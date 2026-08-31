@@ -10,12 +10,12 @@ by what the run *recorded*.
 
 Three cross-checks enforce that last part:
 
-  1. Every number in the front-matter, outside ``regime``, is checked against
-     ``run.jsonl``'s summary record. If the summary binds the same path, the
-     two must be EQUAL -- otherwise a report could state ``turns = 2048``
-     against a run that recorded two turns, merely because 2048 appears
-     elsewhere in the record. If the summary does not bind that path, the
-     value must at least appear somewhere in the record.
+  1. Every number in the front-matter, outside ``[regime]``, must be bound at
+     the SAME path in ``run.jsonl``'s summary record, and must be equal to it.
+     Matching by value alone was not enough: a report could state
+     ``turns = 2048`` against a run that recorded two turns, merely because
+     2048 appeared elsewhere in the record. If you state a number, the run has
+     to have recorded that number under that name.
   2. Every key under ``[regime]`` -- not only the three required ones -- must
      be bound by ``regimen.toml`` and must equal it.
   3. ``product_sha256`` must equal the summary record's ``product_sha256``.
@@ -73,9 +73,27 @@ HEADING = re.compile(r"^##\s+(.*?)\s*$")
 # with nothing but whitespace after.
 CODE_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
+HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+
 # The one directory under results/ that is an example rather than a run, and so
 # the one exempt from the YYYY-MM-DD-<slug> rule.
 TEMPLATE_DIR = "_template"
+
+
+class Unreadable(Exception):
+    """A file that cannot be decoded. Reported, never raised out of a lint."""
+
+
+def read_text(path: pathlib.Path) -> str:
+    """Read a file as UTF-8, turning a decode error into a lint failure.
+
+    An uncaught UnicodeDecodeError would abort a whole ``--root`` sweep on one
+    bad file, leaving every later directory unlinted and looking clean.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError) as err:
+        raise Unreadable(f"{path.name} is not readable as UTF-8: {err}") from err
 
 
 def type_name(expected: type | tuple[type, ...]) -> str:
@@ -89,6 +107,17 @@ def is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def same_value(left: object, right: object) -> bool:
+    """Equality that does not conflate a TOML boolean with an integer.
+
+    Python says ``True == 1``. TOML does not, and a regime binding
+    ``dogma_version = true`` is not a regime binding ``dogma_version = 1``.
+    """
+    if isinstance(left, bool) != isinstance(right, bool):
+        return False
+    return left == right
+
+
 def has_type(value: object, expected: type | tuple[type, ...]) -> bool:
     """``isinstance`` with ``bool`` excluded from ``int``.
 
@@ -100,38 +129,48 @@ def has_type(value: object, expected: type | tuple[type, ...]) -> bool:
     return isinstance(value, expected)
 
 
-def walk_numbers(value: object, path: str = "") -> list[tuple[str, float]]:
-    """Every number in a nested TOML/JSON structure, with its dotted path."""
-    found: list[tuple[str, float]] = []
+def walk_numbers(
+    value: object, path: tuple[object, ...] = ()
+) -> list[tuple[tuple[object, ...], float]]:
+    """Every number in a nested structure, with its path as a tuple of steps.
+
+    A tuple, not a dotted string: a top-level key literally named
+    ``regime.something`` would otherwise be indistinguishable from the
+    ``regime`` table's ``something`` field, and so would inherit that table's
+    exemption and be checked by nothing at all.
+    """
+    found: list[tuple[tuple[object, ...], float]] = []
     if isinstance(value, dict):
         for key, child in value.items():
-            found += walk_numbers(child, f"{path}.{key}" if path else str(key))
+            found += walk_numbers(child, (*path, key))
     elif isinstance(value, list):
         for index, child in enumerate(value):
-            found += walk_numbers(child, f"{path}[{index}]")
+            found += walk_numbers(child, (*path, index))
     elif is_number(value):
         found.append((path, value))
     return found
 
 
-def resolve(value: object, path: str) -> tuple[bool, object]:
-    """Follow a dotted/indexed path into a nested structure.
+def show_path(path: tuple[object, ...]) -> str:
+    """A path tuple rendered for a human."""
+    out = ""
+    for step in path:
+        out += f"[{step}]" if isinstance(step, int) else (f".{step}" if out else str(step))
+    return out
 
-    Returns (found, value). Used to compare a front-matter number against the
-    SAME path in the summary record, rather than against a bag of every number
-    the record happens to contain.
-    """
+
+def resolve(value: object, path: tuple[object, ...]) -> tuple[bool, object]:
+    """Follow a path tuple into a nested structure. Returns (found, value)."""
     current = value
-    for part in re.findall(r"[^.\[\]]+|\[\d+\]", path):
-        if part.startswith("["):
-            index = int(part[1:-1])
-            if not isinstance(current, list) or index >= len(current):
+    for step in path:
+        if isinstance(step, int):
+            if not isinstance(current, list) or step >= len(current):
                 return False, None
-            current = current[index]
+            current = current[step]
         else:
-            if not isinstance(current, dict) or part not in current:
+            if not isinstance(current, dict) or step not in current:
                 return False, None
-            current = current[part]
+            current = current[step]
     return True, current
 
 
@@ -151,6 +190,8 @@ def split_front_matter(text: str) -> tuple[str | None, str, str | None]:
 
 def body_sections(body: str) -> list[str]:
     """Level-2 headings in document order, ignoring fenced code blocks."""
+    # A heading inside an HTML comment is not a heading: it renders as nothing.
+    body = HTML_COMMENT.sub("", body)
     headings: list[str] = []
     fence: str | None = None
     for line in body.split("\n"):
@@ -174,7 +215,7 @@ def body_sections(body: str) -> list[str]:
 def load_jsonl(path: pathlib.Path, fail) -> list[dict]:
     """Parse ``run.jsonl``. Reports every malformed line rather than the first."""
     records: list[dict] = []
-    raw = path.read_text(encoding="utf-8")
+    raw = read_text(path)
     lines = raw.split("\n")
     if lines and lines[-1] == "":
         lines.pop()
@@ -222,7 +263,11 @@ def check_run(directory: pathlib.Path) -> list[str]:
         return failures
 
     # --- run.jsonl -------------------------------------------------------
-    records = load_jsonl(directory / "run.jsonl", fail)
+    try:
+        records = load_jsonl(directory / "run.jsonl", fail)
+    except Unreadable as err:
+        fail(str(err))
+        records = []
     summaries = [r for r in records if r.get("record") == "summary"]
     if len(summaries) != 1:
         fail(f"run.jsonl holds {len(summaries)} summary records, expected exactly 1")
@@ -231,12 +276,18 @@ def check_run(directory: pathlib.Path) -> list[str]:
     # --- regimen.toml ----------------------------------------------------
     regimen: dict | None = None
     try:
-        regimen = tomllib.loads((directory / "regimen.toml").read_text(encoding="utf-8"))
-    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as err:
+        regimen = tomllib.loads(read_text(directory / "regimen.toml"))
+    except tomllib.TOMLDecodeError as err:
         fail(f"regimen.toml is not TOML: {err}")
+    except Unreadable as err:
+        fail(str(err))
 
     # --- README.md front-matter -----------------------------------------
-    text = (directory / "README.md").read_text(encoding="utf-8")
+    try:
+        text = read_text(directory / "README.md")
+    except Unreadable as err:
+        fail(str(err))
+        return failures
     source, body, err = split_front_matter(text)
     if err is not None or source is None:
         fail(f"README.md {err}")
@@ -278,7 +329,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
             for key in regime:
                 if key not in regimen:
                     fail(f"regimen.toml does not bind `{key}`, so `regime.{key}` is unbacked")
-                elif regimen[key] != regime[key]:
+                elif not same_value(regimen[key], regime[key]):
                     fail(
                         f"front-matter `regime.{key}` is {regime[key]!r} but "
                         f"regimen.toml binds {regimen[key]!r}"
@@ -300,21 +351,20 @@ def check_run(directory: pathlib.Path) -> list[str]:
 
     # --- prose against data ----------------------------------------------
     if summary is not None:
-        recorded = {value for _, value in walk_numbers(summary)}
         for path, value in walk_numbers(front):
-            if path == "regime" or path.startswith("regime."):
+            if path and path[0] == "regime":
                 continue  # checked against regimen.toml above
+            shown = show_path(path)
             found, at_path = resolve(summary, path)
-            if found:
-                if not (is_number(at_path) and at_path == value):
-                    fail(
-                        f"front-matter `{path}` states {value!r} but the summary "
-                        f"record binds `{path}` to {at_path!r}"
-                    )
-            elif value not in recorded:
+            if not found:
                 fail(
-                    f"front-matter `{path}` states {value!r}, which does not "
-                    f"appear in run.jsonl's summary record"
+                    f"front-matter `{shown}` states {value!r}, but the summary "
+                    f"record binds no `{shown}`"
+                )
+            elif not (is_number(at_path) and same_value(at_path, value)):
+                fail(
+                    f"front-matter `{shown}` states {value!r} but the summary "
+                    f"record binds `{shown}` to {at_path!r}"
                 )
 
     # --- sections ---------------------------------------------------------
@@ -380,7 +430,15 @@ def main(argv: list[str]) -> int:
         targets.append(directory)
 
     for directory in targets:
-        failures += check_run(directory)
+        # One unreadable directory must not stop the sweep: every later
+        # directory would go unlinted and the run would look thinner, not
+        # redder.
+        try:
+            failures += check_run(directory)
+        except Unreadable as err:
+            failures.append(f"{directory}: {err}")
+        except OSError as err:
+            failures.append(f"{directory}: cannot be read: {err}")
 
     for message in failures:
         print(message, file=sys.stderr)

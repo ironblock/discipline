@@ -1,0 +1,1 @@
+README.md is not decodable as UTF-8. This used to raise an uncaught exception that aborted the whole sweep, leaving later directories unlinted.

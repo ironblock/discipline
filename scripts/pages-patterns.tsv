@@ -27,4 +27,4 @@ dynamic-import	-	\bimport[[:space:]]*\([[:space:]]*["']?(https?:)?//
 form-element	i	<form[^A-Za-z0-9]
 
 # --- credentials, again, because this surface is public ---
-api-key-shape	-	(sk-ant-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{36}|xox[abprs]-[A-Za-z0-9-]{10,})
+api-key-shape	b	(sk-ant-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{36}|xox[abprs]-[A-Za-z0-9-]{10,})

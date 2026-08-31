@@ -63,8 +63,13 @@ milestone_rows="$(read_definitions .github/milestones.json '.milestones[] | [.ti
 note "== labels =="
 while IFS=$'\t' read -r name color description; do
   [ -n "$name" ] || continue
-  if gh api "repos/${REPO}/labels/${name}" > /dev/null 2>&1; then
-    action="update"; method="PATCH"; endpoint="repos/${REPO}/labels/${name}"
+  # The name goes into a URL path, so percent-encode it. A conventional label
+  # like "good first issue" is legal on GitHub and would otherwise break the
+  # request.
+  encoded="$(jq -rn --arg s "$name" '$s|@uri')"
+
+  if gh api "repos/${REPO}/labels/${encoded}" > /dev/null 2>&1; then
+    action="update"; method="PATCH"; endpoint="repos/${REPO}/labels/${encoded}"
   else
     action="create"; method="POST"; endpoint="repos/${REPO}/labels"
   fi

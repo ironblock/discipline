@@ -87,7 +87,29 @@ if [ "${#scanned[@]}" -eq 0 ]; then
   exit "$EXIT_BROKEN"
 fi
 
+# Split by whether grep would call the file binary. Every pattern runs over the
+# text files; only patterns flagged `b` run over the binary ones. Scanning a
+# binary with a loose heuristic produces noise, but never scanning it at all
+# would hide a committed credential, so precise patterns still go there.
+# A file of nothing but blank lines classifies as binary and is therefore only
+# credential-scanned, which is all it could ever carry.
+text_files=()
+binary_files=()
+for path in "${scanned[@]}"; do
+  if grep -Iq . -- "$path" 2>/dev/null || [ ! -s "$path" ]; then
+    text_files+=("$path")
+  else
+    binary_files+=("$path")
+  fi
+done
+
 # --- scan --------------------------------------------------------------------
+# grep's output goes to a file rather than a command substitution: a match
+# inside a binary carries NUL bytes, which `$(...)` discards with a warning on
+# stderr. A file keeps grep's exit status ours to read and keeps the noise out.
+matchfile="$(mktemp)" || { echo "hygiene: mktemp failed" >&2; exit "$EXIT_BROKEN"; }
+trap 'rm -f -- "$matchfile"' EXIT
+
 patterns=0
 hits=0
 
@@ -104,14 +126,19 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
   patterns=$((patterns + 1))
 
   opts=(-n -a -H -E)
-  [ "${flags:-}" = "i" ] && opts+=(-i)
+  case "${flags:-}" in *i*) opts+=(-i) ;; esac
+
+  targets=("${text_files[@]}")
+  case "${flags:-}" in
+    *b*) targets+=(${binary_files+"${binary_files[@]}"}) ;;
+  esac
+  [ "${#targets[@]}" -gt 0 ] || continue
 
   start=0
-  while [ "$start" -lt "${#scanned[@]}" ]; do
-    part=("${scanned[@]:start:CHUNK}")
-    matches=""
+  while [ "$start" -lt "${#targets[@]}" ]; do
+    part=("${targets[@]:start:CHUNK}")
     rc=0
-    matches="$(grep "${opts[@]}" -e "$regex" -- "${part[@]}")" || rc=$?
+    grep "${opts[@]}" -e "$regex" -- "${part[@]}" > "$matchfile" 2>/dev/null || rc=$?
 
     case "$rc" in
       0)
@@ -119,7 +146,7 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
           [ -n "$line" ] || continue
           echo "hygiene: ${label}: ${line:0:MAX_REPORT}" >&2
           hits=$((hits + 1))
-        done <<< "$matches"
+        done < <(tr -d '\0' < "$matchfile")
         ;;
       1) : ;;  # no match, which is the point
       *)
@@ -141,4 +168,6 @@ if [ "$hits" -gt 0 ]; then
   exit "$EXIT_DIRTY"
 fi
 
-echo "hygiene: ${#scanned[@]} file(s) clean against ${patterns} pattern(s)"
+echo "hygiene: ${#scanned[@]} file(s) clean against ${patterns} pattern(s)" \
+     "(${#text_files[@]} text, ${#binary_files[@]} binary, the latter searched" \
+     "only for credential shapes)"

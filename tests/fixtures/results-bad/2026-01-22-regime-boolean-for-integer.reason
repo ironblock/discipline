@@ -1,0 +1,1 @@
+regimen.toml binds dogma_version = true; the report claims 1. Python says True == 1 and TOML does not.

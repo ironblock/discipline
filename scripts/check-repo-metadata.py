@@ -27,10 +27,12 @@ MILESTONES = GITHUB / "milestones.json"
 TEMPLATES = GITHUB / "ISSUE_TEMPLATE"
 
 COLOR = re.compile(r"[0-9a-f]{6}")
-# `sync-repo-metadata.sh` builds `repos/{owner}/{repo}/labels/{name}` by
-# interpolation, so a name carrying `/`, `?` or `#` would address a different
-# endpoint entirely. Restrict names to what is safe unencoded.
-LABEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# `sync-repo-metadata.sh` puts the label name in an API path, so a name
+# carrying `/`, `?`, `#`, `%` or a backslash could address a different endpoint
+# entirely. The sync percent-encodes the name; this bans the characters that
+# would be ambiguous even encoded, while still admitting the conventional
+# GitHub shapes -- "good first issue", "help wanted", "type: bug".
+LABEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._:+-]*")
 FRONT_MATTER_LABELS = re.compile(r"^labels:\s*(.+?)\s*$", re.MULTILINE)
 
 
@@ -78,8 +80,12 @@ def check_entries(
             seen.add(name)
         for field, pattern in extra.items():
             value = entry.get(field)
-            if isinstance(value, str) and not pattern.fullmatch(value):
+            if not isinstance(value, str):
+                continue
+            if not pattern.fullmatch(value):
                 failures.append(f"{where}: `{field}` {value!r} does not match {pattern.pattern}")
+            elif value != value.strip():
+                failures.append(f"{where}: `{field}` {value!r} has leading or trailing space")
     return seen
 
 

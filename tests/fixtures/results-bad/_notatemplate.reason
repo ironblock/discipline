@@ -1,0 +1,1 @@
+Only `_template` is exempt from the YYYY-MM-DD-<slug> rule. Every other underscore-prefixed directory must still be named like a run.

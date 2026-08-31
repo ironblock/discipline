@@ -1,0 +1,1 @@
+The report states iterations = 2. The summary record binds no `iterations`; matching the value alone let a renamed key slip through.

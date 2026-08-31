@@ -37,12 +37,16 @@ readonly CHECKS=(fmt clippy test results regimen metadata hygiene pages)
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
 # the selftest still reporting success.
+# Every class, not only the ones the brief names: otherwise a pattern and its
+# seeded class can be deleted together and the selftest still reports success.
 readonly REQUIRED_HYGIENE_CLASSES=(
   private-ipv4 internal-hostname personal-home-path windows-user-path
-  internal-ticket-id private-key-block
+  internal-ticket-id aws-access-key-id github-token slack-token
+  private-key-block anthropic-api-key openai-api-key assigned-secret
 )
 readonly REQUIRED_PAGES_CLASSES=(
-  external-subresource external-stylesheet network-call form-element
+  external-subresource external-stylesheet css-import css-external-url
+  base-element network-call beacon dynamic-import form-element api-key-shape
 )
 
 FAILED=()
@@ -163,7 +167,14 @@ selftest_cleanup() {
 # EXIT trap would have nothing to remove.
 SCRATCH=""
 scratch() {
-  SCRATCH="$(mktemp -d)"
+  SCRATCH="$(mktemp -d)" || {
+    echo "selftest: mktemp failed" >&2
+    exit "$EXIT_MISUSE"
+  }
+  [ -n "$SCRATCH" ] && [ -d "$SCRATCH" ] || {
+    echo "selftest: mktemp produced no directory" >&2
+    exit "$EXIT_MISUSE"
+  }
   SELFTEST_SCRATCH+=("$SCRATCH")
 }
 
@@ -178,8 +189,10 @@ sandbox() {
   local dest="$1" path
   mkdir -p "$dest"
   while IFS= read -r -d '' path; do
-    if [ ! -e "${ROOT}/${path}" ]; then
-      echo "selftest: git lists ${path} but it is not on disk" >&2
+    # -f after dereference: a broken symlink, or one pointing at a directory,
+    # would make `cp` fail mid-copy and leave a half-built sandbox.
+    if [ ! -f "${ROOT}/${path}" ]; then
+      echo "selftest: ${path} is not a regular file (missing, or a symlink to one)" >&2
       return 1
     fi
     mkdir -p "${dest}/$(dirname -- "$path")"
@@ -194,11 +207,22 @@ sandbox() {
 # EXPECT is an extended regex the sandbox's log must carry. The exit code is
 # the verdict -- the signature decides whether that verdict is about the fault
 # we seeded rather than something incidental.
+#
+# A signature must appear ONLY when the seeded fault fires. A test NAME is not
+# a signature: `cargo test` prints it on success too, so matching it would
+# certify a dead gate. Match the failure text instead.
 seeded_case() {
   local label="$1" check="$2" inject="$3" expect="$4"
   local box
   scratch; box="$SCRATCH"
   SEEDED_CHECKS+=("$check")
+
+  # `cd ""` succeeds and stays put, so an empty box would run the injection in
+  # the real working tree. Refuse rather than seed faults into the repository.
+  if [ -z "$box" ] || [ ! -d "$box" ]; then
+    echo "selftest: no sandbox for '${label}'; refusing to inject into ${PWD}" >&2
+    exit "$EXIT_MISUSE"
+  fi
 
   sandbox "$box"
   ( cd "$box" && "$inject" )
@@ -326,6 +350,65 @@ prove_patterns() {
   done
 }
 
+# Assert that a command exits exactly WANT. The scanners have behaviour no
+# seeded gate-fault reaches -- how they classify files, which files they
+# exempt, how they read their own tables -- and every one of those was
+# reverted-and-still-green before this existed.
+expect_exit() {
+  local label="$1" want="$2"; shift 2
+  local rc=0
+  "$@" > /dev/null 2>&1 || rc=$?
+  if [ "$rc" -eq "$want" ]; then
+    printf 'OK    exit %-3d  %s\n' "$rc" "$label"
+  else
+    printf 'BAD   exit %-3d (wanted %d)  %s\n' "$rc" "$want" "$label"
+    SELFTEST_BROKEN+=("mechanics: ${label}")
+  fi
+}
+
+prove_mechanics() {
+  echo
+  echo "--- scanner mechanics ---"
+  local box; scratch; box="$SCRATCH"
+
+  # A credential inside a file grep calls binary must still be found.
+  mkdir -p "${box}/bin-secret"
+  printf 'x\000GH=%s%s\000\n' 'ghp_' '0123456789abcdefghijklmnopqrstuvwxyz' \
+    > "${box}/bin-secret/blob.bin"
+  expect_exit "a credential inside a binary is caught" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/bin-secret"
+
+  # ...but an ordinary binary must not trip the loose heuristics. Over-strict
+  # is a failure too: a gate that cries wolf on every binary gets switched off.
+  mkdir -p "${box}/bin-clean"
+  cp "$(command -v git)" "${box}/bin-clean/git.bin"
+  head -c 65536 /dev/urandom > "${box}/bin-clean/random.bin"
+  expect_exit "an ordinary binary does not false-positive" 0 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/bin-clean"
+
+  # The pattern-table exemption is scoped to scripts/. Any other file that
+  # happens to be named that way is still scanned.
+  mkdir -p "${box}/fake-table/docs"
+  printf 'see %s%s\n' 'DIE' '-9001' > "${box}/fake-table/docs/notes-patterns.tsv"
+  expect_exit "a *-patterns.tsv outside scripts/ is still scanned" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/fake-table"
+
+  # A table whose final line has no newline must not lose its last pattern.
+  mkdir -p "${box}/last-line"
+  printf 'see %s%s\n' 'DIE' '-1' > "${box}/last-line/hit.txt"
+  printf '# only pattern, no trailing newline\nlast-pattern\t-\tDIE-[0-9]+' \
+    > "${box}/unterminated-patterns.tsv"
+  expect_exit "the last pattern in an unterminated table still fires" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --patterns "${box}/unterminated-patterns.tsv" \
+      --tree "${box}/last-line"
+
+  # A dot-prefixed directory under a results root is linted, not skipped.
+  mkdir -p "${box}/root/.hidden-run"
+  cp "${ROOT}"/results/_template/* "${box}/root/.hidden-run/"
+  expect_exit "a dot-prefixed results directory is linted" 1 \
+    python3 "${ROOT}/scripts/check-results.py" --root "${box}/root"
+}
+
 selftest() {
   trap selftest_cleanup EXIT
   scratch; SELFTEST_TARGET="${SCRATCH}/target"
@@ -340,9 +423,9 @@ selftest() {
   seeded_case "clippy lint violation"                 clippy   inject_clippy \
     'ptr_arg'
   seeded_case "failing unit test"                     test     inject_test \
-    'seeded_fault::seeded_failure'
+    'seeded_fault::seeded_failure \.\.\. FAILED'
   seeded_case "non-conforming format fixture"         test     inject_conformance \
-    'valid_fixtures_parse_to_their_expected_value'
+    'conformance failure\(s\)'
   seeded_case "FORMATS emptied, harness covers none"  test     inject_formats_empty \
     'FORMATS is empty'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
@@ -372,6 +455,8 @@ selftest() {
       SELFTEST_BROKEN+=("results fixture $(basename "$dir")")
     fi
   done
+
+  prove_mechanics
 
   prove_patterns "hygiene" scripts/hygiene-patterns.tsv scripts/seed-hygiene-fault.sh \
     "${REQUIRED_HYGIENE_CLASSES[@]}"
