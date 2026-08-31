@@ -3,9 +3,9 @@
 # Genesis hygiene: fail if the tree carries anything that belongs to a private
 # environment rather than to this repository.
 #
-# The patterns live in scripts/hygiene-patterns.tsv and are the only thing to
-# edit when a new forbidden shape shows up. This script owns the mechanics:
-# which files are scanned, and the exit code.
+# The patterns live in a table and are the only thing to edit when a new
+# forbidden shape shows up. This script owns the mechanics: which files are
+# scanned, and the exit code.
 #
 #   hygiene.sh                   scan every file git tracks or would track
 #                                (cached + untracked, minus .gitignore)
@@ -20,11 +20,18 @@ set -euo pipefail
 readonly EXIT_DIRTY=1
 readonly EXIT_BROKEN=2
 
+# How many paths to hand grep at once. Without chunking the scan dies with
+# E2BIG on a worktree carrying a normal untracked build tree.
+readonly CHUNK=500
+
+# Matched lines can come from a binary file, where a "line" may be megabytes.
+readonly MAX_REPORT=200
+
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly PATTERN_FILE="${here}/hygiene-patterns.tsv"  # the default table
+readonly DEFAULT_PATTERNS="${here}/hygiene-patterns.tsv"
 
 tree=""
-patterns_file="$PATTERN_FILE"
+patterns_file="$DEFAULT_PATTERNS"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --patterns)
@@ -61,11 +68,16 @@ else
 fi
 
 # A pattern table is the one place forbidden shapes are meant to be written
-# down, so pattern tables are the only files excluded from a scan.
+# down, so pattern tables are excluded from a scan. "Pattern table" means a
+# file named *-patterns.tsv sitting DIRECTLY in scripts/ -- not any path
+# anywhere in the tree that happens to end that way, which would let anyone
+# hide a credential by choosing a filename.
 scanned=()
-for path in "${files[@]}"; do
+for path in ${files+"${files[@]}"}; do
   case "$path" in
-    *-patterns.tsv) continue ;;
+    scripts/*-patterns.tsv)
+      if [ "${path#scripts/}" = "$(basename -- "$path")" ]; then continue; fi
+      ;;
   esac
   scanned+=("$path")
 done
@@ -79,32 +91,44 @@ fi
 patterns=0
 hits=0
 
-while IFS=$'\t' read -r label flags regex; do
+# `-a` rather than `-I`: a file grep would classify as binary must still be
+# searched. A credential inside one is exactly as committed as a credential in
+# a text file, and skipping it while counting the file as clean is a hole.
+# `-H` because with a single file grep would otherwise name no file at all.
+#
+# The trailing `|| [ -n "$label" ]` reads a final line with no newline, which
+# would otherwise drop the last pattern in the table silently.
+while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
   case "$label" in ''|\#*) continue ;; esac
   [ -n "${regex:-}" ] || continue
   patterns=$((patterns + 1))
 
-  opts=(-n -I -E)
-  [ "$flags" = "i" ] && opts+=(-i)
+  opts=(-n -a -H -E)
+  [ "${flags:-}" = "i" ] && opts+=(-i)
 
-  matches=""
-  rc=0
-  matches="$(grep "${opts[@]}" -e "$regex" -- "${scanned[@]}")" || rc=$?
+  start=0
+  while [ "$start" -lt "${#scanned[@]}" ]; do
+    part=("${scanned[@]:start:CHUNK}")
+    matches=""
+    rc=0
+    matches="$(grep "${opts[@]}" -e "$regex" -- "${part[@]}")" || rc=$?
 
-  case "$rc" in
-    0)
-      while IFS= read -r line; do
-        [ -n "$line" ] || continue
-        echo "hygiene: ${label}: ${line}" >&2
-        hits=$((hits + 1))
-      done <<< "$matches"
-      ;;
-    1) : ;;  # no match, which is the point
-    *)
-      echo "hygiene: grep failed with status ${rc} on pattern '${label}'" >&2
-      exit "$EXIT_BROKEN"
-      ;;
-  esac
+    case "$rc" in
+      0)
+        while IFS= read -r line; do
+          [ -n "$line" ] || continue
+          echo "hygiene: ${label}: ${line:0:MAX_REPORT}" >&2
+          hits=$((hits + 1))
+        done <<< "$matches"
+        ;;
+      1) : ;;  # no match, which is the point
+      *)
+        echo "hygiene: grep failed with status ${rc} on pattern '${label}'" >&2
+        exit "$EXIT_BROKEN"
+        ;;
+    esac
+    start=$((start + CHUNK))
+  done
 done < "$patterns_file"
 
 if [ "$patterns" -eq 0 ]; then

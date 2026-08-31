@@ -41,6 +41,9 @@ seed beacon js \
 seed dynamic-import js \
   "$(printf 'const m = await %s%s"%s//esm.example.com/x.js");' 'import' '(' 'https:')"
 
+seed base-element html \
+  "$(printf '%sbase href="%s//cdn.example.com/">' '<' 'https:')"
+
 seed form-element html \
   "$(printf '%sform method="post" action="/collect"><input name="email"></form>' '<')"
 

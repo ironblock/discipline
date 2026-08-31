@@ -19,6 +19,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Publishing must not be able to route around the gate. Without this the
+      # branch could serve a surface `./verify.sh --only pages` rejects.
+      - name: Gate the surface
+        run: ./verify.sh --only pages
+
       # Static only. Nothing here reaches a network, a model, or a secret
       # beyond the token that publishes the branch.
       - name: Assemble the site

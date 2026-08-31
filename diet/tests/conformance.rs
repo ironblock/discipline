@@ -66,6 +66,16 @@ fn files_in(dir: &Path) -> Vec<PathBuf> {
     paths
 }
 
+/// Every entry directly in `dir`, or nothing if `dir` cannot be read. Used
+/// where a missing directory is already reported by another check.
+fn files_in_or_empty(dir: &Path) -> Vec<PathBuf> {
+    if dir.is_dir() {
+        files_in(dir)
+    } else {
+        Vec::new()
+    }
+}
+
 /// The `.toml` cases in `dir`.
 fn cases_in(dir: &Path) -> Vec<PathBuf> {
     files_in(dir)
@@ -121,6 +131,26 @@ fn every_format_has_a_grammar_and_a_populated_fixture_directory() {
             if cases_in(&dir).is_empty() {
                 failures.push(format!("{format}: fixture bucket {bucket} holds no cases"));
             }
+        }
+    }
+
+    // The other direction: a format directory on disk that FORMATS does not
+    // name is a format with no grammar requirement and no fixture requirement
+    // at all. Coverage must not be a hand-maintained opinion about what
+    // exists.
+    for entry in files_in_or_empty(&root) {
+        if !entry.is_dir() {
+            continue;
+        }
+        let Some(name) = entry.file_name().and_then(std::ffi::OsStr::to_str) else {
+            failures.push(format!("{}: unreadable directory name", entry.display()));
+            continue;
+        };
+        if !FORMATS.contains(&name) {
+            failures.push(format!(
+                "{name}: has a directory under formats/ but is absent from FORMATS, \
+                 so nothing requires it to have a grammar or fixtures"
+            ));
         }
     }
 

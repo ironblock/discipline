@@ -10,10 +10,14 @@ by what the run *recorded*.
 
 Three cross-checks enforce that last part:
 
-  1. Every number in the front-matter, outside ``regime``, must appear as a
-     value in ``run.jsonl``'s summary record.
-  2. ``regime.arm``, ``regime.substrate`` and ``regime.dogma_version`` must
-     equal the corresponding keys in ``regimen.toml``.
+  1. Every number in the front-matter, outside ``regime``, is checked against
+     ``run.jsonl``'s summary record. If the summary binds the same path, the
+     two must be EQUAL -- otherwise a report could state ``turns = 2048``
+     against a run that recorded two turns, merely because 2048 appears
+     elsewhere in the record. If the summary does not bind that path, the
+     value must at least appear somewhere in the record.
+  2. Every key under ``[regime]`` -- not only the three required ones -- must
+     be bound by ``regimen.toml`` and must equal it.
   3. ``product_sha256`` must equal the summary record's ``product_sha256``.
 
 Stdlib only, by design: this runs in ``verify.sh`` and must not need an
@@ -58,10 +62,20 @@ SECTIONS = ["Observation", "Hypothesis", "Test", "Results", "Conclusion"]
 
 REQUIRED_FILES = ["run.jsonl", "regimen.toml", "README.md"]
 
-DIR_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)$")
-SHA256 = re.compile(r"^[0-9a-f]{64}$")
+# `fullmatch` throughout: `re.match` with a trailing `$` also accepts a final
+# newline, so a 65-character product_sha256 would have passed the "exactly 64
+# hex characters" check.
+DIR_NAME = re.compile(r"(\d{4}-\d{2}-\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)")
+SHA256 = re.compile(r"[0-9a-f]{64}")
 HEADING = re.compile(r"^##\s+(.*?)\s*$")
-CODE_FENCE = re.compile(r"^\s*(```|~~~)")
+# CommonMark: a fence is three or more backticks or tildes, indented at most
+# three spaces. It is closed only by at least as many of the SAME character
+# with nothing but whitespace after.
+CODE_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+# The one directory under results/ that is an example rather than a run, and so
+# the one exempt from the YYYY-MM-DD-<slug> rule.
+TEMPLATE_DIR = "_template"
 
 
 def type_name(expected: type | tuple[type, ...]) -> str:
@@ -100,6 +114,27 @@ def walk_numbers(value: object, path: str = "") -> list[tuple[str, float]]:
     return found
 
 
+def resolve(value: object, path: str) -> tuple[bool, object]:
+    """Follow a dotted/indexed path into a nested structure.
+
+    Returns (found, value). Used to compare a front-matter number against the
+    SAME path in the summary record, rather than against a bag of every number
+    the record happens to contain.
+    """
+    current = value
+    for part in re.findall(r"[^.\[\]]+|\[\d+\]", path):
+        if part.startswith("["):
+            index = int(part[1:-1])
+            if not isinstance(current, list) or index >= len(current):
+                return False, None
+            current = current[index]
+        else:
+            if not isinstance(current, dict) or part not in current:
+                return False, None
+            current = current[part]
+    return True, current
+
+
 def split_front_matter(text: str) -> tuple[str | None, str, str | None]:
     """Split a report into (front-matter source, body, error).
 
@@ -120,16 +155,19 @@ def body_sections(body: str) -> list[str]:
     fence: str | None = None
     for line in body.split("\n"):
         opener = CODE_FENCE.match(line)
-        if fence is None and opener:
-            fence = opener.group(1)
+        if fence is None:
+            if opener:
+                fence = opener.group(1)
+            else:
+                match = HEADING.match(line)
+                if match:
+                    headings.append(match.group(1))
             continue
-        if fence is not None:
-            if line.strip().startswith(fence):
+        # Inside a fence: only a run of the same character, at least as long as
+        # the opener, with nothing but whitespace after it, closes the block.
+        if opener and opener.group(1)[0] == fence[0] and len(opener.group(1)) >= len(fence):
+            if line.strip().strip(fence[0]) == "":
                 fence = None
-            continue
-        match = HEADING.match(line)
-        if match:
-            headings.append(match.group(1))
     return headings
 
 
@@ -167,8 +205,8 @@ def check_run(directory: pathlib.Path) -> list[str]:
         failures.append(f"{directory}: {message}")
 
     name = directory.name
-    if not name.startswith("_"):
-        match = DIR_NAME.match(name)
+    if name != TEMPLATE_DIR:
+        match = DIR_NAME.fullmatch(name)
         if not match:
             fail("name is not `YYYY-MM-DD-<slug>` with a lowercase hyphenated slug")
         else:
@@ -234,9 +272,10 @@ def check_run(directory: pathlib.Path) -> list[str]:
                     f"expected {type_name(expected)}"
                 )
         if regimen is not None:
-            for key in REQUIRED_REGIME_KEYS:
-                if key not in regime:
-                    continue
+            # Every key under [regime], not only the required three: a regime
+            # field the regimen does not bind is a claim about the run that
+            # nothing backs.
+            for key in regime:
                 if key not in regimen:
                     fail(f"regimen.toml does not bind `{key}`, so `regime.{key}` is unbacked")
                 elif regimen[key] != regime[key]:
@@ -247,7 +286,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
 
     sha = front.get("product_sha256")
     if isinstance(sha, str):
-        if not SHA256.match(sha):
+        if not SHA256.fullmatch(sha):
             fail("front-matter `product_sha256` is not 64 lowercase hex characters")
         elif summary is not None:
             recorded = summary.get("product_sha256")
@@ -265,7 +304,14 @@ def check_run(directory: pathlib.Path) -> list[str]:
         for path, value in walk_numbers(front):
             if path == "regime" or path.startswith("regime."):
                 continue  # checked against regimen.toml above
-            if value not in recorded:
+            found, at_path = resolve(summary, path)
+            if found:
+                if not (is_number(at_path) and at_path == value):
+                    fail(
+                        f"front-matter `{path}` states {value!r} but the summary "
+                        f"record binds `{path}` to {at_path!r}"
+                    )
+            elif value not in recorded:
                 fail(
                     f"front-matter `{path}` states {value!r}, which does not "
                     f"appear in run.jsonl's summary record"
@@ -282,7 +328,12 @@ def check_run(directory: pathlib.Path) -> list[str]:
 
 
 def run_directories(root: pathlib.Path) -> list[pathlib.Path]:
-    return sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith("."))
+    """Every subdirectory of a root, dot-prefixed ones included.
+
+    Skipping hidden directories would let a results directory the linter would
+    reject sit unlinted while other tooling still walks it.
+    """
+    return sorted(p for p in root.iterdir() if p.is_dir())
 
 
 def main(argv: list[str]) -> int:

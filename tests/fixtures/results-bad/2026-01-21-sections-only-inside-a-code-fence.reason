@@ -1,0 +1,1 @@
+All five headings sit inside a fenced code block. A closing-fence rule looser than CommonMark's ended the block early and counted them.

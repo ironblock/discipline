@@ -16,6 +16,7 @@ external-subresource	i	(src|srcset|poster|data|action|formaction)[[:space:]]*=[[
 external-stylesheet	i	<link[^>]*href[[:space:]]*=[[:space:]]*["']?[[:space:]]*(https?:)?//
 css-import	i	@import
 css-external-url	i	url\([[:space:]]*["']?[[:space:]]*(https?:)?//
+base-element	i	<base[^A-Za-z0-9]
 
 # --- calls off the page ---
 network-call	-	\b(fetch|XMLHttpRequest|WebSocket|EventSource|importScripts|SharedWorker|Worker)[[:space:]]*\(

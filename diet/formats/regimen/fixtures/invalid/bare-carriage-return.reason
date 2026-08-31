@@ -1,0 +1,1 @@
+A bare CR is not a line terminator in TOML, so it must not be one here.

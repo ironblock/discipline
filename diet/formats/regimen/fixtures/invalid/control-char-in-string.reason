@@ -1,0 +1,1 @@
+A raw control character may not appear inside a string, as in TOML.

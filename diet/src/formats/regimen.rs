@@ -1,8 +1,9 @@
 //! The `regimen` format, v0.
 //!
 //! The grammar at `diet/formats/regimen/grammar.pest` is normative. This
-//! module implements it and adds the one rule a PEG cannot state: a key may
-//! appear at most once in a document.
+//! module implements it and adds the two rules a PEG cannot state: a key may
+//! appear at most once in a document, and an integer literal must fit in an
+//! `i64`.
 
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;

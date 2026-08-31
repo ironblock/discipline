@@ -38,6 +38,27 @@ failures=0
 
 note() { printf '%s\n' "$*"; }
 
+# Read a definition file up front rather than piping jq straight into a `while`.
+# A jq failure inside `< <(...)` is invisible to `set -euo pipefail`: the loop
+# simply sees no input and the script goes on to report success having synced
+# nothing.
+read_definitions() {
+  local file="$1" filter="$2" out rc=0
+  out="$(jq -r "$filter" "$file")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "sync: cannot read ${file} (jq exit ${rc})" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  if [ -z "$out" ]; then
+    echo "sync: ${file} defines nothing; a sync of nothing is not a success" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  printf '%s' "$out"
+}
+
+label_rows="$(read_definitions .github/labels.json '.labels[] | [.name, .color, .description] | @tsv')"
+milestone_rows="$(read_definitions .github/milestones.json '.milestones[] | [.title, .description] | @tsv')"
+
 # --- labels ------------------------------------------------------------------
 note "== labels =="
 while IFS=$'\t' read -r name color description; do
@@ -61,7 +82,7 @@ while IFS=$'\t' read -r name color description; do
     note "  FAILED to ${action} ${name}"
     failures=$((failures + 1))
   fi
-done < <(jq -r '.labels[] | [.name, .color, .description] | @tsv' .github/labels.json)
+done <<< "$label_rows"
 
 # --- milestones --------------------------------------------------------------
 note "== milestones =="
@@ -82,15 +103,18 @@ while IFS=$'\t' read -r title description; do
     continue
   fi
 
-  if gh api -X "$method" "$endpoint" \
-      -f "title=${title}" -f "description=${description}" -f "state=open" \
-      > /dev/null; then
+  # `state` is set only on create. PATCHing state=open on every run would
+  # silently reopen any milestone a maintainer had closed.
+  args=(-f "title=${title}" -f "description=${description}")
+  [ "$action" = "create" ] && args+=(-f "state=open")
+
+  if gh api -X "$method" "$endpoint" "${args[@]}" > /dev/null; then
     note "  ${action}d ${title}"
   else
     note "  FAILED to ${action} ${title}"
     failures=$((failures + 1))
   fi
-done < <(jq -r '.milestones[] | [.title, .description] | @tsv' .github/milestones.json)
+done <<< "$milestone_rows"
 
 # --- what the files do not mention -------------------------------------------
 note "== present but undefined (left alone) =="

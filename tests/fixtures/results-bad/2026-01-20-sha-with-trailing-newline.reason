@@ -1,0 +1,1 @@
+product_sha256 carries a trailing newline, making it 65 characters. An anchored `$` accepted this; fullmatch does not.

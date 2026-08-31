@@ -26,7 +26,11 @@ LABELS = GITHUB / "labels.json"
 MILESTONES = GITHUB / "milestones.json"
 TEMPLATES = GITHUB / "ISSUE_TEMPLATE"
 
-COLOR = re.compile(r"^[0-9a-f]{6}$")
+COLOR = re.compile(r"[0-9a-f]{6}")
+# `sync-repo-metadata.sh` builds `repos/{owner}/{repo}/labels/{name}` by
+# interpolation, so a name carrying `/`, `?` or `#` would address a different
+# endpoint entirely. Restrict names to what is safe unencoded.
+LABEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 FRONT_MATTER_LABELS = re.compile(r"^labels:\s*(.+?)\s*$", re.MULTILINE)
 
 
@@ -63,7 +67,7 @@ def check_entries(
         if not isinstance(entry, dict):
             failures.append(f"{where}: is a {type(entry).__name__}, not an object")
             continue
-        for field in (identity, "description", *extra):
+        for field in dict.fromkeys((identity, "description", *extra)):
             value = entry.get(field)
             if not isinstance(value, str) or not value.strip():
                 failures.append(f"{where}: `{field}` is missing or not a non-empty string")
@@ -74,7 +78,7 @@ def check_entries(
             seen.add(name)
         for field, pattern in extra.items():
             value = entry.get(field)
-            if isinstance(value, str) and not pattern.match(value):
+            if isinstance(value, str) and not pattern.fullmatch(value):
                 failures.append(f"{where}: `{field}` {value!r} does not match {pattern.pattern}")
     return seen
 
@@ -119,7 +123,9 @@ def main() -> int:
     labels = load(LABELS, "labels", failures)
     milestones = load(MILESTONES, "milestones", failures)
 
-    defined = check_entries(LABELS, labels, "name", {"color": COLOR}, failures)
+    defined = check_entries(
+        LABELS, labels, "name", {"color": COLOR, "name": LABEL_NAME}, failures
+    )
     check_entries(MILESTONES, milestones, "title", {}, failures)
 
     for path, assigned in template_labels(failures).items():
