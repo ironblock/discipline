@@ -167,6 +167,10 @@ inject_test() {
   printf '\n#[cfg(test)]\nmod seeded_fault {\n    #[test]\n    fn seeded_failure() {\n        assert_eq!(1, 2, "seeded fault");\n    }\n}\n' >> diet/src/lib.rs
 }
 
+inject_formats_empty() {
+  sed -i 's/&\["regimen"\]/\&[]/' diet/src/formats/mod.rs
+}
+
 inject_conformance() {
   printf 'budget = 1.5\n' > diet/formats/regimen/fixtures/valid/seeded-nonconforming.toml
   printf '{ "budget": { "integer": 1 } }\n' > diet/formats/regimen/fixtures/valid/seeded-nonconforming.expected.json
@@ -232,6 +236,7 @@ selftest() {
   seeded_case "clippy lint violation"                clippy   inject_clippy
   seeded_case "failing unit test"                    test     inject_test
   seeded_case "non-conforming format fixture"        test     inject_conformance
+  seeded_case "FORMATS emptied, harness covers none"  test     inject_formats_empty
   seeded_case "results claim unbacked by run.jsonl"  results  inject_results
   seeded_case "regimen.toml that is not a regimen"   regimen  inject_regimen
   seeded_case "template label nothing defines"       metadata inject_metadata

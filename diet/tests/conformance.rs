@@ -93,6 +93,14 @@ fn every_format_has_a_grammar_and_a_populated_fixture_directory() {
     let root = formats_dir();
     let mut failures = Vec::new();
 
+    // Without this, emptying FORMATS would make every test in this file
+    // iterate nothing and pass. A harness that covers no formats must be red,
+    // not quiet.
+    assert!(
+        !FORMATS.is_empty(),
+        "FORMATS is empty, so this harness covers nothing"
+    );
+
     for format in FORMATS {
         let grammar = root.join(format).join("grammar.pest");
         if !grammar.is_file() {
