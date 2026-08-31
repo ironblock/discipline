@@ -156,11 +156,15 @@ selftest_cleanup() {
   return 0
 }
 
+# Sets SCRATCH to a fresh directory and records it for cleanup.
+#
+# Deliberately NOT `path="$(scratch)"`: command substitution runs the function
+# in a subshell, so the append to SELFTEST_SCRATCH would be discarded and the
+# EXIT trap would have nothing to remove.
+SCRATCH=""
 scratch() {
-  local path
-  path="$(mktemp -d)"
-  SELFTEST_SCRATCH+=("$path")
-  printf '%s' "$path"
+  SCRATCH="$(mktemp -d)"
+  SELFTEST_SCRATCH+=("$SCRATCH")
 }
 
 # Copy everything git tracks or would track into DEST, and make it a git
@@ -192,7 +196,8 @@ sandbox() {
 # we seeded rather than something incidental.
 seeded_case() {
   local label="$1" check="$2" inject="$3" expect="$4"
-  local box; box="$(scratch)"
+  local box
+  scratch; box="$SCRATCH"
   SEEDED_CHECKS+=("$check")
 
   sandbox "$box"
@@ -283,7 +288,7 @@ prove_patterns() {
 
   echo
   echo "--- ${kind} patterns, each proven against its own class ---"
-  seed="$(scratch)"
+  scratch; seed="$SCRATCH"
   bash "${ROOT}/${seeder}" "$seed" > /dev/null
 
   while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
@@ -323,7 +328,7 @@ prove_patterns() {
 
 selftest() {
   trap selftest_cleanup EXIT
-  SELFTEST_TARGET="$(scratch)/target"
+  scratch; SELFTEST_TARGET="${SCRATCH}/target"
 
   echo "Seeded-fault selftest. Every line below must read RED: the fault is"
   echo "deliberate and the gate is what is under test. A case that goes red"
