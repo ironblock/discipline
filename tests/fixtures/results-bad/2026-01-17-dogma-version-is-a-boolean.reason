@@ -1,0 +1,1 @@
+regime.dogma_version is a boolean; TOML distinguishes true from 1 and so must the lint.
