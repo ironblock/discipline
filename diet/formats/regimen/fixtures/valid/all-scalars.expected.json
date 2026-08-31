@@ -1,0 +1,7 @@
+{
+  "arm": { "string": "baseline" },
+  "dogma_version": { "integer": 0 },
+  "replay": { "boolean": false },
+  "seed": { "integer": -17 },
+  "substrate": { "string": "local" }
+}

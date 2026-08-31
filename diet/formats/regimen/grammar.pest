@@ -1,0 +1,32 @@
+//! regimen — grammar, v0
+//!
+//! This file is the normative description of the regimen format. A regimen is
+//! a versioned, fixed combination of variables describing the character,
+//! performance, and timing of a session. v0 is a deliberately minimal,
+//! line-oriented subset of TOML: bare keys, scalar values, comments.
+//!
+//! Deliberately absent in v0, and expected to arrive later: tables, arrays,
+//! floats, datetimes, dotted keys, multi-line and escaped strings.
+//!
+//! One rule this grammar cannot state and the parser therefore enforces:
+//! a key may appear at most once in a document.
+
+file      =  { SOI ~ item* ~ EOI }
+
+item      = _{ blank | statement | trailing }
+blank     = _{ sp* ~ NEWLINE }
+statement = _{ sp* ~ (pair | comment) ~ sp* ~ (NEWLINE | &EOI) }
+trailing  = _{ sp+ ~ &EOI }
+
+pair      =  { key ~ sp* ~ "=" ~ sp* ~ value }
+key       =  { (ASCII_ALPHANUMERIC | "_" | "-")+ }
+
+value     = _{ string | boolean | integer }
+string    =  { "\"" ~ inner ~ "\"" }
+inner     =  { char* }
+char      = _{ !("\"" | "\\" | NEWLINE) ~ ANY }
+boolean   =  { "true" | "false" }
+integer   =  { "-"? ~ ASCII_DIGIT+ }
+
+comment   =  { "#" ~ (!NEWLINE ~ ANY)* }
+sp        = _{ " " | "\t" }

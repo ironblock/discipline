@@ -1,0 +1,21 @@
+[package]
+name = "discipline-diet"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "diet"
+path = "src/lib.rs"
+
+[dependencies]
+pest = "2.9"
+pest_derive = "2.9"
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true

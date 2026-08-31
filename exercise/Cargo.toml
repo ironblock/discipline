@@ -1,0 +1,17 @@
+[package]
+name = "exercise"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "exercise"
+path = "src/main.rs"
+
+[dependencies]
+discipline-diet = { path = "../diet" }
+
+[lints]
+workspace = true
