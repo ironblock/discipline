@@ -105,7 +105,12 @@ def template_labels(failures: list[str]) -> dict[str, set[str]]:
         failures.append(f"{TEMPLATES}: holds no issue templates")
         return assigned
     for path in templates:
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError) as err:
+            # One unreadable template must not stop the others being checked.
+            failures.append(f"{path}: is not readable as UTF-8: {err}")
+            continue
         if not text.startswith("---\n"):
             failures.append(f"{path}: does not open with a `---` front-matter fence")
             continue

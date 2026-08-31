@@ -10,6 +10,12 @@
 #
 # A hyperlink to another site is fine and deliberately not matched here.
 # Loading something from another site is not.
+#
+# scan: all
+#
+# The published surface is small and curated, so every pattern runs over every
+# file in it. Without this a UTF-16 page -- which browsers render perfectly --
+# classifies as binary and is exempt from nine of these ten patterns.
 
 # --- subresources from another origin ---
 external-subresource	i	(src|srcset|poster|data|action|formaction)[[:space:]]*=[[:space:]]*["']?[[:space:]]*(https?:)?//

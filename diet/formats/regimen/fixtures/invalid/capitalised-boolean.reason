@@ -1,0 +1,1 @@
+NOT-TOML: TOML booleans are lowercase. Widening this would mis-value the document, not merely admit it.

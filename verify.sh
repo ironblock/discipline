@@ -403,10 +403,27 @@ prove_mechanics() {
       --tree "${box}/last-line"
 
   # A dot-prefixed directory under a results root is linted, not skipped.
-  mkdir -p "${box}/root/.hidden-run"
+  #
+  # The valid directory beside it is what makes this assertion able to fail.
+  # With only the hidden one, BOTH behaviours exit 1 -- linted, it fails the
+  # name rule; skipped, the root holds no run directories -- so the assertion
+  # was satisfied either way and pinned nothing.
+  mkdir -p "${box}/root/2026-01-01-ok" "${box}/root/.hidden-run"
+  cp "${ROOT}"/results/_template/* "${box}/root/2026-01-01-ok/"
   cp "${ROOT}"/results/_template/* "${box}/root/.hidden-run/"
   expect_exit "a dot-prefixed results directory is linted" 1 \
     python3 "${ROOT}/scripts/check-results.py" --root "${box}/root"
+
+  # A surface whose table sets `scan: all` must reject a file it cannot scan.
+  # UTF-16 renders fine in a browser but encodes ASCII as two bytes, so it
+  # defeats every pattern byte-wise; reporting it clean would be a lie.
+  mkdir -p "${box}/utf16"
+  python3 -c 'import pathlib,sys; pathlib.Path(sys.argv[1]).write_bytes(
+    "<script src=\"https://cdn.example.com/x.js\"></script>\n".encode("utf-16"))' \
+    "${box}/utf16/page.html"
+  expect_exit "an unscannable page is rejected, not called clean" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --patterns "${ROOT}/scripts/pages-patterns.tsv" \
+      --tree "${box}/utf16"
 }
 
 selftest() {
@@ -433,7 +450,7 @@ selftest() {
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \
     'BAD results/_template/regimen\.toml'
   seeded_case "a valid regimen that is not TOML"      regimen  inject_toml_subset \
-    'are not TOML'
+    'accepted as a regimen but rejected by tomllib'
   seeded_case "template label nothing defines"        metadata inject_metadata \
     'assigns label'
   seeded_case "forbidden content in the tree"         hygiene  inject_hygiene \

@@ -174,7 +174,13 @@ fn binding(pair: Pair<'_, Rule>) -> Result<(String, Value), ParseError> {
                 .as_str()
                 .to_owned(),
         ),
-        Rule::boolean => Value::Boolean(raw.as_str() == "true"),
+        // Total rather than defaulting: if the grammar ever admitted `True`,
+        // defaulting would silently value it `false` instead of rejecting it.
+        Rule::boolean => match raw.as_str() {
+            "true" => Value::Boolean(true),
+            "false" => Value::Boolean(false),
+            other => unreachable!("grammar admits no other boolean: {other:?}"),
+        },
         Rule::integer => {
             let literal = raw.as_str();
             Value::Integer(literal.parse().map_err(|_| ParseError::IntegerOutOfRange {

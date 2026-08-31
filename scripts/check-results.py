@@ -225,7 +225,9 @@ def load_jsonl(path: pathlib.Path, fail) -> list[dict]:
     for number, line in enumerate(lines, start=1):
         try:
             record = json.loads(line)
-        except json.JSONDecodeError as err:
+        # JSONDecodeError is a ValueError; a number too large to convert
+        # raises the bare parent. Catch the parent so neither aborts the sweep.
+        except ValueError as err:
             fail(f"run.jsonl line {number} is not JSON: {err}")
             continue
         if not isinstance(record, dict):
@@ -276,11 +278,15 @@ def check_run(directory: pathlib.Path) -> list[str]:
     # --- regimen.toml ----------------------------------------------------
     regimen: dict | None = None
     try:
-        regimen = tomllib.loads(read_text(directory / "regimen.toml"))
-    except tomllib.TOMLDecodeError as err:
+        # read_bytes, not read_text: universal-newline translation would turn a
+        # bare CR into a newline, so this reader would accept a file the other
+        # reader of the same bytes -- the regimen grammar -- must reject. The
+        # two must never disagree about the same file.
+        regimen = tomllib.loads((directory / "regimen.toml").read_bytes().decode("utf-8"))
+    # tomllib raises bare ValueError for an integer too large to convert, and
+    # TOMLDecodeError is itself a ValueError, so one clause covers both.
+    except (ValueError, UnicodeDecodeError, OSError) as err:
         fail(f"regimen.toml is not TOML: {err}")
-    except Unreadable as err:
-        fail(str(err))
 
     # --- README.md front-matter -----------------------------------------
     try:
@@ -294,7 +300,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
         return failures
     try:
         front = tomllib.loads(source)
-    except tomllib.TOMLDecodeError as exc:
+    except ValueError as exc:
         fail(f"README.md front-matter is not TOML: {exc}")
         return failures
 

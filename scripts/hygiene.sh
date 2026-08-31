@@ -32,6 +32,14 @@ readonly DEFAULT_PATTERNS="${here}/hygiene-patterns.tsv"
 
 tree=""
 patterns_file="$DEFAULT_PATTERNS"
+# `# scan: all` in a table means every file must be scannable text and every
+# pattern runs over every file. Splitting text from binary is right for the
+# genesis table, whose loose environment heuristics match inside ordinary
+# binaries. It is wrong for a small curated surface: a UTF-16 page renders
+# perfectly in a browser but encodes ASCII as two bytes, so it both classifies
+# as binary AND defeats the patterns byte-wise. Neither scanning it nor
+# skipping it is honest, so such a table rejects it instead.
+scan_all=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --patterns)
@@ -56,12 +64,16 @@ done
   exit "$EXIT_BROKEN"
 }
 
+if grep -qE '^#[[:space:]]*scan:[[:space:]]*all[[:space:]]*$' -- "$patterns_file"; then
+  scan_all=true
+fi
+
 # --- what to scan ------------------------------------------------------------
 files=()
 if [ -n "$tree" ]; then
   [ -d "$tree" ] || { echo "hygiene: $tree is not a directory" >&2; exit "$EXIT_BROKEN"; }
   while IFS= read -r -d '' path; do files+=("$path"); done \
-    < <(find "$tree" -type f -not -path '*/.git/*' -print0)
+    < <(find "$tree" ! -type d -not -path '*/.git/*' -print0)
 else
   while IFS= read -r -d '' path; do files+=("$path"); done \
     < <(git ls-files -z --cached --others --exclude-standard)
@@ -87,6 +99,15 @@ if [ "${#scanned[@]}" -eq 0 ]; then
   exit "$EXIT_BROKEN"
 fi
 
+# Check readability once, up front. Otherwise the first pattern's grep fails,
+# its stderr is discarded, and the scan dies with a status and no filename.
+for path in "${scanned[@]}"; do
+  [ -r "$path" ] || {
+    echo "hygiene: cannot read ${path}; a file the scan cannot open is not clean" >&2
+    exit "$EXIT_BROKEN"
+  }
+done
+
 # Split by whether grep would call the file binary. Every pattern runs over the
 # text files; only patterns flagged `b` run over the binary ones. Scanning a
 # binary with a loose heuristic produces noise, but never scanning it at all
@@ -102,6 +123,18 @@ for path in "${scanned[@]}"; do
     binary_files+=("$path")
   fi
 done
+
+# Under `scan: all` a file that is not scannable text is a finding in itself.
+# Reporting it as clean would be a lie, and scanning it byte-wise would find
+# nothing in a UTF-16 document however hostile its contents.
+if [ "$scan_all" = true ] && [ "${#binary_files[@]}" -gt 0 ]; then
+  for path in "${binary_files[@]}"; do
+    echo "hygiene: unscannable-encoding: ${path}: not scannable text;" \
+         "this surface must be UTF-8" >&2
+  done
+  echo "hygiene: ${#binary_files[@]} unscannable file(s) across ${#scanned[@]} file(s)" >&2
+  exit "$EXIT_DIRTY"
+fi
 
 # --- scan --------------------------------------------------------------------
 # grep's output goes to a file rather than a command substitution: a match
@@ -168,6 +201,11 @@ if [ "$hits" -gt 0 ]; then
   exit "$EXIT_DIRTY"
 fi
 
-echo "hygiene: ${#scanned[@]} file(s) clean against ${patterns} pattern(s)" \
-     "(${#text_files[@]} text, ${#binary_files[@]} binary, the latter searched" \
-     "only for credential shapes)"
+if [ "$scan_all" = true ]; then
+  echo "hygiene: ${#scanned[@]} file(s) clean against ${patterns} pattern(s)" \
+       "(every pattern over every file; this table sets 'scan: all')"
+else
+  echo "hygiene: ${#scanned[@]} file(s) clean against ${patterns} pattern(s)" \
+       "(${#text_files[@]} text, ${#binary_files[@]} binary, the latter searched" \
+       "only for credential shapes)"
+fi
