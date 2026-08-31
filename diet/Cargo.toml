@@ -10,6 +10,10 @@ repository.workspace = true
 name = "diet"
 path = "src/lib.rs"
 
+[[bin]]
+name = "diet"
+path = "src/bin/diet.rs"
+
 [dependencies]
 pest = "2.9"
 pest_derive = "2.9"

@@ -3,7 +3,7 @@
 
 `diet/formats/regimen/grammar.pest` states that a regimen document is a subset
 of TOML, and the claim is load-bearing: `regimen.toml` files under `results/`
-are read by that grammar (via the `exercise` binary) and by Python's `tomllib`
+are read by that grammar (via the `diet` binary) and by Python's `tomllib`
 (via `check-results.py`). If the two ever disagree about the same bytes, one of
 the gates is lying about the file in front of it.
 

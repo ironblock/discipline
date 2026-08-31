@@ -79,16 +79,16 @@ check_regimen() {
   # tomllib. Check the claim rather than trusting it.
   python3 scripts/check-toml-subset.py || rc=$?
 
-  cargo build --quiet -p exercise || {
+  cargo build --quiet -p discipline-diet --bin diet || {
     local build_rc=$?
-    echo "verify: exercise did not build (exit ${build_rc})" >&2
+    echo "verify: the diet binary did not build (exit ${build_rc})" >&2
     return "$build_rc"
   }
 
   local seen=0 file
   while IFS= read -r -d '' file; do
     seen=$((seen + 1))
-    if cargo run --quiet -p exercise -- "$file" > /dev/null; then
+    if cargo run --quiet -p discipline-diet --bin diet -- "$file" > /dev/null; then
       printf '  ok  %s\n' "$file"
     else
       printf '  BAD %s\n' "$file"
