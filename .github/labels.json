@@ -1,0 +1,11 @@
+{
+  "labels": [
+    { "name": "claim",   "color": "0e8a16", "description": "A hypothesis with a regime, a result, and reproduction steps." },
+    { "name": "defect",  "color": "b60205", "description": "Something is wrong. Acceptance is a command and its exit code." },
+    { "name": "regimen", "color": "1d76db", "description": "The versioned combination of variables a session runs under." },
+    { "name": "formats", "color": "5319e7", "description": "A parsed format: its grammar and its conformance fixtures." },
+    { "name": "results", "color": "fbca04", "description": "The results/ invariant, the lint, and the claim ledger." },
+    { "name": "ci",      "color": "666666", "description": "verify.sh, the workflows, and the gates they run." },
+    { "name": "pages",   "color": "c5def5", "description": "The static site: replay viewer and rendered claim ledger." }
+  ]
+}

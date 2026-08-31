@@ -1,0 +1,29 @@
+# Published-surface patterns.
+#
+# Format: label<TAB>flags<TAB>extended-regex
+#   flags: `i` for case-insensitive, `-` for none.
+#
+# The site published to gh-pages is static, and this is what makes that
+# a gate rather than a promise. `verify.sh --only pages` scans pages/
+# with this table: no subresource from another origin, no network call,
+# no form that could collect anything, no credential shapes.
+#
+# A hyperlink to another site is fine and deliberately not matched here.
+# Loading something from another site is not.
+
+# --- subresources from another origin ---
+external-subresource	i	(src|srcset|poster|data|action|formaction)[[:space:]]*=[[:space:]]*["']?[[:space:]]*(https?:)?//
+external-stylesheet	i	<link[^>]*href[[:space:]]*=[[:space:]]*["']?[[:space:]]*(https?:)?//
+css-import	i	@import
+css-external-url	i	url\([[:space:]]*["']?[[:space:]]*(https?:)?//
+
+# --- calls off the page ---
+network-call	-	\b(fetch|XMLHttpRequest|WebSocket|EventSource|importScripts|SharedWorker|Worker)[[:space:]]*\(
+beacon	-	navigator[[:space:]]*\.[[:space:]]*sendBeacon
+dynamic-import	-	\bimport[[:space:]]*\([[:space:]]*["']?(https?:)?//
+
+# --- collection surfaces ---
+form-element	i	<form[^A-Za-z0-9]
+
+# --- credentials, again, because this surface is public ---
+api-key-shape	-	(sk-ant-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{36}|xox[abprs]-[A-Za-z0-9-]{10,})

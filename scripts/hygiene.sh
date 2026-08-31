@@ -7,9 +7,10 @@
 # edit when a new forbidden shape shows up. This script owns the mechanics:
 # which files are scanned, and the exit code.
 #
-#   hygiene.sh              scan every file git tracks or would track
-#                           (cached + untracked, minus what .gitignore excludes)
-#   hygiene.sh --tree DIR   scan every file under DIR
+#   hygiene.sh                   scan every file git tracks or would track
+#                                (cached + untracked, minus .gitignore)
+#   hygiene.sh --tree DIR        scan every file under DIR instead
+#   hygiene.sh --patterns FILE   use a different pattern table
 #
 # Exits 0 if nothing matched, 1 if anything did, 2 if the scan itself failed.
 # A scan that finds no files to read is an error, not a pass.
@@ -20,11 +21,17 @@ readonly EXIT_DIRTY=1
 readonly EXIT_BROKEN=2
 
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly PATTERN_FILE="${here}/hygiene-patterns.tsv"
+readonly PATTERN_FILE="${here}/hygiene-patterns.tsv"  # the default table
 
 tree=""
+patterns_file="$PATTERN_FILE"
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --patterns)
+      [ "$#" -ge 2 ] || { echo "hygiene: --patterns needs a file" >&2; exit "$EXIT_BROKEN"; }
+      patterns_file="$2"
+      shift 2
+      ;;
     --tree)
       [ "$#" -ge 2 ] || { echo "hygiene: --tree needs a directory" >&2; exit "$EXIT_BROKEN"; }
       tree="$2"
@@ -37,8 +44,8 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ -f "$PATTERN_FILE" ] || {
-  echo "hygiene: no pattern file at $PATTERN_FILE" >&2
+[ -f "$patterns_file" ] || {
+  echo "hygiene: no pattern file at $patterns_file" >&2
   exit "$EXIT_BROKEN"
 }
 
@@ -53,12 +60,12 @@ else
     < <(git ls-files -z --cached --others --exclude-standard)
 fi
 
-# The pattern file is the one place forbidden shapes are meant to be written
-# down, so it is the one file excluded from the scan.
+# A pattern table is the one place forbidden shapes are meant to be written
+# down, so pattern tables are the only files excluded from a scan.
 scanned=()
 for path in "${files[@]}"; do
   case "$path" in
-    */hygiene-patterns.tsv|hygiene-patterns.tsv) continue ;;
+    *-patterns.tsv) continue ;;
   esac
   scanned+=("$path")
 done
@@ -98,7 +105,7 @@ while IFS=$'\t' read -r label flags regex; do
       exit "$EXIT_BROKEN"
       ;;
   esac
-done < "$PATTERN_FILE"
+done < "$patterns_file"
 
 if [ "$patterns" -eq 0 ]; then
   echo "hygiene: pattern file defines no patterns; that is not a pass" >&2

@@ -1,0 +1,46 @@
+name: verify
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: verify.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Invoking cargo resolves rust-toolchain.toml, so rustup installs the
+      # pinned toolchain here rather than in the middle of a check.
+      - name: Resolve the pinned toolchain
+        run: |
+          cargo --version
+          rustc --version
+          cargo clippy --version
+          cargo fmt --version
+          python3 --version
+
+      - name: ./verify.sh
+        run: ./verify.sh
+
+  selftest:
+    name: verify.sh --selftest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve the pinned toolchain
+        run: cargo --version
+
+      # Every line of this must read RED. A gate that has never been seen red
+      # is not a gate.
+      - name: ./verify.sh --selftest
+        run: ./verify.sh --selftest

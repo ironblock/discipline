@@ -27,7 +27,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test results regimen hygiene)
+readonly CHECKS=(fmt clippy test results regimen metadata hygiene pages)
 
 FAILED=()
 
@@ -71,7 +71,19 @@ check_regimen() {
   return "$rc"
 }
 
+# The label and milestone definitions the sync workflow applies. That workflow
+# runs only on main, so without this the first sight of a malformed labels.json
+# would be after it merged.
+check_metadata() { python3 scripts/check-repo-metadata.py; }
+
 check_hygiene() { bash scripts/hygiene.sh; }
+
+# The site published to gh-pages is static, and this is what makes that a gate
+# rather than a promise: no subresource from another origin, no network call,
+# no form, no credential shapes.
+check_pages() {
+  bash scripts/hygiene.sh --patterns scripts/pages-patterns.tsv --tree pages
+}
 
 # --------------------------------------------------------------------------
 # runner
@@ -168,9 +180,43 @@ inject_regimen() {
   printf 'arm = 1.5\n' > results/_template/regimen.toml
 }
 
+inject_metadata() {
+  sed -i 's/"name": "claim"/"name": "claim-renamed"/' .github/labels.json
+}
+
 inject_hygiene() {
   bash scripts/seed-hygiene-fault.sh seeded-faults > /dev/null
   git add --all
+}
+
+inject_pages() {
+  printf '<script src="https://cdn.example.com/x.js"></script>\n' >> pages/index.html
+}
+
+# Every pattern in a table, shown catching its own class. A pattern that has
+# never caught anything is a guess. The verdict is the exit code; the label is
+# checked too, so that a class caught by the wrong pattern still reads as a
+# failure.
+prove_patterns() {
+  local kind="$1" table="$2" seeder="$3"
+  local seed dir label out rc
+
+  echo
+  echo "--- ${kind} patterns, each proven against its own class ---"
+  seed="$(mktemp -d)"
+  bash "${ROOT}/${seeder}" "$seed" > /dev/null
+  for dir in "$seed"/*/; do
+    label="$(basename "$dir")"
+    rc=0
+    out="$(bash "${ROOT}/scripts/hygiene.sh" --patterns "${ROOT}/${table}" --tree "$dir" 2>&1)" || rc=$?
+    if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "hygiene: ${label}:"; then
+      printf 'RED   hygiene.sh exit %-3d  %s\n' "$rc" "$label"
+    else
+      printf 'GREEN hygiene.sh exit %-3d  %s  <-- PATTERN DID NOT FIRE\n' "$rc" "$label"
+      SELFTEST_BROKEN+=("${kind} pattern ${label}")
+    fi
+  done
+  rm -rf "$seed"
 }
 
 selftest() {
@@ -188,7 +234,9 @@ selftest() {
   seeded_case "non-conforming format fixture"        test     inject_conformance
   seeded_case "results claim unbacked by run.jsonl"  results  inject_results
   seeded_case "regimen.toml that is not a regimen"   regimen  inject_regimen
+  seeded_case "template label nothing defines"       metadata inject_metadata
   seeded_case "forbidden content in the tree"        hygiene  inject_hygiene
+  seeded_case "external subresource on the site"     pages    inject_pages
 
   echo
   echo "--- results fixtures, checked directly ---"
@@ -205,23 +253,8 @@ selftest() {
     fi
   done
 
-  echo
-  echo "--- hygiene patterns, each proven against its own class ---"
-  local seed label out
-  seed="$(mktemp -d)"
-  bash "${ROOT}/scripts/seed-hygiene-fault.sh" "$seed" > /dev/null
-  for dir in "$seed"/*/; do
-    label="$(basename "$dir")"
-    rc=0
-    out="$(bash "${ROOT}/scripts/hygiene.sh" --tree "$dir" 2>&1)" || rc=$?
-    if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "hygiene: ${label}:"; then
-      printf 'RED   hygiene.sh exit %-3d  %s\n' "$rc" "$label"
-    else
-      printf 'GREEN hygiene.sh exit %-3d  %s  <-- PATTERN DID NOT FIRE\n' "$rc" "$label"
-      SELFTEST_BROKEN+=("hygiene pattern ${label}")
-    fi
-  done
-  rm -rf "$seed"
+  prove_patterns "hygiene" scripts/hygiene-patterns.tsv scripts/seed-hygiene-fault.sh
+  prove_patterns "pages"   scripts/pages-patterns.tsv   scripts/seed-pages-fault.sh
 
   echo
   if [ "${#SELFTEST_BROKEN[@]}" -gt 0 ]; then

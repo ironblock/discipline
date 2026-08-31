@@ -1,0 +1,46 @@
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: publish to gh-pages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Static only. Nothing here reaches a network, a model, or a secret
+      # beyond the token that publishes the branch.
+      - name: Assemble the site
+        run: |
+          set -euo pipefail
+          rm -rf _site
+          cp -r pages _site
+          touch _site/.nojekyll
+          ls -la _site
+
+      - name: Publish
+        env:
+          GH_PAGES_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd _site
+          git init --quiet --initial-branch=gh-pages
+          git add --all
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit --quiet --message "pages: ${GITHUB_SHA}"
+          git push --force --quiet \
+            "https://x-access-token:${GH_PAGES_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            gh-pages
+          echo "published ${GITHUB_SHA} to gh-pages"

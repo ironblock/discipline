@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>discipline</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --ink: #16181d;
+    --paper: #fbfaf8;
+    --muted: #5d6470;
+    --rule: #d9d5cd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #e8e6e1; --paper: #14161a; --muted: #99a0ac; --rule: #2b2f37; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 4rem 1.5rem;
+    background: var(--paper);
+    color: var(--ink);
+    font: 16px/1.65 ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  main { max-width: 44rem; margin: 0 auto; }
+  h1 { font-size: 1.5rem; letter-spacing: -0.01em; margin: 0 0 0.25rem; }
+  p.sub { color: var(--muted); margin: 0 0 2.5rem; }
+  h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.12em;
+       color: var(--muted); margin: 2.5rem 0 0.75rem;
+       border-top: 1px solid var(--rule); padding-top: 1.25rem; }
+  ul { margin: 0; padding-left: 1.25rem; }
+  li { margin: 0.35rem 0; }
+  code { background: color-mix(in oklab, var(--ink) 8%, transparent);
+         padding: 0.1em 0.35em; border-radius: 3px; }
+  a { color: inherit; text-underline-offset: 3px; }
+  footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--rule);
+           color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>discipline</h1>
+  <p class="sub">Placeholder. This page exists so the deploy path is real before it carries anything.</p>
+
+  <h2>What will live here</h2>
+  <ul>
+    <li>A static replay viewer.</li>
+    <li>A claim ledger, rendered by CI from <code>results/</code>.</li>
+  </ul>
+
+  <h2>What will never live here</h2>
+  <ul>
+    <li>Secrets, API keys, or credentials of any kind.</li>
+    <li>Hosted model access, or any call to one.</li>
+    <li>Anything loaded from an origin other than this one.</li>
+  </ul>
+  <p class="sub">
+    That last one is a gate, not a promise:
+    <code>./verify.sh --only pages</code> fails if this directory grows an
+    external subresource or a network call.
+  </p>
+
+  <footer>
+    <a href="https://github.com/ironblock/discipline">github.com/ironblock/discipline</a>
+    &middot; Apache-2.0
+  </footer>
+</main>
+</body>
+</html>
