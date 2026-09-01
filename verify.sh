@@ -477,28 +477,46 @@ prove_mechanics() {
   # Checks that read the environment, exercised under a FAKED one. `history`
   # is the only such check today; it went red in CI and green locally before
   # the sandbox was made hermetic, and nothing would have caught that here.
+  #
+  # On a repository of this assertion's OWN making, never the ambient
+  # checkout. The first version of these read HEAD~1 and origin/main from
+  # whatever tree it happened to be run in, and a runner clones at depth 1 --
+  # so they passed on a laptop and failed on CI, which is precisely the class
+  # of divergence they exist to catch.
   local fake; scratch; fake="$SCRATCH"
-  git -C "${ROOT}" rev-parse HEAD > "${fake}/head"
-  printf '{"before":"%s","after":"%s"}' "$(printf '0%.0s' $(seq 40))" \
-    "$(cat "${fake}/head")" > "${fake}/push-new-branch.json"
+  mkdir -p "${fake}/repo"
+  cp -R "${ROOT}/scripts" "${fake}/repo/scripts"
+  (
+    cd "${fake}/repo"
+    git init --quiet
+    printf 'a\n' > a.txt && git add --all && seed_commit --message 'base'
+    git update-ref refs/remotes/origin/main HEAD
+    printf 'b\n' > b.txt && git add --all && seed_commit --message 'second'
+  )
+  local fake_base fake_head
+  fake_base="$(git -C "${fake}/repo" rev-parse HEAD~1)"
+  fake_head="$(git -C "${fake}/repo" rev-parse HEAD)"
+  local zero; zero="$(printf '0%.0s' $(seq 40))"
+
+  printf '{"before":"%s","after":"%s"}' "$zero" "$fake_head" \
+    > "${fake}/push-new-branch.json"
   printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"carries %s%s forward"}}' \
-    "$(git -C "${ROOT}" rev-parse HEAD~1)" "$(cat "${fake}/head")" 'DIE' '-9001' \
-    > "${fake}/pr-dirty.json"
-  printf '{"before":"%s","after":"%s"}' "$(cat "${fake}/head")" "$(cat "${fake}/head")" \
+    "$fake_base" "$fake_head" 'DIE' '-9001' > "${fake}/pr-dirty.json"
+  printf '{"before":"%s","after":"%s"}' "$fake_head" "$fake_head" \
     > "${fake}/push-empty.json"
 
   expect_exit "history: a faked pull request with a dirty body" 1 \
     env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
         GITHUB_EVENT_PATH="${fake}/pr-dirty.json" \
-      python3 "${ROOT}/scripts/check-history.py"
+      python3 "${fake}/repo/scripts/check-history.py"
   expect_exit "history: a faked push whose range is empty" 2 \
     env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
         GITHUB_EVENT_PATH="${fake}/push-empty.json" \
-      python3 "${ROOT}/scripts/check-history.py"
+      python3 "${fake}/repo/scripts/check-history.py"
   expect_exit "history: a faked new-branch push resolves a base" 0 \
     env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
         GITHUB_EVENT_PATH="${fake}/push-new-branch.json" \
-      python3 "${ROOT}/scripts/check-history.py"
+      python3 "${fake}/repo/scripts/check-history.py"
 
   # The CI aggregator's comparison. A skipped job is not a failed job, and
   # GitHub's own `!failure()` idiom passes on skipped, so the one thing this
