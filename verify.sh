@@ -32,7 +32,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test results regimen metadata hygiene pages ci)
+readonly CHECKS=(fmt clippy test results regimen metadata hygiene pages ci history)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -119,6 +119,11 @@ check_pages() {
 # while running almost nothing -- a check owned by no workflow, a job the gate
 # does not depend on, a path filter that turns a skip into a pass.
 check_ci() { python3 scripts/check-ci-coverage.py; }
+
+# Commit messages, and a pull request's title and body, against the same
+# pattern table the file gate uses. A file carrying a forbidden shape can be
+# fixed with a commit; a commit message carrying one is permanent.
+check_history() { python3 scripts/check-history.py; }
 
 # --------------------------------------------------------------------------
 # runner
@@ -303,6 +308,28 @@ inject_pages() {
   printf '<script src="https://cdn.example.com/x.js"></script>\n' >> pages/index.html
 }
 
+# A sandbox is a fresh `git init` with no commits and no remote, so both of
+# these build the history they need.
+seed_commit() {
+  git -c user.email=seed@example.invalid -c user.name=seed commit --quiet "$@"
+}
+
+inject_history() {
+  git add --all
+  seed_commit --message 'a base commit'
+  git update-ref refs/remotes/origin/main HEAD
+  printf 'x\n' >> pages/index.html
+  git add --all
+  seed_commit --message "carries $(printf '%s%s' 'DIE' '-9001') forward"
+}
+
+inject_history_no_base() {
+  git add --all
+  seed_commit --message 'the only commit'
+  # No origin ref at all: the base is undeterminable, which must fail rather
+  # than quietly scan nothing.
+}
+
 inject_ci() {
   # Take a check's owner away: it then runs in no workflow, while CI is green.
   sed -i '/^hygiene\t/d' .github/check-owners.tsv
@@ -481,6 +508,10 @@ selftest() {
     'hygiene: external-subresource:'
   seeded_case "a check no workflow runs"              ci       inject_ci \
     'has no owner in check-owners\.tsv'
+  seeded_case "a forbidden id in a commit message"    history  inject_history \
+    'hygiene: internal-ticket-id:'
+  seeded_case "history with an undeterminable base"   history  inject_history_no_base \
+    'an undeterminable base is a failure, not an empty scan'
 
   echo
   echo "--- results fixtures, checked directly ---"

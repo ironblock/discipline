@@ -16,6 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The history gate reads commit messages across a range, so a
+          # shallow clone would leave it unable to determine a base --
+          # which it treats as a failure, correctly and unhelpfully.
+          fetch-depth: 0
 
       - name: Run the checks this package owns
         run: |
