@@ -28,6 +28,13 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 VERIFY = ROOT / "verify.sh"
 MANIFEST = ROOT / "tools" / "gate" / "faults.toml"
 FIXTURES = ROOT / "tests" / "fixtures" / "results-bad"
+REGIMEN_INVALID = ROOT / "diet" / "formats" / "regimen" / "fixtures" / "invalid"
+
+# A fixture whose .reason opens with this pins the TOML-subset agreement: both
+# readers must reject it. Those are the entries that relocate when the second
+# reader goes away, so each must say where its assertion lands.
+NOT_TOML = "NOT-TOML:"
+RELOCATING = {"subset-fixture"}
 
 CASE = re.compile(r'seeded_case\s+"([^"]+)"\s+(\w+)\s+(\w+)\s*\\\s*\n\s*\'([^\']*)\'')
 MECH = re.compile(r'expect_exit\s+"([^"]+)"\s+(\d+)')
@@ -38,7 +45,8 @@ def observed() -> dict[str, set[str]]:
     """What verify.sh proves, read out of verify.sh rather than assumed."""
     s = VERIFY.read_text(encoding="utf-8")
     seen: dict[str, set[str]] = {k: set() for k in
-                                 ("seeded-gate", "mechanics", "results-fixture", "pattern-class")}
+                                 ("seeded-gate", "mechanics", "results-fixture",
+                                  "pattern-class", "subset-fixture")}
     for _label, check, inject, _sig in CASE.findall(s):
         seen["seeded-gate"].add(f"{check}.{inject.removeprefix('inject_')}")
     for label, _want in MECH.findall(s):
@@ -51,6 +59,10 @@ def observed() -> dict[str, set[str]]:
         for d in FIXTURES.iterdir():
             if d.is_dir():
                 seen["results-fixture"].add(f"results.{d.name}")
+    if REGIMEN_INVALID.is_dir():
+        for reason in REGIMEN_INVALID.glob("*.reason"):
+            if reason.read_text(encoding="utf-8").lstrip().startswith(NOT_TOML):
+                seen["subset-fixture"].add(f"subset.{reason.stem}")
     return seen
 
 
@@ -84,6 +96,10 @@ def main() -> int:
             declared[kind].add(ident)
         if entry.get("migrated") is True and "failure_class" not in entry:
             failures.append(f"{where}: marked migrated with no failure_class")
+        # An entry whose assertion moves must name where it lands, or the
+        # count drops at retirement and reads as coverage loss.
+        if kind in RELOCATING and not isinstance(entry.get("migrated_to"), str):
+            failures.append(f"{where}: kind `{kind}` must carry a `migrated_to` pointer")
 
     seen = observed()
     for kind in sorted(set(seen) | set(declared)):

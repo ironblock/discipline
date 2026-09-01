@@ -241,22 +241,14 @@ seeded_case() {
   sandbox "$box"
   ( cd "$box" && "$inject" )
 
-  # Scrub the CI environment. A sandbox is a throwaway checkout, not this
-  # repository's build: leaving GITHUB_* set makes a check that reads the event
-  # context -- `history` does -- resolve shas from the REAL repository against
-  # the sandbox's history and fail for a reason that has nothing to do with the
-  # seeded fault. That reads RED and proves nothing.
-  local scrub=()
-  local name
-  while IFS='=' read -r name _; do
-    case "$name" in
-      GITHUB_*|RUNNER_*|ACTIONS_*|CI) scrub+=(-u "$name") ;;
-    esac
-  done < <(env)
-
+  # Hermetic: only scripts/hermetic.sh's allowlist reaches the sandbox. A
+  # blocklist would silently admit every variable nobody thought of, and a
+  # sandbox that can see the ambient CI identity makes a check which reads it
+  # behave differently there than a contributor would ever see.
   local rc=0
-  ( cd "$box" && env "${scrub[@]}" CARGO_TARGET_DIR="${SELFTEST_TARGET}" \
-      bash ./verify.sh --only "$check" ) > "${box}.log" 2>&1 || rc=$?
+  ( cd "$box" && bash "${ROOT}/scripts/hermetic.sh" \
+      env CARGO_TARGET_DIR="${SELFTEST_TARGET}" bash ./verify.sh --only "$check" ) \
+    > "${box}.log" 2>&1 || rc=$?
 
   if [ "$rc" -eq 0 ]; then
     printf 'GREEN verify.sh --only %-8s exit %-3d  %s  <-- THE GATE DID NOT FIRE\n' \
@@ -473,6 +465,40 @@ prove_mechanics() {
   cp "${ROOT}"/results/_template/* "${box}/root/.hidden-run/"
   expect_exit "a dot-prefixed results directory is linted" 1 \
     python3 "${ROOT}/scripts/check-results.py" --root "${box}/root"
+
+  # Hermeticity itself. Nothing that identifies a repository or a CI system
+  # may cross into a sandbox, whatever the ambient environment holds.
+  expect_exit "no ambient CI identity reaches a sandbox" 0 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push GITHUB_SHA=deadbeef \
+        GITHUB_EVENT_PATH=/nonexistent RUNNER_OS=Linux CI=true \
+      bash "${ROOT}/scripts/hermetic.sh" bash -c \
+        'set -u; for v in ${!GITHUB_@} ${!RUNNER_@} ${CI+CI}; do exit 1; done; exit 0'
+
+  # Checks that read the environment, exercised under a FAKED one. `history`
+  # is the only such check today; it went red in CI and green locally before
+  # the sandbox was made hermetic, and nothing would have caught that here.
+  local fake; scratch; fake="$SCRATCH"
+  git -C "${ROOT}" rev-parse HEAD > "${fake}/head"
+  printf '{"before":"%s","after":"%s"}' "$(printf '0%.0s' $(seq 40))" \
+    "$(cat "${fake}/head")" > "${fake}/push-new-branch.json"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"carries %s%s forward"}}' \
+    "$(git -C "${ROOT}" rev-parse HEAD~1)" "$(cat "${fake}/head")" 'DIE' '-9001' \
+    > "${fake}/pr-dirty.json"
+  printf '{"before":"%s","after":"%s"}' "$(cat "${fake}/head")" "$(cat "${fake}/head")" \
+    > "${fake}/push-empty.json"
+
+  expect_exit "history: a faked pull request with a dirty body" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-dirty.json" \
+      python3 "${ROOT}/scripts/check-history.py"
+  expect_exit "history: a faked push whose range is empty" 2 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
+        GITHUB_EVENT_PATH="${fake}/push-empty.json" \
+      python3 "${ROOT}/scripts/check-history.py"
+  expect_exit "history: a faked new-branch push resolves a base" 0 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
+        GITHUB_EVENT_PATH="${fake}/push-new-branch.json" \
+      python3 "${ROOT}/scripts/check-history.py"
 
   # The CI aggregator's comparison. A skipped job is not a failed job, and
   # GitHub's own `!failure()` idiom passes on skipped, so the one thing this

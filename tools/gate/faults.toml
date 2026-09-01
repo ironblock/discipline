@@ -11,6 +11,15 @@
 # can be checked against what the old gate actually did; nothing should ever
 # match on it again.
 #
+# `migrated_to` names where an entry's assertion lands when the old gate
+# retires. The eight subset-fixtures carry one: today each is rejected twice,
+# by diet's parser and by tomllib. When program-format parsing moves into diet
+# there is no second reader, so the tomllib half has nowhere to live and
+# check-toml-subset.py ceases to exist. The fixtures do not disappear -- they
+# become ordinary conformance fixtures -- but the accounting has to say so, or
+# the count drops and reads as coverage loss. diet's own test has been seen red
+# on all eight already; they flip to migrated only when the old copies retire.
+#
 # scripts/check-fault-manifest.py keeps this in step with verify.sh: an entry
 # here that verify.sh does not prove, or a fault verify.sh proves that is
 # absent here, is a failure. Parity cannot drift into a claim.
@@ -20,8 +29,8 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 67
-mechanics_assertions = 9
+red_faults = 75
+mechanics_assertions = 13
 migrated = 0
 
 
@@ -158,87 +167,6 @@ check = "history"
 label = "history with an undeterminable base"
 failure_class = "history.base-undeterminable"
 legacy_signature = "an undeterminable base is a failure, not an empty scan"
-migrated = false
-
-[[fault]]
-id = "mech.a-credential-inside-a-binary-is-caught"
-kind = "mechanics"
-check = "-"
-label = "a credential inside a binary is caught"
-failure_class = "hygiene.forbidden-pattern"
-expected_exit = "1"
-migrated = false
-
-[[fault]]
-id = "mech.an-ordinary-binary-does-not-false-positive"
-kind = "mechanics"
-check = "-"
-label = "an ordinary binary does not false-positive"
-failure_class = "hygiene.clean"
-expected_exit = "0"
-migrated = false
-
-[[fault]]
-id = "mech.a-patterns-tsv-outside-scripts-is-still-scanned"
-kind = "mechanics"
-check = "-"
-label = "a *-patterns.tsv outside scripts/ is still scanned"
-failure_class = "hygiene.forbidden-pattern"
-expected_exit = "1"
-migrated = false
-
-[[fault]]
-id = "mech.the-last-pattern-in-an-unterminated-table-still-fires"
-kind = "mechanics"
-check = "-"
-label = "the last pattern in an unterminated table still fires"
-failure_class = "hygiene.forbidden-pattern"
-expected_exit = "1"
-migrated = false
-
-[[fault]]
-id = "mech.a-dot-prefixed-results-directory-is-linted"
-kind = "mechanics"
-check = "-"
-label = "a dot-prefixed results directory is linted"
-failure_class = "results.name-malformed"
-expected_exit = "1"
-migrated = false
-
-[[fault]]
-id = "mech.the-gate-accepts-a-run-where-every-job-succeeded"
-kind = "mechanics"
-check = "-"
-label = "the gate accepts a run where every job succeeded"
-failure_class = "wiring.all-jobs-succeeded"
-expected_exit = "0"
-migrated = false
-
-[[fault]]
-id = "mech.the-gate-rejects-a-skipped-job"
-kind = "mechanics"
-check = "-"
-label = "the gate rejects a SKIPPED job"
-failure_class = "wiring.job-not-success"
-expected_exit = "1"
-migrated = false
-
-[[fault]]
-id = "mech.the-gate-rejects-depending-on-no-jobs-at-all"
-kind = "mechanics"
-check = "-"
-label = "the gate rejects depending on no jobs at all"
-failure_class = "wiring.gate-depends-on-nothing"
-expected_exit = "1"
-migrated = false
-
-[[fault]]
-id = "mech.an-unscannable-page-is-rejected-not-called-clean"
-kind = "mechanics"
-check = "-"
-label = "an unscannable page is rejected, not called clean"
-failure_class = "pages.unscannable-encoding"
-expected_exit = "1"
 migrated = false
 
 [[fault]]
@@ -677,4 +605,173 @@ check = "pages"
 label = "api-key-shape"
 failure_class = "pages.forbidden-pattern"
 pattern = "api-key-shape"
+migrated = false
+
+[[fault]]
+id = "mech.a-credential-inside-a-binary-is-caught"
+kind = "mechanics"
+check = "-"
+label = "a credential inside a binary is caught"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.an-ordinary-binary-does-not-false-positive"
+kind = "mechanics"
+check = "-"
+label = "an ordinary binary does not false-positive"
+failure_class = "hygiene.clean"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-patterns-tsv-outside-scripts-is-still-scanned"
+kind = "mechanics"
+check = "-"
+label = "a *-patterns.tsv outside scripts/ is still scanned"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.the-last-pattern-in-an-unterminated-table-still-fires"
+kind = "mechanics"
+check = "-"
+label = "the last pattern in an unterminated table still fires"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.a-dot-prefixed-results-directory-is-linted"
+kind = "mechanics"
+check = "-"
+label = "a dot-prefixed results directory is linted"
+failure_class = "results.name-malformed"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.no-ambient-ci-identity-reaches-a-sandbox"
+kind = "mechanics"
+check = "-"
+label = "no ambient CI identity reaches a sandbox"
+failure_class = "sandbox.environment-leaked"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.history-a-faked-pull-request-with-a-dirty-body"
+kind = "mechanics"
+check = "-"
+label = "history: a faked pull request with a dirty body"
+failure_class = "history.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.history-a-faked-push-whose-range-is-empty"
+kind = "mechanics"
+check = "-"
+label = "history: a faked push whose range is empty"
+failure_class = "history.range-empty-in-ci"
+expected_exit = "2"
+migrated = false
+[[fault]]
+id = "mech.history-a-faked-new-branch-push-resolves-a-base"
+kind = "mechanics"
+check = "-"
+label = "history: a faked new-branch push resolves a base"
+failure_class = "history.clean"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.the-gate-accepts-a-run-where-every-job-succeeded"
+kind = "mechanics"
+check = "-"
+label = "the gate accepts a run where every job succeeded"
+failure_class = "wiring.all-jobs-succeeded"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.the-gate-rejects-a-skipped-job"
+kind = "mechanics"
+check = "-"
+label = "the gate rejects a SKIPPED job"
+failure_class = "wiring.job-not-success"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.the-gate-rejects-depending-on-no-jobs-at-all"
+kind = "mechanics"
+check = "-"
+label = "the gate rejects depending on no jobs at all"
+failure_class = "wiring.gate-depends-on-nothing"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.an-unscannable-page-is-rejected-not-called-clean"
+kind = "mechanics"
+check = "-"
+label = "an unscannable page is rejected, not called clean"
+failure_class = "pages.unscannable-encoding"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "subset.capitalised-boolean"
+kind = "subset-fixture"
+check = "regimen"
+label = "capitalised-boolean"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.cr-after-a-complete-line"
+kind = "subset-fixture"
+check = "regimen"
+label = "cr-after-a-complete-line"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.cr-at-end-of-document"
+kind = "subset-fixture"
+check = "regimen"
+label = "cr-at-end-of-document"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.cr-in-comment"
+kind = "subset-fixture"
+check = "regimen"
+label = "cr-in-comment"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.del-in-comment"
+kind = "subset-fixture"
+check = "regimen"
+label = "del-in-comment"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.del-in-string"
+kind = "subset-fixture"
+check = "regimen"
+label = "del-in-string"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.escape-control-in-string"
+kind = "subset-fixture"
+check = "regimen"
+label = "escape-control-in-string"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.non-ascii-bare-key"
+kind = "subset-fixture"
+check = "regimen"
+label = "non-ascii-bare-key"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
 migrated = false
