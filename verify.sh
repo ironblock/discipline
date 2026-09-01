@@ -424,6 +424,18 @@ prove_mechanics() {
   expect_exit "a dot-prefixed results directory is linted" 1 \
     python3 "${ROOT}/scripts/check-results.py" --root "${box}/root"
 
+  # The CI aggregator's comparison. A skipped job is not a failed job, and
+  # GitHub's own `!failure()` idiom passes on skipped, so the one thing this
+  # must get right is that only the literal 'success' passes.
+  expect_exit "the gate accepts a run where every job succeeded" 0 \
+    env NEEDS='{"a":{"result":"success"}}' \
+      python3 "${ROOT}/scripts/check-job-results.py"
+  expect_exit "the gate rejects a SKIPPED job" 1 \
+    env NEEDS='{"a":{"result":"success"},"b":{"result":"skipped"}}' \
+      python3 "${ROOT}/scripts/check-job-results.py"
+  expect_exit "the gate rejects depending on no jobs at all" 1 \
+    env NEEDS='{}' python3 "${ROOT}/scripts/check-job-results.py"
+
   # A surface whose table sets `scan: all` must reject a file it cannot scan.
   # UTF-16 renders fine in a browser but encodes ASCII as two bytes, so it
   # defeats every pattern byte-wise; reporting it clean would be a lie.

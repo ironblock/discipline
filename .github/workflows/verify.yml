@@ -43,25 +43,12 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      # Compare each result to the literal 'success'. Anything else -- failure,
-      # cancelled, and above all skipped -- is not a pass.
+      - uses: actions/checkout@v5
+
+      # The comparison lives in a script rather than inline here, so that it
+      # can be run and proven against every result state instead of being
+      # trusted because it looks right in YAML.
       - name: Every job must have succeeded
         env:
           NEEDS: ${{ toJSON(needs) }}
-        run: |
-          python3 - <<'PY'
-          import json, os, sys
-
-          needs = json.loads(os.environ["NEEDS"])
-          if not needs:
-              print("::error::the gate depends on no jobs, so it gates nothing")
-              sys.exit(1)
-
-          bad = {name: job.get("result") for name, job in needs.items()
-                 if job.get("result") != "success"}
-          for name, result in sorted(bad.items()):
-              print(f"::error::job '{name}' finished '{result}', not 'success'")
-
-          print(f"{len(needs)} job(s) required; {len(bad)} did not succeed")
-          sys.exit(1 if bad else 0)
-          PY
+        run: python3 scripts/check-job-results.py
