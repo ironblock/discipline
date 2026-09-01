@@ -241,9 +241,22 @@ seeded_case() {
   sandbox "$box"
   ( cd "$box" && "$inject" )
 
+  # Scrub the CI environment. A sandbox is a throwaway checkout, not this
+  # repository's build: leaving GITHUB_* set makes a check that reads the event
+  # context -- `history` does -- resolve shas from the REAL repository against
+  # the sandbox's history and fail for a reason that has nothing to do with the
+  # seeded fault. That reads RED and proves nothing.
+  local scrub=()
+  local name
+  while IFS='=' read -r name _; do
+    case "$name" in
+      GITHUB_*|RUNNER_*|ACTIONS_*|CI) scrub+=(-u "$name") ;;
+    esac
+  done < <(env)
+
   local rc=0
-  ( cd "$box" && CARGO_TARGET_DIR="${SELFTEST_TARGET}" bash ./verify.sh --only "$check" ) \
-    > "${box}.log" 2>&1 || rc=$?
+  ( cd "$box" && env "${scrub[@]}" CARGO_TARGET_DIR="${SELFTEST_TARGET}" \
+      bash ./verify.sh --only "$check" ) > "${box}.log" 2>&1 || rc=$?
 
   if [ "$rc" -eq 0 ]; then
     printf 'GREEN verify.sh --only %-8s exit %-3d  %s  <-- THE GATE DID NOT FIRE\n' \
