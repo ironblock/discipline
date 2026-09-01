@@ -1,0 +1,33 @@
+# Which package owns which check.
+#
+# Format: check<TAB>owner
+#
+# `verify.sh` defines what a check IS; this table decides where CI runs it.
+# One source of truth: each per-package workflow derives its check list from
+# here rather than naming checks itself, so the two cannot drift.
+#
+# scripts/check-ci-coverage.py requires every check `verify.sh --list` names to
+# have exactly one owner here, and every owner to have a workflow that the root
+# workflow calls and the gate job depends on. A check owned by nobody would run
+# nowhere while CI still went green.
+#
+# A package with no checks simply has no row and no workflow. `exercise` is in
+# that state until the SPA exists; a workflow that runs nothing is a vacuous
+# pass, so it does not get one yet.
+
+# --- diet: the Rust crate, and the formats it owns ---
+fmt	diet
+clippy	diet
+test	diet
+regimen	diet
+
+# --- results: the claim-with-evidence invariant ---
+results	results
+
+# --- pages: the published static surface ---
+pages	pages
+
+# --- repo: concerns that belong to no single package ---
+hygiene	repo
+metadata	repo
+ci	repo

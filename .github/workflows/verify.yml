@@ -1,5 +1,15 @@
 name: verify
 
+# The root gate. It composes one reusable workflow per package and one for the
+# gate's own selftest, then requires every one of them to have SUCCEEDED --
+# not merely to have avoided failing.
+#
+# There is deliberately no `paths:` filter anywhere here. A skipped job is not
+# a failed job: `!failure()` and `!cancelled()` both pass on skipped, and a
+# whole workflow filtered out by path leaves its required check pending
+# forever. scripts/check-ci-coverage.py enforces that mechanically, so this
+# comment is a description rather than a promise.
+
 on:
   push:
   pull_request:
@@ -12,35 +22,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  gate:
-    name: verify.sh
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
+  diet:
+    uses: ./.github/workflows/pkg-diet.yml
 
-      # Invoking cargo resolves rust-toolchain.toml, so rustup installs the
-      # pinned toolchain here rather than in the middle of a check.
-      - name: Resolve the pinned toolchain
-        run: |
-          cargo --version
-          rustc --version
-          cargo clippy --version
-          cargo fmt --version
-          python3 --version
+  results:
+    uses: ./.github/workflows/pkg-results.yml
 
-      - name: ./verify.sh
-        run: ./verify.sh
+  pages:
+    uses: ./.github/workflows/pkg-pages.yml
+
+  repo:
+    uses: ./.github/workflows/pkg-repo.yml
 
   selftest:
-    name: verify.sh --selftest
+    uses: ./.github/workflows/gate-selftest.yml
+
+  gate:
+    name: gate
+    needs: [diet, results, pages, repo, selftest]
+    if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      # Compare each result to the literal 'success'. Anything else -- failure,
+      # cancelled, and above all skipped -- is not a pass.
+      - name: Every job must have succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
 
-      - name: Resolve the pinned toolchain
-        run: cargo --version
+          needs = json.loads(os.environ["NEEDS"])
+          if not needs:
+              print("::error::the gate depends on no jobs, so it gates nothing")
+              sys.exit(1)
 
-      # Every line of this must read RED. A gate that has never been seen red
-      # is not a gate.
-      - name: ./verify.sh --selftest
-        run: ./verify.sh --selftest
+          bad = {name: job.get("result") for name, job in needs.items()
+                 if job.get("result") != "success"}
+          for name, result in sorted(bad.items()):
+              print(f"::error::job '{name}' finished '{result}', not 'success'")
+
+          print(f"{len(needs)} job(s) required; {len(bad)} did not succeed")
+          sys.exit(1 if bad else 0)
+          PY

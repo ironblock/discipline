@@ -1,0 +1,34 @@
+name: pkg-pages
+
+# A reusable workflow, composed by verify.yml. It runs the checks
+# .github/check-owners.tsv says this package owns -- derived, never named
+# here, so the table and the workflow cannot drift apart.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: pages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run the checks this package owns
+        run: |
+          set -euo pipefail
+          mapfile -t checks < <(
+            awk -F'\t' -v pkg=pages '!/^#/ && NF>=2 && $2 == pkg { print $1 }' \
+              .github/check-owners.tsv
+          )
+          if [ "${#checks[@]}" -eq 0 ]; then
+            echo "::error::no check is owned by 'pages'; a workflow that runs nothing is not a pass"
+            exit 1
+          fi
+          args=()
+          for check in "${checks[@]}"; do args+=(--only "$check"); done
+          printf 'checks owned by pages: %s\n' "${checks[*]}"
+          ./verify.sh "${args[@]}"

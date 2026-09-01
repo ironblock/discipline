@@ -1,0 +1,43 @@
+name: pkg-diet
+
+# A reusable workflow, composed by verify.yml. It runs the checks
+# .github/check-owners.tsv says this package owns -- derived, never named
+# here, so the table and the workflow cannot drift apart.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: diet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Invoking cargo resolves rust-toolchain.toml, so rustup installs the
+      # pinned toolchain here rather than in the middle of a check.
+      - name: Resolve the pinned toolchain
+        run: |
+          cargo --version
+          rustc --version
+          cargo clippy --version
+          cargo fmt --version
+
+      - name: Run the checks this package owns
+        run: |
+          set -euo pipefail
+          mapfile -t checks < <(
+            awk -F'\t' -v pkg=diet '!/^#/ && NF>=2 && $2 == pkg { print $1 }' \
+              .github/check-owners.tsv
+          )
+          if [ "${#checks[@]}" -eq 0 ]; then
+            echo "::error::no check is owned by 'diet'; a workflow that runs nothing is not a pass"
+            exit 1
+          fi
+          args=()
+          for check in "${checks[@]}"; do args+=(--only "$check"); done
+          printf 'checks owned by diet: %s\n' "${checks[*]}"
+          ./verify.sh "${args[@]}"

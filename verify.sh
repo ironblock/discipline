@@ -32,7 +32,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test results regimen metadata hygiene pages)
+readonly CHECKS=(fmt clippy test results regimen metadata hygiene pages ci)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -114,6 +114,11 @@ check_hygiene() { bash scripts/hygiene.sh; }
 check_pages() {
   bash scripts/hygiene.sh --patterns scripts/pages-patterns.tsv --tree pages
 }
+
+# The wiring between these checks and the CI that runs them. CI can go green
+# while running almost nothing -- a check owned by no workflow, a job the gate
+# does not depend on, a path filter that turns a skip into a pass.
+check_ci() { python3 scripts/check-ci-coverage.py; }
 
 # --------------------------------------------------------------------------
 # runner
@@ -298,6 +303,11 @@ inject_pages() {
   printf '<script src="https://cdn.example.com/x.js"></script>\n' >> pages/index.html
 }
 
+inject_ci() {
+  # Take a check's owner away: it then runs in no workflow, while CI is green.
+  sed -i '/^hygiene\t/d' .github/check-owners.tsv
+}
+
 # Every pattern in a table, shown catching its own class. A pattern that has
 # never caught anything is a guess.
 #
@@ -457,6 +467,8 @@ selftest() {
     'hygiene: internal-ticket-id:'
   seeded_case "external subresource on the site"      pages    inject_pages \
     'hygiene: external-subresource:'
+  seeded_case "a check no workflow runs"              ci       inject_ci \
+    'has no owner in check-owners\.tsv'
 
   echo
   echo "--- results fixtures, checked directly ---"
