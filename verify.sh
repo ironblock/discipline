@@ -32,7 +32,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test results regimen metadata hygiene pages ci history)
+readonly CHECKS=(fmt clippy test results regimen metadata hygiene pages ci history parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -124,6 +124,10 @@ check_ci() { python3 scripts/check-ci-coverage.py; }
 # pattern table the file gate uses. A file carrying a forbidden shape can be
 # fixed with a commit; a commit message carrying one is permanent.
 check_history() { python3 scripts/check-history.py; }
+
+# The fault-migration manifest defines what parity means for the replacement
+# gate. A manifest that has drifted from this script defines the wrong parity.
+check_parity() { python3 scripts/check-fault-manifest.py; }
 
 # --------------------------------------------------------------------------
 # runner
@@ -330,6 +334,12 @@ inject_history_no_base() {
   # than quietly scan nothing.
 }
 
+inject_parity() {
+  # Prove a fault the manifest does not account for: parity would then be
+  # declared over less than the gate actually covers.
+  rm -rf tests/fixtures/results-bad/2026-01-14-bad-sha
+}
+
 inject_ci() {
   # Take a check's owner away: it then runs in no workflow, while CI is green.
   sed -i '/^hygiene\t/d' .github/check-owners.tsv
@@ -508,6 +518,8 @@ selftest() {
     'hygiene: external-subresource:'
   seeded_case "a check no workflow runs"              ci       inject_ci \
     'has no owner in check-owners\.tsv'
+  seeded_case "parity drifts from what is proven"     parity   inject_parity \
+    'which verify\.sh does not prove'
   seeded_case "a forbidden id in a commit message"    history  inject_history \
     'hygiene: internal-ticket-id:'
   seeded_case "history with an undeterminable base"   history  inject_history_no_base \

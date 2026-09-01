@@ -1,0 +1,680 @@
+# The fault-migration manifest: what parity means.
+#
+# `verify.sh` proves 66 seeded faults red and asserts 9 scanner mechanics. The
+# replacement gate retires the old one only when it proves EVERY entry here --
+# equivalence before retirement, the program's instrument law applied to gates.
+#
+# `failure_class` is the reframing. The old gate matched a message string,
+# which is grep-as-verdict one level up and is why signatures went stale twice.
+# The new gate emits a structured failure record per finding and a seeded case
+# asserts on its CLASS. `legacy_signature` is recorded only so the migration
+# can be checked against what the old gate actually did; nothing should ever
+# match on it again.
+#
+# scripts/check-fault-manifest.py keeps this in step with verify.sh: an entry
+# here that verify.sh does not prove, or a fault verify.sh proves that is
+# absent here, is a failure. Parity cannot drift into a claim.
+#
+# This file is the orchestrator's own manifest format. Program formats --
+# regimen, run.jsonl, the report front-matter -- stay in `diet`.
+
+[meta]
+source = "verify.sh"
+red_faults = 67
+mechanics_assertions = 9
+migrated = 0
+
+
+[[fault]]
+id = "fmt.fmt"
+kind = "seeded-gate"
+check = "fmt"
+label = "misformatted source"
+failure_class = "tool.unformatted-file"
+legacy_signature = "Diff in .*diet/src/lib\\.rs"
+migrated = false
+
+[[fault]]
+id = "clippy.clippy"
+kind = "seeded-gate"
+check = "clippy"
+label = "clippy lint violation"
+failure_class = "tool.lint-denied"
+legacy_signature = "ptr_arg"
+migrated = false
+
+[[fault]]
+id = "test.test"
+kind = "seeded-gate"
+check = "test"
+label = "failing unit test"
+failure_class = "tool.test-failed"
+legacy_signature = "seeded_fault::seeded_failure \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "test.conformance"
+kind = "seeded-gate"
+check = "test"
+label = "non-conforming format fixture"
+failure_class = "format.valid-fixture-mismatch"
+legacy_signature = "conformance failure\\(s\\)"
+migrated = false
+
+[[fault]]
+id = "test.formats_empty"
+kind = "seeded-gate"
+check = "test"
+label = "FORMATS emptied, harness covers none"
+failure_class = "coverage.no-formats-registered"
+legacy_signature = "FORMATS is empty"
+migrated = false
+
+[[fault]]
+id = "results.results"
+kind = "seeded-gate"
+check = "results"
+label = "results claim contradicts run.jsonl"
+failure_class = "results.number-contradicts-summary"
+legacy_signature = "front-matter `turns` states 3 but the summary record binds"
+migrated = false
+
+[[fault]]
+id = "regimen.regimen"
+kind = "seeded-gate"
+check = "regimen"
+label = "regimen.toml that is not a regimen"
+failure_class = "format.parse-rejected"
+legacy_signature = "BAD results/_template/regimen\\.toml"
+migrated = false
+
+[[fault]]
+id = "regimen.toml_subset"
+kind = "seeded-gate"
+check = "regimen"
+label = "a valid regimen that is not TOML"
+failure_class = "format.subset-violated"
+legacy_signature = "accepted as a regimen but rejected by tomllib"
+migrated = false
+
+[[fault]]
+id = "metadata.metadata"
+kind = "seeded-gate"
+check = "metadata"
+label = "template label nothing defines"
+failure_class = "metadata.label-undefined"
+legacy_signature = "assigns label"
+migrated = false
+
+[[fault]]
+id = "hygiene.hygiene"
+kind = "seeded-gate"
+check = "hygiene"
+label = "forbidden content in the tree"
+failure_class = "hygiene.forbidden-pattern"
+legacy_signature = "hygiene: internal-ticket-id:"
+migrated = false
+
+[[fault]]
+id = "pages.pages"
+kind = "seeded-gate"
+check = "pages"
+label = "external subresource on the site"
+failure_class = "pages.forbidden-pattern"
+legacy_signature = "hygiene: external-subresource:"
+migrated = false
+
+[[fault]]
+id = "ci.ci"
+kind = "seeded-gate"
+check = "ci"
+label = "a check no workflow runs"
+failure_class = "wiring.check-unowned"
+legacy_signature = "has no owner in check-owners\\.tsv"
+migrated = false
+
+[[fault]]
+id = "parity.parity"
+kind = "seeded-gate"
+check = "parity"
+label = "parity drifts from what is proven"
+failure_class = "parity.manifest-drift"
+legacy_signature = "which verify\\.sh does not prove"
+migrated = false
+
+[[fault]]
+id = "history.history"
+kind = "seeded-gate"
+check = "history"
+label = "a forbidden id in a commit message"
+failure_class = "history.forbidden-pattern"
+legacy_signature = "hygiene: internal-ticket-id:"
+migrated = false
+
+[[fault]]
+id = "history.history_no_base"
+kind = "seeded-gate"
+check = "history"
+label = "history with an undeterminable base"
+failure_class = "history.base-undeterminable"
+legacy_signature = "an undeterminable base is a failure, not an empty scan"
+migrated = false
+
+[[fault]]
+id = "mech.a-credential-inside-a-binary-is-caught"
+kind = "mechanics"
+check = "-"
+label = "a credential inside a binary is caught"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.an-ordinary-binary-does-not-false-positive"
+kind = "mechanics"
+check = "-"
+label = "an ordinary binary does not false-positive"
+failure_class = "hygiene.clean"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.a-patterns-tsv-outside-scripts-is-still-scanned"
+kind = "mechanics"
+check = "-"
+label = "a *-patterns.tsv outside scripts/ is still scanned"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.the-last-pattern-in-an-unterminated-table-still-fires"
+kind = "mechanics"
+check = "-"
+label = "the last pattern in an unterminated table still fires"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-dot-prefixed-results-directory-is-linted"
+kind = "mechanics"
+check = "-"
+label = "a dot-prefixed results directory is linted"
+failure_class = "results.name-malformed"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.the-gate-accepts-a-run-where-every-job-succeeded"
+kind = "mechanics"
+check = "-"
+label = "the gate accepts a run where every job succeeded"
+failure_class = "wiring.all-jobs-succeeded"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.the-gate-rejects-a-skipped-job"
+kind = "mechanics"
+check = "-"
+label = "the gate rejects a SKIPPED job"
+failure_class = "wiring.job-not-success"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.the-gate-rejects-depending-on-no-jobs-at-all"
+kind = "mechanics"
+check = "-"
+label = "the gate rejects depending on no jobs at all"
+failure_class = "wiring.gate-depends-on-nothing"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.an-unscannable-page-is-rejected-not-called-clean"
+kind = "mechanics"
+check = "-"
+label = "an unscannable page is rejected, not called clean"
+failure_class = "pages.unscannable-encoding"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-01-missing-run-jsonl"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-01-missing-run-jsonl"
+failure_class = "results.required-file-missing"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-02-missing-regimen"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-02-missing-regimen"
+failure_class = "results.required-file-missing"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-03-missing-readme"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-03-missing-readme"
+failure_class = "results.required-file-missing"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-04-no-front-matter"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-04-no-front-matter"
+failure_class = "results.front-matter-absent"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-05-missing-key"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-05-missing-key"
+failure_class = "results.required-key-missing"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-06-wrong-type"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-06-wrong-type"
+failure_class = "results.key-mistyped"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-07-sections-out-of-order"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-07-sections-out-of-order"
+failure_class = "results.sections-wrong"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-08-missing-section"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-08-missing-section"
+failure_class = "results.sections-wrong"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-09-unbacked-number"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-09-unbacked-number"
+failure_class = "results.number-contradicts-summary"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-10-regime-mismatch"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-10-regime-mismatch"
+failure_class = "results.regime-disagrees-with-regimen"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-11-no-summary-record"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-11-no-summary-record"
+failure_class = "results.summary-record-count"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-12-two-summary-records"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-12-two-summary-records"
+failure_class = "results.summary-record-count"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-13-malformed-jsonl"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-13-malformed-jsonl"
+failure_class = "results.jsonl-malformed"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-14-bad-sha"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-14-bad-sha"
+failure_class = "results.sha-malformed"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-15-sha-mismatch"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-15-sha-mismatch"
+failure_class = "results.sha-disagrees-with-summary"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-16-unclosed-front-matter"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-16-unclosed-front-matter"
+failure_class = "results.front-matter-unterminated"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-17-dogma-version-is-a-boolean"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-17-dogma-version-is-a-boolean"
+failure_class = "results.key-mistyped"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-18-number-contradicts-its-own-key"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-18-number-contradicts-its-own-key"
+failure_class = "results.number-contradicts-summary"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-19-unbacked-regime-key"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-19-unbacked-regime-key"
+failure_class = "results.regime-unbacked"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-20-sha-with-trailing-newline"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-20-sha-with-trailing-newline"
+failure_class = "results.sha-malformed"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-21-sections-only-inside-a-code-fence"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-21-sections-only-inside-a-code-fence"
+failure_class = "results.sections-wrong"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-22-regime-boolean-for-integer"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-22-regime-boolean-for-integer"
+failure_class = "results.regime-disagrees-with-regimen"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-23-quoted-key-posing-as-regime"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-23-quoted-key-posing-as-regime"
+failure_class = "results.number-unbound-in-summary"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-24-number-under-a-key-the-run-never-recorded"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-24-number-under-a-key-the-run-never-recorded"
+failure_class = "results.number-unbound-in-summary"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-25-sections-inside-an-html-comment"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-25-sections-inside-an-html-comment"
+failure_class = "results.sections-wrong"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-26-readme-is-not-utf8"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-26-readme-is-not-utf8"
+failure_class = "results.unreadable-encoding"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-27-UPPERCASE-slug"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-27-UPPERCASE-slug"
+failure_class = "results.name-malformed"
+migrated = false
+
+[[fault]]
+id = "results.2026-13-45-impossible-date"
+kind = "results-fixture"
+check = "results"
+label = "2026-13-45-impossible-date"
+failure_class = "results.name-malformed"
+migrated = false
+
+[[fault]]
+id = "results._notatemplate"
+kind = "results-fixture"
+check = "results"
+label = "_notatemplate"
+failure_class = "results.name-malformed"
+migrated = false
+
+[[fault]]
+id = "results.not-a-date-slug"
+kind = "results-fixture"
+check = "results"
+label = "not-a-date-slug"
+failure_class = "results.name-malformed"
+migrated = false
+
+[[fault]]
+id = "hygiene.private-ipv4"
+kind = "pattern-class"
+check = "hygiene"
+label = "private-ipv4"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "private-ipv4"
+migrated = false
+
+[[fault]]
+id = "hygiene.internal-hostname"
+kind = "pattern-class"
+check = "hygiene"
+label = "internal-hostname"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "internal-hostname"
+migrated = false
+
+[[fault]]
+id = "hygiene.personal-home-path"
+kind = "pattern-class"
+check = "hygiene"
+label = "personal-home-path"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "personal-home-path"
+migrated = false
+
+[[fault]]
+id = "hygiene.windows-user-path"
+kind = "pattern-class"
+check = "hygiene"
+label = "windows-user-path"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "windows-user-path"
+migrated = false
+
+[[fault]]
+id = "hygiene.internal-ticket-id"
+kind = "pattern-class"
+check = "hygiene"
+label = "internal-ticket-id"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "internal-ticket-id"
+migrated = false
+
+[[fault]]
+id = "hygiene.aws-access-key-id"
+kind = "pattern-class"
+check = "hygiene"
+label = "aws-access-key-id"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "aws-access-key-id"
+migrated = false
+
+[[fault]]
+id = "hygiene.github-token"
+kind = "pattern-class"
+check = "hygiene"
+label = "github-token"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "github-token"
+migrated = false
+
+[[fault]]
+id = "hygiene.slack-token"
+kind = "pattern-class"
+check = "hygiene"
+label = "slack-token"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "slack-token"
+migrated = false
+
+[[fault]]
+id = "hygiene.private-key-block"
+kind = "pattern-class"
+check = "hygiene"
+label = "private-key-block"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "private-key-block"
+migrated = false
+
+[[fault]]
+id = "hygiene.anthropic-api-key"
+kind = "pattern-class"
+check = "hygiene"
+label = "anthropic-api-key"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "anthropic-api-key"
+migrated = false
+
+[[fault]]
+id = "hygiene.openai-api-key"
+kind = "pattern-class"
+check = "hygiene"
+label = "openai-api-key"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "openai-api-key"
+migrated = false
+
+[[fault]]
+id = "hygiene.assigned-secret"
+kind = "pattern-class"
+check = "hygiene"
+label = "assigned-secret"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "assigned-secret"
+migrated = false
+
+[[fault]]
+id = "pages.external-subresource"
+kind = "pattern-class"
+check = "pages"
+label = "external-subresource"
+failure_class = "pages.forbidden-pattern"
+pattern = "external-subresource"
+migrated = false
+
+[[fault]]
+id = "pages.external-stylesheet"
+kind = "pattern-class"
+check = "pages"
+label = "external-stylesheet"
+failure_class = "pages.forbidden-pattern"
+pattern = "external-stylesheet"
+migrated = false
+
+[[fault]]
+id = "pages.css-import"
+kind = "pattern-class"
+check = "pages"
+label = "css-import"
+failure_class = "pages.forbidden-pattern"
+pattern = "css-import"
+migrated = false
+
+[[fault]]
+id = "pages.css-external-url"
+kind = "pattern-class"
+check = "pages"
+label = "css-external-url"
+failure_class = "pages.forbidden-pattern"
+pattern = "css-external-url"
+migrated = false
+
+[[fault]]
+id = "pages.base-element"
+kind = "pattern-class"
+check = "pages"
+label = "base-element"
+failure_class = "pages.forbidden-pattern"
+pattern = "base-element"
+migrated = false
+
+[[fault]]
+id = "pages.network-call"
+kind = "pattern-class"
+check = "pages"
+label = "network-call"
+failure_class = "pages.forbidden-pattern"
+pattern = "network-call"
+migrated = false
+
+[[fault]]
+id = "pages.beacon"
+kind = "pattern-class"
+check = "pages"
+label = "beacon"
+failure_class = "pages.forbidden-pattern"
+pattern = "beacon"
+migrated = false
+
+[[fault]]
+id = "pages.dynamic-import"
+kind = "pattern-class"
+check = "pages"
+label = "dynamic-import"
+failure_class = "pages.forbidden-pattern"
+pattern = "dynamic-import"
+migrated = false
+
+[[fault]]
+id = "pages.form-element"
+kind = "pattern-class"
+check = "pages"
+label = "form-element"
+failure_class = "pages.forbidden-pattern"
+pattern = "form-element"
+migrated = false
+
+[[fault]]
+id = "pages.api-key-shape"
+kind = "pattern-class"
+check = "pages"
+label = "api-key-shape"
+failure_class = "pages.forbidden-pattern"
+pattern = "api-key-shape"
+migrated = false
