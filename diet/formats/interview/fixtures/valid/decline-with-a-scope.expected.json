@@ -1,0 +1,18 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "decline": {
+          "marker": "Nothing to add",
+          "scope": "the interview parser"
+        }
+      },
+      "raw": "Nothing to add about the interview parser.",
+      "tag": {
+        "as_written": "EVIDENCE:",
+        "kind": "evidence"
+      }
+    }
+  ]
+}

@@ -34,8 +34,8 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 99
-mechanics_assertions = 21
+red_faults = 102
+mechanics_assertions = 26
 migrated = 0
 
 
@@ -217,6 +217,33 @@ check = "test"
 label = "the reconciler stops deduping"
 failure_class = "object.duplicate-fact"
 legacy_signature = "the same fact, wrapped differently, is the same fact"
+migrated = false
+
+[[fault]]
+id = "test.cli_usage_exit"
+kind = "seeded-gate"
+check = "test"
+label = "a usage error that exits zero"
+failure_class = "cli.exit-code"
+legacy_signature = "a usage error must be distinguishable from a bad document"
+migrated = false
+
+[[fault]]
+id = "test.cli_wrong_format"
+kind = "seeded-gate"
+check = "test"
+label = "a verb wired to the wrong format"
+failure_class = "cli.mis-dispatch"
+legacy_signature = "a valid fixture of its own format did not read"
+migrated = false
+
+[[fault]]
+id = "test.cli_silent"
+kind = "seeded-gate"
+check = "test"
+label = "a CLI that prints no result"
+failure_class = "cli.no-output"
+legacy_signature = "stdout is not JSON"
 migrated = false
 
 [[fault]]
@@ -828,6 +855,51 @@ failure_class = "pages.forbidden-pattern"
 pattern = "api-key-shape"
 migrated = false
 
+
+[[fault]]
+id = "mech.cargo-build-target-dir-is-where-cargo-built"
+kind = "mechanics"
+check = "regimen"
+label = "cargo build target dir is where cargo built"
+failure_class = "provenance.wrong-artifact"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-config-target-dir-is-where-cargo-built"
+kind = "mechanics"
+check = "regimen"
+label = "a config target dir is where cargo built"
+failure_class = "provenance.wrong-artifact"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-staleness-check-with-no-sources-to-check-is-a-refusal"
+kind = "mechanics"
+check = "regimen"
+label = "a staleness check with no sources to check is a refusal"
+failure_class = "provenance.rule-did-not-apply"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-pin-spelled-with-is-the-same-pin"
+kind = "mechanics"
+check = "regimen"
+label = "a pin spelled with is the same pin"
+failure_class = "provenance.pin-honoured"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-file-that-cannot-be-run-is-not-a-build"
+kind = "mechanics"
+check = "regimen"
+label = "a file that cannot be run is not a build"
+failure_class = "provenance.unrunnable-artifact"
+legacy_signature = ""
+migrated = false
 
 [[fault]]
 id = "mech.a-pinned-diet-bin-is-the-binary-that-is-used"

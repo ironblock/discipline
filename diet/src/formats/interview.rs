@@ -691,25 +691,8 @@ fn outcome_value(outcome: &Outcome) -> Value {
             "value".to_owned(),
             Value::String(text.clone()),
         )])),
-        Outcome::Decline(declined) => {
-            let mut members = std::collections::BTreeMap::from([(
-                "marker".to_owned(),
-                Value::String(declined.marker.clone()),
-            )]);
-            for (key, held) in [
-                ("subject", &declined.subject),
-                ("scope", &declined.scope),
-                ("reason", &declined.reason),
-            ] {
-                if let Some(text) = held {
-                    members.insert(key.to_owned(), Value::String(text.clone()));
-                }
-            }
-            Value::Object(std::collections::BTreeMap::from([(
-                "decline".to_owned(),
-                Value::Object(members),
-            )]))
-        }
+        // The decline format's own projection, not a second copy of it.
+        Outcome::Decline(declined) => super::decline::projected(declined),
         Outcome::Unparseable => Value::String("unparseable".to_owned()),
     }
 }

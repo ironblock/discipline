@@ -79,10 +79,13 @@ check_results() { python3 scripts/check-results.py --root results; }
 # is what keeps diet/formats load-bearing: the format is used on the
 # repository's own data, not merely defined.
 #
-# `cargo run` rather than a hand-built path, so that the binary under test is
-# always the one cargo would produce for this tree -- honouring
-# build.target-dir and any other configuration -- and never a stale artifact
-# left in a shared target directory.
+# Through `scripts/resolve-diet.py`, which asks where cargo would have built
+# -- CARGO_TARGET_DIR, CARGO_BUILD_TARGET_DIR, then `[build] target-dir` from
+# the nearest `.cargo/config.toml` -- so the binary under test is the one
+# cargo produced for this tree and never a stale artifact left at
+# `target/debug/diet`. Reading only CARGO_TARGET_DIR let this check grade
+# every regimen document `ok` through a seventeen-byte shell script, and
+# record its SHA-256 as provenance: accurate, and for the wrong artifact.
 check_regimen() {
   local rc=0
 
@@ -123,9 +126,12 @@ check_regimen() {
   DIET_BIN="$pinned" python3 scripts/resolve-diet.py --expect "$pinned" > /dev/null \
     || pin_rc=$?
   rm -f "$pinned"
-  if [ "$pin_rc" -ne 0 ]; then
+  if [ "$pin_rc" -eq 1 ]; then
     echo "verify: DIET_BIN did not pin the binary the resolver used" >&2
     return 1
+  elif [ "$pin_rc" -ne 0 ]; then
+    echo "verify: the resolver refused the pinned copy (exit ${pin_rc})" >&2
+    return "$pin_rc"
   fi
 
   local seen=0 file
@@ -657,6 +663,30 @@ EOF
 # A correction whose content the object already holds. Without the guard the
 # supersede links whatever dedup handed back -- an entry to itself, or over a
 # link another correction already wrote -- and reports Ok either way.
+# The CLI's exit codes, its stdout, and which format sits behind which verb.
+# Three mutations of this shape survived cargo test, verify.sh AND --selftest
+# before diet/tests/cli.rs existed: nothing ran the program.
+inject_cli_usage_exit() {
+  sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
+}
+
+inject_cli_wrong_format() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/bin/diet.rs")
+source = path.read_text(encoding="utf-8")
+old = '    ("parse-interview", "interview"),\n    ("check-record", "record"),'
+new = '    ("parse-interview", "record"),\n    ("check-record", "interview"),'
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_cli_silent() {
+  sed -i 's|^    println!("{rendered}");$||' diet/src/bin/diet.rs
+}
+
 inject_object_self_void() {
   python3 - <<'EOF'
 import pathlib
@@ -1067,6 +1097,12 @@ selftest() {
     'a correction was erased by a later state change'
   seeded_case "a no-op patch that claims an entry"    test     inject_object_false_attribution \
     'the patch claimed entries no diff can support'
+  seeded_case "a usage error that exits zero"         test     inject_cli_usage_exit \
+    'a usage error must be distinguishable from a bad document'
+  seeded_case "a verb wired to the wrong format"      test     inject_cli_wrong_format \
+    'a valid fixture of its own format did not read'
+  seeded_case "a CLI that prints no result"           test     inject_cli_silent \
+    'stdout is not JSON'
   seeded_case "a field kind nothing covers"           test     inject_field_kind_variant \
     'non-exhaustive patterns'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
@@ -1134,7 +1170,8 @@ selftest() {
     env DIET_BIN="${pin}/diet" python3 "${ROOT}/scripts/resolve-diet.py" \
       --expect "${pin}/some-other-build"
   expect_exit "a DIET_BIN naming nothing is not a fallback" 2 \
-    env DIET_BIN="${pin}/never-built" python3 "${ROOT}/scripts/resolve-diet.py"
+    bash -c "cd '${pin}' && CARGO_TARGET_DIR= DIET_BIN='${pin}/never-built' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
 
   local builds; scratch; builds="$SCRATCH"
   mkdir -p "${builds}/diet/src" "${builds}/target/debug" "${builds}/target/release"
@@ -1156,6 +1193,42 @@ selftest() {
 
   expect_exit "no build at all is a refusal, not an empty scan" 2 \
     bash -c "cd '${pin}' && CARGO_TARGET_DIR= DIET_BIN= python3 '${ROOT}/scripts/resolve-diet.py'"
+
+  # Where cargo actually builds. Reading only CARGO_TARGET_DIR meant a build
+  # directed elsewhere left `target/debug/diet` free for anything to occupy,
+  # and the gate ran that instead -- provenance and all.
+  mkdir -p "${builds}/target/debug" "${builds}/elsewhere/debug"
+  printf '#!/bin/sh\nexit 9\n' > "${builds}/target/debug/diet"
+  printf '#!/bin/sh\nexit 0\n' > "${builds}/elsewhere/debug/diet"
+  chmod +x "${builds}/target/debug/diet" "${builds}/elsewhere/debug/diet"
+  touch "${builds}/target/debug/diet" "${builds}/elsewhere/debug/diet"
+  expect_exit "CARGO_BUILD_TARGET_DIR is where cargo built" 0 \
+    bash -c "cd '${builds}' && CARGO_TARGET_DIR= \
+      CARGO_BUILD_TARGET_DIR='${builds}/elsewhere' \
+      python3 '${ROOT}/scripts/resolve-diet.py' --expect '${builds}/elsewhere/debug/diet'"
+  mkdir -p "${builds}/.cargo"
+  printf '[build]\ntarget-dir = "elsewhere"\n' > "${builds}/.cargo/config.toml"
+  expect_exit "a config target-dir is where cargo built" 0 \
+    bash -c "cd '${builds}' && CARGO_TARGET_DIR= \
+      python3 '${ROOT}/scripts/resolve-diet.py' --expect '${builds}/elsewhere/debug/diet'"
+  rm -rf "${builds}/.cargo"
+
+  # Rule three is stated without conditions. Off a tree that holds the
+  # sources, the scan found nothing and the rule quietly did not apply: a
+  # stale binary resolved with `"checked_against": null` and exit 0.
+  local nowhere; scratch; nowhere="$SCRATCH"
+  expect_exit "a staleness check with no sources to check is a refusal" 2 \
+    bash -c "cd '${nowhere}' && CARGO_TARGET_DIR= DIET_BIN='${pin}/diet' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+
+  # A pin honoured is not a pin ignored, whatever spelling it arrived in.
+  expect_exit "a pin spelled with ./ is the same pin" 0 \
+    bash -c "cd '${pin}' && CARGO_TARGET_DIR= DIET_BIN=./diet \
+      python3 '${ROOT}/scripts/resolve-diet.py' --expect ./diet"
+
+  expect_exit "a file that cannot be run is not a build" 2 \
+    bash -c "cd '${builds}' && CARGO_TARGET_DIR= DIET_BIN='${builds}/diet/src/main.rs' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
 
   prove_patterns "hygiene" scripts/hygiene-patterns.tsv scripts/seed-hygiene-fault.sh \
     "${REQUIRED_HYGIENE_CLASSES[@]}"

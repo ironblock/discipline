@@ -194,26 +194,7 @@ fn shape_of(rule: Rule) -> ParseError {
 /// Returns the reason the answer is content rather than a decline.
 pub fn project(source: &str) -> Result<Value, String> {
     match classify(source) {
-        Classification::Decline(parsed) => {
-            let mut decline =
-                BTreeMap::from([("marker".to_owned(), Value::String(parsed.marker.clone()))]);
-            // Absent is an omitted key, as in the record: a null says the
-            // field exists and holds nothing, which cannot be told apart from
-            // a field nobody filled in.
-            for (key, held) in [
-                ("subject", &parsed.subject),
-                ("scope", &parsed.scope),
-                ("reason", &parsed.reason),
-            ] {
-                if let Some(text) = held {
-                    decline.insert(key.to_owned(), Value::String(text.clone()));
-                }
-            }
-            Ok(Value::Object(BTreeMap::from([(
-                "decline".to_owned(),
-                Value::Object(decline),
-            )])))
-        }
+        Classification::Decline(parsed) => Ok(projected(&parsed)),
         Classification::Content => Err(match parse(source) {
             Err(err) => err.to_string(),
             Ok(_) => "classify says content where parse succeeds: the two \
@@ -221,6 +202,33 @@ pub fn project(source: &str) -> Result<Value, String> {
                 .to_owned(),
         }),
     }
+}
+
+/// One decline as a record value.
+///
+/// Public within the crate because the interview format carries declines
+/// inside its fields and has to write them the same way. It had its own copy
+/// of these six lines, which is the second implementation this crate exists
+/// to refuse -- and the interview corpus covered neither `subject` nor
+/// `scope`, so the copy could have dropped both and stayed green.
+pub(crate) fn projected(parsed: &Decline) -> Value {
+    let mut decline = BTreeMap::from([("marker".to_owned(), Value::String(parsed.marker.clone()))]);
+    // Absent is an omitted key, as in the record: a null says the field
+    // exists and holds nothing, which cannot be told apart from a field
+    // nobody filled in.
+    for (key, held) in [
+        ("subject", &parsed.subject),
+        ("scope", &parsed.scope),
+        ("reason", &parsed.reason),
+    ] {
+        if let Some(text) = held {
+            decline.insert(key.to_owned(), Value::String(text.clone()));
+        }
+    }
+    Value::Object(BTreeMap::from([(
+        "decline".to_owned(),
+        Value::Object(decline),
+    )]))
 }
 
 #[cfg(test)]

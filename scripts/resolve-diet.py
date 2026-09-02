@@ -36,15 +36,48 @@ import json
 import os
 import pathlib
 import sys
+import tomllib
+
+def target_dir() -> pathlib.Path:
+    """Where cargo puts a build, asked the way cargo decides it.
+
+    `CARGO_TARGET_DIR` is not the only answer, and assuming it was is how a
+    gate ran a program cargo had not built: with `[build] target-dir` set in
+    `.cargo/config.toml`, or `CARGO_BUILD_TARGET_DIR` in the environment,
+    cargo builds elsewhere and anything left lying at `target/debug/diet` is
+    what gets resolved -- with its SHA-256 recorded as provenance for an
+    artifact that is not the one under test.
+
+    Cargo's precedence, followed here: the two environment variables (which
+    are two spellings of one setting), then `build.target-dir` from the
+    nearest `.cargo/config.toml` walking up from the working directory, then
+    `target`. A config's relative path is relative to the directory holding
+    `.cargo/`, as cargo resolves it.
+    """
+    for variable in ("CARGO_TARGET_DIR", "CARGO_BUILD_TARGET_DIR"):
+        named = os.environ.get(variable)
+        if named:
+            return pathlib.Path(named)
+    here = pathlib.Path.cwd()
+    for directory in (here, *here.parents):
+        for name in ("config.toml", "config"):
+            config = directory / ".cargo" / name
+            if not config.is_file():
+                continue
+            try:
+                with config.open("rb") as handle:
+                    settings = tomllib.load(handle)
+            except (OSError, tomllib.TOMLDecodeError):
+                continue
+            named = settings.get("build", {}).get("target-dir")
+            if named:
+                return directory / named
+    return pathlib.Path("target")
+
 
 def candidates() -> tuple[pathlib.Path, ...]:
-    """Where a build lands, honouring CARGO_TARGET_DIR.
-
-    Read from the environment rather than assumed: the selftest builds every
-    sandbox into a shared target directory, and a resolver that only looked at
-    `target/` would find no binary there and report that as an absence.
-    """
-    root = pathlib.Path(os.environ.get("CARGO_TARGET_DIR") or "target")
+    """The two paths a build of `diet` lands at."""
+    root = target_dir()
     return (root / "debug" / "diet", root / "release" / "diet")
 
 # What the binary is supposed to reflect. A change to any of these that the
@@ -123,9 +156,26 @@ def main() -> int:
         path = present[0]
         source = "the only build present"
 
+    if not os.access(path, os.X_OK):
+        return refuse(
+            f"{path} is not executable, so it is not a build of anything; "
+            f"resolving it would hand a caller a file it cannot run"
+        )
+
     binary_stamp = path.stat().st_mtime
     newest = newest_source()
-    if newest is not None and newest[0] > binary_stamp:
+    if newest is None:
+        # Rule three is stated without conditions, so it cannot quietly not
+        # apply. Off the repository root none of SOURCES exists, the scan
+        # returned nothing, and a stale binary resolved with
+        # `"checked_against": null` and exit 0 -- a check of no files
+        # reporting success, which is the one shape this repository refuses.
+        return refuse(
+            f"no source found under {', '.join(str(root) for root in SOURCES)} "
+            f"relative to {pathlib.Path.cwd()}, so nothing establishes whether "
+            f"{path} reflects it. Run from the tree the binary belongs to"
+        )
+    if newest[0] > binary_stamp:
         return refuse(
             f"{path} is older than {newest[1]}, so it does not reflect the "
             f"source it is supposed to be a build of"
@@ -135,11 +185,11 @@ def main() -> int:
         "path": str(path),
         "sha256": digest(path),
         "resolved_by": source,
-        "checked_against": newest[1] if newest else None,
+        "checked_against": newest[1],
     }
     # Exit 1, not 2: this is the provenance TEST failing, not the resolver
     # refusing. The difference matters to a caller deciding whether to build.
-    if args.expect is not None and str(path) != args.expect:
+    if args.expect is not None and path.resolve() != pathlib.Path(args.expect).resolve():
         print(
             f"resolve-diet: resolved {path}, but {args.expect} was pinned; "
             f"a pin that can be silently ignored is not a pin",
