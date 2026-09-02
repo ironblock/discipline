@@ -1,8 +1,5 @@
 {
   "decline": {
-    "subject": null,
-    "marker": "No material changes this turn",
-    "scope": null,
-    "reason": null
+    "marker": "No material changes this turn"
   }
 }

@@ -25,11 +25,19 @@ pub mod record;
 pub mod regimen;
 
 /// A format with a grammar and a conformance-fixture directory.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct Format {
     /// Directory name under `diet/formats/`, and the name the harness
     /// dispatches on.
     pub name: &'static str,
+    /// Parse `source` and render the result as the record's value space.
+    ///
+    /// A function pointer, not a name the caller matches on. The conformance
+    /// harness used to dispatch on `name` with a string match that panicked on
+    /// an unknown one -- a guard, but a guard that fires at run time. A format
+    /// added to this list without a projection now fails to compile, because
+    /// the struct literal has nowhere to leave the field blank.
+    pub project: fn(&str) -> Result<record::json::Value, String>,
     /// Extension of a fixture case file, without the dot.
     ///
     /// Carried as data rather than assumed. The first format was TOML and the
@@ -47,18 +55,22 @@ pub const FORMATS: &[Format] = &[
     Format {
         name: "decline",
         case_extension: "txt",
+        project: decline::project,
     },
     Format {
         name: "interview",
         case_extension: "txt",
+        project: interview::project,
     },
     Format {
         name: "record",
         case_extension: "jsonl",
+        project: record::project,
     },
     Format {
         name: "regimen",
         case_extension: "toml",
+        project: regimen::project,
     },
 ];
 

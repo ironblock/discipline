@@ -97,10 +97,41 @@ check_regimen() {
     return "$build_rc"
   }
 
+  # Through the resolver, and the resolver says which binary and what its
+  # digest is. Four instruments once banked numbers through a release binary
+  # seven days behind its source because their resolver picked the newer of
+  # two builds; this one refuses to pick.
+  local resolved bin
+  resolved="$(python3 scripts/resolve-diet.py)" || {
+    echo "verify: the diet binary could not be resolved" >&2
+    return 2
+  }
+  printf '  %s\n' "$resolved"
+  bin="$(printf '%s' "$resolved" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])')"
+
+  # And the pin is honoured on every run, not only in the selftest. A DIET_BIN
+  # that can be silently ignored is not a pin, and that being a no-op is how
+  # the documented way to fix a run to a build stopped working without anyone
+  # noticing. Pinned to a COPY, deliberately: pinning the path the resolver
+  # would have chosen anyway proves nothing about whether the pin was read.
+  local pinned pin_rc=0
+  pinned="$(mktemp)" && cp "$bin" "$pinned" && chmod +x "$pinned" || {
+    echo "verify: could not stage a pinned copy of ${bin}" >&2
+    return 2
+  }
+  DIET_BIN="$pinned" python3 scripts/resolve-diet.py --expect "$pinned" > /dev/null \
+    || pin_rc=$?
+  rm -f "$pinned"
+  if [ "$pin_rc" -ne 0 ]; then
+    echo "verify: DIET_BIN did not pin the binary the resolver used" >&2
+    return 1
+  fi
+
   local seen=0 file
   while IFS= read -r -d '' file; do
     seen=$((seen + 1))
-    if cargo run --quiet -p discipline-diet --bin diet -- "$file" > /dev/null; then
+    if "$bin" check-regimen "$file" > /dev/null; then
       printf '  ok  %s\n' "$file"
     else
       printf '  BAD %s\n' "$file"
@@ -606,6 +637,14 @@ inject_results() {
   cp -r tests/fixtures/results-bad/2026-01-09-unbacked-number results/
 }
 
+# A DIET_BIN that the resolver quietly ignores. The documented way to pin a
+# run to a specific build being a silent no-op is how four instruments banked
+# numbers through a release binary seven days behind its source.
+inject_diet_bin_ignored() {
+  sed -i 's|^    pinned = os.environ.get("DIET_BIN")$|    pinned = None|' \
+    scripts/resolve-diet.py
+}
+
 inject_regimen() {
   printf 'arm = 1.5\n' > results/_template/regimen.toml
 }
@@ -938,6 +977,8 @@ selftest() {
     'BAD results/_template/regimen\.toml'
   seeded_case "a valid regimen that is not TOML"      regimen  inject_toml_subset \
     'accepted as a regimen but rejected by tomllib'
+  seeded_case "a pin the resolver ignores"            regimen  inject_diet_bin_ignored \
+    'a pin that can be silently ignored is not a pin'
   seeded_case "template label nothing defines"        metadata inject_metadata \
     'assigns label'
   seeded_case "forbidden content in the tree"         hygiene  inject_hygiene \
@@ -969,6 +1010,46 @@ selftest() {
   done
 
   prove_mechanics
+
+  # --- binary provenance at the boundary ---
+  #
+  # The resolver's whole job is refusing to guess, so each refusal is asserted
+  # against the exit code it must produce -- and the pin is asserted to be the
+  # binary actually used, because a pin that can be silently ignored is not a
+  # pin, and that is precisely how four instruments banked numbers through a
+  # build seven days behind their source.
+  local pin; scratch; pin="$SCRATCH"
+  printf '#!/bin/sh\nexit 0\n' > "${pin}/diet"
+  chmod +x "${pin}/diet"
+
+  expect_exit "a pinned DIET_BIN is the binary that is used" 0 \
+    env DIET_BIN="${pin}/diet" python3 "${ROOT}/scripts/resolve-diet.py" --expect "${pin}/diet"
+  expect_exit "a DIET_BIN that is ignored is a failed test, not a refusal" 1 \
+    env DIET_BIN="${pin}/diet" python3 "${ROOT}/scripts/resolve-diet.py" \
+      --expect "${pin}/some-other-build"
+  expect_exit "a DIET_BIN naming nothing is not a fallback" 2 \
+    env DIET_BIN="${pin}/never-built" python3 "${ROOT}/scripts/resolve-diet.py"
+
+  local builds; scratch; builds="$SCRATCH"
+  mkdir -p "${builds}/diet/src" "${builds}/target/debug" "${builds}/target/release"
+  printf 'fn main() {}\n' > "${builds}/diet/src/main.rs"
+  printf '#!/bin/sh\nexit 0\n' > "${builds}/target/debug/diet"
+  printf '#!/bin/sh\nexit 0\n' > "${builds}/target/release/diet"
+  chmod +x "${builds}/target/debug/diet" "${builds}/target/release/diet"
+  expect_exit "two builds are a refusal, not a choice" 2 \
+    bash -c "cd '${builds}' && CARGO_TARGET_DIR= python3 '${ROOT}/scripts/resolve-diet.py'"
+
+  rm -f "${builds}/target/release/diet"
+  expect_exit "one build resolves" 0 \
+    bash -c "cd '${builds}' && CARGO_TARGET_DIR= python3 '${ROOT}/scripts/resolve-diet.py'"
+
+  # ...and the same one build, once the source is newer than it.
+  touch "${builds}/diet/src/main.rs"
+  expect_exit "a build older than its source does not reflect it" 2 \
+    bash -c "cd '${builds}' && CARGO_TARGET_DIR= python3 '${ROOT}/scripts/resolve-diet.py'"
+
+  expect_exit "no build at all is a refusal, not an empty scan" 2 \
+    bash -c "cd '${pin}' && CARGO_TARGET_DIR= DIET_BIN= python3 '${ROOT}/scripts/resolve-diet.py'"
 
   prove_patterns "hygiene" scripts/hygiene-patterns.tsv scripts/seed-hygiene-fault.sh \
     "${REQUIRED_HYGIENE_CLASSES[@]}"

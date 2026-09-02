@@ -1,8 +1,7 @@
 {
   "decline": {
-    "subject": null,
     "marker": "Nothing to add",
-    "scope": "the parser",
-    "reason": "it was a replay"
+    "reason": "it was a replay",
+    "scope": "the parser"
   }
 }

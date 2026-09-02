@@ -1546,6 +1546,45 @@ fn integer(count: Count) -> Value {
     Value::Integer(i64::try_from(count.get()).unwrap_or(i64::MAX))
 }
 
+/// This record, as its own value space.
+///
+/// # Errors
+///
+/// Returns the reason the text is not a session record.
+pub fn project(source: &str) -> Result<Value, String> {
+    parse(source)
+        .map(|parsed| {
+            Value::Object(BTreeMap::from([
+                (
+                    "regime".to_owned(),
+                    Value::Object(BTreeMap::from([
+                        ("arm".to_owned(), Value::String(parsed.regime().arm.clone())),
+                        (
+                            "substrate".to_owned(),
+                            Value::String(parsed.regime().substrate.name.clone()),
+                        ),
+                        (
+                            "dogma_version".to_owned(),
+                            Value::Integer(i64::from(parsed.regime().dogma_version)),
+                        ),
+                    ])),
+                ),
+                (
+                    "kinds".to_owned(),
+                    Value::Array(
+                        parsed
+                            .kinds()
+                            .iter()
+                            .map(|kind| Value::String(kind.tag().to_owned()))
+                            .collect(),
+                    ),
+                ),
+                ("canonical".to_owned(), Value::String(render(&parsed))),
+            ]))
+        })
+        .map_err(|err| err.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::json::Value;

@@ -1,8 +1,5 @@
 {
   "decline": {
-    "subject": null,
-    "marker": "nothing else",
-    "scope": null,
-    "reason": null
+    "marker": "nothing else"
   }
 }

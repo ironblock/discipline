@@ -34,8 +34,8 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 93
-mechanics_assertions = 14
+red_faults = 94
+mechanics_assertions = 21
 migrated = 0
 
 
@@ -271,6 +271,15 @@ check = "regimen"
 label = "a valid regimen that is not TOML"
 failure_class = "format.subset-violated"
 legacy_signature = "accepted as a regimen but rejected by tomllib"
+migrated = false
+
+[[fault]]
+id = "regimen.diet_bin_ignored"
+kind = "seeded-gate"
+check = "regimen"
+label = "a pin the resolver ignores"
+failure_class = "provenance.pin-ignored"
+legacy_signature = "a pin that can be silently ignored is not a pin"
 migrated = false
 
 [[fault]]
@@ -772,6 +781,70 @@ check = "pages"
 label = "api-key-shape"
 failure_class = "pages.forbidden-pattern"
 pattern = "api-key-shape"
+migrated = false
+
+
+[[fault]]
+id = "mech.a-pinned-diet-bin-is-the-binary-that-is-used"
+kind = "mechanics"
+check = "regimen"
+label = "a pinned diet bin is the binary that is used"
+failure_class = "provenance.pin-honoured"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-diet-bin-that-is-ignored-is-a-failed-test-not-a-refusal"
+kind = "mechanics"
+check = "regimen"
+label = "a diet bin that is ignored is a failed test not a refusal"
+failure_class = "provenance.pin-ignored"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-diet-bin-naming-nothing-is-not-a-fallback"
+kind = "mechanics"
+check = "regimen"
+label = "a diet bin naming nothing is not a fallback"
+failure_class = "provenance.pin-missing"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.two-builds-are-a-refusal-not-a-choice"
+kind = "mechanics"
+check = "regimen"
+label = "two builds are a refusal not a choice"
+failure_class = "provenance.two-builds"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.one-build-resolves"
+kind = "mechanics"
+check = "regimen"
+label = "one build resolves"
+failure_class = "provenance.one-build"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-build-older-than-its-source-does-not-reflect-it"
+kind = "mechanics"
+check = "regimen"
+label = "a build older than its source does not reflect it"
+failure_class = "provenance.stale-build"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.no-build-at-all-is-a-refusal-not-an-empty-scan"
+kind = "mechanics"
+check = "regimen"
+label = "no build at all is a refusal not an empty scan"
+failure_class = "provenance.no-build"
+legacy_signature = ""
 migrated = false
 
 [[fault]]

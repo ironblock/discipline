@@ -1,8 +1,6 @@
 {
   "decline": {
-    "subject": null,
     "marker": "Nothing to add",
-    "scope": "the second interview parser",
-    "reason": null
+    "scope": "the second interview parser"
   }
 }

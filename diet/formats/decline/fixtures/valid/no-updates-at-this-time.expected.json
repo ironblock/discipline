@@ -1,8 +1,5 @@
 {
   "decline": {
-    "subject": null,
-    "marker": "No updates at this time",
-    "scope": null,
-    "reason": null
+    "marker": "No updates at this time"
   }
 }

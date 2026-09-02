@@ -5,8 +5,7 @@
       "outcome": {
         "decline": {
           "marker": "NONE",
-          "reason": "not building yet",
-          "scope": null
+          "reason": "not building yet"
         }
       },
       "raw": "NONE (not building yet)",
@@ -15,6 +14,5 @@
         "kind": "decision"
       }
     }
-  ],
-  "wrapper": null
+  ]
 }
