@@ -19,6 +19,7 @@
 fmt	diet
 clippy	diet
 test	diet
+library	diet
 regimen	diet
 
 # --- results: the claim-with-evidence invariant ---

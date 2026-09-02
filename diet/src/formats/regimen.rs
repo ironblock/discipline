@@ -174,13 +174,11 @@ fn binding(pair: Pair<'_, Rule>) -> Result<(String, Value), ParseError> {
                 .as_str()
                 .to_owned(),
         ),
-        // Total rather than defaulting: if the grammar ever admitted `True`,
-        // defaulting would silently value it `false` instead of rejecting it.
-        Rule::boolean => match raw.as_str() {
-            "true" => Value::Boolean(true),
-            "false" => Value::Boolean(false),
-            other => unreachable!("grammar admits no other boolean: {other:?}"),
-        },
+        // On the rule, not on the text. A third boolean spelling added to the
+        // grammar becomes a rule with nowhere to hide; a string arm would have
+        // compiled and quietly stopped covering it.
+        Rule::boolean_true => Value::Boolean(true),
+        Rule::boolean_false => Value::Boolean(false),
         Rule::integer => {
             let literal = raw.as_str();
             Value::Integer(literal.parse().map_err(|_| ParseError::IntegerOutOfRange {

@@ -31,7 +31,14 @@ key       =  { (ASCII_ALPHANUMERIC | "_" | "-")+ }
 value     = _{ string | boolean | integer }
 string    =  { "\"" ~ inner ~ "\"" }
 inner     =  { char* }
-boolean   =  { "true" | "false" }
+// Two rules rather than one with two spellings, so that the parser matches on
+// the RULE rather than on the text. A match arm on a string literal compiles
+// fine when a third spelling is added and quietly stops covering it; a match
+// on a rule is a match on a generated enum, and the new variant has nowhere to
+// hide. scripts/check-predicates.py refuses the string form outright.
+boolean   = _{ boolean_true | boolean_false }
+boolean_true  = { "true" }
+boolean_false = { "false" }
 
 // No leading zeros and no leading `+`, because TOML admits neither. `-0` is
 // legal TOML and so is legal here.

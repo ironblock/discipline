@@ -32,7 +32,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test results regimen metadata hygiene pages ci history parity)
+readonly CHECKS=(fmt clippy test library results regimen metadata hygiene pages ci history parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -64,6 +64,14 @@ check_clippy() { cargo clippy --workspace --all-targets -- -D warnings; }
 # to recognise: a broken unit test in the library would hide every conformance
 # failure behind it, and the log would say the gate fired for the wrong reason.
 check_test() { cargo test --workspace --no-fail-fast; }
+
+# Two rules about the library saying what it says. Field kinds, verdicts and
+# outcome classes are enums with exhaustive matches -- the compiler enforces
+# that once the predicate IS an enum, and cannot stop somebody writing a new
+# `match text { "DECISION" => ... }`. And every source file is reached by a
+# `mod` declaration: an orphan compiles nowhere, so its tests do not run and
+# `cargo test -- <its module>` matches nothing and exits 0.
+check_library() { python3 scripts/check-library.py; }
 
 check_results() { python3 scripts/check-results.py --root results; }
 
@@ -483,6 +491,53 @@ inject_grounded_undemonstrated() {
     diet/src/capture/grounded.rs
 }
 
+# A stringly predicate reintroduced by hand. Field kinds were matched as
+# strings in more than one place before, and the places drifted.
+inject_stringly_predicate() {
+  printf '\n#[must_use]\npub fn seeded_stringly(text: &str) -> u8 {\n    match text {\n        "DECISION" => 1,\n        _ => 0,\n    }\n}\n' \
+    >> diet/src/lib.rs
+}
+
+# The acceptance case where THE BUILD IS THE GATE: a field-kind variant added
+# without wiring it. Every exhaustive match over FieldKind stops compiling,
+# which is the whole reason the predicate is an enum.
+# A source file no `mod` declaration reaches. It sits on disk, compiles
+# nowhere, and `cargo test -- object` selects nothing and exits 0 -- which is
+# how five hundred lines and eleven tests went unrun with the gate green.
+inject_orphaned_module() {
+  sed -i '/^pub mod object;$/d' diet/src/lib.rs
+}
+
+inject_field_kind_variant() {
+  sed -i 's|^    Stuck,$|    Stuck,\n    /// Seeded: a variant nothing covers.\n    Seeded,|' \
+    diet/src/formats/interview.rs
+}
+
+# A supersede that deletes what it replaced. Claim atomicity at the object
+# level: a correction is a linked row, and the row it corrects has to still be
+# there to be read.
+inject_object_supersede_deletes() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if let Some(old) = self.entries.get_mut(voids) {
+            old.state = EntryState::Voided { by: added.clone() };
+        }"""
+new = """        self.entries.remove(voids);"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Dedup removed, so two forks saying one thing become two facts and each
+# carries half the provenance.
+inject_object_no_dedup() {
+  sed -i 's|^        if let Some(held) = self.by_content.get(&key).cloned() {$|        if let Some(held) = None::<EntryId> {|' \
+    diet/src/object.rs
+}
+
 inject_results() {
   cp -r tests/fixtures/results-bad/2026-01-09-unbacked-number results/
 }
@@ -795,6 +850,16 @@ selftest() {
     'the gate touched a judgment-class field'
   seeded_case "a score with no demonstrated failure"  test     inject_grounded_undemonstrated \
     'a measurement was handed back whose instrument never failed'
+  seeded_case "supersede deletes what it replaced"    test     inject_object_supersede_deletes \
+    'the voided entry is still here'
+  seeded_case "the reconciler stops deduping"         test     inject_object_no_dedup \
+    'the same fact, wrapped differently, is the same fact'
+  seeded_case "a field kind nothing covers"           test     inject_field_kind_variant \
+    'non-exhaustive patterns'
+  seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
+    'a match arm on a string literal'
+  seeded_case "a module nothing compiles"             library  inject_orphaned_module \
+    'no .mod. declaration reaches it'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
     'front-matter `turns` states 3 but the summary record binds'
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \

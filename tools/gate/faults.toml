@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 84
+red_faults = 89
 mechanics_assertions = 14
 migrated = 0
 
@@ -163,6 +163,51 @@ check = "test"
 label = "a score with no demonstrated failure"
 failure_class = "capture.instrument-never-failed"
 legacy_signature = "a measurement was handed back whose instrument never failed"
+migrated = false
+
+[[fault]]
+id = "test.object_supersede_deletes"
+kind = "seeded-gate"
+check = "test"
+label = "supersede deletes what it replaced"
+failure_class = "object.correction-deletes"
+legacy_signature = "the voided entry is still here"
+migrated = false
+
+[[fault]]
+id = "test.object_no_dedup"
+kind = "seeded-gate"
+check = "test"
+label = "the reconciler stops deduping"
+failure_class = "object.duplicate-fact"
+legacy_signature = "the same fact, wrapped differently, is the same fact"
+migrated = false
+
+[[fault]]
+id = "test.field_kind_variant"
+kind = "seeded-gate"
+check = "test"
+label = "a field kind nothing covers"
+failure_class = "library.non-exhaustive-predicate"
+legacy_signature = "non-exhaustive patterns"
+migrated = false
+
+[[fault]]
+id = "library.stringly_predicate"
+kind = "seeded-gate"
+check = "library"
+label = "a stringly predicate in the library"
+failure_class = "library.stringly-predicate"
+legacy_signature = "a match arm on a string literal"
+migrated = false
+
+[[fault]]
+id = "library.orphaned_module"
+kind = "seeded-gate"
+check = "library"
+label = "a module nothing compiles"
+failure_class = "library.orphaned-module"
+legacy_signature = "no .mod. declaration reaches it"
 migrated = false
 
 [[fault]]
