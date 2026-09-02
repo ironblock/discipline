@@ -92,6 +92,19 @@ pub enum ParseError {
         /// The literal as it appeared in the document.
         literal: String,
     },
+    /// The grammar produced a value rule the reader does not know.
+    ///
+    /// Unreachable against the grammar as written -- and it used to say so,
+    /// with `unreachable!`. But the pairing is maintained by hand: adding a
+    /// value rule to the `.pest` file and not here turned a document the
+    /// grammar accepts into a panic, which is a crash where the caller asked
+    /// for a verdict. Refusing it says the same thing and survives.
+    UnexpectedRule {
+        /// The key whose value could not be read.
+        key: String,
+        /// The rule the grammar produced, named as the grammar names it.
+        rule: String,
+    },
 }
 
 impl fmt::Display for ParseError {
@@ -105,6 +118,13 @@ impl fmt::Display for ParseError {
                     "integer `{literal}` bound to `{key}` does not fit in i64"
                 )
             }
+            Self::UnexpectedRule { key, rule } => {
+                write!(
+                    f,
+                    "the value bound to `{key}` parsed as `{rule}`, which this \
+                     reader does not know how to read"
+                )
+            }
         }
     }
 }
@@ -113,7 +133,9 @@ impl Error for ParseError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Syntax(err) => Some(err),
-            Self::DuplicateKey { .. } | Self::IntegerOutOfRange { .. } => None,
+            Self::DuplicateKey { .. }
+            | Self::IntegerOutOfRange { .. }
+            | Self::UnexpectedRule { .. } => None,
         }
     }
 }
@@ -123,8 +145,10 @@ impl Error for ParseError {
 /// # Errors
 ///
 /// Returns [`ParseError::Syntax`] if the input does not match the grammar,
-/// [`ParseError::DuplicateKey`] if a key is bound twice, and
-/// [`ParseError::IntegerOutOfRange`] if an integer literal overflows `i64`.
+/// [`ParseError::DuplicateKey`] if a key is bound twice,
+/// [`ParseError::IntegerOutOfRange`] if an integer literal overflows `i64`,
+/// and [`ParseError::UnexpectedRule`] if the grammar produced a value rule
+/// this reader does not know.
 ///
 /// # Panics
 ///
@@ -174,9 +198,11 @@ fn binding(pair: Pair<'_, Rule>) -> Result<(String, Value), ParseError> {
                 .as_str()
                 .to_owned(),
         ),
-        // On the rule, not on the text. A third boolean spelling added to the
-        // grammar becomes a rule with nowhere to hide; a string arm would have
-        // compiled and quietly stopped covering it.
+        // On the rule, not on the text. A string arm compiles fine when a third
+        // spelling is added to the grammar and quietly stops covering it; an
+        // unknown RULE is refused below by name. The compiler is not the gate
+        // here -- `Rule` is generated, so no arm is missing until the grammar
+        // grows one -- but the failure is a verdict rather than a default.
         Rule::boolean_true => Value::Boolean(true),
         Rule::boolean_false => Value::Boolean(false),
         Rule::integer => {
@@ -186,7 +212,12 @@ fn binding(pair: Pair<'_, Rule>) -> Result<(String, Value), ParseError> {
                 literal: literal.to_owned(),
             })?)
         }
-        other => unreachable!("grammar admits no other value rule: {other:?}"),
+        other => {
+            return Err(ParseError::UnexpectedRule {
+                key,
+                rule: format!("{other:?}"),
+            });
+        }
     };
     Ok((key, value))
 }

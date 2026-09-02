@@ -593,9 +593,6 @@ inject_stringly_predicate() {
     >> diet/src/lib.rs
 }
 
-# The acceptance case where THE BUILD IS THE GATE: a field-kind variant added
-# without wiring it. Every exhaustive match over FieldKind stops compiling,
-# which is the whole reason the predicate is an enum.
 # A source file no `mod` declaration reaches. It sits on disk, compiles
 # nowhere, and `cargo test -- object` selects nothing and exits 0 -- which is
 # how five hundred lines and eleven tests went unrun with the gate green.
@@ -603,6 +600,35 @@ inject_orphaned_module() {
   sed -i '/^pub mod object;$/d' diet/src/lib.rs
 }
 
+# The same module lost the ordinary way: commented OUT rather than deleted.
+# Rule two read raw text, so a block comment hid the declaration and the file
+# went uncompiled with every check green -- the deletion above, restaged in
+# the shape somebody actually produces.
+inject_commented_out_module() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/lib.rs")
+source = path.read_text(encoding="utf-8")
+old = "pub mod object;"
+new = "/* undone for a probe:\npub mod object;\n*/"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The or-pattern shape `cargo fmt` produces unprompted once tag names are
+# realistic. It is the same stringly predicate as the one above, wrapped
+# across lines -- and the rule's first version was anchored to the start of a
+# line, so its coverage depended on how long the identifiers were.
+inject_stringly_or_pattern() {
+  printf '\n#[must_use]\npub fn seeded_wrapped(text: &str) -> u8 {\n    match text {\n        "a_decision_tag_that_is_quite_long_indeed"\n        | "an_evidence_tag_that_is_also_long_here" => 1,\n        _ => 0,\n    }\n}\n' \
+    >> diet/src/lib.rs
+}
+
+# The acceptance case where THE BUILD IS THE GATE: a field-kind variant added
+# without wiring it. Every exhaustive match over FieldKind stops compiling,
+# which is the whole reason the predicate is an enum.
 inject_field_kind_variant() {
   sed -i 's|^    Stuck,$|    Stuck,\n    /// Seeded: a variant nothing covers.\n    Seeded,|' \
     diet/src/formats/interview.rs
@@ -628,6 +654,76 @@ EOF
 
 # Dedup removed, so two forks saying one thing become two facts and each
 # carries half the provenance.
+# A correction whose content the object already holds. Without the guard the
+# supersede links whatever dedup handed back -- an entry to itself, or over a
+# link another correction already wrote -- and reports Ok either way.
+inject_object_self_void() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if let Some(already) = self.by_content.get(&key).cloned() {
+            return Err(if already == *voids {
+                ObjectError::SelfSupersede(voids.clone())
+            } else {
+                ObjectError::SupersedeRestates {
+                    id: id.clone(),
+                    held: already,
+                }
+            });
+        }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# Resolve or Retire written straight through a voided entry. The state is one
+# slot and `Voided` keeps the supersede link in it, so the correction is gone
+# with nothing to show it happened -- and the double-void guard reads that
+# same slot, so it stops firing too.
+inject_object_state_overwrite() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if let EntryState::Voided { by } = &entry.state {
+            return Err(ObjectError::TargetNotLive {
+                id: target.clone(),
+                state: EntryState::Voided { by: by.clone() },
+            });
+        }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# Provenance recording that always claims it wrote. Every no-op patch then
+# reports a touched entry, and `touched()` names rows no diff of the dumps
+# can support -- which is the acceptance this module is built against.
+inject_object_false_attribution() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = """            entry.provenances.push(provenance.clone());
+            return true;
+        }
+        false
+    }"""
+new = """            entry.provenances.push(provenance.clone());
+        }
+        true
+    }"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_object_no_dedup() {
   sed -i 's|^        if let Some(held) = self.by_content.get(&key).cloned() {$|        if let Some(held) = None::<EntryId> {|' \
     diet/src/object.rs
@@ -965,12 +1061,22 @@ selftest() {
     'the voided entry is still here'
   seeded_case "the reconciler stops deduping"         test     inject_object_no_dedup \
     'the same fact, wrapped differently, is the same fact'
+  seeded_case "a correction that restates what it voids" test   inject_object_self_void \
+    'an entry was voided by itself'
+  seeded_case "a state change over a supersede link"  test     inject_object_state_overwrite \
+    'a correction was erased by a later state change'
+  seeded_case "a no-op patch that claims an entry"    test     inject_object_false_attribution \
+    'the patch claimed entries no diff can support'
   seeded_case "a field kind nothing covers"           test     inject_field_kind_variant \
     'non-exhaustive patterns'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
     'no .mod. declaration reaches it'
+  seeded_case "a module commented out, not deleted"   library  inject_commented_out_module \
+    'object.rs: no .mod. declaration reaches it'
+  seeded_case "a stringly predicate cargo fmt wrapped" library inject_stringly_or_pattern \
+    'a_decision_tag_that_is_quite_long_indeed'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
     'front-matter `turns` states 3 but the summary record binds'
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \

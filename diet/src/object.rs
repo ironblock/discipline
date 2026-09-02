@@ -18,7 +18,7 @@
 //! * **Stringly predicates leak.** Field kinds, verdicts and outcome classes
 //!   were matched as strings in more than one place and the places drifted. A
 //!   typed predicate is caught by the compiler when a variant is added; a
-//!   string comparison is not. `scripts/check-predicates.py` keeps the rule
+//!   string comparison is not. `scripts/check-library.py` keeps the rule
 //!   from being re-broken by hand.
 //!
 //! **Nothing here deletes.** A supersede voids the entry it replaces and links
@@ -38,8 +38,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 
-use crate::formats::record::Regime;
 use crate::formats::record::json::{self, Value};
+use crate::formats::record::{Regime, regime_value};
 
 /// An entry's identity.
 ///
@@ -235,6 +235,40 @@ pub enum ObjectError {
         /// What voided it.
         by: EntryId,
     },
+    /// A `Supersede` whose content the object already holds. Dedup would fold
+    /// the correction into the held entry, so no new entry exists to carry the
+    /// link -- and the pair could only be linked by overwriting a link the
+    /// held entry may already have. A correction that overwrites is the thing
+    /// this module exists to refuse.
+    SupersedeRestates {
+        /// The id the patch asked to create.
+        id: EntryId,
+        /// The entry that already holds that content.
+        held: EntryId,
+    },
+    /// A patch names an entry that no longer speaks for the object. Writing
+    /// through it would either overwrite a supersede link (the state is one
+    /// slot, and `Voided` carries the link in it) or silently discard the mark
+    /// that took it out of the live set.
+    TargetNotLive {
+        /// The entry.
+        id: EntryId,
+        /// What it currently is.
+        state: EntryState,
+    },
+    /// An `Add` restating content the object holds under an entry that is no
+    /// longer live. Dedup is for two forks saying the same thing in one turn;
+    /// folding a later assertion into a fact that was already corrected away
+    /// files it onto a corpse, and the disagreement -- the interesting part --
+    /// is gone.
+    RestatesInactive {
+        /// The id the patch asked to create.
+        id: EntryId,
+        /// The entry that already holds that content.
+        held: EntryId,
+        /// What that entry currently is.
+        state: EntryState,
+    },
 }
 
 impl fmt::Display for ObjectError {
@@ -258,6 +292,23 @@ impl fmt::Display for ObjectError {
                 f,
                 "entry `{id}` was already voided by `{by}`, and overwriting that \
                  link would lose which correction came first"
+            ),
+            Self::TargetNotLive { id, state } => write!(
+                f,
+                "entry `{id}` is {}, so it no longer speaks for the object; \
+                 writing through it would overwrite what took it out",
+                state.name()
+            ),
+            Self::SupersedeRestates { id, held } => write!(
+                f,
+                "entry `{id}` would restate `{held}`, so the supersede creates no \
+                 new entry and could only link the pair by overwriting `{held}`"
+            ),
+            Self::RestatesInactive { id, held, state } => write!(
+                f,
+                "entry `{id}` restates `{held}`, which is {}; folding it in would \
+                 file the assertion onto a fact that is no longer live",
+                state.name()
             ),
         }
     }
@@ -286,6 +337,14 @@ pub enum Applied {
     },
     /// An existing entry changed state.
     StateChanged(EntryId),
+    /// The object already held everything the patch said, provenance
+    /// included. No entry moved.
+    ///
+    /// Distinct from `Deduped` because attribution is the acceptance this
+    /// module is built against: a patch that names an entry whose dump line
+    /// is byte-identical afterwards has not touched it, and saying otherwise
+    /// makes `touched()` a claim a diff cannot support.
+    Unchanged(EntryId),
 }
 
 impl Applied {
@@ -295,6 +354,7 @@ impl Applied {
         match self {
             Self::Created(id) | Self::Deduped(id) | Self::StateChanged(id) => vec![id.clone()],
             Self::Superseded { added, voided } => vec![added.clone(), voided.clone()],
+            Self::Unchanged(_) => Vec::new(),
         }
     }
 }
@@ -395,6 +455,39 @@ impl WorkingObject {
         provenance: &Provenance,
     ) -> Result<Applied, ObjectError> {
         let key = normalise(content);
+        self.check_admissible(id, &key)?;
+        // Two forks in one turn say the same thing. One entry, both
+        // provenances: which of them said it is what a later reviewer needs to
+        // attribute a wrong outcome to the model or to the reconciler.
+        //
+        // Only onto a LIVE entry. The held entry may have been voided,
+        // resolved or retired since; folding a later assertion into it files
+        // that lane's claim onto a fact the object no longer holds, and a
+        // reader diffing dumps sees a provenance appear on a dead row rather
+        // than a disagreement between two lanes.
+        if let Some(held) = self.by_content.get(&key).cloned() {
+            if let Some(entry) = self.entries.get(&held)
+                && !entry.state.is_live()
+            {
+                return Err(ObjectError::RestatesInactive {
+                    id: id.clone(),
+                    held,
+                    state: entry.state.clone(),
+                });
+            }
+            return Ok(if self.record_provenance(&held, provenance) {
+                Applied::Deduped(held)
+            } else {
+                Applied::Unchanged(held)
+            });
+        }
+        Ok(Applied::Created(self.create(id, content, key, provenance)))
+    }
+
+    /// Whether an entry under `id` carrying content that normalises to `key`
+    /// may be written at all, independent of what the object already holds
+    /// under that content.
+    fn check_admissible(&self, id: &EntryId, key: &str) -> Result<(), ObjectError> {
         if key.is_empty() {
             return Err(ObjectError::EmptyContent(id.clone()));
         }
@@ -406,13 +499,22 @@ impl WorkingObject {
                 existing: existing.content.clone(),
             });
         }
-        // Two forks in one turn say the same thing. One entry, both
-        // provenances: which of them said it is what a later reviewer needs to
-        // attribute a wrong outcome to the model or to the reconciler.
-        if let Some(held) = self.by_content.get(&key).cloned() {
-            self.record_provenance(&held, provenance);
-            return Ok(Applied::Deduped(held));
-        }
+        Ok(())
+    }
+
+    /// Write a genuinely new entry and index it.
+    ///
+    /// Callers establish first that the object holds nothing under `key`, so
+    /// this cannot fail -- which is what lets `supersede` know it has a new
+    /// entry to link, rather than discovering afterwards that dedup handed it
+    /// one that was already there.
+    fn create(
+        &mut self,
+        id: &EntryId,
+        content: &str,
+        key: String,
+        provenance: &Provenance,
+    ) -> EntryId {
         self.entries.insert(
             id.clone(),
             Entry {
@@ -424,7 +526,7 @@ impl WorkingObject {
             },
         );
         self.by_content.insert(key, id.clone());
-        Ok(Applied::Created(id.clone()))
+        id.clone()
     }
 
     /// Record a fact that replaces an earlier one, linking the pair.
@@ -447,10 +549,32 @@ impl WorkingObject {
                 by: by.clone(),
             });
         }
-        let added = match self.add(id, content, provenance)? {
-            Applied::Created(added) | Applied::Deduped(added) => added,
-            other => return Ok(other),
-        };
+        // Resolved and retired are marks, and the state is one slot: voiding
+        // over them drops the mark with nothing left to say it was ever there.
+        if !old.state.is_live() {
+            return Err(ObjectError::TargetNotLive {
+                id: voids.clone(),
+                state: old.state.clone(),
+            });
+        }
+        // A correction states a NEW fact. If the object already holds this
+        // content, dedup would hand back the entry holding it and no new entry
+        // would exist -- so the link below would either point an entry at
+        // itself, or overwrite whatever link the held entry already carries.
+        // Both are refused here rather than written and discovered in a dump.
+        let key = normalise(content);
+        self.check_admissible(id, &key)?;
+        if let Some(already) = self.by_content.get(&key).cloned() {
+            return Err(if already == *voids {
+                ObjectError::SelfSupersede(voids.clone())
+            } else {
+                ObjectError::SupersedeRestates {
+                    id: id.clone(),
+                    held: already,
+                }
+            });
+        }
+        let added = self.create(id, content, key, provenance);
         // Both directions. A reader arriving at either end can walk to the
         // other, which is what makes a correction inspectable rather than a
         // pair of rows somebody has to notice are related.
@@ -472,23 +596,44 @@ impl WorkingObject {
         state: EntryState,
         provenance: &Provenance,
     ) -> Result<Applied, ObjectError> {
-        if !self.entries.contains_key(target) {
+        let Some(entry) = self.entries.get(target) else {
             return Err(ObjectError::UnknownTarget(target.clone()));
+        };
+        // A voided entry keeps the other half of a supersede link in the same
+        // slot the mark lives in. Resolving or retiring it would write over
+        // the link -- the correction erased with nothing to show it happened
+        // -- and the double-void guard reads that slot too, so it would stop
+        // firing and a second entry could claim the same one.
+        if let EntryState::Voided { by } = &entry.state {
+            return Err(ObjectError::TargetNotLive {
+                id: target.clone(),
+                state: EntryState::Voided { by: by.clone() },
+            });
         }
+        let already_in_state = entry.state == state;
         if let Some(entry) = self.entries.get_mut(target) {
             entry.state = state;
         }
-        self.record_provenance(target, provenance);
+        let recorded = self.record_provenance(target, provenance);
+        if already_in_state && !recorded {
+            return Ok(Applied::Unchanged(target.clone()));
+        }
         Ok(Applied::StateChanged(target.clone()))
     }
 
     /// Add `provenance` to an entry, unless it already carries it.
-    fn record_provenance(&mut self, id: &EntryId, provenance: &Provenance) {
+    ///
+    /// Reports whether it wrote, so a caller can tell a patch that merged
+    /// something new into an entry from one the object had already absorbed
+    /// in full.
+    fn record_provenance(&mut self, id: &EntryId, provenance: &Provenance) -> bool {
         if let Some(entry) = self.entries.get_mut(id)
             && !entry.provenances.contains(provenance)
         {
             entry.provenances.push(provenance.clone());
+            return true;
         }
+        false
     }
 
     /// The object as one line per entry, keyed by entry.
@@ -496,6 +641,25 @@ impl WorkingObject {
     /// Keyed rather than a bare string so that a diff between two versions can
     /// say WHICH entries moved, which is what "attributable to exactly one
     /// patch" needs.
+    /// The dump's first line: which version this is, and under which regime.
+    ///
+    /// The dump is the only durable half of the object. Without this line two
+    /// dumps taken at different versions are byte-identical whenever no entry
+    /// moved, and two objects under different regimes are byte-identical
+    /// always -- so "versioned dump" would name a file carrying neither. It
+    /// is kept out of `dump_lines`, which is the keyed map a diff walks: a
+    /// header is not an entry, and it would appear in every diff.
+    fn header_value(&self) -> Value {
+        Value::Object(BTreeMap::from([
+            ("object".to_owned(), Value::String("dump".to_owned())),
+            (
+                "version".to_owned(),
+                Value::Integer(i64::from(self.version)),
+            ),
+            ("regime".to_owned(), regime_value(&self.regime)),
+        ]))
+    }
+
     #[must_use]
     pub fn dump_lines(&self) -> BTreeMap<EntryId, String> {
         self.entries
@@ -516,6 +680,8 @@ impl WorkingObject {
     #[must_use]
     pub fn dump(&self) -> String {
         let mut out = String::new();
+        json::render(&self.header_value(), &mut out);
+        out.push('\n');
         for line in self.dump_lines().values() {
             out.push_str(line);
             out.push('\n');
@@ -789,11 +955,24 @@ mod tests {
             .expect("a");
         let once = object.dump();
         assert_eq!(once, object.dump(), "dumping twice gives the same bytes");
-        let ids: Vec<&str> = once
+        // By ID, which is what this test is about. Reading the field by
+        // position picked out `content` instead -- and passed, because the
+        // fixture's contents happened to sort the same way its ids did.
+        let ids: Vec<String> = once
             .lines()
-            .map(|line| line.split('"').nth(3).unwrap_or_default())
+            .skip(1)
+            .map(|line| {
+                let at = line
+                    .find(r#""id":""#)
+                    .expect("every entry line names its id");
+                line[at + 6..]
+                    .split('"')
+                    .next()
+                    .expect("the id is a quoted string")
+                    .to_owned()
+            })
             .collect();
-        assert_eq!(ids, vec!["first", "second"], "entries come out in id order");
+        assert_eq!(ids, vec!["e1", "e2"], "entries come out in id order");
     }
 
     #[test]
@@ -807,9 +986,55 @@ mod tests {
             ))
             .expect("a fact");
         let dump = object.dump();
-        assert!(dump.lines().count() == 1);
-        assert!(!dump.trim_end().contains('\n'), "one entry, one line");
-        assert!(dump.contains(r#"\"quote\""#), "quotes are escaped");
+        let lines: Vec<&str> = dump.lines().collect();
+        assert_eq!(lines.len(), 2, "a header line, then one line per entry");
+        assert!(lines[1].contains(r#"\"quote\""#), "quotes are escaped");
+        assert!(!lines[1].contains('\n'), "one entry, one line");
+        // The header says which version and which regime, or the dump is not
+        // a versioned dump.
+        assert!(lines[0].contains(r#""version":1"#), "header: {}", lines[0]);
+        assert!(
+            lines[0].contains(r#""arm":"baseline""#),
+            "header: {}",
+            lines[0]
+        );
+    }
+
+    #[test]
+    fn a_dump_distinguishes_versions_and_regimes() {
+        let mut object = object();
+        object
+            .apply(&add("e1", "a fact", from(1, "interview", None)))
+            .expect("a fact");
+        let first = object.dump();
+        // A patch that moves no entry still advances the version, and the
+        // dump has to show it or two turns are indistinguishable on disk.
+        object
+            .apply(&Patch::Resolve {
+                target: id("e1"),
+                provenance: from(2, "structuring", None),
+            })
+            .expect("a state change");
+        assert_ne!(first, object.dump(), "two versions, one dump");
+
+        let mut other = WorkingObject::open(
+            record::parse(
+                "{\"record\":\"start\",\"regime\":{\"arm\":\"treatment\",\"dogma_version\":0,\
+                 \"substrate\":{\"name\":\"local\",\"model\":\"m\",\"quantization\":\"q\",\
+                 \"sampler\":{\"seed\":0},\"reasoning\":\"on\",\"hardware\":\"h\"}}}",
+            )
+            .expect("a record")
+            .regime()
+            .clone(),
+        );
+        other
+            .apply(&add("e1", "a fact", from(1, "interview", None)))
+            .expect("the same fact");
+        assert_ne!(
+            first,
+            other.dump(),
+            "two arms produced byte-identical dumps of the same fact"
+        );
     }
 
     #[test]
@@ -921,5 +1146,322 @@ mod tests {
         }
         assert_eq!(first, second);
         assert_eq!(first.dump(), second.dump());
+    }
+
+    // A correction whose content the object already holds creates no new
+    // entry. Every one of these three said "applied" before, and lost a fact
+    // doing it: the object reported a supersede it had not performed, an
+    // entry voided by itself, an overwritten link, and a later lane's
+    // disagreement filed onto a row nobody reads.
+
+    #[test]
+    fn a_supersede_that_restates_the_entry_it_voids_is_refused() {
+        let mut object = object();
+        object
+            .apply(&add(
+                "e1",
+                "the parser rejects empty input",
+                from(1, "interview", None),
+            ))
+            .expect("the first fact");
+        let version = object.version();
+        // The same fact, re-wrapped. normalise() collapses whitespace, so as
+        // far as dedup is concerned this content IS e1's.
+        let refused = object.apply(&Patch::Supersede {
+            id: id("e2"),
+            content: "the  parser   rejects\nempty input".to_owned(),
+            voids: id("e1"),
+            provenance: from(2, "interview", None),
+        });
+        assert_eq!(
+            refused,
+            Err(ObjectError::SelfSupersede(id("e1"))),
+            "an entry was voided by itself"
+        );
+        // Refused means untouched: e1 still speaks, and no version was spent.
+        let entry = object.entry(&id("e1")).expect("e1 is retained");
+        assert_eq!(entry.state, EntryState::Live);
+        assert_eq!(entry.supersedes, None);
+        assert_eq!(object.version(), version);
+        assert!(object.entry(&id("e2")).is_none());
+    }
+
+    #[test]
+    fn a_supersede_that_restates_a_third_entry_is_refused() {
+        let mut object = object();
+        for (entry, content) in [("e0", "the rate is 0.42"), ("e1", "the sampler is greedy")] {
+            object
+                .apply(&add(entry, content, from(1, "interview", None)))
+                .expect("a fact");
+        }
+        object
+            .apply(&Patch::Supersede {
+                id: id("e3"),
+                content: "the rate is 0.31 after the regrade".to_owned(),
+                voids: id("e0"),
+                provenance: from(2, "interview", None),
+            })
+            .expect("a correction");
+        // Correcting e1 with content that restates e3 would have to reuse e3
+        // as the new entry -- overwriting the link e3 already carries to e0.
+        let refused = object.apply(&Patch::Supersede {
+            id: id("e4"),
+            content: "the rate is 0.31 after the regrade".to_owned(),
+            voids: id("e1"),
+            provenance: from(3, "interview", None),
+        });
+        assert_eq!(
+            refused,
+            Err(ObjectError::SupersedeRestates {
+                id: id("e4"),
+                held: id("e3"),
+            }),
+            "a correction overwrote the link an entry already carried"
+        );
+        // The first correction's link survives, in both directions.
+        assert_eq!(
+            object.entry(&id("e3")).expect("e3").supersedes,
+            Some(id("e0"))
+        );
+        assert_eq!(
+            object.entry(&id("e0")).expect("e0").state,
+            EntryState::Voided { by: id("e3") }
+        );
+        assert_eq!(object.entry(&id("e1")).expect("e1").state, EntryState::Live);
+    }
+
+    #[test]
+    fn restating_a_fact_that_was_corrected_away_is_refused() {
+        let mut object = object();
+        object
+            .apply(&add("e1", "the rate is 0.42", from(1, "interview", None)))
+            .expect("the first fact");
+        object
+            .apply(&Patch::Supersede {
+                id: id("e2"),
+                content: "the rate is 0.31".to_owned(),
+                voids: id("e1"),
+                provenance: from(2, "interview", None),
+            })
+            .expect("a correction");
+        // A later lane, not having seen the correction, asserts the old fact
+        // again. Folding it into e1 would file a live disagreement onto an
+        // entry no reader of the object will ever see.
+        let refused = object.apply(&add("e9", "the rate is 0.42", from(3, "structuring", None)));
+        assert_eq!(
+            refused,
+            Err(ObjectError::RestatesInactive {
+                id: id("e9"),
+                held: id("e1"),
+                state: EntryState::Voided { by: id("e2") },
+            }),
+            "an assertion was filed onto an entry that is no longer live"
+        );
+        assert_eq!(
+            object.entry(&id("e1")).expect("e1").provenances.len(),
+            1,
+            "the corrected-away entry gained a provenance it never said"
+        );
+    }
+
+    #[test]
+    fn every_object_error_says_which_entries_it_is_about() {
+        for (error, expected) in [
+            (
+                ObjectError::SupersedeRestates {
+                    id: id("e4"),
+                    held: id("e3"),
+                },
+                vec!["e4", "e3"],
+            ),
+            (
+                ObjectError::RestatesInactive {
+                    id: id("e9"),
+                    held: id("e1"),
+                    state: EntryState::Voided { by: id("e2") },
+                },
+                vec!["e9", "e1", "voided"],
+            ),
+        ] {
+            let rendered = error.to_string();
+            for needle in expected {
+                assert!(
+                    rendered.contains(needle),
+                    "{error:?} rendered as {rendered:?}, which never mentions {needle:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_object_never_goes_dark_from_ordinary_corrections() {
+        // Two facts, then each corrected with content that happens to restate
+        // the other. Nothing about these patches is pathological, and before
+        // the guard every one returned Ok and the object ended with no live
+        // entry at all.
+        let mut object = object();
+        object
+            .apply(&add("a", "the rate is 0.42", from(1, "interview", None)))
+            .expect("a fact");
+        object
+            .apply(&add(
+                "b",
+                "the resolver refuses a stale binary",
+                from(1, "interview", None),
+            ))
+            .expect("another fact");
+        object
+            .apply(&Patch::Supersede {
+                id: id("c"),
+                content: "the resolver refuses a stale binary".to_owned(),
+                voids: id("a"),
+                provenance: from(2, "interview", None),
+            })
+            .expect_err("a correction that restates a held fact is refused");
+        object
+            .apply(&Patch::Supersede {
+                id: id("d"),
+                content: "the rate is 0.42".to_owned(),
+                voids: id("b"),
+                provenance: from(3, "interview", None),
+            })
+            .expect_err("and so is its mirror image");
+        assert_eq!(
+            object.live().count(),
+            2,
+            "the object went dark: every patch returned Ok and nothing was left alive"
+        );
+    }
+
+    #[test]
+    fn a_patch_that_changes_nothing_claims_nothing() {
+        let mut object = object();
+        let said = from(1, "interview", None);
+        object
+            .apply(&Patch::Add {
+                id: id("e1"),
+                content: "a fact".to_owned(),
+                provenance: said.clone(),
+            })
+            .expect("the fact");
+        for (label, patch) in [
+            (
+                "the same fact from the same place",
+                Patch::Add {
+                    id: id("e2"),
+                    content: "a fact".to_owned(),
+                    provenance: said.clone(),
+                },
+            ),
+            (
+                "resolving what is already resolved",
+                Patch::Resolve {
+                    target: id("e1"),
+                    provenance: said.clone(),
+                },
+            ),
+        ] {
+            if label.starts_with("resolving") {
+                object
+                    .apply(&Patch::Resolve {
+                        target: id("e1"),
+                        provenance: said.clone(),
+                    })
+                    .expect("the first resolve");
+            }
+            let before = object.dump_lines();
+            let applied = object.apply(&patch).expect("the patch applies");
+            let moved = changed_between(&before, &object.dump_lines());
+            let claimed: std::collections::BTreeSet<_> = applied.touched().into_iter().collect();
+            assert!(
+                moved.is_empty(),
+                "{label}: expected nothing to move, {moved:?} did"
+            );
+            assert_eq!(
+                claimed, moved,
+                "{label}: the patch claimed entries no diff can support"
+            );
+        }
+    }
+
+    #[test]
+    fn a_voided_entry_cannot_be_resolved_retired_or_voided_again() {
+        let mut object = object();
+        object
+            .apply(&add("e1", "the rate is 0.42", from(1, "interview", None)))
+            .expect("the fact");
+        object
+            .apply(&Patch::Supersede {
+                id: id("e2"),
+                content: "the rate is 0.31".to_owned(),
+                voids: id("e1"),
+                provenance: from(2, "interview", None),
+            })
+            .expect("a correction");
+        for patch in [
+            Patch::Resolve {
+                target: id("e1"),
+                provenance: from(3, "structuring", None),
+            },
+            Patch::Retire {
+                target: id("e1"),
+                provenance: from(3, "structuring", None),
+            },
+        ] {
+            assert_eq!(
+                object.apply(&patch),
+                Err(ObjectError::TargetNotLive {
+                    id: id("e1"),
+                    state: EntryState::Voided { by: id("e2") },
+                }),
+                "a correction was erased by a later state change"
+            );
+        }
+        // The link is still there, in both directions, and still guards.
+        assert_eq!(
+            object.entry(&id("e1")).expect("e1").state,
+            EntryState::Voided { by: id("e2") }
+        );
+        assert_eq!(
+            object.entry(&id("e2")).expect("e2").supersedes,
+            Some(id("e1"))
+        );
+    }
+
+    #[test]
+    fn a_retired_or_resolved_entry_cannot_be_superseded_over() {
+        for (mark, retire) in [(EntryState::Retired, true), (EntryState::Resolved, false)] {
+            let mut object = object();
+            object
+                .apply(&add("e1", "the rate is 0.42", from(1, "interview", None)))
+                .expect("the fact");
+            object
+                .apply(&if retire {
+                    Patch::Retire {
+                        target: id("e1"),
+                        provenance: from(2, "structuring", None),
+                    }
+                } else {
+                    Patch::Resolve {
+                        target: id("e1"),
+                        provenance: from(2, "structuring", None),
+                    }
+                })
+                .expect("the mark");
+            assert_eq!(
+                object.apply(&Patch::Supersede {
+                    id: id("e2"),
+                    content: "the rate is 0.31".to_owned(),
+                    voids: id("e1"),
+                    provenance: from(3, "interview", None),
+                }),
+                Err(ObjectError::TargetNotLive {
+                    id: id("e1"),
+                    state: mark.clone(),
+                }),
+                "a supersede wrote over the mark that took the entry out of the live set"
+            );
+            assert_eq!(object.entry(&id("e1")).expect("e1").state, mark);
+        }
     }
 }

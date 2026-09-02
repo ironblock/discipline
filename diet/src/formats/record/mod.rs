@@ -1501,7 +1501,12 @@ fn artifacts_value(consumes: &[Artifact]) -> Value {
     )
 }
 
-fn regime_value(regime: &Regime) -> Value {
+/// The regime as a record value.
+///
+/// Crate-visible because the object's dump carries it: the dump is the only
+/// durable half of a working object, and a dump that does not say which
+/// regime produced it cannot be compared with one from another arm.
+pub(crate) fn regime_value(regime: &Regime) -> Value {
     let substrate = BTreeMap::from([
         (
             "name".to_owned(),
@@ -2019,10 +2024,8 @@ mod tests {
         ));
         assert!(matches!(
             parse(&source),
-            Err(ParseError::Structure(StructureError::SummaryDisagrees {
-                field: "turns",
-                ..
-            }))
+            Err(ParseError::Structure(StructureError::SummaryDisagrees { field, .. }))
+                if field == "turns"
         ));
     }
 
