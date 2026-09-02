@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 93
+red_faults = 98
 mechanics_assertions = 14
 migrated = 0
 
@@ -220,12 +220,57 @@ legacy_signature = "the same fact, wrapped differently, is the same fact"
 migrated = false
 
 [[fault]]
+id = "test.object_self_void"
+kind = "seeded-gate"
+check = "test"
+label = "a correction that restates what it voids"
+failure_class = "object.self-link"
+legacy_signature = "an entry was voided by itself"
+migrated = false
+
+[[fault]]
+id = "test.object_state_overwrite"
+kind = "seeded-gate"
+check = "test"
+label = "a state change over a supersede link"
+failure_class = "object.correction-erased"
+legacy_signature = "a correction was erased by a later state change"
+migrated = false
+
+[[fault]]
+id = "test.object_false_attribution"
+kind = "seeded-gate"
+check = "test"
+label = "a no-op patch that claims an entry"
+failure_class = "object.false-attribution"
+legacy_signature = "the patch claimed entries no diff can support"
+migrated = false
+
+[[fault]]
 id = "test.field_kind_variant"
 kind = "seeded-gate"
 check = "test"
 label = "a field kind nothing covers"
 failure_class = "library.non-exhaustive-predicate"
 legacy_signature = "non-exhaustive patterns"
+migrated = false
+
+[[fault]]
+id = "library.commented_out_module"
+kind = "seeded-gate"
+check = "library"
+label = "a module commented out, not deleted"
+failure_class = "library.uncompiled-source"
+legacy_signature = "object.rs: no .mod. declaration reaches it"
+migrated = false
+
+[[fault]]
+id = "library.stringly_or_pattern"
+kind = "seeded-gate"
+check = "library"
+label = "a stringly predicate cargo fmt wrapped"
+failure_class = "library.stringly-predicate"
+legacy_signature = "a_decision_tag_that_is_quite_long_indeed"
 migrated = false
 
 [[fault]]

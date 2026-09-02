@@ -52,7 +52,12 @@ integer = @{ ("-" ~ nonzero) | int_part }
 int_part = _{ "0" | nonzero }
 nonzero = _{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
 
-boolean = { "true" | "false" }
+// Two rules rather than one with two spellings, so the reader matches on the
+// RULE. `as_str() == "true"` reads every other spelling as false, which is a
+// default where the grammar could have given a verdict.
+boolean = _{ boolean_true | boolean_false }
+boolean_true = { "true" }
+boolean_false = { "false" }
 
 // ---------------------------------------------------------------------------
 // strings
