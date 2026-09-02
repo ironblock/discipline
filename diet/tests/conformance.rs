@@ -25,7 +25,7 @@
 //! test-only path -- and no ambient environment variable can point this
 //! harness at a corpus that is not the committed one.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use diet::formats::interview::{Completion, Outcome};
@@ -160,9 +160,9 @@ fn parse_to_json(format: &str, source: &[u8]) -> Result<Json, String> {
                 // by line.
                 serde_json::json!({
                     "regime": {
-                        "arm": parsed.regime.arm,
-                        "substrate": parsed.regime.substrate.name,
-                        "dogma_version": parsed.regime.dogma_version,
+                        "arm": parsed.regime().arm,
+                        "substrate": parsed.regime().substrate.name,
+                        "dogma_version": parsed.regime().dogma_version,
                     },
                     "kinds": parsed.kinds().iter().map(|kind| kind.tag()).collect::<Vec<_>>(),
                     "canonical": record::render(&parsed),
@@ -365,6 +365,9 @@ fn assert_invalid_fixtures_are_rejected(format: &Format) {
         .join("fixtures")
         .join("invalid");
     let mut failures = Vec::new();
+    // The rejection each case produced, so that two cases pinning one rule
+    // can be told apart from two cases pinning two.
+    let mut rejections: BTreeMap<String, PathBuf> = BTreeMap::new();
 
     for case in cases_in(format, &dir) {
         let reason = case.with_extension("reason");
@@ -373,11 +376,26 @@ fn assert_invalid_fixtures_are_rejected(format: &Format) {
         } else {
             "no reason recorded".to_owned()
         };
-        if let Ok(parsed) = parse_to_json(format.name, &read_case(&case)) {
-            failures.push(format!(
+        match parse_to_json(format.name, &read_case(&case)) {
+            Ok(parsed) => failures.push(format!(
                 "{}: accepted as {parsed}, but must be rejected: {reason}",
                 case.display()
-            ));
+            )),
+            // Two fixtures rejected by the identical message are one fixture
+            // and a duplicate: whichever is second pins nothing the first does
+            // not, and its `.reason` describes a rule it never reaches. One
+            // such pair shipped -- a case whose reason named a rule that is
+            // unreachable for any document holding a row.
+            Err(rejection) => {
+                if let Some(first) = rejections.insert(rejection.clone(), case.clone()) {
+                    failures.push(format!(
+                        "{} and {} are both rejected by `{rejection}`, so the \
+                         second pins nothing the first does not",
+                        first.display(),
+                        case.display()
+                    ));
+                }
+            }
         }
     }
 

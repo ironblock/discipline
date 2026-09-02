@@ -1,5 +1,5 @@
 {
-  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrate\":{\"hardware\":\"one-gpu\",\"model\":\"a-model\",\"name\":\"local\",\"quantization\":\"q4\",\"reasoning\":\"off\",\"sampler\":{}}}}\n",
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrate\":{\"hardware\":\"one-gpu\",\"model\":\"a-model\",\"name\":\"local\",\"quantization\":\"q4\",\"reasoning\":\"off\",\"sampler\":{\"seed\":0}}}}\n",
   "kinds": [
     "start"
   ],

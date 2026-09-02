@@ -1,5 +1,5 @@
 {
-  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrate\":{\"hardware\":\"one-gpu\",\"model\":\"a-model\",\"name\":\"local\",\"quantization\":\"q4\",\"reasoning\":\"on\",\"sampler\":{\"seed\":7,\"temperature\":0.7}}}}\n{\"index\":1,\"prefill_tokens\":10,\"record\":\"turn\"}\n{\"id\":\"f1\",\"lane\":\"reformat\",\"of_turn\":1,\"record\":\"fork\"}\n{\"grounded\":3,\"id\":\"x1\",\"lane\":\"reformat\",\"of\":30,\"record\":\"rejected\"}\n",
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrate\":{\"hardware\":\"one-gpu\",\"model\":\"a-model\",\"name\":\"local\",\"quantization\":\"q4\",\"reasoning\":\"on\",\"sampler\":{\"seed\":7,\"temperature\":0.7}}}}\n{\"index\":1,\"prefill_tokens\":10,\"record\":\"turn\"}\n{\"id\":\"f1\",\"lane\":\"reformat\",\"of_turn\":1,\"record\":\"fork\"}\n{\"at_turn\":1,\"grounded\":3,\"id\":\"x1\",\"lane\":\"reformat\",\"of\":30,\"record\":\"rejected\"}\n",
   "kinds": [
     "start",
     "turn",

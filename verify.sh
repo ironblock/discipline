@@ -296,6 +296,17 @@ seeded_case() {
       return
       ;;
   esac
+  # Every sandbox shares SELFTEST_TARGET, and a test binary bakes its
+  # CARGO_MANIFEST_DIR in at compile time. So a binary cargo judges fresh and
+  # reuses reads the FIXTURES OF THE BOX IT WAS BUILT IN -- a stale-artifact
+  # false receipt, one directory over from the one this selftest already
+  # carries a comment about. It is safe today only because every injection
+  # happens to edit Rust source and so forces a rebuild; one that touched only
+  # a fixture would silently test the wrong tree. Touching a source file after
+  # the fingerprint is taken removes the coincidence. `git write-tree` hashes
+  # content, so this does not disturb the comparison above.
+  touch diet/src/lib.rs 2> /dev/null || true
+
   if [ "$state_before" = "$state_after" ]; then
     printf 'BROKEN verify.sh --only %-8s          %s  <-- THE INJECTION CHANGED NOTHING\n' \
       "$check" "$label"
@@ -427,12 +438,11 @@ import pathlib
 path = pathlib.Path("diet/src/formats/record/mod.rs")
 source = path.read_text(encoding="utf-8")
 edits = [
-    ("    Summary,\n}", "    Summary,\n    /// Seeded: wired everywhere, fixtured nowhere.\n    Spurious,\n}"),
-    ("        Self::Summary,\n    ];", "        Self::Summary,\n        Self::Spurious,\n    ];"),
-    ('            Self::Summary => "summary",',
-     '            Self::Summary => "summary",\n            Self::Spurious => "spurious",'),
+    ('        /// The session\'s totals.\n        Summary => "summary",',
+     '        /// The session\'s totals.\n        Summary => "summary",\n'
+     '        /// Seeded: wired everywhere, fixtured nowhere.\n        Spurious => "spurious",'),
     ("        Kind::Summary => Event::Summary {",
-     "        Kind::Spurious => Event::Turn { index: 1, prefill_tokens: 0 },\n"
+     "        Kind::Spurious => Event::Turn { index: 1, prefill_tokens: Count::default() },\n"
      "        Kind::Summary => Event::Summary {"),
 ]
 for old, new in edits:
@@ -445,6 +455,27 @@ EOF
 # Provenance made optional. A substrate that defaults when absent is a regime
 # that reads complete and is not, which is how partial regimes were compared as
 # though they were comparable.
+# Links checked after the row's own id was recorded, which is what let a
+# request retry itself and a claim supersede itself.
+inject_record_self_link_allowed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "        seen.admit(event)?;\n        seen.claim_id(event)?;"
+new = "        seen.claim_id(event)?;\n        seen.admit(event)?;"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The depth limit removed. Recursive descent then runs out of stack and aborts
+# the process, and an abort is not a verdict.
+inject_record_depth_unbounded() {
+  sed -i 's|^    if depth > MAX_DEPTH {$|    if false {|' diet/src/formats/record/mod.rs
+}
+
 inject_record_substrate_optional() {
   python3 - <<'EOF'
 import pathlib
@@ -457,7 +488,13 @@ new = """    let mut substrate_members = take_object(members, of, "substrate").u
             ("name".to_owned(), Value::String("unknown".to_owned())),
             ("model".to_owned(), Value::String("unknown".to_owned())),
             ("quantization".to_owned(), Value::String("unknown".to_owned())),
-            ("sampler".to_owned(), Value::Object(BTreeMap::new())),
+            (
+                "sampler".to_owned(),
+                Value::Object(BTreeMap::from([(
+                    "seed".to_owned(),
+                    Value::Integer(0),
+                )])),
+            ),
             ("reasoning".to_owned(), Value::String("off".to_owned())),
             ("hardware".to_owned(), Value::String("unknown".to_owned())),
         ])
@@ -470,6 +507,33 @@ EOF
 # The per-lane floor made inert. A pass that mostly fabricated has shown it
 # was not structuring, and its individual survivors are not trustworthy; a gate
 # that keeps them anyway banks the survivors of a fabrication.
+# Presence loosened from a contiguous run of whole tokens to "every word
+# appears somewhere". That is a recombination matcher, and it scores sentences
+# the source never said as present in it -- a judgment call in the one place
+# that must not have one.
+inject_grounded_loose_matching() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/grounded.rs")
+source = path.read_text(encoding="utf-8")
+old = """    haystack
+        .iter()
+        .any(|line| line.windows(needle.len()).any(|window| window == needle))"""
+new = """    haystack
+        .iter()
+        .any(|line| needle.iter().all(|word| line.contains(word)))"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A floor of zero, which every lane meets. The per-lane rule switched off by a
+# value that looks like a setting.
+inject_grounded_zero_floor() {
+  sed -i 's|^        if grounded == 0 {$|        if false {|' diet/src/capture/grounded.rs
+}
+
 inject_grounded_floor_inert() {
   sed -i 's|^    let outcome = if score.meets(floor) {$|    let outcome = if true {|' \
     diet/src/capture/grounded.rs
@@ -844,12 +908,20 @@ selftest() {
     'no fixture.*spurious'
   seeded_case "record substrate made optional"        test     inject_record_substrate_optional \
     'regime-missing-substrate\.jsonl: accepted as'
+  seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
+    'retry-of-itself\.jsonl: accepted as'
+  seeded_case "record nesting left unbounded"         test     inject_record_depth_unbounded \
+    'deep-nesting\.jsonl: accepted as'
   seeded_case "grounding floor made inert"            test     inject_grounded_floor_inert \
     'a lane that mostly fabricated must be rejected whole'
   seeded_case "grounding gates a judgment field"      test     inject_grounded_gates_judgment \
     'the gate touched a judgment-class field'
   seeded_case "a score with no demonstrated failure"  test     inject_grounded_undemonstrated \
     'a measurement was handed back whose instrument never failed'
+  seeded_case "grounding loosened to recombination"   test     inject_grounded_loose_matching \
+    'a sentence the source never said was scored as present in it'
+  seeded_case "a floor of zero"                       test     inject_grounded_zero_floor \
+    'a floor of zero was accepted, and every lane meets it'
   seeded_case "supersede deletes what it replaced"    test     inject_object_supersede_deletes \
     'the voided entry is still here'
   seeded_case "the reconciler stops deduping"         test     inject_object_no_dedup \

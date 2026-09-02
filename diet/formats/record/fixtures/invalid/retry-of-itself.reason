@@ -1,0 +1,3 @@
+A request cannot retry itself. A self-link is a cycle of length one -- the
+only cycle a backwards-only rule does not already exclude -- and walking it
+does not terminate.

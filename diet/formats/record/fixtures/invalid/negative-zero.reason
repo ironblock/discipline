@@ -1,0 +1,2 @@
+`-0` is a second spelling of `0`. One spelling per value is the rule `01`
+and `7e-1` are already rejected for; this was the hole in it.

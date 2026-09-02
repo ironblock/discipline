@@ -1,0 +1,3 @@
+An empty lane is not below any floor -- rejecting it would turn a lane that
+emitted nothing into a lane that failed -- so a rejection over zero entries
+is a row the gate cannot write.

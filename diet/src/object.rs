@@ -602,8 +602,8 @@ mod tests {
     /// A regime for the tests, parsed through the record schema so that the
     /// object cannot be opened under a regime the record would reject.
     fn regime() -> Regime {
-        let source = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"m","quantization":"q","sampler":{},"reasoning":"on","hardware":"h"}}}"#;
-        record::parse(source).expect("a record").regime
+        let source = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"m","quantization":"q","sampler":{"seed":0},"reasoning":"on","hardware":"h"}}}"#;
+        record::parse(source).expect("a record").regime().clone()
     }
 
     fn object() -> WorkingObject {

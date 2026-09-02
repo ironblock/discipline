@@ -33,7 +33,7 @@ use std::error::Error;
 use std::fmt;
 
 use crate::formats::interview::FieldKind;
-use crate::formats::record::Event;
+use crate::formats::record::{Count, CountTooLarge, Event};
 
 /// What a lane's output can be grounded against.
 ///
@@ -186,6 +186,11 @@ impl Floor {
         if of == 0 {
             return Err(FloorError::ZeroDenominator);
         }
+        // A floor of 0/N is met by a lane that grounded nothing, so the
+        // per-lane rule is switched off by a value that looks like a setting.
+        if grounded == 0 {
+            return Err(FloorError::ZeroNumerator);
+        }
         if grounded > of {
             return Err(FloorError::AboveOne { grounded, of });
         }
@@ -217,6 +222,9 @@ impl fmt::Display for Floor {
 pub enum FloorError {
     /// A fraction over nothing.
     ZeroDenominator,
+    /// A floor of zero, which every lane meets, including one that grounded
+    /// nothing at all.
+    ZeroNumerator,
     /// A fraction above one, which no score can meet.
     AboveOne {
         /// The numerator.
@@ -232,6 +240,11 @@ impl fmt::Display for FloorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ZeroDenominator => write!(f, "a floor of something over nothing"),
+            Self::ZeroNumerator => write!(
+                f,
+                "a floor of zero, which every lane meets -- including one that \
+                 grounded nothing at all"
+            ),
             Self::AboveOne { grounded, of } => {
                 write!(
                     f,
@@ -311,23 +324,37 @@ impl LaneReport {
     /// A rejection that is not in the record is a rejection nobody can audit:
     /// the fallback output stands, and the only trace of why is a number
     /// somebody remembers.
-    #[must_use]
-    pub fn rejection_event(&self, id: &str, lane: &str) -> Option<Event> {
-        (self.outcome == LaneOutcome::Rejected).then(|| Event::Rejected {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CountTooLarge`] if a count is larger than the record's value
+    /// space can spell. Not reachable from [`check`], whose counts are list
+    /// lengths, but the record refuses to be handed a number it cannot write.
+    pub fn rejection_event(
+        &self,
+        id: &str,
+        lane: &str,
+        at_turn: u32,
+    ) -> Result<Option<Event>, CountTooLarge> {
+        if self.outcome != LaneOutcome::Rejected {
+            return Ok(None);
+        }
+        Ok(Some(Event::Rejected {
             id: id.to_owned(),
             lane: lane.to_owned(),
-            grounded: self.score.grounded,
-            of: self.score.of,
-        })
+            at_turn,
+            grounded: Count::new(self.score.grounded)?,
+            of: Count::new(self.score.of)?,
+        }))
     }
 }
 
 /// Check one lane's entries against its contract input.
 ///
-/// `class` decides whether the gate applies at all. A judgment-class field is
-/// returned untouched, with every entry `Grounded` and the lane accepted --
-/// not because they were checked, but because there is nothing to check them
-/// against.
+/// The field's own class decides whether the gate applies at all. A
+/// judgment-class field is returned untouched, with every entry `Grounded` and
+/// the lane accepted -- not because they were checked, but because there is
+/// nothing to check them against.
 ///
 /// Matching is **presence, normalised for whitespace and nothing else**. Not
 /// fuzzy, not case-folded: a fuzzy match is a judgment call, and the point of
@@ -336,11 +363,16 @@ impl LaneReport {
 #[must_use]
 pub fn check(
     entries: &[String],
-    class: FieldClass,
+    field: FieldKind,
     input: ContractInput<'_>,
     floor: &Floor,
 ) -> LaneReport {
-    if !class.is_gated() {
+    // Derived here, never passed in. Taking a `FieldClass` let a caller hand
+    // `Judgment` for `api_surface` and switch the gate off for the one field
+    // the founding incident happened in -- the invariant "a field cannot be
+    // judgment-class in one lane and structuring in another" was true of
+    // `FieldKind::class` and false of everything that called it.
+    if !field.class().is_gated() {
         let entries: Vec<Entry> = entries
             .iter()
             .map(|text| Entry {
@@ -359,15 +391,17 @@ pub fn check(
         };
     }
 
-    let source = normalise(input.source);
-    let prefix = normalise(input.session_prefix);
+    let source = segments(input.source);
+    let prefix = segments(input.session_prefix);
     let checked: Vec<Entry> = entries
         .iter()
         .map(|text| {
-            let needle = normalise(text);
-            let verdict = if !needle.is_empty() && source.contains(&needle) {
+            let needle = tokens(text);
+            let verdict = if needle.is_empty() {
+                Verdict::Invention
+            } else if present_in(&source, &needle) {
                 Verdict::Grounded
-            } else if !needle.is_empty() && prefix.contains(&needle) {
+            } else if present_in(&prefix, &needle) {
                 Verdict::Bleed
             } else {
                 Verdict::Invention
@@ -396,10 +430,42 @@ pub fn check(
     }
 }
 
-/// Whitespace runs collapse to one space, and the ends are trimmed. Nothing
-/// else: case and punctuation are content.
-fn normalise(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+/// A line's whitespace-separated tokens.
+fn tokens(text: &str) -> Vec<&str> {
+    text.split_whitespace().collect()
+}
+
+/// A text as its lines' tokens.
+///
+/// Per LINE, not per document. Collapsing newlines into one token stream lets
+/// an entry weld the end of one field to the start of the next and read as
+/// present in both -- which, for a structuring lane reading a multi-field
+/// answer, is content invented across a field boundary scoring as grounded.
+fn segments(text: &str) -> Vec<Vec<&str>> {
+    text.lines()
+        .map(tokens)
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// Whether `needle` appears as a contiguous run of whole tokens in one line.
+///
+/// Three properties, and each of them is a defect that was there before:
+///
+/// * WHOLE TOKENS. Raw substring containment made `"a"`, `"re"` and `"."`
+///   grounded against any prose containing them, so a lane could meet any
+///   floor by emitting short strings.
+/// * CONTIGUOUS. "every word appears somewhere" is a recombination matcher: it
+///   scores `"the resolver added the capture lane"` as present in a source
+///   that says no such thing. The whole point of this check is that it is not
+///   a judgment call, and reassembly is a judgment.
+/// * ON ONE LINE. See [`segments`].
+///
+/// Case and punctuation are content and are compared exactly.
+fn present_in(haystack: &[Vec<&str>], needle: &[&str]) -> bool {
+    haystack
+        .iter()
+        .any(|line| line.windows(needle.len()).any(|window| window == needle))
 }
 
 /// A grounding number, and the case that proves the number can be low.
@@ -411,33 +477,57 @@ fn normalise(text: &str) -> String {
 /// fail -- and cannot obtain it at all if that input did not fail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Measurement {
-    /// The lane being measured.
-    pub subject: LaneReport,
-    /// The same check, on an input built to be ungrounded.
-    pub demonstrated_failure: LaneReport,
-    /// The floor both were judged against.
-    pub floor: Floor,
+    // Private, all three. They were public, and a caller could then assemble a
+    // `Measurement` whose `demonstrated_failure` the instrument had never
+    // produced -- a certificate written by the thing being certified.
+    // [`Measurement::take`] is the only door.
+    subject: LaneReport,
+    demonstrated_failure: LaneReport,
+    floor: Floor,
 }
 
 impl Measurement {
-    /// Measure `entries`, and demonstrate on `failing` that the measurement
+    /// The lane being measured.
+    #[must_use]
+    pub fn subject(&self) -> &LaneReport {
+        &self.subject
+    }
+
+    /// The same check, on entries built to be ungrounded in the SAME input.
+    #[must_use]
+    pub fn demonstrated_failure(&self) -> &LaneReport {
+        &self.demonstrated_failure
+    }
+
+    /// The floor both were judged against.
+    #[must_use]
+    pub fn floor(&self) -> &Floor {
+        &self.floor
+    }
+
+    /// Measure `entries`, and demonstrate with `failing` that the measurement
     /// can come out low.
+    ///
+    /// `failing` is entries only, deliberately: it is checked against the
+    /// SUBJECT'S contract input. Letting the demonstration carry its own input
+    /// re-opened the incident this type exists for -- a perfect score on a
+    /// probe where fabrication was structurally impossible, certified by a
+    /// failure staged somewhere else entirely.
     ///
     /// # Errors
     ///
     /// Returns [`MeasurementError::InstrumentNeverFailed`] when the
-    /// demonstrated-failure case does not, in fact, fail. That is the whole
-    /// point: an instrument that has never been seen fail is not an
-    /// instrument, and a perfect subject score alongside it means nothing.
+    /// demonstrated-failure case does not, in fact, fail. An instrument that
+    /// has never been seen fail is not an instrument, and a perfect subject
+    /// score alongside it means nothing.
     pub fn take(
         entries: &[String],
-        class: FieldClass,
+        field: FieldKind,
         input: ContractInput<'_>,
         floor: &Floor,
-        failing: (&[String], ContractInput<'_>),
+        failing: &[String],
     ) -> Result<Self, MeasurementError> {
-        let (failing_entries, failing_input) = failing;
-        let demonstrated_failure = check(failing_entries, class, failing_input, floor);
+        let demonstrated_failure = check(failing, field, input, floor);
         if demonstrated_failure.outcome != LaneOutcome::Rejected {
             return Err(MeasurementError::InstrumentNeverFailed {
                 score: demonstrated_failure.score,
@@ -445,7 +535,7 @@ impl Measurement {
             });
         }
         Ok(Self {
-            subject: check(entries, class, input, floor),
+            subject: check(entries, field, input, floor),
             demonstrated_failure,
             floor: floor.clone(),
         })
@@ -490,12 +580,12 @@ mod tests {
     use crate::formats::record::{Event, Kind};
 
     /// The answer a reformat lane was told to restructure.
-    const SOURCE: &str = "I renamed the capture lane and added a register fixture. \
+    const SOURCE: &str = "I renamed the capture lane and added a register fixture.\n\
                           The resolver now refuses when the binary is older than the source.";
 
     /// What the lane could see and was not told to work from.
-    const PREFIX: &str = "Earlier this session I touched the wilson_interval helper \
-                          and the sediment registrar.";
+    const PREFIX: &str = "Earlier this session I touched the wilson_interval helper\n\
+                          and the sediment registrar was already there.";
 
     fn input() -> ContractInput<'static> {
         ContractInput {
@@ -528,27 +618,93 @@ mod tests {
         texts.iter().map(|t| (*t).to_owned()).collect()
     }
 
+    /// The verdicts `texts` get as `api_surface` output.
+    fn verdicts(texts: &[&str]) -> Vec<Verdict> {
+        check(
+            &entries(texts),
+            FieldKind::ApiSurface,
+            input(),
+            &permissive_floor(),
+        )
+        .entries
+        .iter()
+        .map(|entry| entry.verdict)
+        .collect()
+    }
+
     // Acceptance: three strings absent from the source must all drop, and
     // telemetry must record them as invention.
     #[test]
     fn strings_absent_from_the_source_drop_as_invention() {
-        let emitted = entries(&[
-            "renamed the capture lane",
-            "parse_interview_answer",
-            "GroundingReport::finalize",
-            "wilson_interval_bounds",
-        ]);
         let report = check(
-            &emitted,
-            FieldClass::Structuring,
+            &entries(&[
+                "renamed the capture lane",
+                "parse_interview_answer",
+                "GroundingReport::finalize",
+                "wilson_interval_bounds",
+            ]),
+            FieldKind::ApiSurface,
             input(),
             &permissive_floor(),
         );
         assert_eq!(report.count(Verdict::Invention), 3);
         assert_eq!(report.kept(), vec!["renamed the capture lane"]);
-        for entry in &report.entries[1..] {
-            assert_eq!(entry.verdict, Verdict::Invention, "{entry:?}");
-        }
+    }
+
+    // PRESENCE IS A CONTIGUOUS RUN OF WHOLE TOKENS, ON ONE LINE. Each of these
+    // was grounded before, and each is a different way for a lane to meet any
+    // floor without saying anything the source said.
+    #[test]
+    fn presence_is_not_recombination() {
+        // Every word appears; the sentence does not. A matcher that asks "do
+        // all the words occur somewhere" passes the whole corpus otherwise.
+        assert_eq!(
+            // Every word of each is a whole token of one source line, and
+            // none of these sentences is in it. "all the words occur
+            // somewhere" scores all three as present.
+            verdicts(&[
+                "renamed a register",
+                "the capture lane renamed",
+                "added the capture lane",
+            ]),
+            vec![Verdict::Invention; 3],
+            "a sentence the source never said was scored as present in it"
+        );
+    }
+
+    #[test]
+    fn presence_is_whole_tokens_and_not_substrings() {
+        // Letters and fragments of words, all substrings of the source.
+        assert_eq!(
+            verdicts(&["a", "e", "re", "resolve", "reg"]),
+            vec![
+                // `a` IS a word of the source; the rest are fragments.
+                Verdict::Grounded,
+                Verdict::Invention,
+                Verdict::Invention,
+                Verdict::Invention,
+                Verdict::Invention,
+            ]
+        );
+    }
+
+    #[test]
+    fn presence_does_not_span_a_line_boundary() {
+        // The last words of one line welded to the first of the next. For a
+        // lane reading a multi-field answer, that is content invented across
+        // a field boundary reading as grounded.
+        assert_eq!(
+            verdicts(&["fixture. The resolver"]),
+            vec![Verdict::Invention]
+        );
+    }
+
+    #[test]
+    fn case_is_content_and_not_formatting() {
+        assert_eq!(
+            verdicts(&["Renamed the capture lane"]),
+            vec![Verdict::Invention]
+        );
     }
 
     // Acceptance: a string present only in the session prefix must drop, and
@@ -557,10 +713,9 @@ mod tests {
     // repair from one that fabricates.
     #[test]
     fn a_string_from_the_session_prefix_drops_as_bleed() {
-        let emitted = entries(&["the sediment registrar", "renamed the capture lane"]);
         let report = check(
-            &emitted,
-            FieldClass::Structuring,
+            &entries(&["the sediment registrar", "renamed the capture lane"]),
+            FieldKind::ApiSurface,
             input(),
             &permissive_floor(),
         );
@@ -569,7 +724,7 @@ mod tests {
         assert_eq!(report.kept(), vec!["renamed the capture lane"]);
     }
 
-    // Acceptance: a lane at 0.1 grounded must be rejected whole, and a
+    // Acceptance: a lane at 1/10 grounded must be rejected whole, and a
     // `rejected` event emitted with the score. Its individual survivors are
     // not trustworthy: a pass that mostly fabricated was not structuring.
     #[test]
@@ -578,7 +733,7 @@ mod tests {
         for index in 0..9 {
             emitted.push(format!("Fabricated::name_{index}"));
         }
-        let report = check(&emitted, FieldClass::Structuring, input(), &floor());
+        let report = check(&emitted, FieldKind::ApiSurface, input(), &floor());
         assert_eq!(
             report.score,
             Score {
@@ -596,27 +751,38 @@ mod tests {
             "a rejected lane keeps nothing, not even its grounded entries"
         );
         let event = report
-            .rejection_event("x1", "reformat")
+            .rejection_event("x1", "reformat", 1)
+            .expect("the counts fit")
             .expect("a rejected lane emits a rejected event");
         assert_eq!(event.kind(), Kind::Rejected);
-        assert!(matches!(
-            event,
-            Event::Rejected {
-                grounded: 1,
-                of: 10,
-                ..
-            }
-        ));
+        let Event::Rejected {
+            grounded,
+            of,
+            at_turn,
+            ..
+        } = event
+        else {
+            panic!("a rejection event")
+        };
+        assert_eq!((grounded.get(), of.get(), at_turn), (1, 10, 1));
     }
 
     #[test]
     fn a_lane_at_the_floor_is_accepted() {
-        let emitted = entries(&["renamed the capture lane", "Fabricated::name"]);
-        let report = check(&emitted, FieldClass::Structuring, input(), &floor());
+        let report = check(
+            &entries(&["renamed the capture lane", "Fabricated::name"]),
+            FieldKind::ApiSurface,
+            input(),
+            &floor(),
+        );
         assert_eq!(report.score, Score { grounded: 1, of: 2 });
         assert_eq!(report.outcome, LaneOutcome::Accepted);
-        assert_eq!(report.kept(), vec!["renamed the capture lane"]);
-        assert!(report.rejection_event("x1", "reformat").is_none());
+        assert!(
+            report
+                .rejection_event("x1", "reformat", 1)
+                .expect("the counts fit")
+                .is_none()
+        );
     }
 
     // Acceptance: the gate must not touch a judgment-class field. Grounding a
@@ -627,7 +793,7 @@ mod tests {
             "ship the boundary first, then measure",
             "nothing here appears in the source at all",
         ]);
-        let report = check(&plan, FieldClass::Judgment, input(), &floor());
+        let report = check(&plan, FieldKind::Plan, input(), &floor());
         let untouched = report.outcome == LaneOutcome::Accepted
             && report.count(Verdict::Invention) == 0
             && report.count(Verdict::Bleed) == 0;
@@ -636,6 +802,23 @@ mod tests {
             "the gate touched a judgment-class field: {report:?}"
         );
         assert_eq!(report.kept().len(), 2, "a plan keeps everything it said");
+    }
+
+    // The class comes from the FIELD. Passing it in let a caller hand
+    // `Judgment` for `api_surface` and switch the gate off for the one field
+    // the founding incident happened in.
+    #[test]
+    fn the_class_is_the_fields_and_not_the_callers() {
+        let fabricated = entries(&["Invented::one", "Invented::two"]);
+        assert_eq!(
+            check(&fabricated, FieldKind::ApiSurface, input(), &floor()).outcome,
+            LaneOutcome::Rejected
+        );
+        assert_eq!(
+            check(&fabricated, FieldKind::Plan, input(), &floor()).outcome,
+            LaneOutcome::Accepted,
+            "a plan has no source, so it is not judged against one"
+        );
     }
 
     #[test]
@@ -647,15 +830,13 @@ mod tests {
             .collect();
         assert_eq!(gated, vec!["api_surface", "evidence"]);
         assert_eq!(FieldKind::Plan.class(), FieldClass::Judgment);
-        assert_eq!(FieldKind::Decision.class(), FieldClass::Judgment);
         assert_eq!(FieldKind::Evidence.class(), FieldClass::Verbatim);
     }
 
     // A threshold that cannot say where its value came from is a number
-    // somebody wanted. There is no `Default` and no constant, so this is the
-    // only way to get one.
+    // somebody wanted, and a floor of zero is every lane's floor.
     #[test]
-    fn a_floor_must_be_pre_registered() {
+    fn a_floor_must_be_pre_registered_and_nonzero() {
         assert_eq!(
             Floor::pre_registered(7, 10, "   "),
             Err(FloorError::NoProvenance)
@@ -663,6 +844,11 @@ mod tests {
         assert_eq!(
             Floor::pre_registered(1, 0, "measured"),
             Err(FloorError::ZeroDenominator)
+        );
+        assert_eq!(
+            Floor::pre_registered(0, 10, "measured"),
+            Err(FloorError::ZeroNumerator),
+            "a floor of zero was accepted, and every lane meets it"
         );
         assert!(matches!(
             Floor::pre_registered(11, 10, "measured"),
@@ -673,7 +859,8 @@ mod tests {
 
     // The 1.000 that meant nothing was a real score on a probe where
     // fabrication was structurally impossible. A measurement now cannot be
-    // obtained unless the same code, on a case built to fail, actually failed.
+    // obtained unless the same code, ON THE SAME INPUT, actually failed --
+    // and cannot be assembled by hand, because its fields are private.
     #[test]
     fn a_measurement_requires_its_instrument_to_have_been_seen_fail() {
         let subject = entries(&["renamed the capture lane"]);
@@ -681,62 +868,27 @@ mod tests {
 
         let measurement = Measurement::take(
             &subject,
-            FieldClass::Structuring,
+            FieldKind::ApiSurface,
             input(),
             &floor(),
-            (&fabricating, input()),
+            &fabricating,
         )
         .expect("the failing case fails, so the measurement stands");
-        assert_eq!(measurement.subject.score, Score { grounded: 1, of: 1 });
+        assert_eq!(measurement.subject().score, Score { grounded: 1, of: 1 });
         assert_eq!(
-            measurement.demonstrated_failure.outcome,
+            measurement.demonstrated_failure().outcome,
             LaneOutcome::Rejected
         );
+        assert_eq!(measurement.floor(), &floor());
 
         // The probe on which fabrication was impossible: its "failing" case is
-        // grounded, so it never failed, so the perfect subject score certifies
-        // nothing and there is no measurement to hand back.
-        let err = Measurement::take(
-            &subject,
-            FieldClass::Structuring,
-            input(),
-            &floor(),
-            (&subject, input()),
-        )
-        .expect_err("a measurement was handed back whose instrument never failed");
+        // grounded in the same input, so it never failed, so the perfect
+        // subject score certifies nothing and there is no measurement.
+        let err = Measurement::take(&subject, FieldKind::ApiSurface, input(), &floor(), &subject)
+            .expect_err("a measurement was handed back whose instrument never failed");
         assert!(
             matches!(err, MeasurementError::InstrumentNeverFailed { .. }),
             "a measurement was handed back whose instrument never failed: {err:?}"
-        );
-    }
-
-    #[test]
-    fn matching_normalises_whitespace_and_nothing_else() {
-        let emitted = entries(&[
-            "renamed   the\n  capture lane",
-            "Renamed the capture lane",
-            "",
-        ]);
-        let report = check(
-            &emitted,
-            FieldClass::Structuring,
-            input(),
-            &permissive_floor(),
-        );
-        assert_eq!(
-            report.entries[0].verdict,
-            Verdict::Grounded,
-            "whitespace runs collapse"
-        );
-        assert_eq!(
-            report.entries[1].verdict,
-            Verdict::Invention,
-            "case is content, not formatting"
-        );
-        assert_eq!(
-            report.entries[2].verdict,
-            Verdict::Invention,
-            "an empty entry is grounded in nothing"
         );
     }
 
@@ -744,22 +896,30 @@ mod tests {
     // would turn an empty lane into a failing one and hide the emptiness.
     #[test]
     fn an_empty_lane_is_not_below_the_floor() {
-        let report = check(&[], FieldClass::Structuring, input(), &floor());
+        let report = check(&[], FieldKind::ApiSurface, input(), &floor());
         assert_eq!(report.score, Score { grounded: 0, of: 0 });
         assert_eq!(report.outcome, LaneOutcome::Accepted);
+        assert!(
+            report
+                .rejection_event("x1", "reformat", 1)
+                .expect("the counts fit")
+                .is_none(),
+            "an empty lane produces no rejection, and the record refuses one"
+        );
     }
 
-    // Scores are cross-multiplied, never divided. 1/3 against a floor of
-    // 1/3 is exactly met; through f64 it is 0.3333333333333333 against
-    // 0.3333333333333333, which happens to work and is not a reason to trust
-    // it.
+    #[test]
+    fn an_empty_entry_is_grounded_in_nothing() {
+        assert_eq!(verdicts(&["", "   "]), vec![Verdict::Invention; 2]);
+    }
+
+    // Scores are cross-multiplied, never divided.
     #[test]
     fn a_score_is_the_counts_it_came_from() {
         let third = Floor::pre_registered(1, 3, "a fixture").expect("a floor");
         assert!(Score { grounded: 1, of: 3 }.meets(&third));
         assert!(Score { grounded: 2, of: 6 }.meets(&third));
         assert!(!Score { grounded: 1, of: 4 }.meets(&third));
-        // Counts large enough that the product overflows u64 but not u128.
         let huge = Floor::pre_registered(u64::MAX, u64::MAX, "a fixture").expect("a floor");
         assert!(
             Score {
@@ -768,5 +928,56 @@ mod tests {
             }
             .meets(&huge)
         );
+    }
+
+    // The operator-facing texts for this module's central failures. Every
+    // `Display` here was unexecuted by any test, so `Score` could print its
+    // fraction inverted and `MeasurementError` could read "the instrument
+    // failed as it should have" with the whole gate green.
+    #[test]
+    fn the_operator_facing_texts_say_what_happened() {
+        assert_eq!(
+            Score {
+                grounded: 3,
+                of: 30
+            }
+            .to_string(),
+            "3/30"
+        );
+        let floor = floor();
+        let rendered = floor.to_string();
+        assert!(rendered.starts_with("1/2 ("), "{rendered}");
+        assert!(
+            rendered.contains(floor.provenance()),
+            "a floor prints where its value came from: {rendered}"
+        );
+        let err = Measurement::take(
+            &entries(&["renamed the capture lane"]),
+            FieldKind::ApiSurface,
+            input(),
+            &floor,
+            &entries(&["renamed the capture lane"]),
+        )
+        .expect_err("the instrument never failed");
+        let text = err.to_string();
+        assert!(text.contains("never been seen fail"), "{text}");
+        assert!(text.contains("1/1"), "the score it actually got: {text}");
+        assert_eq!(
+            FloorError::ZeroNumerator.to_string(),
+            "a floor of zero, which every lane meets -- including one that \
+             grounded nothing at all"
+        );
+    }
+
+    // The names the issue uses by name. Nothing else pins them: the rejection
+    // event carries only counts, so the bleed/invention split never reaches
+    // durable storage and only this test stands between it and a rename.
+    #[test]
+    fn the_verdict_names_are_the_ones_the_telemetry_promises() {
+        let names: Vec<&str> = Verdict::ALL.iter().map(|v| v.name()).collect();
+        assert_eq!(names, vec!["grounded", "bleed", "invention"]);
+        assert!(Verdict::Grounded.keeps());
+        assert!(!Verdict::Bleed.keeps());
+        assert!(!Verdict::Invention.keeps());
     }
 }
