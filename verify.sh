@@ -459,6 +459,30 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The per-lane floor made inert. A pass that mostly fabricated has shown it
+# was not structuring, and its individual survivors are not trustworthy; a gate
+# that keeps them anyway banks the survivors of a fabrication.
+inject_grounded_floor_inert() {
+  sed -i 's|^    let outcome = if score.meets(floor) {$|    let outcome = if true {|' \
+    diet/src/capture/grounded.rs
+}
+
+# The judgment exemption removed. Grounding a plan is a category error, and a
+# gate that does it rejects legitimate content -- the failure that made the
+# scoping a ruling rather than an implementation detail.
+inject_grounded_gates_judgment() {
+  sed -i 's|^        !matches!(self, Self::Judgment)$|        let _ = self; true|' \
+    diet/src/capture/grounded.rs
+}
+
+# A measurement handed back without its instrument having been seen fail. The
+# 1.000 that meant nothing was a real score, computed by real code, on a probe
+# where fabrication was structurally impossible.
+inject_grounded_undemonstrated() {
+  sed -i 's|^        if demonstrated_failure.outcome != LaneOutcome::Rejected {$|        if false {|' \
+    diet/src/capture/grounded.rs
+}
+
 inject_results() {
   cp -r tests/fixtures/results-bad/2026-01-09-unbacked-number results/
 }
@@ -765,6 +789,12 @@ selftest() {
     'no fixture.*spurious'
   seeded_case "record substrate made optional"        test     inject_record_substrate_optional \
     'regime-missing-substrate\.jsonl: accepted as'
+  seeded_case "grounding floor made inert"            test     inject_grounded_floor_inert \
+    'a lane that mostly fabricated must be rejected whole'
+  seeded_case "grounding gates a judgment field"      test     inject_grounded_gates_judgment \
+    'the gate touched a judgment-class field'
+  seeded_case "a score with no demonstrated failure"  test     inject_grounded_undemonstrated \
+    'a measurement was handed back whose instrument never failed'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
     'front-matter `turns` states 3 but the summary record binds'
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \

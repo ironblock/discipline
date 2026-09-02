@@ -153,6 +153,8 @@ pub enum Kind {
     Seam,
     /// A tool was called.
     ToolCall,
+    /// A lane's output rejected whole by the groundedness floor.
+    Rejected,
     /// One hypothesis, one result, and what recomputing it consumes.
     Claim,
     /// The session's totals.
@@ -170,6 +172,7 @@ impl Kind {
         Self::Capture,
         Self::Seam,
         Self::ToolCall,
+        Self::Rejected,
         Self::Claim,
         Self::Summary,
     ];
@@ -186,6 +189,7 @@ impl Kind {
             Self::Capture => "capture",
             Self::Seam => "seam",
             Self::ToolCall => "tool_call",
+            Self::Rejected => "rejected",
             Self::Claim => "claim",
             Self::Summary => "summary",
         }
@@ -310,6 +314,21 @@ pub enum Event {
         /// Which tool.
         tool: String,
     },
+    /// A lane's output rejected whole because too little of it was grounded
+    /// in the input the lane was told to work from.
+    ///
+    /// Carries the score, because a rejection nobody can audit is a fallback
+    /// output standing for a reason somebody remembers.
+    Rejected {
+        /// This rejection's identifier.
+        id: String,
+        /// Which lane was rejected.
+        lane: String,
+        /// How many of its entries were grounded.
+        grounded: u64,
+        /// How many entries it emitted.
+        of: u64,
+    },
     /// One hypothesis, one result.
     Claim {
         /// This claim's identifier.
@@ -347,6 +366,7 @@ impl Event {
             Self::Capture { .. } => Kind::Capture,
             Self::Seam { .. } => Kind::Seam,
             Self::ToolCall { .. } => Kind::ToolCall,
+            Self::Rejected { .. } => Kind::Rejected,
             Self::Claim { .. } => Kind::Claim,
             Self::Summary { .. } => Kind::Summary,
         }
@@ -362,6 +382,7 @@ impl Event {
             | Self::Capture { id, .. }
             | Self::Seam { id, .. }
             | Self::ToolCall { id, .. }
+            | Self::Rejected { id, .. }
             | Self::Claim { id, .. } => Some(id),
             Self::Start { .. } | Self::Turn { .. } | Self::Summary { .. } => None,
         }
@@ -483,6 +504,15 @@ pub enum StructureError {
     ClaimConsumesNothing(String),
     /// A digest that is not 64 lowercase hex characters.
     BadDigest(String),
+    /// A rejection whose grounded count exceeds its total.
+    ScoreAboveOne {
+        /// The rejection's identifier.
+        id: String,
+        /// The numerator.
+        grounded: u64,
+        /// The denominator.
+        of: u64,
+    },
     /// A turn index a link names that no turn ever had.
     UnknownTurn(u32),
     /// Turn indices that do not run 1, 2, 3.
@@ -564,6 +594,11 @@ impl fmt::Display for StructureError {
             Self::BadDigest(text) => {
                 write!(f, "`{text}` is not 64 lowercase hex characters")
             }
+            Self::ScoreAboveOne { id, grounded, of } => write!(
+                f,
+                "rejection `{id}` scores {grounded}/{of}, and a score above one \
+                 is not a score"
+            ),
             Self::UnknownTurn(index) => write!(f, "a row names turn {index}, which never happened"),
             Self::TurnOutOfOrder { want, found } => {
                 write!(f, "turn {found} follows where turn {want} was expected")
@@ -685,6 +720,12 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             id: take_string(&mut members, of, "id")?,
             at_turn: take_u32(&mut members, of, "at_turn")?,
             tool: take_string(&mut members, of, "tool")?,
+        },
+        Kind::Rejected => Event::Rejected {
+            id: take_string(&mut members, of, "id")?,
+            lane: take_string(&mut members, of, "lane")?,
+            grounded: take_u64(&mut members, of, "grounded")?,
+            of: take_u64(&mut members, of, "of")?,
         },
         Kind::Claim => Event::Claim {
             id: take_string(&mut members, of, "id")?,
@@ -907,11 +948,135 @@ fn digest_ok(text: &str) -> bool {
 /// record. A lineage that can only be resolved by reading ahead is a lineage
 /// that cannot be walked while the record is being written, which is the only
 /// time anyone would want to walk it.
+/// What the walk has seen so far.
+///
+/// Held apart from the loop so that "what a row is checked against" is a
+/// value with a name rather than four locals: every link resolves against
+/// THIS, and this only ever holds rows that already went past.
+#[derive(Default)]
+struct Seen<'a> {
+    ids: BTreeMap<&'a str, Kind>,
+    turns: BTreeSet<u32>,
+    next_turn: u32,
+}
+
+impl<'a> Seen<'a> {
+    fn new() -> Self {
+        Self {
+            next_turn: 1,
+            ..Self::default()
+        }
+    }
+
+    /// Record `event`'s identifier, refusing a second row that claims it.
+    fn claim_id(&mut self, event: &'a Event) -> Result<(), ParseError> {
+        if let Some(id) = event.id()
+            && self.ids.insert(id, event.kind()).is_some()
+        {
+            return Err(StructureError::DuplicateId(id.to_owned()).into());
+        }
+        Ok(())
+    }
+
+    /// The rules one row carries about rows before it.
+    fn admit(&mut self, event: &Event) -> Result<(), ParseError> {
+        match event {
+            Event::Turn { index, .. } => {
+                if *index != self.next_turn {
+                    return Err(StructureError::TurnOutOfOrder {
+                        want: self.next_turn,
+                        found: *index,
+                    }
+                    .into());
+                }
+                self.turns.insert(*index);
+                self.next_turn += 1;
+            }
+            Event::Request { id, retry_of, .. } => {
+                if let Some(previous) = retry_of {
+                    link(&self.ids, id, "retry_of", previous, Kind::Request)?;
+                }
+            }
+            Event::Response { id, to_request, .. } => {
+                link(&self.ids, id, "to_request", to_request, Kind::Request)?;
+            }
+            Event::Fork { of_turn, .. } => self.require_turn(*of_turn)?,
+            Event::Capture { id, from_fork, .. } => {
+                link(&self.ids, id, "from_fork", from_fork, Kind::Fork)?;
+            }
+            Event::Seam { at_turn, .. } | Event::ToolCall { at_turn, .. } => {
+                self.require_turn(*at_turn)?;
+            }
+            Event::Rejected {
+                id, grounded, of, ..
+            } => {
+                // A score above one is not a score.
+                if grounded > of {
+                    return Err(StructureError::ScoreAboveOne {
+                        id: id.clone(),
+                        grounded: *grounded,
+                        of: *of,
+                    }
+                    .into());
+                }
+            }
+            Event::Claim {
+                id,
+                consumes,
+                supersedes,
+                ..
+            } => self.admit_claim(id, consumes, supersedes.as_deref())?,
+            Event::Summary { product_sha256, .. } => {
+                if !digest_ok(product_sha256) {
+                    return Err(StructureError::BadDigest(product_sha256.clone()).into());
+                }
+            }
+            Event::Start { .. } => {}
+        }
+        Ok(())
+    }
+
+    fn require_turn(&self, index: u32) -> Result<(), ParseError> {
+        if self.turns.contains(&index) {
+            Ok(())
+        } else {
+            Err(StructureError::UnknownTurn(index).into())
+        }
+    }
+
+    fn admit_claim(
+        &self,
+        id: &str,
+        consumes: &[Artifact],
+        supersedes: Option<&str>,
+    ) -> Result<(), ParseError> {
+        // Recompute-sufficiency, as a rule rather than a habit. A claim that
+        // names nothing it consumes can be re-read but not re-derived, and a
+        // number nobody can re-derive is a number nobody can check.
+        if consumes.is_empty() {
+            return Err(StructureError::ClaimConsumesNothing(id.to_owned()).into());
+        }
+        for artifact in consumes {
+            if !digest_ok(&artifact.sha256) {
+                return Err(StructureError::BadDigest(artifact.sha256.clone()).into());
+            }
+        }
+        if let Some(superseded) = supersedes {
+            link(&self.ids, id, "supersedes", superseded, Kind::Claim)?;
+        }
+        Ok(())
+    }
+}
+
+/// The rules that hold across rows rather than within one.
+///
+/// Every link is checked against events ALREADY SEEN, never against the whole
+/// record. A lineage that can only be resolved by reading ahead is a lineage
+/// that cannot be walked while the record is being written, which is the only
+/// time anyone would want to walk it.
 fn validate(events: &[Event]) -> Result<Regime, ParseError> {
     let mut regime = None;
-    let mut ids: BTreeMap<&str, Kind> = BTreeMap::new();
-    let mut turns: BTreeSet<u32> = BTreeSet::new();
-    let mut next_turn = 1_u32;
+    let mut seen = Seen::new();
     let mut summary_seen = false;
 
     for (position, event) in events.iter().enumerate() {
@@ -930,76 +1095,9 @@ fn validate(events: &[Event]) -> Result<Regime, ParseError> {
             _ if position == 0 => return Err(StructureError::StartNotFirst.into()),
             _ => {}
         }
-
-        if let Some(id) = event.id()
-            && ids.insert(id, event.kind()).is_some()
-        {
-            return Err(StructureError::DuplicateId(id.to_owned()).into());
-        }
-
-        match event {
-            Event::Turn { index, .. } => {
-                if *index != next_turn {
-                    return Err(StructureError::TurnOutOfOrder {
-                        want: next_turn,
-                        found: *index,
-                    }
-                    .into());
-                }
-                turns.insert(*index);
-                next_turn += 1;
-            }
-            Event::Request { id, retry_of, .. } => {
-                if let Some(previous) = retry_of {
-                    link(&ids, id, "retry_of", previous, Kind::Request)?;
-                }
-            }
-            Event::Response { id, to_request, .. } => {
-                link(&ids, id, "to_request", to_request, Kind::Request)?;
-            }
-            Event::Fork { of_turn, .. } => {
-                if !turns.contains(of_turn) {
-                    return Err(StructureError::UnknownTurn(*of_turn).into());
-                }
-            }
-            Event::Capture { id, from_fork, .. } => {
-                link(&ids, id, "from_fork", from_fork, Kind::Fork)?;
-            }
-            Event::Seam { at_turn, .. } | Event::ToolCall { at_turn, .. } => {
-                if !turns.contains(at_turn) {
-                    return Err(StructureError::UnknownTurn(*at_turn).into());
-                }
-            }
-            Event::Claim {
-                id,
-                consumes,
-                supersedes,
-                ..
-            } => {
-                // Recompute-sufficiency, as a rule rather than a habit. A claim
-                // that names nothing it consumes can be re-read but not
-                // re-derived, and a number nobody can re-derive is a number
-                // nobody can check.
-                if consumes.is_empty() {
-                    return Err(StructureError::ClaimConsumesNothing(id.clone()).into());
-                }
-                for artifact in consumes {
-                    if !digest_ok(&artifact.sha256) {
-                        return Err(StructureError::BadDigest(artifact.sha256.clone()).into());
-                    }
-                }
-                if let Some(superseded) = supersedes {
-                    link(&ids, id, "supersedes", superseded, Kind::Claim)?;
-                }
-            }
-            Event::Summary { product_sha256, .. } => {
-                if !digest_ok(product_sha256) {
-                    return Err(StructureError::BadDigest(product_sha256.clone()).into());
-                }
-                summary_seen = true;
-            }
-            Event::Start { .. } => {}
-        }
+        seen.claim_id(event)?;
+        seen.admit(event)?;
+        summary_seen |= matches!(event, Event::Summary { .. });
     }
 
     regime.ok_or_else(|| StructureError::NoStart.into())
@@ -1126,6 +1224,17 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             put("at_turn", Value::Integer(i64::from(*at_turn)));
             put("rendered_bytes", integer(*rendered_bytes));
         }
+        Event::Rejected {
+            id,
+            lane,
+            grounded,
+            of: total,
+        } => {
+            put("id", Value::String(id.clone()));
+            put("lane", Value::String(lane.clone()));
+            put("grounded", integer(*grounded));
+            put("of", integer(*total));
+        }
         Event::ToolCall { id, at_turn, tool } => {
             put("id", Value::String(id.clone()));
             put("at_turn", Value::Integer(i64::from(*at_turn)));
@@ -1141,20 +1250,7 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             put("id", Value::String(id.clone()));
             put("hypothesis", Value::String(hypothesis.clone()));
             put("result", Value::String(result.tag().to_owned()));
-            put(
-                "consumes",
-                Value::Array(
-                    consumes
-                        .iter()
-                        .map(|artifact| {
-                            Value::Object(BTreeMap::from([
-                                ("path".to_owned(), Value::String(artifact.path.clone())),
-                                ("sha256".to_owned(), Value::String(artifact.sha256.clone())),
-                            ]))
-                        })
-                        .collect(),
-                ),
-            );
+            put("consumes", artifacts_value(consumes));
             if let Some(superseded) = supersedes {
                 put("supersedes", Value::String(superseded.clone()));
             }
@@ -1170,6 +1266,21 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
         }
     }
     members
+}
+
+/// The artifacts a claim consumes, as the value space.
+fn artifacts_value(consumes: &[Artifact]) -> Value {
+    Value::Array(
+        consumes
+            .iter()
+            .map(|artifact| {
+                Value::Object(BTreeMap::from([
+                    ("path".to_owned(), Value::String(artifact.path.clone())),
+                    ("sha256".to_owned(), Value::String(artifact.sha256.clone())),
+                ]))
+            })
+            .collect(),
+    )
 }
 
 fn regime_value(regime: &Regime) -> Value {
