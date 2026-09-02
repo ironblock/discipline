@@ -6,6 +6,14 @@ one only when it proves every entry. A manifest that has drifted from the gate
 defines the wrong parity, and would let the new gate retire the old one while
 covering less -- so the manifest is itself gated.
 
+THIS GATE PROVES ONE HALF. It compares what verify.sh DECLARES against what
+the manifest claims -- reading declaration tables and fixture directories out
+of the source. That the declared faults actually go RED is proved elsewhere:
+by `--selftest` for most kinds, and by the per-run `regimen` check for the
+subset fixtures. Composed, the two give declared-to-manifest and
+declared-to-executed; neither alone gives both, and a reader should not credit
+this script with the second.
+
 Checks:
   * every seeded case, mechanics assertion, results fixture and pinned pattern
     class verify.sh proves has an entry here, and vice versa;
@@ -125,10 +133,17 @@ def main() -> int:
         print(f"check-fault-manifest: {len(failures)} failure(s)", file=sys.stderr)
         return 1
 
+    # Report the split by WHERE each kind is proven red, so the arithmetic
+    # explains itself. `--selftest` reports 67; the manifest says 75 red; the
+    # difference is the 8 subset fixtures, which go red on every run through
+    # check_regimen rather than in the selftest.
+    by_selftest = sum(len(seen[k]) for k in ("seeded-gate", "results-fixture", "pattern-class"))
+    by_per_run = len(seen["subset-fixture"])
     migrated = sum(1 for e in entries if e.get("migrated") is True)
     print(
-        f"check-fault-manifest: {len(entries)} fault(s) define parity "
-        f"({red} red + {len(seen['mechanics'])} mechanics); {migrated} migrated"
+        f"check-fault-manifest: {len(entries)} fault(s) define parity = "
+        f"{by_selftest} red in --selftest + {by_per_run} red per run (regimen) + "
+        f"{len(seen['mechanics'])} mechanics assertions; {migrated} migrated"
     )
     return 0
 

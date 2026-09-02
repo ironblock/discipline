@@ -41,4 +41,14 @@ for name in "${ALLOWED[@]}"; do
   fi
 done
 
+# HOME has to survive -- cargo and rustup need it -- and git reads
+# $HOME/.gitconfig through it. That is the allowlist leaking behaviour through
+# a file handle rather than a variable: a contributor with `commit.gpgsign` set
+# would have sandbox commits attempt to sign and fail, so the gate's verdict
+# would depend on whose machine ran it. Same family as the GITHUB_* incident.
+#
+# FORCED, not allowlisted: these are set regardless of the ambient value,
+# because the point is that no ambient value reaches git.
+keep+=(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null)
+
 exec env -i "${keep[@]}" "$@"

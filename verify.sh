@@ -466,6 +466,20 @@ prove_mechanics() {
   expect_exit "a dot-prefixed results directory is linted" 1 \
     python3 "${ROOT}/scripts/check-results.py" --root "${box}/root"
 
+  # The same leak through a file handle. A contributor with commit signing
+  # enabled must not get a different verdict from the same tree.
+  local gitfake; scratch; gitfake="$SCRATCH"
+  printf '[commit]\n\tgpgsign = true\n[user]\n\tsigningkey = 0xDEADBEEF\n' \
+    > "${gitfake}/.gitconfig"
+  mkdir -p "${gitfake}/repo"
+  git -C "${gitfake}/repo" init --quiet
+  printf 'x\n' > "${gitfake}/repo/a.txt"
+  git -C "${gitfake}/repo" add --all
+  expect_exit "a signing global gitconfig cannot reach a sandbox" 0 \
+    env HOME="$gitfake" bash "${ROOT}/scripts/hermetic.sh" \
+      git -C "${gitfake}/repo" -c user.email=seed@example.invalid -c user.name=seed \
+        commit --quiet --message 'probe'
+
   # Hermeticity itself. Nothing that identifies a repository or a CI system
   # may cross into a sandbox, whatever the ambient environment holds.
   expect_exit "no ambient CI identity reaches a sandbox" 0 \
@@ -545,6 +559,12 @@ prove_mechanics() {
 selftest() {
   trap selftest_cleanup EXIT
   scratch; SELFTEST_TARGET="${SCRATCH}/target"
+
+  # sandbox(), seed_commit and the fake-repository builder all run git in THIS
+  # process, outside scripts/hermetic.sh, so they need the same protection from
+  # the contributor's global git config. Scoped to the selftest: the real
+  # `history` check reads the real repository and should see its real config.
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 
   echo "Seeded-fault selftest. Every line below must read RED: the fault is"
   echo "deliberate and the gate is what is under test. A case that goes red"

@@ -1,12 +1,23 @@
 name: pages
 
+# Publishes the static placeholder through the Pages *Actions* pipeline, which
+# is how this repository's Pages is configured -- there is no gh-pages branch
+# to push to, and pushing one would leave a branch GitHub ignores while the
+# deploy reported success.
+#
+# Static only. Nothing here reaches a network, a model, or a secret; the
+# id-token permission exists so deploy-pages can prove to Pages that this
+# workflow produced the artifact, not to reach anything.
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
 
 concurrency:
   group: pages
@@ -14,38 +25,31 @@ concurrency:
 
 jobs:
   deploy:
-    name: publish to gh-pages
+    name: publish
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
 
       # Publishing must not be able to route around the gate. Without this the
-      # branch could serve a surface `./verify.sh --only pages` rejects.
+      # site could serve a surface `./verify.sh --only pages` rejects.
       - name: Gate the surface
         run: ./verify.sh --only pages
 
-      # Static only. Nothing here reaches a network, a model, or a secret
-      # beyond the token that publishes the branch.
+      - uses: actions/configure-pages@v5
+
       - name: Assemble the site
         run: |
           set -euo pipefail
           rm -rf _site
           cp -r pages _site
-          touch _site/.nojekyll
           ls -la _site
 
-      - name: Publish
-        env:
-          GH_PAGES_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          cd _site
-          git init --quiet --initial-branch=gh-pages
-          git add --all
-          git -c user.name='github-actions[bot]' \
-              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-              commit --quiet --message "pages: ${GITHUB_SHA}"
-          git push --force --quiet \
-            "https://x-access-token:${GH_PAGES_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            gh-pages
-          echo "published ${GITHUB_SHA} to gh-pages"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

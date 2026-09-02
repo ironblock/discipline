@@ -30,7 +30,7 @@
 [meta]
 source = "verify.sh"
 red_faults = 75
-mechanics_assertions = 13
+mechanics_assertions = 14
 migrated = 0
 
 
@@ -647,6 +647,15 @@ label = "a dot-prefixed results directory is linted"
 failure_class = "results.name-malformed"
 expected_exit = "1"
 migrated = false
+[[fault]]
+id = "mech.a-signing-global-gitconfig-cannot-reach-a-sandbox"
+kind = "mechanics"
+check = "-"
+label = "a signing global gitconfig cannot reach a sandbox"
+failure_class = "sandbox.environment-leaked"
+expected_exit = "0"
+migrated = false
+
 [[fault]]
 id = "mech.no-ambient-ci-identity-reaches-a-sandbox"
 kind = "mechanics"

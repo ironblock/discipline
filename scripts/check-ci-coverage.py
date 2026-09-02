@@ -34,10 +34,12 @@ VERIFY = ROOT / "verify.sh"
 
 ROOT_WORKFLOW = "verify.yml"
 
-# Workflows that act on a merge rather than gating one. They may filter by
-# path: nothing is waiting on their result, so a skip cannot be mistaken for a
-# pass. Every other workflow file is a gate and may not filter.
-NOT_GATES = {"pages.yml", "repo-metadata.yml"}
+# Which workflows gate is DERIVED, not listed: the root workflow and everything
+# it calls. A workflow nobody waits on may filter by path, because a skip there
+# cannot be mistaken for a pass. The boundary is therefore a class rather than
+# a remembered exception -- a filtering workflow must not be reachable from the
+# gate's `needs`, and adding one to the root workflow makes its filter a
+# failure automatically.
 
 CALLS = re.compile(r"^\s*uses:\s*\./\.github/workflows/([A-Za-z0-9._-]+)\s*$", re.MULTILINE)
 JOB = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$", re.MULTILINE)
@@ -138,15 +140,16 @@ def main() -> int:
         for job in sorted(needed - gate_jobs):
             failures.append(f"{ROOT_WORKFLOW}: the gate needs `{job}`, which is not a job")
 
-    # 4. nothing that gates may filter by path
+    # 4. nothing reachable from the gate may filter by path
+    gating = {ROOT_WORKFLOW} | called
     for wf in sorted(WORKFLOWS.glob("*.yml")):
-        if wf.name in NOT_GATES:
-            continue
         text = wf.read_text(encoding="utf-8")
-        if PATH_FILTER.search(text):
+        filters = bool(PATH_FILTER.search(text))
+        if filters and wf.name in gating:
             failures.append(
-                f"{wf.name}: has a path filter. A skipped job is not a failed job, and "
-                f"a filtered-out workflow leaves its required check pending forever"
+                f"{wf.name}: has a path filter and is reached from the gate's `needs`. "
+                f"A skipped job is not a failed job, and a filtered-out workflow leaves "
+                f"its required check pending forever"
             )
 
     # 5. every pkg-* workflow is callable and is actually called
