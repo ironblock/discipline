@@ -1,0 +1,25 @@
+{
+  "completion": {
+    "truncated": "trailing-tag-with-no-value"
+  },
+  "fields": [
+    {
+      "tag": {
+        "kind": "decision",
+        "as_written": "DECISION:"
+      },
+      "outcome": {
+        "value": "keep it"
+      }
+    },
+    {
+      "tag": {
+        "kind": "learned",
+        "as_written": "LEARNED:"
+      },
+      "outcome": {
+        "unparseable": "LEARNED:"
+      }
+    }
+  ]
+}

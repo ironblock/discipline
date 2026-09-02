@@ -1,0 +1,4 @@
+PLAN: ship it
+```rust
+let x = 1;
+```

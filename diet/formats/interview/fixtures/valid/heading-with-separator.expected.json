@@ -1,0 +1,14 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "tag": {
+        "kind": "learned",
+        "as_written": "### LEARNED:"
+      },
+      "outcome": {
+        "value": "tolerance is not the fix, a grammar is"
+      }
+    }
+  ]
+}

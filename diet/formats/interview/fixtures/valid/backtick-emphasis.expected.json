@@ -1,0 +1,14 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "tag": {
+        "kind": "plan",
+        "as_written": "`PLAN`:"
+      },
+      "outcome": {
+        "value": "ship the boundary first"
+      }
+    }
+  ]
+}

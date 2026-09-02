@@ -1,0 +1,2 @@
+A NUL byte in an emitted answer is corruption, not content. A format that
+lets one into the permanent record has accepted the corruption as a value.

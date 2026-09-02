@@ -1,0 +1,14 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "tag": {
+        "kind": "decision",
+        "as_written": "DECISION:"
+      },
+      "outcome": {
+        "value": "first\nsecond\n\nfourth"
+      }
+    }
+  ]
+}

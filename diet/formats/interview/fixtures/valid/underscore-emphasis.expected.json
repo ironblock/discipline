@@ -1,0 +1,14 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "tag": {
+        "kind": "stuck",
+        "as_written": "__STUCK__:"
+      },
+      "outcome": {
+        "value": "the resolver's ordering rule"
+      }
+    }
+  ]
+}

@@ -344,6 +344,23 @@ inject_conformance() {
   printf '{ "budget": { "integer": 1 } }\n' > diet/formats/regimen/fixtures/valid/seeded-nonconforming.expected.json
 }
 
+# The 71-of-630 defect, restaged: the continuation lines are parsed but never
+# reach the value. Every historical fix for this made the parser more tolerant
+# and shipped its own regression, which is why the corpus rather than the
+# tolerance is the gate.
+inject_interview_drops_continuations() {
+  sed -i 's|^    let value = lines.join("\\n");$|    let value = lines.first().cloned().unwrap_or_default();|' \
+    diet/src/formats/interview.rs
+}
+
+# Truncation graded as an ordinary parse. An emission that hit its token cap
+# produced exactly as much valid answer as it had room for; calling it complete
+# banks a partial answer as a whole one.
+inject_interview_truncation_blind() {
+  sed -i 's|^fn completion_of(unterminated: bool, fields: &\[Field\]) -> Completion {$|fn completion_of(unterminated: bool, fields: \&[Field]) -> Completion {\n    let _ = (unterminated, fields);\n    return Completion::Complete;|' \
+    diet/src/formats/interview.rs
+}
+
 inject_results() {
   cp -r tests/fixtures/results-bad/2026-01-09-unbacked-number results/
 }
@@ -640,6 +657,10 @@ selftest() {
     'FORMATS is empty'
   seeded_case "decline grammar loses its end anchor"  test     inject_decline_unanchored \
     'mentions-nothing-but-carries-content\.txt: accepted as'
+  seeded_case "interview drops continuation lines"    test     inject_interview_drops_continuations \
+    'multi-line-continuation\.txt: parsed to'
+  seeded_case "interview blind to truncation"         test     inject_interview_truncation_blind \
+    'truncated-unterminated-fence\.txt: parsed to'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
     'front-matter `turns` states 3 but the summary record binds'
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \

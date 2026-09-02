@@ -1,0 +1,11 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "tag": null,
+      "outcome": {
+        "unparseable": "*DECISION**: keep it"
+      }
+    }
+  ]
+}

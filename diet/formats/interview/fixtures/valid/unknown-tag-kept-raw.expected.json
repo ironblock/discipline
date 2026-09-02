@@ -1,0 +1,20 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "tag": null,
+      "outcome": {
+        "unparseable": "SUMMARY: a field this format does not know"
+      }
+    },
+    {
+      "tag": {
+        "kind": "decision",
+        "as_written": "DECISION:"
+      },
+      "outcome": {
+        "value": "keep it"
+      }
+    }
+  ]
+}

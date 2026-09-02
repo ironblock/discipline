@@ -1,0 +1,141 @@
+// The `interview` format, v0. This file is NORMATIVE: the Rust parser in
+// diet/src/formats/interview.rs implements it and is not itself the
+// definition.
+//
+// An interview answer is the prose a forked model returns when asked what it
+// decided, learned, or got stuck on this turn. It was the most-parsed format
+// in the system and the largest single source of SILENT LOSS: five defects in
+// one lane, every one of them content discarded or corrupted with no signal.
+//
+//   * `**DECISION**:` captured the bold markers as part of the value, so a
+//     legitimate entry was recorded as noise.
+//   * A wrapper code fence around the whole answer made the parser see zero
+//     fields.
+//   * A tag-stripping step removed a leading `#` that was part of the content.
+//   * A field's second and later lines were dropped: 71 of 630 archived
+//     answers lost content that way.
+//   * A close-cousin register (`Decision —` for `DECISION:`) matched nothing.
+//
+// Each was fixed by making the parser more tolerant, and every tolerance fix
+// shipped its own regression. The lesson that closed the class: TOLERANCE IS
+// NOT THE FIX, A GRAMMAR IS. What the register may be is stated here, as data,
+// once -- and every shape ever observed is a fixture, so the register cannot
+// drift silently again.
+//
+// Two rules deserve their reasons stated, because both look like tolerance and
+// are not:
+//
+//   * THE TAG VOCABULARY IS CLOSED. A line is a tag line only if it opens with
+//     a name this grammar lists. The alternative -- treat any `Word:` as a tag
+//     -- reintroduces the continuation bug in a new dress, because ordinary
+//     prose contains colons (`The bug: the parser dropped lines`) and every
+//     one of them would end the field it sits in. Text that names no known
+//     field is kept as an unparseable segment, raw. Never guessed at, never
+//     dropped.
+//   * A CONTINUATION IS ANY LINE THAT IS NOT THE NEXT TAG. Not "an indented
+//     line", not "a line before a blank line": those heuristics are what lost
+//     the 71. A field ends where the next field begins, and nowhere else.
+
+// ---------------------------------------------------------------------------
+// document
+// ---------------------------------------------------------------------------
+
+// Three shapes, in order. An emitter told to answer in a code block wraps the
+// whole answer in one; an emitter that hit its token cap mid-block opened a
+// fence it never closed. The third alternative is an answer with no wrapper.
+//
+// `unterminated` exists so that truncation is a shape in the grammar rather
+// than a guess in the parser: an answer cut off mid-emission is a typed
+// outcome, never "malformed".
+document = { SOI ~ (wrapped | unterminated | bare) ~ EOI }
+
+// An answer that opened with a fence: the LAST fence line in the document is
+// that wrapper's closing one, and everything between is the answer.
+wrapped = { fence_line ~ fenced_body ~ final_fence }
+
+// The same, cut off before the wrapper closed.
+unterminated = { fence_line ~ plain_body }
+
+// No wrapper. Nothing here is a wrapper's closing fence, so a fence on the
+// last line belongs to the value it sits in.
+bare = { plain_body }
+
+// The two bodies differ in ONE guard, and the duplication is deliberate. A
+// wrapped body must refuse to read the final fence as content, or the wrapper
+// swallows it; an unwrapped body must NOT refuse, or an answer whose value
+// ends in a code block silently loses its last line -- which is the same
+// silent-loss defect this format exists to close, arriving from the other
+// direction.
+fenced_body = { fenced_preamble? ~ fenced_field* }
+fenced_preamble = { fenced_loose+ }
+fenced_field = { tag_line ~ fenced_loose* }
+fenced_loose = { !tag_line ~ !final_fence ~ text_line }
+
+plain_body = { plain_preamble? ~ plain_field* }
+plain_preamble = { plain_loose+ }
+plain_field = { tag_line ~ plain_loose* }
+plain_loose = { !tag_line ~ text_line }
+
+// ---------------------------------------------------------------------------
+// tag lines
+// ---------------------------------------------------------------------------
+
+// The registers, all of them, in one place:
+//
+//   DECISION: value              bare
+//   **DECISION**: value          emphasised, any of the markdown emphases
+//   ## DECISION                  heading, value on the lines below
+//   ## DECISION: value           heading and separator together
+//   Decision — value             cousin register, any of the separators
+//   decision: value              any case
+//
+// The emphasis markers are matched as a PAIR (`PUSH`/`POP`), so `**DECISION*`
+// is not a tag line and `**DECISION**` never leaves an asterisk in the value.
+// That is defect one, stated as a rule.
+tag_line = { hspace* ~ (heading_tag | inline_tag) ~ hspace* ~ value_head ~ line_end }
+
+heading_tag = { heading_marker ~ hspace* ~ tag_body ~ (hspace* ~ separator)? }
+inline_tag = { tag_body ~ hspace* ~ separator }
+
+tag_body = { emphasised_tag | tag_name }
+emphasised_tag = { PUSH(emphasis) ~ tag_name ~ POP }
+emphasis = { "***" | "**" | "__" | "*" | "_" | "`" }
+
+// `#` opens a heading only in front of a tag name. A `#` at the head of a
+// value line is content and stays there -- defect three, stated as a rule.
+heading_marker = { "#"+ }
+
+separator = { ":" | "：" | "—" | "–" | "--" | "-" | "=" | "»" | ">" }
+
+// The closed vocabulary. Longest alternative first where one is a prefix of
+// another, because PEG choice is ordered.
+tag_name = {
+    ^"api_surface" | ^"api surface" | ^"api-surface"
+  | ^"decision" | ^"evidence" | ^"learned" | ^"stuck" | ^"plan"
+}
+
+// The remainder of the tag line: the field's first line of value, which may
+// be empty when the value starts on the line below.
+value_head = @{ (!nl ~ ANY)* }
+
+// ---------------------------------------------------------------------------
+// lines, fences, whitespace
+// ---------------------------------------------------------------------------
+
+// Consumes a newline, or at least one character at end of input. A rule that
+// can match the empty string inside a repetition never terminates.
+text_line = { line_content ~ nl | line_rest }
+line_content = @{ (!nl ~ ANY)* }
+line_rest = @{ (!nl ~ ANY)+ ~ &EOI }
+
+// A fence line, and the fence that closes a wrapper: the last one in the
+// document. A fence inside a value is an ordinary line and stays in the value.
+fence_line = { hspace* ~ fence_marker ~ (!nl ~ ANY)* ~ line_end }
+final_fence = { fence_line ~ trailing* ~ &EOI }
+fence_marker = { "```" | "~~~" }
+
+trailing = _{ hspace | nl }
+
+line_end = _{ nl | &EOI }
+nl = _{ "\r\n" | "\n" }
+hspace = _{ " " | "\t" }

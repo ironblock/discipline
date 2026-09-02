@@ -26,8 +26,9 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use diet::formats::interview::{Completion, Outcome};
 use diet::formats::regimen::Value;
-use diet::formats::{FORMATS, Format, decline, regimen};
+use diet::formats::{FORMATS, Format, decline, interview, regimen};
 use serde_json::{Map, Value as Json};
 
 /// Where fixtures live. `DISCIPLINE_FORMATS_DIR` overrides it so a seeded
@@ -84,6 +85,43 @@ fn parse_to_json(format: &str, source: &[u8]) -> Result<Json, String> {
                         "reason": parsed.reason,
                     }
                 })
+            })
+            .map_err(|err| err.to_string()),
+        "interview" => interview::parse(source)
+            .map(|answer| {
+                let fields: Vec<Json> = answer
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        let tag = field.tag.as_ref().map_or(Json::Null, |tag| {
+                            serde_json::json!({
+                                "kind": tag.kind.canonical_tag(),
+                                "as_written": tag.as_written,
+                            })
+                        });
+                        let outcome = match &field.outcome {
+                            Outcome::Value(text) => serde_json::json!({ "value": text }),
+                            Outcome::Decline(declined) => serde_json::json!({
+                                "decline": {
+                                    "marker": declined.marker,
+                                    "scope": declined.scope,
+                                    "reason": declined.reason,
+                                }
+                            }),
+                            Outcome::Unparseable { raw } => {
+                                serde_json::json!({ "unparseable": raw })
+                            }
+                        };
+                        serde_json::json!({ "tag": tag, "outcome": outcome })
+                    })
+                    .collect();
+                let completion = match answer.completion {
+                    Completion::Complete => Json::from("complete"),
+                    Completion::Truncated(signal) => {
+                        serde_json::json!({ "truncated": signal.name() })
+                    }
+                };
+                serde_json::json!({ "completion": completion, "fields": fields })
             })
             .map_err(|err| err.to_string()),
         other => panic!("format `{other}` is listed in FORMATS but not wired into the harness"),
@@ -353,7 +391,7 @@ mod formats {
     use super::FORMATS;
     use std::collections::BTreeSet;
 
-    per_format!(decline, regimen);
+    per_format!(decline, interview, regimen);
 
     /// A format in [`FORMATS`] with no module here is a format nobody can run
     /// on its own, and -- worse -- `cargo test -- formats::<name>` for it

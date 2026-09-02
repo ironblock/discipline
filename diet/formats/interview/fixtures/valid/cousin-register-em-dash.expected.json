@@ -1,0 +1,14 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "tag": {
+        "kind": "decision",
+        "as_written": "Decision \u2014"
+      },
+      "outcome": {
+        "value": "keep it"
+      }
+    }
+  ]
+}

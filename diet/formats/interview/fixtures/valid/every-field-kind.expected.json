@@ -1,0 +1,59 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "tag": {
+        "kind": "api_surface",
+        "as_written": "API_SURFACE:"
+      },
+      "outcome": {
+        "value": "parse, classify"
+      }
+    },
+    {
+      "tag": {
+        "kind": "decision",
+        "as_written": "DECISION:"
+      },
+      "outcome": {
+        "value": "keep the two-turn design"
+      }
+    },
+    {
+      "tag": {
+        "kind": "evidence",
+        "as_written": "EVIDENCE:"
+      },
+      "outcome": {
+        "value": "the log line reads exit 2"
+      }
+    },
+    {
+      "tag": {
+        "kind": "learned",
+        "as_written": "LEARNED:"
+      },
+      "outcome": {
+        "value": "tolerance is not the fix"
+      }
+    },
+    {
+      "tag": {
+        "kind": "plan",
+        "as_written": "PLAN:"
+      },
+      "outcome": {
+        "value": "ship the boundary first"
+      }
+    },
+    {
+      "tag": {
+        "kind": "stuck",
+        "as_written": "STUCK:"
+      },
+      "outcome": {
+        "value": "the resolver's ordering rule"
+      }
+    }
+  ]
+}

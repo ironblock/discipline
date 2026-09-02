@@ -20,6 +20,7 @@
 //! `per_format!` list -- not a new test file.
 
 pub mod decline;
+pub mod interview;
 pub mod regimen;
 
 /// A format with a grammar and a conformance-fixture directory.
@@ -43,6 +44,10 @@ pub struct Format {
 pub const FORMATS: &[Format] = &[
     Format {
         name: "decline",
+        case_extension: "txt",
+    },
+    Format {
+        name: "interview",
         case_extension: "txt",
     },
     Format {
