@@ -45,8 +45,12 @@ array = { "[" ~ hspace* ~ (value ~ (hspace* ~ "," ~ hspace* ~ value)*)? ~ hspace
 value = { object | array | string | decimal | integer | boolean }
 
 decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }
-integer = @{ "-"? ~ int_part }
-int_part = _{ "0" | (ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*) }
+// `-0` is a second spelling of `0`, so a negative integer starts with a
+// nonzero digit. One spelling per value is the rule `01` and `7e-1` are
+// already fixtured rejections for; this was the hole in it.
+integer = @{ ("-" ~ nonzero) | int_part }
+int_part = _{ "0" | nonzero }
+nonzero = _{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
 
 boolean = { "true" | "false" }
 

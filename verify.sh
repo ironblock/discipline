@@ -288,6 +288,17 @@ seeded_case() {
       return
       ;;
   esac
+  # Every sandbox shares SELFTEST_TARGET, and a test binary bakes its
+  # CARGO_MANIFEST_DIR in at compile time. So a binary cargo judges fresh and
+  # reuses reads the FIXTURES OF THE BOX IT WAS BUILT IN -- a stale-artifact
+  # false receipt, one directory over from the one this selftest already
+  # carries a comment about. It is safe today only because every injection
+  # happens to edit Rust source and so forces a rebuild; one that touched only
+  # a fixture would silently test the wrong tree. Touching a source file after
+  # the fingerprint is taken removes the coincidence. `git write-tree` hashes
+  # content, so this does not disturb the comparison above.
+  touch diet/src/lib.rs 2> /dev/null || true
+
   if [ "$state_before" = "$state_after" ]; then
     printf 'BROKEN verify.sh --only %-8s          %s  <-- THE INJECTION CHANGED NOTHING\n' \
       "$check" "$label"
@@ -419,12 +430,11 @@ import pathlib
 path = pathlib.Path("diet/src/formats/record/mod.rs")
 source = path.read_text(encoding="utf-8")
 edits = [
-    ("    Summary,\n}", "    Summary,\n    /// Seeded: wired everywhere, fixtured nowhere.\n    Spurious,\n}"),
-    ("        Self::Summary,\n    ];", "        Self::Summary,\n        Self::Spurious,\n    ];"),
-    ('            Self::Summary => "summary",',
-     '            Self::Summary => "summary",\n            Self::Spurious => "spurious",'),
+    ('        /// The session\'s totals.\n        Summary => "summary",',
+     '        /// The session\'s totals.\n        Summary => "summary",\n'
+     '        /// Seeded: wired everywhere, fixtured nowhere.\n        Spurious => "spurious",'),
     ("        Kind::Summary => Event::Summary {",
-     "        Kind::Spurious => Event::Turn { index: 1, prefill_tokens: 0 },\n"
+     "        Kind::Spurious => Event::Turn { index: 1, prefill_tokens: Count::default() },\n"
      "        Kind::Summary => Event::Summary {"),
 ]
 for old, new in edits:
@@ -437,6 +447,27 @@ EOF
 # Provenance made optional. A substrate that defaults when absent is a regime
 # that reads complete and is not, which is how partial regimes were compared as
 # though they were comparable.
+# Links checked after the row's own id was recorded, which is what let a
+# request retry itself and a claim supersede itself.
+inject_record_self_link_allowed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "        seen.admit(event)?;\n        seen.claim_id(event)?;"
+new = "        seen.claim_id(event)?;\n        seen.admit(event)?;"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The depth limit removed. Recursive descent then runs out of stack and aborts
+# the process, and an abort is not a verdict.
+inject_record_depth_unbounded() {
+  sed -i 's|^    if depth > MAX_DEPTH {$|    if false {|' diet/src/formats/record/mod.rs
+}
+
 inject_record_substrate_optional() {
   python3 - <<'EOF'
 import pathlib
@@ -449,7 +480,13 @@ new = """    let mut substrate_members = take_object(members, of, "substrate").u
             ("name".to_owned(), Value::String("unknown".to_owned())),
             ("model".to_owned(), Value::String("unknown".to_owned())),
             ("quantization".to_owned(), Value::String("unknown".to_owned())),
-            ("sampler".to_owned(), Value::Object(BTreeMap::new())),
+            (
+                "sampler".to_owned(),
+                Value::Object(BTreeMap::from([(
+                    "seed".to_owned(),
+                    Value::Integer(0),
+                )])),
+            ),
             ("reasoning".to_owned(), Value::String("off".to_owned())),
             ("hardware".to_owned(), Value::String("unknown".to_owned())),
         ])
@@ -765,6 +802,10 @@ selftest() {
     'no fixture.*spurious'
   seeded_case "record substrate made optional"        test     inject_record_substrate_optional \
     'regime-missing-substrate\.jsonl: accepted as'
+  seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
+    'retry-of-itself\.jsonl: accepted as'
+  seeded_case "record nesting left unbounded"         test     inject_record_depth_unbounded \
+    'deep-nesting\.jsonl: accepted as'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
     'front-matter `turns` states 3 but the summary record binds'
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \

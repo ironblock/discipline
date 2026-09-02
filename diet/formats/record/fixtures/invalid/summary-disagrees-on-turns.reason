@@ -1,0 +1,4 @@
+A summary that does not summarise the rows above it. A report's
+front-matter numbers are verified against this row rather than against the
+rows, so an inconsistent summary launders a wrong number into a green
+results gate.
