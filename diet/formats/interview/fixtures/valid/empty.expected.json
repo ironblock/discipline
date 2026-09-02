@@ -1,4 +1,5 @@
 {
-  "completion": "complete",
-  "fields": []
+  "completion": "empty",
+  "fields": [],
+  "wrapper": null
 }

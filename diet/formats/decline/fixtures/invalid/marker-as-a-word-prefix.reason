@@ -1,2 +1,2 @@
-`none` is a prefix of `nonetheless`. Anchoring at both ends is what stops
-a marker matching inside a longer word.
+`none` is a prefix of `nonetheless`. The marker must be followed by
+something that ends the phrase; letters do not.

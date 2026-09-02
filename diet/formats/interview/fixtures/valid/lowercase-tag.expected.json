@@ -2,13 +2,15 @@
   "completion": "complete",
   "fields": [
     {
-      "tag": {
-        "kind": "decision",
-        "as_written": "decision:"
-      },
       "outcome": {
         "value": "keep it"
+      },
+      "raw": "keep it",
+      "tag": {
+        "as_written": "decision:",
+        "kind": "decision"
       }
     }
-  ]
+  ],
+  "wrapper": null
 }

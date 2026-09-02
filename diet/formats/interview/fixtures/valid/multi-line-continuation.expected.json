@@ -2,13 +2,15 @@
   "completion": "complete",
   "fields": [
     {
-      "tag": {
-        "kind": "decision",
-        "as_written": "DECISION:"
-      },
       "outcome": {
         "value": "keep the two-turn design\nbecause the constrained turn cannot carry judgment\nand the judgment turn cannot be constrained"
+      },
+      "raw": "keep the two-turn design\nbecause the constrained turn cannot carry judgment\nand the judgment turn cannot be constrained",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
       }
     }
-  ]
+  ],
+  "wrapper": null
 }

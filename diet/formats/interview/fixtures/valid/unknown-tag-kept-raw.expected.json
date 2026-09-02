@@ -2,19 +2,20 @@
   "completion": "complete",
   "fields": [
     {
-      "tag": null,
-      "outcome": {
-        "unparseable": "SUMMARY: a field this format does not know"
-      }
+      "outcome": "unparseable",
+      "raw": "SUMMARY: a field this format does not know",
+      "tag": null
     },
     {
-      "tag": {
-        "kind": "decision",
-        "as_written": "DECISION:"
-      },
       "outcome": {
         "value": "keep it"
+      },
+      "raw": "keep it",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
       }
     }
-  ]
+  ],
+  "wrapper": null
 }

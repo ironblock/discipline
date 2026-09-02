@@ -2,13 +2,15 @@
   "completion": "complete",
   "fields": [
     {
-      "tag": {
-        "kind": "learned",
-        "as_written": "LEARNED:"
-      },
       "outcome": {
         "value": "the fix\n# not a heading, part of the value"
+      },
+      "raw": "the fix\n# not a heading, part of the value",
+      "tag": {
+        "as_written": "LEARNED:",
+        "kind": "learned"
       }
     }
-  ]
+  ],
+  "wrapper": null
 }

@@ -2,58 +2,65 @@
   "completion": "complete",
   "fields": [
     {
-      "tag": {
-        "kind": "api_surface",
-        "as_written": "API_SURFACE:"
-      },
       "outcome": {
         "value": "parse, classify"
+      },
+      "raw": "parse, classify",
+      "tag": {
+        "as_written": "API_SURFACE:",
+        "kind": "api_surface"
       }
     },
     {
-      "tag": {
-        "kind": "decision",
-        "as_written": "DECISION:"
-      },
       "outcome": {
         "value": "keep the two-turn design"
+      },
+      "raw": "keep the two-turn design",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
       }
     },
     {
-      "tag": {
-        "kind": "evidence",
-        "as_written": "EVIDENCE:"
-      },
       "outcome": {
         "value": "the log line reads exit 2"
+      },
+      "raw": "the log line reads exit 2",
+      "tag": {
+        "as_written": "EVIDENCE:",
+        "kind": "evidence"
       }
     },
     {
-      "tag": {
-        "kind": "learned",
-        "as_written": "LEARNED:"
-      },
       "outcome": {
         "value": "tolerance is not the fix"
+      },
+      "raw": "tolerance is not the fix",
+      "tag": {
+        "as_written": "LEARNED:",
+        "kind": "learned"
       }
     },
     {
-      "tag": {
-        "kind": "plan",
-        "as_written": "PLAN:"
-      },
       "outcome": {
         "value": "ship the boundary first"
+      },
+      "raw": "ship the boundary first",
+      "tag": {
+        "as_written": "PLAN:",
+        "kind": "plan"
       }
     },
     {
-      "tag": {
-        "kind": "stuck",
-        "as_written": "STUCK:"
-      },
       "outcome": {
         "value": "the resolver's ordering rule"
+      },
+      "raw": "the resolver's ordering rule",
+      "tag": {
+        "as_written": "STUCK:",
+        "kind": "stuck"
       }
     }
-  ]
+  ],
+  "wrapper": null
 }

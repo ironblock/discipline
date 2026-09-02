@@ -2,19 +2,20 @@
   "completion": "complete",
   "fields": [
     {
-      "tag": null,
-      "outcome": {
-        "unparseable": "Here is what I found this turn."
-      }
+      "outcome": "unparseable",
+      "raw": "Here is what I found this turn.",
+      "tag": null
     },
     {
-      "tag": {
-        "kind": "decision",
-        "as_written": "DECISION:"
-      },
       "outcome": {
         "value": "keep it"
+      },
+      "raw": "keep it",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
       }
     }
-  ]
+  ],
+  "wrapper": null
 }

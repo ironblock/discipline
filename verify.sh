@@ -225,10 +225,16 @@ sandbox() {
 # rather than files. Compared either side of an injection, it answers the one
 # question a seeded case cannot answer for itself -- did the injection inject
 # anything at all?
+# Any git failure here is reported rather than swallowed. It used to end with
+# `|| true`, so a sandbox git could not read -- a full disk, a half-built copy
+# -- fingerprinted identically either side of the injection, and every case
+# printed THE INJECTION CHANGED NOTHING. That is a confident answer to a
+# question nobody asked.
+readonly STATE_UNREADABLE="sandbox-state-unreadable"
 sandbox_state() {
   local box="$1"
-  git -C "$box" add --all > /dev/null 2>&1 || true
-  git -C "$box" write-tree 2> /dev/null || echo "no-tree"
+  git -C "$box" add --all > /dev/null 2>&1 || { echo "$STATE_UNREADABLE"; return; }
+  git -C "$box" write-tree 2> /dev/null || { echo "$STATE_UNREADABLE"; return; }
   git -C "$box" show-ref 2> /dev/null || true
 }
 
@@ -254,7 +260,15 @@ seeded_case() {
     exit "$EXIT_MISUSE"
   fi
 
-  sandbox "$box"
+  # `selftest` is invoked in a `||` list, which suspends errexit for everything
+  # it calls, so a failed `sandbox` used to return 1 into a caller that carried
+  # on regardless -- into a directory that was never even `git init`-ed.
+  if ! sandbox "$box"; then
+    printf 'BROKEN verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE BUILT\n' \
+      "$check" "$label"
+    SELFTEST_BROKEN+=("${label}: the sandbox could not be built")
+    return
+  fi
 
   # An injection is a `sed` or a `printf` against a file it names. Rename the
   # file, or reshape the line the pattern matches, and the injection silently
@@ -266,6 +280,14 @@ seeded_case() {
   state_before="$(sandbox_state "$box")"
   ( cd "$box" && "$inject" )
   state_after="$(sandbox_state "$box")"
+  case "${state_before}${state_after}" in
+    *"${STATE_UNREADABLE}"*)
+      printf 'BROKEN verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE READ\n' \
+        "$check" "$label"
+      SELFTEST_BROKEN+=("${label}: the sandbox's state could not be read")
+      return
+      ;;
+  esac
   if [ "$state_before" = "$state_after" ]; then
     printf 'BROKEN verify.sh --only %-8s          %s  <-- THE INJECTION CHANGED NOTHING\n' \
       "$check" "$label"
@@ -349,7 +371,7 @@ inject_conformance() {
 # and shipped its own regression, which is why the corpus rather than the
 # tolerance is the gate.
 inject_interview_drops_continuations() {
-  sed -i 's|^    let value = lines.join("\\n");$|    let value = lines.first().cloned().unwrap_or_default();|' \
+  sed -i 's|^    let joined = value.join("\\n");$|    let joined = value.first().cloned().unwrap_or_default();|' \
     diet/src/formats/interview.rs
 }
 
@@ -357,8 +379,33 @@ inject_interview_drops_continuations() {
 # produced exactly as much valid answer as it had room for; calling it complete
 # banks a partial answer as a whole one.
 inject_interview_truncation_blind() {
-  sed -i 's|^fn completion_of(unterminated: bool, fields: &\[Field\]) -> Completion {$|fn completion_of(unterminated: bool, fields: \&[Field]) -> Completion {\n    let _ = (unterminated, fields);\n    return Completion::Complete;|' \
-    diet/src/formats/interview.rs
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/interview.rs")
+source = path.read_text(encoding="utf-8")
+old = "    if let Some(signal) = signal {\n        return Completion::Truncated(signal);\n    }"
+new = "    if false {\n        return Completion::Truncated(signal.unwrap_or(\n            TruncationSignal::UnterminatedFence,\n        ));\n    }"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The sixth defect, restaged: content after the wrapper's closing fence
+# discarded with no signal. It is what a corpus of hand-authored fixtures
+# cannot catch -- a fixture pins what the parser produced, never what it
+# dropped -- so the accounting property is what has to go red here.
+inject_interview_discards_trailing() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/interview.rs")
+source = path.read_text(encoding="utf-8")
+old = "    if close_at < lines.len() {\n        fields.extend(group(&lines[close_at + 1..]));\n    }"
+new = "    if false && close_at < lines.len() {\n        fields.extend(group(&lines[close_at + 1..]));\n    }"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
 }
 
 # An event kind wired into the schema but never fixtured. The compiler catches
@@ -707,11 +754,13 @@ selftest() {
   seeded_case "FORMATS emptied, harness covers none"  test     inject_formats_empty \
     'FORMATS is empty'
   seeded_case "decline grammar loses its end anchor"  test     inject_decline_unanchored \
-    'mentions-nothing-but-carries-content\.txt: accepted as'
+    'coordinated-with-and\.txt: accepted as'
   seeded_case "interview drops continuation lines"    test     inject_interview_drops_continuations \
     'multi-line-continuation\.txt: parsed to'
   seeded_case "interview blind to truncation"         test     inject_interview_truncation_blind \
     'truncated-unterminated-fence\.txt: parsed to'
+  seeded_case "interview discards trailing content"   test     inject_interview_discards_trailing \
+    'content lost parsing'
   seeded_case "an event kind with no fixture"         test     inject_record_unfixtured_kind \
     'no fixture.*spurious'
   seeded_case "record substrate made optional"        test     inject_record_substrate_optional \

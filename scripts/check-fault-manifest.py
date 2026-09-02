@@ -49,14 +49,23 @@ MECH = re.compile(r'expect_exit\s+"([^"]+)"\s+(\d+)')
 REQ = re.compile(r"REQUIRED_(HYGIENE|PAGES)_CLASSES=\(([^)]*)\)", re.DOTALL)
 
 
+# What each seeded case says about itself, keyed by the id derived from it.
+# Recorded so the manifest's own prose can be checked rather than trusted: an
+# entry whose `label` and `legacy_signature` are fiction describes a fault
+# nobody proves, and the id alone cannot tell you that.
+DETAILS: dict[str, dict[str, str]] = {}
+
+
 def observed() -> dict[str, set[str]]:
     """What verify.sh proves, read out of verify.sh rather than assumed."""
     s = VERIFY.read_text(encoding="utf-8")
     seen: dict[str, set[str]] = {k: set() for k in
                                  ("seeded-gate", "mechanics", "results-fixture",
                                   "pattern-class", "subset-fixture")}
-    for _label, check, inject, _sig in CASE.findall(s):
-        seen["seeded-gate"].add(f"{check}.{inject.removeprefix('inject_')}")
+    for label, check, inject, sig in CASE.findall(s):
+        ident = f"{check}.{inject.removeprefix('inject_')}"
+        seen["seeded-gate"].add(ident)
+        DETAILS[ident] = {"label": label, "legacy_signature": sig}
     for label, _want in MECH.findall(s):
         seen["mechanics"].add("mech." + re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-"))
     for kind, body in REQ.findall(s):
@@ -91,6 +100,9 @@ def main() -> int:
         print(f"{MANIFEST}: declares no faults, so it defines no parity", file=sys.stderr)
         return 1
 
+    # Before the loop: `observed()` is what fills DETAILS, which the loop reads.
+    seen = observed()
+
     declared: dict[str, set[str]] = {}
     for index, entry in enumerate(entries):
         where = f"{MANIFEST.name}[{index}]"
@@ -102,6 +114,17 @@ def main() -> int:
             if ident in declared.setdefault(kind, set()):
                 failures.append(f"{where}: duplicate id `{ident}`")
             declared[kind].add(ident)
+        # The id says the case exists; these say what it proves. Both were
+        # unchecked prose until an adversarial review put fiction in them and
+        # watched this script pass.
+        if kind == "seeded-gate" and isinstance(ident, str) and ident in DETAILS:
+            for field, actual in DETAILS[ident].items():
+                stated = entry.get(field)
+                if stated != actual:
+                    failures.append(
+                        f"{where}: {field} is {stated!r}, but verify.sh's "
+                        f"case says {actual!r}"
+                    )
         if entry.get("migrated") is True and "failure_class" not in entry:
             failures.append(f"{where}: marked migrated with no failure_class")
         # An entry whose assertion moves must name where it lands, or the
@@ -109,7 +132,6 @@ def main() -> int:
         if kind in RELOCATING and not isinstance(entry.get("migrated_to"), str):
             failures.append(f"{where}: kind `{kind}` must carry a `migrated_to` pointer")
 
-    seen = observed()
     for kind in sorted(set(seen) | set(declared)):
         have, want = declared.get(kind, set()), seen.get(kind, set())
         for ident in sorted(want - have):

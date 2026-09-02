@@ -1,2 +1,4 @@
-A NUL byte in an emitted answer is corruption, not content. A format that
-lets one into the permanent record has accepted the corruption as a value.
+A NUL byte is where a byte stream ends, not something a text emitter
+writes. It is the one content rejection this format makes: every other
+awkward byte is kept, because rejecting an answer discards the fields that
+did parse.

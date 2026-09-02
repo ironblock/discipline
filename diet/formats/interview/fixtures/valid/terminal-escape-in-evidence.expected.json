@@ -1,0 +1,26 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "keep it"
+      },
+      "raw": "keep it",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
+      }
+    },
+    {
+      "outcome": {
+        "value": "test result: \u001b[31mFAILED\u001b[0m. 1 failed"
+      },
+      "raw": "test result: \u001b[31mFAILED\u001b[0m. 1 failed",
+      "tag": {
+        "as_written": "EVIDENCE:",
+        "kind": "evidence"
+      }
+    }
+  ],
+  "wrapper": null
+}
