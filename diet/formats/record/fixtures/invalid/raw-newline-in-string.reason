@@ -1,0 +1,2 @@
+One event, one line. A raw control character inside a string is what would
+let an event span lines.

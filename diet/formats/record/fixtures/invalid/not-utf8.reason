@@ -1,0 +1,2 @@
+Not UTF-8. A format must return a verdict on arbitrary bytes rather than
+crash on them.

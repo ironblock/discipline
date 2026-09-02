@@ -1,0 +1,1 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"n","model":"m","quantization":"q","sampler":{"temperature":7e-1},"reasoning":"on","hardware":"h"}}}

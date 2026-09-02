@@ -1,0 +1,2 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"a-model","quantization":"q4","sampler":{"seed":7,"temperature":0.7},"reasoning":"on","hardware":"one-gpu"}}}
+{"record":"turn","index":1,"prefill_tokens":10,"prefil_tokens":10}

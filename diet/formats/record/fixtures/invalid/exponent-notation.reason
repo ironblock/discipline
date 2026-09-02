@@ -1,0 +1,2 @@
+One spelling per value. `7e-1` and `0.7` are the same number and different
+bytes, and two records of the same run must not differ by spelling.

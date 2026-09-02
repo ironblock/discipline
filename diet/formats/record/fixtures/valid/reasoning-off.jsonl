@@ -1,0 +1,1 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"a-model","quantization":"q4","sampler":{},"reasoning":"off","hardware":"one-gpu"}}}

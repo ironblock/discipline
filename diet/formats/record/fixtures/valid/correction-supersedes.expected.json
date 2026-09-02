@@ -1,0 +1,12 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrate\":{\"hardware\":\"one-gpu\",\"model\":\"a-model\",\"name\":\"local\",\"quantization\":\"q4\",\"reasoning\":\"on\",\"sampler\":{\"seed\":7,\"temperature\":0.7}}}}\n{\"consumes\":[{\"path\":\"run.jsonl\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"hypothesis\":\"the rate is 0.42\",\"id\":\"c1\",\"record\":\"claim\",\"result\":\"supported\"}\n{\"consumes\":[{\"path\":\"run.jsonl\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},{\"path\":\"regrade.jsonl\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"hypothesis\":\"the rate is 0.42\",\"id\":\"c2\",\"record\":\"claim\",\"result\":\"refuted\",\"supersedes\":\"c1\"}\n",
+  "kinds": [
+    "start",
+    "claim"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "substrate": "local"
+  }
+}

@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 
 use diet::formats::interview::{Completion, Outcome};
 use diet::formats::regimen::Value;
-use diet::formats::{FORMATS, Format, decline, interview, regimen};
+use diet::formats::{FORMATS, Format, decline, interview, record, regimen};
 use serde_json::{Map, Value as Json};
 
 /// Where fixtures live. `DISCIPLINE_FORMATS_DIR` overrides it so a seeded
@@ -122,6 +122,25 @@ fn parse_to_json(format: &str, source: &[u8]) -> Result<Json, String> {
                     }
                 };
                 serde_json::json!({ "completion": completion, "fields": fields })
+            })
+            .map_err(|err| err.to_string()),
+        "record" => record::parse(source)
+            .map(|parsed| {
+                // Three things, each pinning something different: the regime
+                // trio a report's front-matter mirrors, which event kinds the
+                // case exercises, and the canonical rendering -- which pins
+                // every value's type and spelling byte for byte, and is short
+                // enough that a reviewer can check it against the input line
+                // by line.
+                serde_json::json!({
+                    "regime": {
+                        "arm": parsed.regime.arm,
+                        "substrate": parsed.regime.substrate.name,
+                        "dogma_version": parsed.regime.dogma_version,
+                    },
+                    "kinds": parsed.kinds().iter().map(|kind| kind.tag()).collect::<Vec<_>>(),
+                    "canonical": record::render(&parsed),
+                })
             })
             .map_err(|err| err.to_string()),
         other => panic!("format `{other}` is listed in FORMATS but not wired into the harness"),
@@ -391,7 +410,7 @@ mod formats {
     use super::FORMATS;
     use std::collections::BTreeSet;
 
-    per_format!(decline, interview, regimen);
+    per_format!(decline, interview, record, regimen);
 
     /// A format in [`FORMATS`] with no module here is a format nobody can run
     /// on its own, and -- worse -- `cargo test -- formats::<name>` for it

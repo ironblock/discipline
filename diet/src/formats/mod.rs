@@ -21,6 +21,7 @@
 
 pub mod decline;
 pub mod interview;
+pub mod record;
 pub mod regimen;
 
 /// A format with a grammar and a conformance-fixture directory.
@@ -49,6 +50,10 @@ pub const FORMATS: &[Format] = &[
     Format {
         name: "interview",
         case_extension: "txt",
+    },
+    Format {
+        name: "record",
+        case_extension: "jsonl",
     },
     Format {
         name: "regimen",

@@ -1,0 +1,11 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrate\":{\"hardware\":\"h\",\"model\":\"m\",\"name\":\"local\",\"quantization\":\"q\",\"reasoning\":\"on\",\"sampler\":{\"min_p\":-0.5,\"seed\":0,\"temperature\":0.7000,\"top_p\":0.94999999999999996}}}}\n",
+  "kinds": [
+    "start"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "substrate": "local"
+  }
+}

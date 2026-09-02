@@ -361,6 +361,57 @@ inject_interview_truncation_blind() {
     diet/src/formats/interview.rs
 }
 
+# An event kind wired into the schema but never fixtured. The compiler catches
+# a variant that is not wired at all; what it cannot catch is a variant that is
+# wired everywhere and exercised nowhere, which is the shape a silent
+# serialization bug actually arrives in.
+inject_record_unfixtured_kind() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+edits = [
+    ("    Summary,\n}", "    Summary,\n    /// Seeded: wired everywhere, fixtured nowhere.\n    Spurious,\n}"),
+    ("        Self::Summary,\n    ];", "        Self::Summary,\n        Self::Spurious,\n    ];"),
+    ('            Self::Summary => "summary",',
+     '            Self::Summary => "summary",\n            Self::Spurious => "spurious",'),
+    ("        Kind::Summary => Event::Summary {",
+     "        Kind::Spurious => Event::Turn { index: 1, prefill_tokens: 0 },\n"
+     "        Kind::Summary => Event::Summary {"),
+]
+for old, new in edits:
+    assert old in source, old
+    source = source.replace(old, new, 1)
+path.write_text(source, encoding="utf-8")
+EOF
+}
+
+# Provenance made optional. A substrate that defaults when absent is a regime
+# that reads complete and is not, which is how partial regimes were compared as
+# though they were comparable.
+inject_record_substrate_optional() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '    let mut substrate_members = take_object(members, of, "substrate")?;'
+new = """    let mut substrate_members = take_object(members, of, "substrate").unwrap_or_else(|_| {
+        BTreeMap::from([
+            ("name".to_owned(), Value::String("unknown".to_owned())),
+            ("model".to_owned(), Value::String("unknown".to_owned())),
+            ("quantization".to_owned(), Value::String("unknown".to_owned())),
+            ("sampler".to_owned(), Value::Object(BTreeMap::new())),
+            ("reasoning".to_owned(), Value::String("off".to_owned())),
+            ("hardware".to_owned(), Value::String("unknown".to_owned())),
+        ])
+    });"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_results() {
   cp -r tests/fixtures/results-bad/2026-01-09-unbacked-number results/
 }
@@ -661,6 +712,10 @@ selftest() {
     'multi-line-continuation\.txt: parsed to'
   seeded_case "interview blind to truncation"         test     inject_interview_truncation_blind \
     'truncated-unterminated-fence\.txt: parsed to'
+  seeded_case "an event kind with no fixture"         test     inject_record_unfixtured_kind \
+    'no fixture.*spurious'
+  seeded_case "record substrate made optional"        test     inject_record_substrate_optional \
+    'regime-missing-substrate\.jsonl: accepted as'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
     'front-matter `turns` states 3 but the summary record binds'
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \

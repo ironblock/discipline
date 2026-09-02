@@ -1,0 +1,14 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrate\":{\"hardware\":\"one-gpu\",\"model\":\"a-model\",\"name\":\"local\",\"quantization\":\"q4\",\"reasoning\":\"on\",\"sampler\":{\"seed\":7,\"temperature\":0.7}}}}\n{\"index\":1,\"prefill_tokens\":10,\"record\":\"turn\"}\n{\"id\":\"q1\",\"lane\":\"main\",\"record\":\"request\"}\n{\"id\":\"q2\",\"lane\":\"main\",\"record\":\"request\",\"retry_of\":\"q1\"}\n{\"id\":\"a1\",\"output_tokens\":7,\"record\":\"response\",\"to_request\":\"q2\"}\n",
+  "kinds": [
+    "start",
+    "turn",
+    "request",
+    "response"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "substrate": "local"
+  }
+}

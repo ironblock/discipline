@@ -1,0 +1,2 @@
+An artifact reference without a real digest names a file, not a version of
+one, and the file may have changed since.

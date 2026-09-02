@@ -1,0 +1,2 @@
+The substrate tag is required, not optional. An optional substrate field is
+one that will be absent exactly when it matters.

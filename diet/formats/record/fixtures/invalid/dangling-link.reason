@@ -1,0 +1,2 @@
+A response naming a request that never appeared is the failure retry
+lineage exists to prevent: an answer that cannot say what produced it.

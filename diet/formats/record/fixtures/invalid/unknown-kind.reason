@@ -1,0 +1,2 @@
+An event kind this schema does not define has no serialization path and no
+fixture; accepting it would let one exist unnoticed.

@@ -1,0 +1,2 @@
+Links resolve backwards only. A lineage that can be resolved only by
+reading ahead cannot be walked while the record is being written.

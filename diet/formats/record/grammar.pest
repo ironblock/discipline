@@ -1,0 +1,74 @@
+// The `record` format, v0. This file is NORMATIVE: the Rust parser in
+// diet/src/formats/record/ implements it and is not itself the definition.
+//
+// A session record is JSON Lines: one event per line, in the order the events
+// happened. The syntax below is a SUBSET of JSON, deliberately, in the same
+// way `regimen` is a subset of TOML -- a record holds identifiers, counts,
+// exact numbers and text, and every JSON construct outside that space is a
+// construct nobody has had to record and nobody has had to read back.
+//
+// Three restrictions carry reasons, because each of them cost something:
+//
+//   * NO `null`. Absence is expressed by omitting the key. A null says the
+//     field exists and holds nothing, which in a provenance record cannot be
+//     told apart from a field nobody filled in -- and telling those apart is
+//     the entire job.
+//   * NO BINARY FLOATS. A `decimal` keeps the digits exactly as they were
+//     written. A banked number should read back as the number that was
+//     computed, not as the nearest double to it, and a record that round-trips
+//     0.142 into 0.14199999999999999 has lost the thing it was storing.
+//   * NO EXPONENTS, NO LEADING ZEROS. One spelling per value, so that two
+//     records of the same run are the same bytes.
+//
+// A raw control character inside a string is rejected, which is also what
+// keeps one event on one line: an unescaped newline cannot appear inside an
+// event.
+
+document = { SOI ~ (event_line | blank_line)* ~ hspace* ~ EOI }
+
+// One event. The object may not span lines, because `hspace` -- not `ws` --
+// is what may sit between its tokens.
+event_line = { hspace* ~ object ~ hspace* ~ line_end }
+blank_line = { hspace* ~ nl }
+
+// ---------------------------------------------------------------------------
+// the value space
+// ---------------------------------------------------------------------------
+
+object = { "{" ~ hspace* ~ (member ~ (hspace* ~ "," ~ hspace* ~ member)*)? ~ hspace* ~ "}" }
+member = { string ~ hspace* ~ ":" ~ hspace* ~ value }
+
+array = { "[" ~ hspace* ~ (value ~ (hspace* ~ "," ~ hspace* ~ value)*)? ~ hspace* ~ "]" }
+
+// `decimal` before `integer`: PEG choice is ordered, and `integer` would match
+// the `0` of `0.142` and strand the rest.
+value = { object | array | string | decimal | integer | boolean }
+
+decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }
+integer = @{ "-"? ~ int_part }
+int_part = _{ "0" | (ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*) }
+
+boolean = { "true" | "false" }
+
+// ---------------------------------------------------------------------------
+// strings
+// ---------------------------------------------------------------------------
+
+string = ${ "\"" ~ string_inner ~ "\"" }
+string_inner = @{ string_char* }
+string_char = _{ escape | unescaped }
+escape = _{ "\\" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t" | ("u" ~ hex{4})) }
+
+// The control range is excluded here rather than decoded later, so a record
+// carrying a raw byte no emitter produces is rejected at the door.
+unescaped = _{ !("\"" | "\\") ~ !control ~ ANY }
+control = _{ '\x00'..'\x1f' }
+hex = _{ ASCII_HEX_DIGIT }
+
+// ---------------------------------------------------------------------------
+// whitespace
+// ---------------------------------------------------------------------------
+
+line_end = _{ nl | &EOI }
+nl = _{ "\r\n" | "\n" }
+hspace = _{ " " | "\t" }

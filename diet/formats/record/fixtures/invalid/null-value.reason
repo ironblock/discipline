@@ -1,0 +1,3 @@
+No `null`. Absence is expressed by omitting the key; a null says the field
+exists and holds nothing, which cannot be told apart from a field nobody
+filled in.

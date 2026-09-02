@@ -1,8 +1,13 @@
 # The fault-migration manifest: what parity means.
 #
-# `verify.sh` proves 66 seeded faults red and asserts 9 scanner mechanics. The
-# replacement gate retires the old one only when it proves EVERY entry here --
-# equivalence before retirement, the program's instrument law applied to gates.
+# `verify.sh` proves every fault below red and asserts every mechanic below.
+# The counts live in `[meta]`, where check-fault-manifest.py compares them
+# against what verify.sh actually does; a count restated in prose is a count
+# that goes stale, and this header carried a stale one for three commits.
+#
+# The replacement gate retires the old one only when it proves EVERY entry
+# here -- equivalence before retirement, the program's instrument law applied
+# to gates.
 #
 # `failure_class` is the reframing. The old gate matched a message string,
 # which is grep-as-verdict one level up and is why signatures went stale twice.
@@ -29,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 78
+red_faults = 80
 mechanics_assertions = 14
 migrated = 0
 
@@ -104,6 +109,24 @@ check = "test"
 label = "interview blind to truncation"
 failure_class = "format.valid-fixture-misparsed"
 legacy_signature = "truncated-unterminated-fence\\.txt: parsed to"
+migrated = false
+
+[[fault]]
+id = "test.record_unfixtured_kind"
+kind = "seeded-gate"
+check = "test"
+label = "an event kind with no fixture"
+failure_class = "format.kind-without-fixture"
+legacy_signature = "no fixture.*spurious"
+migrated = false
+
+[[fault]]
+id = "test.record_substrate_optional"
+kind = "seeded-gate"
+check = "test"
+label = "record substrate made optional"
+failure_class = "format.invalid-fixture-accepted"
+legacy_signature = "regime-missing-substrate\\.jsonl: accepted as"
 migrated = false
 
 [[fault]]
