@@ -1,0 +1,1 @@
+Front-matter states turns = 2048. The summary record binds turns to 2; 2048 is a real number in the record but belongs to a different key.

@@ -1,0 +1,1 @@
+A key may be bound at most once. The grammar cannot state this; the parser enforces it.

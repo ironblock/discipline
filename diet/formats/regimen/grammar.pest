@@ -1,0 +1,53 @@
+//! regimen — grammar, v0
+//!
+//! This file is the normative description of the regimen format. A regimen is
+//! a versioned, fixed combination of variables describing the character,
+//! performance, and timing of a session. v0 is a deliberately minimal,
+//! line-oriented subset of TOML: bare keys, scalar values, comments.
+//!
+//! Being a SUBSET of TOML is load-bearing, not decorative: `regimen.toml`
+//! files under `results/` are read by this grammar and by Python's `tomllib`,
+//! and the two must never disagree about the same file. So anything TOML
+//! rejects, this grammar must reject too.
+//!
+//! Deliberately absent in v0, and expected to arrive later: tables, arrays,
+//! floats, datetimes, dotted keys, quoted keys, multi-line strings, string
+//! escapes, `+` before an integer, leading zeros, and underscores in numbers.
+//!
+//! Two rules this grammar cannot state, which the parser therefore enforces:
+//! a key may appear at most once in a document, and an integer literal must
+//! fit in an `i64`.
+
+file      =  { SOI ~ item* ~ EOI }
+
+item      = _{ blank | statement | trailing }
+blank     = _{ sp* ~ nl }
+statement = _{ sp* ~ (pair ~ (sp* ~ comment)? | comment) ~ sp* ~ (nl | &EOI) }
+trailing  = _{ sp+ ~ &EOI }
+
+pair      =  { key ~ sp* ~ "=" ~ sp* ~ value }
+key       =  { (ASCII_ALPHANUMERIC | "_" | "-")+ }
+
+value     = _{ string | boolean | integer }
+string    =  { "\"" ~ inner ~ "\"" }
+inner     =  { char* }
+boolean   =  { "true" | "false" }
+
+// No leading zeros and no leading `+`, because TOML admits neither. `-0` is
+// legal TOML and so is legal here.
+integer   =  { "-"? ~ ("0" | (ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)) }
+
+comment   =  { "#" ~ (!(nl | control) ~ ANY)* }
+
+// A raw control character is forbidden inside a string, as in TOML. Tab is
+// not a control character for this purpose; a line break is, which is what
+// stops a string spanning lines.
+char      = _{ !("\"" | "\\" | control) ~ ANY }
+control   = _{ '\u{0000}'..'\u{0008}' | '\u{000A}'..'\u{001F}' | "\u{007F}" }
+
+// The line terminator is stated rather than inherited. pest's built-in
+// NEWLINE also matches a bare carriage return, which TOML does not accept,
+// and a CR-only document would otherwise pass this grammar while `tomllib`
+// rejected the very same bytes.
+nl        = _{ "\r\n" | "\n" }
+sp        = _{ " " | "\t" }

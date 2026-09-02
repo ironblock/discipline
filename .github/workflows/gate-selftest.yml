@@ -1,0 +1,23 @@
+name: gate-selftest
+
+# The gate's own test, composed by verify.yml. Every line of its output must
+# read RED: a gate that has never been seen red is not a gate.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    name: selftest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve the pinned toolchain
+        run: cargo --version
+
+      - name: ./verify.sh --selftest
+        run: ./verify.sh --selftest

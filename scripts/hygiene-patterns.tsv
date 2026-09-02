@@ -1,0 +1,37 @@
+# Genesis hygiene patterns.
+#
+# Format: label<TAB>flags<TAB>extended-regex
+#   flags: any of `i` (case-insensitive) and `b`, or `-` for none.
+#
+# `b` means the pattern is precise enough to run over a file grep judges
+# binary. Credential shapes carry it: a secret in a .pack or an image is
+# exactly as committed as one in a text file. The loose environment
+# heuristics do not -- `internal-hostname` alone matches inside
+# /usr/bin/git, and a gate that cries wolf on every binary is a gate
+# people switch off.
+#
+# `scripts/hygiene.sh` fails the build if any tracked file matches any
+# pattern here. This file is the only file the scan skips: it is the one
+# place forbidden shapes are meant to be written down.
+#
+# Add a pattern here, not in the script. Add a case to
+# `scripts/seed-hygiene-fault.sh` at the same time, so that every pattern
+# has been seen catch something.
+
+# --- environments that are not this repository ---
+private-ipv4	-	(^|[^0-9A-Za-z.-])(10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3})([^0-9A-Za-z.-]|$)
+internal-hostname	i	[A-Za-z0-9][A-Za-z0-9-]*\.(local|internal|lan|corp|intranet)([^A-Za-z0-9.-]|$)
+personal-home-path	-	(/Users/|/home/)[A-Za-z0-9._-]+/
+windows-user-path	i	[a-z]:\\+Users\\+
+
+# --- identifiers from a tracker this repository does not use ---
+internal-ticket-id	b	(^|[^A-Za-z0-9])DIE-[0-9]+
+
+# --- credentials ---
+aws-access-key-id	b	(^|[^A-Z0-9])(A(KIA|SIA|GPA|IDA|ROA|NPA|NVA|BIA|CCA))[A-Z0-9]{16}([^A-Z0-9]|$)
+github-token	b	(gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,})
+slack-token	b	xox[abprs]-[A-Za-z0-9-]{10,}
+private-key-block	b	-----BEGIN ([A-Z ]+ )?PRIVATE KEY-----
+anthropic-api-key	b	sk-ant-[A-Za-z0-9_-]{20,}
+openai-api-key	b	(^|[^A-Za-z0-9-])sk-[A-Za-z0-9]{32,}
+assigned-secret	ib	(secret|token|password|passwd|api[_-]?key|access[_-]?key)[[:space:]]*[:=][[:space:]]*["'][^"']{16,}["']

@@ -1,0 +1,3 @@
+{"record":"start","regimen":{"arm":"baseline","substrate":"local","dogma_version":0}}
+{"record":"turn","index":1,"prefill_tokens":1024}
+{"record":"turn","index":2,"prefill_tokens":1024}

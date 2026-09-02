@@ -1,0 +1,1 @@
+[regime] declares a `sampler` field that regimen.toml does not bind, so the regime the report claims is not the regime the run applied.

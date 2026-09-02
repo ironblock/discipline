@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+#
+# Reconcile this repository's labels and milestones with the definitions in
+# .github/labels.json and .github/milestones.json.
+#
+#   sync-repo-metadata.sh [--dry-run]
+#
+# Additive and updating, never destructive: entries that exist are updated to
+# match the files, entries that do not are created, and entries the files do
+# not mention are reported and left alone. Deleting a label deletes its use on
+# every issue that carries it, which is not a thing a workflow should do on a
+# push.
+#
+# Needs `gh` (preinstalled on GitHub-hosted runners) with GH_TOKEN set, and
+# GITHUB_REPOSITORY in owner/repo form.
+#
+# Exits 0 if every entry is in place, 1 if any call failed, 2 on misuse.
+
+set -euo pipefail
+
+readonly EXIT_FAIL=1
+readonly EXIT_MISUSE=2
+
+dry_run=false
+[ "${1:-}" = "--dry-run" ] && { dry_run=true; shift; }
+[ "$#" -eq 0 ] || { echo "sync: unexpected argument '$1'" >&2; exit "$EXIT_MISUSE"; }
+
+for tool in gh jq; do
+  command -v "$tool" > /dev/null || {
+    echo "sync: ${tool} is not on PATH" >&2
+    exit "$EXIT_MISUSE"
+  }
+done
+: "${GITHUB_REPOSITORY:?sync: GITHUB_REPOSITORY must be set to owner/repo}"
+readonly REPO="$GITHUB_REPOSITORY"
+
+failures=0
+
+note() { printf '%s\n' "$*"; }
+
+# Read a definition file up front rather than piping jq straight into a `while`.
+# A jq failure inside `< <(...)` is invisible to `set -euo pipefail`: the loop
+# simply sees no input and the script goes on to report success having synced
+# nothing.
+read_definitions() {
+  local file="$1" filter="$2" out rc=0
+  out="$(jq -r "$filter" "$file")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "sync: cannot read ${file} (jq exit ${rc})" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  if [ -z "$out" ]; then
+    echo "sync: ${file} defines nothing; a sync of nothing is not a success" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  printf '%s' "$out"
+}
+
+label_rows="$(read_definitions .github/labels.json '.labels[] | [.name, .color, .description] | @tsv')"
+milestone_rows="$(read_definitions .github/milestones.json '.milestones[] | [.title, .description] | @tsv')"
+
+# --- labels ------------------------------------------------------------------
+note "== labels =="
+while IFS=$'\t' read -r name color description; do
+  [ -n "$name" ] || continue
+  # The name goes into a URL path, so percent-encode it. A conventional label
+  # like "good first issue" is legal on GitHub and would otherwise break the
+  # request.
+  encoded="$(jq -rn --arg s "$name" '$s|@uri')"
+
+  if gh api "repos/${REPO}/labels/${encoded}" > /dev/null 2>&1; then
+    action="update"; method="PATCH"; endpoint="repos/${REPO}/labels/${encoded}"
+  else
+    action="create"; method="POST"; endpoint="repos/${REPO}/labels"
+  fi
+
+  if [ "$dry_run" = true ]; then
+    note "  would ${action} ${name} (#${color})"
+    continue
+  fi
+
+  if gh api -X "$method" "$endpoint" \
+      -f "name=${name}" -f "color=${color}" -f "description=${description}" \
+      > /dev/null; then
+    note "  ${action}d ${name} (#${color})"
+  else
+    note "  FAILED to ${action} ${name}"
+    failures=$((failures + 1))
+  fi
+done <<< "$label_rows"
+
+# --- milestones --------------------------------------------------------------
+note "== milestones =="
+existing="$(gh api --paginate "repos/${REPO}/milestones?state=all")"
+while IFS=$'\t' read -r title description; do
+  [ -n "$title" ] || continue
+  number="$(printf '%s' "$existing" \
+    | jq -r --arg t "$title" 'map(select(.title == $t)) | .[0].number // empty')"
+
+  if [ -n "$number" ]; then
+    action="update"; method="PATCH"; endpoint="repos/${REPO}/milestones/${number}"
+  else
+    action="create"; method="POST"; endpoint="repos/${REPO}/milestones"
+  fi
+
+  if [ "$dry_run" = true ]; then
+    note "  would ${action} ${title}"
+    continue
+  fi
+
+  # `state` is set only on create. PATCHing state=open on every run would
+  # silently reopen any milestone a maintainer had closed.
+  args=(-f "title=${title}" -f "description=${description}")
+  [ "$action" = "create" ] && args+=(-f "state=open")
+
+  if gh api -X "$method" "$endpoint" "${args[@]}" > /dev/null; then
+    note "  ${action}d ${title}"
+  else
+    note "  FAILED to ${action} ${title}"
+    failures=$((failures + 1))
+  fi
+done <<< "$milestone_rows"
+
+# --- what the files do not mention -------------------------------------------
+note "== present but undefined (left alone) =="
+comm -23 \
+  <(gh api --paginate "repos/${REPO}/labels" --jq '.[].name' | sort) \
+  <(jq -r '.labels[].name' .github/labels.json | sort) \
+  | sed 's/^/  label /' || true
+comm -23 \
+  <(printf '%s' "$existing" | jq -r '.[].title' | sort) \
+  <(jq -r '.milestones[].title' .github/milestones.json | sort) \
+  | sed 's/^/  milestone /' || true
+
+if [ "$failures" -gt 0 ]; then
+  echo "sync: ${failures} call(s) failed" >&2
+  exit "$EXIT_FAIL"
+fi
+note "sync: labels and milestones match the definitions"

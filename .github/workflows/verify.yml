@@ -1,0 +1,54 @@
+name: verify
+
+# The root gate. It composes one reusable workflow per package and one for the
+# gate's own selftest, then requires every one of them to have SUCCEEDED --
+# not merely to have avoided failing.
+#
+# There is deliberately no `paths:` filter anywhere here. A skipped job is not
+# a failed job: `!failure()` and `!cancelled()` both pass on skipped, and a
+# whole workflow filtered out by path leaves its required check pending
+# forever. scripts/check-ci-coverage.py enforces that mechanically, so this
+# comment is a description rather than a promise.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diet:
+    uses: ./.github/workflows/pkg-diet.yml
+
+  results:
+    uses: ./.github/workflows/pkg-results.yml
+
+  pages:
+    uses: ./.github/workflows/pkg-pages.yml
+
+  repo:
+    uses: ./.github/workflows/pkg-repo.yml
+
+  selftest:
+    uses: ./.github/workflows/gate-selftest.yml
+
+  gate:
+    name: gate
+    needs: [diet, results, pages, repo, selftest]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The comparison lives in a script rather than inline here, so that it
+      # can be run and proven against every result state instead of being
+      # trusted because it looks right in YAML.
+      - name: Every job must have succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/check-job-results.py

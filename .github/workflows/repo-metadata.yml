@@ -1,0 +1,36 @@
+name: repo-metadata
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/labels.json
+      - .github/milestones.json
+      - .github/workflows/repo-metadata.yml
+      - scripts/sync-repo-metadata.sh
+      - scripts/check-repo-metadata.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: repo-metadata
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: labels and milestones
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Validate before applying: a malformed definition must not reach the API.
+      - name: Validate the definitions
+        run: python3 scripts/check-repo-metadata.py
+
+      - name: Reconcile
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/sync-repo-metadata.sh

@@ -1,0 +1,1 @@
+NOT-TOML: An ESC (U+001B) inside a string; TOML forbids raw control characters.
