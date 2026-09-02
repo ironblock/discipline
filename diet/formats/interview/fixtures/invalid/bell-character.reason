@@ -1,2 +1,0 @@
-A C0 control other than tab, newline or carriage return is not something a
-text emitter produces; its presence means the byte stream is damaged.

@@ -1,0 +1,2 @@
+# Evidence of the leak was everywhere
+the allocator never freed the arena

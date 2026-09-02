@@ -2,13 +2,15 @@
   "completion": "complete",
   "fields": [
     {
-      "tag": {
-        "kind": "api_surface",
-        "as_written": "API SURFACE:"
-      },
       "outcome": {
         "value": "parse, classify"
+      },
+      "raw": "parse, classify",
+      "tag": {
+        "as_written": "API SURFACE:",
+        "kind": "api_surface"
       }
     }
-  ]
+  ],
+  "wrapper": null
 }

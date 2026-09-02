@@ -2,26 +2,29 @@
   "completion": "complete",
   "fields": [
     {
-      "tag": {
-        "kind": "decision",
-        "as_written": "DECISION:"
-      },
       "outcome": {
         "decline": {
           "marker": "NONE",
-          "scope": null,
-          "reason": null
+          "reason": null,
+          "scope": null
         }
+      },
+      "raw": "NONE",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
       }
     },
     {
-      "tag": {
-        "kind": "learned",
-        "as_written": "LEARNED:"
-      },
       "outcome": {
         "value": "the resolver picks the newer binary"
+      },
+      "raw": "the resolver picks the newer binary",
+      "tag": {
+        "as_written": "LEARNED:",
+        "kind": "learned"
       }
     }
-  ]
+  ],
+  "wrapper": null
 }

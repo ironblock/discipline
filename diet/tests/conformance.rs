@@ -120,20 +120,34 @@ fn parse_to_json(format: &str, source: &[u8]) -> Result<Json, String> {
                                     "reason": declined.reason,
                                 }
                             }),
-                            Outcome::Unparseable { raw } => {
-                                serde_json::json!({ "unparseable": raw })
-                            }
+                            Outcome::Unparseable => Json::from("unparseable"),
                         };
-                        serde_json::json!({ "tag": tag, "outcome": outcome })
+                        serde_json::json!({
+                            "tag": tag,
+                            "raw": field.raw,
+                            "outcome": outcome,
+                        })
                     })
                     .collect();
                 let completion = match answer.completion {
                     Completion::Complete => Json::from("complete"),
+                    Completion::Empty => Json::from("empty"),
                     Completion::Truncated(signal) => {
                         serde_json::json!({ "truncated": signal.name() })
                     }
                 };
-                serde_json::json!({ "completion": completion, "fields": fields })
+                let wrapper = answer.wrapper.as_ref().map_or(Json::Null, |wrapper| {
+                    serde_json::json!({
+                        "open": wrapper.open,
+                        "close": wrapper.close,
+                        "fields_inside": wrapper.fields_inside,
+                    })
+                });
+                serde_json::json!({
+                    "completion": completion,
+                    "wrapper": wrapper,
+                    "fields": fields,
+                })
             })
             .map_err(|err| err.to_string()),
         other => panic!("format `{other}` is listed in FORMATS but not wired into the harness"),

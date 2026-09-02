@@ -2,22 +2,29 @@
   "completion": "complete",
   "fields": [
     {
-      "tag": {
-        "kind": "decision",
-        "as_written": "DECISION:"
-      },
       "outcome": {
         "value": "keep it"
+      },
+      "raw": "keep it",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
       }
     },
     {
-      "tag": {
-        "kind": "learned",
-        "as_written": "LEARNED:"
-      },
       "outcome": {
         "value": "the parser was tolerant"
+      },
+      "raw": "the parser was tolerant",
+      "tag": {
+        "as_written": "LEARNED:",
+        "kind": "learned"
       }
     }
-  ]
+  ],
+  "wrapper": {
+    "close": "```",
+    "fields_inside": 2,
+    "open": "```"
+  }
 }

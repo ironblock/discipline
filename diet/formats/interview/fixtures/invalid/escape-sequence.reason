@@ -1,3 +1,0 @@
-Terminal escapes in a quoted excerpt are an escaping problem at the
-boundary that produced them. Accepting them writes control bytes into the
-record, where every later reader has to guess what they meant.

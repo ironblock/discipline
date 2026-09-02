@@ -1,0 +1,22 @@
+{
+  "completion": {
+    "truncated": "unterminated-fence"
+  },
+  "fields": [
+    {
+      "outcome": {
+        "value": "keep it\n```"
+      },
+      "raw": "keep it\n```",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
+      }
+    }
+  ],
+  "wrapper": {
+    "close": null,
+    "fields_inside": 1,
+    "open": "~~~"
+  }
+}

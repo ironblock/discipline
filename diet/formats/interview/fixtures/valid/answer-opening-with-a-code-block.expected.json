@@ -1,0 +1,25 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": "unparseable",
+      "raw": "let x = 1;",
+      "tag": null
+    },
+    {
+      "outcome": {
+        "value": "keep it"
+      },
+      "raw": "keep it",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
+      }
+    }
+  ],
+  "wrapper": {
+    "close": "```",
+    "fields_inside": 1,
+    "open": "```rust"
+  }
+}

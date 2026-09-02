@@ -1,0 +1,16 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "the resolver picks the newer binary\nEvidence-based debugging beat guesswork here.\nDecision-making was deferred to the next turn.\nPlan-of-record is unchanged."
+      },
+      "raw": "the resolver picks the newer binary\nEvidence-based debugging beat guesswork here.\nDecision-making was deferred to the next turn.\nPlan-of-record is unchanged.",
+      "tag": {
+        "as_written": "LEARNED:",
+        "kind": "learned"
+      }
+    }
+  ],
+  "wrapper": null
+}

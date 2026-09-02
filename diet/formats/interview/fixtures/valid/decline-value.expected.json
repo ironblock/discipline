@@ -2,17 +2,19 @@
   "completion": "complete",
   "fields": [
     {
-      "tag": {
-        "kind": "decision",
-        "as_written": "DECISION:"
-      },
       "outcome": {
         "decline": {
           "marker": "NONE",
-          "scope": null,
-          "reason": "not building yet"
+          "reason": "not building yet",
+          "scope": null
         }
+      },
+      "raw": "NONE (not building yet)",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
       }
     }
-  ]
+  ],
+  "wrapper": null
 }

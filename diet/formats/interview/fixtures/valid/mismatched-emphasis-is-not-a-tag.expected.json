@@ -2,10 +2,10 @@
   "completion": "complete",
   "fields": [
     {
-      "tag": null,
-      "outcome": {
-        "unparseable": "*DECISION**: keep it"
-      }
+      "outcome": "unparseable",
+      "raw": "*DECISION**: keep it",
+      "tag": null
     }
-  ]
+  ],
+  "wrapper": null
 }

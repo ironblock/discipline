@@ -1,0 +1,4 @@
+LEARNED: the resolver picks the newer binary
+Evidence-based debugging beat guesswork here.
+Decision-making was deferred to the next turn.
+Plan-of-record is unchanged.

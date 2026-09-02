@@ -4,22 +4,23 @@
   },
   "fields": [
     {
-      "tag": {
-        "kind": "decision",
-        "as_written": "DECISION:"
-      },
       "outcome": {
         "value": "keep it"
+      },
+      "raw": "keep it",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
       }
     },
     {
+      "outcome": "unparseable",
+      "raw": "",
       "tag": {
-        "kind": "learned",
-        "as_written": "LEARNED:"
-      },
-      "outcome": {
-        "unparseable": "LEARNED:"
+        "as_written": "LEARNED:",
+        "kind": "learned"
       }
     }
-  ]
+  ],
+  "wrapper": null
 }

@@ -371,7 +371,7 @@ inject_conformance() {
 # and shipped its own regression, which is why the corpus rather than the
 # tolerance is the gate.
 inject_interview_drops_continuations() {
-  sed -i 's|^    let value = lines.join("\\n");$|    let value = lines.first().cloned().unwrap_or_default();|' \
+  sed -i 's|^    let joined = value.join("\\n");$|    let joined = value.first().cloned().unwrap_or_default();|' \
     diet/src/formats/interview.rs
 }
 
@@ -379,8 +379,33 @@ inject_interview_drops_continuations() {
 # produced exactly as much valid answer as it had room for; calling it complete
 # banks a partial answer as a whole one.
 inject_interview_truncation_blind() {
-  sed -i 's|^fn completion_of(unterminated: bool, fields: &\[Field\]) -> Completion {$|fn completion_of(unterminated: bool, fields: \&[Field]) -> Completion {\n    let _ = (unterminated, fields);\n    return Completion::Complete;|' \
-    diet/src/formats/interview.rs
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/interview.rs")
+source = path.read_text(encoding="utf-8")
+old = "    if let Some(signal) = signal {\n        return Completion::Truncated(signal);\n    }"
+new = "    if false {\n        return Completion::Truncated(signal.unwrap_or(\n            TruncationSignal::UnterminatedFence,\n        ));\n    }"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The sixth defect, restaged: content after the wrapper's closing fence
+# discarded with no signal. It is what a corpus of hand-authored fixtures
+# cannot catch -- a fixture pins what the parser produced, never what it
+# dropped -- so the accounting property is what has to go red here.
+inject_interview_discards_trailing() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/interview.rs")
+source = path.read_text(encoding="utf-8")
+old = "    if close_at < lines.len() {\n        fields.extend(group(&lines[close_at + 1..]));\n    }"
+new = "    if false && close_at < lines.len() {\n        fields.extend(group(&lines[close_at + 1..]));\n    }"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
 }
 
 inject_results() {
@@ -683,6 +708,8 @@ selftest() {
     'multi-line-continuation\.txt: parsed to'
   seeded_case "interview blind to truncation"         test     inject_interview_truncation_blind \
     'truncated-unterminated-fence\.txt: parsed to'
+  seeded_case "interview discards trailing content"   test     inject_interview_discards_trailing \
+    'content lost parsing'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
     'front-matter `turns` states 3 but the summary record binds'
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \
