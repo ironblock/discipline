@@ -1,0 +1,2 @@
+A decline is one line. Every separator inside one is horizontal
+whitespace, so a marker followed by content on later lines is content.

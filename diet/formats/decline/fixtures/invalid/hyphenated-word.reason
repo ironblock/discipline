@@ -1,0 +1,3 @@
+A dash set-off needs whitespace on both sides. Without it `none-ish` and
+`nil-terminated` split into a marker and a reason, which is a decline made
+out of half a word.

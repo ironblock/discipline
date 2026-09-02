@@ -1,0 +1,2 @@
+As above. This defeated the anchoring rule that the marker-inside-a-word
+fixture claims to pin: a hyphen was enough to get past it.

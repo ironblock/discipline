@@ -8,57 +8,77 @@
 //   * A decline read as CONTENT inflates a field's rate. A `^none\b` matcher
 //     catches the literal and lets every English decline through.
 //   * A decline written into the record as a REAL ENTRY pollutes the working
-//     object with a row that carries capture authority and says nothing.
+//     object with a row that carries capture authority and says nothing --
+//     and, worse, whatever content the answer actually carried is gone.
 //
-// The discrimination this grammar exists to make is therefore not "does the
-// answer mention having nothing to add" but "is the answer, in its entirety,
-// such a report". `nothing to add about the parser` is a decline;
-// `nothing to add about the parser, but the record schema changed` is content
-// wearing a decline's opening words. The rule that separates them is
-// structural rather than lexical: a decline is one clause. It may be scoped
-// (`about X`) and it may carry a reason, but the reason must be DELIMITED --
-// parenthesised, or set off by a dash or colon -- and neither the scope nor
-// the reason may run into a coordinating conjunction. A bare continuation is
-// content, and content is not a decline.
+// The discrimination is therefore not "does the answer mention having nothing
+// to add" but "is the answer, in its entirety, such a report". The rule that
+// separates them is structural rather than lexical, and it has four parts:
+//
+//   1. A DECLINE IS ONE LINE. Every separator inside a decline is horizontal
+//      whitespace. Blank lines may surround it; nothing may follow it.
+//   2. A DECLINE IS ONE CLAUSE. A set-off reason ends at a sentence
+//      terminator and at any conjunction that would introduce a second
+//      clause. `and`, `or` and `so` are conjunctions as surely as `but` is;
+//      an earlier version of this grammar listed only the adversatives, and
+//      `Nothing to add about the parser and the record schema changed`
+//      classified as a decline.
+//   3. A SCOPE NAMES A THING. `about X` is part of a decline, but a thing's
+//      name is short: at most four words. Without the bound, an unpunctuated
+//      continuation is indistinguishable from a scope, and
+//      `Nothing to add on Tuesday I shipped the parser` classified as a
+//      decline with a five-word "scope".
+//   4. A PARENTHESIS IS A BOUNDARY THE EMITTER DREW; A DASH IS NOT. Inside
+//      parentheses the conjunction rule does not apply, because the closing
+//      bracket already says where the reason ends. That is why
+//      `NONE (nothing but formatting)` is a decline while
+//      `NONE - nothing but formatting` is not.
+//
+// What this grammar CANNOT do, stated so nobody has to discover it: a
+// dash-set-off clause is read as a reason, and no mechanical rule tells
+// `— this was an exploration` (a reason) from `— I shipped the schema`
+// (content). Both are one clause after a dash. The cost is bounded by the
+// typed outcome: a decline's reason is recorded AS a reason and never becomes
+// a content entry, so the worst case is a degraded capture rather than a
+// fabricated fact.
 
-// Whitespace, horizontal and vertical alike. A decline may be soft-wrapped by
-// the emitter, so a newline inside one is whitespace like any other; what a
-// decline may not contain is a second, content-bearing clause.
+// Horizontal whitespace. A decline is one line, so this is what separates its
+// parts -- `ws` appears only at the document's edges.
+sp = _{ " " | "\t" }
 ws = _{ " " | "\t" | "\r" | "\n" }
+nl = _{ "\r\n" | "\n" }
 
 // The whole answer, anchored at both ends. Anchoring is the point: a decline
 // is a property of the answer, not a substring that occurs somewhere in it.
 document = { SOI ~ ws* ~ decline ~ ws* ~ EOI }
 
-// Scope and reason hang off the decline rather than off the phrase, so that
-// the phrase's span is exactly the marker -- `nothing to add` and not
-// `nothing to add about the interview parser`. The parse records the three
-// separately because they mean different things: the marker says the answer
-// declines, the scope says what it declines about, the reason says why.
-decline = { phrase ~ (ws+ ~ scope)? ~ (ws* ~ reason)? ~ (ws* ~ terminator)? }
+decline = { (subject ~ sp+)? ~ phrase ~ (sp+ ~ scope)? ~ reason? ~ terminator? }
 
 // ---------------------------------------------------------------------------
 // the decline phrase
 // ---------------------------------------------------------------------------
 
-phrase = { token_phrase | negated_noun | nothing_clause }
+// "I have nothing to add", "There is nothing to report". The subject is not
+// part of the marker; it is how English says the same thing with a verb in it.
+subject = { ^"there are" | ^"there is" | ^"there's" | ^"i have" | ^"i've" | ^"we have" | ^"we've" | ^"it has" }
+
+phrase = { (paren_marker | token_phrase | negated_noun | nothing_clause) ~ (sp+ ~ locative)? }
 
 // Bare markers: answers rather than prose. A lane that emits one of these has
 // declined, whatever the field asked for.
-token_phrase = { ^"none" | ^"n/a" | ^"nil" }
+token_phrase = { ^"not applicable" | ^"none" | ^"n/a" | ^"nil" }
 
-// "no change", "no plan changes", "no material updates this turn".
+// `(none)` -- a marker an emitter bracketed to show it is not content.
+paren_marker = { "(" ~ sp* ~ token_phrase ~ sp* ~ ")" }
+
+// "no change", "no plan changes", "no significant updates".
 // `no` alone is deliberately absent: a bare "no" answers a yes/no question,
 // which is content, and is not a report that there is nothing to record.
-negated_noun = {
-    ^"no" ~ ws+ ~ (adjective ~ ws+)? ~ change_noun ~ (ws+ ~ locative)?
-}
+negated_noun = { ^"no" ~ sp+ ~ (adjective ~ sp+)? ~ change_noun }
 
-// "nothing", "nothing new", "nothing to add", "nothing new here",
-// "nothing further to report about the interview parser".
-nothing_clause = {
-    ^"nothing" ~ (ws+ ~ adjective)? ~ (ws+ ~ predicate)? ~ (ws+ ~ locative)?
-}
+// "nothing", "nothing new", "nothing to add", "nothing of note",
+// "nothing worth reporting", "nothing further to report".
+nothing_clause = { ^"nothing" ~ (sp+ ~ adjective)? ~ (sp+ ~ predicate)? }
 
 // Longest alternative first throughout: PEG choice is ordered, so `change`
 // ahead of `changes` would match the singular and strand the `s`.
@@ -69,33 +89,29 @@ change_noun = {
 }
 
 adjective = {
-    ^"additional" | ^"substantive" | ^"material" | ^"further" | ^"plan"
-  | ^"else" | ^"more" | ^"new" | ^"real"
+    ^"significant" | ^"substantive" | ^"substantial" | ^"additional"
+  | ^"of note" | ^"notable" | ^"material" | ^"further" | ^"major"
+  | ^"worth" | ^"else" | ^"more" | ^"new" | ^"real" | ^"plan"
 }
 
-predicate = { ^"to" ~ ws+ ~ verb }
+predicate = { (^"to" ~ sp+ ~ verb) | gerund }
 verb = { ^"report" | ^"record" | ^"add" | ^"note" | ^"flag" | ^"say" }
+gerund = { ^"reporting" | ^"recording" | ^"adding" | ^"noting" | ^"flagging" }
 
-// `yet` is a locative here ("nothing yet") and is deliberately NOT a contrast
-// conjunction, though English uses it as both. The ambiguity is resolved in
-// favour of the decline because the contrast reading ("nothing to add, yet
-// the schema changed") already carries a comma, and the comma alone ends the
-// clause.
-locative = { ^"this turn" | ^"so far" | ^"here" | ^"yet" | ^"today" }
+locative = { ^"at this time" | ^"in this turn" | ^"this turn" | ^"this time" | ^"so far" | ^"for now" | ^"here" | ^"yet" | ^"today" }
 
 // ---------------------------------------------------------------------------
 // scope: what the decline is a decline ABOUT
 // ---------------------------------------------------------------------------
 
-scope = { scope_prep ~ ws+ ~ scope_text }
+scope = { scope_prep ~ sp+ ~ scope_text }
 scope_prep = { ^"regarding" | ^"concerning" | ^"about" | ^"for" | ^"on" | ^"re" }
 
-// A run of plain words. Every character that could open a second clause --
-// comma, semicolon, colon, paren, dash, sentence terminator -- is absent from
-// `word_char`, so the scope simply ends there and the leftover text has to
-// account for itself against `reason` and `terminator`. That is where
-// `nothing to add about X, but Y changed` dies.
-scope_text = { word ~ (ws+ ~ word)* }
+// At most four words, and every word starts with an alphanumeric. The bound is
+// the rule: a scope names a thing, and a thing's name is short. Anything
+// longer is a clause, and a clause is content. Without the bound the scope
+// swallows an unpunctuated continuation and the answer reads as a decline.
+scope_text = { word ~ (sp+ ~ word){0,3} }
 
 // ---------------------------------------------------------------------------
 // reason: why the answer is a decline
@@ -105,33 +121,55 @@ scope_text = { word ~ (ws+ ~ word)* }
 // record that the turn happened at all -- but typed as a reason, so it can
 // never be mistaken for a content entry.
 reason = { paren_reason | setoff_reason }
-paren_reason = { "(" ~ ws* ~ reason_text ~ ws* ~ ")" }
-setoff_reason = { setoff ~ ws* ~ reason_text }
-setoff = _{ "—" | "–" | "--" | "-" | ":" }
-reason_text = { reason_token ~ (ws+ ~ reason_token)* }
+
+// Bracketed by the emitter, so the closing bracket says where it ends and no
+// conjunction rule is needed. This is what lets `NONE (nothing but
+// formatting)` be a decline.
+paren_reason = { sp* ~ "(" ~ sp* ~ paren_text ~ ")" }
+paren_text = @{ (!(")" | nl) ~ ANY)+ }
+
+// Set off by a colon or a dash. A colon may hug the marker; a dash may not,
+// because `none-ish` and `nil-terminated` are words and not declines. Both
+// must be followed by whitespace, so a set-off with nothing after it is not a
+// reason -- it is a reason that never arrived.
+setoff_reason = { (colon_setoff | dash_setoff) ~ reason_text }
+colon_setoff = _{ sp* ~ ":" ~ sp+ }
+dash_setoff = _{ sp+ ~ ("—" | "–" | "--" | "-") ~ sp+ }
+
+// One clause. Commas and semicolons separate tokens rather than ending the
+// reason, so `not building yet, and no plan to` is still one reason -- but
+// the token after a comma is checked against the conjunction list like any
+// other, which is what closes the "delete one space" hole: in
+// `a replay,but I shipped`, `but` is a token here and not a substring.
+reason_text = { reason_token ~ ((sp+ | inner_punct) ~ reason_token)* }
+inner_punct = _{ ("," | ";") ~ sp* }
+reason_token = @{ !contrast ~ (!sp ~ !nl ~ !terminator ~ !"," ~ !";" ~ ANY)+ }
 
 // ---------------------------------------------------------------------------
 // tokens and boundaries
 // ---------------------------------------------------------------------------
 
-// A scope word. Hyphens, apostrophes, slashes and underscores are inside a
-// word; punctuation that separates clauses is not.
-word = @{ !contrast ~ word_char+ }
+// A scope word. It starts with an alphanumeric, so a lone dash is not a word
+// and cannot pad the four-word bound; hyphens, apostrophes, slashes and
+// underscores are inside a word.
+word = @{ !contrast ~ ASCII_ALPHANUMERIC ~ word_char* }
 word_char = _{ ASCII_ALPHANUMERIC | "'" | "-" | "_" | "/" }
 
-// A reason token is anything up to whitespace or a closing paren, so that a
-// reason may carry punctuation an emitter wrote (`exploration…`, `v0.3`) and
-// still be preserved whole.
-reason_token = @{ !contrast ~ (!ws ~ !")" ~ ANY)+ }
-
-// The conjunctions that introduce a second clause. Checked at a token
-// boundary on both sides -- `!word_char` after, and the fact that this rule
-// is only ever tried at the start of a token before -- so `rebuttal` and
-// `however-shaped` identifiers are words, not contrasts.
+// The conjunctions that introduce a second clause -- coordinating as well as
+// adversative. Checked at a token boundary on both sides: this rule is only
+// tried at the start of a token, and `!word_char` closes the other end, so
+// `rebuttal` and `android` are words rather than conjunctions.
 contrast = _{ contrast_word ~ !word_char }
 contrast_word = _{
-    ^"however" | ^"although" | ^"whereas" | ^"instead" | ^"except"
-  | ^"besides" | ^"though" | ^"aside" | ^"apart" | ^"but"
+    ^"however" | ^"although" | ^"whereas" | ^"instead" | ^"besides"
+  | ^"because" | ^"though" | ^"except" | ^"while" | ^"aside" | ^"apart"
+  | ^"also" | ^"plus" | ^"then" | ^"and" | ^"but" | ^"nor" | ^"or" | ^"so"
 }
 
-terminator = _{ "." | "!" | "?" | "…" }
+// A period ends a sentence only when whitespace or the end of the answer
+// follows it, so `v0.3` is one token and `a replay. I shipped X` is two
+// sentences. A trailing comma or semicolon ends the answer the same way.
+terminator = _{
+    ("." ~ &(sp | nl | EOI)) | "!" | "?" | "…"
+  | ((("," | ";") ~ &(ws* ~ EOI)))
+}

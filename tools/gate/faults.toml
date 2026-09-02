@@ -85,7 +85,7 @@ kind = "seeded-gate"
 check = "test"
 label = "decline grammar loses its end anchor"
 failure_class = "format.invalid-fixture-accepted"
-legacy_signature = "mentions-nothing-but-carries-content\\.txt: accepted as"
+legacy_signature = "coordinated-with-and\\.txt: accepted as"
 migrated = false
 
 [[fault]]

@@ -225,10 +225,16 @@ sandbox() {
 # rather than files. Compared either side of an injection, it answers the one
 # question a seeded case cannot answer for itself -- did the injection inject
 # anything at all?
+# Any git failure here is reported rather than swallowed. It used to end with
+# `|| true`, so a sandbox git could not read -- a full disk, a half-built copy
+# -- fingerprinted identically either side of the injection, and every case
+# printed THE INJECTION CHANGED NOTHING. That is a confident answer to a
+# question nobody asked.
+readonly STATE_UNREADABLE="sandbox-state-unreadable"
 sandbox_state() {
   local box="$1"
-  git -C "$box" add --all > /dev/null 2>&1 || true
-  git -C "$box" write-tree 2> /dev/null || echo "no-tree"
+  git -C "$box" add --all > /dev/null 2>&1 || { echo "$STATE_UNREADABLE"; return; }
+  git -C "$box" write-tree 2> /dev/null || { echo "$STATE_UNREADABLE"; return; }
   git -C "$box" show-ref 2> /dev/null || true
 }
 
@@ -254,7 +260,15 @@ seeded_case() {
     exit "$EXIT_MISUSE"
   fi
 
-  sandbox "$box"
+  # `selftest` is invoked in a `||` list, which suspends errexit for everything
+  # it calls, so a failed `sandbox` used to return 1 into a caller that carried
+  # on regardless -- into a directory that was never even `git init`-ed.
+  if ! sandbox "$box"; then
+    printf 'BROKEN verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE BUILT\n' \
+      "$check" "$label"
+    SELFTEST_BROKEN+=("${label}: the sandbox could not be built")
+    return
+  fi
 
   # An injection is a `sed` or a `printf` against a file it names. Rename the
   # file, or reshape the line the pattern matches, and the injection silently
@@ -266,6 +280,14 @@ seeded_case() {
   state_before="$(sandbox_state "$box")"
   ( cd "$box" && "$inject" )
   state_after="$(sandbox_state "$box")"
+  case "${state_before}${state_after}" in
+    *"${STATE_UNREADABLE}"*)
+      printf 'BROKEN verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE READ\n' \
+        "$check" "$label"
+      SELFTEST_BROKEN+=("${label}: the sandbox's state could not be read")
+      return
+      ;;
+  esac
   if [ "$state_before" = "$state_after" ]; then
     printf 'BROKEN verify.sh --only %-8s          %s  <-- THE INJECTION CHANGED NOTHING\n' \
       "$check" "$label"
@@ -656,7 +678,7 @@ selftest() {
   seeded_case "FORMATS emptied, harness covers none"  test     inject_formats_empty \
     'FORMATS is empty'
   seeded_case "decline grammar loses its end anchor"  test     inject_decline_unanchored \
-    'mentions-nothing-but-carries-content\.txt: accepted as'
+    'coordinated-with-and\.txt: accepted as'
   seeded_case "interview drops continuation lines"    test     inject_interview_drops_continuations \
     'multi-line-continuation\.txt: parsed to'
   seeded_case "interview blind to truncation"         test     inject_interview_truncation_blind \
