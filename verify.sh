@@ -59,7 +59,11 @@ check_fmt() { cargo fmt --all --check; }
 
 check_clippy() { cargo clippy --workspace --all-targets -- -D warnings; }
 
-check_test() { cargo test --workspace; }
+# `--no-fail-fast` because cargo otherwise stops at the first test binary that
+# fails, and the failures it then never prints are the ones a seeded case has
+# to recognise: a broken unit test in the library would hide every conformance
+# failure behind it, and the log would say the gate fired for the wrong reason.
+check_test() { cargo test --workspace --no-fail-fast; }
 
 check_results() { python3 scripts/check-results.py --root results; }
 
@@ -216,6 +220,18 @@ sandbox() {
   git -C "$dest" add --all
 }
 
+# A fingerprint of everything a seeded fault could plausibly change: the
+# working tree, and the refs, because two of the injections below seed history
+# rather than files. Compared either side of an injection, it answers the one
+# question a seeded case cannot answer for itself -- did the injection inject
+# anything at all?
+sandbox_state() {
+  local box="$1"
+  git -C "$box" add --all > /dev/null 2>&1 || true
+  git -C "$box" write-tree 2> /dev/null || echo "no-tree"
+  git -C "$box" show-ref 2> /dev/null || true
+}
+
 # Run `verify.sh --only CHECK` inside a sandbox carrying one seeded fault.
 #
 # EXPECT is an extended regex the sandbox's log must carry. The exit code is
@@ -239,7 +255,23 @@ seeded_case() {
   fi
 
   sandbox "$box"
+
+  # An injection is a `sed` or a `printf` against a file it names. Rename the
+  # file, or reshape the line the pattern matches, and the injection silently
+  # becomes a no-op -- the case then runs a clean tree, goes green, and is
+  # reported as a gate that did not fire. That is the right verdict for the
+  # wrong reason, and it costs a debugging session every time. Fingerprint the
+  # sandbox instead, and say which of the two actually happened.
+  local state_before state_after
+  state_before="$(sandbox_state "$box")"
   ( cd "$box" && "$inject" )
+  state_after="$(sandbox_state "$box")"
+  if [ "$state_before" = "$state_after" ]; then
+    printf 'BROKEN verify.sh --only %-8s          %s  <-- THE INJECTION CHANGED NOTHING\n' \
+      "$check" "$label"
+    SELFTEST_BROKEN+=("${label}: ${inject} changed nothing, so the case proves nothing")
+    return
+  fi
 
   # Hermetic: only scripts/hermetic.sh's allowlist reaches the sandbox. A
   # blocklist would silently admit every variable nobody thought of, and a
@@ -279,7 +311,32 @@ inject_test() {
 }
 
 inject_formats_empty() {
-  sed -i 's/&\["regimen"\]/\&[]/' diet/src/formats/mod.rs
+  python3 - <<'EOF'
+import pathlib
+import re
+
+path = pathlib.Path("diet/src/formats/mod.rs")
+source = path.read_text(encoding="utf-8")
+emptied = re.sub(
+    r"pub const FORMATS: &\[Format\] = &\[.*?\];",
+    "pub const FORMATS: &[Format] = &[];",
+    source,
+    count=1,
+    flags=re.DOTALL,
+)
+path.write_text(emptied, encoding="utf-8")
+EOF
+}
+
+# The historical shape of this bug: a detector that finds a decline's opening
+# words and stops looking. Dropping the end anchor turns the grammar from "the
+# answer IS a decline" into "the answer BEGINS with one", which is what a
+# `^none\b` matcher does and why English declines and decline-shaped content
+# were both mis-read for a year.
+inject_decline_unanchored() {
+  sed -i \
+    's/^document = { SOI ~ ws\* ~ decline ~ ws\* ~ EOI }$/document = { SOI ~ ws* ~ decline ~ ANY* }/' \
+    diet/formats/decline/grammar.pest
 }
 
 inject_conformance() {
@@ -581,6 +638,8 @@ selftest() {
     'conformance failure\(s\)'
   seeded_case "FORMATS emptied, harness covers none"  test     inject_formats_empty \
     'FORMATS is empty'
+  seeded_case "decline grammar loses its end anchor"  test     inject_decline_unanchored \
+    'mentions-nothing-but-carries-content\.txt: accepted as'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
     'front-matter `turns` states 3 but the summary record binds'
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \
