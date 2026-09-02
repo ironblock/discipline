@@ -1,0 +1,3 @@
+`but` is a token after the comma, not a substring inside one. Checking the
+conjunction only at whitespace boundaries let this through by the deletion
+of a single space.

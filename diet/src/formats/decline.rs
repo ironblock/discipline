@@ -23,14 +23,17 @@ struct DeclineParser;
 
 /// A decline, decomposed.
 ///
-/// The three parts are kept apart because they are answers to different
-/// questions, and collapsing them is how a decline's reason text ends up in
-/// the record as though it were a finding.
+/// The parts are kept apart because they are answers to different questions,
+/// and collapsing them is how a decline's reason text ends up in the record as
+/// though it were a finding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Decline {
+    /// The subject an English decline puts in front of the marker -- the
+    /// `I have` of `I have nothing to add`. `None` for the bare registers.
+    pub subject: Option<String>,
     /// The decline phrase exactly as written: `NONE`, `no plan change`,
-    /// `nothing further to report`. Preserved verbatim -- the register an
-    /// emitter used is evidence about the emitter.
+    /// `nothing further to report`, `None at this time`. Preserved verbatim --
+    /// the register an emitter used is evidence about the emitter.
     pub marker: String,
     /// What the answer declines *about*, if it said: the text after
     /// `about` / `regarding` / `on`.
@@ -112,12 +115,14 @@ pub fn parse(input: &str) -> Result<Decline, ParseError> {
         .find(|pair| pair.as_rule() == Rule::decline)
         .ok_or(ParseError::Shape("document holds no decline"))?;
 
+    let mut subject = None;
     let mut marker = None;
     let mut scope = None;
     let mut reason = None;
 
     for pair in decline.into_inner() {
         match pair.as_rule() {
+            Rule::subject => subject = Some(pair.as_str().to_owned()),
             Rule::phrase => marker = Some(pair.as_str().to_owned()),
             Rule::scope => scope = Some(text_of(&pair, Rule::scope_text)?),
             Rule::reason => reason = Some(reason_text(&pair)?),
@@ -126,6 +131,7 @@ pub fn parse(input: &str) -> Result<Decline, ParseError> {
     }
 
     Ok(Decline {
+        subject,
         marker: marker.ok_or(ParseError::Shape("decline with no phrase"))?,
         scope,
         reason,
@@ -151,7 +157,8 @@ fn reason_text(pair: &Pair<'_, Rule>) -> Result<String, ParseError> {
         .next()
         .ok_or(ParseError::Shape("reason with no form"))?;
     match inner.as_rule() {
-        Rule::paren_reason | Rule::setoff_reason => text_of(&inner, Rule::reason_text),
+        Rule::paren_reason => text_of(&inner, Rule::paren_text),
+        Rule::setoff_reason => text_of(&inner, Rule::reason_text),
         other => Err(shape_of(other)),
     }
 }
@@ -165,6 +172,7 @@ fn shape_of(rule: Rule) -> ParseError {
     match rule {
         Rule::document => ParseError::Shape("nested document"),
         Rule::decline => ParseError::Shape("nested decline"),
+        Rule::subject => ParseError::Shape("second subject"),
         Rule::phrase => ParseError::Shape("second phrase"),
         Rule::scope => ParseError::Shape("second scope"),
         Rule::reason => ParseError::Shape("second reason"),
@@ -174,57 +182,203 @@ fn shape_of(rule: Rule) -> ParseError {
 
 #[cfg(test)]
 mod tests {
-    use super::{Classification, classify, parse};
+    use super::{Classification, Decline, classify, parse};
+
+    /// The decline `answer` classifies as, or a panic naming what came back.
+    ///
+    /// Through `classify` on purpose. `classify` is the entry point every
+    /// caller is told to use, and the tests that came before this one all went
+    /// through `parse` -- so a `classify` that returned `Content` for
+    /// everything passed all of them, and the whole gate stayed green.
+    fn declined(answer: &str) -> Decline {
+        match classify(answer) {
+            Classification::Decline(declined) => declined,
+            Classification::Content => panic!("{answer:?} classified as content"),
+        }
+    }
+
+    fn is_content(answer: &str) -> bool {
+        matches!(classify(answer), Classification::Content)
+    }
 
     #[test]
     fn a_bare_marker_is_a_decline() {
-        let parsed = parse("NONE").expect("NONE is a decline");
+        let parsed = declined("NONE");
         assert_eq!(parsed.marker, "NONE");
+        assert_eq!(parsed.subject, None);
         assert_eq!(parsed.scope, None);
         assert_eq!(parsed.reason, None);
+        assert!(classify("NONE").is_decline());
     }
 
     #[test]
     fn a_parenthetical_reason_is_preserved() {
-        let parsed = parse("NONE (not building yet)").expect("a reason is still a decline");
-        assert_eq!(parsed.reason.as_deref(), Some("not building yet"));
+        assert_eq!(
+            declined("NONE (not building yet)").reason.as_deref(),
+            Some("not building yet")
+        );
     }
 
     #[test]
     fn a_scoped_decline_records_what_it_declines_about() {
-        let parsed = parse("Nothing to add about the interview parser.").expect("a decline");
+        let parsed = declined("Nothing to add about the interview parser.");
         assert_eq!(parsed.marker, "Nothing to add");
         assert_eq!(parsed.scope.as_deref(), Some("the interview parser"));
     }
 
-    // The bug this whole format exists to make impossible: an answer that
-    // opens with a decline's words and then says something.
+    #[test]
+    fn an_english_decline_with_a_subject_is_a_decline() {
+        let parsed = declined("I have nothing to add.");
+        assert_eq!(parsed.subject.as_deref(), Some("I have"));
+        assert_eq!(parsed.marker, "nothing to add");
+    }
+
+    // The bug this whole format exists to make impossible, in both the
+    // adversative and the coordinating form. Only the first was caught when
+    // this grammar first shipped, and the second read as a decline whose scope
+    // was the rest of the sentence.
     #[test]
     fn a_coordinated_continuation_is_content_not_a_decline() {
-        let answer = "Nothing to add about the parser, but the record schema changed.";
-        assert_eq!(classify(answer), Classification::Content);
+        assert!(is_content(
+            "Nothing to add about the parser, but the record schema changed."
+        ));
+        assert!(is_content(
+            "Nothing to add about the parser and the record schema changed."
+        ));
+        assert!(is_content(
+            "No plan change — and I did rename the capture lane."
+        ));
+    }
+
+    // A conjunction is a token, not a substring: deleting one space must not
+    // hide it.
+    #[test]
+    fn a_conjunction_after_a_comma_still_ends_the_reason() {
+        assert!(is_content("No updates - a replay,but I shipped the parser"));
+    }
+
+    // Without a bound on the scope, an unpunctuated continuation is
+    // indistinguishable from the name of a thing.
+    #[test]
+    fn a_scope_is_bounded_to_the_name_of_a_thing() {
+        assert_eq!(
+            declined("Nothing to add about the second interview parser.")
+                .scope
+                .as_deref(),
+            Some("the second interview parser")
+        );
+        assert!(is_content("Nothing to add on Tuesday I shipped the parser"));
+        assert!(is_content(
+            "Nothing to add about the second interview parser rewrite"
+        ));
+    }
+
+    // A dash set-off needs whitespace on both sides, or a hyphenated word
+    // splits into a marker and a reason.
+    #[test]
+    fn a_hyphen_inside_a_word_is_not_a_set_off() {
+        assert!(is_content("none-ish"));
+        assert!(is_content("nil-terminated strings are the bug"));
+        assert!(is_content("None-the-less the plan changed."));
+    }
+
+    // A parenthesis is a boundary the emitter drew, so the conjunction rule
+    // does not apply inside one. Without this, a reason that merely contains
+    // an ordinary `but` made the whole answer read as content.
+    #[test]
+    fn a_conjunction_inside_parentheses_is_ordinary_prose() {
+        assert_eq!(
+            declined("NONE (nothing but formatting)").reason.as_deref(),
+            Some("nothing but formatting")
+        );
+        assert_eq!(
+            declined("NONE (not building yet, and no plan to)")
+                .reason
+                .as_deref(),
+            Some("not building yet, and no plan to")
+        );
+    }
+
+    // A period ends a sentence only when whitespace follows it, so a version
+    // number stays inside its reason and a second sentence does not.
+    #[test]
+    fn a_reason_is_one_sentence() {
+        assert_eq!(
+            declined("No changes - the pin is still v0.3")
+                .reason
+                .as_deref(),
+            Some("the pin is still v0.3")
+        );
+        assert!(is_content(
+            "No updates - the run was a replay. I also shipped the schema."
+        ));
+    }
+
+    #[test]
+    fn a_decline_is_one_line() {
+        assert!(is_content(
+            "NONE\n- rewrote the reconciler\n- shipped the schema"
+        ));
+        assert!(classify("\n\n  NONE  \n\n").is_decline());
     }
 
     #[test]
     fn a_decline_inside_a_sentence_is_not_a_decline() {
-        assert_eq!(
-            classify("The fork returned NONE for every field."),
-            Classification::Content
-        );
+        assert!(is_content("The fork returned NONE for every field."));
+        assert!(is_content("Nonetheless the plan changed."));
     }
 
     // Absence is not a decline. A lane that emitted nothing has not reported
     // that it had nothing to say, and conflating the two hides an empty lane.
     #[test]
     fn an_empty_answer_is_content_not_a_decline() {
-        assert_eq!(classify(""), Classification::Content);
-        assert_eq!(classify("   \n\t "), Classification::Content);
+        assert!(is_content(""));
+        assert!(is_content("   \n\t "));
     }
 
+    // A set-off announces a reason; one with nothing after it is a reason that
+    // never arrived.
     #[test]
-    fn classify_never_errors_on_arbitrary_prose() {
-        for answer in ["", "\u{0}", "but", "none-ish", "NONETHELESS"] {
-            let _ = classify(answer);
+    fn a_set_off_with_no_reason_is_not_a_decline() {
+        assert!(is_content("none:"));
+        assert!(is_content("NONE -"));
+    }
+
+    // `classify` and `parse` are two views of one decision. If they can
+    // disagree, the entry point and the diagnostic describe different formats.
+    #[test]
+    fn classify_and_parse_agree_over_the_committed_corpus() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("formats/decline/fixtures");
+        let mut cases = 0_usize;
+        for (bucket, want_decline) in [("valid", true), ("invalid", false)] {
+            for entry in std::fs::read_dir(root.join(bucket)).expect("the corpus is readable") {
+                let path = entry.expect("a readable entry").path();
+                if path.extension().is_none_or(|ext| ext != "txt") {
+                    continue;
+                }
+                let Ok(source) = std::fs::read_to_string(&path) else {
+                    continue; // the deliberately non-UTF-8 case
+                };
+                cases += 1;
+                let by_classify = classify(&source).is_decline();
+                let by_parse = parse(&source).is_ok();
+                assert_eq!(
+                    by_classify,
+                    by_parse,
+                    "classify and parse disagree about {}",
+                    path.display()
+                );
+                assert_eq!(
+                    by_classify,
+                    want_decline,
+                    "{} is in {bucket}/ but classify says otherwise",
+                    path.display()
+                );
+            }
         }
+        // Without this the loop above would hold vacuously over an empty
+        // corpus, which is the failure this repository exists to prevent.
+        assert!(cases > 40, "the corpus shrank to {cases} readable cases");
     }
 }

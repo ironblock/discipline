@@ -30,9 +30,10 @@ pub struct Format {
     pub name: &'static str,
     /// Extension of a fixture case file, without the dot.
     ///
-    /// Carried as data rather than assumed, because the first format was TOML
-    /// and the harness quietly hard-coded that: a `.txt` corpus dropped in
-    /// beside it would have been walked as zero cases and passed.
+    /// Carried as data rather than assumed. The first format was TOML and the
+    /// harness hard-coded that; a corpus with any other extension would have
+    /// been walked as zero cases, which the empty-bucket assertion does catch
+    /// -- but only as "no fixtures at all", never as "the wrong files".
     pub case_extension: &'static str,
 }
 
