@@ -43,6 +43,32 @@ pub enum Value {
 pub struct Decimal(String);
 
 impl Decimal {
+    /// A decimal from its digits, checked against the grammar's spelling: an
+    /// optional sign, an integer part with no leading zero, a point, and at
+    /// least one digit after it. No exponent, no `.5`, no `1.`.
+    ///
+    /// The one way to make a decimal outside the parser. A number a caller
+    /// computed -- a census's reduction, a metric -- reaches a record through
+    /// here or not at all, so a spelling the grammar would refuse to read
+    /// back is refused before it is written.
+    #[must_use]
+    pub fn new(text: &str) -> Option<Self> {
+        let digits = text.strip_prefix('-').unwrap_or(text);
+        let (whole, fraction) = digits.split_once('.')?;
+        let all_digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+        if !all_digits(whole) || !all_digits(fraction) {
+            return None;
+        }
+        if whole.len() > 1 && whole.starts_with('0') {
+            return None;
+        }
+        if text.starts_with('-') && whole == "0" && fraction.bytes().all(|b| b == b'0') {
+            // `-0.0` is a second spelling of `0.0`, and the grammar keeps one.
+            return None;
+        }
+        Some(Self(text.to_owned()))
+    }
+
     /// The decimal as written.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -279,4 +305,74 @@ fn render_string(text: &str, out: &mut String) {
         }
     }
     out.push('"');
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Decimal, Value};
+    use crate::formats::record::{Event, parse};
+
+    /// A record whose sampler carries `text` as a setting, so the grammar
+    /// itself is the judge of the spelling.
+    fn record_with(text: &str) -> String {
+        format!(
+            r#"{{"record":"start","regime":{{"arm":"baseline","dogma_version":0,"substrate":{{"name":"local","model":"a-model","quantization":"q4","sampler":{{"temperature":{text}}},"reasoning":"on","hardware":"one-gpu"}}}}}}"#
+        )
+    }
+
+    // The constructor and the grammar must agree, in both directions: a
+    // spelling the constructor accepts is one the grammar reads back as the
+    // same digits, and a spelling it refuses is one the grammar refuses too.
+    // Otherwise a computed number could be written that no reader accepts.
+    #[test]
+    fn a_constructed_decimal_is_one_the_grammar_reads_back() {
+        for text in [
+            "0.0",
+            "0.142",
+            "1.5",
+            "-1.5",
+            "12.000",
+            "0.407",
+            "-0.5",
+            "1234567.89",
+        ] {
+            let made = Decimal::new(text).unwrap_or_else(|| panic!("{text} is a decimal"));
+            assert_eq!(made.as_str(), text);
+            let parsed = parse(&record_with(text)).unwrap_or_else(|err| panic!("{text}: {err}"));
+            let Some(Event::Start { regime }) = parsed.events.first() else {
+                panic!("a start row");
+            };
+            assert_eq!(
+                regime.substrate.sampler.get("temperature"),
+                Some(&Value::Decimal(made)),
+                "{text}: the grammar read back a different value"
+            );
+        }
+    }
+
+    #[test]
+    fn a_spelling_the_grammar_refuses_cannot_be_constructed() {
+        for text in [
+            "01.5", ".5", "1.", "1e5", "abc", "1.5.2", "", "-", "+1.5", "1,5",
+        ] {
+            assert!(
+                Decimal::new(text).is_none(),
+                "{text:?} was constructed, and the grammar would not read it back"
+            );
+            assert!(
+                parse(&record_with(text)).is_err(),
+                "{text:?} was refused by the constructor but read by the grammar: the two disagree"
+            );
+        }
+    }
+
+    // `-0.0` is refused by the constructor as a second spelling of zero. The
+    // grammar's own rule is on integers (`-0`); for decimals the grammar
+    // accepts `-0.0`, so this is the one place the constructor is stricter,
+    // and the test above must not claim otherwise.
+    #[test]
+    fn negative_zero_is_the_constructors_own_refusal() {
+        assert!(Decimal::new("-0.0").is_none());
+        assert!(Decimal::new("-0.5").is_some());
+    }
 }
