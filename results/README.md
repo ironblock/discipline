@@ -2,11 +2,9 @@
 
 This directory contains experiment results.
 
-All results should provide fixtures, and anything required to reproduce or challenge the results.
+The contract is `results/_template/`, enforced by `scripts/check-results.py` (files, sections, front-matter keys, numbers-versus-data) and `diet check-record` (the record itself).
 
-
-## Structure
 Each test should have a subdirectory named by the pattern: `YYYY-MM-DD-<ledger-slug>`.
 
-The subdirectory *must* contain:
-  - README.md -  explain at a 'middle school science fair' level how the scientific method was employed.
+Results are brief by design, meant to describe:
+  observation → hypothesis → test → results → conclusion
