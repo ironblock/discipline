@@ -1,0 +1,8 @@
+{
+  "decline": {
+    "subject": null,
+    "marker": "None",
+    "scope": null,
+    "reason": "nothing was decided this turn"
+  }
+}

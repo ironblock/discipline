@@ -29,7 +29,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 75
+red_faults = 76
 mechanics_assertions = 14
 migrated = 0
 
@@ -77,6 +77,15 @@ check = "test"
 label = "FORMATS emptied, harness covers none"
 failure_class = "coverage.no-formats-registered"
 legacy_signature = "FORMATS is empty"
+migrated = false
+
+[[fault]]
+id = "test.decline_unanchored"
+kind = "seeded-gate"
+check = "test"
+label = "decline grammar loses its end anchor"
+failure_class = "format.invalid-fixture-accepted"
+legacy_signature = "coordinated-with-and\\.txt: accepted as"
 migrated = false
 
 [[fault]]
