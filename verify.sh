@@ -32,7 +32,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test results regimen metadata hygiene pages ci history parity)
+readonly CHECKS=(fmt clippy test library results regimen metadata hygiene pages ci history parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -64,6 +64,14 @@ check_clippy() { cargo clippy --workspace --all-targets -- -D warnings; }
 # to recognise: a broken unit test in the library would hide every conformance
 # failure behind it, and the log would say the gate fired for the wrong reason.
 check_test() { cargo test --workspace --no-fail-fast; }
+
+# Two rules about the library saying what it says. Field kinds, verdicts and
+# outcome classes are enums with exhaustive matches -- the compiler enforces
+# that once the predicate IS an enum, and cannot stop somebody writing a new
+# `match text { "DECISION" => ... }`. And every source file is reached by a
+# `mod` declaration: an orphan compiles nowhere, so its tests do not run and
+# `cargo test -- <its module>` matches nothing and exits 0.
+check_library() { python3 scripts/check-library.py; }
 
 check_results() { python3 scripts/check-results.py --root results; }
 
@@ -547,6 +555,217 @@ inject_grounded_undemonstrated() {
     diet/src/capture/grounded.rs
 }
 
+# A stringly predicate reintroduced by hand. Field kinds were matched as
+# strings in more than one place before, and the places drifted.
+inject_stringly_predicate() {
+  printf '\n#[must_use]\npub fn seeded_stringly(text: &str) -> u8 {\n    match text {\n        "DECISION" => 1,\n        _ => 0,\n    }\n}\n' \
+    >> diet/src/lib.rs
+}
+
+# A source file no `mod` declaration reaches. It sits on disk, compiles
+# nowhere, and `cargo test -- object` selects nothing and exits 0 -- which is
+# how five hundred lines and eleven tests went unrun with the gate green.
+inject_orphaned_module() {
+  sed -i '/^pub mod object;$/d' diet/src/lib.rs
+}
+
+# The same module lost the ordinary way: commented OUT rather than deleted.
+# Rule two read raw text, so a block comment hid the declaration and the file
+# went uncompiled with every check green -- the deletion above, restaged in
+# the shape somebody actually produces.
+inject_commented_out_module() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/lib.rs")
+source = path.read_text(encoding="utf-8")
+old = "pub mod object;"
+new = "/* undone for a probe:\npub mod object;\n*/"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The or-pattern shape `cargo fmt` produces unprompted once tag names are
+# realistic. It is the same stringly predicate as the one above, wrapped
+# across lines -- and the rule's first version was anchored to the start of a
+# line, so its coverage depended on how long the identifiers were.
+inject_stringly_or_pattern() {
+  printf '\n#[must_use]\npub fn seeded_wrapped(text: &str) -> u8 {\n    match text {\n        "a_decision_tag_that_is_quite_long_indeed"\n        | "an_evidence_tag_that_is_also_long_here" => 1,\n        _ => 0,\n    }\n}\n' \
+    >> diet/src/lib.rs
+}
+
+# The acceptance case where THE BUILD IS THE GATE: a field-kind variant added
+# without wiring it. Every exhaustive match over FieldKind stops compiling,
+# which is the whole reason the predicate is an enum.
+inject_field_kind_variant() {
+  sed -i 's|^    Stuck,$|    Stuck,\n    /// Seeded: a variant nothing covers.\n    Seeded,|' \
+    diet/src/formats/interview.rs
+}
+
+# A supersede that deletes what it replaced. Claim atomicity at the object
+# level: a correction is a linked row, and the row it corrects has to still be
+# there to be read.
+inject_object_supersede_deletes() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if let Some(old) = self.entries.get_mut(voids) {
+            old.state = EntryState::Voided { by: added.clone() };
+        }"""
+new = """        self.entries.remove(voids);"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Dedup removed, so two forks saying one thing become two facts and each
+# carries half the provenance.
+# A correction whose content the object already holds. Without the guard the
+# supersede links whatever dedup handed back -- an entry to itself, or over a
+# link another correction already wrote -- and reports Ok either way.
+inject_object_self_void() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if let Some(already) = self.by_content.get(&key).cloned() {
+            return Err(if already == *voids {
+                ObjectError::SelfSupersede(voids.clone())
+            } else {
+                ObjectError::SupersedeRestates {
+                    id: id.clone(),
+                    held: already,
+                }
+            });
+        }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# Resolve or Retire written straight through a voided entry. The state is one
+# slot and `Voided` keeps the supersede link in it, so the correction is gone
+# with nothing to show it happened -- and the double-void guard reads that
+# same slot, so it stops firing too.
+inject_object_state_overwrite() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if let EntryState::Voided { by } = &entry.state {
+            return Err(ObjectError::TargetNotLive {
+                id: target.clone(),
+                state: EntryState::Voided { by: by.clone() },
+            });
+        }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# Provenance recording that always claims it wrote. Every no-op patch then
+# reports a touched entry, and `touched()` names rows no diff of the dumps
+# can support -- which is the acceptance this module is built against.
+inject_object_false_attribution() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = """            entry.provenances.push(provenance.clone());
+            return true;
+        }
+        false
+    }"""
+new = """            entry.provenances.push(provenance.clone());
+        }
+        true
+    }"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Planning's rulings on #13, each as a guard that has been seen red.
+
+# The regime moves under a patch. There is no Patch variant that can express
+# this, and the test that holds it is exhaustive over the variants -- so the
+# only way to seed it is to make apply() itself do what no patch can.
+inject_object_regime_mutable() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = "        self.version += 1;\n        Ok(applied)"
+new = "        self.version += 1;\n        self.regime.dogma_version += 1;\n        Ok(applied)"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Dedup rebinds rather than aliases: the id the lane chose is forgotten, and
+# its next patch naming that id is told the object never heard of it.
+inject_object_no_alias() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = "            let aliased = self.record_alias(id, &held);"
+new = "            let aliased = false;"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A turn applied in arrival order. Which fork's fact becomes the canonical
+# entry then depends on which fork was faster.
+inject_object_unsorted_turn() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = """        ordered.sort_by_key(|patch| {
+            let p = patch.provenance();
+            (p.lane.clone(), p.fork.clone(), p.index)
+        });
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# The belt removed: a supersede whose new id and whose target resolve to one
+# entry through an alias is no longer named as a self-supersede.
+inject_object_alias_self_void() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if self.canonical(id).as_ref() == Some(voids) {
+            return Err(ObjectError::SelfSupersede(voids.clone()));
+        }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+inject_object_no_dedup() {
+  sed -i 's|^        if let Some(held) = self.by_content.get(&key).cloned() {$|        if let Some(held) = None::<EntryId> {|' \
+    diet/src/object.rs
+}
+
 inject_results() {
   cp -r tests/fixtures/results-bad/2026-01-09-unbacked-number results/
 }
@@ -867,6 +1086,34 @@ selftest() {
     'a sentence the source never said was scored as present in it'
   seeded_case "a floor of zero"                       test     inject_grounded_zero_floor \
     'a floor of zero was accepted, and every lane meets it'
+  seeded_case "supersede deletes what it replaced"    test     inject_object_supersede_deletes \
+    'the voided entry is still here'
+  seeded_case "the reconciler stops deduping"         test     inject_object_no_dedup \
+    'the same fact, wrapped differently, is the same fact'
+  seeded_case "a correction that restates what it voids" test   inject_object_self_void \
+    'an entry was voided by itself'
+  seeded_case "a state change over a supersede link"  test     inject_object_state_overwrite \
+    'a correction was erased by a later state change'
+  seeded_case "a no-op patch that claims an entry"    test     inject_object_false_attribution \
+    'the patch claimed entries no diff can support'
+  seeded_case "the regime moves under a patch"        test     inject_object_regime_mutable \
+    'moved the regime the object was opened under'
+  seeded_case "dedup rebinds instead of aliasing"     test     inject_object_no_alias \
+    'a lane was told the object had never heard of the id it chose'
+  seeded_case "a turn applied in arrival order"       test     inject_object_unsorted_turn \
+    'the outcome of a turn depended on the order its patches arrived in'
+  seeded_case "a self-supersede through an alias"     test     inject_object_alias_self_void \
+    'was not named as one'
+  seeded_case "a field kind nothing covers"           test     inject_field_kind_variant \
+    'non-exhaustive patterns'
+  seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
+    'a match arm on a string literal'
+  seeded_case "a module nothing compiles"             library  inject_orphaned_module \
+    'no .mod. declaration reaches it'
+  seeded_case "a module commented out, not deleted"   library  inject_commented_out_module \
+    'object.rs: no .mod. declaration reaches it'
+  seeded_case "a stringly predicate cargo fmt wrapped" library inject_stringly_or_pattern \
+    'a_decision_tag_that_is_quite_long_indeed'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
     'front-matter `turns` states 3 but the summary record binds'
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \

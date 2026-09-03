@@ -112,7 +112,8 @@ pub fn value(pair: &Pair<'_, Rule>) -> Result<Value, ValueError> {
             .map(Value::Integer)
             .map_err(|_| ValueError::IntegerOutOfRange(inner.as_str().to_owned())),
         Rule::decimal => Ok(Value::Decimal(Decimal(inner.as_str().to_owned()))),
-        Rule::boolean => Ok(Value::Boolean(inner.as_str() == "true")),
+        Rule::boolean_true => Ok(Value::Boolean(true)),
+        Rule::boolean_false => Ok(Value::Boolean(false)),
         _ => Err(ValueError::Shape("an unexpected rule inside a value")),
     }
 }
