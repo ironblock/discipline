@@ -1,0 +1,29 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "cd"
+                  },
+                  {
+                    "literal": false,
+                    "text": "~/work"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

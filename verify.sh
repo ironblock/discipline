@@ -681,6 +681,73 @@ EOF
 # The CLI's exit codes, its stdout, and which format sits behind which verb.
 # Three mutations of this shape survived cargo test, verify.sh AND --selftest
 # before diet/tests/cli.rs existed: nothing ran the program.
+# A subshell read as a group. The scoping the grammar exists to preserve --
+# `cd a; (cd b; ls); pwd` ending in `a` -- is gone, and every consumer that
+# asked which state a bracketed list ran against is told the wrong one.
+inject_shell_subshell_as_group() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "        Rule::subshell => nested_list(&inner).map(Command::Subshell),\n"
+new = "        Rule::subshell => nested_list(&inner).map(Command::Group),\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# `|&` read as a plain pipe. The shell sends stderr down that pipe; a reader
+# that drops the duplication reports stderr as having gone nowhere.
+inject_shell_stderr_pipe_flat() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Rule::pipe if inner.as_str().len() == 2 => match commands.last_mut() {"
+new = "            Rule::pipe if inner.as_str().len() == 99 => match commands.last_mut() {"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Every expansion reported literal. `cd $DIR` then names a directory called
+# `$DIR`, and the lane that trusts the flag tracks a path that never existed.
+inject_shell_expansion_literal() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "    Ok(inner.as_rule() == Rule::dollar_alone)\n"
+new = "    let _ = inner;\n    Ok(true)\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# An empty payload read as an absent one. The silence collapse the ablation
+# measures is an answer of no characters; a record that turns it into a
+# missing field reports the worst case as missing data.
+inject_record_empty_payload_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """) -> Result<Option<String>, ParseError> {
+    match members.remove(field) {
+        Some(Value::String(text)) => Ok(Some(text)),"""
+new = """) -> Result<Option<String>, ParseError> {
+    match members.remove(field) {
+        Some(Value::String(text)) if text.is_empty() => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text)),"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1218,6 +1285,14 @@ selftest() {
     'was not named as one'
   seeded_case "a field kind nothing covers"           test     inject_field_kind_variant \
     'non-exhaustive patterns'
+  seeded_case "a subshell read as a group"            test     inject_shell_subshell_as_group \
+    'the bracketed list was not read as a subshell'
+  seeded_case "a stderr pipe read as a plain pipe"    test     inject_shell_stderr_pipe_flat \
+    'did not become the duplication it abbreviates'
+  seeded_case "an expanding word reported literal"    test     inject_shell_expansion_literal \
+    'a word the shell would expand was reported literal'
+  seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
+    'an empty answer is a recorded answer, not a missing one'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

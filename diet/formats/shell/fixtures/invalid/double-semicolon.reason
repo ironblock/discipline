@@ -1,0 +1,2 @@
+Two separators meeting. `;;` belongs to `case`, which is not in this
+subset, and outside one the shell refuses it.

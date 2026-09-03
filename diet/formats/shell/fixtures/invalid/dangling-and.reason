@@ -1,0 +1,3 @@
+An operator with nothing after it. The shell would wait for the rest of
+the line; a tool call has no rest, so the command is incomplete and is
+refused rather than read as `ls` alone.

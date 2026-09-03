@@ -1,0 +1,223 @@
+// The `shell` format, v0. This file is NORMATIVE: the Rust parser in
+// diet/src/formats/shell.rs implements it and is not itself the definition.
+//
+// A shell document is the command line one tool call handed to a shell. Two
+// lanes read it and neither may guess at it:
+//
+//   * The mechanical lane derives the working directory from `cd`, `pushd`
+//     and `popd`, and the files a turn touched from redirections and operand
+//     words. The working directory was once an INTERVIEW QUESTION, and the
+//     model got it wrong in exactly the way one would expect, because it was
+//     reconstructing state it had no reason to track. A lane that derives it
+//     from the command line is exact -- but only if the command line is read
+//     as the shell reads it. `cd a; (cd b; ls); pwd` ends in `a`, and a reader
+//     that does not know a subshell has its own working directory says `b`.
+//   * The router classifies a call by what the model wanted from it, which is
+//     the last simple command of the list: `cd diet && cargo test` is a test
+//     run, and the first word of the line is not.
+//
+// So the shape of a command line is what this grammar states, and what it
+// states is a SUBSET of the shell: lists, pipelines, simple commands with
+// assignment prefixes and redirections, subshells and groups, the three
+// quotings, expansions kept as opaque words, comments, line continuations and
+// a heredoc when it ends its line. Control flow (`if`, `for`, `while`, `case`,
+// functions) is NOT in this subset. Its keywords parse as ordinary words, so a
+// loop body is seen as a sequence of simple commands -- which is right for
+// "which files did this touch" and wrong for "how many times". A lane that
+// needs the difference needs a later version of this file, not a tolerant
+// reading of this one.
+//
+// What is deliberately refused, stated so nobody has to discover it: an
+// unterminated quote, subshell, group or expansion; an operator with nothing
+// after it (`a &&`); a redirection with no target (`echo >`); a heredoc that
+// is not the last thing on its line (`cat <<EOF | sort` -- the body would have
+// to be located past the rest of the line, and v0 does not); an empty
+// subshell; a redirection or `|&` after a subshell or group. Each is a
+// fixture under `fixtures/invalid/` with its reason.
+
+// ---------------------------------------------------------------------------
+// document
+// ---------------------------------------------------------------------------
+
+// A document may be empty or all blank lines: a tool call with no command is a
+// fact about the call, and the projection says so with an empty list.
+document = { SOI ~ gap* ~ (list ~ gap*)? ~ EOI }
+
+// ---------------------------------------------------------------------------
+// lists
+// ---------------------------------------------------------------------------
+
+// `a; b`, `a && b || c`, `a &`, one per line. A separator may trail; a
+// separator may not lead, and two may not meet -- `;;` belongs to `case`,
+// which is not here.
+list = { and_or ~ (sep ~ gap* ~ and_or)* ~ sep? }
+
+// `&` sends the AND-OR list before it to the background. It is captured as
+// its own rule so the parser can say which list it applied to; `;` and a
+// newline are the plain sequence separators. A comment may sit in front of a
+// newline separator and nowhere else.
+sep = { hs* ~ (background | (";" ~ !";") | comment? ~ nl) }
+background = { "&" ~ !"&" ~ !">" }
+
+// `a && b || c` groups left to right, as the shell does. A newline may follow
+// the operator.
+and_or = { pipeline ~ (hs* ~ and_or_op ~ gap* ~ pipeline)* }
+and_or_op = { and | or }
+and = { "&&" }
+or = { "||" }
+
+// `a | b`, `a |& b`. A single `|` followed by another is `||` and belongs to
+// the rule above; the lookahead keeps this one from taking half of it.
+pipeline = { command ~ (hs* ~ pipe ~ gap* ~ command)* }
+pipe = { "|&" | ("|" ~ !"|") }
+
+// ---------------------------------------------------------------------------
+// commands
+// ---------------------------------------------------------------------------
+
+// Ordered: a subshell and a group each open with a character that is also
+// legal inside a word, so they are tried first. A group's brace must be
+// followed by whitespace -- `{a,b}` is a word, `{ a; }` is a group.
+command = { subshell | group | simple }
+
+// A subshell runs its list against a COPY of the shell's state. That is the
+// entire reason it is a separate rule rather than a word: the mechanical lane
+// discards what happened inside.
+subshell = { "(" ~ gap* ~ list ~ gap* ~ close_paren }
+close_paren = { ")" }
+
+// A group runs its list against the shell's own state. The closing brace
+// must be its own word, which the list's trailing separator or a newline
+// provides.
+//
+// The closers are named rules so that a bracket left open is refused for
+// its own reason. Written as bare literals, an unterminated subshell, an
+// unterminated group and a dangling `&&` all failed with the same message
+// at the same place -- "expected command" at the end of input -- and the
+// conformance corpus could not tell the three refusals apart.
+//
+// A redirection after a compound command (`(ls) > out`) and `|&` after one
+// are outside v0: the redirection would need a place on the compound
+// command to live, and v0 gives it none rather than a wrong one.
+group = { "{" ~ hs+ ~ gap* ~ list ~ gap* ~ close_brace }
+close_brace = { "}" }
+
+// Assignment prefixes come first and only first: `make key=value` is a
+// command with an operand, `key=value make` is an assignment. A command may
+// be assignments alone, or elements alone, and never nothing: a rule that
+// accepted the empty string here would make `; ls` a list of two commands,
+// the first of them empty, and an empty command is what a leading separator
+// or a dangling `&&` leaves behind. Both are refused instead.
+simple = { (assignment_prefix+ ~ elements?) | elements }
+assignment_prefix = _{ assignment ~ (hs+ | &sep_ahead | &EOI) }
+elements = _{ !lone_open_brace ~ element ~ (hs+ ~ element)* }
+sep_ahead = _{ ";" | "&" | "|" | ")" | "}" | nl | "#" }
+
+// A lone `{` where a command should start is a group that failed to be one
+// -- `{ ls` with no closing brace -- and not a command called `{`. Only at
+// command position: `echo { a` is three words to the shell and to this rule.
+lone_open_brace = _{ "{" ~ &(hs | nl | EOI) }
+
+element = { redirection | word }
+
+assignment = { name ~ "=" ~ word? }
+name = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+
+// ---------------------------------------------------------------------------
+// redirections
+// ---------------------------------------------------------------------------
+
+// `> f`, `>>f`, `2>&1`, `&> f`, `< f`, `<<< word`, and a heredoc. A file
+// descriptor hugs its operator: `echo 2 > f` is a word `2` and a redirection
+// of descriptor 1. A target is a word; a duplication's target is a descriptor
+// or `-`.
+redirection = { heredoc | dup | file_redirection }
+
+file_redirection = { fd? ~ file_op ~ hs* ~ word }
+file_op = { ">>" | "&>>" | "&>" | ">|" | ">" | "<<<" | "<" }
+
+dup = { fd? ~ dup_op ~ hs* ~ dup_target }
+dup_op = { ">&" | "<&" }
+dup_target = @{ ASCII_DIGIT+ | "-" }
+
+fd = @{ ASCII_DIGIT+ }
+
+// A heredoc: the operator, its delimiter, then -- after the rest of the
+// command line, which must be empty -- the body up to a line that is exactly
+// the delimiter. The delimiter is pushed onto pest's stack when it is read and
+// popped when the terminator line is matched, so the terminator is compared
+// against the text that opened it. A quoted delimiter is pushed without its
+// quotes, because that is what the shell compares against.
+heredoc = { heredoc_op ~ hs* ~ heredoc_delim ~ hs* ~ comment? ~ nl ~ heredoc_body ~ heredoc_end }
+heredoc_op = { "<<-" | "<<" }
+heredoc_delim = _{ ("'" ~ PUSH(delim_text) ~ "'") | ("\"" ~ PUSH(delim_text) ~ "\"") | PUSH(delim_text) }
+delim_text = @{ (ASCII_ALPHANUMERIC | "_" | "-" | ".")+ }
+heredoc_body = @{ (!(PEEK ~ (nl | EOI)) ~ (!nl ~ ANY)* ~ nl)* }
+// Named, not silent: a heredoc whose delimiter never arrives is then
+// refused as "expected heredoc_end" at the end of the input, rather than
+// as a failed `<` redirection back where the heredoc began.
+heredoc_end = { POP ~ &(nl | EOI) }
+
+// ---------------------------------------------------------------------------
+// words
+// ---------------------------------------------------------------------------
+
+// A word is one or more parts with nothing between them: `a'b c'd` is one
+// word, `a 'b c' d` is three. A word may not begin a comment, and a lone
+// closing brace is not a word -- it closes a group.
+word = ${ !comment_start ~ !lone_close_brace ~ word_part+ }
+comment_start = _{ "#" }
+lone_close_brace = _{ "}" ~ &(hs | nl | ";" | "&" | "|" | ")" | EOI) }
+
+word_part = _{ single_quoted | double_quoted | expansion | escaped | bare }
+
+// Single quotes keep every byte as written; nothing escapes inside them.
+single_quoted = { "'" ~ single_inner ~ "'" }
+single_inner = @{ (!"'" ~ ANY)* }
+
+// Double quotes keep bytes as written except for a backslash before one of
+// the five characters it can escape, and they may contain an expansion,
+// which may itself contain a double quote.
+double_quoted = { "\"" ~ double_part* ~ "\"" }
+double_part = _{ double_escape | expansion | double_run | double_backslash }
+double_escape = { "\\" ~ ("\"" | "\\" | "$" | "`" | nl) }
+double_run = @{ (!("\"" | "\\" | "$" | "`") ~ ANY)+ }
+// A backslash before any other character stays a backslash, as the shell
+// keeps it: `"\n"` is two characters inside double quotes.
+double_backslash = { "\\" }
+
+// Expansions are kept opaque. What they expand to depends on state the
+// grammar does not have, and a lane that needs the value marks the word as
+// not literal rather than guessing.
+expansion = { dollar_paren | dollar_brace | dollar_name | backtick | dollar_alone }
+dollar_paren = { "$(" ~ paren_inner* ~ ")" }
+paren_inner = _{ dollar_paren | single_quoted | double_quoted | escaped | (!")" ~ ANY) }
+dollar_brace = { "${" ~ brace_inner* ~ "}" }
+brace_inner = _{ dollar_brace | single_quoted | double_quoted | escaped | (!"}" ~ ANY) }
+dollar_name = { "$" ~ (name | ASCII_DIGIT | "?" | "$" | "!" | "#" | "@" | "*") }
+backtick = { "`" ~ (!"`" ~ ANY)* ~ "`" }
+dollar_alone = { "$" }
+
+// A backslash before a newline joins the lines; before anything else it keeps
+// that character literally.
+escaped = { "\\" ~ (nl | ANY) }
+
+// Everything else, up to a character that means something to the grammar.
+bare = @{ bare_char+ }
+bare_char = _{ !(hs | nl | "'" | "\"" | "\\" | "$" | "`" | "|" | "&" | ";" | "(" | ")" | "<" | ">") ~ ANY }
+
+// ---------------------------------------------------------------------------
+// whitespace and comments
+// ---------------------------------------------------------------------------
+
+// `hs` is horizontal space; a backslash-newline is horizontal space too,
+// because the shell splices the lines before it reads them.
+hs = _{ " " | "\t" | "\r" | ("\\" ~ nl) }
+nl = _{ "\n" }
+
+// A gap is anything that may sit between two items of a list: blank lines,
+// comments, space.
+gap = _{ hs | nl | comment }
+// Silent: a comment is nothing to any reader, and a token for it would have
+// to be skipped at every place a gap may sit.
+comment = _{ "#" ~ (!nl ~ ANY)* }

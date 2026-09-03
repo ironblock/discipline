@@ -1,0 +1,3 @@
+A `|&` after a subshell. The shell reads it as `2>&1 |` on the subshell,
+and v0 has no place on a compound command to record that duplication; it
+refuses rather than read the pipe as a plain one and misplace stderr.

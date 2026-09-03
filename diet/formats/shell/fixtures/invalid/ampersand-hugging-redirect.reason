@@ -1,0 +1,3 @@
+An `&` that hugs a redirection with no space before it. The shell reads
+`&>` as one operator; v0 does not resolve which of the background marker
+and the redirection this was, and refuses rather than choose.

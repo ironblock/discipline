@@ -1,0 +1,51 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [
+                  {
+                    "descriptor": "1",
+                    "fd": 2,
+                    "op": ">&"
+                  }
+                ],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "cargo"
+                  },
+                  {
+                    "literal": true,
+                    "text": "build"
+                  }
+                ]
+              }
+            },
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "tail"
+                  },
+                  {
+                    "literal": true,
+                    "text": "-3"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

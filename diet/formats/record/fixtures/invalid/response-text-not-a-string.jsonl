@@ -1,0 +1,3 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"a-model","quantization":"q4","sampler":{"seed":7},"reasoning":"on","hardware":"one-gpu"}}}
+{"record":"request","id":"q1","lane":"main"}
+{"record":"response","id":"a1","to_request":"q1","output_tokens":3,"text":["no"]}

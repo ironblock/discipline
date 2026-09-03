@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 107
+red_faults = 111
 mechanics_assertions = 27
 migrated = 0
 
@@ -325,6 +325,42 @@ check = "test"
 label = "a field kind nothing covers"
 failure_class = "library.non-exhaustive-predicate"
 legacy_signature = "non-exhaustive patterns"
+migrated = false
+
+[[fault]]
+id = "test.shell_subshell_as_group"
+kind = "seeded-gate"
+check = "test"
+label = "a subshell read as a group"
+failure_class = "shell.scope-lost"
+legacy_signature = "the bracketed list was not read as a subshell"
+migrated = false
+
+[[fault]]
+id = "test.shell_stderr_pipe_flat"
+kind = "seeded-gate"
+check = "test"
+label = "a stderr pipe read as a plain pipe"
+failure_class = "shell.stderr-misplaced"
+legacy_signature = "did not become the duplication it abbreviates"
+migrated = false
+
+[[fault]]
+id = "test.shell_expansion_literal"
+kind = "seeded-gate"
+check = "test"
+label = "an expanding word reported literal"
+failure_class = "shell.literal-overclaimed"
+legacy_signature = "a word the shell would expand was reported literal"
+migrated = false
+
+[[fault]]
+id = "test.record_empty_payload_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "an empty payload read as absent"
+failure_class = "record.payload-dropped"
+legacy_signature = "an empty answer is a recorded answer, not a missing one"
 migrated = false
 
 [[fault]]

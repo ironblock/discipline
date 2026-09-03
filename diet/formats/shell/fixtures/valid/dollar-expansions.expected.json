@@ -1,0 +1,57 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "echo"
+                  },
+                  {
+                    "literal": false,
+                    "text": "$HOME"
+                  },
+                  {
+                    "literal": false,
+                    "text": "${VAR:-x}"
+                  },
+                  {
+                    "literal": false,
+                    "text": "$(pwd)"
+                  },
+                  {
+                    "literal": false,
+                    "text": "`date`"
+                  },
+                  {
+                    "literal": false,
+                    "text": "$1"
+                  },
+                  {
+                    "literal": false,
+                    "text": "$?"
+                  },
+                  {
+                    "literal": true,
+                    "text": "$"
+                  },
+                  {
+                    "literal": true,
+                    "text": "end"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

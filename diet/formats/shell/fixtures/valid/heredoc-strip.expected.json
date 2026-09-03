@@ -1,0 +1,33 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [
+                  {
+                    "heredoc": {
+                      "body": "indented body\n",
+                      "delimiter": "END"
+                    },
+                    "op": "<<-"
+                  }
+                ],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "cat"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

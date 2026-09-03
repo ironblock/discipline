@@ -1,0 +1,33 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "make"
+                  },
+                  {
+                    "literal": true,
+                    "text": "key=value"
+                  },
+                  {
+                    "literal": true,
+                    "text": "--flag=x"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

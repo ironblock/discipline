@@ -23,6 +23,7 @@ pub mod decline;
 pub mod interview;
 pub mod record;
 pub mod regimen;
+pub mod shell;
 
 /// A format with a grammar and a conformance-fixture directory.
 #[derive(Debug, Clone, Copy)]
@@ -71,6 +72,11 @@ pub const FORMATS: &[Format] = &[
         name: "regimen",
         case_extension: "toml",
         project: regimen::project,
+    },
+    Format {
+        name: "shell",
+        case_extension: "sh",
+        project: shell::project,
     },
 ];
 

@@ -1,0 +1,37 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "rm"
+                  },
+                  {
+                    "literal": true,
+                    "text": "-f"
+                  },
+                  {
+                    "literal": false,
+                    "text": "*.tmp"
+                  },
+                  {
+                    "literal": false,
+                    "text": "build/?.o"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
