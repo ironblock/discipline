@@ -90,6 +90,14 @@ pub struct Provenance {
     pub lane: String,
     /// The fork it came from, when it came from one.
     pub fork: Option<String>,
+    /// Where this patch sat in its lane's emission for the turn.
+    ///
+    /// Patches within one turn are logically simultaneous, and forks finish
+    /// in whatever order they finish. Without a position of its own, a patch
+    /// would be ordered by arrival -- and which of two forks' identical facts
+    /// becomes the canonical entry would depend on which fork was faster.
+    /// `(lane, fork, index)` orders a turn totally, so it does not.
+    pub index: u32,
 }
 
 /// What a patch does.
@@ -256,6 +264,26 @@ pub enum ObjectError {
         /// What it currently is.
         state: EntryState,
     },
+    /// A turn handed to [`WorkingObject::apply_turn`] whose patches do not
+    /// all come from the same turn. Canonical ordering is within a turn;
+    /// across turns the order is the turns'.
+    MixedTurns {
+        /// The turn of the first patch.
+        expected: u32,
+        /// A turn that disagreed.
+        found: u32,
+    },
+    /// Two patches in one turn claim the same `(lane, fork, index)`. The
+    /// canonical order is total only if positions are unique, and a turn
+    /// whose order is not total is a turn whose result depends on arrival.
+    DuplicatePosition {
+        /// The lane.
+        lane: String,
+        /// The fork.
+        fork: Option<String>,
+        /// The index both patches claimed.
+        index: u32,
+    },
     /// An `Add` restating content the object holds under an entry that is no
     /// longer live. Dedup is for two forks saying the same thing in one turn;
     /// folding a later assertion into a fact that was already corrected away
@@ -292,6 +320,16 @@ impl fmt::Display for ObjectError {
                 f,
                 "entry `{id}` was already voided by `{by}`, and overwriting that \
                  link would lose which correction came first"
+            ),
+            Self::MixedTurns { expected, found } => write!(
+                f,
+                "a turn of patches from turn {expected} also carries one from turn \
+                 {found}; a turn is ordered within itself"
+            ),
+            Self::DuplicatePosition { lane, fork, index } => write!(
+                f,
+                "two patches in one turn sit at lane `{lane}`, fork {fork:?}, index \
+                 {index}; a turn whose order is not total is ordered by arrival"
             ),
             Self::TargetNotLive { id, state } => write!(
                 f,
@@ -365,6 +403,11 @@ pub struct WorkingObject {
     regime: Regime,
     entries: BTreeMap<EntryId, Entry>,
     by_content: BTreeMap<String, EntryId>,
+    /// Ids that named content the object already held, mapped to the entry
+    /// that holds it. An alias, never a rebinding: the lane that said `e2`
+    /// can go on saying `e2`, and identity is not collapsed because content
+    /// was.
+    aliases: BTreeMap<EntryId, EntryId>,
     version: u32,
 }
 
@@ -376,6 +419,7 @@ impl WorkingObject {
             regime,
             entries: BTreeMap::new(),
             by_content: BTreeMap::new(),
+            aliases: BTreeMap::new(),
             version: 0,
         }
     }
@@ -395,7 +439,70 @@ impl WorkingObject {
     /// The entry `id` names.
     #[must_use]
     pub fn entry(&self, id: &EntryId) -> Option<&Entry> {
-        self.entries.get(id)
+        self.entries.get(&self.canonical(id)?)
+    }
+
+    /// The entry `id` names, resolving an alias to the entry that holds its
+    /// content. `None` when the object holds nothing under `id`.
+    #[must_use]
+    pub fn canonical(&self, id: &EntryId) -> Option<EntryId> {
+        if self.entries.contains_key(id) {
+            return Some(id.clone());
+        }
+        self.aliases.get(id).cloned()
+    }
+
+    /// Every alias, with the entry it resolves to.
+    pub fn aliases(&self) -> impl Iterator<Item = (&EntryId, &EntryId)> {
+        self.aliases.iter()
+    }
+
+    /// Apply one turn's patches in their canonical order.
+    ///
+    /// Patches within a turn are logically simultaneous; forks finish in
+    /// whatever order they finish. Sorting by `(lane, fork, index)` before
+    /// applying makes the result a property of the turn rather than of the
+    /// race, and `a_turns_patches_apply_the_same_in_any_order` holds this
+    /// to every permutation. Atomic: a turn that is refused at any patch
+    /// leaves the object as it was.
+    ///
+    /// # Errors
+    ///
+    /// [`ObjectError::MixedTurns`] if the patches are not all from one turn,
+    /// [`ObjectError::DuplicatePosition`] if two claim the same position,
+    /// and whatever [`WorkingObject::apply`] returns for the patch it refused.
+    pub fn apply_turn(&mut self, patches: &[Patch]) -> Result<Vec<Applied>, ObjectError> {
+        let mut ordered: Vec<&Patch> = patches.iter().collect();
+        if let (Some(first), true) = (ordered.first(), ordered.len() > 1) {
+            let expected = first.provenance().turn;
+            if let Some(other) = ordered.iter().find(|p| p.provenance().turn != expected) {
+                return Err(ObjectError::MixedTurns {
+                    expected,
+                    found: other.provenance().turn,
+                });
+            }
+        }
+        ordered.sort_by_key(|patch| {
+            let p = patch.provenance();
+            (p.lane.clone(), p.fork.clone(), p.index)
+        });
+        for pair in ordered.windows(2) {
+            let (a, b) = (pair[0].provenance(), pair[1].provenance());
+            if (&a.lane, &a.fork, a.index) == (&b.lane, &b.fork, b.index) {
+                return Err(ObjectError::DuplicatePosition {
+                    lane: a.lane.clone(),
+                    fork: a.fork.clone(),
+                    index: a.index,
+                });
+            }
+        }
+        let mut staged = self.clone();
+        let mut applied = Vec::with_capacity(ordered.len());
+        for patch in ordered {
+            applied.push(staged.apply(patch)?);
+        }
+        *self = staged;
+        Ok(applied)
     }
 
     /// Every entry, in id order.
@@ -475,7 +582,13 @@ impl WorkingObject {
                     state: entry.state.clone(),
                 });
             }
-            return Ok(if self.record_provenance(&held, provenance) {
+            // The id the lane chose survives as an alias of the entry that
+            // holds the content. Identity and content are different things,
+            // and a lane that emits `Add(e2)` then `Resolve(e2)` must not be
+            // told the object has never heard of e2.
+            let aliased = self.record_alias(id, &held);
+            let recorded = self.record_provenance(&held, provenance);
+            return Ok(if aliased || recorded {
                 Applied::Deduped(held)
             } else {
                 Applied::Unchanged(held)
@@ -491,7 +604,10 @@ impl WorkingObject {
         if key.is_empty() {
             return Err(ObjectError::EmptyContent(id.clone()));
         }
-        if let Some(existing) = self.entries.get(id)
+        // Through the alias: an id that already names a fact names it whether
+        // it is the canonical entry or an alias of one.
+        if let Some(held) = self.canonical(id)
+            && let Some(existing) = self.entries.get(&held)
             && normalise(&existing.content) != key
         {
             return Err(ObjectError::IdReused {
@@ -539,6 +655,17 @@ impl WorkingObject {
     ) -> Result<Applied, ObjectError> {
         if id == voids {
             return Err(ObjectError::SelfSupersede(id.clone()));
+        }
+        // Through the aliases, both ends. A correction whose new id and whose
+        // target resolve to one entry is a correction of an entry by itself,
+        // whichever names the lane used for it. Checked before admissibility
+        // so that it is named as what it is rather than as an id reused.
+        let Some(voids) = self.canonical(voids) else {
+            return Err(ObjectError::UnknownTarget(voids.clone()));
+        };
+        let voids = &voids;
+        if self.canonical(id).as_ref() == Some(voids) {
+            return Err(ObjectError::SelfSupersede(voids.clone()));
         }
         let Some(old) = self.entries.get(voids) else {
             return Err(ObjectError::UnknownTarget(voids.clone()));
@@ -596,6 +723,10 @@ impl WorkingObject {
         state: EntryState,
         provenance: &Provenance,
     ) -> Result<Applied, ObjectError> {
+        let Some(target) = self.canonical(target) else {
+            return Err(ObjectError::UnknownTarget(target.clone()));
+        };
+        let target = &target;
         let Some(entry) = self.entries.get(target) else {
             return Err(ObjectError::UnknownTarget(target.clone()));
         };
@@ -619,6 +750,16 @@ impl WorkingObject {
             return Ok(Applied::Unchanged(target.clone()));
         }
         Ok(Applied::StateChanged(target.clone()))
+    }
+
+    /// Record that `alias` names the entry `canonical`, unless it already
+    /// does or they are the same id. Reports whether it wrote.
+    fn record_alias(&mut self, alias: &EntryId, canonical: &EntryId) -> bool {
+        if alias == canonical || self.aliases.get(alias) == Some(canonical) {
+            return false;
+        }
+        self.aliases.insert(alias.clone(), canonical.clone());
+        true
     }
 
     /// Add `provenance` to an entry, unless it already carries it.
@@ -666,7 +807,13 @@ impl WorkingObject {
             .values()
             .map(|entry| {
                 let mut line = String::new();
-                json::render(&entry_value(entry), &mut line);
+                let aliases: Vec<&EntryId> = self
+                    .aliases
+                    .iter()
+                    .filter(|(_, held)| *held == &entry.id)
+                    .map(|(alias, _)| alias)
+                    .collect();
+                json::render(&entry_value(entry, &aliases), &mut line);
                 (entry.id.clone(), line)
             })
             .collect()
@@ -715,7 +862,7 @@ pub fn changed_between(
 }
 
 /// One entry as the record's value space.
-fn entry_value(entry: &Entry) -> Value {
+fn entry_value(entry: &Entry, aliases: &[&EntryId]) -> Value {
     let mut members = BTreeMap::from([
         ("id".to_owned(), Value::String(entry.id.0.clone())),
         ("content".to_owned(), Value::String(entry.content.clone())),
@@ -734,6 +881,17 @@ fn entry_value(entry: &Entry) -> Value {
     if let Some(superseded) = &entry.supersedes {
         members.insert("supersedes".to_owned(), Value::String(superseded.0.clone()));
     }
+    if !aliases.is_empty() {
+        members.insert(
+            "aliases".to_owned(),
+            Value::Array(
+                aliases
+                    .iter()
+                    .map(|alias| Value::String(alias.0.clone()))
+                    .collect(),
+            ),
+        );
+    }
     Value::Object(members)
 }
 
@@ -744,6 +902,10 @@ fn provenance_value(provenance: &Provenance) -> Value {
             Value::Integer(i64::from(provenance.turn)),
         ),
         ("lane".to_owned(), Value::String(provenance.lane.clone())),
+        (
+            "index".to_owned(),
+            Value::Integer(i64::from(provenance.index)),
+        ),
     ]);
     if let Some(fork) = &provenance.fork {
         members.insert("fork".to_owned(), Value::String(fork.clone()));
@@ -763,7 +925,16 @@ mod tests {
         Applied, EntryId, EntryState, ObjectError, Patch, Provenance, WorkingObject,
         changed_between,
     };
-    use crate::formats::record::{self, Regime};
+    use crate::formats::record::json;
+    use crate::formats::record::{self, Regime, regime_value};
+
+    /// The regime as the dump header writes it, so a test can ask whether a
+    /// header still carries exactly the regime the object was opened under.
+    fn rendered(regime: &Regime) -> String {
+        let mut out = String::from(r#""regime":"#);
+        json::render(&regime_value(regime), &mut out);
+        out
+    }
 
     /// A regime for the tests, parsed through the record schema so that the
     /// object cannot be opened under a regime the record would reject.
@@ -781,10 +952,15 @@ mod tests {
     }
 
     fn from(turn: u32, lane: &str, fork: Option<&str>) -> Provenance {
+        at(turn, lane, fork, 0)
+    }
+
+    fn at(turn: u32, lane: &str, fork: Option<&str>, index: u32) -> Provenance {
         Provenance {
             turn,
             lane: lane.to_owned(),
             fork: fork.map(str::to_owned),
+            index,
         }
     }
 
@@ -877,7 +1053,15 @@ mod tests {
             vec![first, second],
             "both forks are recorded on the one entry"
         );
-        assert!(object.entry(&id("e2")).is_none());
+        // The second fork's id is an alias of the first's entry, not a name
+        // the object has forgotten. Identity is not collapsed because content
+        // was.
+        assert_eq!(object.canonical(&id("e2")), Some(id("e1")));
+        assert_eq!(
+            object.entry(&id("e2")).map(|e| &e.id),
+            Some(&id("e1")),
+            "e2 resolves through its alias"
+        );
     }
 
     #[test]
@@ -926,9 +1110,18 @@ mod tests {
             },
         ];
 
+        let opened = rendered(object.regime());
         let mut before = object.dump_lines();
         for (turn, patch) in patches.iter().enumerate() {
             let applied = object.apply(patch).expect("the patch applies");
+            // Every render at the seam carries the same regime. The version
+            // moves; nothing else in the header may.
+            let header = object.dump().lines().next().map(str::to_owned);
+            assert!(
+                header.as_deref().is_some_and(|h| h.contains(&opened)),
+                "turn {}: the dump header's regime moved: {header:?}",
+                turn + 1
+            );
             let after = object.dump_lines();
             let moved = changed_between(&before, &after);
             let claimed: std::collections::BTreeSet<_> = applied.touched().into_iter().collect();
@@ -1346,9 +1539,9 @@ mod tests {
             .expect("the fact");
         for (label, patch) in [
             (
-                "the same fact from the same place",
+                "the same fact, under the same id, from the same place",
                 Patch::Add {
-                    id: id("e2"),
+                    id: id("e1"),
                     content: "a fact".to_owned(),
                     provenance: said.clone(),
                 },
@@ -1463,5 +1656,253 @@ mod tests {
             );
             assert_eq!(object.entry(&id("e1")).expect("e1").state, mark);
         }
+    }
+
+    // Planning's rulings on the two questions #13 disclosed, each as a test
+    // that can fail: the regime is immutable for the session; dedup aliases
+    // and never rebinds; a turn applies the same in any order; and a
+    // correction of an entry by itself is refused through aliases too.
+
+    #[test]
+    fn no_patch_variant_can_move_the_regime() {
+        let mut object = object();
+        let opened = object.regime().clone();
+        let at_open = rendered(&opened);
+        let patches = [
+            add("e1", "a fact", from(1, "interview", None)),
+            Patch::Supersede {
+                id: id("e2"),
+                content: "a corrected fact".to_owned(),
+                voids: id("e1"),
+                provenance: from(2, "interview", None),
+            },
+            Patch::Resolve {
+                target: id("e2"),
+                provenance: from(3, "reconciler", None),
+            },
+            Patch::Retire {
+                target: id("e2"),
+                provenance: from(4, "reconciler", None),
+            },
+        ];
+        for patch in &patches {
+            // Exhaustive on purpose: a variant added to `Patch` and not
+            // listed here does not compile, which is the point -- there is
+            // no variant that can express a regime change, and this is where
+            // that stays true.
+            match patch {
+                Patch::Add { .. }
+                | Patch::Supersede { .. }
+                | Patch::Resolve { .. }
+                | Patch::Retire { .. } => {}
+            }
+            object.apply(patch).expect("the patch applies");
+            assert_eq!(
+                object.regime(),
+                &opened,
+                "{patch:?} moved the regime the object was opened under"
+            );
+            let header = object.dump().lines().next().map(str::to_owned);
+            assert!(
+                header.as_deref().is_some_and(|h| h.contains(&at_open)),
+                "{patch:?}: the dump header's regime moved: {header:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_alias_resolves_to_its_entry_and_keeps_both_provenances() {
+        let mut object = object();
+        let first = from(1, "interview", Some("f1"));
+        let second = from(1, "interview", Some("f2"));
+        object
+            .apply(&add("e1", "the rate is 0.42", first.clone()))
+            .expect("the first fork");
+        assert_eq!(
+            object
+                .apply(&add("e2", "the rate is 0.42", second.clone()))
+                .expect("the second fork"),
+            Applied::Deduped(id("e1"))
+        );
+        // The lane that said e2 goes on saying e2.
+        assert_eq!(
+            object.apply(&Patch::Resolve {
+                target: id("e2"),
+                provenance: from(2, "reconciler", None),
+            }),
+            Ok(Applied::StateChanged(id("e1"))),
+            "a lane was told the object had never heard of the id it chose"
+        );
+        let entry = object.entry(&id("e2")).expect("e2 resolves");
+        assert_eq!(entry.id, id("e1"));
+        assert_eq!(entry.state, EntryState::Resolved);
+        assert!(entry.provenances.contains(&first));
+        assert!(entry.provenances.contains(&second));
+        assert_eq!(
+            object.aliases().collect::<Vec<_>>(),
+            vec![(&id("e2"), &id("e1"))]
+        );
+        // And the alias is in the dump, so a diff can see it arrive.
+        assert!(
+            object.dump().contains(r#""aliases":["e2"]"#),
+            "the alias is not in the dump: {}",
+            object.dump()
+        );
+    }
+
+    #[test]
+    fn a_turns_patches_apply_the_same_in_any_order() {
+        // One turn, two lanes, three forks: two forks stating one fact, a
+        // third stating another, a correction, and a resolve -- the shapes
+        // whose outcome used to depend on which fork finished first.
+        let turn: Vec<Patch> = vec![
+            add("a1", "the rate is 0.42", at(7, "interview", Some("f1"), 0)),
+            add("a2", "the rate is  0.42", at(7, "interview", Some("f2"), 0)),
+            add(
+                "b1",
+                "the sampler is greedy",
+                at(7, "interview", Some("f2"), 1),
+            ),
+            Patch::Supersede {
+                id: id("c1"),
+                content: "the sampler is greedy with a seed".to_owned(),
+                voids: id("b1"),
+                provenance: at(7, "structuring", None, 0),
+            },
+            Patch::Resolve {
+                target: id("a2"),
+                provenance: at(7, "structuring", None, 1),
+            },
+        ];
+        let mut reference: Option<(String, Vec<(EntryId, EntryId)>)> = None;
+        let mut orderings = 0;
+        for permutation in permutations(turn.len()) {
+            let shuffled: Vec<Patch> = permutation.iter().map(|&i| turn[i].clone()).collect();
+            let mut object = object();
+            // A refused ordering is order dependence too: the same patches,
+            // accepted in one order and refused in another.
+            object.apply_turn(&shuffled).unwrap_or_else(|err| {
+                panic!(
+                    "ordering {permutation:?} was refused ({err}): the outcome of a turn \
+                     depended on the order its patches arrived in"
+                )
+            });
+            let aliases: Vec<(EntryId, EntryId)> = object
+                .aliases()
+                .map(|(a, b)| (a.clone(), b.clone()))
+                .collect();
+            let got = (object.dump(), aliases);
+            match &reference {
+                None => reference = Some(got),
+                Some(expected) => assert_eq!(
+                    &got, expected,
+                    "ordering {permutation:?} produced a different object: the outcome of a \
+                     turn depended on the order its patches arrived in"
+                ),
+            }
+            orderings += 1;
+        }
+        assert_eq!(orderings, 120, "every ordering of five patches was tried");
+        let (dump, aliases) = reference.expect("at least one ordering");
+        assert_eq!(
+            aliases,
+            vec![(id("a2"), id("a1"))],
+            "a2 aliases a1 whichever fork was faster"
+        );
+        assert!(dump.contains(r#""id":"c1""#));
+    }
+
+    /// Every ordering of `0..n`.
+    fn permutations(n: usize) -> Vec<Vec<usize>> {
+        if n == 0 {
+            return vec![vec![]];
+        }
+        permutations(n - 1)
+            .into_iter()
+            .flat_map(|shorter| {
+                (0..=shorter.len()).map(move |slot| {
+                    let mut longer = shorter.clone();
+                    longer.insert(slot, n - 1);
+                    longer
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_turn_is_refused_whole_when_its_order_is_not_total() {
+        let mut object = object();
+        object
+            .apply(&add("e0", "a fact", from(1, "interview", None)))
+            .expect("a fact");
+        let before = object.dump();
+        let refused = object.apply_turn(&[
+            add("e1", "one", at(2, "interview", None, 0)),
+            add("e2", "two", at(2, "interview", None, 0)),
+        ]);
+        assert_eq!(
+            refused,
+            Err(ObjectError::DuplicatePosition {
+                lane: "interview".to_owned(),
+                fork: None,
+                index: 0,
+            })
+        );
+        assert_eq!(object.dump(), before, "a refused turn touched the object");
+        assert_eq!(
+            object.apply_turn(&[
+                add("e1", "one", at(2, "interview", None, 0)),
+                add("e2", "two", at(3, "interview", None, 1)),
+            ]),
+            Err(ObjectError::MixedTurns {
+                expected: 2,
+                found: 3
+            })
+        );
+    }
+
+    #[test]
+    fn a_supersede_of_an_entry_by_its_own_alias_is_refused() {
+        let mut object = object();
+        object
+            .apply(&add(
+                "e1",
+                "the rate is 0.42",
+                from(1, "interview", Some("f1")),
+            ))
+            .expect("the first fork");
+        object
+            .apply(&add(
+                "e2",
+                "the rate is 0.42",
+                from(1, "interview", Some("f2")),
+            ))
+            .expect("the second fork, aliased");
+        // The new id resolves to e1 through its alias; the target IS e1.
+        assert_eq!(
+            object.apply(&Patch::Supersede {
+                id: id("e2"),
+                content: "the rate is 0.31".to_owned(),
+                voids: id("e1"),
+                provenance: from(2, "interview", None),
+            }),
+            Err(ObjectError::SelfSupersede(id("e1"))),
+            "a correction of an entry by its own alias was not named as one"
+        );
+        // And through the alias on the other end.
+        assert_eq!(
+            object.apply(&Patch::Supersede {
+                id: id("e1"),
+                content: "the rate is 0.31".to_owned(),
+                voids: id("e2"),
+                provenance: from(2, "interview", None),
+            }),
+            Err(ObjectError::SelfSupersede(id("e1")))
+        );
+        assert_eq!(
+            object.entry(&id("e1")).expect("e1").state,
+            EntryState::Live,
+            "the refused correction left a mark"
+        );
     }
 }

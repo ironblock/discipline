@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 98
+red_faults = 102
 mechanics_assertions = 14
 migrated = 0
 
@@ -244,6 +244,42 @@ check = "test"
 label = "a no-op patch that claims an entry"
 failure_class = "object.false-attribution"
 legacy_signature = "the patch claimed entries no diff can support"
+migrated = false
+
+[[fault]]
+id = "test.object_regime_mutable"
+kind = "seeded-gate"
+check = "test"
+label = "the regime moves under a patch"
+failure_class = "object.regime-not-immutable"
+legacy_signature = "moved the regime the object was opened under"
+migrated = false
+
+[[fault]]
+id = "test.object_no_alias"
+kind = "seeded-gate"
+check = "test"
+label = "dedup rebinds instead of aliasing"
+failure_class = "object.identity-collapsed"
+legacy_signature = "a lane was told the object had never heard of the id it chose"
+migrated = false
+
+[[fault]]
+id = "test.object_unsorted_turn"
+kind = "seeded-gate"
+check = "test"
+label = "a turn applied in arrival order"
+failure_class = "object.order-dependent"
+legacy_signature = "the outcome of a turn depended on the order its patches arrived in"
+migrated = false
+
+[[fault]]
+id = "test.object_alias_self_void"
+kind = "seeded-gate"
+check = "test"
+label = "a self-supersede through an alias"
+failure_class = "object.self-link"
+legacy_signature = "was not named as one"
 migrated = false
 
 [[fault]]
