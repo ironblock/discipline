@@ -496,6 +496,57 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The per-lane floor made inert. A pass that mostly fabricated has shown it
+# was not structuring, and its individual survivors are not trustworthy; a gate
+# that keeps them anyway banks the survivors of a fabrication.
+# Presence loosened from a contiguous run of whole tokens to "every word
+# appears somewhere". That is a recombination matcher, and it scores sentences
+# the source never said as present in it -- a judgment call in the one place
+# that must not have one.
+inject_grounded_loose_matching() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/grounded.rs")
+source = path.read_text(encoding="utf-8")
+old = """    haystack
+        .iter()
+        .any(|line| line.windows(needle.len()).any(|window| window == needle))"""
+new = """    haystack
+        .iter()
+        .any(|line| needle.iter().all(|word| line.contains(word)))"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A floor of zero, which every lane meets. The per-lane rule switched off by a
+# value that looks like a setting.
+inject_grounded_zero_floor() {
+  sed -i 's|^        if grounded == 0 {$|        if false {|' diet/src/capture/grounded.rs
+}
+
+inject_grounded_floor_inert() {
+  sed -i 's|^    let outcome = if score.meets(floor) {$|    let outcome = if true {|' \
+    diet/src/capture/grounded.rs
+}
+
+# The judgment exemption removed. Grounding a plan is a category error, and a
+# gate that does it rejects legitimate content -- the failure that made the
+# scoping a ruling rather than an implementation detail.
+inject_grounded_gates_judgment() {
+  sed -i 's|^        !matches!(self, Self::Judgment)$|        let _ = self; true|' \
+    diet/src/capture/grounded.rs
+}
+
+# A measurement handed back without its instrument having been seen fail. The
+# 1.000 that meant nothing was a real score, computed by real code, on a probe
+# where fabrication was structurally impossible.
+inject_grounded_undemonstrated() {
+  sed -i 's|^        if demonstrated_failure.outcome != LaneOutcome::Rejected {$|        if false {|' \
+    diet/src/capture/grounded.rs
+}
+
 inject_results() {
   cp -r tests/fixtures/results-bad/2026-01-09-unbacked-number results/
 }
@@ -806,6 +857,16 @@ selftest() {
     'retry-of-itself\.jsonl: accepted as'
   seeded_case "record nesting left unbounded"         test     inject_record_depth_unbounded \
     'deep-nesting\.jsonl: accepted as'
+  seeded_case "grounding floor made inert"            test     inject_grounded_floor_inert \
+    'a lane that mostly fabricated must be rejected whole'
+  seeded_case "grounding gates a judgment field"      test     inject_grounded_gates_judgment \
+    'the gate touched a judgment-class field'
+  seeded_case "a score with no demonstrated failure"  test     inject_grounded_undemonstrated \
+    'a measurement was handed back whose instrument never failed'
+  seeded_case "grounding loosened to recombination"   test     inject_grounded_loose_matching \
+    'a sentence the source never said was scored as present in it'
+  seeded_case "a floor of zero"                       test     inject_grounded_zero_floor \
+    'a floor of zero was accepted, and every lane meets it'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
     'front-matter `turns` states 3 but the summary record binds'
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \

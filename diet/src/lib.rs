@@ -4,4 +4,5 @@
 //! character, performance, and timing of an agentic coding session, live or
 //! replayed. This crate owns the regimen and the formats it is expressed in.
 
+pub mod capture;
 pub mod formats;

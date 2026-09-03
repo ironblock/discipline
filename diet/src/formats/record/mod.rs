@@ -171,6 +171,8 @@ vocabulary! {
         Seam => "seam",
         /// A tool was called.
         ToolCall => "tool_call",
+        /// A lane's output rejected whole by the groundedness floor.
+        Rejected => "rejected",
         /// One hypothesis, one result, and what recomputing it consumes.
         Claim => "claim",
         /// The session's totals.
@@ -334,6 +336,25 @@ pub enum Event {
         /// Which tool.
         tool: String,
     },
+    /// A lane's output rejected whole because too little of it was grounded
+    /// in the input the lane was told to work from.
+    ///
+    /// Carries the score, because a rejection nobody can audit is a fallback
+    /// output standing for a reason somebody remembers.
+    Rejected {
+        /// This rejection's identifier.
+        id: String,
+        /// Which lane was rejected.
+        lane: String,
+        /// The turn it happened in. Every id-bearing row links to something
+        /// already seen, and this is the anchor for a lane that need not
+        /// correspond to a fork.
+        at_turn: u32,
+        /// How many of its entries were grounded.
+        grounded: Count,
+        /// How many entries it emitted.
+        of: Count,
+    },
     /// One hypothesis, one result.
     Claim {
         /// This claim's identifier.
@@ -371,6 +392,7 @@ impl Event {
             Self::Capture { .. } => Kind::Capture,
             Self::Seam { .. } => Kind::Seam,
             Self::ToolCall { .. } => Kind::ToolCall,
+            Self::Rejected { .. } => Kind::Rejected,
             Self::Claim { .. } => Kind::Claim,
             Self::Summary { .. } => Kind::Summary,
         }
@@ -386,6 +408,7 @@ impl Event {
             | Self::Capture { id, .. }
             | Self::Seam { id, .. }
             | Self::ToolCall { id, .. }
+            | Self::Rejected { id, .. }
             | Self::Claim { id, .. } => Some(id),
             Self::Start { .. } | Self::Turn { .. } | Self::Summary { .. } => None,
         }
@@ -552,6 +575,16 @@ pub enum StructureError {
     ClaimConsumesNothing(String),
     /// A digest that is not 64 lowercase hex characters.
     BadDigest(String),
+    /// A rejection that is not a rejection: an empty lane, or one whose
+    /// grounded count is not below its total.
+    NotARejection {
+        /// The rejection's identifier.
+        id: String,
+        /// The numerator.
+        grounded: u64,
+        /// The denominator.
+        of: u64,
+    },
     /// A summary that does not summarise the rows above it.
     SummaryDisagrees {
         /// Which total.
@@ -653,6 +686,12 @@ impl fmt::Display for StructureError {
             Self::BadDigest(text) => {
                 write!(f, "`{text}` is not 64 lowercase hex characters")
             }
+            Self::NotARejection { id, grounded, of } => write!(
+                f,
+                "rejection `{id}` scores {grounded}/{of}, which is not a lane \
+                 the floor rejected: a rejection is below its floor, and an \
+                 empty lane is not below any floor"
+            ),
             Self::SummaryDisagrees {
                 field,
                 says,
@@ -821,6 +860,13 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             id: take_string(&mut members, of, "id")?,
             at_turn: take_u32(&mut members, of, "at_turn")?,
             tool: take_string(&mut members, of, "tool")?,
+        },
+        Kind::Rejected => Event::Rejected {
+            id: take_string(&mut members, of, "id")?,
+            lane: take_string(&mut members, of, "lane")?,
+            at_turn: take_u32(&mut members, of, "at_turn")?,
+            grounded: take_u64(&mut members, of, "grounded")?,
+            of: take_u64(&mut members, of, "of")?,
         },
         Kind::Claim => Event::Claim {
             id: take_string(&mut members, of, "id")?,
@@ -1132,6 +1178,27 @@ impl<'a> Seen<'a> {
             Event::Seam { at_turn, .. } | Event::ToolCall { at_turn, .. } => {
                 self.require_turn(*at_turn)?;
             }
+            Event::Rejected {
+                id,
+                at_turn,
+                grounded,
+                of,
+                ..
+            } => {
+                self.require_turn(*at_turn)?;
+                // A rejection is a lane that FAILED the floor. Recorded at a
+                // perfect score, or over an empty lane, it is a row the gate
+                // that writes it can never produce -- and a row nothing can
+                // produce is a row nothing can be checked against.
+                if of.get() == 0 || grounded >= of {
+                    return Err(StructureError::NotARejection {
+                        id: id.clone(),
+                        grounded: grounded.get(),
+                        of: of.get(),
+                    }
+                    .into());
+                }
+            }
             Event::Claim {
                 id,
                 consumes,
@@ -1373,6 +1440,19 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             put("at_turn", Value::Integer(i64::from(*at_turn)));
             put("rendered_bytes", integer(*rendered_bytes));
         }
+        Event::Rejected {
+            id,
+            lane,
+            at_turn,
+            grounded,
+            of,
+        } => {
+            put("id", Value::String(id.clone()));
+            put("lane", Value::String(lane.clone()));
+            put("at_turn", Value::Integer(i64::from(*at_turn)));
+            put("grounded", integer(*grounded));
+            put("of", integer(*of));
+        }
         Event::ToolCall { id, at_turn, tool } => {
             put("id", Value::String(id.clone()));
             put("at_turn", Value::Integer(i64::from(*at_turn)));
@@ -1388,20 +1468,7 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             put("id", Value::String(id.clone()));
             put("hypothesis", Value::String(hypothesis.clone()));
             put("result", Value::String(result.tag().to_owned()));
-            put(
-                "consumes",
-                Value::Array(
-                    consumes
-                        .iter()
-                        .map(|artifact| {
-                            Value::Object(BTreeMap::from([
-                                ("path".to_owned(), Value::String(artifact.path.clone())),
-                                ("sha256".to_owned(), Value::String(artifact.sha256.clone())),
-                            ]))
-                        })
-                        .collect(),
-                ),
-            );
+            put("consumes", artifacts_value(consumes));
             if let Some(superseded) = supersedes {
                 put("supersedes", Value::String(superseded.clone()));
             }
@@ -1417,6 +1484,21 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
         }
     }
     members
+}
+
+/// The artifacts a claim consumes, as the value space.
+fn artifacts_value(consumes: &[Artifact]) -> Value {
+    Value::Array(
+        consumes
+            .iter()
+            .map(|artifact| {
+                Value::Object(BTreeMap::from([
+                    ("path".to_owned(), Value::String(artifact.path.clone())),
+                    ("sha256".to_owned(), Value::String(artifact.sha256.clone())),
+                ]))
+            })
+            .collect(),
+    )
 }
 
 fn regime_value(regime: &Regime) -> Value {

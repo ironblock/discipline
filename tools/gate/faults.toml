@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 83
+red_faults = 88
 mechanics_assertions = 14
 migrated = 0
 
@@ -154,6 +154,51 @@ check = "test"
 label = "record nesting left unbounded"
 failure_class = "record.unbounded-recursion"
 legacy_signature = "deep-nesting\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.grounded_floor_inert"
+kind = "seeded-gate"
+check = "test"
+label = "grounding floor made inert"
+failure_class = "capture.floor-not-enforced"
+legacy_signature = "a lane that mostly fabricated must be rejected whole"
+migrated = false
+
+[[fault]]
+id = "test.grounded_gates_judgment"
+kind = "seeded-gate"
+check = "test"
+label = "grounding gates a judgment field"
+failure_class = "capture.judgment-not-exempt"
+legacy_signature = "the gate touched a judgment-class field"
+migrated = false
+
+[[fault]]
+id = "test.grounded_undemonstrated"
+kind = "seeded-gate"
+check = "test"
+label = "a score with no demonstrated failure"
+failure_class = "capture.instrument-never-failed"
+legacy_signature = "a measurement was handed back whose instrument never failed"
+migrated = false
+
+[[fault]]
+id = "test.grounded_loose_matching"
+kind = "seeded-gate"
+check = "test"
+label = "grounding loosened to recombination"
+failure_class = "capture.presence-is-recombination"
+legacy_signature = "a sentence the source never said was scored as present in it"
+migrated = false
+
+[[fault]]
+id = "test.grounded_zero_floor"
+kind = "seeded-gate"
+check = "test"
+label = "a floor of zero"
+failure_class = "capture.floor-is-zero"
+legacy_signature = "a floor of zero was accepted, and every lane meets it"
 migrated = false
 
 [[fault]]
