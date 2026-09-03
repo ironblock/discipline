@@ -1,0 +1,4 @@
+No `start`, so the record carries no regime. Results without a regime do
+not transfer, and this is the door that keeps one out. A document with any
+event row reaches `start-not-first` instead; this is the only shape that
+reaches this rule, which is why it holds no rows.

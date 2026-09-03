@@ -1,0 +1,2 @@
+A raw control character inside a string; JSON requires it escaped, and
+requiring the escape is what keeps one event on one line.

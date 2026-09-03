@@ -1,0 +1,12 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrate\":{\"hardware\":\"one-gpu\",\"model\":\"a-model\",\"name\":\"local\",\"quantization\":\"q4\",\"reasoning\":\"on\",\"sampler\":{\"seed\":7,\"temperature\":0.7}}}}\n{\"consumes\":[{\"path\":\"a\\\\b.jsonl\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"hypothesis\":\"a tab\\tand a newline\\nand a quote \\\" and a snowman ☃ and an astral 😀\",\"id\":\"c1\",\"record\":\"claim\",\"result\":\"inconclusive\"}\n",
+  "kinds": [
+    "start",
+    "claim"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "substrate": "local"
+  }
+}

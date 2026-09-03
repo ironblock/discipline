@@ -1,0 +1,2 @@
+A response's `to_request` must name a request. Naming a fork would make
+the link type-correct and meaningless.

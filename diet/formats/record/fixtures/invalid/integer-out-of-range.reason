@@ -1,0 +1,2 @@
+An integer literal outside i64. Accepting it would mean storing a number
+different from the one written.

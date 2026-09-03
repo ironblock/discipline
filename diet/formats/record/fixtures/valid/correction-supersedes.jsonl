@@ -1,0 +1,3 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"a-model","quantization":"q4","sampler":{"seed":7,"temperature":0.7},"reasoning":"on","hardware":"one-gpu"}}}
+{"record":"claim","id":"c1","hypothesis":"the rate is 0.42","result":"supported","consumes":[{"path":"run.jsonl","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}
+{"record":"claim","id":"c2","hypothesis":"the rate is 0.42","result":"refuted","consumes":[{"path":"run.jsonl","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"path":"regrade.jsonl","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],"supersedes":"c1"}

@@ -1,0 +1,2 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"a-model","quantization":"q4","sampler":{"seed":7,"temperature":0.7},"reasoning":"on","hardware":"one-gpu"}}}
+{"record":"claim","id":"c1","hypothesis":"a tab\tand a newline\nand a quote \" and a snowman \u2603 and an astral \ud83d\ude00","result":"inconclusive","consumes":[{"path":"a\\b.jsonl","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}

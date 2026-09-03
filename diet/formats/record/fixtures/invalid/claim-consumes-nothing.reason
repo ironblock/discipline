@@ -1,0 +1,3 @@
+A claim that names nothing it consumes can be re-read but never
+re-derived. A run that stored an answer's character count but not the
+answer could only ever produce a bound, never a number.

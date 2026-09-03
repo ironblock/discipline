@@ -1,0 +1,2 @@
+A typo'd key that is silently dropped is a field nobody notices is missing,
+so an undefined key is a rejection rather than something to ignore.

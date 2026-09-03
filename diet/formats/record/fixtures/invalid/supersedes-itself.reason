@@ -1,0 +1,3 @@
+A claim that supersedes itself IS a compound row: one cell holding both the
+retraction and the replacement. A correction is a new row linked to the old
+one, and the old one has to still be there.

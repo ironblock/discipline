@@ -1,0 +1,5 @@
+Nested past the depth limit. Without one, recursive descent runs out of
+stack and ABORTS the process on about two kilobytes of input -- and this
+corpus already says, in not-utf8.reason, that a format must return a
+verdict on arbitrary bytes rather than crash on them. A crash is not a
+verdict.
