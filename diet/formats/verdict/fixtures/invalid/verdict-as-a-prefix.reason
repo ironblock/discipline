@@ -1,0 +1,2 @@
+A verdict is a whole word. A prefix match would make `DONEISH` a `DONE`
+and `PARTIALLY` a `PARTIAL`.

@@ -24,6 +24,7 @@ pub mod interview;
 pub mod record;
 pub mod regimen;
 pub mod shell;
+pub mod verdict;
 
 /// A format with a grammar and a conformance-fixture directory.
 #[derive(Debug, Clone, Copy)]
@@ -77,6 +78,11 @@ pub const FORMATS: &[Format] = &[
         name: "shell",
         case_extension: "sh",
         project: shell::project,
+    },
+    Format {
+        name: "verdict",
+        case_extension: "txt",
+        project: verdict::project,
     },
 ];
 

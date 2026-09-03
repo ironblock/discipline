@@ -39,6 +39,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("check-record", "record"),
     ("check-regimen", "regimen"),
     ("parse-shell", "shell"),
+    ("parse-verdict", "verdict"),
 ];
 
 fn usage() -> String {

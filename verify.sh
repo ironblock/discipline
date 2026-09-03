@@ -748,6 +748,36 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A verdict read by prefix. `DONEISH` is then `DONE`, `PARTIALLY` is
+# `PARTIAL`, and the reconciler applies a judgment the fork did not give.
+inject_verdict_prefix_accepted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/verdict/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = 'verdict = @{ (^"SUPERSEDED" | ^"NOT_THIS" | ^"NOT THIS" | ^"PARTIAL" | ^"DONE") ~ !word_char }'
+new = 'verdict = @{ (^"SUPERSEDED" | ^"NOT_THIS" | ^"NOT THIS" | ^"PARTIAL" | ^"DONE") }'
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A second verdict inside a reason accepted. The reconciler branches on one
+# word; `DONE - or PARTIAL` hands it two.
+inject_verdict_second_verdict_accepted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/verdict/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = "reason_token = _{ !upper_verdict ~ (!sp ~ !nl ~ ANY)+ }"
+new = "reason_token = _{ (!sp ~ !nl ~ ANY)+ }"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1293,6 +1323,10 @@ selftest() {
     'a word the shell would expand was reported literal'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
     'an empty answer is a recorded answer, not a missing one'
+  seeded_case "a verdict read by prefix"               test     inject_verdict_prefix_accepted \
+    'verdict-as-a-prefix\.txt: accepted as'
+  seeded_case "a second verdict in a reason accepted"  test     inject_verdict_second_verdict_accepted \
+    'two-verdicts\.txt: accepted as'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

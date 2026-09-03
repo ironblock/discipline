@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 111
+red_faults = 113
 mechanics_assertions = 27
 migrated = 0
 
@@ -361,6 +361,24 @@ check = "test"
 label = "an empty payload read as absent"
 failure_class = "record.payload-dropped"
 legacy_signature = "an empty answer is a recorded answer, not a missing one"
+migrated = false
+
+[[fault]]
+id = "test.verdict_prefix_accepted"
+kind = "seeded-gate"
+check = "test"
+label = "a verdict read by prefix"
+failure_class = "format.invalid-fixture-accepted"
+legacy_signature = "verdict-as-a-prefix\\.txt: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.verdict_second_verdict_accepted"
+kind = "seeded-gate"
+check = "test"
+label = "a second verdict in a reason accepted"
+failure_class = "format.invalid-fixture-accepted"
+legacy_signature = "two-verdicts\\.txt: accepted as"
 migrated = false
 
 [[fault]]
