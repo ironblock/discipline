@@ -29,7 +29,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 76
+red_faults = 79
 mechanics_assertions = 14
 migrated = 0
 
@@ -86,6 +86,33 @@ check = "test"
 label = "decline grammar loses its end anchor"
 failure_class = "format.invalid-fixture-accepted"
 legacy_signature = "coordinated-with-and\\.txt: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.interview_drops_continuations"
+kind = "seeded-gate"
+check = "test"
+label = "interview drops continuation lines"
+failure_class = "format.valid-fixture-misparsed"
+legacy_signature = "multi-line-continuation\\.txt: parsed to"
+migrated = false
+
+[[fault]]
+id = "test.interview_truncation_blind"
+kind = "seeded-gate"
+check = "test"
+label = "interview blind to truncation"
+failure_class = "format.valid-fixture-misparsed"
+legacy_signature = "truncated-unterminated-fence\\.txt: parsed to"
+migrated = false
+
+[[fault]]
+id = "test.interview_discards_trailing"
+kind = "seeded-gate"
+check = "test"
+label = "interview discards trailing content"
+failure_class = "format.content-unaccounted-for"
+legacy_signature = "content lost parsing"
 migrated = false
 
 [[fault]]

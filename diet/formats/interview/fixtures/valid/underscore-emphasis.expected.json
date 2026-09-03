@@ -1,0 +1,11 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": "unparseable",
+      "raw": "__STUCK__: the resolver's ordering rule",
+      "tag": null
+    }
+  ],
+  "wrapper": null
+}

@@ -1,0 +1,20 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "keep it"
+      },
+      "raw": "keep it",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
+      }
+    }
+  ],
+  "wrapper": {
+    "close": "``` and then some words",
+    "fields_inside": 1,
+    "open": "```"
+  }
+}

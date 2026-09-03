@@ -1,0 +1,4 @@
+A NUL byte is where a byte stream ends, not something a text emitter
+writes. It is the one content rejection this format makes: every other
+awkward byte is kept, because rejecting an answer discards the fields that
+did parse.

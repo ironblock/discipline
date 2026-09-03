@@ -1,0 +1,21 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": "unparseable",
+      "raw": "Here is what I found this turn.",
+      "tag": null
+    },
+    {
+      "outcome": {
+        "value": "keep it"
+      },
+      "raw": "keep it",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
+      }
+    }
+  ],
+  "wrapper": null
+}

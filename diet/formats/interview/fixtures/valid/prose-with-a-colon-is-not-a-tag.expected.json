@@ -1,0 +1,16 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "keep it\nThe bug: the parser dropped lines"
+      },
+      "raw": "keep it\nThe bug: the parser dropped lines",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
+      }
+    }
+  ],
+  "wrapper": null
+}

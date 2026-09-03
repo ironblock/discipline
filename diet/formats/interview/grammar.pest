@@ -1,0 +1,132 @@
+// The `interview` format, v0. This file is NORMATIVE for what a LINE is: the
+// Rust parser in diet/src/formats/interview.rs implements it, and does the two
+// things a PEG cannot -- pair the fences, which is counting, and group lines
+// into fields, which needs to know where the wrapper ends.
+//
+// An interview answer is the prose a forked model returns when asked what it
+// decided, learned, or got stuck on this turn. It was the most-parsed format
+// in the system and the largest single source of SILENT LOSS: five defects in
+// one lane, every one of them content discarded or corrupted with no signal.
+//
+//   * `**DECISION**:` captured the bold markers as part of the value.
+//   * A wrapper code fence around the whole answer made the parser see zero
+//     fields.
+//   * A tag-stripping step removed a leading `#` that was part of the content.
+//   * A field's second and later lines were dropped: 71 of 630 archived
+//     answers lost content that way.
+//   * A close-cousin register (`Decision —` for `DECISION:`) matched nothing.
+//
+// Each was fixed by making the parser more tolerant, and every tolerance fix
+// shipped its own regression. TOLERANCE IS NOT THE FIX, A GRAMMAR IS.
+//
+// A sixth arrived with the first version of this grammar, found by adversarial
+// review: `wrapped = fence_line ~ body ~ final_fence` DISCARDED both fence
+// lines and everything after the closing one. A mechanical sweep of 22,220
+// generated answers found 5,428 that lost content; the same sweep over inputs
+// containing no fence lines lost none. So the shape of this file changed: a
+// document is a sequence of LINES, every byte of the input is inside exactly
+// one of them, and accounting is structural rather than promised. What the
+// parser then does with a line it must say, and `Answer::accounted_text`
+// hands back everything it kept.
+//
+// Two rules look like tolerance and are not:
+//
+//   * THE TAG VOCABULARY IS CLOSED. Treating any `Word:` as a tag
+//     reintroduces the continuation bug in a new dress, because ordinary
+//     prose contains colons (`The bug: the parser dropped lines`) and every
+//     one of them would end the field it sits in.
+//   * A TAG NAME ENDS AT A WORD BOUNDARY, AND A DASH SEPARATOR NEEDS
+//     WHITESPACE ON BOTH SIDES. Without the first, `## DECISIONS ABOUT THE
+//     PARSER` was a DECISION field whose value began `S ABOUT THE PARSER`.
+//     Without the second, `Evidence-based debugging` was an EVIDENCE field
+//     reading `based debugging` -- ordinary hyphenated English fabricating
+//     typed entries out of continuation lines.
+
+// ---------------------------------------------------------------------------
+// document
+// ---------------------------------------------------------------------------
+
+// Every byte of the input is inside exactly one line, and every line is
+// classified. Nothing here can drop anything, because nothing here chooses
+// what to keep.
+document = { SOI ~ line* ~ EOI }
+line = { tag_line | fence_line | text_line }
+
+// ---------------------------------------------------------------------------
+// tag lines
+// ---------------------------------------------------------------------------
+
+// The registers, all of them, in one place:
+//
+//   DECISION: value              bare
+//   **DECISION**: value          emphasised, any of the markdown emphases
+//   **DECISION:** value          emphasis around the separator too
+//   - **DECISION**: value        as a list item
+//   1. DECISION: value           as a numbered list item
+//   ## DECISION                  heading, value on the lines below
+//   ## DECISION: value           heading and separator together
+//   Decision — value             cousin register, any of the separators
+//   decision: value              any case
+tag_line = { hspace* ~ bullet? ~ (heading_tag | inline_tag) ~ hspace* ~ value_head ~ line_end }
+
+bullet = { (("-" | "*" | "+") ~ hspace+) | (ASCII_DIGIT+ ~ ("." | ")") ~ hspace+) }
+
+// A heading with no separator must have nothing else on its line. Without
+// that, `# Evidence of the leak was everywhere` was an EVIDENCE field whose
+// value began `of the leak`.
+heading_tag = { heading_marker ~ hspace* ~ tag_body ~ ((hspace* ~ separator) | (hspace* ~ &line_end)) }
+
+inline_tag = { emphasised_through_separator | (tag_body ~ separator) }
+
+tag_body = { emphasised_tag | tag_name }
+emphasised_tag = { PUSH(emphasis) ~ tag_name ~ POP }
+emphasised_through_separator = { PUSH(emphasis) ~ tag_name ~ separator ~ POP }
+emphasis = { "***" | "**" | "__" | "*" | "_" | "`" }
+
+// `#` opens a heading only in front of a tag name. A `#` at the head of a
+// value line is content and stays there.
+heading_marker = { "#"+ }
+
+// A colon may hug the tag; a dash may not, because `Evidence-based` and
+// `Plan-of-record` are words. Both must be followed by whitespace or the end
+// of the line, so a separator inside a word is not a separator.
+separator = { (hspace* ~ colon) | (hspace+ ~ dash ~ &(hspace | nl | EOI)) }
+colon = { ":" | "：" }
+dash = { "—" | "–" | "--" | "-" | "=" | "»" | ">" }
+
+// The closed vocabulary, ending at a word boundary. Longest alternative first
+// where one is a prefix of another, because PEG choice is ordered.
+tag_name = @{ tag_word ~ !tag_char }
+tag_word = _{
+    ^"api_surface" | ^"api surface" | ^"api-surface"
+  | ^"decision" | ^"evidence" | ^"learned" | ^"stuck" | ^"plan"
+}
+tag_char = _{ ASCII_ALPHANUMERIC | "_" }
+
+// The remainder of the tag line: the field's first line of value, which may
+// be empty when the value starts on the line below.
+value_head = @{ (!nl ~ ANY)* }
+
+// ---------------------------------------------------------------------------
+// fence lines
+// ---------------------------------------------------------------------------
+
+// The marker is captured separately so the parser can pair fences by marker:
+// a block opened with `~~~` is not closed by one opened with a backtick run.
+fence_line = { hspace* ~ fence_marker ~ fence_info ~ line_end }
+fence_marker = @{ ("`"{3,}) | ("~"{3,}) }
+fence_info = @{ (!nl ~ ANY)* }
+
+// ---------------------------------------------------------------------------
+// text lines
+// ---------------------------------------------------------------------------
+
+// Consumes a newline, or at least one character at end of input. A rule that
+// can match the empty string inside a repetition never terminates.
+text_line = { line_content ~ nl | line_rest }
+line_content = @{ (!nl ~ ANY)* }
+line_rest = @{ (!nl ~ ANY)+ ~ &EOI }
+
+line_end = _{ nl | &EOI }
+nl = _{ "\r\n" | "\n" }
+hspace = _{ " " | "\t" }

@@ -1,0 +1,16 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "ship it\n```rust\nlet x = 1;\n```"
+      },
+      "raw": "ship it\n```rust\nlet x = 1;\n```",
+      "tag": {
+        "as_written": "PLAN:",
+        "kind": "plan"
+      }
+    }
+  ],
+  "wrapper": null
+}

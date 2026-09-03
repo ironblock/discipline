@@ -1,0 +1,35 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "keep it"
+      },
+      "raw": "keep it",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
+      }
+    },
+    {
+      "outcome": {
+        "value": "the fix"
+      },
+      "raw": "the fix",
+      "tag": {
+        "as_written": "LEARNED:",
+        "kind": "learned"
+      }
+    },
+    {
+      "outcome": "unparseable",
+      "raw": "That is the whole answer.",
+      "tag": null
+    }
+  ],
+  "wrapper": {
+    "close": "```",
+    "fields_inside": 2,
+    "open": "```"
+  }
+}

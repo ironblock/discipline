@@ -1,0 +1,4 @@
+DECISION: first
+second
+
+fourth

@@ -1,0 +1,32 @@
+{
+  "completion": {
+    "truncated": "unterminated-fence"
+  },
+  "fields": [
+    {
+      "outcome": {
+        "value": "ship"
+      },
+      "raw": "ship",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
+      }
+    },
+    {
+      "outcome": {
+        "value": "```text\nerror[E0308]: mismatched types\n```"
+      },
+      "raw": "```text\nerror[E0308]: mismatched types\n```",
+      "tag": {
+        "as_written": "EVIDENCE:",
+        "kind": "evidence"
+      }
+    }
+  ],
+  "wrapper": {
+    "close": null,
+    "fields_inside": 2,
+    "open": "```"
+  }
+}

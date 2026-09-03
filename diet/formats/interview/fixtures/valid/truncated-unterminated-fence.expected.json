@@ -1,0 +1,32 @@
+{
+  "completion": {
+    "truncated": "unterminated-fence"
+  },
+  "fields": [
+    {
+      "outcome": {
+        "value": "keep it"
+      },
+      "raw": "keep it",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
+      }
+    },
+    {
+      "outcome": {
+        "value": "the parser was"
+      },
+      "raw": "the parser was",
+      "tag": {
+        "as_written": "LEARNED:",
+        "kind": "learned"
+      }
+    }
+  ],
+  "wrapper": {
+    "close": null,
+    "fields_inside": 2,
+    "open": "```"
+  }
+}

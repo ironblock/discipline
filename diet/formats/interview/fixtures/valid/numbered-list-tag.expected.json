@@ -1,0 +1,26 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "keep it"
+      },
+      "raw": "keep it",
+      "tag": {
+        "as_written": "1. DECISION:",
+        "kind": "decision"
+      }
+    },
+    {
+      "outcome": {
+        "value": "the fix"
+      },
+      "raw": "the fix",
+      "tag": {
+        "as_written": "2. LEARNED:",
+        "kind": "learned"
+      }
+    }
+  ],
+  "wrapper": null
+}

@@ -1,0 +1,5 @@
+PLAN: ship it
+```rust
+let x = 1;
+```
+and then measure

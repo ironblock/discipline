@@ -1,0 +1,9 @@
+{
+  "completion": "complete",
+  "fields": [],
+  "wrapper": {
+    "close": "```",
+    "fields_inside": 0,
+    "open": "```"
+  }
+}

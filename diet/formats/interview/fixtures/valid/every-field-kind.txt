@@ -1,0 +1,6 @@
+API_SURFACE: parse, classify
+DECISION: keep the two-turn design
+EVIDENCE: the log line reads exit 2
+LEARNED: tolerance is not the fix
+PLAN: ship the boundary first
+STUCK: the resolver's ordering rule

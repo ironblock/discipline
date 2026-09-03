@@ -28,8 +28,9 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use diet::formats::interview::{Completion, Outcome};
 use diet::formats::regimen::Value;
-use diet::formats::{FORMATS, Format, decline, regimen};
+use diet::formats::{FORMATS, Format, decline, interview, regimen};
 use serde_json::{Map, Value as Json};
 
 /// Where fixtures live: the committed tree, and nowhere else.
@@ -98,6 +99,57 @@ fn parse_to_json(format: &str, source: &[u8]) -> Result<Json, String> {
                     .to_owned(),
             }),
         },
+        "interview" => interview::parse(source)
+            .map(|answer| {
+                let fields: Vec<Json> = answer
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        let tag = field.tag.as_ref().map_or(Json::Null, |tag| {
+                            serde_json::json!({
+                                "kind": tag.kind.canonical_tag(),
+                                "as_written": tag.as_written,
+                            })
+                        });
+                        let outcome = match &field.outcome {
+                            Outcome::Value(text) => serde_json::json!({ "value": text }),
+                            Outcome::Decline(declined) => serde_json::json!({
+                                "decline": {
+                                    "marker": declined.marker,
+                                    "scope": declined.scope,
+                                    "reason": declined.reason,
+                                }
+                            }),
+                            Outcome::Unparseable => Json::from("unparseable"),
+                        };
+                        serde_json::json!({
+                            "tag": tag,
+                            "raw": field.raw,
+                            "outcome": outcome,
+                        })
+                    })
+                    .collect();
+                let completion = match answer.completion {
+                    Completion::Complete => Json::from("complete"),
+                    Completion::Empty => Json::from("empty"),
+                    Completion::Truncated(signal) => {
+                        serde_json::json!({ "truncated": signal.name() })
+                    }
+                };
+                let wrapper = answer.wrapper.as_ref().map_or(Json::Null, |wrapper| {
+                    serde_json::json!({
+                        "open": wrapper.open,
+                        "close": wrapper.close,
+                        "fields_inside": wrapper.fields_inside,
+                    })
+                });
+                serde_json::json!({
+                    "completion": completion,
+                    "wrapper": wrapper,
+                    "fields": fields,
+                })
+            })
+            .map_err(|err| err.to_string()),
         other => panic!("format `{other}` is listed in FORMATS but not wired into the harness"),
     }
 }
@@ -365,7 +417,7 @@ mod formats {
     use super::FORMATS;
     use std::collections::BTreeSet;
 
-    per_format!(decline, regimen);
+    per_format!(decline, interview, regimen);
 
     /// A format in [`FORMATS`] with no module here is a format nobody can run
     /// on its own, and -- worse -- `cargo test -- formats::<name>` for it

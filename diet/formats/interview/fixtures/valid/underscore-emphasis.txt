@@ -1,0 +1,1 @@
+__STUCK__: the resolver's ordering rule

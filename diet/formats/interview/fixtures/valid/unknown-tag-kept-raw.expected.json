@@ -1,0 +1,21 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": "unparseable",
+      "raw": "SUMMARY: a field this format does not know",
+      "tag": null
+    },
+    {
+      "outcome": {
+        "value": "keep it"
+      },
+      "raw": "keep it",
+      "tag": {
+        "as_written": "DECISION:",
+        "kind": "decision"
+      }
+    }
+  ],
+  "wrapper": null
+}

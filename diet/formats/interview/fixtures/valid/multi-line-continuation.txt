@@ -1,0 +1,3 @@
+DECISION: keep the two-turn design
+because the constrained turn cannot carry judgment
+and the judgment turn cannot be constrained
