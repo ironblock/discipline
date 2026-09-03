@@ -754,6 +754,74 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# Planning's rulings on #13, each as a guard that has been seen red.
+
+# The regime moves under a patch. There is no Patch variant that can express
+# this, and the test that holds it is exhaustive over the variants -- so the
+# only way to seed it is to make apply() itself do what no patch can.
+inject_object_regime_mutable() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = "        self.version += 1;\n        Ok(applied)"
+new = "        self.version += 1;\n        self.regime.dogma_version += 1;\n        Ok(applied)"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Dedup rebinds rather than aliases: the id the lane chose is forgotten, and
+# its next patch naming that id is told the object never heard of it.
+inject_object_no_alias() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = "            let aliased = self.record_alias(id, &held);"
+new = "            let aliased = false;"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A turn applied in arrival order. Which fork's fact becomes the canonical
+# entry then depends on which fork was faster.
+inject_object_unsorted_turn() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = """        ordered.sort_by_key(|patch| {
+            let p = patch.provenance();
+            (p.lane.clone(), p.fork.clone(), p.index)
+        });
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# The belt removed: a supersede whose new id and whose target resolve to one
+# entry through an alias is no longer named as a self-supersede.
+inject_object_alias_self_void() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if self.canonical(id).as_ref() == Some(voids) {
+            return Err(ObjectError::SelfSupersede(voids.clone()));
+        }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
 inject_object_no_dedup() {
   sed -i 's|^        if let Some(held) = self.by_content.get(&key).cloned() {$|        if let Some(held) = None::<EntryId> {|' \
     diet/src/object.rs
@@ -1103,6 +1171,14 @@ selftest() {
     'a valid fixture of its own format did not read'
   seeded_case "a CLI that prints no result"           test     inject_cli_silent \
     'stdout is not JSON'
+  seeded_case "the regime moves under a patch"        test     inject_object_regime_mutable \
+    'moved the regime the object was opened under'
+  seeded_case "dedup rebinds instead of aliasing"     test     inject_object_no_alias \
+    'a lane was told the object had never heard of the id it chose'
+  seeded_case "a turn applied in arrival order"       test     inject_object_unsorted_turn \
+    'the outcome of a turn depended on the order its patches arrived in'
+  seeded_case "a self-supersede through an alias"     test     inject_object_alias_self_void \
+    'was not named as one'
   seeded_case "a field kind nothing covers"           test     inject_field_kind_variant \
     'non-exhaustive patterns'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
