@@ -778,6 +778,53 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# An anchor matched inside a longer word. `plan_a` then recurs in every
+# `plan_ab`, and the entry is nominated by every mention of the longer name.
+inject_collector_substring_match() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = "    !continues(before) && !continues(after)\n"
+new = "    let _ = (before, after, continues);\n    true\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# An English word made an anchor. `plan` is in every third sentence of a
+# drive, and an entry anchored on it is nominated by everything.
+inject_collector_english_anchor() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = "        .any(|(a, b)| a.is_lowercase() && b.is_uppercase())\n}\n"
+new = "        .any(|(a, b)| a.is_lowercase() && b.is_uppercase())\n        || has_alpha\n}\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# An entry nominated by the turn that made it. Its own prose carries its own
+# anchors, so every new entry would go straight to a confirm fork.
+inject_collector_self_nomination() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if entry.provenances.iter().any(|p| p.turn >= new.turn) {
+            continue;
+        }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1327,6 +1374,12 @@ selftest() {
     'verdict-as-a-prefix\.txt: accepted as'
   seeded_case "a second verdict in a reason accepted"  test     inject_verdict_second_verdict_accepted \
     'two-verdicts\.txt: accepted as'
+  seeded_case "an anchor matched inside a longer word"  test     inject_collector_substring_match \
+    'an anchor matched inside a longer word'
+  seeded_case "an English word made an anchor"         test     inject_collector_english_anchor \
+    'an English word became an anchor'
+  seeded_case "an entry nominated by its own turn"     test     inject_collector_self_nomination \
+    'an entry nominated itself'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

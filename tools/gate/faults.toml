@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 113
+red_faults = 116
 mechanics_assertions = 27
 migrated = 0
 
@@ -379,6 +379,33 @@ check = "test"
 label = "a second verdict in a reason accepted"
 failure_class = "format.invalid-fixture-accepted"
 legacy_signature = "two-verdicts\\.txt: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.collector_substring_match"
+kind = "seeded-gate"
+check = "test"
+label = "an anchor matched inside a longer word"
+failure_class = "collector.substring-match"
+legacy_signature = "an anchor matched inside a longer word"
+migrated = false
+
+[[fault]]
+id = "test.collector_english_anchor"
+kind = "seeded-gate"
+check = "test"
+label = "an English word made an anchor"
+failure_class = "collector.over-firing"
+legacy_signature = "an English word became an anchor"
+migrated = false
+
+[[fault]]
+id = "test.collector_self_nomination"
+kind = "seeded-gate"
+check = "test"
+label = "an entry nominated by its own turn"
+failure_class = "collector.self-nomination"
+legacy_signature = "an entry nominated itself"
 migrated = false
 
 [[fault]]
