@@ -1,8 +1,6 @@
 {
   "decline": {
-    "subject": null,
     "marker": "NONE",
-    "scope": null,
     "reason": "except the parser"
   }
 }

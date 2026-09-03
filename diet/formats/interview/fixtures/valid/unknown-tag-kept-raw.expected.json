@@ -3,8 +3,7 @@
   "fields": [
     {
       "outcome": "unparseable",
-      "raw": "SUMMARY: a field this format does not know",
-      "tag": null
+      "raw": "SUMMARY: a field this format does not know"
     },
     {
       "outcome": {
@@ -16,6 +15,5 @@
         "kind": "decision"
       }
     }
-  ],
-  "wrapper": null
+  ]
 }

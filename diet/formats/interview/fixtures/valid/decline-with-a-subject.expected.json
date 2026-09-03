@@ -3,9 +3,12 @@
   "fields": [
     {
       "outcome": {
-        "value": "the fix\n# not a heading, part of the value"
+        "decline": {
+          "marker": "nothing to add",
+          "subject": "I have"
+        }
       },
-      "raw": "the fix\n# not a heading, part of the value",
+      "raw": "I have nothing to add.",
       "tag": {
         "as_written": "LEARNED:",
         "kind": "learned"

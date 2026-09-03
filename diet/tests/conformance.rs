@@ -28,10 +28,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use diet::formats::interview::{Completion, Outcome};
-use diet::formats::regimen::Value;
-use diet::formats::{FORMATS, Format, decline, interview, record, regimen};
-use serde_json::{Map, Value as Json};
+use diet::formats::record::json::Value;
+use diet::formats::{FORMATS, Format};
+use serde_json::Value as Json;
 
 /// Where fixtures live: the committed tree, and nowhere else.
 ///
@@ -53,7 +52,7 @@ fn format_named(name: &str) -> &'static Format {
         .unwrap_or_else(|| panic!("`{name}` has a test module but is absent from FORMATS"))
 }
 
-/// Parse `source` as `format` and render the result as tagged JSON, so that a
+/// Parse `source` with `format` and render the result as JSON, so that a
 /// fixture pins the parsed *type* and not merely the parsed text.
 ///
 /// Takes bytes, not text: a format has to return a verdict on whatever is on
@@ -61,115 +60,34 @@ fn format_named(name: &str) -> &'static Format {
 /// where reading it as a `String` first would abort the whole harness on a
 /// fixture whose entire point is being unreadable.
 ///
-/// Adding a name to [`FORMATS`] without wiring it here is a panic, not a
-/// silently skipped format.
-fn parse_to_json(format: &str, source: &[u8]) -> Result<Json, String> {
+/// Dispatch is the format's own `project` function pointer. It used to be a
+/// match on the format's NAME that panicked on one it did not know -- a guard
+/// that fires at run time, where this one fires at compile time, and the same
+/// projection the `diet` CLI emits rather than a second one that agrees today.
+fn parse_to_json(format: &Format, source: &[u8]) -> Result<Json, String> {
     let source = std::str::from_utf8(source).map_err(|err| format!("not UTF-8: {err}"))?;
-    match format {
-        "regimen" => regimen::parse(source)
-            .map(|parsed| {
-                let mut map = Map::new();
-                for (key, value) in parsed.iter() {
-                    let tagged = match value {
-                        Value::String(text) => serde_json::json!({ "string": text }),
-                        Value::Integer(number) => serde_json::json!({ "integer": number }),
-                        Value::Boolean(flag) => serde_json::json!({ "boolean": flag }),
-                    };
-                    map.insert(key.to_owned(), tagged);
-                }
-                Json::Object(map)
-            })
-            .map_err(|err| err.to_string()),
-        // Through `classify`, not `parse`. `classify` is what every caller is
-        // told to use, and a corpus that exercised only `parse` left it able
-        // to return `Content` for everything with the whole gate green.
-        "decline" => match decline::classify(source) {
-            decline::Classification::Decline(parsed) => Ok(serde_json::json!({
-                "decline": {
-                    "subject": parsed.subject,
-                    "marker": parsed.marker,
-                    "scope": parsed.scope,
-                    "reason": parsed.reason,
-                }
-            })),
-            decline::Classification::Content => Err(match decline::parse(source) {
-                Err(err) => err.to_string(),
-                Ok(_) => "classify says content where parse succeeds: \
-                          the two disagree about the same bytes"
-                    .to_owned(),
-            }),
-        },
-        "interview" => interview::parse(source)
-            .map(|answer| {
-                let fields: Vec<Json> = answer
-                    .fields
-                    .iter()
-                    .map(|field| {
-                        let tag = field.tag.as_ref().map_or(Json::Null, |tag| {
-                            serde_json::json!({
-                                "kind": tag.kind.canonical_tag(),
-                                "as_written": tag.as_written,
-                            })
-                        });
-                        let outcome = match &field.outcome {
-                            Outcome::Value(text) => serde_json::json!({ "value": text }),
-                            Outcome::Decline(declined) => serde_json::json!({
-                                "decline": {
-                                    "marker": declined.marker,
-                                    "scope": declined.scope,
-                                    "reason": declined.reason,
-                                }
-                            }),
-                            Outcome::Unparseable => Json::from("unparseable"),
-                        };
-                        serde_json::json!({
-                            "tag": tag,
-                            "raw": field.raw,
-                            "outcome": outcome,
-                        })
-                    })
-                    .collect();
-                let completion = match answer.completion {
-                    Completion::Complete => Json::from("complete"),
-                    Completion::Empty => Json::from("empty"),
-                    Completion::Truncated(signal) => {
-                        serde_json::json!({ "truncated": signal.name() })
-                    }
-                };
-                let wrapper = answer.wrapper.as_ref().map_or(Json::Null, |wrapper| {
-                    serde_json::json!({
-                        "open": wrapper.open,
-                        "close": wrapper.close,
-                        "fields_inside": wrapper.fields_inside,
-                    })
-                });
-                serde_json::json!({
-                    "completion": completion,
-                    "wrapper": wrapper,
-                    "fields": fields,
-                })
-            })
-            .map_err(|err| err.to_string()),
-        "record" => record::parse(source)
-            .map(|parsed| {
-                // Three things, each pinning something different: the regime
-                // trio a report's front-matter mirrors, which event kinds the
-                // case exercises, and the canonical rendering -- which pins
-                // every value's type and spelling byte for byte, and is short
-                // enough that a reviewer can check it against the input line
-                // by line.
-                serde_json::json!({
-                    "regime": {
-                        "arm": parsed.regime().arm,
-                        "substrate": parsed.regime().substrate.name,
-                        "dogma_version": parsed.regime().dogma_version,
-                    },
-                    "kinds": parsed.kinds().iter().map(|kind| kind.tag()).collect::<Vec<_>>(),
-                    "canonical": record::render(&parsed),
-                })
-            })
-            .map_err(|err| err.to_string()),
-        other => panic!("format `{other}` is listed in FORMATS but not wired into the harness"),
+    (format.project)(source).map(|value| as_json(&value))
+}
+
+/// The record's value space as `serde_json`, for comparison against a fixture.
+fn as_json(value: &Value) -> Json {
+    match value {
+        Value::Object(members) => Json::Object(
+            members
+                .iter()
+                .map(|(key, member)| (key.clone(), as_json(member)))
+                .collect(),
+        ),
+        Value::Array(items) => Json::Array(items.iter().map(as_json).collect()),
+        Value::String(text) => Json::String(text.clone()),
+        Value::Integer(number) => Json::from(*number),
+        // Exact in the record and exact here: parsed from its own digits, not
+        // from a float that happened to round there.
+        Value::Decimal(number) => number
+            .as_str()
+            .parse::<serde_json::Number>()
+            .map_or_else(|_| Json::String(number.as_str().to_owned()), Json::Number),
+        Value::Boolean(flag) => Json::Bool(*flag),
     }
 }
 
@@ -346,7 +264,7 @@ fn assert_valid_fixtures_parse_to_their_expected_value(format: &Format) {
                 continue;
             }
         };
-        match parse_to_json(format.name, &read_case(&case)) {
+        match parse_to_json(format, &read_case(&case)) {
             Ok(actual) if actual == expected => {}
             Ok(actual) => failures.push(format!(
                 "{}: parsed to {actual}, expected {expected}",
@@ -376,7 +294,7 @@ fn assert_invalid_fixtures_are_rejected(format: &Format) {
         } else {
             "no reason recorded".to_owned()
         };
-        match parse_to_json(format.name, &read_case(&case)) {
+        match parse_to_json(format, &read_case(&case)) {
             Ok(parsed) => failures.push(format!(
                 "{}: accepted as {parsed}, but must be rejected: {reason}",
                 case.display()

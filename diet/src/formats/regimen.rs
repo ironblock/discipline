@@ -222,6 +222,35 @@ fn binding(pair: Pair<'_, Rule>) -> Result<(String, Value), ParseError> {
     Ok((key, value))
 }
 
+/// This document, as the record's value space.
+///
+/// # Errors
+///
+/// Returns the reason the text is not a regimen.
+pub fn project(source: &str) -> Result<crate::formats::record::json::Value, String> {
+    use crate::formats::record::json::Value as Json;
+    parse(source)
+        .map(|parsed| {
+            let mut members = std::collections::BTreeMap::new();
+            for (key, value) in parsed.iter() {
+                let tagged = match value {
+                    Value::String(text) => ("string", Json::String(text.clone())),
+                    Value::Integer(number) => ("integer", Json::Integer(*number)),
+                    Value::Boolean(flag) => ("boolean", Json::Boolean(*flag)),
+                };
+                members.insert(
+                    key.to_owned(),
+                    Json::Object(std::collections::BTreeMap::from([(
+                        tagged.0.to_owned(),
+                        tagged.1,
+                    )])),
+                );
+            }
+            Json::Object(members)
+        })
+        .map_err(|err| err.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ParseError, Value, parse};

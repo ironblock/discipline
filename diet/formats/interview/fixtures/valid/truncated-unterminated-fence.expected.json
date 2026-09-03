@@ -25,7 +25,6 @@
     }
   ],
   "wrapper": {
-    "close": null,
     "fields_inside": 2,
     "open": "```"
   }

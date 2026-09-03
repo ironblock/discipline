@@ -1,8 +1,6 @@
 {
   "decline": {
-    "subject": null,
     "marker": "No plan change",
-    "scope": null,
     "reason": "this was an exploration of the existing parser"
   }
 }

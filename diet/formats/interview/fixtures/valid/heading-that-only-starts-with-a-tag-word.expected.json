@@ -3,9 +3,7 @@
   "fields": [
     {
       "outcome": "unparseable",
-      "raw": "## DECISIONS ABOUT THE PARSER\nkeep it",
-      "tag": null
+      "raw": "## DECISIONS ABOUT THE PARSER\nkeep it"
     }
-  ],
-  "wrapper": null
+  ]
 }

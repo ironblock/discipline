@@ -4,9 +4,7 @@
     {
       "outcome": {
         "decline": {
-          "marker": "NONE",
-          "reason": null,
-          "scope": null
+          "marker": "NONE"
         }
       },
       "raw": "NONE",
@@ -25,6 +23,5 @@
         "kind": "learned"
       }
     }
-  ],
-  "wrapper": null
+  ]
 }

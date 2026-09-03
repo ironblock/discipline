@@ -3,8 +3,7 @@
   "fields": [
     {
       "outcome": "unparseable",
-      "raw": "Here is what I found this turn.",
-      "tag": null
+      "raw": "Here is what I found this turn."
     },
     {
       "outcome": {
@@ -16,6 +15,5 @@
         "kind": "decision"
       }
     }
-  ],
-  "wrapper": null
+  ]
 }

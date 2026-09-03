@@ -8,27 +8,41 @@ required types, that the report's sections appear in the required order, and
 -- the point of the whole exercise -- that what the report *states* is backed
 by what the run *recorded*.
 
-Three cross-checks enforce that last part:
+Whether ``run.jsonl`` IS a session record is not this script's question.
+``diet check-record`` is the sole authority on that -- the regime trio, the
+retry lineage, the recompute-sufficiency fields, the value space -- and this
+script dispatches to it through ``scripts/resolve-diet.py``, prints which
+binary answered and its SHA-256, and relays the verdict. It does not read the
+file with ``json`` and reach its own. When diet refuses the record, every
+check below that would have read the record is not reached: a linter that
+judged the format itself would be a second reader, and two readers of one
+file is how they come to disagree about it.
+
+What stays here is what is not a format question. Three cross-checks:
 
   1. Every number in the front-matter, outside ``[regime]``, must be bound at
-     the SAME path in ``run.jsonl``'s summary record, and must be equal to it.
+     the SAME path in the record's summary row, and must be equal to it.
      Matching by value alone was not enough: a report could state
      ``turns = 2048`` against a run that recorded two turns, merely because
      2048 appeared elsewhere in the record. If you state a number, the run has
-     to have recorded that number under that name.
+     to have recorded that number under that name. The rows are read from the
+     canonical rendering diet handed back, never from the file.
   2. Every key under ``[regime]`` -- not only the three required ones -- must
-     be bound by ``regimen.toml`` and must equal it.
-  3. ``product_sha256`` must equal the summary record's ``product_sha256``.
+     be bound by ``regimen.toml`` and must equal it; and the required three
+     must equal what the record's ``start`` row carries.
+  3. ``product_sha256`` must equal the summary row's ``product_sha256``.
 
 Stdlib only, by design: this runs in ``verify.sh`` and must not need an
-install step to tell the truth.
+install step to tell the truth. It needs a built ``diet``, and refuses --
+exit 2, not a pass -- when the resolver cannot name one.
 
 Usage:
     check-results.py --root results          # lint every run directory under a root
     check-results.py DIR [DIR ...]           # lint the named run directories
 
-Exit code is 0 if every linted directory passes and 1 otherwise. A sweep that
-finds no run directories is an error, not a pass.
+Exit code is 0 if every linted directory passes, 1 otherwise, and 2 when no
+``diet`` binary could be resolved to ask. A sweep that finds no run
+directories is an error, not a pass.
 """
 
 from __future__ import annotations
@@ -38,6 +52,7 @@ import datetime
 import json
 import pathlib
 import re
+import subprocess
 import sys
 import tomllib
 
@@ -82,6 +97,75 @@ TEMPLATE_DIR = "_template"
 
 class Unreadable(Exception):
     """A file that cannot be decoded. Reported, never raised out of a lint."""
+
+
+REPO = pathlib.Path(__file__).resolve().parent.parent
+
+# The binary every record verdict comes from, resolved once per run and named
+# in the output, so that a verdict can be traced to the build that gave it.
+DIET: pathlib.Path | None = None
+
+
+def resolve_diet() -> tuple[pathlib.Path, str] | None:
+    """Ask the resolver which `diet` to run, or None if it refuses.
+
+    Through the resolver and never a path composed here: a hand-built path is
+    how a gate ends up running a binary cargo did not produce. The resolver
+    refuses to guess -- two builds, a stale build, no build -- and each of
+    those is a reason this script cannot answer either.
+    """
+    result = subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "resolve-diet.py")],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        sys.stderr.write(result.stderr)
+        return None
+    resolved = json.loads(result.stdout)
+    return REPO / resolved["path"], resolved["sha256"]
+
+
+class Verdict:
+    """What `diet check-record` said about one file."""
+
+    def __init__(self, ok: bool, value: dict | None, error: str | None) -> None:
+        self.ok = ok
+        self.value = value
+        self.error = error
+
+
+def record_verdict(path: pathlib.Path) -> Verdict:
+    """Run `diet check-record` over `path` and relay its envelope.
+
+    Exit 0 and 1 are verdicts. Anything else -- a usage error, a binary that
+    would not run, stdout that is not the envelope -- is not a verdict, and is
+    raised rather than read as one.
+    """
+    assert DIET is not None
+    result = subprocess.run(
+        [str(DIET), "check-record", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode not in (0, 1):
+        raise Unreadable(
+            f"diet check-record exited {result.returncode} on {path.name}: "
+            f"{result.stderr.strip()}"
+        )
+    try:
+        envelope = json.loads(result.stdout)
+    except json.JSONDecodeError as err:
+        raise Unreadable(f"diet check-record did not answer with JSON: {err}") from err
+    if envelope.get("ok") is True:
+        return Verdict(True, envelope.get("value"), None)
+    error = str(envelope.get("error", "refused without a reason"))
+    # diet says "not a session record: <why>"; this script says the first
+    # half itself when it relays, so keep only the why.
+    return Verdict(False, None, error.removeprefix("not a session record: "))
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -212,34 +296,6 @@ def body_sections(body: str) -> list[str]:
     return headings
 
 
-def load_jsonl(path: pathlib.Path, fail) -> list[dict]:
-    """Parse ``run.jsonl``. Reports every malformed line rather than the first."""
-    records: list[dict] = []
-    raw = read_text(path)
-    lines = raw.split("\n")
-    if lines and lines[-1] == "":
-        lines.pop()
-    if not lines:
-        fail("run.jsonl is empty")
-        return records
-    for number, line in enumerate(lines, start=1):
-        try:
-            record = json.loads(line)
-        # JSONDecodeError is a ValueError; a number too large to convert
-        # raises the bare parent. Catch the parent so neither aborts the sweep.
-        except ValueError as err:
-            fail(f"run.jsonl line {number} is not JSON: {err}")
-            continue
-        if not isinstance(record, dict):
-            fail(f"run.jsonl line {number} is a {type(record).__name__}, not an object")
-            continue
-        if not isinstance(record.get("record"), str):
-            fail(f"run.jsonl line {number} has no string `record` key")
-            continue
-        records.append(record)
-    return records
-
-
 def check_run(directory: pathlib.Path) -> list[str]:
     """Lint one run directory. Returns a list of failure messages."""
     failures: list[str] = []
@@ -264,16 +320,25 @@ def check_run(directory: pathlib.Path) -> list[str]:
     if missing:
         return failures
 
-    # --- run.jsonl -------------------------------------------------------
-    try:
-        records = load_jsonl(directory / "run.jsonl", fail)
-    except Unreadable as err:
-        fail(str(err))
-        records = []
-    summaries = [r for r in records if r.get("record") == "summary"]
-    if len(summaries) != 1:
-        fail(f"run.jsonl holds {len(summaries)} summary records, expected exactly 1")
-    summary = summaries[0] if len(summaries) == 1 else None
+    # --- run.jsonl: diet's verdict, relayed ------------------------------
+    verdict = record_verdict(directory / "run.jsonl")
+    summary: dict | None = None
+    recorded_regime: dict | None = None
+    if not verdict.ok:
+        fail(f"run.jsonl is not a session record, says diet check-record: {verdict.error}")
+        # Nothing below reads the record. The number and digest checks need a
+        # summary row, and a summary row is only known to exist once diet has
+        # said the file is a record; reaching for one here would be this
+        # script judging the format after all.
+    else:
+        value = verdict.value or {}
+        rows = [json.loads(line) for line in value.get("canonical", "").splitlines() if line.strip()]
+        summaries = [r for r in rows if r.get("record") == "summary"]
+        if len(summaries) != 1:
+            fail(f"run.jsonl holds {len(summaries)} summary rows, expected exactly 1")
+        else:
+            summary = summaries[0]
+        recorded_regime = value.get("regime")
 
     # --- regimen.toml ----------------------------------------------------
     regimen: dict | None = None
@@ -328,6 +393,17 @@ def check_run(directory: pathlib.Path) -> list[str]:
                     f"front-matter key `regime.{key}` is {type(regime[key]).__name__}, "
                     f"expected {type_name(expected)}"
                 )
+        if recorded_regime is not None:
+            # The report's trio against the record's own start row. The regimen
+            # says what was intended; the record says what ran.
+            for key in REQUIRED_REGIME_KEYS:
+                if key in regime and key in recorded_regime and not same_value(
+                    recorded_regime[key], regime[key]
+                ):
+                    fail(
+                        f"front-matter `regime.{key}` is {regime[key]!r} but the "
+                        f"record's start row carries {recorded_regime[key]!r}"
+                    )
         if regimen is not None:
             # Every key under [regime], not only the required three: a regime
             # field the regimen does not bind is a claim about the run that
@@ -348,7 +424,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
         elif summary is not None:
             recorded = summary.get("product_sha256")
             if recorded is None:
-                fail("run.jsonl summary record does not carry `product_sha256`")
+                fail("the record's summary row does not carry `product_sha256`")
             elif recorded != sha:
                 fail(
                     f"front-matter `product_sha256` is {sha} but the summary "
@@ -416,6 +492,18 @@ def main(argv: list[str]) -> int:
 
     if not args.root and not args.directories:
         parser.error("nothing to lint: pass --root DIR or one or more run directories")
+
+    global DIET
+    resolved = resolve_diet()
+    if resolved is None:
+        print(
+            "check-results: no diet binary to ask; a record this script cannot "
+            "have checked is not a record it can pass",
+            file=sys.stderr,
+        )
+        return 2
+    DIET, sha = resolved
+    print(f"check-results: record verdicts from {DIET} sha256={sha}")
 
     targets: list[pathlib.Path] = []
     failures: list[str] = []

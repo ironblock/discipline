@@ -10,12 +10,15 @@
 //! The rule that closed this class: a decline is not a substring, it is a
 //! property of the whole answer. See the grammar for why.
 
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 
 use pest::Parser as _;
 use pest::iterators::Pair;
 use pest_derive::Parser;
+
+use crate::formats::record::json::Value;
 
 #[derive(Parser)]
 #[grammar = "../formats/decline/grammar.pest"]
@@ -178,6 +181,54 @@ fn shape_of(rule: Rule) -> ParseError {
         Rule::reason => ParseError::Shape("second reason"),
         _ => ParseError::Shape("unexpected rule inside a decline"),
     }
+}
+
+/// This answer's classification, as the record's value space.
+///
+/// The one projection of this format. The conformance harness and the `diet`
+/// CLI both call it, so a fixture cannot agree with the corpus while
+/// disagreeing with what a caller actually receives.
+///
+/// # Errors
+///
+/// Returns the reason the answer is content rather than a decline.
+pub fn project(source: &str) -> Result<Value, String> {
+    match classify(source) {
+        Classification::Decline(parsed) => Ok(projected(&parsed)),
+        Classification::Content => Err(match parse(source) {
+            Err(err) => err.to_string(),
+            Ok(_) => "classify says content where parse succeeds: the two \
+                      disagree about the same bytes"
+                .to_owned(),
+        }),
+    }
+}
+
+/// One decline as a record value.
+///
+/// Public within the crate because the interview format carries declines
+/// inside its fields and has to write them the same way. It had its own copy
+/// of these six lines, which is the second implementation this crate exists
+/// to refuse -- and the interview corpus covered neither `subject` nor
+/// `scope`, so the copy could have dropped both and stayed green.
+pub(crate) fn projected(parsed: &Decline) -> Value {
+    let mut decline = BTreeMap::from([("marker".to_owned(), Value::String(parsed.marker.clone()))]);
+    // Absent is an omitted key, as in the record: a null says the field
+    // exists and holds nothing, which cannot be told apart from a field
+    // nobody filled in.
+    for (key, held) in [
+        ("subject", &parsed.subject),
+        ("scope", &parsed.scope),
+        ("reason", &parsed.reason),
+    ] {
+        if let Some(text) = held {
+            decline.insert(key.to_owned(), Value::String(text.clone()));
+        }
+    }
+    Value::Object(BTreeMap::from([(
+        "decline".to_owned(),
+        Value::Object(decline),
+    )]))
 }
 
 #[cfg(test)]

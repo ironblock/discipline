@@ -3,9 +3,12 @@
   "fields": [
     {
       "outcome": {
-        "value": "the terminal rang\u0007 during the run"
+        "decline": {
+          "marker": "Nothing to add",
+          "scope": "the interview parser"
+        }
       },
-      "raw": "the terminal rang\u0007 during the run",
+      "raw": "Nothing to add about the interview parser.",
       "tag": {
         "as_written": "EVIDENCE:",
         "kind": "evidence"

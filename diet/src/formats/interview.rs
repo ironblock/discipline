@@ -23,6 +23,7 @@ use pest::iterators::Pair;
 use pest_derive::Parser;
 
 use super::decline;
+use super::record::json::Value;
 
 #[derive(Parser)]
 #[grammar = "../formats/interview/grammar.pest"]
@@ -618,6 +619,82 @@ fn strip_tag_punctuation(as_written: &str) -> &str {
         ) || c.is_ascii_digit()
             || c.is_whitespace()
     })
+}
+
+/// This answer, as the record's value space.
+///
+/// The one projection of this format, called by the conformance harness and
+/// by the `diet` CLI alike.
+///
+/// # Errors
+///
+/// Returns the reason the text is not an interview answer.
+pub fn project(source: &str) -> Result<Value, String> {
+    let answer = parse(source).map_err(|err| err.to_string())?;
+    let fields: Vec<Value> = answer
+        .fields
+        .iter()
+        .map(|field| {
+            let mut members = std::collections::BTreeMap::from([
+                ("raw".to_owned(), Value::String(field.raw.clone())),
+                ("outcome".to_owned(), outcome_value(&field.outcome)),
+            ]);
+            if let Some(tag) = &field.tag {
+                members.insert(
+                    "tag".to_owned(),
+                    Value::Object(std::collections::BTreeMap::from([
+                        (
+                            "kind".to_owned(),
+                            Value::String(tag.kind.canonical_tag().to_owned()),
+                        ),
+                        (
+                            "as_written".to_owned(),
+                            Value::String(tag.as_written.clone()),
+                        ),
+                    ])),
+                );
+            }
+            Value::Object(members)
+        })
+        .collect();
+    let completion = match answer.completion {
+        Completion::Complete => Value::String("complete".to_owned()),
+        Completion::Empty => Value::String("empty".to_owned()),
+        Completion::Truncated(signal) => Value::Object(std::collections::BTreeMap::from([(
+            "truncated".to_owned(),
+            Value::String(signal.name().to_owned()),
+        )])),
+    };
+    let mut members = std::collections::BTreeMap::from([
+        ("completion".to_owned(), completion),
+        ("fields".to_owned(), Value::Array(fields)),
+    ]);
+    if let Some(wrapper) = &answer.wrapper {
+        let mut wrapped = std::collections::BTreeMap::from([
+            ("open".to_owned(), Value::String(wrapper.open.clone())),
+            (
+                "fields_inside".to_owned(),
+                Value::Integer(i64::try_from(wrapper.fields_inside).unwrap_or(i64::MAX)),
+            ),
+        ]);
+        if let Some(close) = &wrapper.close {
+            wrapped.insert("close".to_owned(), Value::String(close.clone()));
+        }
+        members.insert("wrapper".to_owned(), Value::Object(wrapped));
+    }
+    Ok(Value::Object(members))
+}
+
+fn outcome_value(outcome: &Outcome) -> Value {
+    match outcome {
+        Outcome::Value(text) => Value::Object(std::collections::BTreeMap::from([(
+            "value".to_owned(),
+            Value::String(text.clone()),
+        )])),
+        // The decline format's own projection, not a second copy of it.
+        Outcome::Decline(declined) => super::decline::projected(declined),
+        Outcome::Unparseable => Value::String("unparseable".to_owned()),
+    }
 }
 
 #[cfg(test)]
