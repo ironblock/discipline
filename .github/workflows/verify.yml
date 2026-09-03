@@ -25,9 +25,6 @@ jobs:
   diet:
     uses: ./.github/workflows/pkg-diet.yml
 
-  results:
-    uses: ./.github/workflows/pkg-results.yml
-
   pages:
     uses: ./.github/workflows/pkg-pages.yml
 
@@ -39,7 +36,7 @@ jobs:
 
   gate:
     name: gate
-    needs: [diet, results, pages, repo, selftest]
+    needs: [diet, pages, repo, selftest]
     if: always()
     runs-on: ubuntu-latest
     steps:

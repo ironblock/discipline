@@ -73,7 +73,20 @@ check_test() { cargo test --workspace --no-fail-fast; }
 # `cargo test -- <its module>` matches nothing and exits 0.
 check_library() { python3 scripts/check-library.py; }
 
-check_results() { python3 scripts/check-results.py --root results; }
+# Build the one binary the format checks below dispatch to. Factored out so
+# that `results` and `regimen` cannot disagree about which build that is.
+build_diet() {
+  cargo build --quiet -p discipline-diet --bin diet || {
+    local build_rc=$?
+    echo "verify: the diet binary did not build (exit ${build_rc})" >&2
+    return "$build_rc"
+  }
+}
+
+# The report contract, with the record's format verdict dispatched to
+# `diet check-record` through the resolver. The linter prints which binary
+# answered; it does not read run.jsonl itself.
+check_results() { build_diet && python3 scripts/check-results.py --root results; }
 
 # Every regimen.toml under results/ must parse as a `regimen` document. This
 # is what keeps diet/formats load-bearing: the format is used on the
@@ -94,11 +107,7 @@ check_regimen() {
   # tomllib. Check the claim rather than trusting it.
   python3 scripts/check-toml-subset.py || rc=$?
 
-  cargo build --quiet -p discipline-diet --bin diet || {
-    local build_rc=$?
-    echo "verify: the diet binary did not build (exit ${build_rc})" >&2
-    return "$build_rc"
-  }
+  build_diet || return $?
 
   # Through the resolver, and the resolver says which binary and what its
   # digest is. Four instruments once banked numbers through a release binary
@@ -342,7 +351,13 @@ seeded_case() {
   # a fixture would silently test the wrong tree. Touching a source file after
   # the fingerprint is taken removes the coincidence. `git write-tree` hashes
   # content, so this does not disturb the comparison above.
-  touch diet/src/lib.rs 2> /dev/null || true
+  #
+  # IN THE BOX. The first version of this line was relative, and only the
+  # injection above runs inside the box -- so it touched the repository's own
+  # lib.rs on every case, forced no rebuild where it meant to, and left the
+  # repository's binary older than its source for anything that resolved it
+  # afterwards. The results-fixture loop below found that out.
+  touch "${box}/diet/src/lib.rs" 2> /dev/null || true
 
   if [ "$state_before" = "$state_after" ]; then
     printf 'BROKEN verify.sh --only %-8s          %s  <-- THE INJECTION CHANGED NOTHING\n' \
@@ -831,6 +846,24 @@ inject_results() {
   cp -r tests/fixtures/results-bad/2026-01-09-unbacked-number results/
 }
 
+# A run.jsonl whose start row has lost its substrate. The report is fine; the
+# record is not a session record, and only diet says so -- the linter must
+# relay that verdict and reach none of its own.
+inject_results_no_substrate() {
+  cp -r results/_template results/2026-01-30-no-substrate
+  python3 - <<'EOF'
+import json, pathlib
+
+path = pathlib.Path("results/2026-01-30-no-substrate/run.jsonl")
+lines = path.read_text(encoding="utf-8").split("\n")
+row = json.loads(lines[0])
+assert row["record"] == "start"
+del row["regime"]["substrate"]
+lines[0] = json.dumps(row, separators=(",", ":"))
+path.write_text("\n".join(lines), encoding="utf-8")
+EOF
+}
+
 # A DIET_BIN that the resolver quietly ignores. The documented way to pin a
 # run to a specific build being a silent no-op is how four instruments banked
 # numbers through a release binary seven days behind its source.
@@ -1011,8 +1044,12 @@ prove_mechanics() {
   mkdir -p "${box}/root/2026-01-01-ok" "${box}/root/.hidden-run"
   cp "${ROOT}"/results/_template/* "${box}/root/2026-01-01-ok/"
   cp "${ROOT}"/results/_template/* "${box}/root/.hidden-run/"
+  # Built first: the linter dispatches the record verdict to diet through the
+  # resolver, and a resolver with nothing to resolve refuses (2), which is
+  # not the 1 this assertion is about.
   expect_exit "a dot-prefixed results directory is linted" 1 \
-    python3 "${ROOT}/scripts/check-results.py" --root "${box}/root"
+    bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
+      && python3 scripts/check-results.py --root '${box}/root'"
 
   # The same leak through a file handle. A contributor with commit signing
   # enabled must not get a different verdict from the same tree.
@@ -1189,6 +1226,8 @@ selftest() {
     'object.rs: no .mod. declaration reaches it'
   seeded_case "a stringly predicate cargo fmt wrapped" library inject_stringly_or_pattern \
     'a_decision_tag_that_is_quite_long_indeed'
+  seeded_case "a record missing its substrate"        results  inject_results_no_substrate \
+    'says diet check-record: a .start. row is missing its required .substrate.'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
     'front-matter `turns` states 3 but the summary record binds'
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \
@@ -1214,6 +1253,10 @@ selftest() {
 
   echo
   echo "--- results fixtures, checked directly ---"
+  # The linter dispatches the record verdict to diet through the resolver, so
+  # it needs exactly one fresh build where the resolver will look -- the same
+  # thing check_results does before it runs the linter for real.
+  ( cd "${ROOT}" && build_diet ) || SELFTEST_BROKEN+=("results fixtures: diet did not build")
   local dir rc
   for dir in "${ROOT}"/tests/fixtures/results-bad/*/; do
     rc=0
@@ -1228,6 +1271,32 @@ selftest() {
   done
 
   prove_mechanics
+
+  # --- the linter dispatches; it does not judge the format ---
+  #
+  # A record diet refuses must surface as diet's verdict and nothing else:
+  # no number check, no digest check, no summary-row count from this side.
+  # Any of those appearing would mean the Python side read the record and
+  # reached a verdict of its own, which is the second reader this exists to
+  # remove.
+  local relay; scratch; relay="$SCRATCH"
+  cp -r "${ROOT}/results/_template" "${relay}/2026-01-30-no-substrate"
+  python3 - "${relay}/2026-01-30-no-substrate/run.jsonl" <<'EOF'
+import json, pathlib, sys
+
+path = pathlib.Path(sys.argv[1])
+lines = path.read_text(encoding="utf-8").split("\n")
+row = json.loads(lines[0])
+del row["regime"]["substrate"]
+lines[0] = json.dumps(row, separators=(",", ":"))
+path.write_text("\n".join(lines), encoding="utf-8")
+EOF
+  expect_exit "a record diet refuses gets no verdict from the linter" 0 \
+    bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
+      && out=\$(python3 scripts/check-results.py '${relay}/2026-01-30-no-substrate' 2>&1; true) \
+      && grep -q 'says diet check-record: a .start. row is missing its required .substrate.' <<<\"\$out\" \
+      && ! grep -qE 'front-matter|summary row|product_sha256' <<<\"\$out\" \
+      && grep -q 'record verdicts from .* sha256=' <<<\"\$out\""
 
   # --- binary provenance at the boundary ---
   #

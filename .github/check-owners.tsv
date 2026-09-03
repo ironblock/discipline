@@ -22,8 +22,10 @@ test	diet
 library	diet
 regimen	diet
 
-# --- results: the claim-with-evidence invariant ---
-results	results
+# --- results: the claim-with-evidence invariant. Owned by diet since the
+# record's format verdict comes from `diet check-record`, and a job without
+# the toolchain could not build the binary it dispatches to. ---
+results	diet
 
 # --- pages: the published static surface ---
 pages	pages

@@ -34,8 +34,8 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 106
-mechanics_assertions = 26
+red_faults = 107
+mechanics_assertions = 27
 migrated = 0
 
 
@@ -307,6 +307,15 @@ check = "test"
 label = "a self-supersede through an alias"
 failure_class = "object.self-link"
 legacy_signature = "was not named as one"
+migrated = false
+
+[[fault]]
+id = "results.results_no_substrate"
+kind = "seeded-gate"
+check = "results"
+label = "a record missing its substrate"
+failure_class = "results.record-not-a-record"
+legacy_signature = "says diet check-record: a .start. row is missing its required .substrate."
 migrated = false
 
 [[fault]]
@@ -934,6 +943,15 @@ kind = "mechanics"
 check = "regimen"
 label = "a file that cannot be run is not a build"
 failure_class = "provenance.unrunnable-artifact"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-record-diet-refuses-gets-no-verdict-from-the-linter"
+kind = "mechanics"
+check = "results"
+label = "a record diet refuses gets no verdict from the linter"
+failure_class = "results.linter-judged-the-format"
 legacy_signature = ""
 migrated = false
 
