@@ -953,6 +953,21 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The sign let back onto a zero. `-0.0` is then a second spelling of `0.0`,
+# and a banked sampler temperature reads back as a number nobody wrote.
+inject_record_negative_zero_decimal() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/record/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = """decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
+new = """decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # The seam refill graded on whether anything came back rather than on whether
 # the refilled entry was named. A candidate that answers past the render is
 # exactly the candidate a seam cannot be used with, and any non-empty answer
@@ -1092,23 +1107,6 @@ path = pathlib.Path("diet/src/capture/battery.rs")
 source = path.read_text(encoding="utf-8")
 old = "    for required in offered.required_args {"
 new = "    for required in &offered.required_args[..0] {"
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# The lane accepting any red from a fixture declared to fail one behaviour.
-# A fixture that starts failing for a second reason is as broken as one that
-# stops failing, and both read as green once the set is only ever compared
-# against a set it already matches.
-inject_drive_wrong_red_accepted() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/examples/drive.rs")
-source = path.read_text(encoding="utf-8")
-old = "            if failed == vec![wanted] {"
-new = "            let _ = wanted;\n            if !failed.is_empty() {"
 assert source.count(old) == 1
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -1385,7 +1383,6 @@ path.write_text(
 )
 EOF
 }
-
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1951,52 +1948,78 @@ selftest() {
     'an empty answer is a recorded answer, not a missing one'
   seeded_case "prose accepted for a tool call"        test     inject_battery_tool_prose_accepted \
     'prose where a tool call was required must fail that behaviour and only that one'
+
   seeded_case "a seam refill graded on any answer"    test     inject_battery_seam_uncited \
     'an answer that repeats itself after the seam cites no entry id'
+
   seeded_case "one entry accepted from an excursion" test      inject_battery_excursion_one_entry \
     'two fields holding one fact are one entry, and closure needs two'
+
   seeded_case "a behaviour dropped from the battery" test      inject_battery_behaviour_dropped \
     'the ask files on disk and the ones the battery includes disagree'
+
   seeded_case "a canned script out of step"           test     inject_battery_script_overrun \
     'the script has rows the battery never asked for'
+
   seeded_case "a tool call with no arguments"         test     inject_battery_tool_args_unchecked \
     'a call with no arguments does not record anything'
+
   seeded_case "a drive archive that links nowhere"    integration inject_drive_dangling_response \
     'archive was refused by diet check-record'
+
   seeded_case "a regime nothing served"               test     inject_battery_regime_invented \
     'regime the responder never answered under'
+
   seeded_case "a drive archive cut to its first row"  test     inject_battery_archive_truncated \
     'holds a turn for every behaviour or it is not the archive of this drive'
+
   seeded_case "an archive with its payloads dropped"  test     inject_battery_archive_payloads_dropped \
     'is a ledger of a drive and not the archive of one'
+
   seeded_case "a probe put with an empty prompt"      test     inject_battery_ask_blanked \
     'was put with something other than the ask its file carries'
+
   seeded_case "a tool offered with no probe"          test     inject_battery_tool_never_offered \
     'a tool the battery never offered is a tool the candidate was never asked to call'
+
   seeded_case "an ask that never names its tool"      test     inject_battery_offer_unnamed_in_the_ask \
     'never names it, so a candidate reading its prompt'
+
   seeded_case "a seam that renders nothing"           test     inject_battery_seam_render_empty \
     'the refill ask names no entry'
+
   seeded_case "a seam that renders only an id"        test     inject_battery_seam_renders_only_the_id \
     'carries an entry id and not the object it belongs to'
+
   seeded_case "byte lengths written as token counts"  test     inject_battery_tokens_from_bytes \
     'wrote a prompt cost the responder never reported'
+
   seeded_case "a report that claims compliance"       test     inject_battery_report_claims_compliance \
     'claims a compliance the battery did not decide'
+
   seeded_case "a canned script with no turns"         test     inject_battery_script_without_turns \
     'a script with no turns answers nothing'
+
   seeded_case "a canned script with a hole"           test     inject_battery_turn_without_answer \
     'a turn with no response row is a hole in the script'
+
   seeded_case "an answer that is not whole accepted"  test     inject_battery_completion_unchecked \
     'the reason must say the answer was empty'
+
   seeded_case "an expected red refused by the lane"   integration inject_drive_expected_red_refused \
     'did not fail uses_offered_tool alone'
+
   seeded_case "any red accepted from a fixture"       integration inject_drive_wrong_red_accepted \
     'accepted a red it was not required to have'
+
   seeded_case "a red the drive does not name"         integration inject_drive_failure_unnamed \
     'did not name the behaviour that failed'
+
   seeded_case "a failed battery that exits zero"      integration inject_drive_failure_exits_zero \
     'answers nothing parseable did not exit 1'
+
+  seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
+    'was constructed, and the grammar would not read it back'
   seeded_case "the producer read as the last command" test     inject_shell_producer_is_last_written \
     'produces its output with'
   seeded_case "an operator dropped from the table"    test     inject_shell_operator_table_row_dropped \
