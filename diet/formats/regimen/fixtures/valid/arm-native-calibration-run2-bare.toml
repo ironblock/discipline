@@ -17,7 +17,7 @@
 name = "l2-bare-run2"
 
 [sampler]
-# §4: "Same sampler envelope, thinking-on." Identical to arm-diet-run2.toml — the
+# §4: "Same sampler envelope, thinking-on." Identical to the run 2 diet arm — the
 # arms must differ ONLY in the compaction mechanism, or the comparison measures the
 # sampler too.
 temperature = 0.6
@@ -82,14 +82,14 @@ generate = true              # §4 / PIN 4b: the model writes its own summary at
                              # seam under the committed compaction prompt, injected
                              # via the same eviction path a replayed summary uses —
                              # "indistinguishable to every downstream check by
-                             # construction" (agent.rs), so prefix digests, the cache
+                             # construction" (the harness's agent loop), so prefix digests, the cache
                              # tripwire and the seam checks all cover it unchanged.
                              #
                              # NOTE A DELIBERATE DEPARTURE FROM THE CODE'S ORIGINAL
                              # INTENT, recorded rather than glossed: the PIN 4b
                              # implementation authored `generate` as a ONE-TIME PREP PASS
                              # whose output was to be frozen into a summaries_file for a
-                             # separate replay arm ("never a graded/timed fire", arm.rs).
+                             # separate replay arm ("never a graded/timed fire", the harness's arm loader).
                              # REV-9 §4 supersedes that for Run 2 — a frozen-and-replayed
                              # summary set would give the bare arm ZERO within-fire
                              # summarization variance, which is exactly the quantity
@@ -114,7 +114,7 @@ generate_thinking = true     # A READING OF §4, NOT A SETTLED RULING — flip t
                              # hardcoded thinking-off, making §4 inexpressible.
 
 # NO summaries / summaries_file. `Arm::load` REJECTS generate + summaries together
-# ("a generate-mode arm has nothing to replay"), and fire.sh's summaries validation
+# ("a generate-mode arm has nothing to replay"), and the fire orchestration's summaries validation
 # is correctly skipped when no summaries_file is declared. Nothing yet asserts
 # generate=true positively for a Run-2 bare arm — the fire's own §6.4 validity check
 # (each seam's generative compaction produced non-empty output) is what catches a
