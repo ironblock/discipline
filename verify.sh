@@ -875,6 +875,22 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The substitution scanner descending into a word the shell would not expand.
+# `echo '$(cat notes.txt)'` then records a file read that never happened,
+# which is the one thing this lane exists not to do.
+inject_mechanical_quoted_substitution() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = "            (!word.literal).then_some(word.text.as_str())\n"
+new = "            Some(word.text.as_str())\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1430,6 +1446,8 @@ selftest() {
     'a question about a mechanical fact went unflagged'
   seeded_case "a mechanical entry sent through the gate" test  inject_mechanical_entry_grounded \
     'a mechanical entry was dropped as if it needed grounding'
+  seeded_case "a quoted substitution descended into"  test     inject_mechanical_quoted_substitution \
+    'a single-quoted substitution was descended into'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

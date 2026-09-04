@@ -1152,17 +1152,26 @@ impl Lane {
 
     /// `$( … )` runs against a copy of the state, exactly as `( … )` does.
     fn run_substitutions(&mut self, simple: &Simple, state: &State, call: &mut Call<'_>) {
-        let mut texts: Vec<&str> = simple.words.iter().map(|word| word.text.as_str()).collect();
+        // A literal word is one the shell passes through whole -- it was
+        // single-quoted, and `$(` inside it is three characters, not a
+        // command. `Word.text` is the text after unquoting, so it looks
+        // exactly like a substitution to a scanner that does not ask. The
+        // grammar already decided; asking it is the difference between
+        // recording a file that was read and inventing one that was not.
+        fn unquoted(word: &Word) -> Option<&str> {
+            (!word.literal).then_some(word.text.as_str())
+        }
+        let mut texts: Vec<&str> = simple.words.iter().filter_map(unquoted).collect();
         texts.extend(
             simple
                 .assignments
                 .iter()
                 .filter_map(|assignment| assignment.value.as_ref())
-                .map(|word| word.text.as_str()),
+                .filter_map(unquoted),
         );
         texts.extend(simple.redirections.iter().filter_map(
             |redirection| match &redirection.target {
-                Target::File(word) => Some(word.text.as_str()),
+                Target::File(word) => unquoted(word),
                 Target::Descriptor(_) | Target::Heredoc { .. } => None,
             },
         ));
@@ -1680,8 +1689,9 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        Builtin, Cwd, CwdKind, Facts, Failure, Hole, Lane, MECHANICAL_NOUNS, Operands, TOOLS,
-        ToolKind, TouchKind, asks_for_a_mechanical_fact, fill, lint_template,
+        Builtin, Cwd, CwdKind, Facts, Failure, Hole, Lane, MECHANICAL_NOUNS, Operands,
+        QUESTION_OPENERS, TOOLS, ToolKind, TouchKind, asks_for_a_mechanical_fact, fill,
+        lint_template,
     };
     use crate::formats::record::json::{self, Value};
     use crate::formats::record::{self, Event, Regime};
@@ -2636,5 +2646,260 @@ mod tests {
             };
             assert_eq!(EntryId::new(id.as_str()), Ok(id.clone()));
         }
+    }
+
+    // --- what a review proved the gate could not see -------------------------
+    //
+    // Everything below closes a mutation that survived the whole gate. Each
+    // was demonstrated first: the mutation applied, `./verify.sh` exit 0, the
+    // test written, the test red under the mutation and green without it.
+
+    /// The content of the one entry an id ends with, for a lane's turn.
+    fn entry_saying(lane: &Lane, ends_with: &str) -> String {
+        let patches = lane.patches(1);
+        let found: Vec<&Patch> = patches
+            .iter()
+            .filter(|patch| match patch {
+                Patch::Add { id, .. } => id.as_str().ends_with(ends_with),
+                _ => false,
+            })
+            .collect();
+        assert_eq!(
+            found.len(),
+            1,
+            "{ends_with}: expected one entry, and the lane wrote {:?}",
+            patches
+                .iter()
+                .map(|patch| match patch {
+                    Patch::Add { id, content, .. } => format!("{} => {content}", id.as_str()),
+                    other => format!("{other:?}"),
+                })
+                .collect::<Vec<_>>()
+        );
+        match found[0] {
+            Patch::Add { content, .. } => content.clone(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    // The lane's product is the text of the entries it writes, and nothing
+    // read one. Three separate mutations to the three content builders --
+    // dropping the derived directory, dropping the path and the verb,
+    // dropping the exit code -- each survived the full gate.
+    #[test]
+    fn an_entry_says_the_fact_it_was_derived_for() {
+        let lane = lane_after(&[shell("t1", "cd diet && cat Cargo.toml")]);
+        assert_eq!(
+            entry_saying(&lane, "/cwd"),
+            "the working directory is /work/diet after tool call t1"
+        );
+        assert_eq!(
+            entry_saying(&lane, "/ran"),
+            "tool call t1 ran `cd diet && cat Cargo.toml`, exit 0"
+        );
+        let read = lane
+            .patches(1)
+            .into_iter()
+            .filter_map(|patch| match patch {
+                Patch::Add { id, content, .. } if id.as_str().contains("/read") => Some(content),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(read, vec!["tool call t1 read /work/diet/Cargo.toml"]);
+
+        // The two shapes that refuse to name a path still say which they
+        // are. Losing the directory takes two calls: the entry is written
+        // when the directory changes, and a call that establishes `/work`
+        // and then loses it has changed nothing by the time it ends.
+        let unknown = lane_after(&[shell("t1", "pwd"), shell("t2", "cd $WHEREVER")]);
+        assert_eq!(
+            entry_saying(&unknown, "t2/cwd"),
+            "the working directory is no longer known after tool call t2"
+        );
+        let home = lane_after(&[shell("t1", "cd")]);
+        assert!(
+            entry_saying(&home, "/cwd")
+                .starts_with("the working directory is the home directory after tool call t1;"),
+            "{}",
+            entry_saying(&home, "/cwd")
+        );
+    }
+
+    // `last_edited` and `last_command` are the published contract the router
+    // renders into an ask. Returning the FIRST write and the FIRST command
+    // survived the gate, and an ask filled from it states a file the model
+    // edited turns ago as if it were the current one.
+    #[test]
+    fn the_facts_are_the_most_recent_ones_and_not_the_first() {
+        let lane = lane_after(&[
+            shell("t1", "echo a > first.txt"),
+            shell("t2", "echo b > second.txt"),
+        ]);
+        let facts = lane.facts();
+        assert_eq!(
+            facts.last_edited.as_deref(),
+            Some("/work/second.txt"),
+            "the lane reported an earlier write as the latest"
+        );
+        assert_eq!(
+            facts.last_command.as_deref(),
+            Some("echo b > second.txt"),
+            "the lane reported an earlier command as the latest"
+        );
+    }
+
+    // The lint's fourth acceptance row. Every ASKED fixture also ends in
+    // `?`, so three of the four openers were decided by the `?` branch and
+    // never reached -- and a question without a `?` could be written into a
+    // template.
+    #[test]
+    fn every_question_opener_catches_a_question_that_has_no_mark() {
+        // Written out rather than iterated from the table: a test that
+        // loops over the very list it is guarding passes just as happily
+        // when the list has been emptied to one entry, which is the shape
+        // of vacuous pass this suite exists to refuse. These four are the
+        // rule as the brief states it.
+        for opener in ["what ", "which ", "where ", "how many "] {
+            assert!(
+                QUESTION_OPENERS.contains(&opener),
+                "{opener:?} is an interrogative opener and the table has lost it"
+            );
+            let line = format!("{opener}the working directory was when the tests ran");
+            assert!(
+                !line.ends_with('?'),
+                "{line:?} ends in a mark, so it does not exercise the opener"
+            );
+            assert!(
+                asks_for_a_mechanical_fact(&line).is_some(),
+                "{line:?} is a question about a mechanical fact and the lint let it pass"
+            );
+        }
+    }
+
+    // Bare `pushd` swaps the top of the stack with the working directory,
+    // and on an empty stack it fails without moving anywhere. Both branches
+    // were unexercised: one could discard a stack level, the other could
+    // throw the working directory away on a failure it had already recorded.
+    #[test]
+    fn a_bare_pushd_exchanges_and_on_an_empty_stack_keeps_where_it_is() {
+        let swapped = lane_after(&[shell("t1", "pushd diet; pushd")]);
+        assert_eq!(swapped.cwd(), &at("/work"), "the exchange did not happen");
+        assert_eq!(
+            swapped.stack(),
+            &[at("/work/diet")],
+            "a stack level was discarded rather than exchanged"
+        );
+
+        let empty = lane_after(&[shell("t1", "pushd")]);
+        assert_eq!(
+            empty.cwd(),
+            &at("/work"),
+            "a failed pushd threw the working directory away"
+        );
+        assert_eq!(empty.failures().len(), 1, "the failure was not recorded");
+    }
+
+    // The documented tie-break: the last bare absolute line of the output is
+    // the pwd report. Every fixture printed one line, so taking the first
+    // survived -- and the first is wrong for exactly the `cd x && pwd` shape
+    // that prints something absolute before the report.
+    #[test]
+    fn the_last_reported_path_is_the_one_that_counts() {
+        let lane = lane_after(&[shell_said("t1", "cd a && pwd", 0, "/work/a\n/work/b\n")]);
+        assert_eq!(
+            lane.cwd(),
+            &at("/work/b"),
+            "an earlier line of the output was read as the pwd report"
+        );
+    }
+
+    // The `cwd` argument is a fact only when it is absolute. A relative one
+    // read as the working directory makes every relative path in the session
+    // resolve against a root that is not one, and marks them resolved.
+    #[test]
+    fn a_relative_cwd_argument_is_not_a_working_directory() {
+        let lane = lane_after(&[call(
+            "bash",
+            "t1",
+            1,
+            &[("cwd", "diet"), ("command", "cat a.txt")],
+            Some(0),
+            None,
+        )]);
+        assert_eq!(
+            lane.cwd(),
+            &Cwd::Unknown,
+            "a relative cwd argument was stated as the working directory"
+        );
+        assert_eq!(lane.facts().cwd, None);
+        assert_eq!(
+            touched(&lane, "a.txt"),
+            Some((TouchKind::Read, false)),
+            "a path was resolved against a root that is not one"
+        );
+    }
+
+    // One shell report is one failure. Without the consumption bookkeeping a
+    // single `No such file or directory` charges every `cd` on the line.
+    #[test]
+    fn one_report_fails_one_builtin() {
+        let lane = lane_after(&[shell_said(
+            "t1",
+            "cd nowhere; cd nowhere",
+            0,
+            "bash: cd: nowhere: No such file or directory\n",
+        )]);
+        assert_eq!(
+            lane.failures().len(),
+            1,
+            "one report was charged to more than one cd"
+        );
+        assert_eq!(
+            lane.cwd(),
+            &at("/work/nowhere"),
+            "the second cd was failed by the first cd's report"
+        );
+    }
+
+    // A leading `..` is not popped: a path that escapes its base is kept as
+    // written rather than flattened into the directory it climbed out of.
+    #[test]
+    fn a_path_that_climbs_out_of_its_base_is_not_flattened_into_it() {
+        let lane = lane_after(&[call(
+            "bash",
+            "t1",
+            1,
+            &[("command", "cat ../../secret.txt")],
+            Some(0),
+            None,
+        )]);
+        assert_eq!(
+            touched(&lane, "../../secret.txt"),
+            Some((TouchKind::Read, false)),
+            "a path two levels above an unknown cwd was recorded as one inside it"
+        );
+    }
+
+    // The one that was a bug rather than a gap. `Word.text` is the text
+    // after unquoting, so a single-quoted word looks exactly like a
+    // substitution to a scanner that does not ask the grammar whether the
+    // shell would expand it. It would not: the file was never opened.
+    #[test]
+    fn a_quoted_substitution_is_three_characters_and_not_a_command() {
+        let quoted = lane_after(&[shell("t1", "echo '$(cat notes.txt)'")]);
+        assert_eq!(
+            touched(&quoted, "/work/notes.txt"),
+            None,
+            "a single-quoted substitution was descended into: {:?}",
+            quoted.files()
+        );
+        // The same text where the shell really would expand it.
+        let expanded = lane_after(&[shell("t1", "echo \"$(cat notes.txt)\"")]);
+        assert_eq!(
+            touched(&expanded, "/work/notes.txt"),
+            Some((TouchKind::Read, true)),
+            "a substitution the shell would run was not read: {:?}",
+            expanded.files()
+        );
     }
 }
