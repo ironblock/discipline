@@ -1,0 +1,20 @@
+{"record":"start","regime":{"arm":"dev-loop","dogma_version":0,"substrate":{"name":"canned","model":"none: a scripted fixture answers and nothing is served","quantization":"none","sampler":{"replayed":true},"reasoning":"off","hardware":"none: no substrate is served"}}}
+{"record":"turn","index":1,"prefill_tokens":0}
+{"record":"request","id":"exchange-1/ask","lane":"interview"}
+{"record":"response","id":"exchange-1/answer","to_request":"exchange-1/ask","output_tokens":0,"text":"DECISION: keep the canned server a fixture rather than a service\nLEARNED: the battery decides compliance and never quality"}
+{"record":"turn","index":2,"prefill_tokens":0}
+{"record":"request","id":"exchange-2/ask","lane":"interview"}
+{"record":"tool_call","id":"exchange-2/call-0","at_turn":2,"tool":"update_record","args":{"field":"decision","content":"the offered tool was called, not described"}}
+{"record":"response","id":"exchange-2/answer","to_request":"exchange-2/ask","output_tokens":0,"text":"DECISION: recorded through the offered tool"}
+{"record":"turn","index":3,"prefill_tokens":0}
+{"record":"request","id":"exchange-3/ask","lane":"interview"}
+{"record":"response","id":"exchange-3/answer","to_request":"exchange-3/ask","output_tokens":0,"text":"Nothing to report at this time."}
+{"record":"turn","index":4,"prefill_tokens":0}
+{"record":"request","id":"exchange-4/ask","lane":"interview"}
+{"record":"response","id":"exchange-4/answer","to_request":"exchange-4/ask","output_tokens":0,"text":"LEARNED: the seam render is the only state the next turn carries"}
+{"record":"turn","index":5,"prefill_tokens":0}
+{"record":"request","id":"exchange-5/ask","lane":"interview"}
+{"record":"response","id":"exchange-5/answer","to_request":"exchange-5/ask","output_tokens":0,"text":"EVIDENCE: `survives_seam_refill/1/answer` holds: the seam render is the only state the next turn carries"}
+{"record":"turn","index":6,"prefill_tokens":0}
+{"record":"request","id":"exchange-6/ask","lane":"interview"}
+{"record":"response","id":"exchange-6/answer","to_request":"exchange-6/ask","output_tokens":0,"text":"DECISION: park the excursion's second finding\nLEARNED: an excursion that says one thing twice leaves one entry"}

@@ -1,0 +1,5 @@
+The tool `update_record` is offered for this turn. It takes a `field` and a
+`content`.
+
+Record one fact this turn established by calling it. Do not describe the
+call in prose; make it.

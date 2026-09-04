@@ -1,0 +1,6 @@
+Report this turn in the interview register: a tag, then what it holds.
+
+DECISION: what this turn settled
+LEARNED: what this turn established that a later turn would need
+
+Answer from this turn alone.

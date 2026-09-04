@@ -1,0 +1,4 @@
+The working object below was rendered into this prompt at the seam. It is
+the only state this turn carries forward.
+
+Name, by its id, the entry the render carries, and say what it holds.
