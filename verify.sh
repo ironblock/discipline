@@ -820,6 +820,594 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A cosine that divides by one norm and the square of the other. Every
+# similarity becomes a function of how long the sentence is, so the seeded
+# control row -- the sense text verbatim -- no longer sits at one, and every
+# ranking in the bakeoff is a ranking by length.
+inject_sense_cosine_unnormalised() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "    let norm_a = a.iter().map(|x| x * x).sum::<f64>().sqrt();\n"
+new = "    let norm_a = a.iter().map(|x| x * x).sum::<f64>();\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A subshell run against the shell's own state. `cd a; (cd b; ls); pwd` then
+# ends in `b`, and every relative path after it resolves against a directory
+# the session was never in.
+inject_mechanical_subshell_leaks() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Command::Subshell(inner) => {
+                let mut copy = state.clone();
+                self.run_list(inner, &mut copy, call);
+                false
+            }"""
+new = """            Command::Subshell(inner) => {
+                self.run_list(inner, state, call);
+                false
+            }"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Contrastive scoring that never subtracts the authored negative sense. It
+# becomes raw cosine wearing another tag, and the one repair the bakeoff has
+# for an abstract description sitting near everything is reported as measured
+# and is not there.
+inject_sense_contrastive_ignores_negative() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "                Some(toward - away)\n"
+new = "                let _ = away;\n                Some(toward)\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A shuffled-label null that never shuffles. It reports the real separation as
+# what chance looks like, so every cell measured against it is measured
+# against itself and no metric can be caught finding structure in noise.
+inject_sense_null_labels_unshuffled() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            let j = rng.below(i + 1);\n            labels.swap(i, j);\n"
+new = "            let _ = rng.below(i + 1);\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A bootstrap p-value that travels without the floor its resample count
+# implies. A p of 0.001 from 999 resamples is the smallest number the
+# procedure can produce, and printed alone it reads as a finding.
+inject_sense_p_without_floor() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            floor: attainable_p_floor(resamples),\n"
+new = "            floor: 0.0,\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A metric whose demonstrated-failure fixture is deleted. The metric still
+# computes and still prints, and nothing has ever seen it report failure --
+# which is the shape a perfect grounding score of 1.000 had on a probe where
+# fabrication was structurally impossible.
+inject_sense_metric_fixture_removed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """    (
+        Metric::Auc,
+        &[
+            ("failing/positive/0.1", Label::Positive, 0.1),
+            ("failing/positive/0.2", Label::Positive, 0.2),
+            ("failing/negative/0.8", Label::Negative, 0.8),
+            ("failing/negative/0.9", Label::Negative, 0.9),
+        ],
+    ),
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# The one-object reader taking the first line of a file and dropping the rest.
+# Every data file this reader serves -- sense sets, registers, vector caches --
+# is read one line at a time, so a reader that silently accepts two returns a
+# row nobody wrote and loses one somebody did.
+inject_record_data_line_two_lines() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/json.rs")
+source = path.read_text(encoding="utf-8")
+old = """    if event_line.as_span().end() != text.len() {
+        return Err(LineError::NotOneLine);
+    }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# Controls that never look at the register. The two seeded control rows are
+# still scored and still compared with each other, so the run reports its
+# controls as being at their extremes -- while an embedder that cannot tell
+# the authored sense from a transcript sentence ties them and is not caught.
+inject_sense_controls_ignore_register() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """    let control_ids = [top.id(set.set()), bottom.id(set.set())];
+    for row in scored.iter().filter(|row| !control_ids.contains(&row.id)) {
+        if row.score >= top_score {
+            return Err(ControlFailure::NotAtTop {
+                control: top,
+                score: top_score,
+                row: row.id.clone(),
+                other: row.score,
+            });
+        }
+        if row.score < bottom_score {
+            return Err(ControlFailure::NotAtBottom {
+                control: bottom,
+                score: bottom_score,
+                row: row.id.clone(),
+                other: row.score,
+            });
+        }
+    }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# A paired bootstrap whose every resample is the observed sample. Nothing ever
+# crosses zero, so every p the bakeoff prints is the attainable floor -- the
+# smallest number the procedure can produce, reported for every comparison as
+# though it were a finding.
+inject_sense_bootstrap_never_resamples() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "    let total: f64 = (0..n).map(|_| differences[rng.below(n)]).sum();\n"
+new = "    let _ = rng;\n    let total: f64 = (0..n).map(|i| differences[i]).sum();\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A `cd` the shell reported failing, applied anyway. The tracked working
+# directory then names a directory that is not there, which is the mistake the
+# whole lane exists to stop being made by a model.
+inject_mechanical_failed_cd_applied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = "        let refused = call.refusal(builtin, written.as_deref(), simple);\n"
+new = """        let refused: Option<String> = {
+            let _ = call.refusal(builtin, written.as_deref(), simple);
+            None
+        };
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# `popd` with nothing on the stack passed over in silence. The cwd stays
+# right and the record stops saying the session tried to leave.
+inject_mechanical_popd_empty_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        self.record_failure(call, simple, EMPTY_STACK.to_owned());
+        true
+    }"""
+new = """        false
+    }"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The lint's table of mechanical nouns emptied. Every ask template then passes,
+# and the working directory can go back to being an interview question.
+inject_mechanical_lint_table_emptied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = "pub const MECHANICAL_NOUNS: &[&str] = &[\n"
+new = "pub const MECHANICAL_NOUNS: &[&str] = &[];\nconst RETIRED_NOUNS: &[&str] = &[\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Mechanical entries routed through the groundedness gate. A derivation is not
+# a quotation, so "the working directory is /work/diet" is absent from the row
+# that says `cd diet` and the gate drops the lane's whole output as invention.
+inject_mechanical_entry_grounded() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        let patches = self.patches(turn);
+        object.apply_turn(&patches)
+"""
+new = """        let patches = self.patches(turn);
+        let texts: Vec<String> = patches
+            .iter()
+            .map(|patch| match patch {
+                Patch::Add { content, .. } => content.clone(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        let source = self
+            .commands
+            .iter()
+            .map(|run| run.line.as_str())
+            .collect::<Vec<_>>()
+            .join("\\n");
+        let floor = crate::capture::grounded::Floor::pre_registered(1, 2, "the seeded fault")
+            .expect("a floor");
+        let report = crate::capture::grounded::check(
+            &texts,
+            crate::formats::interview::FieldKind::ApiSurface,
+            crate::capture::grounded::ContractInput {
+                source: &source,
+                session_prefix: "",
+            },
+            &floor,
+        );
+        let kept = report.kept();
+        let patches: Vec<Patch> = patches
+            .into_iter()
+            .zip(texts.iter())
+            .filter(|(_, text)| kept.contains(&text.as_str()))
+            .map(|(patch, _)| patch)
+            .collect();
+        object.apply_turn(&patches)
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A word's command substitutions found by scanning the text the quoting has
+# already been taken out of, instead of by the grammar that read the quoting.
+# `echo '$(cat notes.txt)'` then records a file read that never happened,
+# which is the one thing this lane exists not to do.
+inject_mechanical_quoted_substitution() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = """    Ok(Word {
+        text,
+        literal,
+        substitutions,
+    })"""
+new = """    let mut substitutions = Vec::new();
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        if bytes[index] == b'$'
+            && bytes[index + 1] == b'('
+            && let Some(end) = text[index + 2..].find(')')
+        {
+            substitutions.push(text[index + 2..index + 2 + end].to_owned());
+            index = index + 2 + end + 1;
+            continue;
+        }
+        index += 1;
+    }
+    Ok(Word {
+        text,
+        literal,
+        substitutions,
+    })"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The reading at which a metric counts as having failed, moved off the worst
+# the metric can say. An area under the curve of 0.9 is nearly perfect
+# separation, and a fixture that reaches it would then certify every number
+# the bakeoff goes on to report.
+inject_sense_failure_reading_moved() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Self::Auc => 0.5,\n"
+new = "            Self::Auc => 0.9,\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The lane renamed. Every derived entry then claims to have come from `main`,
+# the canonical lane, whose authority a mechanical derivation does not carry.
+inject_mechanical_lane_renamed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = 'pub const LANE: &str = "mechanical";'
+new = 'pub const LANE: &str = "main";'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A pre-registration whose primary endpoint says nothing. The plan is the one
+# artefact that has to be fixed before the data arrives; emptied, it can be
+# written once the numbers are in and read as though it never had been.
+inject_sense_pre_registration_emptied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """    primary: "precision at a fixed nomination budget, the top k of the register, per embedder, \\
+              scoring and gate",
+"""
+new = '    primary: "",\n'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# An option word to a builtin read as the directory it names. `cd -P /work/x`
+# then states the working directory as `/work/-P`: an absolute path, marked
+# resolved, that every later relative path resolves against.
+inject_mechanical_option_is_a_directory() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        let optioned = simple.operands().iter().any(is_option);
+        let argument = simple.operands().iter().find(|word| !is_option(word));"""
+new = """        let optioned = false;
+        let argument = simple.operands().first();"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The lexical pre-gate asked about the row's id instead of its text. The
+# shipped ids are slugs of their texts and mostly agree, so the with-gate arm
+# of every cell is computed from identifiers with a row silently dropped to
+# the scoring's floor -- and the gate is one of the two factors the bakeoff
+# exists to measure.
+inject_sense_gate_reads_the_id() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            let admitted = cell.gate.admits(set.set(), &row.text);\n"
+new = "            let admitted = cell.gate.admits(set.set(), &row.id);\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A flag's value read as a file operand. `touch -t 202401010000 f.txt` then
+# says the turn wrote a file named after the timestamp.
+inject_mechanical_flag_value_is_a_file() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """    FileCommand::plain("touch", Operands::Write, &["-d", "-r", "-t"]),
+    FileCommand::plain("mkdir", Operands::Write, &["-m"]),"""
+new = """    FileCommand::plain("touch", Operands::Write, &[]),
+    FileCommand::plain("mkdir", Operands::Write, &[]),"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A standardised separation divided by one class's spread rather than by both.
+# It is one of the two pre-registered separation endpoints, and a cell could
+# report a separation computed from the positives alone.
+inject_sense_d_prime_unpooled() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "    let pooled = f64::midpoint(positive.variance, negative.variance).sqrt();\n"
+new = "    let pooled = positive.variance.sqrt();\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The verb an entry uses to say what happened to a file, swapped. The lane
+# then writes, under capture authority, that a file it made was deleted.
+inject_mechanical_entry_verb_swapped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Self::Read => "read",
+            Self::Written => "wrote",
+            Self::Deleted => "deleted","""
+new = """            Self::Read => "read",
+            Self::Written => "deleted",
+            Self::Deleted => "wrote","""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The null's acceptance band widened until nothing is outside it. A
+# shuffled-label null separating the two classes by a whole standard deviation
+# is then reported as chance, and every cell measured against that null is
+# measured against itself.
+inject_sense_null_band_widened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "pub const NULL_D_PRIME_BAND: f64 = 0.25;\n"
+new = "pub const NULL_D_PRIME_BAND: f64 = 5.0;\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A pipeline's members never run. Nothing a pipeline reads is recorded, and a
+# pipeline is the ordinary shape of an agent's shell call.
+inject_mechanical_pipeline_skipped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if link.pipeline.len() > 1 {
+            for command in &link.pipeline {
+                let mut copy = state.clone();
+                self.run_command(command, &mut copy, call);
+            }
+            return false;
+        }"""
+new = """        if link.pipeline.len() > 1 {
+            return false;
+        }"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A reported metric whose record carries a constant instead of the number the
+# metric produced. The record is the one door from a computed number to a
+# result, and the assembly can be guarded while the content is not.
+inject_sense_reported_value_constant() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '            ("value".to_owned(), decimal(self.value, 4)),\n'
+new = '            ("value".to_owned(), decimal(0.0, 4)),\n'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A path written and then read by one call kept as one fact. The write is the
+# one discarded, so the lane tells a later reader the turn wrote nothing.
+inject_mechanical_write_lost_to_a_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """                && matches!(
+                    &fact.derived,
+                    Derived::Touch { path: held, touch: held_touch }
+                        if *held == path && held_touch.kind == kind
+                )"""
+new = """                && matches!(&fact.derived, Derived::Touch { path: held, .. } if *held == path)"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A register whose rows disagree with the name on the file. The directory
+# then lists an authored register that is in fact corpus, and a metric taken
+# over it reads as a statement about the world.
+inject_sense_register_source_mislabelled() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/capture/sense/register/authored-mistake.jsonl")
+source = path.read_text(encoding="utf-8")
+old = '"source":"authored"'
+assert old in source
+path.write_text(source.replace(old, '"source":"mined"', 1), encoding="utf-8")
+EOF
+}
+
+# A file in the register directory that names nothing. A walk that skipped it
+# would skip a register whose name was mistyped and call the directory clean.
+inject_sense_register_unnamed_file() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/capture/sense/register/notaregister.jsonl")
+assert not path.exists()
+path.write_text('{"id":"a/b","text":"x","label":"positive","source":"authored"}\n', encoding="utf-8")
+EOF
+}
+
+# The join between a mined row and its provenance made optional. A mined
+# register can then ship a row nobody can trace, which is evidence in name
+# and an assertion in fact.
+inject_sense_provenance_join_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """    if let Some(row) = register
+        .iter()
+        .find(|row| !traced.contains(row.id.as_str()))
+    {
+        return Err(JoinError::Untraced(row.id.clone()));
+    }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
 # The sign let back onto a zero. `-0.0` is then a second spelling of `0.0`,
 # and a banked sampler temperature reads back as a number nobody wrote.
 inject_record_negative_zero_decimal() {
@@ -1398,6 +1986,93 @@ selftest() {
     'a word the shell would expand was reported literal'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
     'an empty answer is a recorded answer, not a missing one'
+  seeded_case "a cosine that forgot its second norm"  test     inject_sense_cosine_unnormalised \
+    'cosine of a vector with itself was not one'
+
+  seeded_case "contrastive scoring that ignores the negative sense" test inject_sense_contrastive_ignores_negative \
+    'the contrastive score ignored the negative sense'
+
+  seeded_case "a null whose labels are never shuffled" test   inject_sense_null_labels_unshuffled \
+    'd-prime on a shuffled-label null was far from zero'
+
+  seeded_case "a bootstrap p with no attainable floor" test   inject_sense_p_without_floor \
+    'a bootstrap p-value came without its attainable floor'
+
+  seeded_case "a metric whose failure fixture is gone" test   inject_sense_metric_fixture_removed \
+    'no failure fixture, so it can never be reported'
+
+  seeded_case "a register mislabelled at its source" test     inject_sense_register_source_mislabelled \
+    'and a row says otherwise'
+
+  seeded_case "a file in the register naming nothing"  test     inject_sense_register_unnamed_file \
+    'not a declared sidecar'
+
+  seeded_case "a mined row nobody can trace"          test     inject_sense_provenance_join_dropped \
+    'a row nobody can trace was accepted'
+
+  seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
+    'two lines were read as one, and the second was lost'
+
+  seeded_case "controls that never look at the register" test inject_sense_controls_ignore_register \
+    'a register row reached the top control and the controls passed'
+
+  seeded_case "a bootstrap that never resamples"      test     inject_sense_bootstrap_never_resamples \
+    'every resample was the observed difference'
+
+  seeded_case "a failure reading off the worst reading" test   inject_sense_failure_reading_moved \
+    'is the worst the metric can say'
+
+  seeded_case "a pre-registration with nothing in it" test     inject_sense_pre_registration_emptied \
+    'the primary endpoint is not the endpoint that was registered'
+
+  seeded_case "a lexical gate asked about the id"     test     inject_sense_gate_reads_the_id \
+    'the gate did not decide on the row'
+
+  seeded_case "a separation over one class spread"    test     inject_sense_d_prime_unpooled \
+    'd-prime was standardised by one class'
+
+  seeded_case "a null band widened past a finding"    test     inject_sense_null_band_widened \
+    'bands are not the numbers they were registered as'
+
+  seeded_case "a reported metric that reports a constant" test inject_sense_reported_value_constant \
+    'the record of a metric is not the numbers the metric produced'
+
+  seeded_case "a subshell that shares the parent state" test   inject_mechanical_subshell_leaks \
+    'the subshell cd leaked into the parent'
+
+  seeded_case "a failed cd applied anyway"            test     inject_mechanical_failed_cd_applied \
+    'a failed cd moved the working directory'
+
+  seeded_case "popd on an empty stack ignored"        test     inject_mechanical_popd_empty_ignored \
+    'popd on an empty stack was silently ignored'
+
+  seeded_case "the mechanical-noun table emptied"     test     inject_mechanical_lint_table_emptied \
+    'a question about a mechanical fact went unflagged'
+
+  seeded_case "a mechanical entry sent through the gate" test  inject_mechanical_entry_grounded \
+    'a mechanical entry was dropped as if it needed grounding'
+
+  seeded_case "a quoted substitution descended into"  test     inject_mechanical_quoted_substitution \
+    'a single-quoted substitution was descended into'
+
+  seeded_case "the mechanical lane renamed"           test     inject_mechanical_lane_renamed \
+    'the lane was renamed'
+
+  seeded_case "an option word read as a directory"    test     inject_mechanical_option_is_a_directory \
+    'an option word was read as the directory it names'
+
+  seeded_case "a flag value read as a file"           test     inject_mechanical_flag_value_is_a_file \
+    'the lane read a file out of a flag.s value'
+
+  seeded_case "an entry with the wrong verb"          test     inject_mechanical_entry_verb_swapped \
+    'the entry used the wrong verb for what happened to the file'
+
+  seeded_case "a pipeline whose members never run"    test     inject_mechanical_pipeline_skipped \
+    'nothing in the pipeline ran'
+
+  seeded_case "a write lost to a read of the same path" test   inject_mechanical_write_lost_to_a_read \
+    'a write was lost to a read of the same path in the same call'
+
   seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
     'was constructed, and the grammar would not read it back'
   seeded_case "the producer read as the last command" test     inject_shell_producer_is_last_written \
