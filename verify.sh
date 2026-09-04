@@ -32,7 +32,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results regimen metadata hygiene pages ci history parity)
+readonly CHECKS=(fmt clippy test library results regimen metadata hygiene pages ci history injections parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -182,6 +182,13 @@ check_ci() { python3 scripts/check-ci-coverage.py; }
 # pattern table the file gate uses. A file carrying a forbidden shape can be
 # fixed with a commit; a commit message carrying one is permanent.
 check_history() { python3 scripts/check-history.py; }
+
+# Every injection in this file changes the tree it is run against. A verdict
+# is worth what the fault behind it cost, so an injection is proven to change
+# something before the RED it produces counts as anything. This runs on every
+# invocation and not only in --selftest: an inert injection is introduced by
+# an edit, and the edit is what should fail.
+check_injections() { python3 scripts/check-injections.py; }
 
 # The fault-migration manifest defines what parity means for the replacement
 # gate. A manifest that has drifted from this script defines the wrong parity.
@@ -722,6 +729,71 @@ path = pathlib.Path("diet/src/formats/shell.rs")
 source = path.read_text(encoding="utf-8")
 old = "    Ok(inner.as_rule() == Rule::dollar_alone)\n"
 new = "    let _ = inner;\n    Ok(true)\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The producer read as the last command WRITTEN rather than the one whose
+# output the line carries. `cargo test | tail -15` is then a `tail` run, and
+# every routing decision downstream of it is about the wrong tool.
+inject_shell_producer_is_last_written() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "        match tail.pipeline.first()? {\n"
+new = "        match tail.pipeline.last()? {\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# One row dropped from the operator table. `>|` then has no spelling and no
+# reading, so a line that truncates a file parses as something else or not at
+# all -- and the table was, until this fault existed, guarded only by a test
+# that iterated it.
+inject_shell_operator_table_row_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "        (Self::Clobber, \">|\"),\n"
+new = ""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# `<<-` recorded as the operator and read as a plain heredoc. The body then
+# carries the leading tabs the shell strips before the command ever sees them,
+# so the recorded input is not the input that ran.
+inject_shell_heredoc_strip_keeps_tabs() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "        out.push_str(line.trim_start_matches('\\t'));\n"
+new = "        out.push_str(line);\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The command word counted among its own operands. The mechanical lane derives
+# the files a turn touched from the operands, so `rm -rf build` reports a file
+# called `rm`.
+inject_shell_command_word_is_an_operand() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "        self.words.get(1..).unwrap_or(&[])\n"
+new = "        &self.words\n"
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -1759,6 +1831,24 @@ inject_history() {
   seed_commit --message "carries $(printf '%s%s' 'DIE' '-9001') forward"
 }
 
+# An injection that changes nothing. This is the whole failure the
+# `injections` gate exists for: a body whose anchor no longer matches the
+# file, or one a line-based merge spliced into silence, still reports its
+# seeded case RED -- because the gate it runs was already failing, or because
+# it was going to fail anyway -- and proves nothing about the guard it names.
+inject_inert_injection() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+old = "inject_history_no_base() {\n"
+new = "inject_that_changes_nothing() {\n  :\n}\n\ninject_history_no_base() {\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_history_no_base() {
   git add --all
   seed_commit --message 'the only commit'
@@ -2076,94 +2166,153 @@ selftest() {
     'was constructed, and the grammar would not read it back'
   seeded_case "a cosine that forgot its second norm"  test     inject_sense_cosine_unnormalised \
     'cosine of a vector with itself was not one'
+
   seeded_case "contrastive scoring that ignores the negative sense" test inject_sense_contrastive_ignores_negative \
     'the contrastive score ignored the negative sense'
+
   seeded_case "a null whose labels are never shuffled" test   inject_sense_null_labels_unshuffled \
     'd-prime on a shuffled-label null was far from zero'
+
   seeded_case "a bootstrap p with no attainable floor" test   inject_sense_p_without_floor \
     'a bootstrap p-value came without its attainable floor'
+
   seeded_case "a metric whose failure fixture is gone" test   inject_sense_metric_fixture_removed \
     'no failure fixture, so it can never be reported'
+
   seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
     'two lines were read as one, and the second was lost'
+
   seeded_case "a verdict read by prefix"               test     inject_verdict_prefix_accepted \
     'verdict-as-a-prefix\.txt: accepted as'
+
   seeded_case "an identifier in a reason read as a verdict" test inject_verdict_identifier_read_as_a_verdict \
     'reason-naming-an-identifier\.txt: rejected'
+
   seeded_case "a second verdict in a reason accepted"  test     inject_verdict_second_verdict_accepted \
     'two-verdicts\.txt: accepted as'
+
   seeded_case "an anchor matched inside a longer word"  test     inject_collector_substring_match \
     'an anchor matched inside a longer word'
+
   seeded_case "an English word made an anchor"         test     inject_collector_english_anchor \
     'an English word became an anchor'
+
   seeded_case "an entry nominated by its own turn"     test     inject_collector_self_nomination \
     'an entry nominated itself'
+
   seeded_case "a supersession that adds without voiding" test   inject_reconcile_supersede_without_voiding \
     'the old entry was not voided'
+
   seeded_case "a verdict that settles nothing settling"  test   inject_reconcile_partial_applies_a_patch \
     'PARTIAL produced a patch'
+
   seeded_case "an uncalibrated nomination policy accepted" test inject_collector_uncalibrated_policy \
     'the fixture policy was accepted by the door that ships'
+
   seeded_case "a nomination budget ignored"           test     inject_collector_budget_ignored \
     'the budget did not bind'
+
   seeded_case "a turn that nominates only its first entry" test inject_collector_one_nomination_per_turn \
     'a turn that named two anchors nominated fewer than two entries'
+
   seeded_case "a voided entry nominated by tier 0" test inject_collector_voided_entry_renominated \
     'a voided entry was nominated again by the literal tier'
+
   seeded_case "a hit that says nothing about where" test inject_collector_hit_offset_lost \
     'the hits did not say where the anchor recurred'
+
   seeded_case "an overlapping anchor scan" test inject_collector_overlapping_scan \
     'an anchor that overlaps itself was counted at every shifted position'
+
   seeded_case "a double-quoted span that is not an anchor" test inject_collector_quoted_anchor_delimiter \
     'a double-quoted span was not anchored'
+
   seeded_case "a two-byte shape read as an anchor" test inject_collector_short_shape_anchored \
     'a two-byte shape was anchored'
+
   seeded_case "a module path that is not an identifier" test inject_collector_module_path_shape \
     'a path through the module tree was not anchored'
+
   seeded_case "a sentence word read as a file extension" test inject_collector_extension_window \
     'a dotted word whose tail is a word was read as a file name'
+
   seeded_case "an anchor with the sentence still on it" test inject_collector_token_untrimmed \
     'the punctuation prose hung on a token was kept as part of the anchor'
+
   seeded_case "anchor kinds that swapped their names" test inject_collector_anchor_kind_permuted \
     'the anchor kind vocabulary is not what it promises'
+
   seeded_case "a source vocabulary with no members" test inject_collector_source_vocabulary_emptied \
     'the source vocabulary is not what it promises'
+
   seeded_case "a nomination that names the other tier" test inject_collector_tier_name_swapped \
     'a nomination named the wrong tier'
+
   seeded_case "registers that swapped their names" test inject_collector_register_permuted \
     'the register vocabulary is not what it promises'
+
   seeded_case "a lexical pre-gate the tier ignores" test inject_collector_gate_ignored \
     'a turn carrying no seed was scored by a gated policy anyway'
+
   seeded_case "a turn-level threshold never compared" test inject_collector_turn_threshold_ignored \
     'an unremarkable turn nominated'
+
   seeded_case "a per-entry threshold never compared" test inject_collector_entry_threshold_ignored \
     'the tier nominated an entry the turn was not about'
+
   seeded_case "a turn scored against the wrong sense set" test inject_collector_wrong_sense_set \
     'a turn about a mistaken assumption was scored as a reversal'
+
   seeded_case "an intent register that reads the prose" test inject_collector_intent_register_reads_the_prose \
     'the tier measured the prose of the turn where it should have measured the stated intent'
+
   seeded_case "a budget spent on the worst candidates" test inject_collector_budget_takes_the_worst \
     'the budget was spent on the entries that scored lowest'
+
   seeded_case "a nomination score nothing measured" test inject_collector_score_not_measured \
     'a nomination carried a score nothing measured'
+
   seeded_case "an entry nominated by its own turn at tier 1" test inject_collector_sense_self_nomination \
     'an entry born in this turn nominated itself'
+
   seeded_case "a voided entry nominated by tier 1" test inject_collector_sense_voided_entry_renominated \
     'a voided entry was nominated again by the sense tier'
+
   seeded_case "a report that drops half its policy" test inject_collector_report_drops_the_policy \
     'the report did not say which scoring produced it'
+
   seeded_case "a calibration that names no run" test inject_collector_policy_names_no_run \
     'was read as a calibration'
+
   seeded_case "a supersession that writes a constant" test inject_reconcile_supersede_writes_a_constant \
     'the superseding entry does not say what superseded the old one'
+
   seeded_case "a supersession with no fork behind it" test inject_reconcile_supersede_loses_its_fork \
     'the superseding entry does not say which fork produced it'
+
   seeded_case "a patch the reconciler never hands back" test inject_reconcile_patch_never_handed_back \
     'a verdict that produced a patch did not hand it back'
+
   seeded_case "a PARTIAL counted as a false nomination" test inject_reconcile_partial_read_as_a_false_nomination \
     'a fork that said the prose bears on the entry was read as a false nomination'
+
   seeded_case "a mention applied as a supersession" test inject_reconcile_mention_superseded \
     'NOT_THIS produced a patch'
+
+  seeded_case "the producer read as the last command" test     inject_shell_producer_is_last_written \
+    'produces its output with'
+
+  seeded_case "an operator dropped from the table"    test     inject_shell_operator_table_row_dropped \
+    'the table gained or lost an operator'
+
+  seeded_case "a stripping heredoc that keeps tabs"   test     inject_shell_heredoc_strip_keeps_tabs \
+    'did not strip the tabs the shell strips'
+
+  seeded_case "the command word read as an operand"   test     inject_shell_command_word_is_an_operand \
+    'the command word is not one of its own operands'
+
+  seeded_case "an injection that changes nothing"     injections inject_inert_injection \
+    'inject_that_changes_nothing'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

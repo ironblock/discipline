@@ -1,0 +1,37 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [
+                  {
+                    "file": {
+                      "literal": true,
+                      "text": "build.log"
+                    },
+                    "op": "&>"
+                  }
+                ],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "cargo"
+                  },
+                  {
+                    "literal": true,
+                    "text": "build"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
