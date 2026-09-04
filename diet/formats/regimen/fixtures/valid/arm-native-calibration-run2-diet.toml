@@ -1,0 +1,94 @@
+# Level-2 diet experiment, Run 2 (REV-9) — the SHIPPING configuration, per-class thinking doctrine live.
+#
+# A regimen v1 conformance fixture of that arm as written. What the regimen grammar
+# cannot express is not carried and not approximated:
+#   not carried: expected_absent = ["--cache-ram", "-cram"] — the regimen grammar has no arrays
+#   not carried: [serving.flags] (a nested header, empty in the source) — the regimen grammar has no nested tables
+#
+# Transcribed from the REV-9 Run 2 preregistration §4, not designed here. Run 2
+# compares against nothing (§1), so this file's job is to state the shipping default
+# exactly and pin every value the fire depends on. Deviations from §4 are recorded
+# at the field they affect, never silently.
+#
+# vs the Run-1 arm (the Pi-parity arm): thinking flips ON for the main lane
+# and the interview forks; max_tokens 4096 -> 8000; the rest of the sampler envelope
+# becomes explicit instead of inherited from server defaults.
+name = "l2-diet-run2"
+
+[sampler]
+# §4: "production sampler per arm file (pinned; full envelope: temperature, top_k,
+# top_p, min_p, max_tokens=8000, penalties)". Values are the box's MEASURED
+# production defaults (GET /props, 2026-07-26), now stated rather than inherited —
+# a per-request server default is invisible to the launch-flag fingerprint, so an
+# upgrade that moved one would move the science with nothing able to detect it.
+# That is REV-8 §5.2's absent-`--cache-ram` lesson one layer down.
+temperature = 0.6
+top_k = 20
+top_p = 1.0                  # DECLARED DEVIATION from the Qwen3.6-27B card, which asks
+                             # for 0.95 in thinking/precise-coding mode (per the model's sampler card).
+                             # KEPT because §11 pins "the committed shipping default, exactly" —
+                             # changing it would make Run 2 a measurement of something other than
+                             # this system. top_p=1.0 disables nucleus truncation, so under
+                             # thinking-on it admits a longer tail than the card intends; if Run 2
+                             # shows rambling reasoning, look here first. Candidate finding, not a
+                             # silent difference.
+min_p = 0.0
+repeat_penalty = 1.0         # neutral; every penalty is off in production
+presence_penalty = 0.0
+frequency_penalty = 0.0
+max_tokens = 8000            # §4. Run 1 used 4096 (Pi's observed max gen); the
+                             # token-starvation law made the budget a first-class
+                             # value — an empty graded turn is instrument failure,
+                             # never a zero (§6.1), so the budget must not bind.
+preserve_thinking = true     # load-bearing on the beellama build; NOT moot here,
+                             # unlike Run 1 where thinking-off meant nothing to keep
+enable_thinking = true       # §4: main lane thinking-ON (Run 1 was OFF for Pi parity)
+interview_thinking = true    # §4: interview/audit/supersede forks thinking-ON.
+                             # These do JUDGMENT work, and this program measured
+                             # judgment collapsing under no-think (open-questions
+                             # captured per session 19 -> 0).
+
+# EXTRACTION THINKING IS NOT A FIELD, ON PURPOSE. §4 requires extraction
+# thinking-off as a CHECKED INVARIANT ("lane==extraction => thinking==off, asserted
+# per-fork from the log"), and it is enforced in code, not configured here —
+# extraction is provably non-judgment, so this is an invariant rather than a knob.
+# The harness's assert-cache extraction-invariant check asserts it on every drive;
+# it held on all six Run-1/1' drives.
+
+[limits]
+max_steps = 30
+turn_timeout_s = 2400        # unchanged from Run 1. Thinking-on lengthens turns, so
+                             # this is the value most likely to need revisiting; a
+                             # timeout is caught by check_timeouts, not silent.
+tool_timeout_s = 120
+
+[triggers]
+# §4: "Capture thresholds at committed production defaults (raw values recorded — no
+# tuning for this fire; the threshold surface is [a later study's] job)." Identical to the
+# Run-1 arm by design: changing a threshold in the same fire that changes the
+# thinking regime would confound the two, and the knob is a cliff not a dial (a 1.5x
+# threshold change once produced a 7x capture swing).
+enabled = true
+evidence_threshold = 3000
+extract_threshold = 1500
+trio_cooldown = 3
+open_next_every = 10
+ratify = true
+audit_legacy_wording = true  # parity arm — reproduce the Pi archive wording
+seam_every_turns = 2         # seams at [1,3,5,7,9,11] with first_at=1 (§4)
+supersede = true
+extraction = true
+extraction_minimal_prefix = false  # pinned — Run 2's already-ratified result was
+                                    # measured on the warm-27B topology (matches the Pi-parity arm
+                                    # by design); the code default was later flipped to true
+                                    # (by the extraction-offboarding change).
+rationale = false            # the rationale lane is its own study's, excluded from this
+                             # fire per §11 (application probes are not in it)
+
+# matches the Pi-parity arm's reference exactly (identity, no deviation
+# needed) — Run 2 relies on the --cache-ram compiled default, unchanged from
+# Run 1. The Pi-parity arm's [serving] comment carries the full rationale.
+[serving]
+# The arm's one serving binding, expected_absent = ["--cache-ram", "-cram"], is an
+# array, and its [serving.flags] header is a nested table: neither is carried (see
+# the header block). The table is kept so the arm's shape survives as written.

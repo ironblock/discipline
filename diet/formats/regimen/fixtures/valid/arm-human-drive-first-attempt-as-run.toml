@@ -1,0 +1,21 @@
+# the human-driven session arm as it ran in attempt 1 of the first human-paced drives (2026-08-09): the T0/ecological instrument, a person pacing turns against the served model
+# as run, this attempt omitted the [triggers] table and so fired the bare control while intending diet; it is preserved as the record of what actually drove
+#
+# not carried: [serving.flags] — the regimen grammar has no nested table header (one level only)
+# not carried: "--cache-ram" = 8192 — the regimen grammar has no nested table to hold it and no quoted key
+#
+# [serving] is kept as the header the arm declared; it is empty here because its only content was the flags table above
+name = "human-driven"
+[sampler]
+temperature = 0.9
+top_k = 20
+top_p = 1.0
+max_tokens = 65000            # >= Pi's observed max gen (2494 tok)
+preserve_thinking = true     # server-matched; moot with thinking-off
+enable_thinking = true      # main lane OFF (Pi-identical); Run 2 = true
+interview_thinking = true   # moot (no capture forks); set for consistency
+# [limits]
+# max_steps = 30
+# turn_timeout_s = 2400
+# tool_timeout_s = 120
+[serving]

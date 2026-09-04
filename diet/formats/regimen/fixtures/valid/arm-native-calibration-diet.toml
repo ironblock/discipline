@@ -1,0 +1,51 @@
+# Level-2 calibration, Run 1: the diet arm ("l2-diet"), config-identical to Pi with thinking OFF on all lanes, to reproduce Pi's judgment-slot-starved capture regime
+#
+# RUN 1 (Level-2 calibration) — config-identical to Pi: thinking OFF on ALL lanes
+# (main + interview + extraction), reproducing Pi's judgment-slot-starved capture
+# regime. PIN B (Pi's 2.0/0.75) governs this run. Run 2 (shipping split: main +
+# interview thinking ON) gets its own arm file, gated on Run 1 passing.
+#
+# not carried: expected_absent = ["--cache-ram", "-cram"] — the regimen grammar has no array value
+# not carried: [serving.flags] — the regimen grammar has no nested table header (the arm declares it with nothing under it)
+# The [serving] header itself is carried, empty, as the arm writes it; only its two members above are not.
+#   the arm's rationale for [serving], kept for the record: identity with the Pi-parity arm's
+#   reference (no deviation needed) — Run 1 relies on the --cache-ram compiled default, same
+#   as Pi's regime.
+name = "l2-diet"
+
+[sampler]
+temperature = 0.6
+top_k = 20
+top_p = 1.0
+max_tokens = 4096            # >= Pi's observed max gen (2494 tok); exact Pi limit unrecoverable
+preserve_thinking = true     # server-matched; moot with thinking-off (no <think> generated)
+enable_thinking = false      # main lane OFF (Pi-identical); Run 2 = true
+interview_thinking = false   # interview/audit/supersede forks OFF (Pi-identical); Run 2 = true
+
+[limits]
+max_steps = 30
+turn_timeout_s = 2400
+tool_timeout_s = 120
+
+[triggers]
+enabled = true
+evidence_threshold = 3000
+extract_threshold = 1500
+trio_cooldown = 3
+open_next_every = 10
+ratify = true
+audit_legacy_wording = true  # parity arm — reproduce the Pi archive wording
+seam_every_turns = 2
+supersede = true
+extraction = true
+extraction_minimal_prefix = false  # pinned — Run 1's already-ratified result was
+                                    # measured on the warm-27B topology (matches the Pi-parity
+                                    # arm by design); a later change flipped the code default to true.
+rationale = false
+
+# The arm's serving section is carried as this empty header: its one binding
+# (`expected_absent`, an array) and its nested table are not expressible in the
+# regimen grammar and are listed as not carried in the header above; the arm's
+# rationale was that run 1 relies on the --cache-ram compiled default, the same as
+# the parity declaration's reference.
+[serving]
