@@ -1,0 +1,1 @@
+cargo build &> build.log
