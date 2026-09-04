@@ -759,6 +759,52 @@ impl From<StructureError> for ParseError {
 // parsing
 // ---------------------------------------------------------------------------
 
+/// Read a JSON-lines document as plain objects, stopping before the schema.
+///
+/// A lane's contract file and a lane corpus's expectation are JSON that is
+/// not a record: rows with no `record` tag and no event schema to satisfy.
+/// They are read here rather than by a second decoder because the crate's
+/// standing finding about formats applies to its own value space first --
+/// eleven divergent readers of one format, and "I recreated it to be quick".
+/// This is the same grammar and the same [`json`] value space as a record,
+/// with the schema layer left off.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] for text the grammar rejects, for nesting past
+/// [`MAX_DEPTH`], and for a value the record's value space cannot hold. Never
+/// [`ParseError::Schema`] or [`ParseError::Structure`]: those layers are
+/// exactly what this function does not apply.
+pub fn objects(input: &str) -> Result<Vec<BTreeMap<String, Value>>, ParseError> {
+    let depth = nesting_depth(input);
+    if depth > MAX_DEPTH {
+        return Err(ParseError::TooDeep {
+            depth,
+            limit: MAX_DEPTH,
+        });
+    }
+    let mut parsed = RecordParser::parse(Rule::document, input)
+        .map_err(|err| ParseError::Syntax(Box::new(err)))?;
+    let document = parsed.next().ok_or(ParseError::Value(ValueError::Shape(
+        "a document with no rows",
+    )))?;
+
+    let mut rows = Vec::new();
+    for line in document.into_inner() {
+        if line.as_rule() != Rule::event_line {
+            continue; // a blank line
+        }
+        let object = line
+            .into_inner()
+            .find(|pair| pair.as_rule() == Rule::object)
+            .ok_or(ParseError::Value(ValueError::Shape(
+                "a line with no object",
+            )))?;
+        rows.push(json::object(&object)?);
+    }
+    Ok(rows)
+}
+
 /// Parse a session record.
 ///
 /// # Errors

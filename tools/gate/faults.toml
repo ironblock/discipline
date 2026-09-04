@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 111
+red_faults = 115
 mechanics_assertions = 27
 migrated = 0
 
@@ -361,6 +361,42 @@ check = "test"
 label = "an empty payload read as absent"
 failure_class = "record.payload-dropped"
 legacy_signature = "an empty answer is a recorded answer, not a missing one"
+migrated = false
+
+[[fault]]
+id = "test.tools_ungrounded"
+kind = "seeded-gate"
+check = "test"
+label = "self-capture exempt from grounding"
+failure_class = "capture.modality-exempt-from-grounding"
+legacy_signature = "modality does not exempt a lane from grounding"
+migrated = false
+
+[[fault]]
+id = "test.tools_reminder_silent"
+kind = "seeded-gate"
+check = "test"
+label = "a reminder cadence that never fires"
+failure_class = "capture.reminder-never-fires"
+legacy_signature = "ten silent turns must be reminded at every third turn"
+migrated = false
+
+[[fault]]
+id = "test.tools_foreign_call"
+kind = "seeded-gate"
+check = "test"
+label = "a harness tool call read as a capture"
+failure_class = "capture.foreign-tool-as-source"
+legacy_signature = "a harness tool call is not a capture tool and writes nothing"
+migrated = false
+
+[[fault]]
+id = "test.tools_proposal_writes"
+kind = "seeded-gate"
+check = "test"
+label = "a phase proposal that writes a fact"
+failure_class = "capture.proposal-writes-a-fact"
+legacy_signature = "a phase-transition proposal is advisory and writes nothing"
 migrated = false
 
 [[fault]]

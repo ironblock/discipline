@@ -748,6 +748,70 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# Self-capture exempt from the groundedness gate. The modality is the whole
+# argument -- a tool call rides the harness's own parsing instead of the
+# content channel -- and none of that says anything about whether the content
+# is true. The 454-entry fabrication came through a lane that was also
+# confident, also well-formed, and also sure of itself.
+inject_tools_ungrounded() {
+  sed -i 's|^    let kept = !report.kept().is_empty();$|    let kept = true;|' \
+    diet/src/capture/tools.rs
+}
+
+# The reminder that never comes round. Every model eventually stops recording;
+# a cadence that cannot fire turns the forget rate this lane exists to survive
+# into a silence nobody counts.
+inject_tools_reminder_silent() {
+  sed -i 's|^        if self.since < self.cadence.interval() {$|        if true {|' \
+    diet/src/capture/tools.rs
+}
+
+# A harness tool call accepted as a capture. Another system's tool output then
+# becomes a fact about this session, written with capture authority, and the
+# provenance says the model recorded it.
+inject_tools_foreign_call() {
+  sed -i 's|^        return Err(ToolError::NotACaptureTool(tool.clone()));$|        return Ok(Effect::default());|' \
+    diet/src/capture/tools.rs
+}
+
+# A phase-transition proposal that writes. The tool was the most successful
+# capture-adjacent mechanism the program ever ran, and it was that because it
+# ASKED; a version that writes makes the model's wish for a phase change
+# indistinguishable from a phase change.
+inject_tools_proposal_writes() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """fn advisory(proposal: Proposal) -> Effect {
+    Effect {
+        proposal: Some(proposal),
+        ..Effect::default()
+    }
+}"""
+new = """fn advisory(proposal: Proposal) -> Effect {
+    let patches = vec![Patch::Add {
+        id: EntryId::new(&proposal.from_call).expect("a call id is not blank"),
+        content: proposal.reason.clone(),
+        provenance: Provenance {
+            turn: proposal.at_turn,
+            lane: LANE.to_owned(),
+            fork: None,
+            index: 0,
+        },
+    }];
+    Effect {
+        patches,
+        proposal: Some(proposal),
+        ..Effect::default()
+    }
+}"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1293,6 +1357,14 @@ selftest() {
     'a word the shell would expand was reported literal'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
     'an empty answer is a recorded answer, not a missing one'
+  seeded_case "self-capture exempt from grounding"    test     inject_tools_ungrounded \
+    'modality does not exempt a lane from grounding'
+  seeded_case "a reminder cadence that never fires"   test     inject_tools_reminder_silent \
+    'ten silent turns must be reminded at every third turn'
+  seeded_case "a harness tool call read as a capture" test     inject_tools_foreign_call \
+    'a harness tool call is not a capture tool and writes nothing'
+  seeded_case "a phase proposal that writes a fact"   test     inject_tools_proposal_writes \
+    'a phase-transition proposal is advisory and writes nothing'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
