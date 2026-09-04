@@ -44,10 +44,15 @@ array = { "[" ~ hspace* ~ (value ~ (hspace* ~ "," ~ hspace* ~ value)*)? ~ hspace
 // the `0` of `0.142` and strand the rest.
 value = { object | array | string | decimal | integer | boolean }
 
-decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }
-// `-0` is a second spelling of `0`, so a negative integer starts with a
-// nonzero digit. One spelling per value is the rule `01` and `7e-1` are
-// already fixtured rejections for; this was the hole in it.
+// `-0` is a second spelling of `0`, and so is `-0.0`. One spelling per value
+// is the rule `01` and `7e-1` are already fixtured rejections for; the sign
+// was the hole in it, on both sides of the point. A negative number is one
+// with a digit that is not zero, which for a decimal means either side of
+// the point may carry it.
+decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }
+negative_decimal = _{
+    (nonzero ~ "." ~ ASCII_DIGIT+) | ("0" ~ "." ~ "0"* ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
+}
 integer = @{ ("-" ~ nonzero) | int_part }
 int_part = _{ "0" | nonzero }
 nonzero = _{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }

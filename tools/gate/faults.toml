@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 111
+red_faults = 112
 mechanics_assertions = 27
 migrated = 0
 
@@ -361,6 +361,15 @@ check = "test"
 label = "an empty payload read as absent"
 failure_class = "record.payload-dropped"
 legacy_signature = "an empty answer is a recorded answer, not a missing one"
+migrated = false
+
+[[fault]]
+id = "test.record_negative_zero_decimal"
+kind = "seeded-gate"
+check = "test"
+label = "a negative zero decimal accepted"
+failure_class = "record.second-spelling"
+legacy_signature = "was constructed, and the grammar would not read it back"
 migrated = false
 
 [[fault]]
