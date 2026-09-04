@@ -12,23 +12,15 @@
                 "words": [
                   {
                     "literal": true,
-                    "text": "rm"
+                    "text": "echo"
                   },
                   {
                     "literal": true,
-                    "text": "-f"
+                    "text": "foobar"
                   },
                   {
-                    "literal": false,
-                    "text": "*.tmp"
-                  },
-                  {
-                    "literal": false,
-                    "text": "build/?.o"
-                  },
-                  {
-                    "literal": false,
-                    "text": "log[0-9].txt"
+                    "literal": true,
+                    "text": "baz"
                   }
                 ]
               }

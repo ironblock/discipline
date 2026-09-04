@@ -1,1 +1,1 @@
-cd ~/work
+cd ~/work && ls ~ a~b "x"~
