@@ -1048,8 +1048,10 @@ import pathlib
 
 path = pathlib.Path("diet/src/capture/sense.rs")
 source = path.read_text(encoding="utf-8")
-old = """    let traced: BTreeSet<&str> = provenance.iter().map(|row| row.id.as_str()).collect();
-    if let Some(row) = register.iter().find(|row| !traced.contains(row.id.as_str())) {
+old = """    if let Some(row) = register
+        .iter()
+        .find(|row| !traced.contains(row.id.as_str()))
+    {
         return Err(JoinError::Untraced(row.id.clone()));
     }
 """
