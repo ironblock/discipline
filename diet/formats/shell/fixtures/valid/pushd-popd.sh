@@ -1,0 +1,1 @@
+pushd a; ls; popd

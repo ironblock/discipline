@@ -29,6 +29,7 @@ const VERBS: &[(&str, &str)] = &[
     ("parse-interview", "interview"),
     ("check-record", "record"),
     ("check-regimen", "regimen"),
+    ("parse-shell", "shell"),
 ];
 
 /// The binary cargo built for this test run. Not a path this file composes:

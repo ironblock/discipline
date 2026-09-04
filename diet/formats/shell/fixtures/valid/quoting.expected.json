@@ -1,0 +1,53 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "cd"
+                  },
+                  {
+                    "literal": true,
+                    "text": "a b"
+                  },
+                  {
+                    "literal": false,
+                    "text": "$HOME/x"
+                  },
+                  {
+                    "literal": true,
+                    "text": "c d"
+                  },
+                  {
+                    "literal": false,
+                    "text": "$DIR"
+                  },
+                  {
+                    "literal": true,
+                    "text": "lit\"eral"
+                  },
+                  {
+                    "literal": false,
+                    "text": "~/e"
+                  },
+                  {
+                    "literal": false,
+                    "text": "f*"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

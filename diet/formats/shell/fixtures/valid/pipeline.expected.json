@@ -1,0 +1,53 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "grep"
+                  },
+                  {
+                    "literal": true,
+                    "text": "-n"
+                  },
+                  {
+                    "literal": true,
+                    "text": "fn parse"
+                  },
+                  {
+                    "literal": true,
+                    "text": "src/lib.rs"
+                  }
+                ]
+              }
+            },
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "head"
+                  },
+                  {
+                    "literal": true,
+                    "text": "-5"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

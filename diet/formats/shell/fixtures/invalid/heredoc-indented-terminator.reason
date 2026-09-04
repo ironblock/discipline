@@ -1,0 +1,3 @@
+A `<<` terminator indented by tabs. Only `<<-` strips leading tabs, so to the
+shell -- and to this grammar -- the indented line is body and the delimiter
+never arrives. Refused as an unterminated heredoc, which is what it is.

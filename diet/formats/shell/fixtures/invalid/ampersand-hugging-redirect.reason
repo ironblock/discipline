@@ -1,0 +1,7 @@
+An `&>` that hugs the word before it. The shell reads `cmd&>/dev/null` as a
+redirection of both streams -- there is no ambiguity in it -- and v0 refuses
+it anyway, because a redirection here must stand as its own word. What the
+refusal buys is the neighbouring case: `cmd& >/dev/null` is a background
+marker and a redirection of the NEXT command, and the two lines differ by one
+space. `background` carries the `!">"` lookahead so this one is refused rather
+than read as the other.

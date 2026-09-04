@@ -1,1 +1,1 @@
-{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"m","quantization":"q","sampler":{"temperature":0.7000,"top_p":0.94999999999999996,"min_p":-0.5,"seed":0},"reasoning":"on","hardware":"h"}}}
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"m","quantization":"q","sampler":{"temperature":0.7000,"top_p":0.94999999999999996,"min_p":-0.5,"floor":-0.142,"seed":0},"reasoning":"on","hardware":"h"}}}

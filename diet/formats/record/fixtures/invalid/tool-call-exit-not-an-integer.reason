@@ -1,0 +1,3 @@
+An exit status is a number. Spelled as a string it would compare equal to
+nothing the lane checks against, and a failed `cd` recorded as "1" would read
+as a `cd` whose status was never recorded.

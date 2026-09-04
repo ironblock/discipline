@@ -1,0 +1,62 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "cd"
+                  },
+                  {
+                    "literal": true,
+                    "text": "a"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "join": "and",
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "ls"
+                  }
+                ]
+              }
+            },
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "wc"
+                  },
+                  {
+                    "literal": true,
+                    "text": "-l"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

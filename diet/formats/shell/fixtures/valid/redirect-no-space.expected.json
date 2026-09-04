@@ -1,0 +1,45 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [
+                  {
+                    "file": {
+                      "literal": true,
+                      "text": "file"
+                    },
+                    "op": ">"
+                  },
+                  {
+                    "fd": 2,
+                    "file": {
+                      "literal": true,
+                      "text": "/dev/null"
+                    },
+                    "op": ">"
+                  }
+                ],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "echo"
+                  },
+                  {
+                    "literal": true,
+                    "text": "hi"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

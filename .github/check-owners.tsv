@@ -35,4 +35,5 @@ hygiene	repo
 metadata	repo
 ci	repo
 history	repo
+injections	repo
 parity	repo

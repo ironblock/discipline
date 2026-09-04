@@ -1,0 +1,58 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "cd"
+                  },
+                  {
+                    "literal": false,
+                    "text": "~/work"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "join": "and",
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "ls"
+                  },
+                  {
+                    "literal": false,
+                    "text": "~"
+                  },
+                  {
+                    "literal": true,
+                    "text": "a~b"
+                  },
+                  {
+                    "literal": true,
+                    "text": "x~"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
