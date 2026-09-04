@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 117
+red_faults = 123
 mechanics_assertions = 27
 migrated = 0
 
@@ -415,6 +415,60 @@ check = "test"
 label = "a quoted substitution descended into"
 failure_class = "capture.invented-read"
 legacy_signature = "a single-quoted substitution was descended into"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_lane_renamed"
+kind = "seeded-gate"
+check = "test"
+label = "the mechanical lane renamed"
+failure_class = "capture.lane-misnamed"
+legacy_signature = "the lane was renamed"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_option_is_a_directory"
+kind = "seeded-gate"
+check = "test"
+label = "an option word read as a directory"
+failure_class = "capture.invented-directory"
+legacy_signature = "an option word was read as the directory it names"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_flag_value_is_a_file"
+kind = "seeded-gate"
+check = "test"
+label = "a flag value read as a file"
+failure_class = "capture.invented-touch"
+legacy_signature = "the lane read a file out of a flag.s value"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_entry_verb_swapped"
+kind = "seeded-gate"
+check = "test"
+label = "an entry with the wrong verb"
+failure_class = "capture.entry-misstates-the-fact"
+legacy_signature = "the entry used the wrong verb for what happened to the file"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_pipeline_skipped"
+kind = "seeded-gate"
+check = "test"
+label = "a pipeline whose members never run"
+failure_class = "capture.command-not-read"
+legacy_signature = "nothing in the pipeline ran"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_write_lost_to_a_read"
+kind = "seeded-gate"
+check = "test"
+label = "a write lost to a read of the same path"
+failure_class = "capture.fact-discarded"
+legacy_signature = "a write was lost to a read of the same path in the same call"
 migrated = false
 
 [[fault]]

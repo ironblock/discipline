@@ -28,12 +28,18 @@
 //!
 //! The lane cannot run commands. Whether a `cd` failed is read from the
 //! shell's own report in the call's output, or from the call's exit status
-//! when the `cd` was the last thing on the line; otherwise a command is taken
-//! to have succeeded. Every reading here prefers a miss to a false claim: an
-//! unresolvable path is recorded as written and marked unresolved, a word the
-//! shell would expand loses the working directory rather than naming a
-//! directory that never existed, and a command the lane does not know derives
-//! nothing from the shape of its arguments.
+//! when the `cd` was the last thing the shell itself ran; otherwise a command
+//! is taken to have succeeded. Every reading here prefers a miss to a false
+//! claim: an unresolvable path is recorded as written and marked unresolved,
+//! a word the shell would expand loses the working directory rather than
+//! naming a directory that never existed, an option word to `cd` is an option
+//! and never a place, a `pushd -n` or `popd +1` loses the stack rather than
+//! carrying one it cannot vouch for, and a command the lane does not know
+//! derives nothing from the shape of its arguments. The misses are named
+//! where they are made: a backtick substitution and a `${X:-$(…)}` are both
+//! invisible to the file walk, because the first is a spelling
+//! [`crate::formats::shell`] keeps opaque and the second runs only on a
+//! condition no reader here can evaluate.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -406,6 +412,10 @@ pub struct FileCommand {
     /// whose result went to standard output, and calling both a read would
     /// make the read a word that meant nothing.
     pub required_flag: Option<&'static str>,
+    /// The flag that supplies the destination, so every operand is a source.
+    /// `mv -t dir a b` moves two files into `dir`; a reader that took the
+    /// last operand for the destination would say the turn deleted `dir`.
+    pub destination_flag: Option<&'static str>,
 }
 
 impl FileCommand {
@@ -422,9 +432,28 @@ impl FileCommand {
             first_operand_is_pattern: false,
             pattern_flags: &[],
             required_flag: None,
+            destination_flag: None,
+        }
+    }
+
+    /// A command that moves or copies its operands, whose destination may be
+    /// named by a flag instead of by the last operand.
+    const fn moving(word: &'static str, operands: Operands) -> Self {
+        Self {
+            word,
+            operands,
+            value_flags: TARGET_FLAGS,
+            first_operand_is_pattern: false,
+            pattern_flags: &[],
+            required_flag: None,
+            destination_flag: Some(TARGET_DIRECTORY),
         }
     }
 }
+
+/// How `mv` and `cp` are told to put their operands in a named directory.
+const TARGET_DIRECTORY: &str = "-t";
+const TARGET_FLAGS: &[&str] = &[TARGET_DIRECTORY];
 
 /// The shell commands the lane reads a file operand out of.
 pub const FILE_COMMANDS: &[FileCommand] = &[
@@ -441,6 +470,7 @@ pub const FILE_COMMANDS: &[FileCommand] = &[
         first_operand_is_pattern: true,
         pattern_flags: &["-e", "-f"],
         required_flag: Some("-n"),
+        destination_flag: None,
     },
     FileCommand {
         word: "grep",
@@ -449,12 +479,13 @@ pub const FILE_COMMANDS: &[FileCommand] = &[
         first_operand_is_pattern: true,
         pattern_flags: &["-e", "-f"],
         required_flag: None,
+        destination_flag: None,
     },
     FileCommand::plain("tee", Operands::Write, &[]),
     FileCommand::plain("touch", Operands::Write, &["-d", "-r", "-t"]),
     FileCommand::plain("mkdir", Operands::Write, &["-m"]),
-    FileCommand::plain("cp", Operands::Copy, &[]),
-    FileCommand::plain("mv", Operands::Move, &[]),
+    FileCommand::moving("cp", Operands::Copy),
+    FileCommand::moving("mv", Operands::Move),
     FileCommand::plain("rm", Operands::Delete, &[]),
     FileCommand::plain("rmdir", Operands::Delete, &[]),
 ];
@@ -1141,7 +1172,13 @@ impl Lane {
         let Some(name) = basename(&word.text) else {
             return false;
         };
-        if let Some(builtin) = Builtin::from_word(name) {
+        // A builtin is a builtin only when it is written as a bare word.
+        // `/usr/bin/cd x` runs in a child process, which cannot move the
+        // working directory of the shell that spawned it, and a lane that
+        // read the basename here would say it did.
+        if name == word.text
+            && let Some(builtin) = Builtin::from_word(name)
+        {
             return self.run_builtin(builtin, simple, state, call);
         }
         if let Some(known) = file_command(name) {
@@ -1152,48 +1189,60 @@ impl Lane {
 
     /// `$( … )` runs against a copy of the state, exactly as `( … )` does.
     fn run_substitutions(&mut self, simple: &Simple, state: &State, call: &mut Call<'_>) {
-        // A literal word is one the shell passes through whole -- it was
-        // single-quoted, and `$(` inside it is three characters, not a
-        // command. `Word.text` is the text after unquoting, so it looks
-        // exactly like a substitution to a scanner that does not ask. The
-        // grammar already decided; asking it is the difference between
-        // recording a file that was read and inventing one that was not.
-        fn unquoted(word: &Word) -> Option<&str> {
-            (!word.literal).then_some(word.text.as_str())
+        // The substitutions are the ones the grammar found, never ones found
+        // by scanning the word's text. `Word.text` is the text after
+        // unquoting, so `'$(cat notes.txt)'` -- three characters the shell
+        // passes through whole -- looks exactly like a command to a scanner,
+        // and `literal` cannot stand in for the grammar's answer because it
+        // is a property of the whole word while quoting is a property of a
+        // part: `*.rs'$(cat notes.txt)'` is not literal, because of the glob.
+        // The difference is between recording a file that was read and
+        // inventing one that was not.
+        fn inside(word: &Word) -> &[String] {
+            &word.substitutions
         }
-        let mut texts: Vec<&str> = simple.words.iter().filter_map(unquoted).collect();
+        let mut texts: Vec<&str> = simple
+            .words
+            .iter()
+            .flat_map(inside)
+            .map(String::as_str)
+            .collect();
         texts.extend(
             simple
                 .assignments
                 .iter()
                 .filter_map(|assignment| assignment.value.as_ref())
-                .filter_map(unquoted),
+                .flat_map(inside)
+                .map(String::as_str),
         );
-        texts.extend(simple.redirections.iter().filter_map(
-            |redirection| match &redirection.target {
-                Target::File(word) => unquoted(word),
-                Target::Descriptor(_) | Target::Heredoc { .. } => None,
-            },
-        ));
-        for text in texts {
-            for inner in substitutions(text) {
-                let Ok(list) = shell::parse(inner) else {
-                    continue;
-                };
-                let mut copy = state.clone();
-                let mut nested = Call {
-                    event: call.event.clone(),
-                    turn: call.turn,
-                    // A substitution's own status is not the call's status,
-                    // and the shell reports on it under the same names, so
-                    // neither the exit code nor an unconsumed report may be
-                    // charged to a command inside one.
-                    exit: None,
-                    reports: Vec::new(),
-                    trailing: None,
-                };
-                self.run_list(&list, &mut copy, &mut nested);
-            }
+        texts.extend(
+            simple
+                .redirections
+                .iter()
+                .filter_map(|redirection| match &redirection.target {
+                    Target::File(word) => Some(inside(word)),
+                    Target::Descriptor(_) | Target::Heredoc { .. } => None,
+                })
+                .flatten()
+                .map(String::as_str),
+        );
+        for inner in texts {
+            let Ok(list) = shell::parse(inner) else {
+                continue;
+            };
+            let mut copy = state.clone();
+            let mut nested = Call {
+                event: call.event.clone(),
+                turn: call.turn,
+                // A substitution's own status is not the call's status, and
+                // the shell reports on it under the same names, so neither
+                // the exit code nor an unconsumed report may be charged to a
+                // command inside one.
+                exit: None,
+                reports: Vec::new(),
+                trailing: None,
+            };
+            self.run_list(&list, &mut copy, &mut nested);
         }
     }
 
@@ -1225,7 +1274,13 @@ impl Lane {
         state: &mut State,
         call: &mut Call<'_>,
     ) -> bool {
-        let argument = simple.operands().first();
+        // An option is not a directory. `cd -P /work/real` goes to
+        // `/work/real` and never to a directory called `-P`, which is what a
+        // reader that took the first operand for the argument would say --
+        // and would then mark resolved, and resolve every later relative path
+        // against.
+        let optioned = simple.operands().iter().any(is_option);
+        let argument = simple.operands().iter().find(|word| !is_option(word));
         let written = argument.map(|word| word.text.clone());
         let refused = call.refusal(builtin, written.as_deref(), simple);
         if let Some(report) = refused {
@@ -1239,6 +1294,22 @@ impl Lane {
         match builtin {
             Builtin::Cd => {
                 state.cwd = target_of(argument, state);
+                false
+            }
+            // `pushd -n dir` pushes without moving and `popd +1` drops an
+            // entry from the middle of the stack: forms whose effect on the
+            // stack this lane does not model. It says so by losing both the
+            // working directory and what it thought was on the stack, rather
+            // than by carrying a stack it can no longer vouch for into every
+            // later `popd`.
+            Builtin::Pushd if optioned => {
+                lose_the_stack(state);
+                false
+            }
+            // `popd` takes no directory, so any operand at all is one of
+            // those forms.
+            Builtin::Popd if !simple.operands().is_empty() => {
+                lose_the_stack(state);
                 false
             }
             Builtin::Pushd => self.push_directory(argument, simple, state, call),
@@ -1310,8 +1381,18 @@ impl Lane {
                 }
             }
             Operands::Move | Operands::Copy => {
-                let Some((destination, sources)) = operands.split_last() else {
-                    return;
+                // With a destination flag every operand is a source; without
+                // one the last operand is where the rest went.
+                let named = known
+                    .destination_flag
+                    .and_then(|flag| flag_value(simple, flag));
+                let (destination, sources) = if let Some(directory) = named {
+                    (directory, operands.as_slice())
+                } else {
+                    let Some((last, rest)) = operands.split_last() else {
+                        return;
+                    };
+                    (*last, rest)
                 };
                 if known.operands == Operands::Move {
                     for source in sources {
@@ -1363,12 +1444,20 @@ impl Lane {
             resolved,
         };
         self.files.insert(path.clone(), touch.clone());
-        // One entry per (call, path): a line that names the same file twice
-        // touched it once as far as a later reader is concerned, and two
-        // entries would collide on the id built from the pair.
+        // One entry per (call, path, kind), because that triple is what the
+        // id is built from: `cat a.txt a.txt` names the same file twice and
+        // touched it once as far as a later reader is concerned, and a second
+        // entry would collide on the id. A different kind is a different id
+        // and a different fact -- `grep -v x app.log > app.log` truncated the
+        // file and then read it, and a lane that kept one of those would say
+        // the turn wrote nothing.
         let already = self.facts.iter().position(|fact| {
             fact.event == event
-                && matches!(&fact.derived, Derived::Touch { path: held, .. } if *held == path)
+                && matches!(
+                    &fact.derived,
+                    Derived::Touch { path: held, touch: held_touch }
+                        if *held == path && held_touch.kind == kind
+                )
         });
         let fact = Fact {
             turn,
@@ -1514,10 +1603,13 @@ fn basename(word: &str) -> Option<&str> {
 
 /// The last simple command the list would run in the live shell.
 ///
-/// `None` when the exit status of the call does not belong to a command this
-/// lane models: a backgrounded list returns immediately, a pipeline's members
-/// each run in a subshell, and a subshell's `cd` never touched the parent in
-/// the first place.
+/// The shell ITSELF, which is what makes the answer usable both for charging
+/// an exit status and for reading a `pwd` report. `None` for anything that
+/// ran somewhere else: a backgrounded list returns as soon as the job starts,
+/// a pipeline's members each run in a subshell, and a subshell's `cd` never
+/// touched the parent in the first place. A group is the exception the rule
+/// needs -- `{ cd d; }` runs against the shell's own state -- so this descends
+/// into one.
 fn trailing_simple(list: &List) -> Option<&Simple> {
     let item = list.items.last()?;
     if item.background {
@@ -1573,45 +1665,41 @@ fn file_operands<'a>(known: &FileCommand, simple: &'a Simple) -> Vec<&'a str> {
     found
 }
 
+/// The word after `flag`, when the command carries the flag and that word is
+/// one the shell passes through whole.
+fn flag_value<'a>(simple: &'a Simple, flag: &str) -> Option<&'a str> {
+    let operands = simple.operands();
+    let at = operands
+        .iter()
+        .position(|word| word.literal && word.text == flag)?;
+    let value = operands.get(at + 1)?;
+    value.literal.then_some(value.text.as_str())
+}
+
 /// Whether a word is an option rather than an operand. A lone `-` is standard
 /// input, which is an operand and not a file.
 fn is_flag(word: &str) -> bool {
     word.starts_with('-') && word != DASH
 }
 
-/// Every `$( … )` inside a word, as the text between the brackets.
-fn substitutions(text: &str) -> Vec<&str> {
-    let bytes = text.as_bytes();
-    let mut found = Vec::new();
-    let mut index = 0;
-    while index + 1 < bytes.len() {
-        if bytes[index] != b'$' || bytes[index + 1] != b'(' {
-            index += 1;
-            continue;
-        }
-        let start = index + 2;
-        let mut depth = 1_u32;
-        let mut cursor = start;
-        while cursor < bytes.len() {
-            match bytes[cursor] {
-                b'(' => depth += 1,
-                b')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-                _ => {}
-            }
-            cursor += 1;
-        }
-        if depth != 0 {
-            break;
-        }
-        found.push(&text[start..cursor]);
-        index = cursor + 1;
+/// Whether a word is an option to `cd`, `pushd` or `popd` rather than a
+/// directory. `cd -` is the previous directory and so an argument; `-P`,
+/// `-L`, `--`, `-n` and `+1` are options, and none of them is a place.
+fn is_option(word: &Word) -> bool {
+    word.literal && (is_flag(&word.text) || word.text.starts_with('+'))
+}
+
+/// A `pushd` or `popd` in a form the lane does not model.
+///
+/// It moved the shell somewhere and it changed a stack whose contents the
+/// lane can no longer name, so both stop being claims. Keeping the stack
+/// would be worse than losing it: every later `popd` would state a directory
+/// read off a stack that is one entry out.
+fn lose_the_stack(state: &mut State) {
+    state.cwd = Cwd::Unknown;
+    for entry in &mut state.stack {
+        *entry = Cwd::Unknown;
     }
-    found
 }
 
 /// The working directory the shell printed, if it printed one.
@@ -1619,7 +1707,9 @@ fn substitutions(text: &str) -> Vec<&str> {
 /// Only a line that is nothing but an absolute path counts. A listing that
 /// happens to mention a path is not the shell reporting where it is, and
 /// reading one as a report is how a lane that exists to be exact starts
-/// guessing.
+/// guessing. The price is a directory whose name has a space in it, which is
+/// a miss; the alternative prices a wrong working directory, which is the
+/// mistake the lane exists to prevent.
 fn reported_path(output: &str) -> Option<PathBuf> {
     output
         .lines()
@@ -1686,6 +1776,7 @@ fn string_arg<'a>(args: Option<&'a BTreeMap<String, Value>>, key: &str) -> Optio
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
 
     use super::{
@@ -1754,6 +1845,26 @@ mod tests {
     /// A shell call with no starting directory.
     fn shell_nowhere(id: &str, command: &str, output: Option<&str>) -> Event {
         call("bash", id, 1, &[("command", command)], Some(0), output)
+    }
+
+    /// A shell call in a turn of its own.
+    fn shell_in_turn(id: &str, turn: u32, command: &str) -> Event {
+        call(
+            "bash",
+            id,
+            turn,
+            &[("cwd", "/work"), ("command", command)],
+            Some(0),
+            None,
+        )
+    }
+
+    /// Every file the lane holds, as `<path>=<kind>`, sorted.
+    fn files_of(lane: &Lane) -> Vec<String> {
+        lane.files()
+            .iter()
+            .map(|(path, touch)| format!("{}={}", path.display(), touch.kind.tag()))
+            .collect()
     }
 
     fn lane_after(events: &[Event]) -> Lane {
@@ -2144,11 +2255,25 @@ mod tests {
 
     #[test]
     fn an_unknown_tool_is_recorded_as_a_command_run_with_no_derived_facts() {
-        let lane = lane_after(&[call("xyzzy", "t1", 1, &[], Some(127), Some("not found"))]);
+        // With a `path` argument, which is the shape that can fail: an
+        // unknown tool with no arguments at all cannot tell a lane that
+        // refuses to read one from a lane that would.
+        let lane = lane_after(&[call(
+            "xyzzy",
+            "t1",
+            1,
+            &[("path", "diet/src")],
+            Some(127),
+            Some("not found"),
+        )]);
         assert_eq!(lane.commands().len(), 1);
         assert_eq!(lane.commands()[0].line, "xyzzy");
         assert_eq!(lane.commands()[0].exit, Some(127));
-        assert!(lane.files().is_empty());
+        assert!(
+            lane.files().is_empty(),
+            "an unknown tool's `path` argument was read as a file: {:?}",
+            lane.files()
+        );
         assert_eq!(lane.cwd(), &Cwd::Unknown);
         let ids: Vec<String> = lane
             .patches(1)
@@ -2159,10 +2284,19 @@ mod tests {
             })
             .collect();
         assert_eq!(ids, vec!["t1/ran"], "an unknown tool derived something");
+        assert_eq!(
+            entry_saying(&lane, "/ran"),
+            "tool call t1 ran `xyzzy`, exit 127",
+            "a call that had no command line was said to have one the lane could not read"
+        );
         // A shell tool that carries no command line is recorded the same way.
         let lane = lane_after(&[call("bash", "t2", 1, &[], None, None)]);
         assert_eq!(lane.commands().len(), 1);
         assert!(lane.commands()[0].line.contains("no command line"));
+        assert_eq!(
+            entry_saying(&lane, "/ran"),
+            "tool call t2 ran `a shell tool call the record kept no command line for`"
+        );
     }
 
     #[test]
@@ -2189,6 +2323,15 @@ mod tests {
         assert_eq!(builtins, vec!["cd", "pushd", "popd"]);
         let operands: Vec<&str> = Operands::ALL.iter().map(|kind| kind.tag()).collect();
         assert_eq!(operands, vec!["read", "write", "delete", "move", "copy"]);
+        // Named, not iterated: a hole dropped from `ALL` stops being
+        // recognised, and the template's `{last_edited}` then reaches the
+        // model as five literal characters.
+        let holes: Vec<&str> = Hole::ALL.iter().map(|hole| hole.tag()).collect();
+        assert_eq!(holes, vec!["cwd", "last_edited", "last_command"]);
+        for hole in Hole::ALL {
+            assert_eq!(Hole::from_tag(hole.tag()), Some(*hole));
+        }
+        assert_eq!(Hole::from_tag("intent"), None);
         for (name, kind) in TOOLS {
             assert_eq!(super::tool_kind(name), Some(*kind));
         }
@@ -2541,6 +2684,14 @@ mod tests {
         "write-via-redirect-and-tool",
         "mv-source-and-destination",
         "pwd-reports-unknown-cwd",
+        // The same subshell with nothing to fall back on. The required case
+        // ends in `pwd`, and a `pwd` that succeeded printed its path, so the
+        // shell's own report settles that case whatever the lane derived.
+        // This one has no report, and so pins the derivation.
+        "subshell-cwd-unreported",
+        // Every other case is one turn long, which leaves the turn column of
+        // every recorded fact free to be anything.
+        "touched-again-in-a-later-turn",
     ];
 
     #[test]
@@ -2717,11 +2868,10 @@ mod tests {
             "the working directory is no longer known after tool call t2"
         );
         let home = lane_after(&[shell("t1", "cd")]);
-        assert!(
-            entry_saying(&home, "/cwd")
-                .starts_with("the working directory is the home directory after tool call t1;"),
-            "{}",
-            entry_saying(&home, "/cwd")
+        assert_eq!(
+            entry_saying(&home, "/cwd"),
+            "the working directory is the home directory after tool call t1; \
+             the shell has not reported its path"
         );
     }
 
@@ -2797,6 +2947,11 @@ mod tests {
             "a failed pushd threw the working directory away"
         );
         assert_eq!(empty.failures().len(), 1, "the failure was not recorded");
+        assert_eq!(
+            empty.failures()[0].report,
+            "pushd: no other directory",
+            "the failure was recorded without saying what it was"
+        );
     }
 
     // The documented tie-break: the last bare absolute line of the output is
@@ -2884,22 +3039,583 @@ mod tests {
     // after unquoting, so a single-quoted word looks exactly like a
     // substitution to a scanner that does not ask the grammar whether the
     // shell would expand it. It would not: the file was never opened.
+    //
+    // The first fix asked `Word::literal`, which is a property of the WHOLE
+    // word while quoting is a property of a part, so the invented read came
+    // straight back for every word that mixed the two. The substitutions are
+    // now the extents the grammar itself found.
     #[test]
     fn a_quoted_substitution_is_three_characters_and_not_a_command() {
-        let quoted = lane_after(&[shell("t1", "echo '$(cat notes.txt)'")]);
+        // Every shape where the shell opens no file. The last is a
+        // substitution that runs only when `X` is unset, which is a condition
+        // no reader here can evaluate, so claiming it is claiming a read that
+        // may not have happened.
+        let never_opened = [
+            "echo '$(cat notes.txt)'",
+            "echo *.rs'$(cat notes.txt)'",
+            "V=$(pwd)'$(cat notes.txt)' echo hi",
+            "echo ~/x'$(cat notes.txt)'",
+            "echo \"${X:-$(cat notes.txt)}\"",
+            "echo `cat notes.txt`",
+        ];
+        for line in never_opened {
+            let lane = lane_after(&[shell("t1", line)]);
+            assert_eq!(
+                touched(&lane, "/work/notes.txt"),
+                None,
+                "a single-quoted substitution was descended into: {line} gave {:?}",
+                lane.files()
+            );
+        }
+        // The same text where the shell really would expand it, including
+        // the shape a bracket-counting reader loses: the `)` inside the
+        // quotes closes nothing, and the grammar has always known that.
+        let opened = [
+            "echo $(cat notes.txt)",
+            "echo \"$(cat notes.txt)\"",
+            "echo \"$(grep ')' notes.txt)\"",
+            "echo *.rs$(cat notes.txt)",
+        ];
+        for line in opened {
+            let lane = lane_after(&[shell("t1", line)]);
+            assert_eq!(
+                touched(&lane, "/work/notes.txt"),
+                Some((TouchKind::Read, true)),
+                "a substitution the shell would run was not read: {line} gave {:?}",
+                lane.files()
+            );
+        }
+    }
+
+    // --- what a second review proved the gate could not see ------------------
+    //
+    // Same discipline as the section above: every test here was written
+    // against a mutation that survived `cargo test --workspace` and
+    // `./verify.sh`, watched red under it, and watched green without it.
+
+    // The lane's own name. The only assertion that touched it compared the
+    // provenance against the constant that writes it, which holds for any
+    // string: `LANE` could be set to `main` -- the canonical lane, whose
+    // authority a mechanical entry does not carry -- with the whole gate
+    // green. Nothing else in the tree spells the word.
+    #[test]
+    fn the_lane_is_named_mechanical_and_every_entry_says_so() {
+        assert_eq!(super::LANE, "mechanical", "the lane was renamed");
+        let lane = lane_after(&[shell("t1", "cd diet")]);
+        let lanes: Vec<String> = lane
+            .patches(1)
+            .iter()
+            .map(|patch| match patch {
+                Patch::Add { provenance, .. } => provenance.lane.clone(),
+                other => panic!("an Add: {other:?}"),
+            })
+            .collect();
+        assert_eq!(lanes, vec!["mechanical", "mechanical"]);
+    }
+
+    // An option is not a directory. `run_builtin` handed the first operand
+    // straight to `target_of`, so `cd -P /work/real` stated the working
+    // directory as `/work/-P` -- an absolute path, marked resolved, that
+    // every later relative path resolved against. Inventing a directory is
+    // the failure this lane exists to prevent; that it was the code and not
+    // the model inventing it makes it worse, not better.
+    #[test]
+    fn an_option_word_is_not_a_directory() {
+        // `cd` skips its options and takes the first operand that is not one.
+        // `pushd -n dir` pushes without moving and `popd +1` drops an entry
+        // from the middle of the stack; neither form is modelled here, and
+        // saying so costs a working directory the lane would otherwise
+        // invent.
+        let places: &[(&str, Cwd)] = &[
+            ("cd -P real", at("/work/real")),
+            ("cd -L sub", at("/work/sub")),
+            ("cd --", Cwd::Home),
+            ("cd -- real", at("/work/real")),
+            ("pushd -n other", Cwd::Unknown),
+            ("pushd one; pushd two; popd +1", Cwd::Unknown),
+        ];
+        for (line, expected) in places {
+            assert_eq!(
+                lane_after(&[shell("t1", line)]).cwd(),
+                expected,
+                "an option word was read as the directory it names: {line}"
+            );
+        }
+
+        // And nothing after it resolves against the directory that was not.
+        let pushed = lane_after(&[shell("t1", "pushd -n other; cat a.txt")]);
         assert_eq!(
-            touched(&quoted, "/work/notes.txt"),
-            None,
-            "a single-quoted substitution was descended into: {:?}",
-            quoted.files()
+            files_of(&pushed),
+            vec!["a.txt=read"],
+            "an option word was read as the directory it names: a path \
+             resolved against a directory named after an option"
         );
-        // The same text where the shell really would expand it.
-        let expanded = lane_after(&[shell("t1", "echo \"$(cat notes.txt)\"")]);
+        let popped = lane_after(&[shell("t1", "pushd one; pushd two; popd +1; cat a.txt")]);
+        assert_eq!(files_of(&popped), vec!["a.txt=read"]);
         assert_eq!(
-            touched(&expanded, "/work/notes.txt"),
-            Some((TouchKind::Read, true)),
-            "a substitution the shell would run was not read: {:?}",
-            expanded.files()
+            popped.stack(),
+            &[Cwd::Unknown, Cwd::Unknown],
+            "a stack the lane cannot vouch for was carried on as if it could"
+        );
+    }
+
+    // `trailing_simple` descends into a trailing group, which decides both
+    // which command a non-zero exit is charged to and whether the shell's own
+    // `pwd` report is read. The only group fixture put the group in the
+    // middle, so the arm was never taken and could be deleted whole.
+    #[test]
+    fn a_trailing_group_is_where_the_lines_exit_status_lands() {
+        let failed = lane_after(&[shell_said("t1", "cd a && { cd nowhere; }", 1, "")]);
+        assert_eq!(
+            failed.cwd(),
+            &at("/work/a"),
+            "a cd the exit status failed was applied anyway"
+        );
+        assert_eq!(failed.failures().len(), 1, "{:?}", failed.failures());
+        assert_eq!(failed.failures()[0].command, "cd nowhere");
+
+        let reported = lane_after(&[shell_said("t1", "cd a; { pwd; }", 0, "/work/elsewhere\n")]);
+        assert_eq!(
+            reported.cwd(),
+            &at("/work/elsewhere"),
+            "a `pwd` at the end of a group was not read as the shell reporting"
+        );
+    }
+
+    // A shell report that names no argument fails the builtin it names.
+    // `reports_in` reads the argument as the field after the builtin only
+    // when another field follows it; without that, `cd: no such file` is read
+    // as a report about a directory called `no such file`, matches nothing,
+    // and the cd it was about is applied.
+    #[test]
+    fn a_shell_report_that_names_no_argument_fails_the_builtin_it_names() {
+        let lane = lane_after(&[shell_said("t1", "cd a; ls", 1, "cd: no such file")]);
+        assert_eq!(
+            lane.cwd(),
+            &at("/work"),
+            "a cd the shell reported failing was applied anyway"
+        );
+        assert_eq!(lane.failures().len(), 1, "{:?}", lane.failures());
+        assert_eq!(lane.failures()[0].report, "cd: no such file");
+    }
+
+    // A `popd` report names no argument, because `popd` takes no directory.
+    // Reading its second field as one leaves the report unclaimed, and the
+    // failure is then recorded in the lane's words instead of the shell's --
+    // a `Failure.report` that says it is the shell's report and is not.
+    #[test]
+    fn the_shells_own_words_are_what_a_popd_failure_records() {
+        let said = "bash: popd: +3: directory stack index out of range";
+        let lane = lane_after(&[shell_said("t1", "popd", 1, said)]);
+        assert_eq!(lane.failures().len(), 1, "{:?}", lane.failures());
+        assert_eq!(
+            lane.failures()[0].report,
+            said,
+            "the shell's own report was replaced by the lane's"
+        );
+    }
+
+    // The flag columns of `FILE_COMMANDS` were unowned data: one operand
+    // shape per row was exercised, so emptying a row's `value_flags` left the
+    // gate green and made the lane claim the turn touched a file named after
+    // a timestamp, a permission mask or a context count.
+    #[test]
+    fn a_flag_value_is_not_a_file_the_turn_touched() {
+        let shapes: &[(&str, &[&str])] = &[
+            ("touch -t 202401010000 f.txt", &["/work/f.txt=written"]),
+            ("touch -r ref.txt new.txt", &["/work/new.txt=written"]),
+            ("mkdir -m 755 d", &["/work/d=written"]),
+            ("head -n 20 notes.md", &["/work/notes.md=read"]),
+            ("tail -c 40 notes.md", &["/work/notes.md=read"]),
+            ("grep -B 2 foo f.txt", &["/work/f.txt=read"]),
+            ("grep -m 1 foo f.txt", &["/work/f.txt=read"]),
+            ("sed -n -e 1p -e 3p f.txt", &["/work/f.txt=read"]),
+        ];
+        for (line, expected) in shapes {
+            let lane = lane_after(&[shell("t1", line)]);
+            assert_eq!(
+                files_of(&lane),
+                *expected,
+                "the lane read a file out of a flag's value: {line}"
+            );
+        }
+    }
+
+    // A pattern flag supplies the pattern, so the first operand is a file
+    // after all -- and the second `-e` value is not one.
+    #[test]
+    fn a_pattern_flag_makes_the_first_operand_a_file_again() {
+        let lane = lane_after(&[shell("t1", "grep -e p1 -e p2 f.txt")]);
+        assert_eq!(files_of(&lane), vec!["/work/f.txt=read"]);
+    }
+
+    // A redirection target the shell would expand is not a file. Without the
+    // guard the lane records a write to a file named after the unexpanded
+    // variable. The `cd` analogue of this rule was pinned; this one was not.
+    #[test]
+    fn a_redirection_target_the_shell_would_expand_is_not_a_file() {
+        let lane = lane_after(&[shell("t1", "echo hi > $OUT")]);
+        assert!(
+            lane.files().is_empty(),
+            "a file was invented from an unexpanded word: {:?}",
+            lane.files()
+        );
+        let literal = lane_after(&[shell("t1", "echo hi > out.txt")]);
+        assert_eq!(files_of(&literal), vec!["/work/out.txt=written"]);
+    }
+
+    // A lone `-` is standard input: an operand, not an option. Read as an
+    // option it shifts every operand after it by one, so the file becomes the
+    // pattern and the read disappears.
+    #[test]
+    fn a_lone_dash_is_standard_input_and_not_an_option() {
+        let lane = lane_after(&[shell("t1", "grep - f.txt")]);
+        assert_eq!(
+            files_of(&lane),
+            vec!["/work/f.txt=read"],
+            "a lone dash was read as an option and took the file's place"
+        );
+        let stdin = lane_after(&[shell("t1", "cat -")]);
+        assert!(stdin.files().is_empty(), "{:?}", stdin.files());
+    }
+
+    // A command word is known by the last element of its path, and a builtin
+    // only when it is written as a bare word. `/bin/cat notes.txt` reads a
+    // file; `/usr/bin/cd x` runs in a child process, which cannot move the
+    // working directory of the shell that spawned it.
+    #[test]
+    fn an_external_command_is_known_by_its_basename_and_is_not_a_builtin() {
+        let read = lane_after(&[shell("t1", "/bin/cat notes.txt")]);
+        assert_eq!(
+            files_of(&read),
+            vec!["/work/notes.txt=read"],
+            "a path-qualified command word was not read by its last element"
+        );
+        let external = lane_after(&[shell("t1", "/usr/bin/cd elsewhere")]);
+        assert_eq!(
+            external.cwd(),
+            &at("/work"),
+            "an external cd was allowed to move its parent shell"
+        );
+    }
+
+    // The verb an entry uses is what it claims happened to the file. Swapping
+    // the written and deleted arms left the gate green, and the lane then
+    // wrote `tool call t1 deleted /work/made.txt` about a file it had made.
+    #[test]
+    fn an_entry_names_what_happened_to_the_file_it_is_about() {
+        let written = lane_after(&[shell("t1", "echo x > made.txt")]);
+        assert_eq!(
+            entry_saying(&written, "/written:/work/made.txt"),
+            "tool call t1 wrote /work/made.txt",
+            "the entry used the wrong verb for what happened to the file"
+        );
+        let deleted = lane_after(&[shell("t1", "rm gone.txt")]);
+        assert_eq!(
+            entry_saying(&deleted, "/deleted:/work/gone.txt"),
+            "tool call t1 deleted /work/gone.txt",
+            "the entry used the wrong verb for what happened to the file"
+        );
+        let unresolved = lane_after(&[shell_nowhere("t1", "rm gone.txt", None)]);
+        assert_eq!(
+            entry_saying(&unresolved, "/deleted:gone.txt"),
+            "tool call t1 deleted gone.txt, cwd unknown"
+        );
+    }
+
+    // A path a call both wrote and read is two facts, because the id is
+    // built from the pair and the kind: `grep -v x app.log > app.log`
+    // truncated the file and then read it, and a lane that kept one of them
+    // told a later reader the turn wrote nothing. The same file named twice
+    // by one call is still one fact, which is what the id requires.
+    #[test]
+    fn a_file_written_and_read_by_one_call_is_two_facts_and_a_file_named_twice_is_one() {
+        let both = lane_after(&[shell("t1", "grep -v debug app.log > app.log")]);
+        let about_the_file: Vec<String> = both
+            .patches(1)
+            .iter()
+            .filter_map(|patch| match patch {
+                Patch::Add { id, content, .. } if id.as_str().ends_with("app.log") => {
+                    Some(content.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            about_the_file,
+            vec![
+                "tool call t1 wrote /work/app.log",
+                "tool call t1 read /work/app.log"
+            ],
+            "a write was lost to a read of the same path in the same call"
+        );
+
+        let twice = lane_after(&[shell("t1", "cat a.txt a.txt")]);
+        let ids: Vec<String> = twice
+            .patches(1)
+            .iter()
+            .map(|patch| match patch {
+                Patch::Add { id, .. } => id.to_string(),
+                other => panic!("an Add: {other:?}"),
+            })
+            .collect();
+        let mut unique = ids.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(ids.len(), unique.len(), "two entries share an id: {ids:?}");
+        let mut object = WorkingObject::open(regime());
+        twice.apply_to(&mut object, 1).expect("the turn applies");
+        assert_eq!(object.live().count(), ids.len());
+    }
+
+    // `files` holds the LAST thing that happened to a file and the turn it
+    // happened in. Keeping the first survived the gate, and the lane then
+    // reported a deleted file as one still there to be read; hard-coding the
+    // turn survived too, because every corpus case is one turn long.
+    #[test]
+    fn the_files_map_holds_the_last_thing_that_happened_and_the_turn_it_happened_in() {
+        let lane = lane_after(&[
+            shell("t1", "cat notes.txt"),
+            shell_in_turn("t2", 2, "rm notes.txt"),
+        ]);
+        let touch = lane
+            .files()
+            .get(Path::new("/work/notes.txt"))
+            .expect("the file");
+        assert_eq!(touch.kind, TouchKind::Deleted, "an earlier touch won");
+        assert_eq!(touch.event, "t2");
+        assert_eq!(touch.turn, 2, "the turn a file was touched in was not kept");
+        assert_eq!(lane.commands()[1].turn, 2, "a command's turn was not kept");
+    }
+
+    // `last_edited` is the file most recently WRITTEN. Widening it to
+    // anything that is not a read makes an ask state a file the turn deleted
+    // as the one it last edited.
+    #[test]
+    fn a_deleted_file_is_not_the_file_last_edited() {
+        let lane = lane_after(&[
+            shell("t1", "echo x > kept.txt"),
+            shell_in_turn("t2", 2, "rm gone.txt"),
+        ]);
+        assert_eq!(
+            lane.facts().last_edited.as_deref(),
+            Some("/work/kept.txt"),
+            "a deleted file was reported as the one last edited"
+        );
+    }
+
+    // Every root in `NOT_FILES`, not just the one with a fixture. `/proc` and
+    // `/sys` are the kernel answering a question, not files a turn touched.
+    #[test]
+    fn a_device_root_is_not_a_file_the_turn_touched() {
+        let lane = lane_after(&[shell(
+            "t1",
+            "cat /proc/cpuinfo /sys/kernel/hostname notes.md",
+        )]);
+        assert_eq!(files_of(&lane), vec!["/work/notes.md=read"]);
+        let discarded = lane_after(&[shell("t1", "cargo build 2>/dev/null")]);
+        assert!(discarded.files().is_empty(), "{:?}", discarded.files());
+    }
+
+    // The status of a backgrounded list is not the status of anything in it:
+    // `&` returns as soon as the job starts. Charging the line's exit code to
+    // a `cd` inside one fabricates a failure the shell never reported.
+    //
+    // The same rule covers the two other places a command runs somewhere the
+    // shell itself did not: a member of a pipeline and a subshell. A group is
+    // the exception, because a group IS the shell itself, and that arm has a
+    // test of its own.
+    #[test]
+    fn an_exit_status_is_charged_only_to_a_command_that_ran_in_the_shell_itself() {
+        let elsewhere = [
+            ("cd nowhere &", "a backgrounded list"),
+            ("ls | cd nowhere", "a member of a pipeline"),
+            ("cd a; (cd nowhere)", "a subshell"),
+        ];
+        for (line, where_it_ran) in elsewhere {
+            let lane = lane_after(&[shell_said("t1", line, 1, "")]);
+            assert!(
+                lane.failures().is_empty(),
+                "the line's exit status was charged to a cd inside {where_it_ran}: {:?}",
+                lane.failures()
+            );
+        }
+        // The control: run by the shell itself, and charged.
+        let charged = lane_after(&[shell_said("t1", "cd nowhere", 1, "")]);
+        assert_eq!(charged.failures().len(), 1, "{:?}", charged.failures());
+    }
+
+    // A pipeline's members and a backgrounded list run -- against a copy of
+    // the state, but they run. The test that named them asserted only that
+    // the working directory had not moved, so both branches could be deleted
+    // whole and every file a pipeline read would go unrecorded.
+    #[test]
+    fn a_pipeline_and_a_background_chain_still_run_the_commands_in_them() {
+        let piped = lane_after(&[shell("t1", "cat notes.md | head -n 5")]);
+        assert_eq!(
+            files_of(&piped),
+            vec!["/work/notes.md=read"],
+            "nothing in the pipeline ran"
+        );
+        let backgrounded = lane_after(&[shell("t1", "cat bg.txt &")]);
+        assert_eq!(
+            files_of(&backgrounded),
+            vec!["/work/bg.txt=read"],
+            "nothing in the backgrounded list ran"
+        );
+    }
+
+    // The lane cannot judge a pipeline, so it does not: `&&` after one runs.
+    // Taking an unjudged pipeline for a failure stops the rest of the line
+    // being read at all.
+    #[test]
+    fn a_pipeline_the_lane_cannot_judge_is_not_taken_to_have_failed() {
+        let lane = lane_after(&[shell("t1", "ls | cat && cd second")]);
+        assert_eq!(
+            lane.cwd(),
+            &at("/work/second"),
+            "a pipeline was taken to have failed and short-circuited the chain"
+        );
+    }
+
+    // Nesting. `$(echo $(cat inner.txt) done)` is one substitution holding
+    // another, and a reader that stops at the first `)` loses the read
+    // entirely.
+    #[test]
+    fn a_substitution_inside_a_substitution_is_still_a_command() {
+        let lane = lane_after(&[shell("t1", "echo $(echo $(cat inner.txt) done)")]);
+        assert_eq!(files_of(&lane), vec!["/work/inner.txt=read"]);
+    }
+
+    // The `pwd` override fires for the word `pwd`, not for a word that would
+    // expand into one. Without the check a line ending in `$SHELL/pwd` makes
+    // the lane state whatever the output's last absolute line says.
+    #[test]
+    fn a_command_word_the_shell_would_expand_is_not_pwd_reporting() {
+        let lane = lane_after(&[shell_said("t1", "cd a; $SHELL/pwd", 0, "/work/somewhere\n")]);
+        assert_eq!(
+            lane.cwd(),
+            &at("/work/a"),
+            "an expanding command word was read as the shell reporting its path"
+        );
+    }
+
+    // The tool table is the lane's entry point, and the two tests that
+    // guarded it both opened `for (name, kind) in TOOLS` -- loops that shrink
+    // with the table. Seven of the eleven rows could be deleted with the gate
+    // green, and a harness whose shell tool is called `sh` would then derive
+    // nothing at all. These are the rows, named.
+    #[test]
+    fn the_tool_table_names_every_spelling_the_lane_knows() {
+        const NAMED: &[(&str, ToolKind)] = &[
+            ("bash", ToolKind::Shell),
+            ("sh", ToolKind::Shell),
+            ("shell", ToolKind::Shell),
+            ("run_command", ToolKind::Shell),
+            ("execute", ToolKind::Shell),
+            ("read_file", ToolKind::Read),
+            ("cat_file", ToolKind::Read),
+            ("view_file", ToolKind::Read),
+            ("edit_file", ToolKind::Edit),
+            ("write_file", ToolKind::Edit),
+            ("create_file", ToolKind::Edit),
+        ];
+        for (name, kind) in NAMED {
+            assert_eq!(
+                super::tool_kind(name),
+                Some(*kind),
+                "the table has lost `{name}`"
+            );
+        }
+        assert_eq!(
+            TOOLS.len(),
+            NAMED.len(),
+            "the table has a row nothing here names"
+        );
+    }
+
+    // A shell report is spent by one builtin. The nested `Call` a
+    // substitution runs under starts with none, so a report already charged
+    // to a `cd` outside cannot be charged again to one inside.
+    #[test]
+    fn a_shell_report_is_not_charged_to_a_command_inside_a_substitution() {
+        let lane = lane_after(&[shell_said(
+            "t1",
+            "echo $(cd nowhere); cd nowhere",
+            0,
+            NO_SUCH,
+        )]);
+        assert_eq!(
+            lane.failures().len(),
+            1,
+            "one report was charged twice across a substitution: {:?}",
+            lane.failures()
+        );
+        assert_eq!(lane.cwd(), &at("/work"));
+    }
+
+    // A `path` argument that is not a string is not a path. Reading one as
+    // the empty string records a read of the working directory itself.
+    #[test]
+    fn a_path_argument_that_is_not_a_string_is_not_a_path() {
+        let event = Event::ToolCall {
+            id: "t1".to_owned(),
+            at_turn: 1,
+            tool: "read_file".to_owned(),
+            args: Some(BTreeMap::from([
+                (super::ARG_CWD.to_owned(), Value::String("/work".to_owned())),
+                (
+                    super::ARG_PATH.to_owned(),
+                    Value::Array(vec![Value::String("a.txt".to_owned())]),
+                ),
+            ])),
+            exit: None,
+            output: None,
+        };
+        let lane = lane_after(&[event]);
+        assert!(
+            lane.files().is_empty(),
+            "a path was read out of an argument that is not one: {:?}",
+            lane.files()
+        );
+    }
+
+    // Only a line that is nothing but an absolute path is the shell
+    // reporting where it is. A directory whose name has a space in it is a
+    // miss, and the alternative is reading the first field of any line the
+    // command printed as the working directory.
+    #[test]
+    fn a_reported_path_with_a_space_in_it_is_not_read_as_a_report() {
+        let lane = lane_after(&[shell_said("t1", "cd a && pwd", 0, "/work/a b\n")]);
+        assert_eq!(
+            lane.cwd(),
+            &at("/work/a"),
+            "a line that is not only a path was read as the shell reporting"
+        );
+    }
+
+    // `mv -t dir a b` puts both files in `dir`. Read as if the last operand
+    // were the destination it says the turn deleted `dir` and wrote `b`:
+    // two false claims about files, from a command that touched neither that
+    // way.
+    #[test]
+    fn a_target_directory_flag_names_the_destination_and_every_operand_is_a_source() {
+        let moved = lane_after(&[shell("t1", "mv -t dir a.txt b.txt")]);
+        assert_eq!(
+            files_of(&moved),
+            vec![
+                "/work/a.txt=deleted",
+                "/work/b.txt=deleted",
+                "/work/dir=written"
+            ]
+        );
+        let copied = lane_after(&[shell("t1", "cp -t dir a.txt b.txt")]);
+        assert_eq!(files_of(&copied), vec!["/work/dir=written"]);
+        // Without the flag the last operand is still where the rest went.
+        let plain = lane_after(&[shell("t1", "mv a.txt b.txt")]);
+        assert_eq!(
+            files_of(&plain),
+            vec!["/work/a.txt=deleted", "/work/b.txt=written"]
         );
     }
 }

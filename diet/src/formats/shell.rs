@@ -15,8 +15,10 @@
 //! distinct command, not a word that happens to start with a bracket, and a
 //! [`Group`] is distinct from it. A word carries whether it is [`Word::literal`]
 //! -- `cd $DIR` names a directory the reader cannot know, and saying so is the
-//! honest reading -- and a redirection says which descriptor it moved and to
-//! what, so `2>&1` is not mistaken for a file called `1`.
+//! honest reading -- and it carries the extent of every `$( … )` inside it in
+//! [`Word::substitutions`], so no lane has to find one by scanning text the
+//! quoting has already been taken out of. A redirection says which descriptor
+//! it moved and to what, so `2>&1` is not mistaken for a file called `1`.
 //!
 //! Control flow is not in v0; its keywords are words. See the grammar's
 //! header for what that costs and what is refused outright.
@@ -125,6 +127,23 @@ pub struct Word {
     /// replace those with something this reader cannot know, and a lane that
     /// treated the text as a path would be guessing.
     pub literal: bool,
+    /// The commands the shell runs before this word becomes a value: the text
+    /// between `$(` and its matching `)`, for each `$( … )` the grammar found.
+    ///
+    /// Carried on the word because quoting is a property of a PART and
+    /// `literal` is a property of the whole: `*.rs'$(cat notes.txt)'` is not
+    /// literal, because of the glob, and its single-quoted part is still three
+    /// characters and not a command. A reader that scanned `text` for `$(`
+    /// would run the second one and record a file the shell never opened, and
+    /// a reader that counted brackets by hand would stop at the `)` inside
+    /// `$(grep ')' f)`. The grammar already decides both, so it is the only
+    /// thing that decides them.
+    ///
+    /// Only `$( … )`. A backtick substitution is an expansion the grammar
+    /// reads and this field does not carry, so a lane sees nothing inside one
+    /// rather than half of it, and `${X:-$(cat f)}` runs its substitution only
+    /// when `X` is unset, which is a condition no reader here can evaluate.
+    pub substitutions: Vec<String>,
 }
 
 /// A redirection.
@@ -539,6 +558,7 @@ fn has_brace_expansion(run: &str) -> bool {
 fn word(pair: &Pair<'_, Rule>) -> Result<Word, ParseError> {
     let mut text = String::new();
     let mut literal = true;
+    let mut substitutions = Vec::new();
     let mut first = true;
     for part in pair.clone().into_inner() {
         match part.as_rule() {
@@ -553,13 +573,15 @@ fn word(pair: &Pair<'_, Rule>) -> Result<Word, ParseError> {
                 for piece in part.into_inner() {
                     match piece.as_rule() {
                         Rule::double_escape => push_escaped(&mut text, piece.as_str()),
-                        Rule::expansion => literal &= push_expansion(&mut text, &piece)?,
+                        Rule::expansion => {
+                            literal &= push_expansion(&mut text, &piece, &mut substitutions)?;
+                        }
                         Rule::double_run | Rule::double_backslash => text.push_str(piece.as_str()),
                         other => return Err(shape_of(other)),
                     }
                 }
             }
-            Rule::expansion => literal &= push_expansion(&mut text, &part)?,
+            Rule::expansion => literal &= push_expansion(&mut text, &part, &mut substitutions)?,
             Rule::escaped => push_escaped(&mut text, part.as_str()),
             Rule::bare => {
                 let run = part.as_str();
@@ -575,8 +597,16 @@ fn word(pair: &Pair<'_, Rule>) -> Result<Word, ParseError> {
         }
         first = false;
     }
-    Ok(Word { text, literal })
+    Ok(Word {
+        text,
+        literal,
+        substitutions,
+    })
 }
+
+/// What a command substitution opens and closes with.
+const SUBSTITUTION_OPEN: &str = "$(";
+const SUBSTITUTION_CLOSE: &str = ")";
 
 /// The character after a backslash, or nothing for a joined line.
 fn push_escaped(text: &mut String, escaped: &str) {
@@ -590,13 +620,30 @@ fn push_escaped(text: &mut String, escaped: &str) {
 /// An expansion, kept as written. Returns whether the word is still literal:
 /// a lone `$` is the character itself, and everything else is something the
 /// shell would replace.
-fn push_expansion(text: &mut String, pair: &Pair<'_, Rule>) -> Result<bool, ParseError> {
+///
+/// A `$( … )` also leaves its inner text behind, because the grammar is where
+/// its extent is decided: `paren_inner` already knows that a `)` inside quotes
+/// closes nothing, and every reader that counted brackets for itself got that
+/// wrong.
+fn push_expansion(
+    text: &mut String,
+    pair: &Pair<'_, Rule>,
+    substitutions: &mut Vec<String>,
+) -> Result<bool, ParseError> {
     let inner = pair
         .clone()
         .into_inner()
         .next()
         .ok_or(ParseError::Shape("an expansion with no inner rule"))?;
     text.push_str(pair.as_str());
+    if inner.as_rule() == Rule::dollar_paren {
+        let whole = inner.as_str();
+        let opened = whole
+            .strip_prefix(SUBSTITUTION_OPEN)
+            .and_then(|rest| rest.strip_suffix(SUBSTITUTION_CLOSE))
+            .ok_or(ParseError::Shape("a substitution without its brackets"))?;
+        substitutions.push(opened.to_owned());
+    }
     Ok(inner.as_rule() == Rule::dollar_alone)
 }
 
@@ -778,6 +825,54 @@ mod tests {
                 ("f*", false),
             ]
         );
+    }
+
+    // A word's substitutions come from the grammar's own `dollar_paren`
+    // extents, and not from a scan of the text it produced. `literal` is a
+    // property of the whole word and quoting is a property of a part, so a
+    // scan cannot tell `'$(cat f)'` -- three characters -- from the command
+    // beside it; and a scan that counted brackets stops at the `)` inside
+    // `$(grep ')' f)`.
+    #[test]
+    fn a_words_substitutions_are_the_ones_the_grammar_found() {
+        let cases: &[(&str, Vec<Vec<&str>>)] = &[
+            ("echo $(cat a.txt)", vec![vec![], vec!["cat a.txt"]]),
+            ("echo \"$(cat a.txt)\"", vec![vec![], vec!["cat a.txt"]]),
+            ("echo '$(cat a.txt)'", vec![vec![], vec![]]),
+            ("echo *.rs'$(cat a.txt)'", vec![vec![], vec![]]),
+            (
+                "echo \"$(grep ')' a.txt)\"",
+                vec![vec![], vec!["grep ')' a.txt"]],
+            ),
+            (
+                "echo $(cat a.txt)$(cat b.txt)",
+                vec![vec![], vec!["cat a.txt", "cat b.txt"]],
+            ),
+            (
+                "echo $(echo $(cat a.txt) done)",
+                vec![vec![], vec!["echo $(cat a.txt) done"]],
+            ),
+            ("echo ${X:-$(cat a.txt)}", vec![vec![], vec![]]),
+            ("echo `cat a.txt`", vec![vec![], vec![]]),
+        ];
+        for (line, expected) in cases {
+            let parsed = parse(line).unwrap_or_else(|err| panic!("{line}: {err}"));
+            let simple = parsed.simple_commands().next().expect("one command");
+            let found: Vec<Vec<&str>> = simple
+                .words
+                .iter()
+                .map(|word| word.substitutions.iter().map(String::as_str).collect())
+                .collect();
+            assert_eq!(&found, expected, "{line}");
+        }
+        let parsed = parse("V=$(pwd) cat < $(echo f.txt)").expect("a list");
+        let simple = parsed.simple_commands().next().expect("one command");
+        let value = simple.assignments[0].value.as_ref().expect("a value");
+        assert_eq!(value.substitutions, vec!["pwd".to_owned()]);
+        let Target::File(target) = &simple.redirections[0].target else {
+            panic!("a file target")
+        };
+        assert_eq!(target.substitutions, vec!["echo f.txt".to_owned()]);
     }
 
     #[test]
