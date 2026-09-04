@@ -1,0 +1,5 @@
+Pause. You just read {path} — project rules or guidance, not implementation.
+CONSTRAINT: quote verbatim (at most 15 lines) any rule that constrains what you'll build, or NONE.
+PLAN_DELTA: one line on what this changes about your plan, or NONE.
+
+Answer only this question, then end your turn. Do not run a command — the main session continues in parallel.

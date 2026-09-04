@@ -1,0 +1,2 @@
+
+NOTE: if the session has since ANSWERED a question, reply UPDATE: Q: <question> — A: <answer> (keep the pair; REMOVE only questions that stopped mattering).

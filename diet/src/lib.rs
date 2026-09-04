@@ -5,5 +5,6 @@
 //! replayed. This crate owns the regimen and the formats it is expressed in.
 
 pub mod capture;
+pub mod dogma;
 pub mod formats;
 pub mod object;
