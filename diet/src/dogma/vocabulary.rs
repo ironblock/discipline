@@ -70,9 +70,9 @@ pub const SURPRISE_PIN: (usize, &str) = (26, "53a54875041d2c8e");
 /// See [`SURPRISE_PIN`].
 pub const ERROR_PIN: (usize, &str) = (7, "2f500e2563deb160");
 /// The separator-aware pin of [`SURPRISE_WORDS`].
-pub const SURPRISE_JOINED_PIN: &str = "0000000000000000";
+pub const SURPRISE_JOINED_PIN: &str = "ba07a6ebf0eba246";
 /// The separator-aware pin of [`ERROR_WORDS`].
-pub const ERROR_JOINED_PIN: &str = "1111111111111111";
+pub const ERROR_JOINED_PIN: &str = "a900a2d9f8c4c438";
 
 #[cfg(test)]
 mod tests {
