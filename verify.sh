@@ -1012,6 +1012,33 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A register whose rows disagree with the name on the file. The directory
+# then lists an authored register that is in fact corpus, and a metric taken
+# over it reads as a statement about the world.
+inject_sense_register_source_mislabelled() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/capture/sense/register/authored-mistake.jsonl")
+source = path.read_text(encoding="utf-8")
+old = '"source":"authored"'
+assert old in source
+path.write_text(source.replace(old, '"source":"mined"', 1), encoding="utf-8")
+EOF
+}
+
+# A file in the register directory that names nothing. A walk that skipped it
+# would skip a register whose name was mistyped and call the directory clean.
+inject_sense_register_unnamed_file() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/capture/sense/register/notaregister.jsonl")
+assert not path.exists()
+path.write_text('{"id":"a/b","text":"x","label":"positive","source":"authored"}\n', encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1567,6 +1594,10 @@ selftest() {
     'a bootstrap p-value came without its attainable floor'
   seeded_case "a metric whose failure fixture is gone" test   inject_sense_metric_fixture_removed \
     'no failure fixture, so it can never be reported'
+  seeded_case "a register mislabelled at its source" test     inject_sense_register_source_mislabelled \
+    'and a row says otherwise'
+  seeded_case "a file in the register naming nothing"  test     inject_sense_register_unnamed_file \
+    'not a declared sidecar'
   seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
     'two lines were read as one, and the second was lost'
   seeded_case "controls that never look at the register" test inject_sense_controls_ignore_register \

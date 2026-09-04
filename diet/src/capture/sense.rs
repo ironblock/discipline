@@ -181,25 +181,34 @@ impl Label {
 
 /// Where a register row came from.
 ///
-/// One variant, on purpose. The only register that exists was authored for
-/// this instrument's tests; a mined variant arrives with the run that mines
-/// one, and until then a row claiming that provenance is refused rather than
-/// read as a corpus row that nobody produced.
+/// This began with one variant, refusing a row that claimed to be mined
+/// because nothing had mined one. Something has now: a register mined from
+/// archived drives and judged under withheld controls arrives beside the
+/// authored one. The two are not interchangeable and the distinction is the
+/// whole reason this is a vocabulary rather than a comment. An authored row
+/// states a rule and was written to be a test; a mined row is evidence and
+/// carries a judge's verdict behind it. A metric computed over the authored
+/// register says the instrument works. Only one computed over the mined
+/// register says anything about the world, and a reader who cannot tell them
+/// apart will read the first as the second.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Source {
     /// Written by hand for the instrument's own tests. Not the corpus.
     Authored,
+    /// Mined from archived drives and labelled by a judge. The corpus.
+    Mined,
 }
 
 impl Source {
     /// Every source.
-    pub const ALL: &'static [Self] = &[Self::Authored];
+    pub const ALL: &'static [Self] = &[Self::Authored, Self::Mined];
 
     /// The spelling the register uses.
     #[must_use]
     pub fn tag(self) -> &'static str {
         match self {
             Self::Authored => "authored",
+            Self::Mined => "mined",
         }
     }
 
@@ -213,6 +222,50 @@ impl Source {
 // ---------------------------------------------------------------------------
 // data: sense sets and registers
 // ---------------------------------------------------------------------------
+
+/// What a register file's name says is in it: `<source>-<set>.jsonl`.
+///
+/// Both halves are in the name because both are what a reader needs before
+/// opening it, and because a directory that holds one authored register and
+/// one mined one is a directory where the difference has to be visible from
+/// the listing. The rows say it too, and the walk below refuses a file whose
+/// rows disagree with its name -- one spelling per value, checked at the one
+/// place the two spellings meet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegisterName {
+    /// Where its rows came from.
+    pub source: Source,
+    /// The set they are labelled against.
+    pub set: SenseSet,
+}
+
+impl RegisterName {
+    /// The name a file stem spells, if it spells one.
+    ///
+    /// `durable_fact` carries an underscore and the separator is a hyphen, so
+    /// the first hyphen ends the source and the rest is the set.
+    #[must_use]
+    pub fn of(stem: &str) -> Option<Self> {
+        let (source, set) = stem.split_once('-')?;
+        Some(Self {
+            source: Source::from_tag(source)?,
+            set: SenseSet::from_tag(set)?,
+        })
+    }
+
+    /// The stem this name is written as.
+    #[must_use]
+    pub fn stem(self) -> String {
+        format!("{}-{}", self.source.tag(), self.set.tag())
+    }
+}
+
+/// A file in the register directory that is not a register.
+///
+/// Named rather than skipped: a walk that ignored what it did not recognise
+/// would ignore a register whose name was mistyped, and report the directory
+/// as clean.
+pub const REGISTER_SIDECARS: &[&str] = &[".provenance.jsonl"];
 
 /// One authored sense: a literal or a paraphrase, of one polarity of one set.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2494,10 +2547,11 @@ mod tests {
     use super::{
         Blocker, BootstrapError, Cached, Cell, Control, ControlFailure, DataError, Embedded,
         EmbeddedSet, Embedder, Fixture, Fraction, Gate, Label, Metric, MetricError, NULL_AUC_BAND,
-        NULL_D_PRIME_BAND, NULL_SHUFFLES, PRE_REGISTRATION, Polarity, Reported, Row, ScoreError,
-        Scored, Scoring, SenseSet, SetError, Source, Xorshift, attainable_p_floor, auc, controls,
-        cosine, d_prime, holm, over_firing, paired_bootstrap, precision_at_k, register, score_rows,
-        seeds, senses, shipped_senses, shuffled_null,
+        NULL_D_PRIME_BAND, NULL_SHUFFLES, PRE_REGISTRATION, Polarity, REGISTER_SIDECARS,
+        RegisterName, Reported, Row, ScoreError, Scored, Scoring, SenseSet, SetError, Source,
+        Xorshift, attainable_p_floor, auc, controls, cosine, d_prime, holm, over_firing,
+        paired_bootstrap, precision_at_k, register, score_rows, seeds, senses, shipped_senses,
+        shuffled_null,
     };
     use crate::formats::record::json::{self, Decimal, Value};
 
@@ -2524,7 +2578,7 @@ mod tests {
     }
 
     fn register_rows() -> Vec<Row> {
-        let path = register_dir().join("mistake.jsonl");
+        let path = register_dir().join("authored-mistake.jsonl");
         let source = std::fs::read_to_string(&path)
             .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
         register(&source).unwrap_or_else(|err| panic!("{}: {err}", path.display()))
@@ -2769,8 +2823,13 @@ mod tests {
 
     // ---- the register ----
 
+    // Every `.jsonl` in the register directory is classified: it is a
+    // register whose name says its source and its set, or it is a declared
+    // sidecar. Nothing is skipped, because a walk that ignored what it did
+    // not recognise would ignore a register whose name was mistyped and call
+    // the directory clean.
     #[test]
-    fn every_shipped_register_is_authored_and_names_its_set() {
+    fn every_register_is_named_for_what_is_in_it() {
         let dir = register_dir();
         let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|err| panic!("{}: {err}", dir.display()))
@@ -2784,24 +2843,39 @@ mod tests {
             "{}: no registers, so every assertion over them would hold vacuously",
             dir.display()
         );
-        for path in files {
+        let mut registers = 0_usize;
+        for path in &files {
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
             let stem = path
                 .file_stem()
                 .and_then(|stem| stem.to_str())
-                .unwrap_or("");
-            assert!(
-                SenseSet::from_tag(stem).is_some(),
-                "{}: a register is labelled against a set, and this names none",
-                path.display()
-            );
-            let source = std::fs::read_to_string(&path)
+                .unwrap_or_default();
+            let Some(declared) = RegisterName::of(stem) else {
+                assert!(
+                    REGISTER_SIDECARS
+                        .iter()
+                        .any(|suffix| name.ends_with(suffix)),
+                    "{}: not `<source>-<set>.jsonl` and not a declared sidecar, so \
+                     nothing here knows what it is",
+                    path.display()
+                );
+                continue;
+            };
+            registers += 1;
+            let text = std::fs::read_to_string(path)
                 .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-            let rows = register(&source).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+            let rows = register(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
             assert!(rows.len() >= 10, "{}: {} rows", path.display(), rows.len());
+            // The name and the rows are two spellings of one fact, and this
+            // is the one place they meet.
             assert!(
-                rows.iter().all(|row| row.source == Source::Authored),
-                "{}: the shipped register is authored and every row must say so",
-                path.display()
+                rows.iter().all(|row| row.source == declared.source),
+                "{}: the name says {} and a row says otherwise",
+                path.display(),
+                declared.source.tag()
             );
             for label in Label::ALL {
                 assert!(
@@ -2811,6 +2885,45 @@ mod tests {
                     label.tag()
                 );
             }
+        }
+        assert!(registers > 0, "{}: sidecars only", dir.display());
+    }
+
+    #[test]
+    fn a_register_name_spells_a_source_and_a_set_or_nothing() {
+        for source in Source::ALL {
+            for set in SenseSet::ALL {
+                let name = RegisterName {
+                    source: *source,
+                    set: *set,
+                };
+                assert_eq!(
+                    RegisterName::of(&name.stem()),
+                    Some(name),
+                    "{}",
+                    name.stem()
+                );
+            }
+        }
+        // The set's own underscore is not the separator, and a name missing
+        // either half names nothing.
+        assert_eq!(
+            RegisterName::of("authored-durable_fact").map(|n| n.set),
+            Some(SenseSet::DurableFact)
+        );
+        for stem in [
+            "mistake",
+            "mined",
+            "mined.provenance",
+            "authored-",
+            "-mistake",
+            "invented-mistake",
+            "authored-nonesuch",
+        ] {
+            assert!(
+                RegisterName::of(stem).is_none(),
+                "{stem:?} was read as a register name"
+            );
         }
     }
 
@@ -2824,8 +2937,8 @@ mod tests {
                 "line 1: `label` is \"maybe\", which names nothing",
             ),
             (
-                r#"{"id":"a/b","text":"x","label":"positive","source":"mined"}"#,
-                "line 1: `source` is \"mined\", which names nothing",
+                r#"{"id":"a/b","text":"x","label":"positive","source":"guessed"}"#,
+                "line 1: `source` is \"guessed\", which names nothing",
             ),
             (
                 r#"{"id":"a/b","text":"x","label":"positive","source":"authored","set":"mistake"}"#,
@@ -4369,7 +4482,12 @@ mod tests {
             Label::from_tag,
             &["positive", "negative", "hard_negative"],
         );
-        check(Source::ALL, Source::tag, Source::from_tag, &["authored"]);
+        check(
+            Source::ALL,
+            Source::tag,
+            Source::from_tag,
+            &["authored", "mined"],
+        );
         check(
             Scoring::ALL,
             Scoring::tag,
