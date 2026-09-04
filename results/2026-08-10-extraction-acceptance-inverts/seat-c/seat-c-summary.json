@@ -1,0 +1,21 @@
+{
+  "model": "urchade/gliner_small-v2.1",
+  "labels": [
+    "software identifier",
+    "file path",
+    "function or method",
+    "constant or numeric value",
+    "command or flag",
+    "data structure",
+    "API or system call"
+  ],
+  "threshold": 0.5,
+  "extract_threshold_bytes": 1500,
+  "window_chars": 1500,
+  "window_overlap": 300,
+  "sources": 31,
+  "spans_total": 321,
+  "ms_median": 1044.2,
+  "ms_max": 2139.8,
+  "source_log": "runs/die24-20260810T051802Z/events.jsonl"
+}
