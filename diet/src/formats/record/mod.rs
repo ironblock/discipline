@@ -1774,8 +1774,8 @@ pub fn project(source: &str) -> Result<Value, String> {
 mod tests {
     use super::json::Value;
     use super::{
-        Count, Event, Kind, ParseError, Reasoning, Regime, SchemaError, StructureError, Verdict,
-        parse, regime_value, render,
+        Count, Event, Kind, MAX_DEPTH, ParseError, Reasoning, Regime, SchemaError, StructureError,
+        Verdict, objects, parse, regime_value, render,
     };
 
     /// A `start` line whose regime is complete, as every record needs one.
@@ -2253,6 +2253,38 @@ mod tests {
         assert!(
             parse(&record("")).is_ok(),
             "the limit does not reject a record"
+        );
+    }
+
+    // The same crash, through the other door. `objects` is a second entry
+    // into the same recursive descent, and a limit on the door nobody walked
+    // through is not a limit -- the lane contract and every lane corpus
+    // expectation arrive this way.
+    #[test]
+    fn a_deeply_nested_object_document_is_a_verdict_and_not_a_crash() {
+        let just_past = format!(
+            "{{\"a\":{}1{}}}\n",
+            "{\"a\":".repeat(MAX_DEPTH),
+            "}".repeat(MAX_DEPTH)
+        );
+        assert!(
+            matches!(objects(&just_past), Err(ParseError::TooDeep { .. })),
+            "one level past the limit must be a verdict from `objects` as well \
+             as from `parse`"
+        );
+        let deep = format!(
+            "{{\"a\":{}1{}}}\n",
+            "{\"a\":".repeat(5000),
+            "}".repeat(5000)
+        );
+        assert!(
+            matches!(objects(&deep), Err(ParseError::TooDeep { .. })),
+            "5000 deep is a verdict and not a crash"
+        );
+        assert!(
+            objects(r#"{"tool":"update_record","parameters":{"content":{"type":"string"}}}"#)
+                .is_ok(),
+            "the limit does not reject a contract row"
         );
     }
 

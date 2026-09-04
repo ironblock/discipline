@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 115
+red_faults = 132
 mechanics_assertions = 27
 migrated = 0
 
@@ -397,6 +397,159 @@ check = "test"
 label = "a phase proposal that writes a fact"
 failure_class = "capture.proposal-writes-a-fact"
 legacy_signature = "a phase-transition proposal is advisory and writes nothing"
+migrated = false
+
+[[fault]]
+id = "test.tools_self_echo"
+kind = "seeded-gate"
+check = "test"
+label = "a capture grounded in its own echo"
+failure_class = "capture.grounded-in-its-own-echo"
+legacy_signature = "a harness that repeats a capture back grounded the capture in itself"
+migrated = false
+
+[[fault]]
+id = "test.tools_future_output"
+kind = "seeded-gate"
+check = "test"
+label = "a capture grounded in a later turn"
+failure_class = "capture.grounded-in-a-later-turn"
+legacy_signature = "a turn-1 capture was grounded in a turn-2 tool output"
+migrated = false
+
+[[fault]]
+id = "test.tools_supersede_minted"
+kind = "seeded-gate"
+check = "test"
+label = "a superseding entry with a minted id"
+failure_class = "capture.minted-entry-id"
+legacy_signature = "a superseding entry id must be derived from the row that carried it"
+migrated = false
+
+[[fault]]
+id = "test.tools_resolve_elsewhere"
+kind = "seeded-gate"
+check = "test"
+label = "a verdict that resolves elsewhere"
+failure_class = "capture.verdict-resolves-another-entry"
+legacy_signature = "a verdict resolved an entry the model never named"
+migrated = false
+
+[[fault]]
+id = "test.tools_ask_words"
+kind = "seeded-gate"
+check = "test"
+label = "the asks reworded to nothing"
+failure_class = "capture.ask-words-unpinned"
+legacy_signature = "the words this lane says out loud are the only product it has"
+migrated = false
+
+[[fault]]
+id = "test.tools_ask_question_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "an ask that drops its own question"
+failure_class = "capture.ask-drops-the-question"
+legacy_signature = "an ask carrying a deferral is the question and then the deferral"
+migrated = false
+
+[[fault]]
+id = "test.tools_sweep_kind"
+kind = "seeded-gate"
+check = "test"
+label = "the sweep asking as the cadence"
+failure_class = "capture.sweep-indistinguishable-from-cadence"
+legacy_signature = "the sweep and the cadence are one ask wearing two names"
+migrated = false
+
+[[fault]]
+id = "test.tools_choice_uncanonical"
+kind = "seeded-gate"
+check = "test"
+label = "a closed choice left in its own case"
+failure_class = "capture.choice-case-unsettled"
+legacy_signature = "a harness may shout a closed choice back at us"
+migrated = false
+
+[[fault]]
+id = "test.tools_proposal_reasonless"
+kind = "seeded-gate"
+check = "test"
+label = "a phase proposal with no reason"
+failure_class = "capture.proposal-with-no-reason"
+legacy_signature = "the reason is the whole of what it carries into one"
+migrated = false
+
+[[fault]]
+id = "test.tools_reminder_deferral_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "a reminder that drops the deferral"
+failure_class = "capture.reminder-drops-the-deferral"
+legacy_signature = "the cadence reminded without what the router put off in that turn"
+migrated = false
+
+[[fault]]
+id = "test.tools_description_thin"
+kind = "seeded-gate"
+check = "test"
+label = "tools described in one character"
+failure_class = "capture.tool-described-in-nothing"
+legacy_signature = "a foreign harness registers this text verbatim"
+migrated = false
+
+[[fault]]
+id = "test.tools_contract_undescribed"
+kind = "seeded-gate"
+check = "test"
+label = "an offered tool the contract omits"
+failure_class = "capture.offered-tool-undescribed"
+legacy_signature = "an offered tool with no row is refused before a harness ever sees it"
+migrated = false
+
+[[fault]]
+id = "test.tools_contract_duplicate"
+kind = "seeded-gate"
+check = "test"
+label = "one tool described twice"
+failure_class = "capture.tool-described-twice"
+legacy_signature = "one tool described twice leaves the harness to the order of the file"
+migrated = false
+
+[[fault]]
+id = "test.tools_verdict_list_open"
+kind = "seeded-gate"
+check = "test"
+label = "a verdict the lane cannot honour"
+failure_class = "capture.contract-admits-an-unhonoured-word"
+legacy_signature = "this lane refuses it at runtime: the model is invited to say a word"
+migrated = false
+
+[[fault]]
+id = "test.tools_silent_kept"
+kind = "seeded-gate"
+check = "test"
+label = "a turn swept after it recorded"
+failure_class = "capture.sweeps-a-turn-that-recorded"
+legacy_signature = "a turn the model did record in the end was swept anyway"
+migrated = false
+
+[[fault]]
+id = "test.record_objects_undepthed"
+kind = "seeded-gate"
+check = "test"
+label = "the object reader with no limit"
+failure_class = "record.objects-without-a-depth-limit"
+legacy_signature = "one level past the limit must be a verdict from `objects`"
+migrated = false
+
+[[fault]]
+id = "test.tools_corpus_one_tool"
+kind = "seeded-gate"
+check = "test"
+label = "a corpus that drives one tool"
+failure_class = "capture.corpus-covers-one-tool"
+legacy_signature = "is offered to the model and no corpus case ever calls it"
 migrated = false
 
 [[fault]]

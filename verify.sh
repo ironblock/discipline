@@ -812,6 +812,259 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A capture grounded in the harness's echo of itself. A harness that answers
+# `update_record` with `recorded: <content>` is the ordinary shape, and reading
+# that line as evidence lets a fabrication certify itself by being repeated
+# back to the model that made it up.
+inject_tools_self_echo() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """                Event::ToolCall {
+                    at_turn,
+                    tool,
+                    output: Some(output),
+                    ..
+                } if CaptureTool::from_tag(tool).is_none() => seen.push(*at_turn, turn, output),"""
+new = """                Event::ToolCall {
+                    at_turn,
+                    output: Some(output),
+                    ..
+                } => seen.push(*at_turn, turn, output),"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A capture grounded in a turn the model had not reached. The whole record is
+# in front of the gate at replay time, so this one arm is what stops a turn-4
+# entry being certified against turn-9's output -- evidence that did not exist
+# when the model wrote.
+inject_tools_future_output() {
+  sed -i 's|^            Ordering::Greater => return,$|            Ordering::Greater => \&mut self.source,|' \
+    diet/src/capture/tools.rs
+}
+
+# A superseding entry whose id is minted from a counter. The entry that
+# replaces a live one is then unreachable from the row that carried it, and its
+# provenance is a claim rather than a walk back to the record.
+inject_tools_supersede_minted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Some(voids) => Patch::Supersede {
+                id,"""
+new = """            Some(voids) => Patch::Supersede {
+                id: EntryId::new(&format!("supersede/{}", id.as_str().len()))
+                    .map_err(ToolError::BadEntry)?,"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A verdict that resolves somebody else's entry. The one patch a verdict alone
+# is allowed to justify, pointed at an entry the model never named.
+inject_tools_resolve_elsewhere() {
+  sed -i 's|^            target: entry.clone(),$|            target: EntryId::new("somebody/else").map_err(ToolError::BadEntry)?,|' \
+    diet/src/capture/tools.rs
+}
+
+# The asks, reworded to nothing. What this lane says out loud is its whole
+# product, and a test that only asks whether two strings differ is happy with
+# "a" and "b".
+inject_tools_ask_words() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Self::Reminder => "Anything you meant to record?",
+            Self::Sweep => "What did this turn establish that a later turn would need?","""
+new = """            Self::Reminder => "a",
+            Self::Sweep => "b","""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# An ask that drops its own question whenever it carries a deferral. The
+# reminder then reads as the router's note alone, with nothing asked.
+inject_tools_ask_question_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Some(about) => format!(
+                "{} It went by without an answer: {about}.",
+                self.kind.opening()
+            ),"""
+new = """            Some(about) => about.clone(),"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The recovery sweep asking as the cadence. `AskKind::Sweep` is then produced
+# nowhere, and the enumeration over `ALL` certifies the enum rather than the
+# caller that was supposed to use it.
+inject_tools_sweep_kind() {
+  sed -i 's|^                kind: AskKind::Sweep,$|                kind: AskKind::Reminder,|' \
+    diet/src/capture/tools.rs
+}
+
+# The model's own spelling of a closed choice, kept. Case is then decided
+# wherever somebody thought of it next: `EVIDENCE` mints a second id for one
+# entry, or is refused outright as a field nothing knows.
+inject_tools_choice_uncanonical() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """            choice.clone()"""
+new = """            let _ = choice;
+            text.clone()"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A phase proposal with no reason. The tool is a request for a ruling, and the
+# why is the whole of what it carries into one.
+inject_tools_proposal_reasonless() {
+  sed -i 's|^            reason: text_argument(&args, "reason"),$|            reason: String::new(),|' \
+    diet/src/capture/tools.rs
+}
+
+# A reminder that drops what the router put off. The deferral then reaches only
+# the post-drive sweep, and the cadence half of the join with the router is
+# dead while every test stays green.
+inject_tools_reminder_deferral_dropped() {
+  sed -i 's|^            about: self.deferred.get(&turn).cloned(),$|            about: None,|' \
+    diet/src/capture/tools.rs
+}
+
+# Every tool description reduced to one character. These bytes are what a
+# foreign harness registers verbatim, and they are the advisory framing the
+# whole modality argument rests on.
+inject_tools_description_thin() {
+  python3 - <<'EOF'
+import json
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools/contract.jsonl")
+rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+assert rows
+for row in rows:
+    row["description"] = "x"
+path.write_text(
+    "\n".join(json.dumps(row, separators=(",", ":")) for row in rows) + "\n",
+    encoding="utf-8",
+)
+EOF
+}
+
+# The check that every offered tool is described, removed. A tool this lane
+# offers and the file omits is then registered with nothing said about it.
+inject_tools_contract_undescribed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """    for tool in CaptureTool::ALL {
+        if !specs.iter().any(|spec| spec.tool == *tool) {
+            return Err(ContractError::Undescribed(tool.tag()));
+        }
+    }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# The check against one tool described twice, removed. Which of the two rows a
+# harness registers is then decided by the order of the file.
+inject_tools_contract_duplicate() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if specs.iter().any(|spec| spec.tool == tool) {
+            return Err(ContractError::DuplicateTool(at));
+        }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# A word in the contract's closed list that the lane cannot honour. The model
+# is invited to say `abandoned`, the harness constrains its argument to it, and
+# `apply` then refuses the answer it asked for.
+inject_tools_verdict_list_open() {
+  sed -i 's|"of":\["done","not_this","partial","superseded"\]|"of":["abandoned","done","not_this","partial","superseded"]|' \
+    diet/src/capture/tools/contract.jsonl
+}
+
+# The depth limit on the record reader's other door. `objects` is a second
+# entry into the same recursive descent, and the lane contract and every lane
+# corpus expectation arrive through it.
+inject_record_objects_undepthed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """    let depth = nesting_depth(input);
+    if depth > MAX_DEPTH {
+        return Err(ParseError::TooDeep {
+            depth,
+            limit: MAX_DEPTH,
+        });
+    }
+    let mut parsed = RecordParser::parse(Rule::document, input)"""
+new = """    let mut parsed = RecordParser::parse(Rule::document, input)"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A turn that recorded in the end, swept anyway. The sweep then asks about a
+# fact the model did record, which teaches that recording changes nothing.
+inject_tools_silent_kept() {
+  sed -i 's|^            self.silent.remove(&turn);$||' diet/src/capture/tools.rs
+}
+
+# The one corpus case that drives a tool other than `update_record`, cut back
+# to `update_record` alone. The corpus then covers the tool whose calls its
+# replay helper finds easiest to read, which is how two of the three tools this
+# lane offers sat outside it in the first place.
+inject_tools_corpus_one_tool() {
+  python3 - <<'EOF'
+import json
+import pathlib
+
+case = pathlib.Path("diet/capture/tools/corpus/a-verdict-and-a-proposal.jsonl")
+lines = [line for line in case.read_text(encoding="utf-8").splitlines() if line.strip()]
+kept = [line for line in lines if '"tool":"resolve_entry"' not in line
+        and '"tool":"propose_phase_transition"' not in line]
+assert len(kept) < len(lines)
+case.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+expected = pathlib.Path("diet/capture/tools/corpus/a-verdict-and-a-proposal.expected.json")
+row = json.loads(expected.read_text(encoding="utf-8"))
+row["captures"] = [c for c in row["captures"] if c["call"] == "c1"]
+expected.write_text(json.dumps(row, separators=(",", ":")) + "\n", encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1365,6 +1618,40 @@ selftest() {
     'a harness tool call is not a capture tool and writes nothing'
   seeded_case "a phase proposal that writes a fact"   test     inject_tools_proposal_writes \
     'a phase-transition proposal is advisory and writes nothing'
+  seeded_case "a capture grounded in its own echo"   test     inject_tools_self_echo \
+    'a harness that repeats a capture back grounded the capture in itself'
+  seeded_case "a capture grounded in a later turn"   test     inject_tools_future_output \
+    'a turn-1 capture was grounded in a turn-2 tool output'
+  seeded_case "a superseding entry with a minted id" test     inject_tools_supersede_minted \
+    'a superseding entry id must be derived from the row that carried it'
+  seeded_case "a verdict that resolves elsewhere"    test     inject_tools_resolve_elsewhere \
+    'a verdict resolved an entry the model never named'
+  seeded_case "the asks reworded to nothing"         test     inject_tools_ask_words \
+    'the words this lane says out loud are the only product it has'
+  seeded_case "an ask that drops its own question"   test     inject_tools_ask_question_dropped \
+    'an ask carrying a deferral is the question and then the deferral'
+  seeded_case "the sweep asking as the cadence"      test     inject_tools_sweep_kind \
+    'the sweep and the cadence are one ask wearing two names'
+  seeded_case "a closed choice left in its own case" test     inject_tools_choice_uncanonical \
+    'a harness may shout a closed choice back at us'
+  seeded_case "a phase proposal with no reason"      test     inject_tools_proposal_reasonless \
+    'the reason is the whole of what it carries into one'
+  seeded_case "a reminder that drops the deferral"   test     inject_tools_reminder_deferral_dropped \
+    'the cadence reminded without what the router put off in that turn'
+  seeded_case "tools described in one character"     test     inject_tools_description_thin \
+    'a foreign harness registers this text verbatim'
+  seeded_case "an offered tool the contract omits"   test     inject_tools_contract_undescribed \
+    'an offered tool with no row is refused before a harness ever sees it'
+  seeded_case "one tool described twice"             test     inject_tools_contract_duplicate \
+    'one tool described twice leaves the harness to the order of the file'
+  seeded_case "a verdict the lane cannot honour"     test     inject_tools_verdict_list_open \
+    'this lane refuses it at runtime: the model is invited to say a word'
+  seeded_case "a turn swept after it recorded"       test     inject_tools_silent_kept \
+    'a turn the model did record in the end was swept anyway'
+  seeded_case "the object reader with no limit"      test     inject_record_objects_undepthed \
+    'one level past the limit must be a verdict from `objects`'
+  seeded_case "a corpus that drives one tool"       test     inject_tools_corpus_one_tool \
+    'is offered to the model and no corpus case ever calls it'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

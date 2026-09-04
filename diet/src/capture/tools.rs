@@ -307,12 +307,6 @@ impl fmt::Display for ContractError {
 
 impl Error for ContractError {}
 
-/// The keys one contract row may carry.
-const ROW_KEYS: &[&str] = &["tool", "description", "parameters"];
-
-/// The keys one parameter may carry.
-const PARAM_KEYS: &[&str] = &["type", "required", "of"];
-
 /// The contract, read from the shipped file.
 ///
 /// # Errors
@@ -338,7 +332,7 @@ fn read_contract(text: &str) -> Result<Vec<ToolSpec>, ContractError> {
         let at = tool.tag().to_owned();
         let description = take_text(&mut row, &at, "description")?;
         let parameters = take_parameters(&mut row, &at)?;
-        no_other_keys(&row, &at, ROW_KEYS)?;
+        no_other_keys(&row, &at)?;
         if specs.iter().any(|spec| spec.tool == tool) {
             return Err(ContractError::DuplicateTool(at));
         }
@@ -379,21 +373,22 @@ fn take_text(
     }
 }
 
-/// Refuse any key the schema does not define.
-fn no_other_keys(
-    object: &BTreeMap<String, Value>,
-    at: &str,
-    known: &[&str],
-) -> Result<(), ContractError> {
-    for key in object.keys() {
-        if !known.contains(&key.as_str()) {
-            return Err(ContractError::UnexpectedKey {
-                at: at.to_owned(),
-                key: key.clone(),
-            });
-        }
+/// Refuse whatever the schema left behind.
+///
+/// The schema is the sequence of removes that read the object, and this is
+/// asked once they have all run: anything still in the map is a key nothing
+/// read. A list of admissible keys beside the reads would be a second copy of
+/// the schema, kept in step by hand, and a key added to the list and to
+/// nothing else would be admitted and then ignored -- which is the promise
+/// nothing keeps that this check exists to refuse.
+fn no_other_keys(object: &BTreeMap<String, Value>, at: &str) -> Result<(), ContractError> {
+    match object.keys().next() {
+        Some(key) => Err(ContractError::UnexpectedKey {
+            at: at.to_owned(),
+            key: key.clone(),
+        }),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 /// Read one row's `parameters` object.
@@ -478,7 +473,7 @@ fn parameter(at: &str, name: String, value: Value) -> Result<Parameter, Contract
     if choices.is_empty() == (kind == ParamType::Choice) {
         return Err(ContractError::ChoicesDisagree { at: where_ });
     }
-    no_other_keys(&members, &where_, PARAM_KEYS)?;
+    no_other_keys(&members, &where_)?;
     Ok(Parameter {
         name,
         kind,
@@ -694,9 +689,15 @@ impl Error for ToolError {}
 ///
 /// Assembled from the record rather than passed in beside it, because the
 /// gate's whole value is that its input is *what happened* and not what a
-/// caller believed happened. A self-capture is never grounded in its own
-/// arguments: this reads a tool call's `output` and a response's `text`, and
-/// never a call's `args`.
+/// caller believed happened.
+///
+/// A self-capture is never grounded in itself, and that takes two exclusions
+/// rather than one. A call's `args` are not read here at all: this takes a
+/// tool call's `output` and a response's `text`. And a *capture* tool's
+/// `output` is not read either. A harness that answers `update_record` with
+/// `recorded: <content>` is the ordinary shape, and a gate that admitted that
+/// line would let a fabrication certify itself by being repeated back to the
+/// model that made it up.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Seen {
     source: String,
@@ -722,9 +723,10 @@ impl Seen {
                 Event::Turn { index, .. } => walking = *index,
                 Event::ToolCall {
                     at_turn,
+                    tool,
                     output: Some(output),
                     ..
-                } => seen.push(*at_turn, turn, output),
+                } if CaptureTool::from_tag(tool).is_none() => seen.push(*at_turn, turn, output),
                 Event::Response {
                     to_request,
                     text: Some(text),
@@ -1169,6 +1171,12 @@ impl Reminder {
     /// A turn that recorded something resets the count: the cadence measures
     /// silence, not elapsed time, and a model recording every turn should
     /// never be asked whether it meant to.
+    ///
+    /// A driver that watches a turn go by before that turn's capture lands
+    /// observes the same turn twice, and the later word wins: a turn that
+    /// recorded in the end is struck off the sweep it was already on. Asking
+    /// again about a fact the model did record is the one thing a recovery
+    /// sweep must not do, because it teaches that recording changes nothing.
     pub fn observe(&mut self, turn: u32, saw_update_record: bool) -> Option<Ask> {
         if saw_update_record {
             self.since = 0;
@@ -1235,8 +1243,9 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        Ask, AskKind, Cadence, CadenceError, CaptureTool, Confirmation, ContractError, Effect,
-        LANE, ParamType, Reminder, Seen, ToolError, ToolSpec, apply, contract, read_contract,
+        Ask, AskKind, CONTRACT, Cadence, CadenceError, CaptureTool, Confirmation, ContractError,
+        Effect, LANE, ParamType, Reminder, Seen, ToolError, ToolSpec, apply, contract,
+        read_contract,
     };
     use crate::capture::grounded::{ContractInput, Verdict};
     use crate::formats::interview::FieldKind;
@@ -1307,14 +1316,89 @@ mod tests {
             "a tool offered and undescribed cannot be registered, and one \
              described and unoffered is a promise nothing keeps"
         );
-        for spec in &specs {
+    }
+
+    /// Phrases that turn an offer into an order.
+    ///
+    /// Small on purpose, and not a grammar of politeness: these are the shapes
+    /// that make "you may use this tool" into "use this tool", which is the
+    /// framing this modality was chosen for not having.
+    const ORDERS: &[&str] = &["you must", "you should", "always call", "do not fail to"];
+
+    /// The fewest words a tool can be described in and still say when to call
+    /// it. A floor rather than a judgement: prose cannot be asserted, and a
+    /// one-character description passing for a description is the failure
+    /// this catches.
+    const DESCRIBED_IN: usize = 12;
+
+    #[test]
+    fn every_tool_is_offered_in_words_rather_than_ordered() {
+        for spec in contract().expect("the shipped contract reads") {
+            let words = spec.description.split_whitespace().count();
             assert!(
-                !spec.description.trim().is_empty(),
-                "`{}` is offered with no description, so the model is told \
-                 nothing about when to call it",
+                words >= DESCRIBED_IN,
+                "`{}` is described in {words} word(s): a foreign harness \
+                 registers this text verbatim, and it is all the model is told \
+                 about when the tool is worth calling",
                 spec.tool.tag()
             );
+            let lowered = spec.description.to_ascii_lowercase();
+            for order in ORDERS {
+                assert!(
+                    !lowered.contains(order),
+                    "`{}` is described as an order (`{order}`): advisory \
+                     framing is the fourth argument for this whole modality, \
+                     and it lives in these bytes",
+                    spec.tool.tag()
+                );
+            }
         }
+    }
+
+    /// The other direction -- that every [`Confirmation`] the lane knows is
+    /// admissible -- is proved by driving each of them through `apply` in
+    /// `only_a_settled_entry_is_resolved_by_a_verdict_alone`. This is the
+    /// direction that ships a word to a harness.
+    #[test]
+    fn every_verdict_the_contract_admits_is_one_this_lane_can_honour() {
+        let specs = contract().expect("the shipped contract reads");
+        let verdict = spec_for(&specs, CaptureTool::ResolveEntry)
+            .parameter("verdict")
+            .expect("`resolve_entry` takes a verdict");
+        for choice in &verdict.choices {
+            assert!(
+                Confirmation::from_written(choice).is_some(),
+                "the contract offers a harness `{choice}` and this lane \
+                 refuses it at runtime: the model is invited to say a word \
+                 that is then thrown away"
+            );
+        }
+    }
+
+    #[test]
+    fn a_contract_that_omits_an_offered_tool_is_refused() {
+        let one = r#"{"tool":"update_record","description":"d","parameters":{"content":{"type":"string","required":true}}}"#;
+        let refused = read_contract(one)
+            .expect_err("an offered tool with no row is refused before a harness ever sees it");
+        assert!(
+            matches!(refused, ContractError::Undescribed(_)),
+            "a tool this lane offers and the file omits was accepted as {refused:?}"
+        );
+    }
+
+    #[test]
+    fn a_contract_that_describes_one_tool_twice_is_refused() {
+        let first = CONTRACT
+            .lines()
+            .next()
+            .expect("the contract has a first row");
+        let twice = format!("{CONTRACT}{first}\n");
+        let refused = read_contract(&twice)
+            .expect_err("one tool described twice leaves the harness to the order of the file");
+        assert!(
+            matches!(refused, ContractError::DuplicateTool(_)),
+            "a tool described twice was accepted as {refused:?}"
+        );
     }
 
     #[test]
@@ -1512,16 +1596,41 @@ mod tests {
             ],
         );
         let effect = apply(&row, 0, saw()).expect("a well-formed call");
-        let [Patch::Supersede { voids, .. }] = effect.patches.as_slice() else {
+        let [
+            Patch::Supersede {
+                id,
+                content,
+                voids,
+                provenance,
+            },
+        ] = effect.patches.as_slice()
+        else {
             panic!(
                 "a capture naming what it replaces is a supersede, not {:?}",
                 effect.patches
             );
         };
         assert_eq!(
+            id.as_str(),
+            "t7/evidence",
+            "a superseding entry id must be derived from the row that carried \
+             it, and this one was minted"
+        );
+        assert_eq!(
+            content, "fn supersede",
+            "a supersede that replaces a live entry with nothing is a deletion \
+             wearing a link"
+        );
+        assert_eq!(
             voids,
             &EntryId::new("t2/evidence").expect("a well-formed id")
         );
+        assert_eq!(
+            provenance.lane, LANE,
+            "a modality whose patches are indistinguishable in provenance from \
+             another's cannot be one of the bakeoff's arms"
+        );
+        assert_eq!(provenance.turn, 2);
     }
 
     // -----------------------------------------------------------------
@@ -1617,6 +1726,31 @@ mod tests {
     }
 
     #[test]
+    fn an_argument_in_the_case_the_harness_used_is_settled_by_the_contract() {
+        let shouted = call(
+            "t2",
+            1,
+            CaptureTool::UpdateRecord.tag(),
+            &[("content", "fn supersede"), ("field", "EVIDENCE")],
+        );
+        let effect =
+            apply(&shouted, 0, saw()).expect("a harness may shout a closed choice back at us");
+        let [Patch::Add { id, .. }] = effect.patches.as_slice() else {
+            panic!(
+                "a grounded capture is one added entry, not {:?}",
+                effect.patches
+            );
+        };
+        assert_eq!(
+            id.as_str(),
+            "t2/evidence",
+            "case is settled against the contract's own spelling and nowhere \
+             else: a second opinion downstream mints `t2/EVIDENCE` beside \
+             `t2/evidence` for one entry"
+        );
+    }
+
+    #[test]
     fn a_field_outside_the_contracts_list_is_refused() {
         let odd = call(
             "t1",
@@ -1659,6 +1793,12 @@ mod tests {
             let effect = apply(&row, 0, saw()).expect("a well-formed verdict");
             let confirmed = effect.confirmation.expect("a verdict is reported");
             assert_eq!(confirmed.verdict, *verdict);
+            assert_eq!(
+                confirmed.entry.as_str(),
+                "t2/evidence",
+                "the collector was handed a verdict about an entry the model \
+                 did not name"
+            );
             let want = usize::from(*verdict == Confirmation::Done);
             assert_eq!(
                 effect.patches.len(),
@@ -1668,6 +1808,19 @@ mod tests {
                 verdict.tag(),
                 effect.patches.len()
             );
+            if *verdict == Confirmation::Done {
+                let [Patch::Resolve { target, provenance }] = effect.patches.as_slice() else {
+                    panic!("`done` settles the entry, and wrote {:?}", effect.patches);
+                };
+                assert_eq!(
+                    target.as_str(),
+                    "t2/evidence",
+                    "a verdict resolved an entry the model never named, which \
+                     is the one patch a verdict alone is allowed to justify \
+                     pointed somewhere else"
+                );
+                assert_eq!(provenance.lane, LANE);
+            }
         }
     }
 
@@ -1693,6 +1846,11 @@ mod tests {
         assert_eq!(proposal.to, "review");
         assert_eq!(proposal.at_turn, 3);
         assert_eq!(proposal.from_call, "t6");
+        assert_eq!(
+            proposal.reason, "the reconciler is covered and the gate is green",
+            "a proposal is a request for a ruling, and the reason is the whole \
+             of what it carries into one"
+        );
     }
 
     // -----------------------------------------------------------------
@@ -1749,24 +1907,67 @@ mod tests {
         let [ask] = asks.as_slice() else {
             panic!("one silent turn in range, and {} asks", asks.len());
         };
-        assert!(
-            ask.text()
-                .contains("a write whose effect nobody asked about"),
-            "the sweep dropped what the router deferred: {}",
+        assert_eq!(
+            ask.kind,
+            AskKind::Sweep,
+            "the recovery sweep asked as a {:?}, so the sweep and the cadence \
+             are one ask wearing two names",
+            ask.kind
+        );
+        assert_eq!(
+            ask.text(),
+            format!(
+                "{} It went by without an answer: a write whose effect nobody \
+                 asked about.",
+                AskKind::Sweep.opening()
+            ),
+            "an ask carrying a deferral is the question and then the deferral, \
+             and this one is neither: {}",
             ask.text()
         );
     }
 
+    /// What each kind is called and what it asks, written out rather than
+    /// read off the enum. A test that iterates the table it is guarding
+    /// certifies the table against itself, and passes when the table is
+    /// emptied.
+    const WORDS: &[(AskKind, &str, &str)] = &[
+        (
+            AskKind::Reminder,
+            "reminder",
+            "Anything you meant to record?",
+        ),
+        (
+            AskKind::Sweep,
+            "sweep",
+            "What did this turn establish that a later turn would need?",
+        ),
+    ];
+
     #[test]
-    fn every_ask_kind_has_words_of_its_own() {
-        let mut openings: Vec<&str> = AskKind::ALL.iter().map(|kind| kind.opening()).collect();
-        for opening in &openings {
-            assert!(!opening.trim().is_empty());
+    fn every_ask_kind_is_named_and_asks_in_its_own_words() {
+        for (kind, tag, opening) in WORDS {
+            assert_eq!(kind.tag(), *tag);
+            assert_eq!(
+                kind.opening(),
+                *opening,
+                "`{tag}` asks something else now, and the words this lane says \
+                 out loud are the only product it has"
+            );
         }
-        openings.sort_unstable();
-        let all = openings.len();
-        openings.dedup();
-        assert_eq!(all, openings.len(), "two ask kinds ask the same question");
+        assert_eq!(
+            WORDS.len(),
+            AskKind::ALL.len(),
+            "a kind this lane produces is not in the words above, or a kind is \
+             in the words above and nothing produces it"
+        );
+        for kind in AskKind::ALL {
+            assert!(
+                WORDS.iter().any(|(named, _, _)| named == kind),
+                "`{}` asks in words nothing checks",
+                kind.tag()
+            );
+        }
     }
 
     #[test]
@@ -1777,6 +1978,38 @@ mod tests {
             about: None,
         };
         assert_eq!(ask.text(), AskKind::Reminder.opening());
+    }
+
+    #[test]
+    fn a_fired_reminder_carries_its_kind_and_what_the_router_put_off() {
+        let mut reminder = Reminder::default();
+        reminder.deferred(3, "a write whose effect nobody asked about");
+        let fired: Vec<Ask> = (1..=3)
+            .filter_map(|turn| reminder.observe(turn, false))
+            .collect();
+        let [ask] = fired.as_slice() else {
+            panic!("three silent turns fire the cadence once, and fired {fired:?}");
+        };
+        assert_eq!(ask.kind, AskKind::Reminder);
+        assert_eq!(ask.at_turn, 3);
+        assert_eq!(
+            ask.about.as_deref(),
+            Some("a write whose effect nobody asked about"),
+            "the cadence reminded without what the router put off in that \
+             turn, so the deferral reaches only the post-drive sweep"
+        );
+    }
+
+    #[test]
+    fn a_turn_that_records_after_it_looked_silent_is_not_swept() {
+        let mut reminder = Reminder::default();
+        reminder.observe(2, false);
+        reminder.observe(2, true);
+        assert!(
+            !reminder.missed(1..4).contains(&2),
+            "a turn the model did record in the end was swept anyway, which \
+             teaches that recording changes nothing"
+        );
     }
 
     #[test]
@@ -1824,20 +2057,44 @@ mod tests {
         }
     }
 
+    fn turn_row(index: u32) -> Event {
+        Event::Turn {
+            index,
+            prefill_tokens: Count::new(1).expect("a small count"),
+        }
+    }
+
+    /// The same call, with what the harness answered it.
+    fn answered(call: Event, output: &str) -> Event {
+        let Event::ToolCall {
+            id,
+            at_turn,
+            tool,
+            args,
+            exit,
+            ..
+        } = call
+        else {
+            panic!("only a tool call is answered");
+        };
+        Event::ToolCall {
+            id,
+            at_turn,
+            tool,
+            args,
+            exit,
+            output: Some(output.to_owned()),
+        }
+    }
+
     #[test]
     fn what_the_model_saw_splits_this_turn_from_everything_before_it() {
         let events = vec![
-            Event::Turn {
-                index: 1,
-                prefill_tokens: Count::new(1).expect("a small count"),
-            },
+            turn_row(1),
             request("q1", super::CANONICAL_LANE),
             tool_output("t1", 1, "the first turn's output"),
             response("a1", "q1", "the first turn's prose"),
-            Event::Turn {
-                index: 2,
-                prefill_tokens: Count::new(1).expect("a small count"),
-            },
+            turn_row(2),
             request("q2", super::CANONICAL_LANE),
             request("q3", "interview"),
             tool_output("t2", 2, "the second turn's output"),
@@ -1855,6 +2112,67 @@ mod tests {
         assert!(input.session_prefix.contains("the first turn's output"));
         assert!(input.session_prefix.contains("the first turn's prose"));
         assert!(!input.source.contains("the first turn's output"));
+    }
+
+    #[test]
+    fn a_capture_is_not_grounded_in_a_turn_the_model_had_not_reached() {
+        let only_later = "diet/src/object.rs:168:    Retired,";
+        let events = vec![
+            turn_row(1),
+            request("q1", super::CANONICAL_LANE),
+            response("a1", "q1", "Looking at what supersede does."),
+            update("c1", 1, FieldKind::Evidence, only_later),
+            turn_row(2),
+            request("q2", super::CANONICAL_LANE),
+            tool_output("t2", 2, only_later),
+            response("a2", "q2", "Retire marks the entry and keeps it."),
+        ];
+        let seen = Seen::of_turn(&events, 1);
+        let effect = apply(&events[3], 0, seen.contract_input()).expect("a well-formed call");
+        assert!(
+            effect.patches.is_empty(),
+            "a turn-1 capture was grounded in a turn-2 tool output, which was \
+             not in front of the model when it wrote: {:?}",
+            effect.patches
+        );
+        let report = effect
+            .grounding
+            .expect("an `update_record` call is grounded");
+        assert_eq!(
+            report.count(Verdict::Invention),
+            1,
+            "a string the model had not yet seen is an invention, not a bleed: \
+             the two need different repairs"
+        );
+    }
+
+    #[test]
+    fn a_capture_is_not_grounded_in_a_harness_repeating_it_back() {
+        let invented = "WorkingObject::rollback_supersede";
+        let events = vec![
+            turn_row(1),
+            request("q1", super::CANONICAL_LANE),
+            response("a1", "q1", "Nothing surprising in the object."),
+            answered(
+                update("c1", 1, FieldKind::ApiSurface, invented),
+                &format!("recorded: {invented}"),
+            ),
+        ];
+        let seen = Seen::of_turn(&events, 1);
+        let effect = apply(&events[3], 0, seen.contract_input()).expect("a well-formed call");
+        assert!(
+            effect.patches.is_empty(),
+            "a harness that repeats a capture back grounded the capture in \
+             itself, so `{invented}` certified its own invention: {:?}",
+            effect.patches
+        );
+        assert_eq!(
+            effect
+                .grounding
+                .expect("an `update_record` call is grounded")
+                .count(Verdict::Invention),
+            1
+        );
     }
 
     // -----------------------------------------------------------------
@@ -1921,7 +2239,7 @@ mod tests {
                     let seen = Seen::of_turn(events, *at_turn);
                     let effect = apply(event, at, seen.contract_input())
                         .unwrap_or_else(|err| panic!("{id}: {err}"));
-                    captures.push((id.clone(), effect.patches.len(), verdict_of(&effect)));
+                    captures.push((id.clone(), effect.patches.len(), produced_by(&effect)));
                 }
                 _ => {}
             }
@@ -1945,20 +2263,36 @@ mod tests {
         }
     }
 
-    /// The one verdict a capture's grounding report carries.
-    fn verdict_of(effect: &Effect) -> String {
-        let report = effect
-            .grounding
-            .as_ref()
-            .expect("a capture that writes content is grounded");
-        let [entry] = report.entries.as_slice() else {
-            panic!(
-                "one call writes one entry, and this one wrote {}",
-                report.entries.len()
-            );
-        };
-        entry.verdict.name().to_owned()
+    /// The word an expectation names a call's effect by.
+    ///
+    /// Three tools, three shapes. A call that wrote content is named by the
+    /// gate's verdict on it, a verdict call by the word the model chose, and a
+    /// proposal by [`ADVISORY`] -- which is the point of that tool and not a
+    /// missing verdict. Reading the grounding report of all three is what kept
+    /// two of this lane's tools out of its own corpus.
+    fn produced_by(effect: &Effect) -> String {
+        if let Some(report) = effect.grounding.as_ref() {
+            let [entry] = report.entries.as_slice() else {
+                panic!(
+                    "one call writes one entry, and this one wrote {}",
+                    report.entries.len()
+                );
+            };
+            return entry.verdict.name().to_owned();
+        }
+        if let Some(confirmed) = effect.confirmation.as_ref() {
+            return confirmed.verdict.tag().to_owned();
+        }
+        assert!(
+            effect.proposal.is_some(),
+            "a capture tool call grounds content, gives a verdict or proposes, \
+             and this one did none of the three"
+        );
+        ADVISORY.to_owned()
     }
+
+    /// What an expectation calls a call that wrote nothing on purpose.
+    const ADVISORY: &str = "advisory";
 
     fn expectation(source: &str) -> BTreeMap<String, Value> {
         let mut rows = objects(source).expect("an expectation is JSON");
@@ -1997,13 +2331,13 @@ mod tests {
                 let Some(Value::Integer(patches)) = members.get("patches") else {
                     panic!("a capture expectation counts no patches");
                 };
-                let Some(Value::String(verdict)) = members.get("verdict") else {
-                    panic!("a capture expectation carries no verdict");
+                let Some(Value::String(produced)) = members.get("produced") else {
+                    panic!("a capture expectation says nothing about what the call produced");
                 };
                 (
                     id.clone(),
                     usize::try_from(*patches).expect("a patch count is small"),
-                    verdict.clone(),
+                    produced.clone(),
                 )
             })
             .collect()
@@ -2043,6 +2377,34 @@ mod tests {
             "{}: {cases} case(s); a corpus that walks nothing passes vacuously",
             dir.display()
         );
+    }
+
+    /// One case covering a tool is one case away from covering nothing. The
+    /// corpus could not hold a `resolve_entry` or a `propose_phase_transition`
+    /// call at all until the replay stopped reading every call as content, and
+    /// a corpus shaped by what its helper can represent is a corpus that
+    /// certifies the tools it happens to like.
+    #[test]
+    fn the_corpus_drives_every_tool_this_lane_offers() {
+        let mut called: BTreeSet<CaptureTool> = BTreeSet::new();
+        for path in files_in(&corpus_dir()) {
+            if !is_case(&path) {
+                continue;
+            }
+            let record = parse(&read(&path)).expect("a corpus case is a record");
+            for event in &record.events {
+                if let Event::ToolCall { tool, .. } = event {
+                    called.extend(CaptureTool::from_tag(tool));
+                }
+            }
+        }
+        for tool in CaptureTool::ALL {
+            assert!(
+                called.contains(tool),
+                "`{}` is offered to the model and no corpus case ever calls it",
+                tool.tag()
+            );
+        }
     }
 
     #[test]
