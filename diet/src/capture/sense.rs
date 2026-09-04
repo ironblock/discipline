@@ -2646,7 +2646,7 @@ fn decimal(value: f64, digits: usize) -> Value {
     } else {
         spelled
     };
-    Decimal::parse(&spelled).map_or_else(|| Value::String("undefined".to_owned()), Value::Decimal)
+    Decimal::new(&spelled).map_or_else(|| Value::String("undefined".to_owned()), Value::Decimal)
 }
 
 #[cfg(test)]
@@ -2673,7 +2673,7 @@ mod tests {
 
     /// A decimal as a record holds it: digits as written.
     fn decimal(spelled: &str) -> Value {
-        Value::Decimal(Decimal::parse(spelled).expect("a decimal"))
+        Value::Decimal(Decimal::new(spelled).expect("a decimal"))
     }
 
     fn shipped() -> Vec<super::Sense> {

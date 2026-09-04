@@ -1132,6 +1132,21 @@ path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
 
+# The sign let back onto a zero. `-0.0` is then a second spelling of `0.0`,
+# and a banked sampler temperature reads back as a number nobody wrote.
+inject_record_negative_zero_decimal() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/record/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = """decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
+new = """decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1697,38 +1712,57 @@ selftest() {
     'an empty answer is a recorded answer, not a missing one'
   seeded_case "a cosine that forgot its second norm"  test     inject_sense_cosine_unnormalised \
     'cosine of a vector with itself was not one'
+
   seeded_case "contrastive scoring that ignores the negative sense" test inject_sense_contrastive_ignores_negative \
     'the contrastive score ignored the negative sense'
+
   seeded_case "a null whose labels are never shuffled" test   inject_sense_null_labels_unshuffled \
     'd-prime on a shuffled-label null was far from zero'
+
   seeded_case "a bootstrap p with no attainable floor" test   inject_sense_p_without_floor \
     'a bootstrap p-value came without its attainable floor'
+
   seeded_case "a metric whose failure fixture is gone" test   inject_sense_metric_fixture_removed \
     'no failure fixture, so it can never be reported'
+
   seeded_case "a register mislabelled at its source" test     inject_sense_register_source_mislabelled \
     'and a row says otherwise'
+
   seeded_case "a file in the register naming nothing"  test     inject_sense_register_unnamed_file \
     'not a declared sidecar'
+
   seeded_case "a mined row nobody can trace"          test     inject_sense_provenance_join_dropped \
     'a row nobody can trace was accepted'
+
   seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
     'two lines were read as one, and the second was lost'
+
   seeded_case "controls that never look at the register" test inject_sense_controls_ignore_register \
     'a register row reached the top control and the controls passed'
+
   seeded_case "a bootstrap that never resamples"      test     inject_sense_bootstrap_never_resamples \
     'every resample was the observed difference'
+
   seeded_case "a failure reading off the worst reading" test   inject_sense_failure_reading_moved \
     'is the worst the metric can say'
+
   seeded_case "a pre-registration with nothing in it" test     inject_sense_pre_registration_emptied \
     'the primary endpoint is not the endpoint that was registered'
+
   seeded_case "a lexical gate asked about the id"     test     inject_sense_gate_reads_the_id \
     'the gate did not decide on the row'
+
   seeded_case "a separation over one class spread"    test     inject_sense_d_prime_unpooled \
     'd-prime was standardised by one class'
+
   seeded_case "a null band widened past a finding"    test     inject_sense_null_band_widened \
     'bands are not the numbers they were registered as'
+
   seeded_case "a reported metric that reports a constant" test inject_sense_reported_value_constant \
     'the record of a metric is not the numbers the metric produced'
+
+  seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
+    'was constructed, and the grammar would not read it back'
   seeded_case "the producer read as the last command" test     inject_shell_producer_is_last_written \
     'produces its output with'
   seeded_case "an operator dropped from the table"    test     inject_shell_operator_table_row_dropped \

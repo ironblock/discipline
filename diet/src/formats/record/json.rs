@@ -12,7 +12,7 @@ use std::fmt;
 use pest::Parser as _;
 use pest::iterators::Pair;
 
-use super::Rule;
+use super::{RecordParser, Rule};
 
 /// A value a record may carry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,37 +44,33 @@ pub enum Value {
 pub struct Decimal(String);
 
 impl Decimal {
+    /// A decimal from its digits, checked by asking the grammar to read them.
+    ///
+    /// The one way to make a decimal outside the parser. A number a caller
+    /// computed -- a census's reduction, a metric -- reaches a record through
+    /// here or not at all, so a spelling the grammar would refuse to read
+    /// back is refused before it is written.
+    ///
+    /// What counts as a spelling is not restated here. This function ran a
+    /// hand-written copy of the rule once, and the copy drifted: it refused
+    /// `-0.0` as a second spelling of zero while the grammar still read it,
+    /// so the same text was a decimal or not depending on which side of the
+    /// format you asked. One format, one implementation -- so this parses
+    /// the text with the very rule the reader uses, and takes it only if
+    /// that rule consumed all of it.
+    #[must_use]
+    pub fn new(text: &str) -> Option<Self> {
+        let matched = RecordParser::parse(Rule::decimal, text).ok()?.next()?;
+        // A rule that matched a prefix has not read this text. `1.5.2` is not
+        // a decimal for the same reason `1.5 apples` is not: something is
+        // left over, and a decimal is the whole of what it is written as.
+        (matched.as_str() == text).then(|| Self(text.to_owned()))
+    }
+
     /// The decimal as written.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-
-    /// A decimal spelled the one way the grammar spells it: an optional sign,
-    /// no leading zero, a point, at least one digit on each side of it.
-    ///
-    /// The only door from a number a program computed to a number a record
-    /// holds. It takes text rather than an `f64` so that the caller has to
-    /// choose how many digits the record keeps, and so that the values with no
-    /// spelling here -- the infinities, and a result that is not a number --
-    /// are refused rather than written.
-    #[must_use]
-    pub fn parse(text: &str) -> Option<Self> {
-        let unsigned = text.strip_prefix('-').unwrap_or(text);
-        let (whole, fraction) = unsigned.split_once('.')?;
-        let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
-        if !digits(whole) || !digits(fraction) {
-            return None;
-        }
-        if whole != "0" && whole.starts_with('0') {
-            return None;
-        }
-        // `-0.0` is a second spelling of `0.0`, and one spelling per value is
-        // what makes two records of one run the same bytes.
-        if text.starts_with('-') && whole == "0" && fraction.bytes().all(|b| b == b'0') {
-            return None;
-        }
-        Some(Self(text.to_owned()))
     }
 }
 
@@ -139,6 +135,10 @@ pub fn value(pair: &Pair<'_, Rule>) -> Result<Value, ValueError> {
             .parse::<i64>()
             .map(Value::Integer)
             .map_err(|_| ValueError::IntegerOutOfRange(inner.as_str().to_owned())),
+        // Built directly, and that is not a bypass: this pair is what
+        // `Rule::decimal` matched, and `Decimal::new` accepts exactly what
+        // `Rule::decimal` matches. Routing it back through the constructor
+        // would parse the same digits with the same rule a second time.
         Rule::decimal => Ok(Value::Decimal(Decimal(inner.as_str().to_owned()))),
         Rule::boolean_true => Ok(Value::Boolean(true)),
         Rule::boolean_false => Ok(Value::Boolean(false)),
@@ -382,6 +382,7 @@ fn render_string(text: &str, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::{Decimal, LineError, Value, ValueError, line};
+    use crate::formats::record::{Event, parse};
 
     // One reader for every data file that is not a record. A second reader is
     // a second opinion about what a number is.
@@ -392,8 +393,8 @@ mod tests {
         assert_eq!(
             members.get("vector"),
             Some(&Value::Array(vec![
-                Value::Decimal(Decimal::parse("0.5000").expect("a decimal")),
-                Value::Decimal(Decimal::parse("-0.2500").expect("a decimal")),
+                Value::Decimal(Decimal::new("0.5000").expect("a decimal")),
+                Value::Decimal(Decimal::new("-0.2500").expect("a decimal")),
             ]))
         );
         assert!(
@@ -434,7 +435,7 @@ mod tests {
     fn a_decimal_is_spelled_one_way() {
         for good in ["0.142", "-3.25", "10.0", "0.000100"] {
             assert_eq!(
-                Decimal::parse(good).map(|number| number.as_str().to_owned()),
+                Decimal::new(good).map(|number| number.as_str().to_owned()),
                 Some(good.to_owned()),
                 "{good} is how the grammar spells a decimal"
             );
@@ -443,8 +444,66 @@ mod tests {
             "1", "01.5", "-0.0", "-0.00", ".5", "1.", "NaN", "inf", "1e3", "+1.0", "", "1.5 ",
         ] {
             assert!(
-                Decimal::parse(bad).is_none(),
+                Decimal::new(bad).is_none(),
                 "{bad:?} was accepted as a decimal"
+            );
+        }
+    }
+
+    /// A record whose sampler carries `text` as a setting, so the grammar
+    /// itself is the judge of the spelling.
+    fn record_with(text: &str) -> String {
+        format!(
+            r#"{{"record":"start","regime":{{"arm":"baseline","dogma_version":0,"substrate":{{"name":"local","model":"a-model","quantization":"q4","sampler":{{"temperature":{text}}},"reasoning":"on","hardware":"one-gpu"}}}}}}"#
+        )
+    }
+
+    // The constructor and the grammar must agree, in both directions: a
+    // spelling the constructor accepts is one the grammar reads back as the
+    // same digits, and a spelling it refuses is one the grammar refuses too.
+    // Otherwise a computed number could be written that no reader accepts.
+    #[test]
+    fn a_constructed_decimal_is_one_the_grammar_reads_back() {
+        for text in [
+            "0.0",
+            "0.142",
+            "1.5",
+            "-1.5",
+            "12.000",
+            "0.407",
+            "-0.5",
+            "1234567.89",
+        ] {
+            let made = Decimal::new(text).unwrap_or_else(|| panic!("{text} is a decimal"));
+            assert_eq!(made.as_str(), text);
+            let parsed = parse(&record_with(text)).unwrap_or_else(|err| panic!("{text}: {err}"));
+            let Some(Event::Start { regime }) = parsed.events.first() else {
+                panic!("a start row");
+            };
+            assert_eq!(
+                regime.substrate.sampler.get("temperature"),
+                Some(&Value::Decimal(made)),
+                "{text}: the grammar read back a different value"
+            );
+        }
+    }
+
+    #[test]
+    fn a_spelling_the_grammar_refuses_cannot_be_constructed() {
+        for text in [
+            "01.5", ".5", "1.", "1e5", "abc", "1.5.2", "", "-", "+1.5", "1,5", "-0.0", "-0.00",
+            "-0.",
+            // The negative branch spells "at least one digit after the point"
+            // a second time, and only the positive copy was guarded.
+            "-1.", "-10.",
+        ] {
+            assert!(
+                Decimal::new(text).is_none(),
+                "{text:?} was constructed, and the grammar would not read it back"
+            );
+            assert!(
+                parse(&record_with(text)).is_err(),
+                "{text:?} was refused by the constructor but read by the grammar: the two disagree"
             );
         }
     }
@@ -474,5 +533,19 @@ mod tests {
             LineError::Value(ValueError::DuplicateKey("a".to_owned())).to_string(),
             ValueError::DuplicateKey("a".to_owned()).to_string()
         );
+    }
+
+    // A negative zero is refused, and a negative number that merely looks
+    // like one is not: the digit that makes it negative may sit on either
+    // side of the point.
+    #[test]
+    fn a_negative_zero_is_the_zero_that_is_already_spelled() {
+        for text in ["-0.5", "-0.05", "-0.0000001", "-1.0", "-10.0"] {
+            assert!(
+                Decimal::new(text).is_some(),
+                "{text} is a negative number, not a second spelling of zero"
+            );
+            assert!(parse(&record_with(text)).is_ok(), "{text}");
+        }
     }
 }

@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 133
+red_faults = 134
 mechanics_assertions = 27
 migrated = 0
 
@@ -559,6 +559,14 @@ check = "test"
 label = "a reported metric that reports a constant"
 failure_class = "sense.record-detached-from-measurement"
 legacy_signature = "the record of a metric is not the numbers the metric produced"
+
+[[fault]]
+id = "test.record_negative_zero_decimal"
+kind = "seeded-gate"
+check = "test"
+label = "a negative zero decimal accepted"
+failure_class = "record.second-spelling"
+legacy_signature = "was constructed, and the grammar would not read it back"
 migrated = false
 
 [[fault]]
