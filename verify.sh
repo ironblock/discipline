@@ -748,130 +748,6 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
-# The answer's tail swallowed instead of anchored. `DONEISH` is then a
-# `DONE`, `PARTIALLY` a `PARTIAL`, and every word after the verdict is
-# discarded -- so the reconciler applies a judgment the fork did not give.
-inject_verdict_prefix_accepted() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/formats/verdict/grammar.pest")
-source = path.read_text(encoding="utf-8")
-old = "document = { SOI ~ ws* ~ verdict ~ reason? ~ ws* ~ EOI }"
-new = "document = { SOI ~ ws* ~ verdict ~ reason? ~ ANY* ~ EOI }"
-assert old in source
-# A cosine that divides by one norm and the square of the other. Every
-# similarity becomes a function of how long the sentence is, so the seeded
-# control row -- the sense text verbatim -- no longer sits at one, and every
-# ranking in the bakeoff is a ranking by length.
-inject_sense_cosine_unnormalised() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/sense.rs")
-source = path.read_text(encoding="utf-8")
-old = "    let norm_a = a.iter().map(|x| x * x).sum::<f64>().sqrt();\n"
-new = "    let norm_a = a.iter().map(|x| x * x).sum::<f64>();\n"
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# The boundary check in `upper_verdict` removed. A reason that names
-# `DONE_MARKER` is then a second answer, and one answer the fork did give is
-# refused as two.
-inject_verdict_identifier_read_as_a_verdict() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/formats/verdict/grammar.pest")
-source = path.read_text(encoding="utf-8")
-old = 'upper_verdict = _{ ("SUPERSEDED" | "NOT_THIS" | "NOT THIS" | "PARTIAL" | "DONE") ~ !word_char }'
-new = 'upper_verdict = _{ "SUPERSEDED" | "NOT_THIS" | "NOT THIS" | "PARTIAL" | "DONE" }'
-assert old in source
-# Contrastive scoring that never subtracts the authored negative sense. It
-# becomes raw cosine wearing another tag, and the one repair the bakeoff has
-# for an abstract description sitting near everything is reported as measured
-# and is not there.
-inject_sense_contrastive_ignores_negative() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/sense.rs")
-source = path.read_text(encoding="utf-8")
-old = "                Some(toward - away)\n"
-new = "                let _ = away;\n                Some(toward)\n"
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# A second verdict inside a reason accepted. The reconciler branches on one
-# word; `DONE - or PARTIAL` hands it two.
-inject_verdict_second_verdict_accepted() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/formats/verdict/grammar.pest")
-source = path.read_text(encoding="utf-8")
-old = "reason_token = _{ !upper_verdict ~ (!sp ~ !nl ~ ANY)+ }"
-new = "reason_token = _{ (!sp ~ !nl ~ ANY)+ }"
-assert old in source
-# A shuffled-label null that never shuffles. It reports the real separation as
-# what chance looks like, so every cell measured against it is measured
-# against itself and no metric can be caught finding structure in noise.
-inject_sense_null_labels_unshuffled() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/sense.rs")
-source = path.read_text(encoding="utf-8")
-old = "            let j = rng.below(i + 1);\n            labels.swap(i, j);\n"
-new = "            let _ = rng.below(i + 1);\n"
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# An anchor matched inside a longer word. `plan_a` then recurs in every
-# `plan_ab`, and the entry is nominated by every mention of the longer name.
-inject_collector_substring_match() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/collector/literal.rs")
-source = path.read_text(encoding="utf-8")
-old = "    !continues(before) && !continues(after)\n"
-new = "    let _ = (before, after, continues);\n    true\n"
-assert old in source
-# A bootstrap p-value that travels without the floor its resample count
-# implies. A p of 0.001 from 999 resamples is the smallest number the
-# procedure can produce, and printed alone it reads as a finding.
-inject_sense_p_without_floor() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/sense.rs")
-source = path.read_text(encoding="utf-8")
-old = "            floor: attainable_p_floor(resamples),\n"
-new = "            floor: 0.0,\n"
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# An English word made an anchor. `plan` is in every third sentence of a
-# drive, and an entry anchored on it is nominated by everything.
-inject_collector_english_anchor() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/collector/literal.rs")
-source = path.read_text(encoding="utf-8")
-old = "        .any(|(a, b)| a.is_lowercase() && b.is_uppercase())\n}\n"
-new = "        .any(|(a, b)| a.is_lowercase() && b.is_uppercase())\n        || has_alpha\n}\n"
-# The sign let back onto a zero. `-0.0` is then a second spelling of `0.0`,
-# and a banked sampler temperature reads back as a number nobody wrote.
 inject_record_negative_zero_decimal() {
   python3 - <<'EOF'
 import pathlib
@@ -885,23 +761,58 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
-# An entry nominated by the turn that made it. Its own prose carries its own
-# anchors, so every new entry would go straight to a confirm fork.
-inject_collector_self_nomination() {
+inject_sense_cosine_unnormalised() {
   python3 - <<'EOF'
 import pathlib
 
-path = pathlib.Path("diet/src/capture/collector/literal.rs")
+path = pathlib.Path("diet/src/capture/sense.rs")
 source = path.read_text(encoding="utf-8")
-old = """        if entry.provenances.iter().any(|p| p.turn >= new.turn) {
-            continue;
-        }
-"""
-assert old in source
-# A metric whose demonstrated-failure fixture is deleted. The metric still
-# computes and still prints, and nothing has ever seen it report failure --
-# which is the shape a perfect grounding score of 1.000 had on a probe where
-# fabrication was structurally impossible.
+old = "    let norm_a = a.iter().map(|x| x * x).sum::<f64>().sqrt();\n"
+new = "    let norm_a = a.iter().map(|x| x * x).sum::<f64>();\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_sense_contrastive_ignores_negative() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "                Some(toward - away)\n"
+new = "                let _ = away;\n                Some(toward)\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_sense_null_labels_unshuffled() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            let j = rng.below(i + 1);\n            labels.swap(i, j);\n"
+new = "            let _ = rng.below(i + 1);\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_sense_p_without_floor() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            floor: attainable_p_floor(resamples),\n"
+new = "            floor: 0.0,\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_sense_metric_fixture_removed() {
   python3 - <<'EOF'
 import pathlib
@@ -923,10 +834,101 @@ path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
 
-# A supersession that adds without voiding. Both facts are then live, the
-# object holds a contradiction, and the entry the archive was supposed to
-# make recoverable is instead one of two answers with nothing to choose
-# between them.
+inject_record_data_line_two_lines() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/json.rs")
+source = path.read_text(encoding="utf-8")
+old = """    if event_line.as_span().end() != text.len() {
+        return Err(LineError::NotOneLine);
+    }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+inject_verdict_prefix_accepted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/verdict/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = "document = { SOI ~ ws* ~ verdict ~ reason? ~ ws* ~ EOI }"
+new = "document = { SOI ~ ws* ~ verdict ~ reason? ~ ANY* ~ EOI }"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_verdict_identifier_read_as_a_verdict() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/verdict/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = 'upper_verdict = _{ ("SUPERSEDED" | "NOT_THIS" | "NOT THIS" | "PARTIAL" | "DONE") ~ !word_char }'
+new = 'upper_verdict = _{ "SUPERSEDED" | "NOT_THIS" | "NOT THIS" | "PARTIAL" | "DONE" }'
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_verdict_second_verdict_accepted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/verdict/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = "reason_token = _{ !upper_verdict ~ (!sp ~ !nl ~ ANY)+ }"
+new = "reason_token = _{ (!sp ~ !nl ~ ANY)+ }"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_collector_substring_match() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = "    !continues(before) && !continues(after)\n"
+new = "    let _ = (before, after, continues);\n    true\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_collector_english_anchor() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = "        .any(|(a, b)| a.is_lowercase() && b.is_uppercase())\n}\n"
+new = "        .any(|(a, b)| a.is_lowercase() && b.is_uppercase())\n        || has_alpha\n}\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_collector_self_nomination() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if entry.provenances.iter().any(|p| p.turn >= new.turn) {
+            continue;
+        }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
 inject_reconcile_supersede_without_voiding() {
   python3 - <<'EOF'
 import pathlib
@@ -955,9 +957,6 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
-# A verdict that settles nothing made to settle something. `PARTIAL` says
-# the prose bears on the entry without replacing it; a reconciler that
-# resolves on it closes an entry the fork deliberately left open.
 inject_reconcile_partial_applies_a_patch() {
   python3 - <<'EOF'
 import pathlib
@@ -972,28 +971,9 @@ new = """        Verdict::Partial => Outcome::Resolved(Patch::Resolve {
 """
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
-# The one-object reader taking the first line of a file and dropping the rest.
-# Every data file this reader serves -- sense sets, registers, vector caches --
-# is read one line at a time, so a reader that silently accepts two returns a
-# row nobody wrote and loses one somebody did.
-inject_record_data_line_two_lines() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/formats/record/json.rs")
-source = path.read_text(encoding="utf-8")
-old = """    if event_line.as_span().end() != text.len() {
-        return Err(LineError::NotOneLine);
-    }
-"""
-assert source.count(old) == 1
-path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
 
-# An uncalibrated policy accepted. The threshold is then a number nobody
-# measured, and a nomination tier nobody can characterise spends confirm
-# forks at a rate nobody predicted.
 inject_collector_uncalibrated_policy() {
   python3 - <<'EOF'
 import pathlib
@@ -1011,8 +991,6 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
-# The budget removed. One turn then nominates the whole object the first
-# time a threshold is set a little too low.
 inject_collector_budget_ignored() {
   python3 - <<'EOF'
 import pathlib
@@ -1570,6 +1548,20 @@ selftest() {
     'a word the shell would expand was reported literal'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
     'an empty answer is a recorded answer, not a missing one'
+  seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
+    'was constructed, and the grammar would not read it back'
+  seeded_case "a cosine that forgot its second norm"  test     inject_sense_cosine_unnormalised \
+    'cosine of a vector with itself was not one'
+  seeded_case "contrastive scoring that ignores the negative sense" test inject_sense_contrastive_ignores_negative \
+    'the contrastive score ignored the negative sense'
+  seeded_case "a null whose labels are never shuffled" test   inject_sense_null_labels_unshuffled \
+    'd-prime on a shuffled-label null was far from zero'
+  seeded_case "a bootstrap p with no attainable floor" test   inject_sense_p_without_floor \
+    'a bootstrap p-value came without its attainable floor'
+  seeded_case "a metric whose failure fixture is gone" test   inject_sense_metric_fixture_removed \
+    'no failure fixture, so it can never be reported'
+  seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
+    'two lines were read as one, and the second was lost'
   seeded_case "a verdict read by prefix"               test     inject_verdict_prefix_accepted \
     'verdict-as-a-prefix\.txt: accepted as'
   seeded_case "an identifier in a reason read as a verdict" test inject_verdict_identifier_read_as_a_verdict \
@@ -1590,20 +1582,6 @@ selftest() {
     'the fixture policy was accepted by the door that ships'
   seeded_case "a nomination budget ignored"           test     inject_collector_budget_ignored \
     'the budget did not bind'
-  seeded_case "a cosine that forgot its second norm"  test     inject_sense_cosine_unnormalised \
-    'cosine of a vector with itself was not one'
-  seeded_case "contrastive scoring that ignores the negative sense" test inject_sense_contrastive_ignores_negative \
-    'the contrastive score ignored the negative sense'
-  seeded_case "a null whose labels are never shuffled" test   inject_sense_null_labels_unshuffled \
-    'd-prime on a shuffled-label null was far from zero'
-  seeded_case "a bootstrap p with no attainable floor" test   inject_sense_p_without_floor \
-    'a bootstrap p-value came without its attainable floor'
-  seeded_case "a metric whose failure fixture is gone" test   inject_sense_metric_fixture_removed \
-    'no failure fixture, so it can never be reported'
-  seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
-    'two lines were read as one, and the second was lost'
-  seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
-    'was constructed, and the grammar would not read it back'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
