@@ -13,8 +13,14 @@
 //     as the shell reads it. `cd a; (cd b; ls); pwd` ends in `a`, and a reader
 //     that does not know a subshell has its own working directory says `b`.
 //   * The router classifies a call by what the model wanted from it, which is
-//     the last simple command of the list: `cd diet && cargo test` is a test
-//     run, and the first word of the line is not.
+//     the command that PRODUCES the line's output: the first command of the
+//     last pipeline of the last item, descending into a subshell or group
+//     that is itself the producer. `cd diet && cargo test` is a test run and
+//     not a `cd`; `cargo test | tail -15` is a test run and not a `tail`;
+//     `cat notes.md | head -20` is a read of `notes.md` and not a `head`.
+//     Neither the first word of the line nor the last simple command written
+//     answers this, so `List::producer` states the rule once and a router
+//     that re-derives it is the second reader this format exists to prevent.
 //
 // So the shape of a command line is what this grammar states, and what it
 // states is a SUBSET of the shell: lists, pipelines, simple commands with
@@ -32,8 +38,23 @@
 // after it (`a &&`); a redirection with no target (`echo >`); a heredoc that
 // is not the last thing on its line (`cat <<EOF | sort` -- the body would have
 // to be located past the rest of the line, and v0 does not); an empty
-// subshell; a redirection or `|&` after a subshell or group. Each is a
-// fixture under `fixtures/invalid/` with its reason.
+// subshell; a redirection or `|&` after a subshell or group; a redirection
+// that hugs the word before it (`cmd>file`, `ls 2>&1>out`, `cmd&>/dev/null`);
+// a `<<` terminator indented by tabs, which only `<<-` may be; arithmetic
+// expansion (`$((1+2))`) and process substitution (`<(ls)`), each of which
+// would need a form v0 does not have. Each is a fixture under
+// `fixtures/invalid/` with its reason.
+//
+// The hugging redirection is the one refusal that costs something a shell
+// would give: `cmd>file` is a command and a write, unambiguously, and v0 says
+// no to it. The rule it protects is that a redirection is ITS OWN WORD, which
+// is what lets `elements` separate on space alone and what keeps `echo 2 > f`
+// (a word `2`) apart from `echo 2>f` (descriptor 2). Widening it would mean
+// deciding, inside a rule that scans left to right, where a word ends and an
+// operator begins -- and `&` is the case that shows the cost: `cmd&>/dev/null`
+// is a redirection to the shell and `cmd& >/dev/null` is a background marker,
+// and the two differ by one space. Refusing both is a subset. Reading one as
+// the other is a lie about what ran.
 
 // ---------------------------------------------------------------------------
 // document
@@ -110,7 +131,7 @@ close_brace = { "}" }
 // or a dangling `&&` leaves behind. Both are refused instead.
 simple = { (assignment_prefix+ ~ elements?) | elements }
 assignment_prefix = _{ assignment ~ (hs+ | &sep_ahead | &EOI) }
-elements = _{ !lone_open_brace ~ element ~ (hs+ ~ element)* }
+elements = _{ !lone_open_brace ~ !lone_close_brace ~ element ~ (hs+ ~ element)* }
 sep_ahead = _{ ";" | "&" | "|" | ")" | "}" | nl | "#" }
 
 // A lone `{` where a command should start is a group that failed to be one
@@ -148,24 +169,55 @@ fd = @{ ASCII_DIGIT+ }
 // popped when the terminator line is matched, so the terminator is compared
 // against the text that opened it. A quoted delimiter is pushed without its
 // quotes, because that is what the shell compares against.
-heredoc = { heredoc_op ~ hs* ~ heredoc_delim ~ hs* ~ comment? ~ nl ~ heredoc_body ~ heredoc_end }
-heredoc_op = { "<<-" | "<<" }
-heredoc_delim = _{ ("'" ~ PUSH(delim_text) ~ "'") | ("\"" ~ PUSH(delim_text) ~ "\"") | PUSH(delim_text) }
-delim_text = @{ (ASCII_ALPHANUMERIC | "_" | "-" | ".")+ }
+//
+// `<<` and `<<-` are TWO RULES because their terminators differ. `<<-` strips
+// leading tabs from every body line and from the terminator line, so a heredoc
+// written inside an indented block reads as the shell reads it; `<<` strips
+// nothing and its terminator must start the line. One rule with a tab-tolerant
+// terminator would have made `<<` accept an indented one, which the shell does
+// not -- and one rule with a strict terminator, which is what v0 shipped
+// first, made `<<-` a `<<` under another name: the operator was recorded, the
+// stripping was not done, and the tab-indented terminator every real `<<-` has
+// was refused. An operator whose spelling is the only thing about it that is
+// implemented is worse than one that is absent.
+heredoc = _{ heredoc_strip | heredoc_plain }
+
+heredoc_plain = { heredoc_op ~ heredoc_head ~ heredoc_body ~ heredoc_end }
+heredoc_op = { "<<" ~ !"-" }
 heredoc_body = @{ (!(PEEK ~ (nl | EOI)) ~ (!nl ~ ANY)* ~ nl)* }
 // Named, not silent: a heredoc whose delimiter never arrives is then
 // refused as "expected heredoc_end" at the end of the input, rather than
 // as a failed `<` redirection back where the heredoc began.
 heredoc_end = { POP ~ &(nl | EOI) }
 
+heredoc_strip = { strip_op ~ heredoc_head ~ strip_body ~ strip_end }
+strip_op = { "<<-" }
+strip_body = @{ (!(tabs ~ PEEK ~ (nl | EOI)) ~ (!nl ~ ANY)* ~ nl)* }
+strip_end = { tabs ~ POP ~ &(nl | EOI) }
+// Tabs and only tabs: the shell strips tabs here and not spaces, and a rule
+// that took `hs*` would have accepted a space-indented terminator the shell
+// would have read as body.
+tabs = _{ "\t"* }
+
+heredoc_head = _{ hs* ~ heredoc_delim ~ hs* ~ comment? ~ nl }
+heredoc_delim = _{ ("'" ~ PUSH(delim_text) ~ "'") | ("\"" ~ PUSH(delim_text) ~ "\"") | PUSH(delim_text) }
+delim_text = @{ (ASCII_ALPHANUMERIC | "_" | "-" | ".")+ }
+
 // ---------------------------------------------------------------------------
 // words
 // ---------------------------------------------------------------------------
 
 // A word is one or more parts with nothing between them: `a'b c'd` is one
-// word, `a 'b c' d` is three. A word may not begin a comment, and a lone
-// closing brace is not a word -- it closes a group.
-word = ${ !comment_start ~ !lone_close_brace ~ word_part+ }
+// word, `a 'b c' d` is three. A word may not begin a comment.
+//
+// A lone closing brace is refused at COMMAND POSITION only, by `elements`,
+// and this rule is the test it uses. That is the mirror of `lone_open_brace`,
+// and the two were once asymmetric: `{` was refused only where a command
+// starts and `}` was refused wherever a word could sit, so `{ a` parsed and
+// `echo }` did not, although the shell reads both as words. `}` still closes
+// a group, because a group's body is a list and a list's commands all start
+// at command position, which is exactly where the refusal now sits.
+word = ${ !comment_start ~ word_part+ }
 comment_start = _{ "#" }
 lone_close_brace = _{ "}" ~ &(hs | nl | ";" | "&" | "|" | ")" | EOI) }
 
@@ -212,8 +264,17 @@ bare_char = _{ !(hs | nl | "'" | "\"" | "\\" | "$" | "`" | "|" | "&" | ";" | "("
 
 // `hs` is horizontal space; a backslash-newline is horizontal space too,
 // because the shell splices the lines before it reads them.
-hs = _{ " " | "\t" | "\r" | ("\\" ~ nl) }
-nl = _{ "\n" }
+//
+// A carriage return is NOT horizontal space. It was, so that a CRLF file
+// parsed -- and that made `echo a<CR>b` three words where the shell gives two,
+// a wrong read rather than a refusal, on the one input class (a file written
+// on Windows) the allowance existed to serve. The return belongs to the line
+// ending instead: `nl` is CRLF or LF, and a return anywhere else is an
+// ordinary character of the word it sits in, which is what the shell makes of
+// it. This also makes `\<CRLF>` a line continuation, which the old pair read
+// as an escaped return followed by a newline that ended the command.
+hs = _{ " " | "\t" | ("\\" ~ nl) }
+nl = _{ "\r"? ~ "\n" }
 
 // A gap is anything that may sit between two items of a list: blank lines,
 // comments, space.

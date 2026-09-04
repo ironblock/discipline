@@ -8,27 +8,27 @@
             {
               "simple": {
                 "assignments": [],
-                "redirections": [],
+                "redirections": [
+                  {
+                    "file": {
+                      "literal": true,
+                      "text": ".commit"
+                    },
+                    "op": ">|"
+                  }
+                ],
                 "words": [
                   {
                     "literal": true,
-                    "text": "rm"
+                    "text": "git"
                   },
                   {
                     "literal": true,
-                    "text": "-f"
+                    "text": "rev-parse"
                   },
                   {
-                    "literal": false,
-                    "text": "*.tmp"
-                  },
-                  {
-                    "literal": false,
-                    "text": "build/?.o"
-                  },
-                  {
-                    "literal": false,
-                    "text": "log[0-9].txt"
+                    "literal": true,
+                    "text": "HEAD"
                   }
                 ]
               }
