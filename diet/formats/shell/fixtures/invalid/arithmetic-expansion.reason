@@ -1,0 +1,5 @@
+Arithmetic expansion. `$((` opens a form v0 does not have: the command
+substitution rule takes it for a `$(` with a bracket inside, closes on the
+first `)`, and leaves the second for the list to choke on. Outside v0 rather
+than half-read, and named here so the refusal is a decision and not a
+surprise.
