@@ -6,14 +6,20 @@ length. `diet::dogma` (in `diet/src/dogma/`) embeds them at compile time and is
 the only way capture code reads them.
 
 **Changing a template is a dogma version bump, not an edit.** Results before
-and after are not comparable. The procedure, and `cargo test` refuses until it
-is followed:
+and after are not comparable. The procedure:
 
 1. Edit the `.txt`.
-2. Bump `diet::dogma::VERSION`.
-3. Regenerate `MANIFEST.tsv`: `name`, digest, bytes, tab-separated, one line
+2. Regenerate `MANIFEST.tsv`: `name`, digest, bytes, tab-separated, one line
    per template. `diet::dogma::digest` is the hash.
+3. Bump `diet::dogma::VERSION` and set `diet::dogma::MANIFEST_DIGEST` to the
+   new manifest's digest, in the same commit.
 4. Say what changed and why in the commit message.
+
+`cargo test` refuses steps 1 through 3 left half-done: a changed byte without
+a manifest line, and a changed manifest without the digest beside the version.
+Step 4 is a reviewer's to hold. The files are marked `-text` in
+`.gitattributes` so a line-ending conversion cannot change the bytes under the
+pin.
 
 Some templates carry holes, written `{tag}`, that the caller fills through
 `Template::fill`. The braces are part of the pinned bytes.

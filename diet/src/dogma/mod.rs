@@ -7,8 +7,8 @@
 //! produced after it. So the templates are data files under
 //! `diet/dogma/templates/`, embedded at compile time, and `diet/dogma/
 //! MANIFEST.tsv` pins each by digest and length. The test that checks the
-//! manifest fails on a single changed byte, at the developer's build, long
-//! before CI.
+//! manifest fails on a single changed byte, at the developer's `cargo test`,
+//! long before CI.
 //!
 //! Three things the types hold rather than a convention:
 //!
@@ -47,6 +47,23 @@ use std::fmt;
 /// different questions, and their numbers do not compare.
 pub const VERSION: u32 = 0;
 
+/// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
+/// against.
+///
+/// A regenerated manifest is a changed dogma, and this constant is what makes
+/// the version site the place that change has to be written down: the test
+/// that recomputes it fails until both lines are edited together. Without it
+/// the manifest could be regenerated after an edit and the version left at
+/// what it was, which is a bump that never happened.
+pub const MANIFEST_DIGEST: &str = "e93b1fbf63c31266";
+
+/// The manifest, exactly as pinned: one line per template, `name`, digest
+/// and byte length, tab-separated, after the comment lines.
+///
+/// Public so that anything reporting which dogma it ran under can print or
+/// record the pin itself rather than a copy of it.
+pub const MANIFEST: &str = include_str!("../../dogma/MANIFEST.tsv");
+
 /// The sentence that closes a fork-local ask.
 ///
 /// It tells a forked model to answer and stop, and it is true only in a
@@ -82,6 +99,18 @@ impl Site {
             Self::Fork => "fork",
             Self::Compaction => "compaction",
         }
+    }
+
+    /// The site `name` names, if there is one.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|site| site.name() == name)
+    }
+}
+
+impl fmt::Display for Site {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
     }
 }
 
@@ -327,8 +356,9 @@ impl Template {
     /// The holes this template's text has, in the order they first appear.
     ///
     /// Declared here and held against the text by a test, so that a hole
-    /// added to a file is a compile-visible change to the caller's contract
-    /// and not a brace that goes out on the wire.
+    /// added to a file fails `cargo test` rather than reaching a caller; and
+    /// [`Template::fill`] refuses such a hole on its own, so it does not reach
+    /// the wire even when the tests were not run.
     #[must_use]
     pub fn holes(self) -> &'static [Hole] {
         match self {
@@ -391,32 +421,43 @@ impl Template {
             });
         }
 
-        let text = self.text();
-        let mut out = String::with_capacity(text.len());
-        let mut rest = text;
-        while let Some(open) = rest.find('{') {
-            out.push_str(&rest[..open]);
-            let after = &rest[open + 1..];
-            let filled = after.find('}').and_then(|close| {
-                let tag = &after[..close];
-                let hole = Hole::from_tag(tag)?;
-                let value = values.iter().find(|(it, _)| *it == hole)?.1;
-                Some((value, close))
-            });
-            if let Some((value, close)) = filled {
-                out.push_str(value);
-                rest = &after[close + 1..];
-            } else {
-                // A brace that opens no hole is text. The holes test keeps
-                // this branch off the pinned templates; it is here so the
-                // fill is total rather than a panic on a brace.
-                out.push('{');
-                rest = after;
-            }
-        }
-        out.push_str(rest);
-        Ok(out)
+        fill_text(self, self.text(), values)
     }
+}
+
+/// The single-pass substitution behind [`Template::fill`], over `text`.
+///
+/// Separate from the method so that the refusal of an undeclared hole can be
+/// exercised on a text no pinned template is allowed to have.
+fn fill_text(template: Template, text: &str, values: &[(Hole, &str)]) -> Result<String, FillError> {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        let hole = after
+            .find('}')
+            .and_then(|close| Hole::from_tag(&after[..close]).map(|hole| (hole, close)));
+        if let Some((hole, close)) = hole {
+            // A hole in the text the caller was given no value for is a hole
+            // the declaration does not know about. Refused here as well as in
+            // the holes test, so that a template edited without a run of the
+            // tests cannot send its braces out on the wire.
+            let Some((_, value)) = values.iter().find(|(it, _)| *it == hole) else {
+                return Err(FillError::Unfilled { template, hole });
+            };
+            out.push_str(value);
+            rest = &after[close + 1..];
+        } else {
+            // A brace that opens no hole is text. The holes test keeps this
+            // branch off the pinned templates; it is here so the fill is
+            // total rather than a panic on a brace.
+            out.push('{');
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    Ok(out)
 }
 
 impl fmt::Display for Template {
@@ -442,8 +483,9 @@ pub enum FillError {
         /// The hole.
         hole: Hole,
     },
-    /// A hole was given no value. Refused rather than sent with the braces
-    /// in it: an ask with `{intent}` still in it is an ask nobody wrote.
+    /// A hole was given no value, or the text has a hole the declaration
+    /// lacks. Refused rather than sent with the braces in it: an ask with
+    /// `{intent}` still in it is an ask nobody wrote.
     Unfilled {
         /// The template.
         template: Template,
@@ -490,11 +532,12 @@ pub fn digest(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{FORK_LOCAL_SENTENCE, FillError, Hole, Site, Template, digest};
+    use super::{
+        FORK_LOCAL_SENTENCE, FillError, Hole, MANIFEST, MANIFEST_DIGEST, Site, Template, digest,
+        fill_text,
+    };
     use std::collections::BTreeSet;
     use std::path::Path;
-
-    const MANIFEST: &str = include_str!("../../dogma/MANIFEST.tsv");
 
     fn manifest() -> Vec<(String, String, usize)> {
         MANIFEST
@@ -546,6 +589,19 @@ mod tests {
              added or removed without updating both",
             pinned.len(),
             Template::ALL.len()
+        );
+        // Both directions, as sets: the length check alone let a manifest
+        // drop one template's line and duplicate another's, leaving the first
+        // template's bytes pinned by nothing.
+        let pinned_names: BTreeSet<&str> =
+            pinned.iter().map(|(name, _, _)| name.as_str()).collect();
+        let declared: BTreeSet<&str> = Template::ALL
+            .iter()
+            .map(|template| template.name())
+            .collect();
+        assert_eq!(
+            pinned_names, declared,
+            "the manifest and Template::ALL do not name the same templates"
         );
         for (name, hash, bytes) in &pinned {
             let template = Template::from_name(name).unwrap_or_else(|| {
@@ -642,6 +698,18 @@ mod tests {
         }
     }
 
+    // A regenerated manifest is a changed dogma, and the change has to be
+    // written down at the version site.
+    #[test]
+    fn the_version_was_declared_against_this_manifest() {
+        assert_eq!(
+            digest(MANIFEST),
+            MANIFEST_DIGEST,
+            "diet/dogma/MANIFEST.tsv changed and dogma::VERSION / MANIFEST_DIGEST did not: \
+             a dogma version bump edits both, in one commit, with the reason"
+        );
+    }
+
     // The lane-scoped-sentence rule, as a check. The sentence is a claim that
     // the main session continues in parallel, which the compaction path
     // cannot make.
@@ -672,14 +740,23 @@ mod tests {
     fn every_site_is_used_and_named_distinctly() {
         let used: BTreeSet<Site> = Template::ALL.iter().map(|t| t.site()).collect();
         for site in Site::ALL {
+            assert!(used.contains(site), "{site} is a site no template uses");
+        }
+        // And the other direction: a site a template names is in ALL, or the
+        // loop above never examines it.
+        for template in Template::ALL {
             assert!(
-                used.contains(site),
-                "{} is a site no template uses",
-                site.name()
+                Site::ALL.contains(&template.site()),
+                "{template} is sent to {}, which Site::ALL does not list",
+                template.site()
             );
         }
         let names: BTreeSet<&str> = Site::ALL.iter().map(|site| site.name()).collect();
         assert_eq!(names.len(), Site::ALL.len());
+        for site in Site::ALL {
+            assert_eq!(Site::from_name(site.name()), Some(*site));
+        }
+        assert_eq!(Site::from_name("seam"), None);
     }
 
     #[test]
@@ -710,14 +787,47 @@ mod tests {
     // next replace in the chain.
     #[test]
     fn a_value_containing_a_hole_shape_is_not_filled_in_turn() {
+        // Each value carries the OTHER hole's tag, so a chained replace in
+        // either order fills one of them a second time; only a single pass
+        // leaves both as written.
         let filled = Template::Supersede
             .fill(&[
                 (Hole::OldEntry, "see {new_quote}"),
-                (Hole::NewQuote, "the quote"),
+                (Hole::NewQuote, "see {old_entry}"),
             ])
             .expect("every hole given");
         assert!(filled.contains("RECORDED: see {new_quote}\n"));
-        assert!(filled.contains("LATEST: \"the quote\"\n"));
+        assert!(filled.contains("LATEST: \"see {old_entry}\"\n"));
+        assert_eq!(filled.matches("{new_quote}").count(), 1);
+        assert_eq!(filled.matches("{old_entry}").count(), 1);
+    }
+
+    // The wire-side half of the holes rule: a hole the text has and the
+    // declaration lacks is refused by fill itself, not only by the test.
+    #[test]
+    fn fill_refuses_a_hole_the_text_has_but_the_declaration_lacks() {
+        // No pinned template has this shape (the holes test forbids it), so
+        // the scan is driven on a text of the test's own.
+        let result = fill_text(
+            Template::Doctrine,
+            "read {path} at {depth}",
+            &[(Hole::Path, "a")],
+        );
+        assert_eq!(
+            result,
+            Err(FillError::Unfilled {
+                template: Template::Doctrine,
+                hole: Hole::Depth
+            })
+        );
+        assert_eq!(
+            fill_text(
+                Template::Doctrine,
+                "read {path} {not_a_hole}",
+                &[(Hole::Path, "a")]
+            ),
+            Ok("read a {not_a_hole}".to_owned())
+        );
     }
 
     #[test]
