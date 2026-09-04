@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 131
+red_faults = 132
 mechanics_assertions = 27
 migrated = 0
 
@@ -541,6 +541,14 @@ check = "test"
 label = "the second reader left unbounded"
 failure_class = "record.json-lines-unbounded"
 legacy_signature = "a JSON Lines reader that does not bound its nesting"
+
+[[fault]]
+id = "test.record_negative_zero_decimal"
+kind = "seeded-gate"
+check = "test"
+label = "a negative zero decimal accepted"
+failure_class = "record.second-spelling"
+legacy_signature = "was constructed, and the grammar would not read it back"
 migrated = false
 
 [[fault]]

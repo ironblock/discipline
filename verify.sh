@@ -837,6 +837,21 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The sign let back onto a zero. `-0.0` is then a second spelling of `0.0`,
+# and a banked sampler temperature reads back as a number nobody wrote.
+inject_record_negative_zero_decimal() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/record/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = """decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
+new = """decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # Silence counted as engagement. The collapse case is an answer of nothing at
 # all, and a grader that reads it as engagement reports the worst outcome a
 # wording can buy as the best one.
@@ -1092,7 +1107,6 @@ assert source.count(old) == 1
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
-
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1658,34 +1672,51 @@ selftest() {
     'an empty answer is a recorded answer, not a missing one'
   seeded_case "the ablation's control arm dropped"     test     inject_ablation_no_control \
     'the control arm is missing: an ablation with no sentence-removed arm'
+
   seeded_case "silence counted as engagement"          test     inject_ablation_silence_engages \
     'counted as engagement and as silence at once'
+
   seeded_case "a p reported without its floor"         test     inject_ablation_p_floor_dropped \
     'a p reported without its attainable floor'
+
   seeded_case "a resample that draws once"            test     inject_ablation_resample_single_draw \
     'the resamples no longer draw one outcome for every fork'
+
   seeded_case "a generator that never advances"       test     inject_ablation_frozen_generator \
     'a seeded draw did not reach every fork in 64 tries'
+
   seeded_case "each arm credited with the other's"    test     inject_ablation_rates_swapped \
     'the first arm held on 5 of these 6 forks and the bootstrap counted'
+
   seeded_case "the silence endpoint unregistered"     test     inject_ablation_endpoint_dropped \
     'the pre-registration no longer carries two endpoints'
+
   seeded_case "one imperative for every arm"          test     inject_ablation_plan_one_imperative \
     'the plan does not pair the arm'
+
   seeded_case "two arms under one name"               test     inject_ablation_arm_names_collide \
     'two arms of the ablation are reported under one name'
+
   seeded_case "an arm's clauses run together"         test     inject_ablation_clauses_run_together \
     'the imperative an arm puts in the fork is not its clauses separated by one'
+
   seeded_case "a placeholder nobody counts"           test     inject_ablation_placeholder_word_dropped \
     'the-placeholder-words-nobody-replaced: graded .engaged. where the corpus says .inert.'
+
   seeded_case "a blank clause text admitted"          test     inject_ablation_blank_clause_allowed \
     'a clause table with a blank clause text was not refused for that reason'
+
   seeded_case "a grading case quietly dropped"        test     inject_ablation_corpus_case_dropped \
     'the corpus holds a case with no expectation or an expectation with no case'
+
   seeded_case "an untagged decline read as content"   test     inject_ablation_untagged_decline_engages \
     'an-untagged-decline: graded .engaged. where the corpus says .inert.'
+
   seeded_case "the second reader left unbounded"      test     inject_json_objects_unbounded \
     'a JSON Lines reader that does not bound its nesting'
+
+  seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
+    'was constructed, and the grammar would not read it back'
   seeded_case "the producer read as the last command" test     inject_shell_producer_is_last_written \
     'produces its output with'
   seeded_case "an operator dropped from the table"    test     inject_shell_operator_table_row_dropped \
