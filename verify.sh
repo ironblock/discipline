@@ -866,6 +866,144 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A tangent that dates every fact it finds at the turn it forked. The turn is
+# content, not bookkeeping: a tangent spans turns, and stamping the fork turn
+# onto each entry says the whole branch arrived the moment it started looking.
+inject_tangent_provenance_ignores_turn() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = """    pub fn provenance(&self, turn: u32, lane: &str, fork: Option<&str>, index: u32) -> Provenance {
+        Provenance {
+            turn,"""
+new = """    pub fn provenance(&self, turn: u32, lane: &str, fork: Option<&str>, index: u32) -> Provenance {
+        let _ = turn;
+        Provenance {
+            turn: self.at_turn,"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A closure that files its rulings at the fork turn. Closure happens later
+# than the fork, and a ruling dated before the fact it ruled on is a verdict
+# the record says was reached before there was anything to reach it about.
+inject_tangent_ruling_dated_at_fork() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = "provenance: self.provenance(at_turn, CLOSING_LANE, None, index),"
+new = "provenance: self.provenance(self.at_turn, CLOSING_LANE, None, index),"
+assert source.count(old) == 2
+source = source.replace(old, new)
+head = "        let mut patches = Vec::new();"
+assert head in source
+path.write_text(source.replace(head, "        let _ = at_turn;\n" + head, 1), encoding="utf-8")
+EOF
+}
+
+# A closure that coins a lane of its own. The lane is written into the dump
+# and orders the turn, so a name the record does not already have is a second
+# name for what the tangent in the provenance already says.
+inject_tangent_closing_lane_coined() {
+  sed -i 's|^const CLOSING_LANE: &str = "main";$|const CLOSING_LANE: \&str = "tangent-closure";|' \
+    diet/src/object/tangent.rs
+}
+
+# A disposition dropped from the list a closure rules with. The enumeration
+# test iterates that list, so emptying it does not fail the test -- it just
+# leaves the test covering less and still reporting ok.
+inject_tangent_disposition_missing_from_all() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = "pub const ALL: &'static [Self] = &[Self::Keep, Self::Drop, Self::Park];"
+new = "pub const ALL: &'static [Self] = &[Self::Keep, Self::Drop];"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A scope that offers an entry the record already ruled on. A tangent that
+# corrected its own fact would have to rule on the corrected one again, and
+# the object refuses to write through it -- so the closure cannot complete.
+inject_tangent_scope_offers_a_ruled_entry() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = "            .filter(|entry| entry.state.is_live() && born_under(entry) == Some(self.id.as_str()))"
+new = "            .filter(|entry| born_under(entry) == Some(self.id.as_str()))"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A prefix that counts the trunk's dead rows. The trunk goes on ruling on its
+# own facts while a tangent runs, and counting rows that had already stopped
+# speaking reports the trunk as moved by a change to something it put away.
+inject_tangent_prefix_counts_dead_rows() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = "        if !entry.state.is_live() || born_under(entry) == Some(tangent) {"
+new = "        if born_under(entry) == Some(tangent) {"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A prefix called intact whenever it only grew. That answers a different
+# question than the one the flag asks: the trunk writing while the tangent
+# ran moves the prefix, and a caller told otherwise never looks.
+inject_tangent_prefix_only_grew() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = "            prefix_intact: trunk_prefix(object, &self.id) == self.prefix_at_open,"
+new = "            prefix_intact: trunk_prefix(object, &self.id).starts_with(&self.prefix_at_open),"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A parked entry that renders as a retired one. The dump is the durable half
+# of the object, and two states rendering the same word read as one to
+# everyone who arrives later.
+inject_object_park_renders_as_retired() {
+  sed -i 's|^            Self::Parked => "parked",$|            Self::Parked => "retired",|' \
+    diet/src/object.rs
+}
+
+# A park with no tangent behind it. Parked says the entry was the tangent's
+# rather than the trunk's, so a park nobody forked takes an entry out of the
+# live set and records nothing about whose fact it was.
+inject_object_park_needs_no_tangent() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = """                if provenance.tangent.is_none() {
+                    return Err(ObjectError::ParkOutsideTangent(target.clone()));
+                }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1423,6 +1561,24 @@ selftest() {
     'the prefix was reported intact after the trunk moved'
   seeded_case "a tangent id opened twice"             test     inject_tangent_id_reused \
     'a tangent id the record already carries was opened again'
+  seeded_case "a tangent that dates a fact at the fork" test   inject_tangent_provenance_ignores_turn \
+    'a tangent dated a patch at a turn other than the one it was made at'
+  seeded_case "a closure ruling dated at the fork"    test     inject_tangent_ruling_dated_at_fork \
+    'the closure filed its ruling at a turn it did not close at'
+  seeded_case "a closure under a coined lane"         test     inject_tangent_closing_lane_coined \
+    'the closure filed its ruling under a lane the record does not already have'
+  seeded_case "a disposition missing from the list"   test     inject_tangent_disposition_missing_from_all \
+    'the dispositions a closure can rule with are not the three the record names'
+  seeded_case "a tangent that offers a settled fact again" test inject_tangent_scope_offers_a_ruled_entry \
+    'the tangent offered a fact the record had already ruled on for disposition a second time'
+  seeded_case "a prefix that counts dead trunk rows"  test     inject_tangent_prefix_counts_dead_rows \
+    'a trunk row that was already dead at the fork was counted into the prefix'
+  seeded_case "a prefix called intact whenever it only grew" test inject_tangent_prefix_only_grew \
+    'the prefix was reported unmoved after the trunk wrote a fact of its own'
+  seeded_case "a parked entry that reads as retired"  test     inject_object_park_renders_as_retired \
+    'a state renders under a name the dump does not promise'
+  seeded_case "a park with no tangent behind it"      test     inject_object_park_needs_no_tangent \
+    'an entry was parked under no tangent, so it left the live set'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

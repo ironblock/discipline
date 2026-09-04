@@ -100,11 +100,16 @@ pub struct Provenance {
     pub fork: Option<String>,
     /// The tangent it was made under, when it was made under one.
     ///
-    /// Written by [`tangent::Tangent::provenance`] and by nothing else, so
-    /// that "this entry was born in that tangent" is a fact of the record
-    /// rather than a guess from when the entry happened to arrive. The guess
-    /// is what recency would give, and the trunk goes on writing while a
-    /// tangent runs.
+    /// [`tangent::Tangent::provenance`] is the only thing in the library that
+    /// writes it, so that "this entry was born in that tangent" is a fact of
+    /// the record rather than a guess from when the entry happened to arrive.
+    /// The guess is what recency would give, and the trunk goes on writing
+    /// while a tangent runs.
+    ///
+    /// The field is public like the rest of the position, so that is where
+    /// the library writes it and not a guarantee the type makes. A caller
+    /// that stamps it by hand puts a scope in the record nothing checked, and
+    /// a closure will rule on what it finds there.
     pub tangent: Option<String>,
     /// Where this patch sat in its lane's emission for the turn.
     ///
@@ -206,9 +211,10 @@ pub enum EntryState {
     /// Out of the live set, and kept: true inside the tangent that created
     /// it, and not the trunk's.
     ///
-    /// Distinct from `Retired` because a later reader deciding whether to
-    /// reopen the tangent needs to know which of the two happened, and one
-    /// state slot holding both would not tell them.
+    /// Distinct from `Retired` because the two say different things about the
+    /// entry -- retired is a fact that stopped mattering, parked is one that
+    /// was never the trunk's -- and one state slot holding both would leave a
+    /// later reader unable to tell which happened.
     Parked,
 }
 
@@ -335,6 +341,12 @@ pub enum ObjectError {
         /// What that entry currently is.
         state: EntryState,
     },
+    /// A `Park` whose provenance names no tangent. `Parked` says the entry is
+    /// the tangent's rather than the trunk's, so a park with no tangent
+    /// behind it takes an entry out of the live set and leaves nothing in the
+    /// record to say whose fact it was -- which is the whole of what the
+    /// state carries.
+    ParkOutsideTangent(EntryId),
 }
 
 impl fmt::Display for ObjectError {
@@ -385,6 +397,11 @@ impl fmt::Display for ObjectError {
                 "entry `{id}` restates `{held}`, which is {}; folding it in would \
                  file the assertion onto a fact that is no longer live",
                 state.name()
+            ),
+            Self::ParkOutsideTangent(id) => write!(
+                f,
+                "entry `{id}` was parked under no tangent; parked says the entry \
+                 is the tangent's rather than the trunk's, and this names none"
             ),
         }
     }
@@ -583,6 +600,14 @@ impl WorkingObject {
                 self.set_state(target, EntryState::Retired, provenance)?
             }
             Patch::Park { target, provenance } => {
+                // A park is a tangent's ruling on its own fact. Without a
+                // tangent in the provenance the entry leaves the live set and
+                // the record says nothing about what it belonged to, which
+                // leaves `Parked` indistinguishable from `Retired` on disk
+                // for anyone reading it later.
+                if provenance.tangent.is_none() {
+                    return Err(ObjectError::ParkOutsideTangent(target.clone()));
+                }
                 self.set_state(target, EntryState::Parked, provenance)?
             }
         };
@@ -1268,6 +1293,54 @@ mod tests {
         );
     }
 
+    // The state is the durable half of what a disposition decided, and the
+    // dump is all a later reader has. Nothing else pins these spellings: two
+    // states rendering the same word would read as one, and the reader would
+    // have no way to know it.
+    #[test]
+    fn every_entry_state_renders_the_name_the_dump_promises() {
+        for (state, name) in [
+            (EntryState::Live, "live"),
+            (EntryState::Voided { by: id("e2") }, "voided"),
+            (EntryState::Resolved, "resolved"),
+            (EntryState::Retired, "retired"),
+            (EntryState::Parked, "parked"),
+        ] {
+            // Exhaustive on purpose: a state added to the enum and left out
+            // of this table stops the test compiling rather than going
+            // unnamed on disk.
+            match state {
+                EntryState::Live
+                | EntryState::Voided { .. }
+                | EntryState::Resolved
+                | EntryState::Retired
+                | EntryState::Parked => {}
+            }
+            assert_eq!(
+                state.name(),
+                name,
+                "a state renders under a name the dump does not promise, and \
+                 the dump is where the distinction has to survive"
+            );
+        }
+
+        let mut object = object();
+        object
+            .apply(&add("e1", "the rate is 0.42", from(1, "interview", None)))
+            .expect("a fact");
+        object
+            .apply(&Patch::Park {
+                target: id("e1"),
+                provenance: under("t1", at(2, "interview", None, 0)),
+            })
+            .expect("the park");
+        assert!(
+            object.dump().contains(r#""state":"parked""#),
+            "a parked entry does not say so in the dump: {}",
+            object.dump()
+        );
+    }
+
     #[test]
     fn a_dump_distinguishes_versions_and_regimes() {
         let mut object = object();
@@ -1742,6 +1815,32 @@ mod tests {
             );
             assert_eq!(object.entry(&id("e1")).expect("e1").state, mark);
         }
+    }
+
+    // `Parked` says the entry was the tangent's rather than the trunk's. A
+    // park with no tangent behind it takes an entry out of the live set and
+    // records nothing about whose fact it was, so the state stops carrying
+    // the one thing it is for.
+    #[test]
+    fn parking_an_entry_no_tangent_created_is_refused() {
+        let mut object = object();
+        object
+            .apply(&add("e1", "the rate is 0.42", from(1, "interview", None)))
+            .expect("a fact");
+        assert_eq!(
+            object.apply(&Patch::Park {
+                target: id("e1"),
+                provenance: at(2, "interview", None, 0),
+            }),
+            Err(ObjectError::ParkOutsideTangent(id("e1"))),
+            "an entry was parked under no tangent, so it left the live set \
+             with nothing in the record to say whose fact it was"
+        );
+        assert_eq!(
+            object.entry(&id("e1")).expect("the entry").state,
+            EntryState::Live,
+            "a refused park took the entry out of the live set anyway"
+        );
     }
 
     // Planning's rulings on the two questions #13 disclosed, each as a test

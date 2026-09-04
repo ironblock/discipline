@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 117
+red_faults = 126
 mechanics_assertions = 27
 migrated = 0
 
@@ -415,6 +415,87 @@ check = "test"
 label = "a tangent id opened twice"
 failure_class = "object.scope-ambiguous"
 legacy_signature = "a tangent id the record already carries was opened again"
+migrated = false
+
+[[fault]]
+id = "test.tangent_provenance_ignores_turn"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent that dates a fact at the fork"
+failure_class = "object.provenance-undated"
+legacy_signature = "a tangent dated a patch at a turn other than the one it was made at"
+migrated = false
+
+[[fault]]
+id = "test.tangent_ruling_dated_at_fork"
+kind = "seeded-gate"
+check = "test"
+label = "a closure ruling dated at the fork"
+failure_class = "object.ruling-predates-fact"
+legacy_signature = "the closure filed its ruling at a turn it did not close at"
+migrated = false
+
+[[fault]]
+id = "test.tangent_closing_lane_coined"
+kind = "seeded-gate"
+check = "test"
+label = "a closure under a coined lane"
+failure_class = "object.lane-coined"
+legacy_signature = "the closure filed its ruling under a lane the record does not already have"
+migrated = false
+
+[[fault]]
+id = "test.tangent_disposition_missing_from_all"
+kind = "seeded-gate"
+check = "test"
+label = "a disposition missing from the list"
+failure_class = "object.vocabulary-incomplete"
+legacy_signature = "the dispositions a closure can rule with are not the three the record names"
+migrated = false
+
+[[fault]]
+id = "test.tangent_scope_offers_a_ruled_entry"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent that offers a settled fact again"
+failure_class = "object.scope-reoffers-ruled"
+legacy_signature = "the tangent offered a fact the record had already ruled on for disposition a second time"
+migrated = false
+
+[[fault]]
+id = "test.tangent_prefix_counts_dead_rows"
+kind = "seeded-gate"
+check = "test"
+label = "a prefix that counts dead trunk rows"
+failure_class = "object.prefix-counts-dead"
+legacy_signature = "a trunk row that was already dead at the fork was counted into the prefix"
+migrated = false
+
+[[fault]]
+id = "test.tangent_prefix_only_grew"
+kind = "seeded-gate"
+check = "test"
+label = "a prefix called intact whenever it only grew"
+failure_class = "object.prefix-growth-only"
+legacy_signature = "the prefix was reported unmoved after the trunk wrote a fact of its own"
+migrated = false
+
+[[fault]]
+id = "test.object_park_renders_as_retired"
+kind = "seeded-gate"
+check = "test"
+label = "a parked entry that reads as retired"
+failure_class = "object.state-name-collapsed"
+legacy_signature = "a state renders under a name the dump does not promise"
+migrated = false
+
+[[fault]]
+id = "test.object_park_needs_no_tangent"
+kind = "seeded-gate"
+check = "test"
+label = "a park with no tangent behind it"
+failure_class = "object.park-untangented"
+legacy_signature = "an entry was parked under no tangent, so it left the live set"
 migrated = false
 
 [[fault]]

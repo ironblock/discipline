@@ -71,13 +71,17 @@ pub enum Disposition {
     /// Evict it to the archive. It is marked retired and kept.
     Drop,
     /// Retain it as the tangent's. It leaves the live set and is marked
-    /// parked, so reopening the tangent has something to reopen.
+    /// parked, so a later reader can tell a fact that was only ever the
+    /// tangent's from one the trunk kept and then retired.
     Park,
 }
 
 impl Disposition {
-    /// Every disposition, so a closure cannot forget one and a test that
-    /// enumerates them cannot go stale when one is added.
+    /// Every disposition, in the order a closure reads them.
+    ///
+    /// The contents are pinned by name in the tests. A table whose only
+    /// reader is the test that iterates it is a table that can be emptied
+    /// while the test goes on reporting ok over nothing.
     pub const ALL: &'static [Self] = &[Self::Keep, Self::Drop, Self::Park];
 
     /// The spelling a report and an error message use.
@@ -95,10 +99,9 @@ impl Disposition {
 /// measured against.
 ///
 /// Holds no entries of its own. The entries are the object's, and what makes
-/// them the tangent's is the id this stamps into their provenance -- which
-/// is why a tangent can be dropped and reopened from the record without
-/// losing anything, and why closure does not depend on this value having
-/// been kept alive.
+/// them the tangent's is the id this stamps into their provenance -- a fact
+/// of the record rather than of this value, which is why closure reads the
+/// scope back off the object instead of trusting anything kept here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tangent {
     id: String,
@@ -110,17 +113,20 @@ pub struct Tangent {
 /// What a closure did to the trunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Closed {
-    /// Whether the canonical prefix is byte-identical to the fork point.
+    /// Whether the trunk renders now byte-for-byte what it rendered at the
+    /// fork point.
     ///
     /// The comparison is over the dump of live entries **not** born in the
     /// tangent, so the tangent's own rows are not counted against it and the
     /// version header -- which moves on every patch -- is not either.
     ///
-    /// False is a finding, not a failure: a tangent that superseded a trunk
-    /// entry, or that restated one and so recorded a second provenance on
-    /// it, moved the trunk. Rollback is free only for a tangent that left
-    /// the trunk alone, and this is how a caller finds out which kind it
-    /// had.
+    /// False is a finding, not a failure, and it does not name who moved the
+    /// trunk. A tangent that superseded a trunk entry moved it; so did the
+    /// trunk writing a fact of its own while the tangent ran, which is the
+    /// ordinary case and not the tangent's doing at all. What the flag
+    /// reports is whether returning the prefix to the fork point is free --
+    /// nothing to undo, nothing to read -- or whether there is something
+    /// there the caller has to look at first.
     pub prefix_intact: bool,
 }
 
@@ -250,10 +256,17 @@ impl Tangent {
 
     /// A provenance for a patch made under this tangent.
     ///
-    /// The only way to build one: a lane working inside a tangent gets its
-    /// provenance from the tangent, so an entry born there carries the scope
-    /// by construction and cannot be attributed to the tangent afterwards by
-    /// anything as fragile as its turn.
+    /// Where a lane working inside a tangent gets its provenance, and the
+    /// only place the library writes [`Provenance::tangent`]: an entry born
+    /// under a tangent carries the scope from birth rather than being
+    /// attributed to it afterwards by anything as fragile as its turn. The
+    /// field is public, so this is where the library stamps it rather than a
+    /// guarantee the type makes; [`Provenance::tangent`] says what a stamp
+    /// written by hand costs.
+    ///
+    /// `turn` is the turn the patch is made at, not the turn the tangent
+    /// forked at. A tangent spans turns, and dating everything it found at
+    /// the fork would say every fact arrived the moment it started looking.
     #[must_use]
     pub fn provenance(&self, turn: u32, lane: &str, fork: Option<&str>, index: u32) -> Provenance {
         Provenance {
@@ -285,9 +298,13 @@ impl Tangent {
     /// later than the fork, and filing its patches at the turn the tangent
     /// opened would put a ruling in the record before the facts it ruled on.
     ///
-    /// Atomic: the dispositions are checked whole before any patch is
-    /// applied, and the patches go through [`WorkingObject::apply_turn`],
-    /// which leaves the object as it was if it refuses one.
+    /// The dispositions are checked whole before any patch is applied: a map
+    /// that names an entry out of scope, or that leaves one unruled, moves
+    /// nothing. What survives that check is filed as one turn through
+    /// [`WorkingObject::apply_turn`], which is where a turn's order is
+    /// judged. Whether that call can refuse a closure at all is answered
+    /// under [`TangentError::Refused`]: today it cannot, so the rollback it
+    /// would do is stated there rather than claimed here.
     ///
     /// # Errors
     ///
@@ -600,8 +617,8 @@ mod tests {
         assert_ne!(
             state_of(&object, "t1"),
             EntryState::Retired,
-            "parked and retired collapsed into one state, so reopening the \
-             tangent has nothing to tell them apart by"
+            "parked and retired collapsed into one state, so a fact that was \
+             only ever the tangent's reads as one the trunk retired"
         );
     }
 
@@ -812,11 +829,213 @@ mod tests {
         }
     }
 
+    // The list a closure rules with, pinned by name. `ALL` has no other
+    // reader, so the test that enumerates it is also the only thing standing
+    // between the table and being emptied -- and a test that iterates the
+    // table it guards reports ok over whatever is left.
+    #[test]
+    fn the_dispositions_are_the_three_a_closure_rules_with() {
+        let tags: Vec<&str> = Disposition::ALL.iter().map(|d| d.tag()).collect();
+        assert_eq!(
+            tags,
+            vec!["keep", "drop", "park"],
+            "the dispositions a closure can rule with are not the three the \
+             record names"
+        );
+    }
+
+    // A closure rules later than the fork, and the record has to say when. A
+    // ruling filed at the fork turn is a verdict recorded before the fact it
+    // ruled on existed. The lane is the canonical one: a tangent is a scope
+    // over the object, not a producer of content, and the tangent it closed
+    // is already in the provenance.
+    #[test]
+    fn a_closure_files_its_rulings_at_the_turn_it_closed_and_in_the_canonical_lane() {
+        let (mut object, tangent) = forked();
+        object
+            .apply(&add(
+                "t1",
+                "the eviction policy is least recently used",
+                tangent.provenance(4, "interview", None, 0),
+            ))
+            .expect("a fact on the tangent");
+        tangent
+            .close(&mut object, 9, &dispositions(&[("t1", Disposition::Drop)]))
+            .expect("a total closure");
+
+        let entry = object.entry(&id("t1")).expect("the dropped entry");
+        let ruling = entry
+            .provenances
+            .last()
+            .expect("the closure recorded a provenance of its own");
+        assert_eq!(
+            ruling.turn, 9,
+            "the closure filed its ruling at a turn it did not close at: {ruling:?}"
+        );
+        assert_eq!(
+            ruling.lane, "main",
+            "the closure filed its ruling under a lane the record does not \
+             already have: {ruling:?}"
+        );
+        assert_eq!(
+            ruling.tangent.as_deref(),
+            Some("t-cache"),
+            "the closure's own patch does not say which tangent it closed"
+        );
+        assert_eq!(
+            entry.provenances.first().map(|birth| birth.turn),
+            Some(4),
+            "the entry's birth was refiled at the turn the closure ran"
+        );
+    }
+
+    // An entry the record has already ruled on is not offered for disposition
+    // again. A tangent that corrects its own fact voided the first one, and a
+    // closure demanding a fresh disposition for it would ask a chooser to
+    // rule on a settled entry -- and then be refused by the object for
+    // writing through it.
+    #[test]
+    fn a_tangent_does_not_offer_a_fact_it_has_already_ruled_on() {
+        let (mut object, tangent) = forked();
+        object
+            .apply(&add(
+                "t1",
+                "the eviction policy is least recently used",
+                tangent.provenance(4, "interview", None, 0),
+            ))
+            .expect("a fact on the tangent");
+        object
+            .apply(&Patch::Supersede {
+                id: id("t2"),
+                content: "the eviction policy is least recently used, by prefix".to_owned(),
+                voids: id("t1"),
+                provenance: tangent.provenance(5, "interview", None, 0),
+            })
+            .expect("the tangent corrected itself");
+
+        assert_eq!(
+            tangent
+                .scope(&object)
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["t2"],
+            "the tangent offered a fact the record had already ruled on for \
+             disposition a second time"
+        );
+        tangent
+            .close(&mut object, 6, &dispositions(&[("t2", Disposition::Keep)]))
+            .expect("a closure over what the tangent still holds");
+        assert_eq!(
+            state_of(&object, "t1"),
+            EntryState::Voided { by: id("t2") },
+            "closing the tangent wrote over the correction it had already made"
+        );
+    }
+
+    // The prefix is the trunk as it renders, so a row that had already
+    // stopped speaking for the object at the fork is not in it. The trunk
+    // goes on ruling on its own facts while a tangent runs, and a prefix that
+    // counted its dead rows would report the trunk moved by a change to
+    // something it had already put away.
+    #[test]
+    fn a_trunk_row_already_dead_at_the_fork_is_not_part_of_the_prefix() {
+        let mut object = object();
+        object
+            .apply(&add(
+                "trunk-a",
+                "the resolver refuses a stale binary",
+                trunk(1, 0),
+            ))
+            .expect("a trunk fact");
+        object
+            .apply(&add(
+                "trunk-b",
+                "the regime is fixed for the session",
+                trunk(1, 1),
+            ))
+            .expect("another trunk fact");
+        object
+            .apply(&Patch::Retire {
+                target: id("trunk-a"),
+                provenance: trunk(2, 0),
+            })
+            .expect("the trunk retired one of its own");
+        let tangent = Tangent::open(&object, "t-cache", 3).expect("a tangent");
+        assert!(
+            !tangent.prefix_at_open().is_empty(),
+            "the fork point rendered nothing, so comparing against it proves \
+             nothing"
+        );
+
+        // The trunk rules again on the row it had already retired, while the
+        // tangent runs.
+        object
+            .apply(&Patch::Resolve {
+                target: id("trunk-a"),
+                provenance: trunk(4, 0),
+            })
+            .expect("the trunk settled what it had retired");
+        object
+            .apply(&add(
+                "t1",
+                "the cache is keyed by the prompt prefix",
+                tangent.provenance(5, "interview", None, 0),
+            ))
+            .expect("a fact on the tangent");
+
+        let closed = tangent
+            .close(&mut object, 6, &dispositions(&[("t1", Disposition::Keep)]))
+            .expect("a total closure");
+        assert!(
+            closed.prefix_intact,
+            "a trunk row that was already dead at the fork was counted into \
+             the prefix, so ruling on it again read as the trunk moving"
+        );
+    }
+
+    // The other polarity of the same comparison, and the ordinary case: the
+    // trunk works while the tangent runs. `prefix_intact` says whether the
+    // prefix is what it was, not who made it something else.
+    #[test]
+    fn a_trunk_that_went_on_writing_moved_the_prefix_the_fork_recorded() {
+        let (mut object, tangent) = forked();
+        object
+            .apply(&add(
+                "t1",
+                "the cache is keyed by the prompt prefix",
+                tangent.provenance(4, "interview", None, 0),
+            ))
+            .expect("a fact on the tangent");
+        object
+            .apply(&add(
+                "trunk-late",
+                "the gate runs twelve checks",
+                trunk(5, 0),
+            ))
+            .expect("the trunk went on writing");
+
+        let closed = tangent
+            .close(&mut object, 6, &dispositions(&[("t1", Disposition::Keep)]))
+            .expect("a total closure");
+        assert!(
+            !closed.prefix_intact,
+            "the prefix was reported unmoved after the trunk wrote a fact of \
+             its own, so a caller reading the flag cannot tell there is \
+             anything there to look at"
+        );
+    }
+
     #[test]
     fn a_tangent_stamps_the_provenance_of_every_patch_made_under_it() {
         let (mut object, tangent) = forked();
         let provenance = tangent.provenance(4, "interview", Some("f2"), 3);
         assert_eq!(provenance.tangent.as_deref(), Some("t-cache"));
+        assert_eq!(
+            provenance.turn, 4,
+            "a tangent dated a patch at a turn other than the one it was made \
+             at, so every fact it found arrives when the fork did"
+        );
         assert_eq!(provenance.lane, "interview");
         assert_eq!(provenance.fork.as_deref(), Some("f2"));
         assert_eq!(provenance.index, 3);
