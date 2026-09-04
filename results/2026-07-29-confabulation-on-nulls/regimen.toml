@@ -1,0 +1,6 @@
+# The regimen this run applied: campaign one of the prompt-language factorial,
+# fired 2026-07-29 against the pinned box. The substrate is named here and
+# described in full by the record's start row.
+arm = "prompt-language-factorial-campaign-one"
+substrate = "box-qwen36-27b-ud-q4kxl"
+dogma_version = 0
