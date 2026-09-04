@@ -1,0 +1,28 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [
+                  {
+                    "name": "FOO",
+                    "value": {
+                      "literal": true,
+                      "text": "bar"
+                    }
+                  }
+                ],
+                "redirections": [],
+                "words": []
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

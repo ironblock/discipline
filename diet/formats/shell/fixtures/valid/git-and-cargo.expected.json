@@ -1,0 +1,66 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "git"
+                  },
+                  {
+                    "literal": true,
+                    "text": "status"
+                  },
+                  {
+                    "literal": true,
+                    "text": "--short"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "join": "and",
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "cargo"
+                  },
+                  {
+                    "literal": true,
+                    "text": "clippy"
+                  },
+                  {
+                    "literal": true,
+                    "text": "--"
+                  },
+                  {
+                    "literal": true,
+                    "text": "-D"
+                  },
+                  {
+                    "literal": true,
+                    "text": "warnings"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

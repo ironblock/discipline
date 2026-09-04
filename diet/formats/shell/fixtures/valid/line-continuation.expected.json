@@ -1,0 +1,41 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "cargo"
+                  },
+                  {
+                    "literal": true,
+                    "text": "test"
+                  },
+                  {
+                    "literal": true,
+                    "text": "--workspace"
+                  },
+                  {
+                    "literal": true,
+                    "text": "--"
+                  },
+                  {
+                    "literal": true,
+                    "text": "capture"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

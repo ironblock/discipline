@@ -1,0 +1,71 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "cd"
+                  },
+                  {
+                    "literal": true,
+                    "text": "diet"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "join": "and",
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "cargo"
+                  },
+                  {
+                    "literal": true,
+                    "text": "test"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "join": "or",
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "echo"
+                  },
+                  {
+                    "literal": true,
+                    "text": "failed"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

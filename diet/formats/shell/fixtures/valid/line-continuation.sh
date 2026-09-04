@@ -1,0 +1,3 @@
+cargo test \
+  --workspace \
+  -- capture

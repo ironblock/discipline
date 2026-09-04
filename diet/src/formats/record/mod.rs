@@ -289,6 +289,14 @@ pub enum Event {
         /// request that names its predecessor; it is not an annotation on the
         /// old one, because the old one already happened.
         retry_of: Option<String>,
+        /// What was sent, when the record keeps it.
+        ///
+        /// A record that carries the texts is an ARCHIVE of the drive: it can
+        /// be replayed through a router, mined for the asks that invited an
+        /// echo, matched against the object's entries. One without them is a
+        /// ledger, and a ledger is still a record -- provenance never
+        /// depended on the payload being kept, only on its being named.
+        text: Option<String>,
     },
     /// A response came back.
     Response {
@@ -299,6 +307,12 @@ pub enum Event {
         to_request: String,
         /// How many tokens came back.
         output_tokens: Count,
+        /// What came back, when the record keeps it. On the canonical lane
+        /// this is the model's own prose for the turn; on an interview lane it
+        /// is the answer. It may be empty: an answer of nothing at all is a
+        /// typed outcome, and a record that could not spell it would be a
+        /// record that could not show the collapse it exists to catch.
+        text: Option<String>,
     },
     /// An interview fork was opened.
     Fork {
@@ -335,6 +349,17 @@ pub enum Event {
         at_turn: u32,
         /// Which tool.
         tool: String,
+        /// The arguments it was called with, when the record keeps them. The
+        /// mechanical lane derives the working directory and the files
+        /// touched from these, and an entry it writes grounds itself by
+        /// naming this row's id -- which is only grounding if the row holds
+        /// what the entry was derived from.
+        args: Option<BTreeMap<String, Value>>,
+        /// The exit status the tool reported, when the record keeps it.
+        exit: Option<i64>,
+        /// What the tool returned, when the record keeps it. May be empty: a
+        /// command that printed nothing is a fact about the command.
+        output: Option<String>,
     },
     /// A lane's output rejected whole because too little of it was grounded
     /// in the input the lane was told to work from.
@@ -835,11 +860,13 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             id: take_string(&mut members, of, "id")?,
             lane: take_string(&mut members, of, "lane")?,
             retry_of: take_optional_string(&mut members, of, "retry_of")?,
+            text: take_optional_text(&mut members, of, "text")?,
         },
         Kind::Response => Event::Response {
             id: take_string(&mut members, of, "id")?,
             to_request: take_string(&mut members, of, "to_request")?,
             output_tokens: take_u64(&mut members, of, "output_tokens")?,
+            text: take_optional_text(&mut members, of, "text")?,
         },
         Kind::Fork => Event::Fork {
             id: take_string(&mut members, of, "id")?,
@@ -860,6 +887,9 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             id: take_string(&mut members, of, "id")?,
             at_turn: take_u32(&mut members, of, "at_turn")?,
             tool: take_string(&mut members, of, "tool")?,
+            args: take_optional_object(&mut members, of, "args")?,
+            exit: take_optional_integer(&mut members, of, "exit")?,
+            output: take_optional_text(&mut members, of, "output")?,
         },
         Kind::Rejected => Event::Rejected {
             id: take_string(&mut members, of, "id")?,
@@ -1039,6 +1069,71 @@ fn take_optional_string(
             of,
             field: field.to_owned(),
             want: "a string",
+        }
+        .into()),
+        None => Ok(None),
+    }
+}
+
+/// An optional payload: text that may legitimately be empty.
+///
+/// Distinct from [`take_optional_string`] on purpose. That one refuses a
+/// blank because every string it reads is an identifier or a statement, and
+/// a blank identifier is a required field satisfied by typing two quotes. A
+/// payload is different: a response of no characters and a command that
+/// printed nothing are facts, and the silence one of them records is the
+/// collapse the ablation exists to measure. A record that could not hold an
+/// empty answer would report the worst case as missing data.
+fn take_optional_text(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+    field: &'static str,
+) -> Result<Option<String>, ParseError> {
+    match members.remove(field) {
+        Some(Value::String(text)) => Ok(Some(text)),
+        Some(_) => Err(SchemaError::WrongType {
+            of,
+            field: field.to_owned(),
+            want: "a string",
+        }
+        .into()),
+        None => Ok(None),
+    }
+}
+
+/// An optional object. Empty is allowed: a tool called with no arguments has
+/// an argument list, and it is empty.
+fn take_optional_object(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+    field: &'static str,
+) -> Result<Option<BTreeMap<String, Value>>, ParseError> {
+    match members.remove(field) {
+        Some(Value::Object(inner)) => Ok(Some(inner)),
+        Some(_) => Err(SchemaError::WrongType {
+            of,
+            field: field.to_owned(),
+            want: "an object",
+        }
+        .into()),
+        None => Ok(None),
+    }
+}
+
+/// An optional signed integer. An exit status may be anything the value
+/// space can spell; a shell reports signals as numbers past 128, and a
+/// harness that failed to run the tool at all may report a negative one.
+fn take_optional_integer(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+    field: &'static str,
+) -> Result<Option<i64>, ParseError> {
+    match members.remove(field) {
+        Some(Value::Integer(number)) => Ok(Some(number)),
+        Some(_) => Err(SchemaError::WrongType {
+            of,
+            field: field.to_owned(),
+            want: "an integer",
         }
         .into()),
         None => Ok(None),
@@ -1385,105 +1480,144 @@ pub fn to_value(record: &Record) -> Value {
     ]))
 }
 
+/// The members of one row, being assembled.
+///
+/// A struct rather than a closure over the map, so that the optional
+/// payloads render through one function: an absent payload is an absent key,
+/// never an empty one, and the rule lives in one place instead of in five
+/// `if let` blocks that could each drift.
+struct Members(BTreeMap<String, Value>);
+
+impl Members {
+    fn put(&mut self, key: &str, value: Value) {
+        self.0.insert(key.to_owned(), value);
+    }
+
+    fn put_text(&mut self, key: &str, text: &str) {
+        self.put(key, Value::String(text.to_owned()));
+    }
+
+    fn put_u32(&mut self, key: &str, number: u32) {
+        self.put(key, Value::Integer(i64::from(number)));
+    }
+
+    fn put_count(&mut self, key: &str, count: Count) {
+        self.put(key, integer(count));
+    }
+
+    /// Present when the record kept it, absent otherwise.
+    fn put_optional(&mut self, key: &str, value: Option<Value>) {
+        if let Some(value) = value {
+            self.put(key, value);
+        }
+    }
+}
+
 /// One event, as the value space.
+///
+/// The identifier is written once, from [`Event::id`], rather than in every
+/// arm that has one: that method is already the single statement of which
+/// kinds carry an id, and a second copy here could disagree with it.
 fn event_value(event: &Event) -> BTreeMap<String, Value> {
-    let mut members = BTreeMap::new();
-    let mut put = |key: &str, value: Value| {
-        members.insert(key.to_owned(), value);
-    };
-    put("record", Value::String(event.kind().tag().to_owned()));
+    let mut members = Members(BTreeMap::new());
+    members.put_text("record", event.kind().tag());
+    members.put_optional("id", event.id().map(|id| Value::String(id.to_owned())));
     match event {
-        Event::Start { regime } => put("regime", regime_value(regime)),
+        Event::Start { regime } => members.put("regime", regime_value(regime)),
         Event::Turn {
             index,
             prefill_tokens,
         } => {
-            put("index", Value::Integer(i64::from(*index)));
-            put("prefill_tokens", integer(*prefill_tokens));
+            members.put_u32("index", *index);
+            members.put_count("prefill_tokens", *prefill_tokens);
         }
-        Event::Request { id, lane, retry_of } => {
-            put("id", Value::String(id.clone()));
-            put("lane", Value::String(lane.clone()));
-            if let Some(previous) = retry_of {
-                put("retry_of", Value::String(previous.clone()));
-            }
+        Event::Request {
+            lane,
+            retry_of,
+            text,
+            ..
+        } => {
+            members.put_text("lane", lane);
+            members.put_optional("retry_of", retry_of.clone().map(Value::String));
+            members.put_optional("text", text.clone().map(Value::String));
         }
         Event::Response {
-            id,
             to_request,
             output_tokens,
+            text,
+            ..
         } => {
-            put("id", Value::String(id.clone()));
-            put("to_request", Value::String(to_request.clone()));
-            put("output_tokens", integer(*output_tokens));
+            members.put_text("to_request", to_request);
+            members.put_count("output_tokens", *output_tokens);
+            members.put_optional("text", text.clone().map(Value::String));
         }
-        Event::Fork { id, lane, of_turn } => {
-            put("id", Value::String(id.clone()));
-            put("lane", Value::String(lane.clone()));
-            put("of_turn", Value::Integer(i64::from(*of_turn)));
+        Event::Fork { lane, of_turn, .. } => {
+            members.put_text("lane", lane);
+            members.put_u32("of_turn", *of_turn);
         }
         Event::Capture {
-            id,
-            from_fork,
-            entries,
+            from_fork, entries, ..
         } => {
-            put("id", Value::String(id.clone()));
-            put("from_fork", Value::String(from_fork.clone()));
-            put("entries", Value::Integer(i64::from(*entries)));
+            members.put_text("from_fork", from_fork);
+            members.put_u32("entries", *entries);
         }
         Event::Seam {
-            id,
             at_turn,
             rendered_bytes,
+            ..
         } => {
-            put("id", Value::String(id.clone()));
-            put("at_turn", Value::Integer(i64::from(*at_turn)));
-            put("rendered_bytes", integer(*rendered_bytes));
+            members.put_u32("at_turn", *at_turn);
+            members.put_count("rendered_bytes", *rendered_bytes);
         }
         Event::Rejected {
-            id,
             lane,
             at_turn,
             grounded,
             of,
+            ..
         } => {
-            put("id", Value::String(id.clone()));
-            put("lane", Value::String(lane.clone()));
-            put("at_turn", Value::Integer(i64::from(*at_turn)));
-            put("grounded", integer(*grounded));
-            put("of", integer(*of));
+            members.put_text("lane", lane);
+            members.put_u32("at_turn", *at_turn);
+            members.put_count("grounded", *grounded);
+            members.put_count("of", *of);
         }
-        Event::ToolCall { id, at_turn, tool } => {
-            put("id", Value::String(id.clone()));
-            put("at_turn", Value::Integer(i64::from(*at_turn)));
-            put("tool", Value::String(tool.clone()));
+        Event::ToolCall {
+            at_turn,
+            tool,
+            args,
+            exit,
+            output,
+            ..
+        } => {
+            members.put_u32("at_turn", *at_turn);
+            members.put_text("tool", tool);
+            members.put_optional("args", args.clone().map(Value::Object));
+            members.put_optional("exit", exit.map(Value::Integer));
+            members.put_optional("output", output.clone().map(Value::String));
         }
         Event::Claim {
-            id,
             hypothesis,
             result,
             consumes,
             supersedes,
+            ..
         } => {
-            put("id", Value::String(id.clone()));
-            put("hypothesis", Value::String(hypothesis.clone()));
-            put("result", Value::String(result.tag().to_owned()));
-            put("consumes", artifacts_value(consumes));
-            if let Some(superseded) = supersedes {
-                put("supersedes", Value::String(superseded.clone()));
-            }
+            members.put_text("hypothesis", hypothesis);
+            members.put_text("result", result.tag());
+            members.put("consumes", artifacts_value(consumes));
+            members.put_optional("supersedes", supersedes.clone().map(Value::String));
         }
         Event::Summary {
             turns,
             prefill_tokens_total,
             product_sha256,
         } => {
-            put("turns", Value::Integer(i64::from(*turns)));
-            put("prefill_tokens_total", integer(*prefill_tokens_total));
-            put("product_sha256", Value::String(product_sha256.clone()));
+            members.put_u32("turns", *turns);
+            members.put_count("prefill_tokens_total", *prefill_tokens_total);
+            members.put_text("product_sha256", product_sha256);
         }
     }
-    members
+    members.0
 }
 
 /// The artifacts a claim consumes, as the value space.
@@ -1779,6 +1913,90 @@ mod tests {
             "the sampler's exact decimal must come back as written: {rendered}"
         );
         assert!(!rendered.contains("0.699"), "a float crept in: {rendered}");
+    }
+
+    // The archive rows. A record that keeps the texts can be replayed; one
+    // that does not is still a record. Both spellings must survive a round
+    // trip, and the empty payload most of all.
+    #[test]
+    fn archive_rows_keep_their_payloads_through_a_round_trip() {
+        let source = record(concat!(
+            r#"{"record":"turn","index":1,"prefill_tokens":10}"#,
+            "\n",
+            r#"{"record":"request","id":"q1","lane":"main","text":"list the tree"}"#,
+            "\n",
+            r#"{"record":"response","id":"a1","to_request":"q1","output_tokens":0,"text":""}"#,
+            "\n",
+            r#"{"record":"tool_call","id":"t1","at_turn":1,"tool":"bash","args":{"command":"ls -la"},"exit":0,"output":""}"#,
+            "\n",
+            r#"{"record":"tool_call","id":"t2","at_turn":1,"tool":"bash","args":{},"exit":127,"output":"xyzzy: not found"}"#,
+            "\n",
+        ));
+        let parsed = parse(&source).expect("archive rows are record rows");
+        let again = parse(&render(&parsed)).expect("a rendering is itself a record");
+        assert_eq!(parsed, again);
+        assert!(
+            matches!(
+                &parsed.events[3],
+                Event::Response { text: Some(text), .. } if text.is_empty()
+            ),
+            "an empty answer is a recorded answer, not a missing one"
+        );
+        assert!(matches!(
+            &parsed.events[4],
+            Event::ToolCall { exit: Some(0), output: Some(output), args: Some(args), .. }
+                if output.is_empty() && args.contains_key("command")
+        ));
+        assert!(matches!(
+            &parsed.events[5],
+            Event::ToolCall { exit: Some(127), args: Some(args), .. } if args.is_empty()
+        ));
+    }
+
+    #[test]
+    fn a_ledger_row_without_payloads_is_still_a_record() {
+        let source = record(concat!(
+            r#"{"record":"turn","index":1,"prefill_tokens":10}"#,
+            "\n",
+            r#"{"record":"tool_call","id":"t1","at_turn":1,"tool":"bash"}"#,
+            "\n",
+        ));
+        let parsed = parse(&source).expect("a ledger is a record");
+        assert!(matches!(
+            &parsed.events[2],
+            Event::ToolCall {
+                args: None,
+                exit: None,
+                output: None,
+                ..
+            }
+        ));
+        assert!(
+            !render(&parsed).contains("args"),
+            "an absent payload renders as absent, never as an empty one"
+        );
+    }
+
+    #[test]
+    fn a_payload_of_the_wrong_type_is_refused() {
+        for row in [
+            r#"{"record":"tool_call","id":"t1","at_turn":1,"tool":"bash","args":"ls"}"#,
+            r#"{"record":"tool_call","id":"t1","at_turn":1,"tool":"bash","exit":"0"}"#,
+            r#"{"record":"tool_call","id":"t1","at_turn":1,"tool":"bash","output":0}"#,
+            r#"{"record":"response","id":"a1","to_request":"q1","output_tokens":0,"text":["no"]}"#,
+        ] {
+            let source = record(&format!(
+                "{{\"record\":\"turn\",\"index\":1,\"prefill_tokens\":10}}\n\
+                 {{\"record\":\"request\",\"id\":\"q1\",\"lane\":\"main\"}}\n{row}\n"
+            ));
+            assert!(
+                matches!(
+                    parse(&source),
+                    Err(ParseError::Schema(SchemaError::WrongType { .. }))
+                ),
+                "{row} was not refused as the wrong type"
+            );
+        }
     }
 
     #[test]

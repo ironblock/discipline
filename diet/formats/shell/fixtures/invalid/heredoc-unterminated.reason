@@ -1,0 +1,2 @@
+A heredoc whose delimiter never arrives. The body would be everything to
+the end of input, and the shell would have complained.

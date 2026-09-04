@@ -1,0 +1,42 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [
+                  {
+                    "descriptor": "1",
+                    "fd": 2,
+                    "op": ">&"
+                  },
+                  {
+                    "file": {
+                      "literal": true,
+                      "text": "out.txt"
+                    },
+                    "op": ">"
+                  }
+                ],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "cargo"
+                  },
+                  {
+                    "literal": true,
+                    "text": "test"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

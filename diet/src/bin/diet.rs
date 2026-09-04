@@ -38,6 +38,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("parse-interview", "interview"),
     ("check-record", "record"),
     ("check-regimen", "regimen"),
+    ("parse-shell", "shell"),
 ];
 
 fn usage() -> String {

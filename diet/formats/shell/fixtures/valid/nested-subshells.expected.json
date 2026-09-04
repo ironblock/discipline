@@ -1,0 +1,118 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "subshell": [
+                {
+                  "background": false,
+                  "chain": [
+                    {
+                      "pipeline": [
+                        {
+                          "simple": {
+                            "assignments": [],
+                            "redirections": [],
+                            "words": [
+                              {
+                                "literal": true,
+                                "text": "cd"
+                              },
+                              {
+                                "literal": true,
+                                "text": "a"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "join": "and",
+                      "pipeline": [
+                        {
+                          "subshell": [
+                            {
+                              "background": false,
+                              "chain": [
+                                {
+                                  "pipeline": [
+                                    {
+                                      "simple": {
+                                        "assignments": [],
+                                        "redirections": [],
+                                        "words": [
+                                          {
+                                            "literal": true,
+                                            "text": "cd"
+                                          },
+                                          {
+                                            "literal": true,
+                                            "text": "b"
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "background": false,
+                              "chain": [
+                                {
+                                  "pipeline": [
+                                    {
+                                      "simple": {
+                                        "assignments": [],
+                                        "redirections": [],
+                                        "words": [
+                                          {
+                                            "literal": true,
+                                            "text": "pwd"
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "background": false,
+                  "chain": [
+                    {
+                      "pipeline": [
+                        {
+                          "simple": {
+                            "assignments": [],
+                            "redirections": [],
+                            "words": [
+                              {
+                                "literal": true,
+                                "text": "pwd"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

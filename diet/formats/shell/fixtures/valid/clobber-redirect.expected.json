@@ -1,0 +1,41 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [
+                  {
+                    "file": {
+                      "literal": true,
+                      "text": ".commit"
+                    },
+                    "op": ">|"
+                  }
+                ],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "git"
+                  },
+                  {
+                    "literal": true,
+                    "text": "rev-parse"
+                  },
+                  {
+                    "literal": true,
+                    "text": "HEAD"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

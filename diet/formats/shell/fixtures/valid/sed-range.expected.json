@@ -1,0 +1,37 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "sed"
+                  },
+                  {
+                    "literal": true,
+                    "text": "-n"
+                  },
+                  {
+                    "literal": true,
+                    "text": "80,160p"
+                  },
+                  {
+                    "literal": true,
+                    "text": "diet/src/object.rs"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

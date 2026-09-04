@@ -1,0 +1,1 @@
+grep x <<< "some text"

@@ -1,0 +1,4 @@
+A tool call's arguments are an object, one member per argument, so the
+mechanical lane can read `command` or `path` by name. A bare string is the
+harness's own rendering of the call, and reading it would mean guessing at
+which argument it was.

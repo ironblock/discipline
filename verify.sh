@@ -32,7 +32,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results regimen metadata hygiene pages ci history parity)
+readonly CHECKS=(fmt clippy test library results regimen metadata hygiene pages ci history injections parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -182,6 +182,13 @@ check_ci() { python3 scripts/check-ci-coverage.py; }
 # pattern table the file gate uses. A file carrying a forbidden shape can be
 # fixed with a commit; a commit message carrying one is permanent.
 check_history() { python3 scripts/check-history.py; }
+
+# Every injection in this file changes the tree it is run against. A verdict
+# is worth what the fault behind it cost, so an injection is proven to change
+# something before the RED it produces counts as anything. This runs on every
+# invocation and not only in --selftest: an inert injection is introduced by
+# an edit, and the edit is what should fail.
+check_injections() { python3 scripts/check-injections.py; }
 
 # The fault-migration manifest defines what parity means for the replacement
 # gate. A manifest that has drifted from this script defines the wrong parity.
@@ -681,6 +688,138 @@ EOF
 # The CLI's exit codes, its stdout, and which format sits behind which verb.
 # Three mutations of this shape survived cargo test, verify.sh AND --selftest
 # before diet/tests/cli.rs existed: nothing ran the program.
+# A subshell read as a group. The scoping the grammar exists to preserve --
+# `cd a; (cd b; ls); pwd` ending in `a` -- is gone, and every consumer that
+# asked which state a bracketed list ran against is told the wrong one.
+inject_shell_subshell_as_group() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "        Rule::subshell => nested_list(&inner).map(Command::Subshell),\n"
+new = "        Rule::subshell => nested_list(&inner).map(Command::Group),\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# `|&` read as a plain pipe. The shell sends stderr down that pipe; a reader
+# that drops the duplication reports stderr as having gone nowhere.
+inject_shell_stderr_pipe_flat() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Rule::pipe if inner.as_str().len() == 2 => match commands.last_mut() {"
+new = "            Rule::pipe if inner.as_str().len() == 99 => match commands.last_mut() {"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Every expansion reported literal. `cd $DIR` then names a directory called
+# `$DIR`, and the lane that trusts the flag tracks a path that never existed.
+inject_shell_expansion_literal() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "    Ok(inner.as_rule() == Rule::dollar_alone)\n"
+new = "    let _ = inner;\n    Ok(true)\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The producer read as the last command WRITTEN rather than the one whose
+# output the line carries. `cargo test | tail -15` is then a `tail` run, and
+# every routing decision downstream of it is about the wrong tool.
+inject_shell_producer_is_last_written() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "        match tail.pipeline.first()? {\n"
+new = "        match tail.pipeline.last()? {\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# One row dropped from the operator table. `>|` then has no spelling and no
+# reading, so a line that truncates a file parses as something else or not at
+# all -- and the table was, until this fault existed, guarded only by a test
+# that iterated it.
+inject_shell_operator_table_row_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "        (Self::Clobber, \">|\"),\n"
+new = ""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# `<<-` recorded as the operator and read as a plain heredoc. The body then
+# carries the leading tabs the shell strips before the command ever sees them,
+# so the recorded input is not the input that ran.
+inject_shell_heredoc_strip_keeps_tabs() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "        out.push_str(line.trim_start_matches('\\t'));\n"
+new = "        out.push_str(line);\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The command word counted among its own operands. The mechanical lane derives
+# the files a turn touched from the operands, so `rm -rf build` reports a file
+# called `rm`.
+inject_shell_command_word_is_an_operand() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "        self.words.get(1..).unwrap_or(&[])\n"
+new = "        &self.words\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# An empty payload read as an absent one. The silence collapse the ablation
+# measures is an answer of no characters; a record that turns it into a
+# missing field reports the worst case as missing data.
+inject_record_empty_payload_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """) -> Result<Option<String>, ParseError> {
+    match members.remove(field) {
+        Some(Value::String(text)) => Ok(Some(text)),"""
+new = """) -> Result<Option<String>, ParseError> {
+    match members.remove(field) {
+        Some(Value::String(text)) if text.is_empty() => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text)),"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -911,6 +1050,24 @@ inject_history() {
   printf 'x\n' >> pages/index.html
   git add --all
   seed_commit --message "carries $(printf '%s%s' 'DIE' '-9001') forward"
+}
+
+# An injection that changes nothing. This is the whole failure the
+# `injections` gate exists for: a body whose anchor no longer matches the
+# file, or one a line-based merge spliced into silence, still reports its
+# seeded case RED -- because the gate it runs was already failing, or because
+# it was going to fail anyway -- and proves nothing about the guard it names.
+inject_inert_injection() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+old = "inject_history_no_base() {\n"
+new = "inject_that_changes_nothing() {\n  :\n}\n\ninject_history_no_base() {\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
 }
 
 inject_history_no_base() {
@@ -1218,6 +1375,24 @@ selftest() {
     'was not named as one'
   seeded_case "a field kind nothing covers"           test     inject_field_kind_variant \
     'non-exhaustive patterns'
+  seeded_case "a subshell read as a group"            test     inject_shell_subshell_as_group \
+    'the bracketed list was not read as a subshell'
+  seeded_case "a stderr pipe read as a plain pipe"    test     inject_shell_stderr_pipe_flat \
+    'did not become the duplication it abbreviates'
+  seeded_case "an expanding word reported literal"    test     inject_shell_expansion_literal \
+    'a word the shell would expand was reported literal'
+  seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
+    'an empty answer is a recorded answer, not a missing one'
+  seeded_case "the producer read as the last command" test     inject_shell_producer_is_last_written \
+    'produces its output with'
+  seeded_case "an operator dropped from the table"    test     inject_shell_operator_table_row_dropped \
+    'the table gained or lost an operator'
+  seeded_case "a stripping heredoc that keeps tabs"   test     inject_shell_heredoc_strip_keeps_tabs \
+    'did not strip the tabs the shell strips'
+  seeded_case "the command word read as an operand"   test     inject_shell_command_word_is_an_operand \
+    'the command word is not one of its own operands'
+  seeded_case "an injection that changes nothing"     injections inject_inert_injection \
+    'inject_that_changes_nothing'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

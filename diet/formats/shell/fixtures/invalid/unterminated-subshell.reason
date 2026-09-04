@@ -1,0 +1,3 @@
+A subshell that never closes. Whether `ls` ran against the copy or the
+shell itself is exactly the question the bracket answers, and it is not
+answered.

@@ -1,0 +1,7 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"a-model","quantization":"q4","sampler":{"seed":7},"reasoning":"on","hardware":"one-gpu"}}}
+{"record":"turn","index":1,"prefill_tokens":900}
+{"record":"request","id":"q1","lane":"main","text":"Run the suite under the memory cap, then the gate."}
+{"record":"tool_call","id":"t1","at_turn":1,"tool":"bash","args":{"command":"cargo test --workspace"},"exit":137,"output":"error: process didn't exit successfully (signal: 9, SIGKILL: kill)"}
+{"record":"tool_call","id":"t2","at_turn":1,"tool":"bash","args":{"command":"./verify.sh --selftest"},"exit":-1,"output":""}
+{"record":"response","id":"a1","to_request":"q1","output_tokens":30,"text":"The suite was killed at 137 and the gate never started."}
+{"record":"summary","turns":1,"prefill_tokens_total":900,"product_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}

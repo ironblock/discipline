@@ -1,0 +1,109 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "cd"
+                  },
+                  {
+                    "literal": true,
+                    "text": "a"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "subshell": [
+                {
+                  "background": false,
+                  "chain": [
+                    {
+                      "pipeline": [
+                        {
+                          "simple": {
+                            "assignments": [],
+                            "redirections": [],
+                            "words": [
+                              {
+                                "literal": true,
+                                "text": "cd"
+                              },
+                              {
+                                "literal": true,
+                                "text": "b"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "background": false,
+                  "chain": [
+                    {
+                      "pipeline": [
+                        {
+                          "simple": {
+                            "assignments": [],
+                            "redirections": [],
+                            "words": [
+                              {
+                                "literal": true,
+                                "text": "ls"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "pwd"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
