@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 129
+red_faults = 146
 mechanics_assertions = 27
 migrated = 0
 
@@ -407,6 +407,158 @@ label = "an empty payload read as absent"
 failure_class = "record.payload-dropped"
 legacy_signature = "an empty answer is a recorded answer, not a missing one"
 migrated = false
+
+[[fault]]
+id = "test.sense_cosine_unnormalised"
+kind = "seeded-gate"
+check = "test"
+label = "a cosine that forgot its second norm"
+failure_class = "sense.similarity-unnormalised"
+legacy_signature = "cosine of a vector with itself was not one"
+migrated = false
+
+[[fault]]
+id = "test.sense_contrastive_ignores_negative"
+kind = "seeded-gate"
+check = "test"
+label = "contrastive scoring that ignores the negative sense"
+failure_class = "sense.contrast-dropped"
+legacy_signature = "the contrastive score ignored the negative sense"
+migrated = false
+
+[[fault]]
+id = "test.sense_null_labels_unshuffled"
+kind = "seeded-gate"
+check = "test"
+label = "a null whose labels are never shuffled"
+failure_class = "sense.null-not-at-chance"
+legacy_signature = "d-prime on a shuffled-label null was far from zero"
+migrated = false
+
+[[fault]]
+id = "test.sense_p_without_floor"
+kind = "seeded-gate"
+check = "test"
+label = "a bootstrap p with no attainable floor"
+failure_class = "sense.p-without-floor"
+legacy_signature = "a bootstrap p-value came without its attainable floor"
+migrated = false
+
+[[fault]]
+id = "test.sense_metric_fixture_removed"
+kind = "seeded-gate"
+check = "test"
+label = "a metric whose failure fixture is gone"
+failure_class = "capture.instrument-never-failed"
+legacy_signature = "no failure fixture, so it can never be reported"
+migrated = false
+
+[[fault]]
+id = "test.sense_register_source_mislabelled"
+kind = "seeded-gate"
+check = "test"
+label = "a register mislabelled at its source"
+failure_class = "sense.register-source-mislabelled"
+legacy_signature = "and a row says otherwise"
+migrated = false
+
+[[fault]]
+id = "test.sense_register_unnamed_file"
+kind = "seeded-gate"
+check = "test"
+label = "a file in the register naming nothing"
+failure_class = "sense.register-unclassified-file"
+legacy_signature = "not a declared sidecar"
+migrated = false
+
+[[fault]]
+id = "test.sense_provenance_join_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "a mined row nobody can trace"
+failure_class = "sense.provenance-untraced"
+legacy_signature = "a row nobody can trace was accepted"
+migrated = false
+
+[[fault]]
+id = "test.record_data_line_two_lines"
+kind = "seeded-gate"
+check = "test"
+label = "two data lines read as one"
+failure_class = "record.line-silently-truncated"
+legacy_signature = "two lines were read as one, and the second was lost"
+migrated = false
+
+[[fault]]
+id = "test.sense_controls_ignore_register"
+kind = "seeded-gate"
+check = "test"
+label = "controls that never look at the register"
+failure_class = "sense.controls-not-compared"
+legacy_signature = "a register row reached the top control and the controls passed"
+migrated = false
+
+[[fault]]
+id = "test.sense_bootstrap_never_resamples"
+kind = "seeded-gate"
+check = "test"
+label = "a bootstrap that never resamples"
+failure_class = "sense.bootstrap-not-resampled"
+legacy_signature = "every resample was the observed difference"
+migrated = false
+
+[[fault]]
+id = "test.sense_failure_reading_moved"
+kind = "seeded-gate"
+check = "test"
+label = "a failure reading off the worst reading"
+failure_class = "capture.instrument-never-failed"
+legacy_signature = "is the worst the metric can say"
+migrated = false
+
+[[fault]]
+id = "test.sense_pre_registration_emptied"
+kind = "seeded-gate"
+check = "test"
+label = "a pre-registration with nothing in it"
+failure_class = "sense.endpoint-unregistered"
+legacy_signature = "the primary endpoint is not the endpoint that was registered"
+migrated = false
+
+[[fault]]
+id = "test.sense_gate_reads_the_id"
+kind = "seeded-gate"
+check = "test"
+label = "a lexical gate asked about the id"
+failure_class = "sense.gate-on-the-wrong-field"
+legacy_signature = "the gate did not decide on the row"
+migrated = false
+
+[[fault]]
+id = "test.sense_d_prime_unpooled"
+kind = "seeded-gate"
+check = "test"
+label = "a separation over one class spread"
+failure_class = "sense.separation-unpooled"
+legacy_signature = "d-prime was standardised by one class"
+migrated = false
+
+[[fault]]
+id = "test.sense_null_band_widened"
+kind = "seeded-gate"
+check = "test"
+label = "a null band widened past a finding"
+failure_class = "sense.null-not-at-chance"
+legacy_signature = "bands are not the numbers they were registered as"
+migrated = false
+
+[[fault]]
+id = "test.sense_reported_value_constant"
+kind = "seeded-gate"
+check = "test"
+label = "a reported metric that reports a constant"
+failure_class = "sense.record-detached-from-measurement"
+legacy_signature = "the record of a metric is not the numbers the metric produced"
 
 [[fault]]
 id = "test.mechanical_subshell_leaks"
