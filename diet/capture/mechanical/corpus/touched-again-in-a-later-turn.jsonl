@@ -1,0 +1,5 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"a-model","quantization":"q4","sampler":{"seed":7},"reasoning":"on","hardware":"one-gpu"}}}
+{"record":"turn","index":1,"prefill_tokens":100}
+{"record":"tool_call","id":"t1","at_turn":1,"tool":"bash","args":{"cwd":"/work","command":"cat notes.md"},"exit":0,"output":"# notes\n"}
+{"record":"turn","index":2,"prefill_tokens":140}
+{"record":"tool_call","id":"t2","at_turn":2,"tool":"bash","args":{"cwd":"/work","command":"rm notes.md"},"exit":0,"output":""}

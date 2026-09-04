@@ -1,0 +1,15 @@
+{
+  "cwd": {
+    "kind": "path",
+    "path": "/work"
+  },
+  "failures": [],
+  "files": {
+    "/work/notes.md": {
+      "event": "t2",
+      "kind": "deleted",
+      "resolved": true,
+      "turn": 2
+    }
+  }
+}
