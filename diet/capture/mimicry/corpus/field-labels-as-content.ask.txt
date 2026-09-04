@@ -1,0 +1,4 @@
+Three fields, please: DECISION, LEARNED, STUCK.
+What did this turn decide, what did it teach you, and what stopped you?
+
+Answer from this turn alone.

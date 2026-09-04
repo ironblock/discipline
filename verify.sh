@@ -748,6 +748,77 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# Mimicry claimed on any echo at all. An answer that quotes one line of its
+# ask as evidence and then says something is then condemned for the quote, and
+# a detector whose precision is gone takes genuine content out of the object.
+inject_mimicry_any_echo() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = "    if of > 0 && every_field_inert && echoed > 0 {\n"
+new = "    let _ = every_field_inert;\n    if of > 0 && echoed > 0 {\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The placeholder table emptied. Every template slot handed back unfilled then
+# reads as content, which is the shape the tolerant parser captured as entries.
+inject_mimicry_placeholders_emptied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = """    pub const ALL: &'static [Self] = &[
+        Self::Angle,
+        Self::Square,
+        Self::Brace,
+        Self::Ellipsis,
+        Self::ToBeDecided,
+        Self::ToDo,
+        Self::FillIn,
+    ];"""
+new = "    pub const ALL: &'static [Self] = &[];"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A third fork. Two forks spent on one non-answer is the budget; a loop that
+# keeps re-asking spends the drive's fork economics on a model that has already
+# said twice that it has nothing.
+inject_mimicry_third_fork() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = "pub const FORK_BUDGET: u32 = 2;\n"
+new = "pub const FORK_BUDGET: u32 = 3;\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Mimicry admitted as content. The one place the outcome gates the object is
+# widened to everything that parsed, so the ask returns to the object as fact
+# attributed to the model.
+inject_mimicry_recorded_as_content() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = "        matches!(self, Self::Answered { .. })\n"
+new = "        !matches!(self, Self::Unreadable { .. })\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1293,6 +1364,14 @@ selftest() {
     'a word the shell would expand was reported literal'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
     'an empty answer is a recorded answer, not a missing one'
+  seeded_case "mimicry claimed on any echo at all"    test     inject_mimicry_any_echo \
+    'the detector is precision-first'
+  seeded_case "the placeholder table emptied"         test     inject_mimicry_placeholders_emptied \
+    'so a template slot handed back reads as content'
+  seeded_case "a third fork on a mimicked ask"        test     inject_mimicry_third_fork \
+    'a third fork fired on an ask already mimicked twice'
+  seeded_case "mimicry recorded as a content entry"   test     inject_mimicry_recorded_as_content \
+    'a mimicked ask reached the working object as content'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

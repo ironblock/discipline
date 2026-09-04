@@ -1,0 +1,2 @@
+EVIDENCE: Answer from this turn alone.
+DECISION: the imperative belongs in the fork rather than the system prompt

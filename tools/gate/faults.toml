@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 111
+red_faults = 115
 mechanics_assertions = 27
 migrated = 0
 
@@ -361,6 +361,42 @@ check = "test"
 label = "an empty payload read as absent"
 failure_class = "record.payload-dropped"
 legacy_signature = "an empty answer is a recorded answer, not a missing one"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_any_echo"
+kind = "seeded-gate"
+check = "test"
+label = "mimicry claimed on any echo at all"
+failure_class = "mimicry.detector-imprecise"
+legacy_signature = "the detector is precision-first"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_placeholders_emptied"
+kind = "seeded-gate"
+check = "test"
+label = "the placeholder table emptied"
+failure_class = "mimicry.placeholder-unrecognised"
+legacy_signature = "so a template slot handed back reads as content"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_third_fork"
+kind = "seeded-gate"
+check = "test"
+label = "a third fork on a mimicked ask"
+failure_class = "mimicry.fork-budget-exceeded"
+legacy_signature = "a third fork fired on an ask already mimicked twice"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_recorded_as_content"
+kind = "seeded-gate"
+check = "test"
+label = "mimicry recorded as a content entry"
+failure_class = "mimicry.non-answer-captured"
+legacy_signature = "a mimicked ask reached the working object as content"
 migrated = false
 
 [[fault]]

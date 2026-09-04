@@ -1,0 +1,7 @@
+Fill each slot. Leave a slot alone if you have nothing for it.
+
+API_SURFACE: [names you touched]
+DECISION: {one sentence}
+LEARNED: …
+
+Answer from this turn alone.

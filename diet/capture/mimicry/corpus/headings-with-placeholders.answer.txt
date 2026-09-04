@@ -1,0 +1,3 @@
+DECISION: <what you decided>
+LEARNED: <what you learned>
+PLAN: <what you intend next>

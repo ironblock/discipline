@@ -1,0 +1,2 @@
+DECISION: read the corpus through the record's own reader rather than adding a second one
+PLAN: TBD

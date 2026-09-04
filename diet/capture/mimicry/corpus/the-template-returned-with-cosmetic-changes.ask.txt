@@ -1,0 +1,7 @@
+Fill in the template. Keep each field to one sentence.
+
+DECISION: what you decided this turn
+LEARNED: what you learned this turn
+PLAN: what you intend next
+
+Answer from this turn alone.
