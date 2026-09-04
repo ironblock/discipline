@@ -1097,6 +1097,21 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The sign let back onto a zero. `-0.0` is then a second spelling of `0.0`,
+# and a banked sampler temperature reads back as a number nobody wrote.
+inject_record_negative_zero_decimal() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/record/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = """decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
+new = """decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1662,28 +1677,42 @@ selftest() {
     'an empty answer is a recorded answer, not a missing one'
   seeded_case "a subshell that shares the parent state" test   inject_mechanical_subshell_leaks \
     'the subshell cd leaked into the parent'
+
   seeded_case "a failed cd applied anyway"            test     inject_mechanical_failed_cd_applied \
     'a failed cd moved the working directory'
+
   seeded_case "popd on an empty stack ignored"        test     inject_mechanical_popd_empty_ignored \
     'popd on an empty stack was silently ignored'
+
   seeded_case "the mechanical-noun table emptied"     test     inject_mechanical_lint_table_emptied \
     'a question about a mechanical fact went unflagged'
+
   seeded_case "a mechanical entry sent through the gate" test  inject_mechanical_entry_grounded \
     'a mechanical entry was dropped as if it needed grounding'
+
   seeded_case "a quoted substitution descended into"  test     inject_mechanical_quoted_substitution \
     'a single-quoted substitution was descended into'
+
   seeded_case "the mechanical lane renamed"           test     inject_mechanical_lane_renamed \
     'the lane was renamed'
+
   seeded_case "an option word read as a directory"    test     inject_mechanical_option_is_a_directory \
     'an option word was read as the directory it names'
+
   seeded_case "a flag value read as a file"           test     inject_mechanical_flag_value_is_a_file \
     'the lane read a file out of a flag.s value'
+
   seeded_case "an entry with the wrong verb"          test     inject_mechanical_entry_verb_swapped \
     'the entry used the wrong verb for what happened to the file'
+
   seeded_case "a pipeline whose members never run"    test     inject_mechanical_pipeline_skipped \
     'nothing in the pipeline ran'
+
   seeded_case "a write lost to a read of the same path" test   inject_mechanical_write_lost_to_a_read \
     'a write was lost to a read of the same path in the same call'
+
+  seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
+    'was constructed, and the grammar would not read it back'
   seeded_case "the producer read as the last command" test     inject_shell_producer_is_last_written \
     'produces its output with'
   seeded_case "an operator dropped from the table"    test     inject_shell_operator_table_row_dropped \
