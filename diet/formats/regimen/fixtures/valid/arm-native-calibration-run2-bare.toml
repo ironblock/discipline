@@ -1,0 +1,121 @@
+# Level-2 experiment, Run 2 (REV-9): the BARE control arm — native GENERATIVE compaction (PIN 4b).
+#
+# Rendered as a regimen v1 conformance fixture of the arm as written. Bindings the
+# grammar cannot express are not carried and not approximated:
+#   not carried: expected_absent = ["--cache-ram", "-cram"] — the regimen grammar has no array
+#   not carried: [serving.flags] — the regimen grammar has no nested table header
+# The serving header itself is carried, empty, as the arm writes it; only those two
+# members are not.
+#
+# Transcribed from the REV-9 Run 2 preregistration, §4. The important sentence:
+# "This arm is a *live system*, not a static control — its variance is a first-class
+# product." Run 1's bare arm replayed frozen Pi summaries; this one generates its own
+# at every seam, so each of the three bare drives produces its own summaries and the
+# arm's run-to-run spread is measured WITHIN the fire (§5, k=3) instead of inferred
+# across fires. That spread is the number REV-8 §1 discovered was missing when bare
+# moved 0.75 -> 1.25 between Run 1 and Run 1' and could not be attributed.
+name = "l2-bare-run2"
+
+[sampler]
+# §4: "Same sampler envelope, thinking-on." Identical to the run 2 diet arm — the
+# arms must differ ONLY in the compaction mechanism, or the comparison measures the
+# sampler too.
+temperature = 0.6
+top_k = 20
+top_p = 1.0                  # DECLARED DEVIATION from the Qwen3.6-27B card, which asks
+                             # for 0.95 in thinking/precise-coding mode (per the sampler card notes).
+                             # KEPT because §11 pins "the committed shipping default, exactly" —
+                             # changing it would make Run 2 a measurement of something other than
+                             # this system. top_p=1.0 disables nucleus truncation, so under
+                             # thinking-on it admits a longer tail than the card intends; if Run 2
+                             # shows rambling reasoning, look here first. Candidate finding, not a
+                             # silent difference.
+min_p = 0.0
+repeat_penalty = 1.0
+presence_penalty = 0.0
+frequency_penalty = 0.0
+max_tokens = 8000
+preserve_thinking = true
+enable_thinking = true       # §4: thinking-ON (Run 1's bare arm was OFF)
+interview_thinking = true    # moot here — this arm has no interview forks — but set
+                             # to match the diet arm so a diff shows only the
+                             # mechanism difference, which is the point of the pair
+
+[limits]
+max_steps = 30
+turn_timeout_s = 2400
+tool_timeout_s = 120
+
+# NO [triggers] TABLE. This arm carries no diet lane at all: `enabled` defaults
+# false, so the drive loop emits only the 7-kind main-lane spine plus the control
+# seams. `[triggers] enabled` and `[native_compaction]` are the opposite poles of
+# the A/B, and setting both would make this neither arm.
+
+# The arm's serving rationale, kept: it matches the parity declaration's reference
+# exactly (identity, no deviation needed); run 2 relies on the --cache-ram compiled
+# default, unchanged from run 1. Its one binding (an array) and its nested table are
+# not carried; see the header.
+[serving]
+
+[native_compaction]
+every_turns = 2
+first_at = 2                 # REV-9.1 ruling: seams at [2,4,6,8,10,12] — the
+                             # SAME positions the diet lane fires at, so both arms
+                             # enter the turn-13 probe with ZERO raw un-compacted
+                             # turns and the probe measures mechanism-mediated recall
+                             # rather than raw-context residue.
+                             #
+                             # Was `1`, inherited from the Run-1 arm — a Pi fossil.
+                             # Odd turns were correct when this arm REPLAYED Pi's
+                             # archived summaries, so each landed at the position it
+                             # was generated at; PIN 4b's generate mode has no
+                             # archived position to match, and the value outlived its
+                             # reason. It shipped in Run 2's first fire and put bare
+                             # into the graded turn holding one more raw turn than
+                             # diet, plus a post-answer seam at 13 measuring nothing.
+                             #
+                             # NOT asserted by comment this time — the previous
+                             # comment here claimed "identical to the diet arm" and
+                             # was simply false. `check_seam_cadence` verifies the
+                             # realized positions; it is §6.2's entry in VALIDITY_MAP.
+generate = true              # §4 / PIN 4b: the model writes its own summary at each
+                             # seam under the committed compaction prompt, injected
+                             # via the same eviction path a replayed summary uses —
+                             # "indistinguishable to every downstream check by
+                             # construction" (the harness's agent loop), so prefix digests, the cache
+                             # tripwire and the seam checks all cover it unchanged.
+                             #
+                             # NOTE A DELIBERATE DEPARTURE FROM THE CODE'S ORIGINAL
+                             # INTENT, recorded rather than glossed: the PIN 4b
+                             # implementation authored `generate` as a ONE-TIME PREP PASS
+                             # whose output was to be frozen into a summaries_file for a
+                             # separate replay arm ("never a graded/timed fire", the harness's arm loader).
+                             # REV-9 §4 supersedes that for Run 2 — a frozen-and-replayed
+                             # summary set would give the bare arm ZERO within-fire
+                             # summarization variance, which is exactly the quantity
+                             # §4 makes a first-class product. The runtime path is
+                             # unchanged and fully capable; only the intent moved.
+
+generate_thinking = true     # A READING OF §4, NOT A SETTLED RULING — flip this one
+                             # line to change it. §4's "thinking-on" plainly covers
+                             # the main lane; whether it also covers the seam
+                             # summarization call is ambiguous in the text. FOR true:
+                             # summarization is generation-and-judgment work, and this
+                             # program measured judgment collapsing under no-think
+                             # while extraction survived it, so a thinking-off
+                             # summarizer is a deliberately handicapped control and
+                             # would understate the incumbent. FOR false:
+                             # comparability with Run 1's replayed summaries, which
+                             # Pi produced under thinking-off. Chose true because Run
+                             # 2 compares against nothing (§1), so cross-fire
+                             # comparability buys nothing here, while handicapping
+                             # the control would bias the one comparison §8.3 does
+                             # report. The knob exists because the fork previously
+                             # hardcoded thinking-off, making §4 inexpressible.
+
+# NO summaries / summaries_file. `Arm::load` REJECTS generate + summaries together
+# ("a generate-mode arm has nothing to replay"), and the fire orchestration's summaries validation
+# is correctly skipped when no summaries_file is declared. Nothing yet asserts
+# generate=true positively for a Run-2 bare arm — the fire's own §6.4 validity check
+# (each seam's generative compaction produced non-empty output) is what catches a
+# misconfigured arm, at drive completion, fail-fast.

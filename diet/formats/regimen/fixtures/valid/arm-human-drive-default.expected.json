@@ -1,0 +1,104 @@
+{
+  "capture": {
+    "string": "deferred"
+  },
+  "limits": {
+    "table": {
+      "capture_timeout_s": {
+        "integer": 300
+      },
+      "max_steps": {
+        "integer": 4294967295
+      },
+      "tool_timeout_s": {
+        "integer": 120
+      },
+      "turn_timeout_s": {
+        "integer": 2400
+      }
+    }
+  },
+  "name": {
+    "string": "die24-human"
+  },
+  "sampler": {
+    "table": {
+      "enable_thinking": {
+        "boolean": true
+      },
+      "frequency_penalty": {
+        "float": 0.0
+      },
+      "interview_thinking": {
+        "boolean": true
+      },
+      "max_tokens": {
+        "integer": 8000
+      },
+      "min_p": {
+        "float": 0.0
+      },
+      "presence_penalty": {
+        "float": 0.0
+      },
+      "preserve_thinking": {
+        "boolean": true
+      },
+      "repeat_penalty": {
+        "float": 1.0
+      },
+      "temperature": {
+        "float": 0.6
+      },
+      "top_k": {
+        "integer": 20
+      },
+      "top_p": {
+        "float": 1.0
+      }
+    }
+  },
+  "stream": {
+    "boolean": true
+  },
+  "triggers": {
+    "table": {
+      "enabled": {
+        "boolean": true
+      },
+      "evidence_threshold": {
+        "integer": 3000
+      },
+      "extract_threshold": {
+        "integer": 1500
+      },
+      "extraction": {
+        "boolean": true
+      },
+      "extraction_minimal_prefix": {
+        "boolean": true
+      },
+      "open_next_every": {
+        "integer": 10
+      },
+      "ratify": {
+        "boolean": true
+      },
+      "rationale": {
+        "boolean": false
+      },
+      "seam_every_turns": {
+        "integer": 0
+      },
+      "seam_on_request": {
+        "boolean": true
+      },
+      "supersede": {
+        "boolean": true
+      },
+      "trio_cooldown": {
+        "integer": 3
+      }
+    }
+  }
+}

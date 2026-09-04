@@ -1,0 +1,77 @@
+{
+  "limits": {
+    "table": {
+      "max_steps": {
+        "integer": 30
+      },
+      "tool_timeout_s": {
+        "integer": 120
+      },
+      "turn_timeout_s": {
+        "integer": 2400
+      }
+    }
+  },
+  "name": {
+    "string": "s5-ab3-diet-gemma"
+  },
+  "sampler": {
+    "table": {
+      "enable_thinking": {
+        "boolean": true
+      },
+      "interview_thinking": {
+        "boolean": true
+      },
+      "max_tokens": {
+        "integer": 4096
+      },
+      "preserve_thinking": {
+        "boolean": false
+      },
+      "temperature": {
+        "float": 1.0
+      },
+      "top_k": {
+        "integer": 64
+      },
+      "top_p": {
+        "float": 0.95
+      }
+    }
+  },
+  "triggers": {
+    "table": {
+      "audit_legacy_wording": {
+        "boolean": true
+      },
+      "enabled": {
+        "boolean": true
+      },
+      "evidence_threshold": {
+        "integer": 3000
+      },
+      "extract_threshold": {
+        "integer": 1500
+      },
+      "extraction": {
+        "boolean": true
+      },
+      "open_next_every": {
+        "integer": 10
+      },
+      "ratify": {
+        "boolean": true
+      },
+      "seam_every_turns": {
+        "integer": 2
+      },
+      "supersede": {
+        "boolean": true
+      },
+      "trio_cooldown": {
+        "integer": 3
+      }
+    }
+  }
+}

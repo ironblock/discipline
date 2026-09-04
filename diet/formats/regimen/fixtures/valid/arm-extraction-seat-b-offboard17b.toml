@@ -1,0 +1,58 @@
+# Extraction-seat bench — SEAT B: minimal-prefix fork on an OFFBOARD
+# small extractor (the return-to-Pi-topology seat: Pi production ran
+# extraction on a separate CPU-side Qwen3-1.7B via DIET_EXTRACT_URL, which is
+# why its drives never felt extraction slot contention).
+#
+# Regimen v1 conformance fixture of that arm as written. Two constructs in the
+# source are outside the v1 grammar and are not carried, not approximated:
+#   not carried: expected_absent = ["--cache-ram", "-cram"] — the regimen grammar has no arrays
+#   not carried: [serving.flags] — the regimen grammar has no nested tables (the source header has no bindings under it)
+# The [serving] header itself is kept, and is empty here for that reason.
+#
+# Identical to seat A (warm full-prefix fork on the main 27B) except the one
+# seat variable:
+# `extraction_minimal_prefix = true` sends the extraction fork as a
+# SELF-CONTAINED question (dogma EXTRACT_MINIMAL — source embedded, ZERO
+# session prefix), the only shape an offboard extractor with no shared cache
+# can serve. See seat A's header for the two shared seat-bench deviations
+# (never seam) and the shared-dogma caveat (this is NOT Pi's literal temp-0
+# JSON-grammar call — the FACT-line pipeline is held constant across seats).
+#
+# Fire-time env (the same opt-in envelope as `run`/`serve --drive`):
+#   DIET_BASE_URL=<production 27B>        # spine warm calls + interview forks
+#   DIET_ROUTE_EXTRACTION=1
+#   DIET_EXTRACT_URL=<CPU-side 1.7B llama-server>
+#   DIET_EXTRACT_MODEL_ID=<its model id>
+# The 1.7B server is a NEW CPU-side process at fire time (declared box touch;
+# VRAM untouched). The Qwen3-1.7B Q4_K_M GGUF is already on the box. Launch it
+# with enough ctx for EXTRACT_MINIMAL + the largest truncated tool output
+# (Pi's 6144-token window was the old bound; verify against the source log's
+# max output before launch, don't assume).
+name = "die45-seat-b-offboard17b"
+[sampler]
+temperature = 0.6
+top_k = 20
+top_p = 1.0
+max_tokens = 4096            # byte-matches the recorded on-wire params
+preserve_thinking = true
+enable_thinking = false
+interview_thinking = false
+[limits]
+max_steps = 30
+turn_timeout_s = 2400
+tool_timeout_s = 120
+[triggers]
+enabled = true
+evidence_threshold = 3000
+extract_threshold = 1500
+trio_cooldown = 3
+open_next_every = 10
+ratify = false               # seat-bench deviation: never seam (see seat A)
+seam_every_turns = 0
+supersede = true
+extraction = true
+extraction_minimal_prefix = true    # SEAT B: self-contained question, no prefix
+rationale = false
+
+[serving]
+# expected_absent (an array) is not carried; see the header of this file.

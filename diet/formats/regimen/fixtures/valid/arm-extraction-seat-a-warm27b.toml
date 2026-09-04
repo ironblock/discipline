@@ -1,0 +1,63 @@
+# The extraction-seat bench, seat A: warm full-prefix fork on the main
+# 27B (the validated native design; the current default topology).
+#
+# not carried: expected_absent = ["--cache-ram", "-cram"] — the regimen grammar has no arrays
+# not carried: [serving.flags] — the regimen grammar has no nested tables (the source opens it and binds nothing under it)
+#
+# Fired by `exercise replay-capture` against the recorded source session (the
+# `l2-diet` drive, recorded 2026-08-10): the spine replays byte-identically
+# from the record, ONLY the capture forks (and max_tokens=1 warm/probe calls)
+# touch the endpoint. Env: DIET_BASE_URL only — no offboarding.
+#
+# Everything below mirrors the source drive's own arm (`l2-diet`,
+# its level-2 arm definition) so the fork gates fire on the same
+# schedule the drive's did, with TWO deliberate deviations, identical across
+# all three seats:
+#
+#   - seam_every_turns = 0, ratify = false: the seat bench NEVER seams. The
+#     source drive's two seam evictions arrive via its recorded post-seam
+#     request arrays (the replay's turn-start spine reset); re-running audits
+#     would fire sampled seam forks that differ per seat run and pollute the
+#     probe physics. The experiment varies the extraction seat, not the seam
+#     machinery.
+#   - audit_legacy_wording dropped: moot with no seams.
+#
+# Interviews stay ON (the drive's own gates): the SAME gate config fires them
+# in every seat, so seat differences (A−B, A−C) isolate the extraction seat's
+# marginal cost. Same config does not mean identical output — the real fire
+# saw 60/60/56 interview forks (A/B/C; 4 extra supersede adjudications in A
+# and B), almost certainly temp-0.6 sampling variance across three
+# independent runs rather than a config divergence (results doc confounds).
+# NB neither seat A nor B reproduces Pi's
+# literal offboard call (temp-0, JSON-grammar `_extract_call`) — the FACT-line
+# dogma is held constant across seats so quality attributes to the seat
+# (model + prefix topology), not to divergent prompt/grammar.
+name = "die45-seat-a-warm27b"
+[sampler]
+temperature = 0.6
+top_k = 20
+top_p = 1.0
+max_tokens = 4096            # byte-matches the recorded on-wire params
+preserve_thinking = true
+enable_thinking = false
+interview_thinking = false
+[limits]
+max_steps = 30
+turn_timeout_s = 2400
+tool_timeout_s = 120
+[triggers]
+enabled = true
+evidence_threshold = 3000
+extract_threshold = 1500
+trio_cooldown = 3
+open_next_every = 10
+ratify = false               # seat-bench deviation: never seam (see header)
+seam_every_turns = 0
+supersede = true
+extraction = true
+extraction_minimal_prefix = false   # SEAT A: the warm full-prefix fork
+rationale = false
+
+# Same substrate expectation as the source drive's arm: the frozen production
+# config relies on the compiled --cache-ram default.
+[serving]

@@ -1,0 +1,36 @@
+# M1 floor suite (MacBook Pro M1 Max / oMLX), stage S5 capture smoke, the real drive: the diet arm ("s5-ab3-diet-gemma") of the A/B-3 diet-vs-bare capture smoke, Gemma 4 12B on oMLX; no date is stated in the arm
+# Every binding the arm declares is expressible in regimen v1; nothing is omitted.
+#
+# S5, diet arm — Gemma 4 12B / oMLX. Trigger thresholds are Pi's RAW
+# constants (the parity declaration [triggers]), an IDENTITY not a deviation, per
+# the level-2 experiments' own doctrine: never tune thresholds away from
+# Pi's values just to chase a target entry count. seam_every_turns=2 mirrors
+# the native harness's existing turn-count-cadence deviation from Pi's
+# ctx-threshold trigger (documented, not new).
+name = "s5-ab3-diet-gemma"
+
+[sampler]
+temperature = 1.0
+top_k = 64
+top_p = 0.95
+max_tokens = 4096
+preserve_thinking = false
+enable_thinking = true
+interview_thinking = true
+
+[limits]
+turn_timeout_s = 2400
+tool_timeout_s = 120
+max_steps = 30
+
+[triggers]
+enabled = true
+evidence_threshold = 3000
+extract_threshold = 1500
+trio_cooldown = 3
+open_next_every = 10
+seam_every_turns = 2
+supersede = true
+ratify = true
+audit_legacy_wording = true  # replay arm — reproduce THIS smoke's recorded archive wording (prefix digests hash the question text)
+extraction = true
