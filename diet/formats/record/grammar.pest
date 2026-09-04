@@ -49,6 +49,12 @@ value = { object | array | string | decimal | integer | boolean }
 // was the hole in it, on both sides of the point. A negative number is one
 // with a digit that is not zero, which for a decimal means either side of
 // the point may carry it.
+//
+// `ASCII_NONZERO_DIGIT` in the second alternative is a restatement, not the
+// enforcement: `"0"*` is greedy and pest does not backtrack a repetition, so
+// whatever follows it is already not a zero. It is spelled out because the
+// rule is about which digit may be nonzero, and a reader who narrowed `"0"*`
+// to `"0"?` with `ASCII_DIGIT` there would reopen the hole in silence.
 decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }
 negative_decimal = _{
     (nonzero ~ "." ~ ASCII_DIGIT+) | ("0" ~ "." ~ "0"* ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
