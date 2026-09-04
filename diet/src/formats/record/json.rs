@@ -7,11 +7,13 @@
 //! text means.
 
 use std::collections::BTreeMap;
+use std::error::Error;
 use std::fmt;
 
+use pest::Parser as _;
 use pest::iterators::Pair;
 
-use super::Rule;
+use super::{RecordParser, Rule};
 
 /// A value a record may carry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,6 +150,68 @@ pub fn object(pair: &Pair<'_, Rule>) -> Result<BTreeMap<String, Value>, ValueErr
         }
     }
     Ok(map)
+}
+
+/// Why a JSON Lines text could not be read as objects.
+#[derive(Debug)]
+pub enum LineError {
+    /// The text is not JSON Lines in the record's value space.
+    Syntax(Box<pest::error::Error<Rule>>),
+    /// A line parsed, and its value space could not be read.
+    Value(ValueError),
+}
+
+impl fmt::Display for LineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Syntax(err) => write!(f, "{err}"),
+            Self::Value(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl Error for LineError {}
+
+impl From<ValueError> for LineError {
+    fn from(err: ValueError) -> Self {
+        Self::Value(err)
+    }
+}
+
+/// Read a JSON Lines text as one object per line.
+///
+/// The record grammar already says what one line of JSON Lines may hold, and
+/// it is the only place in this crate that says it. The versioned data files
+/// that sit beside a record -- a clause table, a sense set, a vector cache --
+/// are the same value space with a different schema over them, and giving
+/// each of them its own reader is how a repository ends up with several
+/// answers to what a number is. This hands back the objects; what their keys
+/// mean is the caller's schema and not this file's.
+///
+/// # Errors
+///
+/// Returns [`LineError::Syntax`] when the text is not JSON Lines in the
+/// record's value space -- a `null`, an exponent, a binary float, an object
+/// spanning two lines -- and [`LineError::Value`] for a line the value space
+/// cannot decode: a duplicate key, an integer outside `i64`, an escape naming
+/// no character.
+pub fn objects(text: &str) -> Result<Vec<BTreeMap<String, Value>>, LineError> {
+    let document = RecordParser::parse(Rule::document, text)
+        .map_err(|err| LineError::Syntax(Box::new(err)))?
+        .next()
+        .ok_or(ValueError::Shape("a document with no content"))?;
+    let mut read = Vec::new();
+    for line in document.into_inner() {
+        if line.as_rule() != Rule::event_line {
+            continue;
+        }
+        let body = line
+            .into_inner()
+            .next()
+            .ok_or(ValueError::Shape("a line with no object"))?;
+        read.push(object(&body)?);
+    }
+    Ok(read)
 }
 
 /// Decode a `string` pair, resolving escapes.

@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 111
+red_faults = 114
 mechanics_assertions = 27
 migrated = 0
 
@@ -361,6 +361,33 @@ check = "test"
 label = "an empty payload read as absent"
 failure_class = "record.payload-dropped"
 legacy_signature = "an empty answer is a recorded answer, not a missing one"
+migrated = false
+
+[[fault]]
+id = "test.ablation_no_control"
+kind = "seeded-gate"
+check = "test"
+label = "the ablation's control arm dropped"
+failure_class = "ablation.control-missing"
+legacy_signature = "the control arm is missing: an ablation with no sentence-removed arm"
+migrated = false
+
+[[fault]]
+id = "test.ablation_silence_engages"
+kind = "seeded-gate"
+check = "test"
+label = "silence counted as engagement"
+failure_class = "ablation.endpoints-collapsed"
+legacy_signature = "counted as engagement and as silence at once"
+migrated = false
+
+[[fault]]
+id = "test.ablation_p_floor_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "a p reported without its floor"
+failure_class = "ablation.p-floor-omitted"
+legacy_signature = "a p reported without its attainable floor"
 migrated = false
 
 [[fault]]

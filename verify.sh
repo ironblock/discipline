@@ -748,6 +748,70 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The control arm dropped from the power set. An ablation whose control is
+# missing can rank its clauses against each other and cannot say that any of
+# them beats an ask with no imperative in it -- which is the one thing the
+# original result it is checking itself against established.
+inject_ablation_no_control() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = "    (0..count).map(Arm).collect()\n"
+new = "    (1..count).map(Arm).collect()\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Silence counted as engagement. The collapse case is an answer of nothing at
+# all, and a grader that reads it as engagement reports the worst outcome a
+# wording can buy as the best one.
+inject_ablation_silence_engages() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = "    matches!(grade(answer), Grade::Engaged)\n"
+new = "    matches!(grade(answer), Grade::Engaged | Grade::Silent)\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A p-value reported without its attainable floor. A sample size bounds the
+# smallest p it can produce; a p quoted at that bound with the bound stripped
+# off reads as a strength the run never had.
+inject_ablation_p_floor_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = """            "{}/{} against {}/{}: p {}, attainable floor {} over {} resamples",
+            self.successes_a,
+            self.pairs,
+            self.successes_b,
+            self.pairs,
+            self.p_value().fixed(P_DIGITS),
+            self.attainable_p_floor().fixed(P_DIGITS),
+            self.resamples,
+"""
+new = """            "{}/{} against {}/{}: p {} over {} resamples",
+            self.successes_a,
+            self.pairs,
+            self.successes_b,
+            self.pairs,
+            self.p_value().fixed(P_DIGITS),
+            self.resamples,
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1293,6 +1357,12 @@ selftest() {
     'a word the shell would expand was reported literal'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
     'an empty answer is a recorded answer, not a missing one'
+  seeded_case "the ablation's control arm dropped"     test     inject_ablation_no_control \
+    'the control arm is missing: an ablation with no sentence-removed arm'
+  seeded_case "silence counted as engagement"          test     inject_ablation_silence_engages \
+    'counted as engagement and as silence at once'
+  seeded_case "a p reported without its floor"         test     inject_ablation_p_floor_dropped \
+    'a p reported without its attainable floor'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
