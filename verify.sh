@@ -1039,6 +1039,25 @@ path.write_text('{"id":"a/b","text":"x","label":"positive","source":"authored"}\
 EOF
 }
 
+# The join between a mined row and its provenance made optional. A mined
+# register can then ship a row nobody can trace, which is evidence in name
+# and an assertion in fact.
+inject_sense_provenance_join_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """    let traced: BTreeSet<&str> = provenance.iter().map(|row| row.id.as_str()).collect();
+    if let Some(row) = register.iter().find(|row| !traced.contains(row.id.as_str())) {
+        return Err(JoinError::Untraced(row.id.clone()));
+    }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1598,6 +1617,8 @@ selftest() {
     'and a row says otherwise'
   seeded_case "a file in the register naming nothing"  test     inject_sense_register_unnamed_file \
     'not a declared sidecar'
+  seeded_case "a mined row nobody can trace"          test     inject_sense_provenance_join_dropped \
+    'a row nobody can trace was accepted'
   seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
     'two lines were read as one, and the second was lost'
   seeded_case "controls that never look at the register" test inject_sense_controls_ignore_register \

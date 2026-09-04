@@ -260,6 +260,116 @@ impl RegisterName {
     }
 }
 
+/// Where one mined row came from, stated as content beside the row it is about.
+///
+/// A mined row is evidence, and evidence with no provenance is an assertion.
+/// The row itself carries only `source: mined` -- repeating nine fields on
+/// every one of hundreds of rows would be a second spelling of one fact --
+/// so the provenance travels in a sidecar keyed by the row's id, and
+/// [`joined`] refuses a register whose rows and provenance do not correspond
+/// one to one. That correspondence is the property: a mined register cannot
+/// ship with a row nobody can trace, and cannot ship provenance for a row it
+/// does not contain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Provenance {
+    /// The row this is about.
+    pub id: String,
+    /// Which archive it was mined from, named by experiment and drive rather
+    /// than by a path -- a path is a fact about a filesystem nobody else has.
+    pub archive: String,
+    /// When that archive was recorded.
+    pub era: String,
+    /// What produced the sentence.
+    pub speaker: String,
+    /// The record event it was taken from.
+    pub event: String,
+    /// The field of that event.
+    pub field: String,
+    /// The lexical pass that surfaced it as a candidate.
+    pub seed_class: String,
+    /// Which judging batch ruled on it, and its control result.
+    pub judge_batch: String,
+    /// Why the judge labelled it as it did.
+    pub judge_why: String,
+}
+
+/// Read a provenance sidecar.
+///
+/// # Errors
+///
+/// Returns [`DataError`] for a line that is not a row of this schema, an id
+/// repeated, or a file with no rows.
+pub fn provenance(source: &str) -> Result<Vec<Provenance>, DataError> {
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for (line, mut members) in rows(source)? {
+        let id = take_text(&mut members, line, "id")?;
+        if !seen.insert(id.clone()) {
+            return Err(DataError::DuplicateId { line, id });
+        }
+        let row = Provenance {
+            id,
+            archive: take_text(&mut members, line, "archive")?,
+            era: take_text(&mut members, line, "era")?,
+            speaker: take_text(&mut members, line, "speaker")?,
+            event: take_text(&mut members, line, "event")?,
+            field: take_text(&mut members, line, "field")?,
+            seed_class: take_text(&mut members, line, "seed_class")?,
+            judge_batch: take_text(&mut members, line, "judge_batch")?,
+            judge_why: take_text(&mut members, line, "judge_why")?,
+        };
+        closed(&members, line)?;
+        out.push(row);
+    }
+    Ok(out)
+}
+
+/// Why a register and its provenance do not correspond.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JoinError {
+    /// A row nobody can trace.
+    Untraced(String),
+    /// Provenance for a row the register does not hold.
+    Orphan(String),
+}
+
+impl fmt::Display for JoinError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Untraced(id) => write!(f, "{id} is a mined row with no provenance"),
+            Self::Orphan(id) => write!(f, "{id} has provenance and is not in the register"),
+        }
+    }
+}
+
+impl Error for JoinError {}
+
+/// Check that every mined row has provenance and every provenance a row.
+///
+/// # Errors
+///
+/// Returns the first id that appears on one side only. Both directions
+/// matter: a row without provenance is evidence nobody can trace, and
+/// provenance without a row is a claim about something that is not there --
+/// most likely a register that was filtered after its provenance was written.
+pub fn joined(register: &[Row], provenance: &[Provenance]) -> Result<(), JoinError> {
+    let traced: BTreeSet<&str> = provenance.iter().map(|row| row.id.as_str()).collect();
+    if let Some(row) = register
+        .iter()
+        .find(|row| !traced.contains(row.id.as_str()))
+    {
+        return Err(JoinError::Untraced(row.id.clone()));
+    }
+    let held: BTreeSet<&str> = register.iter().map(|row| row.id.as_str()).collect();
+    if let Some(row) = provenance
+        .iter()
+        .find(|row| !held.contains(row.id.as_str()))
+    {
+        return Err(JoinError::Orphan(row.id.clone()));
+    }
+    Ok(())
+}
+
 /// A file in the register directory that is not a register.
 ///
 /// Named rather than skipped: a walk that ignored what it did not recognise
@@ -2546,12 +2656,12 @@ mod tests {
 
     use super::{
         Blocker, BootstrapError, Cached, Cell, Control, ControlFailure, DataError, Embedded,
-        EmbeddedSet, Embedder, Fixture, Fraction, Gate, Label, Metric, MetricError, NULL_AUC_BAND,
-        NULL_D_PRIME_BAND, NULL_SHUFFLES, PRE_REGISTRATION, Polarity, REGISTER_SIDECARS,
-        RegisterName, Reported, Row, ScoreError, Scored, Scoring, SenseSet, SetError, Source,
-        Xorshift, attainable_p_floor, auc, controls, cosine, d_prime, holm, over_firing,
-        paired_bootstrap, precision_at_k, register, score_rows, seeds, senses, shipped_senses,
-        shuffled_null,
+        EmbeddedSet, Embedder, Fixture, Fraction, Gate, JoinError, Label, Metric, MetricError,
+        NULL_AUC_BAND, NULL_D_PRIME_BAND, NULL_SHUFFLES, PRE_REGISTRATION, Polarity,
+        REGISTER_SIDECARS, RegisterName, Reported, Row, ScoreError, Scored, Scoring, SenseSet,
+        SetError, Source, Xorshift, attainable_p_floor, auc, controls, cosine, d_prime, holm,
+        joined, over_firing, paired_bootstrap, precision_at_k, provenance, register, score_rows,
+        seeds, senses, shipped_senses, shuffled_null,
     };
     use crate::formats::record::json::{self, Decimal, Value};
 
@@ -2869,6 +2979,29 @@ mod tests {
                 .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
             let rows = register(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
             assert!(rows.len() >= 10, "{}: {} rows", path.display(), rows.len());
+            // A mined row is evidence, and evidence with no provenance is an
+            // assertion. The sidecar is named for the source, so the mined
+            // registers in this directory share one.
+            if declared.source == Source::Mined {
+                let sidecar = dir.join(format!("{}.provenance.jsonl", declared.source.tag()));
+                let text = std::fs::read_to_string(&sidecar).unwrap_or_else(|err| {
+                    panic!(
+                        "{}: a mined register and no {}: {err}",
+                        path.display(),
+                        sidecar.display()
+                    )
+                });
+                let traced =
+                    provenance(&text).unwrap_or_else(|err| panic!("{}: {err}", sidecar.display()));
+                for row in &rows {
+                    assert!(
+                        traced.iter().any(|entry| entry.id == row.id),
+                        "{}: {}",
+                        path.display(),
+                        JoinError::Untraced(row.id.clone())
+                    );
+                }
+            }
             // The name and the rows are two spellings of one fact, and this
             // is the one place they meet.
             assert!(
@@ -2887,6 +3020,74 @@ mod tests {
             }
         }
         assert!(registers > 0, "{}: sidecars only", dir.display());
+    }
+
+    /// One register row and its provenance row, as the mined corpus writes
+    /// them.
+    fn mined_pair(id: &str) -> (String, String) {
+        (
+            format!(
+                r#"{{"id":"{id}","text":"GOTCHA: it was upstream after all","label":"positive","source":"mined"}}"#
+            ),
+            format!(
+                r#"{{"id":"{id}","archive":"cache-ram sweep, drive diet-3","era":"2026-08-05 to 2026-08-08","speaker":"a-model","event":"fork.response","field":"content","seed_class":"reversal","judge_batch":"1:0","judge_why":"own suspicion wrong"}}"#
+            ),
+        )
+    }
+
+    // The property the mined corpus is held to, tested where it can fail:
+    // this branch ships no mined register, so a directory walk alone would
+    // assert nothing.
+    #[test]
+    fn a_mined_row_without_provenance_is_refused_and_so_is_provenance_without_a_row() {
+        let (row_a, prov_a) = mined_pair("mined/reversal/positive/aaaa");
+        let (row_b, prov_b) = mined_pair("mined/reversal/positive/bbbb");
+
+        let rows = register(&format!("{row_a}\n{row_b}\n")).expect("two rows");
+        let traced = provenance(&format!("{prov_a}\n{prov_b}\n")).expect("two provenances");
+        assert_eq!(joined(&rows, &traced), Ok(()));
+
+        let one = provenance(&format!("{prov_a}\n")).expect("one provenance");
+        assert_eq!(
+            joined(&rows, &one),
+            Err(JoinError::Untraced(
+                "mined/reversal/positive/bbbb".to_owned()
+            )),
+            "a row nobody can trace was accepted"
+        );
+
+        let one_row = register(&format!("{row_a}\n")).expect("one row");
+        assert_eq!(
+            joined(&one_row, &traced),
+            Err(JoinError::Orphan("mined/reversal/positive/bbbb".to_owned())),
+            "provenance for a row that is not there was accepted"
+        );
+    }
+
+    #[test]
+    fn the_provenance_schema_is_closed_and_its_ids_are_unique() {
+        let (_, good) = mined_pair("mined/reversal/positive/aaaa");
+        assert_eq!(provenance(&good).expect("a row").len(), 1);
+        let missing = good.replace(r#","era":"2026-08-05 to 2026-08-08""#, "");
+        // The key is asserted rather than matched: a string literal in a
+        // pattern is what `check-library.py` refuses, and for the reason it
+        // refuses it -- a spelling in an arm is a spelling nothing checks.
+        match provenance(&missing) {
+            Err(DataError::MissingKey { key, .. }) => assert_eq!(key, "era"),
+            other => panic!("a provenance row with no era was read: {other:?}"),
+        }
+        let extra = good.replace(r#""judge_why""#, r#""notes":"x","judge_why""#);
+        assert!(
+            matches!(provenance(&extra), Err(DataError::UnknownKey { .. })),
+            "a key the schema does not have was read"
+        );
+        assert!(
+            matches!(
+                provenance(&format!("{good}\n{good}\n")),
+                Err(DataError::DuplicateId { .. })
+            ),
+            "one id described twice was read"
+        );
     }
 
     #[test]
