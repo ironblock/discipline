@@ -1,7 +1,7 @@
 # Level 2 --cache-ram sweep, cell 2 (0 MiB, the floor), per the 2026-08-07 ruling.
 #
 # not carried: [serving.flags] — the regimen grammar has no nested table header
-# not carried: "--cache-ram" = 0 (under [serving.flags]) — the regimen grammar has no quoted key and no nested table header
+# not carried: "--cache-ram" = 0 (under [serving.flags]) — the regimen grammar has no nested table, which is what refuses it (a bare `--cache-ram` key is legal TOML and legal here; the source's quoting is optional)
 #
 # Cloned from the 16384 MiB cell arm with exactly one change: --cache-ram = 0
 # instead of 16384. Per the 2026-08-07 ruling on the sweep:

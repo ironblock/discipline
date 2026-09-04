@@ -17,7 +17,7 @@
 # source lines fall outside the grammar and are neither carried nor
 # approximated:
 #   not carried: [serving.flags] — the regimen grammar has no nested table
-#   not carried: "--cache-ram" = 16384 — the regimen grammar has no quoted key
+#   not carried: "--cache-ram" = 16384 — the regimen grammar has no nested table, which is what refuses it (a bare `--cache-ram` key is legal TOML and legal here; the source's quoting is optional)
 #     and no nested table ([serving.flags]) to hold it
 name = "l2-diet-cacheram16384"
 [sampler]
