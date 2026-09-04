@@ -768,8 +768,7 @@ impl From<StructureError> for ParseError {
 /// layers are kept apart because "this is not a record" is not a useful thing
 /// to be told.
 pub fn parse(input: &str) -> Result<Record, ParseError> {
-    let depth = nesting_depth(input);
-    if depth > MAX_DEPTH {
+    if let Some(depth) = too_deep(input) {
         return Err(ParseError::TooDeep {
             depth,
             limit: MAX_DEPTH,
@@ -797,6 +796,21 @@ pub fn parse(input: &str) -> Result<Record, ParseError> {
 
     validate(&events)?;
     Ok(Record { events })
+}
+
+/// How deep `input` nests, when that is deeper than [`MAX_DEPTH`].
+///
+/// The limit is applied here and nowhere else. Every public reader of this
+/// grammar goes through this function before handing text to the parser,
+/// because two readers with two answers to how deep is too deep is one reader
+/// that returns a verdict and one that aborts the process -- and which of the
+/// two a caller reached would depend on which module it happened to import.
+fn too_deep(input: &str) -> Option<usize> {
+    let depth = nesting_depth(input);
+    if depth > MAX_DEPTH {
+        return Some(depth);
+    }
+    None
 }
 
 /// How deeply `input` nests, counted from the bytes.
