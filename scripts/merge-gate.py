@@ -302,12 +302,75 @@ def repair(path: Path, ours_ref: str, theirs_ref: str) -> bool:
         print(f"{path}: in neither parent: {', '.join(orphaned)}", file=sys.stderr)
         return False
     path.write_text(out, encoding="utf-8")
-    total = len(FUNC.findall(out))
+
+    # Where the two parents carry the same name with DIFFERENT bodies, the
+    # incumbent's copy is not always the right one: an injection anchors on
+    # source text, and the side that changed that source also changed its
+    # anchor. Keeping ours then ships a fault whose assert fails -- it injects
+    # nothing and its seeded case goes green proving nothing.
+    #
+    # Which body is right is not a textual question, so it is asked
+    # empirically: run the pre-flight, and for every injection it reports
+    # inert whose parents disagree, take the other parent's body and ask
+    # again. The pre-flight is the authority on whether an injection bites;
+    # this only chooses what to hand it.
+    disagree = {
+        name
+        for name in set(parents[0]) & set(parents[1])
+        if parents[0][name] != parents[1][name]
+    }
+    swapped = []
+    for _ in range(2):
+        inert = inert_injections(path.parent.parent)
+        if inert is None:
+            break
+        candidates = [n for n in inert if n in disagree and n not in swapped]
+        if not candidates:
+            break
+        text = path.read_text(encoding="utf-8")
+        for name in candidates:
+            current = next(
+                (m.group(0) for m in FUNC.finditer(text) if m.group(1) == name), None
+            )
+            other = next(
+                (parent[name] for parent in parents if parent[name] != current), None
+            )
+            if other is None:
+                continue
+            text = text.replace(current, other, 1)
+            swapped.append(name)
+        path.write_text(text, encoding="utf-8")
+
+    total = len(FUNC.findall(path.read_text(encoding="utf-8")))
     print(
         f"merge-gate: {total} injection(s), {len(restored)} restored from a parent"
         + (f" ({', '.join(restored)})" if restored else "")
+        + (
+            f"; {len(swapped)} taken from the other parent because ours no longer "
+            f"bit ({', '.join(swapped)})"
+            if swapped
+            else ""
+        )
     )
     return True
+
+
+def inert_injections(root: Path) -> list[str] | None:
+    """The injections the pre-flight says change nothing, or None if it could
+    not be asked."""
+    run = subprocess.run(
+        [sys.executable, "scripts/check-injections.py"],
+        capture_output=True,
+        text=True,
+        cwd=root,
+    )
+    if run.returncode not in (0, 1):
+        return None
+    return [
+        line.split()[0]
+        for line in run.stdout.splitlines()
+        if line.startswith("  inject_")
+    ]
 
 
 def main(argv: list[str]) -> int:
