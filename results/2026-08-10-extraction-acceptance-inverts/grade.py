@@ -50,11 +50,8 @@ feed the lane-overlap comparison, and `contains()` ignores spans shorter
 than `MIN_OVERLAP_CHARS` (GLiNER emits many single-token spans that would
 otherwise trivially "contain" nearly anything).
 
-Usage:
-  python3 instruments/die45_grade.py \
-      --seat-a runs/die45-seat-a/replay --seat-b runs/die45-seat-b/replay \
-      --seat-c runs/die45-seat-c/replay --gliner runs/die45-seat-c \
-      --out runs/die45-grading
+Usage (this directory, as recompute.sh runs it):
+  python3 grade.py --seat-a seat-a --seat-b seat-b --seat-c seat-c --gliner seat-c --out <dir>
 """
 import argparse
 import json
@@ -280,7 +277,7 @@ def main():
     report = {
         "physics": physics(seats),
         "quality": quality(seats, gliner_rows),
-        "judge_panel": "NOT RUN — mechanism-fact axis needs the judge-panel "
+        "judge_panel": "NOT RUN — mechanism-fact axis needs the "
                        "panel protocol (separate pass, per the design comment)",
     }
     os.makedirs(args.out, exist_ok=True)
