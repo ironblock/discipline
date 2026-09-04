@@ -1,0 +1,5 @@
+`-0.0` is a second spelling of `0.0`. The integer rule already refused `-0`
+for that reason and the decimal rule did not, so a sampler could be banked
+at a temperature that reads back as a different number than it was written
+as. A negative number has a digit that is not zero, on one side of the
+point or the other.
