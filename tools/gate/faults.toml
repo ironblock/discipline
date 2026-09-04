@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 137
+red_faults = 138
 mechanics_assertions = 27
 migrated = 0
 
@@ -595,6 +595,14 @@ check = "test"
 label = "a corpus that drives one tool"
 failure_class = "capture.corpus-covers-one-tool"
 legacy_signature = "is offered to the model and no corpus case ever calls it"
+
+[[fault]]
+id = "test.record_negative_zero_decimal"
+kind = "seeded-gate"
+check = "test"
+label = "a negative zero decimal accepted"
+failure_class = "record.second-spelling"
+legacy_signature = "was constructed, and the grammar would not read it back"
 migrated = false
 
 [[fault]]

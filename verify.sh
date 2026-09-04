@@ -884,6 +884,21 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The sign let back onto a zero. `-0.0` is then a second spelling of `0.0`,
+# and a banked sampler temperature reads back as a number nobody wrote.
+inject_record_negative_zero_decimal() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/record/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = """decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
+new = """decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # A capture grounded in the harness's echo of itself. A harness that answers
 # `update_record` with `recorded: <content>` is the ordinary shape, and reading
 # that line as evidence lets a fabrication certify itself by being repeated
@@ -1136,7 +1151,6 @@ row["captures"] = [c for c in row["captures"] if c["call"] == "c1"]
 expected.write_text(json.dumps(row, separators=(",", ":")) + "\n", encoding="utf-8")
 EOF
 }
-
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1702,46 +1716,69 @@ selftest() {
     'an empty answer is a recorded answer, not a missing one'
   seeded_case "self-capture exempt from grounding"    test     inject_tools_ungrounded \
     'modality does not exempt a lane from grounding'
+
   seeded_case "a reminder cadence that never fires"   test     inject_tools_reminder_silent \
     'ten silent turns must be reminded at every third turn'
+
   seeded_case "a harness tool call read as a capture" test     inject_tools_foreign_call \
     'a harness tool call is not a capture tool and writes nothing'
+
   seeded_case "a phase proposal that writes a fact"   test     inject_tools_proposal_writes \
     'a phase-transition proposal is advisory and writes nothing'
+
   seeded_case "a capture grounded in its own echo"   test     inject_tools_self_echo \
     'a harness that repeats a capture back grounded the capture in itself'
+
   seeded_case "a capture grounded in a later turn"   test     inject_tools_future_output \
     'a turn-1 capture was grounded in a turn-2 tool output'
+
   seeded_case "a superseding entry with a minted id" test     inject_tools_supersede_minted \
     'a superseding entry id must be derived from the row that carried it'
+
   seeded_case "a verdict that resolves elsewhere"    test     inject_tools_resolve_elsewhere \
     'a verdict resolved an entry the model never named'
+
   seeded_case "the asks reworded to nothing"         test     inject_tools_ask_words \
     'the words this lane says out loud are the only product it has'
+
   seeded_case "an ask that drops its own question"   test     inject_tools_ask_question_dropped \
     'an ask carrying a deferral is the question and then the deferral'
+
   seeded_case "the sweep asking as the cadence"      test     inject_tools_sweep_kind \
     'the sweep and the cadence are one ask wearing two names'
+
   seeded_case "a closed choice left in its own case" test     inject_tools_choice_uncanonical \
     'a harness may shout a closed choice back at us'
+
   seeded_case "a phase proposal with no reason"      test     inject_tools_proposal_reasonless \
     'the reason is the whole of what it carries into one'
+
   seeded_case "a reminder that drops the deferral"   test     inject_tools_reminder_deferral_dropped \
     'the cadence reminded without what the router put off in that turn'
+
   seeded_case "tools described in one character"     test     inject_tools_description_thin \
     'a foreign harness registers this text verbatim'
+
   seeded_case "an offered tool the contract omits"   test     inject_tools_contract_undescribed \
     'an offered tool with no row is refused before a harness ever sees it'
+
   seeded_case "one tool described twice"             test     inject_tools_contract_duplicate \
     'one tool described twice leaves the harness to the order of the file'
+
   seeded_case "a verdict the lane cannot honour"     test     inject_tools_verdict_list_open \
     'this lane refuses it at runtime: the model is invited to say a word'
+
   seeded_case "a turn swept after it recorded"       test     inject_tools_silent_kept \
     'a turn the model did record in the end was swept anyway'
+
   seeded_case "the object reader with no limit"      test     inject_record_objects_undepthed \
     'one level past the limit must be a verdict from `objects`'
+
   seeded_case "a corpus that drives one tool"       test     inject_tools_corpus_one_tool \
     'is offered to the model and no corpus case ever calls it'
+
+  seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
+    'was constructed, and the grammar would not read it back'
   seeded_case "the producer read as the last command" test     inject_shell_producer_is_last_written \
     'produces its output with'
   seeded_case "an operator dropped from the table"    test     inject_shell_operator_table_row_dropped \
