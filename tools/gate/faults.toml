@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 124
+red_faults = 127
 mechanics_assertions = 27
 migrated = 0
 
@@ -424,6 +424,33 @@ check = "test"
 label = "the float rule widened past the record"
 failure_class = "regimen.decimal-drift"
 legacy_signature = "the regimen grammar and the record.s decimal disagree"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_summary_not_derived"
+kind = "seeded-gate"
+check = "recompute"
+label = "a summary the rows do not carry"
+failure_class = "results.summary-not-derived"
+legacy_signature = "the report does not re-derive"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_kind_undeclared"
+kind = "seeded-gate"
+check = "recompute"
+label = "a results directory declaring no kind"
+failure_class = "results.kind-undeclared"
+legacy_signature = "0 recomputed, 0 declared historical, 1 undeclared"
+migrated = false
+
+[[fault]]
+id = "results.results_consumed_digest_stale"
+kind = "seeded-gate"
+check = "results"
+label = "a consumed digest gone stale"
+failure_class = "results.provenance-unchecked"
+legacy_signature = "but the committed file hashes to"
 migrated = false
 
 [[fault]]

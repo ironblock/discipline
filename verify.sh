@@ -32,7 +32,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results regimen metadata hygiene pages ci history injections parity)
+readonly CHECKS=(fmt clippy test library results recompute regimen metadata hygiene pages ci history injections parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -161,6 +161,13 @@ check_regimen() {
   printf '  %d regimen document(s) parsed\n' "$seen"
   return "$rc"
 }
+
+# Gate 0: every results directory's recorded numbers re-derive from the
+# artefacts committed beside it, or the directory declares itself historical
+# and is counted as skipped. `results` checks that the report agrees with the
+# record; both were written by the same run, so agreement between them is not
+# derivation. Zero recomputable directories is exit 2, not a pass.
+check_recompute() { python3 scripts/check-recompute.py; }
 
 check_metadata() { python3 scripts/check-repo-metadata.py; }
 
@@ -1135,6 +1142,56 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A summary that states a turn count the rows do not carry. The report and
+# the record agree -- both say three -- so the results linter passes them, and
+# only a re-derivation from the rows themselves can see that the run held two.
+# This is the fault that separates gate 0 from the linter: a flipped digit in
+# the front-matter alone would have turned `results` red too, and a seeded
+# case another gate also catches proves nothing about this one.
+inject_recompute_summary_not_derived() {
+  python3 - <<'EOF'
+import pathlib
+
+report = pathlib.Path("results/_template/README.md")
+source = report.read_text(encoding="utf-8")
+assert "turns = 2\n" in source
+report.write_text(source.replace("turns = 2\n", "turns = 3\n", 1), encoding="utf-8")
+
+record = pathlib.Path("results/_template/run.jsonl")
+source = record.read_text(encoding="utf-8")
+old = '{"record":"summary","turns":2,'
+new = '{"record":"summary","turns":3,'
+assert old in source
+record.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A directory that declares no kind. It is then neither recomputed nor counted
+# as knowingly skipped, and the census that says so is the only thing standing
+# between "nothing to check here" and "nothing was checked".
+inject_recompute_kind_undeclared() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/_template/README.md")
+source = path.read_text(encoding="utf-8")
+old = 'kind = "reproducible-by-config"\n'
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# A consumed digest that no longer matches its file. The claim then cites
+# evidence it never read, which reads exactly like evidence it did.
+inject_results_consumed_digest_stale() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/_template/product.txt")
+path.write_text(path.read_text(encoding="utf-8") + "one more line\n", encoding="utf-8")
+EOF
+}
+
 inject_inert_injection() {
   python3 - <<'EOF'
 import pathlib
@@ -1479,6 +1536,12 @@ selftest() {
     'a table opened twice was not refused'
   seeded_case "the float rule widened past the record" test    inject_regimen_float_rule_widened \
     'the regimen grammar and the record.s decimal disagree'
+  seeded_case "a summary the rows do not carry"       recompute inject_recompute_summary_not_derived \
+    'the report does not re-derive'
+  seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
+    '0 recomputed, 0 declared historical, 1 undeclared'
+  seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
+    'but the committed file hashes to'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
