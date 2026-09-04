@@ -1,0 +1,6 @@
+A negative zero float. TOML accepts it; this format does not, because
+`-0.0` is a second spelling of `0.0` and a regime is identified by the
+settings it names. The float is built through the record's decimal
+constructor, which refuses the second spelling on both sides of the point.
+(`-0` as an INTEGER is accepted, which predates the float rule; the
+asymmetry is real and stated in the grammar.)

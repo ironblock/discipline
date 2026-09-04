@@ -1,34 +1,58 @@
-//! regimen — grammar, v0
+//! regimen — grammar, v1
 //!
 //! This file is the normative description of the regimen format. A regimen is
 //! a versioned, fixed combination of variables describing the character,
-//! performance, and timing of a session. v0 is a deliberately minimal,
-//! line-oriented subset of TOML: bare keys, scalar values, comments.
+//! performance, and timing of a session. It is a deliberately minimal,
+//! line-oriented subset of TOML: bare keys, scalar values, one level of
+//! table, comments.
 //!
 //! Being a SUBSET of TOML is load-bearing, not decorative: `regimen.toml`
 //! files under `results/` are read by this grammar and by Python's `tomllib`,
 //! and the two must never disagree about the same file. So anything TOML
 //! rejects, this grammar must reject too.
 //!
-//! Deliberately absent in v0, and expected to arrive later: tables, arrays,
-//! floats, datetimes, dotted keys, quoted keys, multi-line strings, string
-//! escapes, `+` before an integer, leading zeros, and underscores in numbers.
+//! v1 adds FLOATS and TABLES, because v0 could not spell an arm. Every arm a
+//! public claim depends on carries a temperature and groups its settings, and
+//! a regimen that cannot express a temperature is not a regimen -- v0's
+//! restriction was scaffolding, not a position. Rendering `0.6` as the string
+//! `"0.6"` would have been a lie about its type, and rendering it as a binary
+//! float would have made `0.6` read back as `0.59999999999999998`, which for
+//! a value that IDENTIFIES a regime is a different regime.
 //!
-//! Two rules this grammar cannot state, which the parser therefore enforces:
-//! a key may appear at most once in a document, and an integer literal must
-//! fit in an `i64`.
+//! Deliberately absent still, and expected to arrive when something needs
+//! them: arrays, datetimes, nested tables, dotted keys, quoted keys,
+//! multi-line strings, string escapes, exponents, `+` before a number,
+//! leading zeros, and underscores in numbers.
+//!
+//! Three rules this grammar cannot state, which the parser therefore enforces:
+//! a key may appear at most once in its own table, a table header may appear
+//! at most once in a document, and an integer literal must fit in an `i64`.
 
 file      =  { SOI ~ item* ~ EOI }
 
-item      = _{ blank | statement | trailing }
+item      = _{ blank | table_header | statement | trailing }
 blank     = _{ sp* ~ nl }
 statement = _{ sp* ~ (pair ~ (sp* ~ comment)? | comment) ~ sp* ~ (nl | &EOI) }
 trailing  = _{ sp+ ~ &EOI }
 
+// `[sampler]` opens a table: every pair after it, up to the next header,
+// belongs to it. One level and one bare key -- `[a.b]` is a dotted key
+// wearing brackets, and dotted keys are still absent.
+//
+// The rule admits ANY table name rather than the three the arms use today
+// (`sampler`, `limits`, `triggers`), for the same reason `key` admits any
+// bare key rather than a list of the fields a regimen happens to carry: a
+// grammar states shape, and a vocabulary in a grammar is a vocabulary nobody
+// can extend without editing the normative file.
+table_header = { sp* ~ "[" ~ sp* ~ key ~ sp* ~ "]" ~ sp* ~ comment? ~ (nl | &EOI) }
+
 pair      =  { key ~ sp* ~ "=" ~ sp* ~ value }
 key       =  { (ASCII_ALPHANUMERIC | "_" | "-")+ }
 
-value     = _{ string | boolean | integer }
+// `float` before `integer`: PEG choice is ordered and does not re-enter, so
+// `integer` would take the `0` of `0.6` and strand `.6` for the statement
+// rule to choke on.
+value     = _{ string | boolean | float | integer }
 string    =  { "\"" ~ inner ~ "\"" }
 inner     =  { char* }
 // Two rules rather than one with two spellings, so that the parser matches on
@@ -43,6 +67,30 @@ boolean_false = { "false" }
 // No leading zeros and no leading `+`, because TOML admits neither. `-0` is
 // legal TOML and so is legal here.
 integer   =  { "-"? ~ ("0" | (ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)) }
+
+// A float is an exact DECIMAL: the digits as written, never a binary float.
+// This rule is character-for-character the `decimal` rule of the record's
+// grammar, and deliberately so -- `formats::record::json::Decimal::new` is
+// what this module builds the value with, and that constructor checks the
+// text against the RECORD's rule. Two rules that must agree, one of which
+// does the enforcing: if they ever drift, a document this grammar accepts
+// fails to build a value and the parser says so, rather than a regimen and a
+// record disagreeing about the same digits in silence. A test drives a table
+// of literals through both readers.
+//
+// `-0.0` is refused, as it is in the record: one spelling per value, and
+// negative zero is a second spelling of zero. (`-0` as an INTEGER is
+// accepted, because it was before this rule existed and TOML admits it; that
+// asymmetry is real and is the one thing here a later version should settle.)
+//
+// No exponent. `7e-1` is a second spelling of `0.7`, and a regime identified
+// by its settings cannot afford two ways to write one setting.
+float     = @{ ("-" ~ negative_float) | (int_part ~ "." ~ ASCII_DIGIT+) }
+negative_float = _{
+    (nonzero ~ "." ~ ASCII_DIGIT+) | ("0" ~ "." ~ "0"* ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
+}
+int_part  = _{ "0" | nonzero }
+nonzero   = _{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
 
 comment   =  { "#" ~ (!(nl | control) ~ ANY)* }
 

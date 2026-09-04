@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 117
+red_faults = 124
 mechanics_assertions = 27
 migrated = 0
 
@@ -388,6 +388,42 @@ check = "test"
 label = "the command word read as an operand"
 failure_class = "shell.operand-overcounted"
 legacy_signature = "the command word is not one of its own operands"
+migrated = false
+
+[[fault]]
+id = "test.regimen_float_as_a_string"
+kind = "seeded-gate"
+check = "test"
+label = "a regimen float rendered as a string"
+failure_class = "regimen.float-stringified"
+legacy_signature = "a float projected as something other than a decimal"
+migrated = false
+
+[[fault]]
+id = "test.regimen_table_scope_flattened"
+kind = "seeded-gate"
+check = "test"
+label = "a table header that opens nothing"
+failure_class = "regimen.table-scope-lost"
+legacy_signature = "its keys are not the document.s"
+migrated = false
+
+[[fault]]
+id = "test.regimen_table_collision_unchecked"
+kind = "seeded-gate"
+check = "test"
+label = "two tables of one name accepted"
+failure_class = "regimen.table-collision-unchecked"
+legacy_signature = "a table opened twice was not refused"
+migrated = false
+
+[[fault]]
+id = "test.regimen_float_rule_widened"
+kind = "seeded-gate"
+check = "test"
+label = "the float rule widened past the record"
+failure_class = "regimen.decimal-drift"
+legacy_signature = "the regimen grammar and the record.s decimal disagree"
 migrated = false
 
 [[fault]]
@@ -1220,6 +1256,30 @@ check = "-"
 label = "an unscannable page is rejected, not called clean"
 failure_class = "pages.unscannable-encoding"
 expected_exit = "1"
+migrated = false
+[[fault]]
+id = "subset.duplicate-key-in-table"
+kind = "subset-fixture"
+check = "regimen"
+label = "duplicate-key-in-table"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.duplicate-table"
+kind = "subset-fixture"
+check = "regimen"
+label = "duplicate-table"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.table-shadows-key"
+kind = "subset-fixture"
+check = "regimen"
+label = "table-shadows-key"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
 migrated = false
 [[fault]]
 id = "subset.capitalised-boolean"

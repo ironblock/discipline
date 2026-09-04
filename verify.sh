@@ -1072,6 +1072,69 @@ inject_history() {
 # file, or one a line-based merge spliced into silence, still reports its
 # seeded case RED -- because the gate it runs was already failing, or because
 # it was going to fail anyway -- and proves nothing about the guard it names.
+# A float rendered as its digits in quotes. `0.6` becomes `"0.6"` and a
+# consumer can no longer tell a temperature from a label that reads like one
+# -- the exact lie the ruling that added floats to the regimen refused.
+inject_regimen_float_as_a_string() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = '        Value::Float(number) => ("float", Json::Decimal(number.clone())),\n'
+new = '        Value::Float(number) => ("float", Json::String(number.as_str().to_owned())),\n'
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A table header that opens nothing. Every key lands at the top level, so
+# `[sampler] seed` and a document-level `seed` become one binding and the arm
+# that named both is recorded as an arm that named one.
+inject_regimen_table_scope_flattened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "                let scope = match &table {\n"
+new = "                let scope = match &None::<String> {\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Two tables of one name, unchecked. One of the two would have to disappear,
+# and a regimen that quietly drops a binding is not the regime that ran.
+inject_regimen_table_collision_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "                    Some(Value::Table(_)) => return Err(ParseError::DuplicateTable { name }),\n"
+new = "                    Some(Value::Table(_)) => {}\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The regimen's float rule widened past the record's decimal. `-0.0` is then
+# a regimen float and not a record decimal, so the same digits are a value or
+# an error depending on which side of the format you ask.
+inject_regimen_float_rule_widened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/regimen/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = 'float     = @{ ("-" ~ negative_float) | (int_part ~ "." ~ ASCII_DIGIT+) }\n'
+new = 'float     = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }\n'
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_inert_injection() {
   python3 - <<'EOF'
 import pathlib
@@ -1408,6 +1471,14 @@ selftest() {
     'did not strip the tabs the shell strips'
   seeded_case "the command word read as an operand"   test     inject_shell_command_word_is_an_operand \
     'the command word is not one of its own operands'
+  seeded_case "a regimen float rendered as a string"  test     inject_regimen_float_as_a_string \
+    'a float projected as something other than a decimal'
+  seeded_case "a table header that opens nothing"     test     inject_regimen_table_scope_flattened \
+    'its keys are not the document.s'
+  seeded_case "two tables of one name accepted"       test     inject_regimen_table_collision_unchecked \
+    'a table opened twice was not refused'
+  seeded_case "the float rule widened past the record" test    inject_regimen_float_rule_widened \
+    'the regimen grammar and the record.s decimal disagree'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
