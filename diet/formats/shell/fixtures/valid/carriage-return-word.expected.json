@@ -12,23 +12,11 @@
                 "words": [
                   {
                     "literal": true,
-                    "text": "rm"
+                    "text": "echo"
                   },
                   {
                     "literal": true,
-                    "text": "-f"
-                  },
-                  {
-                    "literal": false,
-                    "text": "*.tmp"
-                  },
-                  {
-                    "literal": false,
-                    "text": "build/?.o"
-                  },
-                  {
-                    "literal": false,
-                    "text": "log[0-9].txt"
+                    "text": "a\rb"
                   }
                 ]
               }

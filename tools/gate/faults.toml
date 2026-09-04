@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 128
+red_faults = 133
 mechanics_assertions = 27
 migrated = 0
 
@@ -352,6 +352,51 @@ check = "test"
 label = "an expanding word reported literal"
 failure_class = "shell.literal-overclaimed"
 legacy_signature = "a word the shell would expand was reported literal"
+migrated = false
+
+[[fault]]
+id = "test.shell_producer_is_last_written"
+kind = "seeded-gate"
+check = "test"
+label = "the producer read as the last command"
+failure_class = "shell.producer-misread"
+legacy_signature = "produces its output with"
+migrated = false
+
+[[fault]]
+id = "test.shell_operator_table_row_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "an operator dropped from the table"
+failure_class = "shell.operator-lost"
+legacy_signature = "the table gained or lost an operator"
+migrated = false
+
+[[fault]]
+id = "test.shell_heredoc_strip_keeps_tabs"
+kind = "seeded-gate"
+check = "test"
+label = "a stripping heredoc that keeps tabs"
+failure_class = "shell.heredoc-unstripped"
+legacy_signature = "did not strip the tabs the shell strips"
+migrated = false
+
+[[fault]]
+id = "test.shell_command_word_is_an_operand"
+kind = "seeded-gate"
+check = "test"
+label = "the command word read as an operand"
+failure_class = "shell.operand-overcounted"
+legacy_signature = "the command word is not one of its own operands"
+migrated = false
+
+[[fault]]
+id = "injections.inert_injection"
+kind = "seeded-gate"
+check = "injections"
+label = "an injection that changes nothing"
+failure_class = "gate.injection-inert"
+legacy_signature = "inject_that_changes_nothing"
 migrated = false
 
 [[fault]]

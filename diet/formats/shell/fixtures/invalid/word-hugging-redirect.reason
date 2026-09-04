@@ -1,0 +1,5 @@
+A redirection that hugs the word before it. The shell reads this as `cmd`
+and a write to `file`; v0 requires a redirection to stand as its own word,
+so that `elements` can separate on space alone and `echo 2 > f` (a word `2`)
+stays apart from `echo 2>f` (descriptor 2). Refused rather than read with a
+rule that has to decide, mid-word, where an operator begins.
