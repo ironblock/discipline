@@ -1,0 +1,74 @@
+{
+  "limits": {
+    "table": {
+      "max_steps": {
+        "integer": 30
+      },
+      "tool_timeout_s": {
+        "integer": 120
+      },
+      "turn_timeout_s": {
+        "integer": 2400
+      }
+    }
+  },
+  "name": {
+    "string": "l2-bare-run2"
+  },
+  "native_compaction": {
+    "table": {
+      "every_turns": {
+        "integer": 2
+      },
+      "first_at": {
+        "integer": 2
+      },
+      "generate": {
+        "boolean": true
+      },
+      "generate_thinking": {
+        "boolean": true
+      }
+    }
+  },
+  "sampler": {
+    "table": {
+      "enable_thinking": {
+        "boolean": true
+      },
+      "frequency_penalty": {
+        "float": 0.0
+      },
+      "interview_thinking": {
+        "boolean": true
+      },
+      "max_tokens": {
+        "integer": 8000
+      },
+      "min_p": {
+        "float": 0.0
+      },
+      "presence_penalty": {
+        "float": 0.0
+      },
+      "preserve_thinking": {
+        "boolean": true
+      },
+      "repeat_penalty": {
+        "float": 1.0
+      },
+      "temperature": {
+        "float": 0.6
+      },
+      "top_k": {
+        "integer": 20
+      },
+      "top_p": {
+        "float": 1.0
+      }
+    }
+  },
+  "serving": {
+    "table": {}
+  }
+}

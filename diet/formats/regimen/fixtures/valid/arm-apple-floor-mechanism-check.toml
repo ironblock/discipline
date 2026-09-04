@@ -1,0 +1,30 @@
+# Mac-floor-suite S5 capture-smoke experiment, mechanism-check arm: a preliminary
+# smoke drive (NOT the real A/B-3 script) that proves the native-capture
+# branch's fork/patch/gate/seam emission actually works end-to-end against
+# oMLX/Gemma before the authentic 13-turn A/B-3 script arrives from the Mac Pro.
+# Thresholds deliberately lowered from production defaults (evidence 3000/extract
+# 1500) so a short 4-turn smoke drive is virtually guaranteed to fire every lane
+# at least once — this is a mechanism check, not a capture-volume measurement.
+# Every binding the arm declares is expressible in regimen v1; nothing is omitted.
+name = "s5-capture-smoke-gemma"
+
+[sampler]
+temperature = 1.0
+top_k = 64
+top_p = 0.95
+max_tokens = 4096
+preserve_thinking = false
+enable_thinking = true
+interview_thinking = true
+
+[triggers]
+enabled = true
+evidence_threshold = 200
+extract_threshold = 200
+trio_cooldown = 1
+open_next_every = 3
+seam_every_turns = 2
+supersede = true
+ratify = true
+audit_legacy_wording = true  # replay arm — reproduce THIS smoke's recorded archive wording (prefix digests hash the question text)
+extraction = true

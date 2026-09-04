@@ -1,0 +1,49 @@
+# Level 2 --cache-ram sweep, cell 2 (0 MiB, the floor), per the 2026-08-07 ruling.
+#
+# not carried: [serving.flags] — the regimen grammar has no nested table header
+# not carried: "--cache-ram" = 0 (under [serving.flags]) — the regimen grammar has no quoted key and no nested table header
+#
+# Cloned from the 16384 MiB cell arm with exactly one change: --cache-ram = 0
+# instead of 16384. Per the 2026-08-07 ruling on the sweep:
+# host-max/-1 is skipped; 0 MiB runs instead as the low-risk floor contrast
+# — how much prompt-cache buys this workload at all, measured against
+# effectively zero retention rather than a higher ceiling. Everything else
+# — sampler, limits, triggers — is byte-identical to the base diet arm, same
+# single-axis-comparison discipline as cell 1.
+name = "l2-diet-cacheram0"
+[sampler]
+temperature = 0.6
+top_k = 20
+top_p = 1.0
+max_tokens = 4096            # >= Pi's observed max gen (2494 tok); exact Pi limit unrecoverable
+preserve_thinking = true     # server-matched; moot with thinking-off (no <think> generated)
+enable_thinking = false      # main lane OFF (Pi-identical); Run 2 = true
+interview_thinking = false   # interview/audit/supersede forks OFF (Pi-identical); Run 2 = true
+[limits]
+max_steps = 30
+turn_timeout_s = 2400
+tool_timeout_s = 120
+[triggers]
+enabled = true
+evidence_threshold = 3000
+extract_threshold = 1500
+trio_cooldown = 3
+open_next_every = 10
+ratify = true
+audit_legacy_wording = true  # parity arm — reproduce the Pi archive wording
+seam_every_turns = 2
+supersede = true
+extraction = true
+extraction_minimal_prefix = false  # pinned — this sweep cell's already-ratified
+                                    # result was measured on the warm-27B topology (matches
+                                    # the parity regimen); the code default was later flipped to true.
+rationale = false
+
+# Sweep cell 2: --cache-ram DECLARED explicit at 0 MiB. This
+# diverges from the parity regimen's expected-absent list for --cache-ram / -cram
+# — covered by the "serving.--cache-ram" [[deviation]] entries added to
+# the parity regimen for this sweep (a DECLARED deviation, not undeclared
+# drift). The parity preamble's live check verifies the live server
+# actually has --cache-ram=0 in force before any drive fires.
+[serving]
+# the arm's only content under this header lives in [serving.flags], which is not carried (see the header block)

@@ -1,0 +1,45 @@
+# Level 2 --cache-ram sweep, cell 2 (0 MiB, the floor): the bare arm, the cell the 2026-08-07 ruling ran instead of host-max.
+# Cloned from the 16384 MiB bare cell of the same sweep with exactly one change: --cache-ram = 0
+# instead of 16384. Per the 2026-08-07 ruling on the sweep:
+# host-max/-1 is skipped (unexplained retention-3 pin from cell 1 makes it
+# a real-hang-risk cell that might teach nothing new); 0 MiB runs instead
+# as the low-risk floor contrast. The diet arm of this cell and the sweep's
+# design note carry the full rationale.
+#
+# not carried: [serving.flags] — the regimen grammar has no nested table header
+# not carried: "--cache-ram" = 0 — the regimen grammar has no quoted key
+#   (the binding also sits under [serving.flags], which the grammar cannot open;
+#   the one-level [serving] header it hangs from is kept, empty)
+name = "l2-bare-cacheram0"
+[sampler]
+temperature = 0.6
+top_k = 20
+top_p = 1.0
+max_tokens = 4096            # >= Pi's observed max gen (2494 tok)
+preserve_thinking = true     # server-matched; moot with thinking-off
+enable_thinking = false      # main lane OFF (Pi-identical); Run 2 = true
+interview_thinking = false   # moot (no capture forks); set for consistency
+[limits]
+max_steps = 30
+turn_timeout_s = 2400
+tool_timeout_s = 120
+# Sweep cell 2: --cache-ram DECLARED explicit at 0 MiB. See
+# the diet arm of this cell's [serving] comment — same declared deviation,
+# same deviation entry in the parity record covers both arms of this cell.
+[serving]
+# the declared flag itself is listed as not carried in the header above
+
+[native_compaction]
+every_turns = 2
+first_at = 2                 # REV-9.1 ruling pin — same reasoning as
+                             # the 16384 MiB bare cell: this sweep is a
+                             # within-sweep characterization (cells compared
+                             # to each other, all under one cadence), never a
+                             # Run-1 comparison, so new cells run current law.
+                             # The Run 1 bare arm (Run 1's own fired record)
+                             # stays untouched.
+# "inputs/summaries.json", not "summaries.json" — see the Run 1 bare arm's own
+# comment on this; `Arm::load` resolves relative to THIS FILE'S directory,
+# which is the same directory as the Run 1 bare arm, so the same relative path
+# resolves the same way.
+summaries_file = "inputs/summaries.json"

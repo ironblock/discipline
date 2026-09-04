@@ -1,0 +1,33 @@
+{
+  "name": {
+    "string": "human-driven"
+  },
+  "sampler": {
+    "table": {
+      "enable_thinking": {
+        "boolean": true
+      },
+      "interview_thinking": {
+        "boolean": true
+      },
+      "max_tokens": {
+        "integer": 65000
+      },
+      "preserve_thinking": {
+        "boolean": true
+      },
+      "temperature": {
+        "float": 0.9
+      },
+      "top_k": {
+        "integer": 20
+      },
+      "top_p": {
+        "float": 1.0
+      }
+    }
+  },
+  "serving": {
+    "table": {}
+  }
+}
