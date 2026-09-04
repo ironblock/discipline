@@ -1033,8 +1033,18 @@ inject_diet_bin_ignored() {
     scripts/resolve-diet.py
 }
 
+# A results directory carrying a regimen.toml the format refuses.
+#
+# This wrote `arm = 1.5` until the grammar grew floats, at which point the
+# injection kept changing the tree and stopped changing the VERDICT -- the
+# gate went green and the seeded case reported "did not fire". An injection
+# is proven to change the tree by `check-injections`, which cannot see that
+# the change no longer means anything; only the selftest can. So the text
+# here is one both readers refuse permanently rather than one the current
+# subset happens to exclude: an unterminated string is not TOML and never
+# will be.
 inject_regimen() {
-  printf 'arm = 1.5\n' > results/_template/regimen.toml
+  printf 'arm = "unterminated\n' > results/_template/regimen.toml
 }
 
 inject_toml_subset() {
