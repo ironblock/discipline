@@ -1,0 +1,14 @@
+{
+  "cwd": {
+    "kind": "path",
+    "path": "/work"
+  },
+  "failures": [
+    {
+      "command": "cd nowhere",
+      "event": "t1",
+      "report": "bash: cd: nowhere: No such file or directory"
+    }
+  ],
+  "files": {}
+}

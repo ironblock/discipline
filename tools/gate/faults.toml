@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 111
+red_faults = 116
 mechanics_assertions = 27
 migrated = 0
 
@@ -361,6 +361,51 @@ check = "test"
 label = "an empty payload read as absent"
 failure_class = "record.payload-dropped"
 legacy_signature = "an empty answer is a recorded answer, not a missing one"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_subshell_leaks"
+kind = "seeded-gate"
+check = "test"
+label = "a subshell that shares the parent state"
+failure_class = "capture.subshell-state-leaks"
+legacy_signature = "the subshell cd leaked into the parent"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_failed_cd_applied"
+kind = "seeded-gate"
+check = "test"
+label = "a failed cd applied anyway"
+failure_class = "capture.failed-cd-applied"
+legacy_signature = "a failed cd moved the working directory"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_popd_empty_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "popd on an empty stack ignored"
+failure_class = "capture.stack-underflow-ignored"
+legacy_signature = "popd on an empty stack was silently ignored"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_lint_table_emptied"
+kind = "seeded-gate"
+check = "test"
+label = "the mechanical-noun table emptied"
+failure_class = "capture.mechanical-noun-table-empty"
+legacy_signature = "a question about a mechanical fact went unflagged"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_entry_grounded"
+kind = "seeded-gate"
+check = "test"
+label = "a mechanical entry sent through the gate"
+failure_class = "capture.mechanical-entry-gated"
+legacy_signature = "a mechanical entry was dropped as if it needed grounding"
 migrated = false
 
 [[fault]]

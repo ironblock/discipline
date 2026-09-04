@@ -1,0 +1,21 @@
+{
+  "cwd": {
+    "kind": "path",
+    "path": "/work/diet"
+  },
+  "failures": [],
+  "files": {
+    "/work/diet/Cargo.toml": {
+      "event": "t1",
+      "kind": "read",
+      "resolved": true,
+      "turn": 1
+    },
+    "/work/diet/notes.txt": {
+      "event": "t2",
+      "kind": "read",
+      "resolved": true,
+      "turn": 1
+    }
+  }
+}
