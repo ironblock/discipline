@@ -32,7 +32,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results regimen metadata hygiene pages ci history parity)
+readonly CHECKS=(fmt clippy test library results regimen metadata hygiene pages ci history injections parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -182,6 +182,13 @@ check_ci() { python3 scripts/check-ci-coverage.py; }
 # pattern table the file gate uses. A file carrying a forbidden shape can be
 # fixed with a commit; a commit message carrying one is permanent.
 check_history() { python3 scripts/check-history.py; }
+
+# Every injection in this file changes the tree it is run against. A verdict
+# is worth what the fault behind it cost, so an injection is proven to change
+# something before the RED it produces counts as anything. This runs on every
+# invocation and not only in --selftest: an inert injection is introduced by
+# an edit, and the edit is what should fail.
+check_injections() { python3 scripts/check-injections.py; }
 
 # The fault-migration manifest defines what parity means for the replacement
 # gate. A manifest that has drifted from this script defines the wrong parity.
@@ -1045,6 +1052,24 @@ inject_history() {
   seed_commit --message "carries $(printf '%s%s' 'DIE' '-9001') forward"
 }
 
+# An injection that changes nothing. This is the whole failure the
+# `injections` gate exists for: a body whose anchor no longer matches the
+# file, or one a line-based merge spliced into silence, still reports its
+# seeded case RED -- because the gate it runs was already failing, or because
+# it was going to fail anyway -- and proves nothing about the guard it names.
+inject_inert_injection() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+old = "inject_history_no_base() {\n"
+new = "inject_that_changes_nothing() {\n  :\n}\n\ninject_history_no_base() {\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_history_no_base() {
   git add --all
   seed_commit --message 'the only commit'
@@ -1366,6 +1391,8 @@ selftest() {
     'did not strip the tabs the shell strips'
   seeded_case "the command word read as an operand"   test     inject_shell_command_word_is_an_operand \
     'the command word is not one of its own operands'
+  seeded_case "an injection that changes nothing"     injections inject_inert_injection \
+    'inject_that_changes_nothing'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
