@@ -1,0 +1,257 @@
+{
+  "physics": {
+    "probes": {
+      "A": [
+        {
+          "turn": 2,
+          "next_turn_reprefill_tokens": 332,
+          "surviving_cache_n": 109,
+          "drive_recorded_cache_n": 371,
+          "drive_recorded_prompt_n": 70,
+          "prompt_ms": 429.219
+        },
+        {
+          "turn": 3,
+          "next_turn_reprefill_tokens": 4523,
+          "surviving_cache_n": 0,
+          "drive_recorded_cache_n": 0,
+          "drive_recorded_prompt_n": 4523,
+          "prompt_ms": 3917.949
+        },
+        {
+          "turn": 4,
+          "next_turn_reprefill_tokens": 357,
+          "surviving_cache_n": 5177,
+          "drive_recorded_cache_n": 5177,
+          "drive_recorded_prompt_n": 357,
+          "prompt_ms": 498.73
+        },
+        {
+          "turn": 5,
+          "next_turn_reprefill_tokens": 70,
+          "surviving_cache_n": 9991,
+          "drive_recorded_cache_n": 0,
+          "drive_recorded_prompt_n": 10061,
+          "prompt_ms": 207.851
+        }
+      ],
+      "B": [
+        {
+          "turn": 2,
+          "next_turn_reprefill_tokens": 332,
+          "surviving_cache_n": 109,
+          "drive_recorded_cache_n": 371,
+          "drive_recorded_prompt_n": 70,
+          "prompt_ms": 429.955
+        },
+        {
+          "turn": 3,
+          "next_turn_reprefill_tokens": 4523,
+          "surviving_cache_n": 0,
+          "drive_recorded_cache_n": 0,
+          "drive_recorded_prompt_n": 4523,
+          "prompt_ms": 3862.854
+        },
+        {
+          "turn": 4,
+          "next_turn_reprefill_tokens": 357,
+          "surviving_cache_n": 5177,
+          "drive_recorded_cache_n": 5177,
+          "drive_recorded_prompt_n": 357,
+          "prompt_ms": 495.64
+        },
+        {
+          "turn": 5,
+          "next_turn_reprefill_tokens": 70,
+          "surviving_cache_n": 9991,
+          "drive_recorded_cache_n": 0,
+          "drive_recorded_prompt_n": 10061,
+          "prompt_ms": 207.862
+        }
+      ],
+      "C": [
+        {
+          "turn": 2,
+          "next_turn_reprefill_tokens": 332,
+          "surviving_cache_n": 109,
+          "drive_recorded_cache_n": 371,
+          "drive_recorded_prompt_n": 70,
+          "prompt_ms": 426.263
+        },
+        {
+          "turn": 3,
+          "next_turn_reprefill_tokens": 4523,
+          "surviving_cache_n": 0,
+          "drive_recorded_cache_n": 0,
+          "drive_recorded_prompt_n": 4523,
+          "prompt_ms": 3869.757
+        },
+        {
+          "turn": 4,
+          "next_turn_reprefill_tokens": 357,
+          "surviving_cache_n": 5177,
+          "drive_recorded_cache_n": 5177,
+          "drive_recorded_prompt_n": 357,
+          "prompt_ms": 501.289
+        },
+        {
+          "turn": 5,
+          "next_turn_reprefill_tokens": 70,
+          "surviving_cache_n": 9991,
+          "drive_recorded_cache_n": 0,
+          "drive_recorded_prompt_n": 10061,
+          "prompt_ms": 203.755
+        }
+      ]
+    },
+    "warmth": {
+      "A": {
+        "warm_calls": 72,
+        "cache_n_delta_min": -114,
+        "cache_n_delta_max": 0
+      },
+      "B": {
+        "warm_calls": 72,
+        "cache_n_delta_min": -114,
+        "cache_n_delta_max": 0
+      },
+      "C": {
+        "warm_calls": 72,
+        "cache_n_delta_min": -114,
+        "cache_n_delta_max": 0
+      }
+    },
+    "forks": {
+      "A": {
+        "by_lane": {
+          "extraction": {
+            "n": 31,
+            "prompt_n": 43318,
+            "prompt_ms": 45232.781,
+            "predicted_n": 38430,
+            "predicted_ms": 804678.291,
+            "cold": 7,
+            "no_timings": 0
+          },
+          "interview": {
+            "n": 60,
+            "prompt_n": 11229,
+            "prompt_ms": 18138.595999999998,
+            "predicted_n": 11001,
+            "predicted_ms": 234608.36199999988,
+            "cold": 7,
+            "no_timings": 0
+          }
+        },
+        "capture_round_wall_s": {
+          "2": 431.19,
+          "3": 3.76,
+          "4": 667.16,
+          "5": 12.07
+        }
+      },
+      "B": {
+        "by_lane": {
+          "extraction": {
+            "n": 31,
+            "prompt_n": 32714,
+            "prompt_ms": 186646.36799999996,
+            "predicted_n": 34923,
+            "predicted_ms": 1605354.796,
+            "cold": 0,
+            "no_timings": 0
+          },
+          "interview": {
+            "n": 60,
+            "prompt_n": 50933,
+            "prompt_ms": 56560.62999999999,
+            "predicted_n": 10329,
+            "predicted_ms": 213352.68499999997,
+            "cold": 15,
+            "no_timings": 0
+          }
+        },
+        "capture_round_wall_s": {
+          "2": 1029.09,
+          "3": 3.62,
+          "4": 1033.67,
+          "5": 9.27
+        }
+      },
+      "C": {
+        "by_lane": {
+          "interview": {
+            "n": 56,
+            "prompt_n": 50193,
+            "prompt_ms": 54885.196,
+            "predicted_n": 11164,
+            "predicted_ms": 243745.245,
+            "cold": 15,
+            "no_timings": 0
+          }
+        },
+        "capture_round_wall_s": {
+          "2": 97.43,
+          "3": 2.1,
+          "4": 198.26,
+          "5": 7.34
+        }
+      }
+    }
+  },
+  "quality": {
+    "tallies": {
+      "A": {
+        "facts_offered": 937,
+        "facts_accepted_raw": 20,
+        "facts_accepted_deduped": 18,
+        "gate_accept_rate_raw": 0.021,
+        "gate_accept_rate_deduped": 0.019
+      },
+      "B": {
+        "facts_offered": 1545,
+        "facts_accepted_raw": 201,
+        "facts_accepted_deduped": 171,
+        "gate_accept_rate_raw": 0.13,
+        "gate_accept_rate_deduped": 0.111
+      },
+      "C": {
+        "spans": 321
+      }
+    },
+    "degenerate_forks": {
+      "A": [
+        {
+          "fork_id": "e0065",
+          "turn": 2,
+          "step": 2,
+          "fact_lines": 0,
+          "accepted_raw": 2,
+          "excess": 2
+        }
+      ],
+      "B": [
+        {
+          "fork_id": "e0352",
+          "turn": 4,
+          "step": 7,
+          "fact_lines": 5,
+          "accepted_raw": 35,
+          "excess": 30
+        }
+      ]
+    },
+    "min_overlap_chars": 4,
+    "overlap_containment": {
+      "B\u2229C": 50,
+      "A\u2229C": 5
+    },
+    "overlap_bases": {
+      "B\u2229C:B-items": 171,
+      "A\u2229B:A-items": 18,
+      "A\u2229C:A-items": 18
+    },
+    "sources_with_any_output": 31
+  },
+  "judge_panel": "NOT RUN \u2014 mechanism-fact axis needs the judge-panel panel protocol (separate pass, per the design comment)"
+}
