@@ -842,6 +842,21 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The sign let back onto a zero. `-0.0` is then a second spelling of `0.0`,
+# and a banked sampler temperature reads back as a number nobody wrote.
+inject_record_negative_zero_decimal() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/record/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = """decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
+new = """decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # A parked entry that goes on speaking for the object. Park is the disposition
 # for a fact that was true inside the tangent and is not the trunk's; a park
 # that renders is a keep with a different name, and the trunk silently
@@ -1075,7 +1090,6 @@ assert old in source
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
-
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1641,34 +1655,51 @@ selftest() {
     'an empty answer is a recorded answer, not a missing one'
   seeded_case "a tangent drop that deletes"           test     inject_tangent_drop_removes \
     'a drop evicts to the archive and never deletes'
+
   seeded_case "a parked entry that still renders"     test     inject_tangent_park_renders \
     'a parked entry still speaks for the object'
+
   seeded_case "a tangent scoped by recency"           test     inject_tangent_scope_by_recency \
     'scope is by provenance, not by recency'
+
   seeded_case "a tangent closed leaving an entry unruled" test  inject_tangent_undisposed_ignored \
     'closure is total: a tangent-born entry was left undisposed'
+
   seeded_case "a prefix claimed intact, not compared" test     inject_tangent_prefix_asserted \
     'the prefix was reported intact after the trunk moved'
+
   seeded_case "a tangent id opened twice"             test     inject_tangent_id_reused \
     'a tangent id the record already carries was opened again'
+
   seeded_case "a tangent that dates a fact at the fork" test   inject_tangent_provenance_ignores_turn \
     'a tangent dated a patch at a turn other than the one it was made at'
+
   seeded_case "a closure ruling dated at the fork"    test     inject_tangent_ruling_dated_at_fork \
     'the closure filed its ruling at a turn it did not close at'
+
   seeded_case "a closure under a coined lane"         test     inject_tangent_closing_lane_coined \
     'the closure filed its ruling under a lane the record does not already have'
+
   seeded_case "a disposition missing from the list"   test     inject_tangent_disposition_missing_from_all \
     'the dispositions a closure can rule with are not the three the record names'
+
   seeded_case "a tangent that offers a settled fact again" test inject_tangent_scope_offers_a_ruled_entry \
     'the tangent offered a fact the record had already ruled on for disposition a second time'
+
   seeded_case "a prefix that counts dead trunk rows"  test     inject_tangent_prefix_counts_dead_rows \
     'a trunk row that was already dead at the fork was counted into the prefix'
+
   seeded_case "a prefix called intact whenever it only grew" test inject_tangent_prefix_only_grew \
     'the prefix was reported unmoved after the trunk wrote a fact of its own'
+
   seeded_case "a parked entry that reads as retired"  test     inject_object_park_renders_as_retired \
     'a state renders under a name the dump does not promise'
+
   seeded_case "a park with no tangent behind it"      test     inject_object_park_needs_no_tangent \
     'an entry was parked under no tangent, so it left the live set'
+
+  seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
+    'was constructed, and the grammar would not read it back'
   seeded_case "the producer read as the last command" test     inject_shell_producer_is_last_written \
     'produces its output with'
   seeded_case "an operator dropped from the table"    test     inject_shell_operator_table_row_dropped \
