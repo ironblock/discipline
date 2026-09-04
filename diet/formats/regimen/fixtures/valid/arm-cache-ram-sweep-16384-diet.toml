@@ -1,0 +1,61 @@
+# Level-2 --cache-ram sweep, cell 1 (16384 MiB): the level-2 diet arm with
+# --cache-ram declared explicit at 2x the compiled default, one cell of a
+# single-axis cache-RAM sweep against the Run 1 Pi-parity regime.
+#
+# Cloned from the level-2 diet arm (Run 1 Pi-parity regime, thinking OFF on
+# all lanes) with exactly ONE change: --cache-ram is now DECLARED EXPLICIT at
+# 16384 MiB (2x the incumbent 8192 compiled default) instead of inheriting
+# the pi-parity manifest's `expected_absent` reliance on the default.
+# Everything else — sampler, limits, triggers — is byte-identical to the diet
+# arm, so this cell is a single-axis comparison against Run 1'/Run 1's own
+# 8192 numbers (same thinking regime, same token budget). It is NOT directly
+# comparable to Run 2, which additionally differs in thinking regime (on vs
+# off) and max_tokens (8000 vs 4096); the sweep's cell writeup gives the full
+# cell and why this base was chosen over the -run2 arms.
+#
+# Rendered as a regimen v1 conformance fixture of the arm as written. Two
+# source lines fall outside the grammar and are neither carried nor
+# approximated:
+#   not carried: [serving.flags] — the regimen grammar has no nested table
+#   not carried: "--cache-ram" = 16384 — the regimen grammar has no quoted key
+#     and no nested table ([serving.flags]) to hold it
+name = "l2-diet-cacheram16384"
+[sampler]
+temperature = 0.6
+top_k = 20
+top_p = 1.0
+max_tokens = 4096            # >= Pi's observed max gen (2494 tok); exact Pi limit unrecoverable
+preserve_thinking = true     # server-matched; moot with thinking-off (no <think> generated)
+enable_thinking = false      # main lane OFF (Pi-identical); Run 2 = true
+interview_thinking = false   # interview/audit/supersede forks OFF (Pi-identical); Run 2 = true
+[limits]
+max_steps = 30
+turn_timeout_s = 2400
+tool_timeout_s = 120
+[triggers]
+enabled = true
+evidence_threshold = 3000
+extract_threshold = 1500
+trio_cooldown = 3
+open_next_every = 10
+ratify = true
+audit_legacy_wording = true  # parity arm — reproduce the Pi archive wording
+seam_every_turns = 2
+supersede = true
+extraction = true
+extraction_minimal_prefix = false  # pinned — this sweep cell's already-ratified
+                                    # result was measured on the warm-27B topology (matches
+                                    # the pi-parity manifest); the code default later flipped to true.
+rationale = false
+
+# The --cache-ram sweep, cell 1: --cache-ram DECLARED explicit at 16384 MiB.
+# This diverges from the pi-parity manifest's `expected_absent = ["--cache-ram",
+# "-cram"]` — covered by the "serving.--cache-ram" [[deviation]] entry added
+# to the pi-parity manifest for this sweep (a DECLARED deviation, not
+# undeclared drift). The parity preamble's live check (now wired into the
+# fire script for the sweep) verifies the live server actually has
+# --cache-ram=16384 in force before any drive fires.
+#
+# The [serving] table is kept as the arm opens it; the flag lived under the
+# nested [serving.flags] table and is not carried (see the header).
+[serving]

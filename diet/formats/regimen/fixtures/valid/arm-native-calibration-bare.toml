@@ -1,0 +1,40 @@
+# Level-2 calibration, Run 1, the bare arm ("l2-bare"): config-identical to Pi, main lane thinking OFF.
+#
+# not carried: expected_absent = ["--cache-ram", "-cram"] — the regimen grammar has no arrays
+# not carried: [serving.flags] (a nested table header, empty in the source) — the regimen grammar has no nested tables
+# [serving] itself is kept below with nothing in it, as the arm's only binding under it is the array above.
+#
+# The control lane injects Pi's verbatim summaries and does no capture forks, so
+# interview_thinking is moot here; set false for explicit Run-1 consistency.
+name = "l2-bare"
+[sampler]
+temperature = 0.6
+top_k = 20
+top_p = 1.0
+max_tokens = 4096            # >= Pi's observed max gen (2494 tok)
+preserve_thinking = true     # server-matched; moot with thinking-off
+enable_thinking = false      # main lane OFF (Pi-identical); Run 2 = true
+interview_thinking = false   # moot (no capture forks); set for consistency
+[limits]
+max_steps = 30
+turn_timeout_s = 2400
+tool_timeout_s = 120
+# Matches the Pi-parity arm's serving reference exactly (identity, no deviation
+# needed) — Run 1 relies on the --cache-ram compiled default, same as Pi's
+# regime. The full rationale lives with the Pi-parity arm's [serving] comment.
+[serving]
+# (expected_absent and [serving.flags] are not carried; see the header)
+
+[native_compaction]
+every_turns = 2
+first_at = 1
+# "inputs/summaries.json", not "summaries.json". `Arm::load` resolves this
+# relative to THIS FILE'S directory (the arm loader takes the arm file's parent),
+# and when these artifacts were committed under total canon the arm file landed in
+# the level-2 experiment directory while summaries.json landed in its inputs/ subdirectory — so the
+# relative reference pointed at a file that does not exist and this arm could not
+# load from its own committed location. Run 1' worked only because the scratchpad
+# copies were co-located. Presence is not resolvability: "archive the instrument
+# with the artifact" was satisfied for both files individually and still left the
+# pair unusable. Locked in by `committed_run1_arms_load_from_their_committed_paths`.
+summaries_file = "inputs/summaries.json"

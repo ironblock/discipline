@@ -1,0 +1,77 @@
+{
+  "reference": {
+    "table": {
+      "arm_tokens": {
+        "integer": 0
+      },
+      "diet_ctx": {
+        "integer": 30000
+      },
+      "model_extract": {
+        "string": "Qwen3-1.7B"
+      },
+      "model_main": {
+        "string": "Qwen3.6-27B"
+      },
+      "run": {
+        "string": "A/B-3 diet (cut2 production, 2026-07-08)"
+      },
+      "thinking_level": {
+        "string": "off"
+      }
+    }
+  },
+  "sampler": {
+    "table": {
+      "max_tokens": {
+        "integer": 4096
+      },
+      "min_p": {
+        "float": 0.0
+      },
+      "temperature": {
+        "float": 0.6
+      },
+      "top_k": {
+        "integer": 20
+      },
+      "top_p": {
+        "float": 1.0
+      }
+    }
+  },
+  "serving": {
+    "table": {}
+  },
+  "triggers": {
+    "table": {
+      "audit_legacy_wording": {
+        "boolean": true
+      },
+      "evidence_threshold": {
+        "integer": 3000
+      },
+      "extract_threshold": {
+        "integer": 1500
+      },
+      "extraction": {
+        "boolean": true
+      },
+      "extraction_minimal_prefix": {
+        "boolean": false
+      },
+      "open_next_every": {
+        "integer": 10
+      },
+      "ratify": {
+        "boolean": true
+      },
+      "supersede": {
+        "boolean": true
+      },
+      "trio_cooldown": {
+        "integer": 3
+      }
+    }
+  }
+}
