@@ -1,3 +1,3 @@
 cat <<-END
-indented body
-END
+	indented body
+	END
