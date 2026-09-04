@@ -72,6 +72,33 @@ impl Decimal {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// A decimal spelled the one way the grammar spells it: an optional sign,
+    /// no leading zero, a point, at least one digit on each side of it.
+    ///
+    /// The only door from a number a program computed to a number a record
+    /// holds. It takes text rather than an `f64` so that the caller has to
+    /// choose how many digits the record keeps, and so that the values with no
+    /// spelling here -- the infinities, and a result that is not a number --
+    /// are refused rather than written.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let unsigned = text.strip_prefix('-').unwrap_or(text);
+        let (whole, fraction) = unsigned.split_once('.')?;
+        let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+        if !digits(whole) || !digits(fraction) {
+            return None;
+        }
+        if whole != "0" && whole.starts_with('0') {
+            return None;
+        }
+        // `-0.0` is a second spelling of `0.0`, and one spelling per value is
+        // what makes two records of one run the same bytes.
+        if text.starts_with('-') && whole == "0" && fraction.bytes().all(|b| b == b'0') {
+            return None;
+        }
+        Some(Self(text.to_owned()))
+    }
 }
 
 impl fmt::Display for Decimal {
@@ -249,6 +276,76 @@ fn hex4(chars: &mut std::str::Chars<'_>) -> Result<u32, ValueError> {
     u32::from_str_radix(&digits, 16).map_err(|_| ValueError::BadEscape(format!("\\u{digits}")))
 }
 
+/// Why a line is not one object of the value space.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LineError {
+    /// The grammar rejected it.
+    Syntax(String),
+    /// Nested deeper than a record may be.
+    TooDeep {
+        /// How deep it went.
+        depth: usize,
+        /// How deep a record may go.
+        limit: usize,
+    },
+    /// More than one line was handed in. A reader of lines reads one at a
+    /// time, and silently taking the first would lose the rest.
+    NotOneLine,
+    /// The grammar accepted it and the value space did not.
+    Value(ValueError),
+}
+
+impl fmt::Display for LineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Syntax(text) => write!(f, "not an object line: {text}"),
+            Self::TooDeep { depth, limit } => write!(
+                f,
+                "nested {depth} deep where {limit} is the most a record allows"
+            ),
+            Self::NotOneLine => write!(f, "more than one line where one object was expected"),
+            Self::Value(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for LineError {}
+
+/// Decode one line of JSON Lines data -- one object -- through the record
+/// grammar.
+///
+/// The one reader for data files that are not records: sense sets, registers,
+/// vector caches. They share the record's value space on purpose, so that a
+/// number in any of them is a [`Decimal`] and not a float, and they share its
+/// grammar so that there is one parser to be wrong about what a line means.
+///
+/// # Errors
+///
+/// Returns [`LineError`] when the text is not exactly one object line of the
+/// record grammar, or when its value space is rejected.
+pub fn line(text: &str) -> Result<BTreeMap<String, Value>, LineError> {
+    let depth = super::nesting_depth(text);
+    if depth > super::MAX_DEPTH {
+        return Err(LineError::TooDeep {
+            depth,
+            limit: super::MAX_DEPTH,
+        });
+    }
+    let mut parsed = super::RecordParser::parse(Rule::event_line, text)
+        .map_err(|err| LineError::Syntax(err.to_string()))?;
+    let event_line = parsed.next().ok_or(LineError::Value(ValueError::Shape(
+        "a line with no content",
+    )))?;
+    if event_line.as_span().end() != text.len() {
+        return Err(LineError::NotOneLine);
+    }
+    let object_pair = event_line
+        .into_inner()
+        .find(|pair| pair.as_rule() == Rule::object)
+        .ok_or(LineError::Value(ValueError::Shape("a line with no object")))?;
+    object(&object_pair).map_err(LineError::Value)
+}
+
 /// Render a value back to the record's own spelling.
 ///
 /// One spelling per value, so that a record read and written back is the same
@@ -311,8 +408,74 @@ fn render_string(text: &str, out: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Decimal, Value};
+    use super::{Decimal, LineError, Value, ValueError, line};
     use crate::formats::record::{Event, parse};
+
+    // One reader for every data file that is not a record. A second reader is
+    // a second opinion about what a number is.
+    #[test]
+    fn a_data_line_is_one_object_of_the_record_grammar() {
+        let members = line(r#"{"text":"a b","vector":[0.5000,-0.2500]}"#).expect("one object");
+        assert_eq!(members.len(), 2);
+        assert_eq!(
+            members.get("vector"),
+            Some(&Value::Array(vec![
+                Value::Decimal(Decimal::new("0.5000").expect("a decimal")),
+                Value::Decimal(Decimal::new("-0.2500").expect("a decimal")),
+            ]))
+        );
+        assert!(
+            line("  {\"a\":1}  \n").is_ok(),
+            "surrounding space and a newline are not content"
+        );
+        assert!(
+            matches!(line("[1]"), Err(LineError::Syntax(_))),
+            "a line that is not an object"
+        );
+        assert!(
+            matches!(line("{\"a\":1} x"), Err(LineError::Syntax(_))),
+            "trailing text"
+        );
+        assert_eq!(
+            line("{\"a\":1}\n{\"b\":2}\n"),
+            Err(LineError::NotOneLine),
+            "two lines were read as one, and the second was lost"
+        );
+        assert_eq!(
+            line(r#"{"a":1,"a":2}"#),
+            Err(LineError::Value(ValueError::DuplicateKey("a".to_owned())))
+        );
+        let deep = format!("{}{}", "[".repeat(40), "]".repeat(40));
+        assert!(matches!(
+            line(&format!("{{\"a\":{deep}}}")),
+            Err(LineError::TooDeep { .. })
+        ));
+        assert!(
+            matches!(line("{\"a\":1.5e3}"), Err(LineError::Syntax(_))),
+            "no exponents"
+        );
+    }
+
+    // One spelling per value. A number that can be written two ways is a
+    // record that can differ from itself.
+    #[test]
+    fn a_decimal_is_spelled_one_way() {
+        for good in ["0.142", "-3.25", "10.0", "0.000100"] {
+            assert_eq!(
+                Decimal::new(good).map(|number| number.as_str().to_owned()),
+                Some(good.to_owned()),
+                "{good} is how the grammar spells a decimal"
+            );
+        }
+        for bad in [
+            "1", "01.5", "-0.0", "-0.00", ".5", "1.", "NaN", "inf", "1e3", "+1.0", "", "1.5 ",
+        ] {
+            assert!(
+                Decimal::new(bad).is_none(),
+                "{bad:?} was accepted as a decimal"
+            );
+        }
+    }
 
     /// A record whose sampler carries `text` as a setting, so the grammar
     /// itself is the judge of the spelling.
@@ -370,6 +533,33 @@ mod tests {
                 "{text:?} was refused by the constructor but read by the grammar: the two disagree"
             );
         }
+    }
+
+    // Every `Display` here was unexecuted, so a reason could say the opposite
+    // of what happened with the gate still green.
+    #[test]
+    fn a_rejected_line_says_which_layer_rejected_it() {
+        assert_eq!(
+            LineError::NotOneLine.to_string(),
+            "more than one line where one object was expected"
+        );
+        assert_eq!(
+            LineError::TooDeep {
+                depth: 40,
+                limit: 32
+            }
+            .to_string(),
+            "nested 40 deep where 32 is the most a record allows"
+        );
+        assert!(
+            LineError::Syntax("x".to_owned())
+                .to_string()
+                .starts_with("not an object line")
+        );
+        assert_eq!(
+            LineError::Value(ValueError::DuplicateKey("a".to_owned())).to_string(),
+            ValueError::DuplicateKey("a".to_owned()).to_string()
+        );
     }
 
     // A negative zero is refused, and a negative number that merely looks

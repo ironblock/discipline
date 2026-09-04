@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 117
+red_faults = 162
 mechanics_assertions = 27
 migrated = 0
 
@@ -406,6 +406,410 @@ check = "test"
 label = "an empty payload read as absent"
 failure_class = "record.payload-dropped"
 legacy_signature = "an empty answer is a recorded answer, not a missing one"
+migrated = false
+
+[[fault]]
+id = "test.verdict_prefix_accepted"
+kind = "seeded-gate"
+check = "test"
+label = "a verdict read by prefix"
+failure_class = "format.invalid-fixture-accepted"
+legacy_signature = "verdict-as-a-prefix\\.txt: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.verdict_identifier_read_as_a_verdict"
+kind = "seeded-gate"
+check = "test"
+label = "an identifier in a reason read as a verdict"
+failure_class = "format.valid-fixture-rejected"
+legacy_signature = "reason-naming-an-identifier\\.txt: rejected"
+migrated = false
+
+[[fault]]
+id = "test.verdict_second_verdict_accepted"
+kind = "seeded-gate"
+check = "test"
+label = "a second verdict in a reason accepted"
+failure_class = "format.invalid-fixture-accepted"
+legacy_signature = "two-verdicts\\.txt: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.collector_substring_match"
+kind = "seeded-gate"
+check = "test"
+label = "an anchor matched inside a longer word"
+failure_class = "collector.substring-match"
+legacy_signature = "an anchor matched inside a longer word"
+migrated = false
+
+[[fault]]
+id = "test.collector_english_anchor"
+kind = "seeded-gate"
+check = "test"
+label = "an English word made an anchor"
+failure_class = "collector.over-firing"
+legacy_signature = "an English word became an anchor"
+migrated = false
+
+[[fault]]
+id = "test.collector_self_nomination"
+kind = "seeded-gate"
+check = "test"
+label = "an entry nominated by its own turn"
+failure_class = "collector.self-nomination"
+legacy_signature = "an entry nominated itself"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_supersede_without_voiding"
+kind = "seeded-gate"
+check = "test"
+label = "a supersession that adds without voiding"
+failure_class = "collector.supersede-without-void"
+legacy_signature = "the old entry was not voided"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_partial_applies_a_patch"
+kind = "seeded-gate"
+check = "test"
+label = "a verdict that settles nothing settling"
+failure_class = "collector.verdict-overapplied"
+legacy_signature = "PARTIAL produced a patch"
+migrated = false
+
+[[fault]]
+id = "test.collector_uncalibrated_policy"
+kind = "seeded-gate"
+check = "test"
+label = "an uncalibrated nomination policy accepted"
+failure_class = "collector.uncalibrated-policy"
+legacy_signature = "the fixture policy was accepted by the door that ships"
+migrated = false
+
+[[fault]]
+id = "test.collector_budget_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "a nomination budget ignored"
+failure_class = "collector.budget-ignored"
+legacy_signature = "the budget did not bind"
+migrated = false
+
+[[fault]]
+id = "test.collector_one_nomination_per_turn"
+kind = "seeded-gate"
+check = "test"
+label = "a turn that nominates only its first entry"
+failure_class = "collector.nomination-dropped"
+legacy_signature = "a turn that named two anchors nominated fewer than two entries"
+migrated = false
+
+[[fault]]
+id = "test.collector_voided_entry_renominated"
+kind = "seeded-gate"
+check = "test"
+label = "a voided entry nominated by tier 0"
+failure_class = "collector.retired-entry-renominated"
+legacy_signature = "a voided entry was nominated again by the literal tier"
+migrated = false
+
+[[fault]]
+id = "test.collector_hit_offset_lost"
+kind = "seeded-gate"
+check = "test"
+label = "a hit that says nothing about where"
+failure_class = "collector.evidence-without-a-place"
+legacy_signature = "the hits did not say where the anchor recurred"
+migrated = false
+
+[[fault]]
+id = "test.collector_overlapping_scan"
+kind = "seeded-gate"
+check = "test"
+label = "an overlapping anchor scan"
+failure_class = "collector.overlapping-match"
+legacy_signature = "an anchor that overlaps itself was counted at every shifted position"
+migrated = false
+
+[[fault]]
+id = "test.collector_quoted_anchor_delimiter"
+kind = "seeded-gate"
+check = "test"
+label = "a double-quoted span that is not an anchor"
+failure_class = "collector.anchor-class-lost"
+legacy_signature = "a double-quoted span was not anchored"
+migrated = false
+
+[[fault]]
+id = "test.collector_short_shape_anchored"
+kind = "seeded-gate"
+check = "test"
+label = "a two-byte shape read as an anchor"
+failure_class = "collector.over-firing"
+legacy_signature = "a two-byte shape was anchored"
+migrated = false
+
+[[fault]]
+id = "test.collector_module_path_shape"
+kind = "seeded-gate"
+check = "test"
+label = "a module path that is not an identifier"
+failure_class = "collector.anchor-class-lost"
+legacy_signature = "a path through the module tree was not anchored"
+migrated = false
+
+[[fault]]
+id = "test.collector_extension_window"
+kind = "seeded-gate"
+check = "test"
+label = "a sentence word read as a file extension"
+failure_class = "collector.anchor-kind-wrong"
+legacy_signature = "a dotted word whose tail is a word was read as a file name"
+migrated = false
+
+[[fault]]
+id = "test.collector_token_untrimmed"
+kind = "seeded-gate"
+check = "test"
+label = "an anchor with the sentence still on it"
+failure_class = "collector.anchor-missed"
+legacy_signature = "the punctuation prose hung on a token was kept as part of the anchor"
+migrated = false
+
+[[fault]]
+id = "test.collector_anchor_kind_permuted"
+kind = "seeded-gate"
+check = "test"
+label = "anchor kinds that swapped their names"
+failure_class = "collector.vocabulary-drift"
+legacy_signature = "the anchor kind vocabulary is not what it promises"
+migrated = false
+
+[[fault]]
+id = "test.collector_source_vocabulary_emptied"
+kind = "seeded-gate"
+check = "test"
+label = "a source vocabulary with no members"
+failure_class = "collector.vocabulary-drift"
+legacy_signature = "the source vocabulary is not what it promises"
+migrated = false
+
+[[fault]]
+id = "test.collector_tier_name_swapped"
+kind = "seeded-gate"
+check = "test"
+label = "a nomination that names the other tier"
+failure_class = "collector.vocabulary-drift"
+legacy_signature = "a nomination named the wrong tier"
+migrated = false
+
+[[fault]]
+id = "test.collector_register_permuted"
+kind = "seeded-gate"
+check = "test"
+label = "registers that swapped their names"
+failure_class = "collector.vocabulary-drift"
+legacy_signature = "the register vocabulary is not what it promises"
+migrated = false
+
+[[fault]]
+id = "test.collector_gate_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "a lexical pre-gate the tier ignores"
+failure_class = "collector.policy-setting-inert"
+legacy_signature = "a turn carrying no seed was scored by a gated policy anyway"
+migrated = false
+
+[[fault]]
+id = "test.collector_turn_threshold_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "a turn-level threshold never compared"
+failure_class = "collector.policy-setting-inert"
+legacy_signature = "an unremarkable turn nominated"
+migrated = false
+
+[[fault]]
+id = "test.collector_entry_threshold_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "a per-entry threshold never compared"
+failure_class = "collector.policy-setting-inert"
+legacy_signature = "the tier nominated an entry the turn was not about"
+migrated = false
+
+[[fault]]
+id = "test.collector_wrong_sense_set"
+kind = "seeded-gate"
+check = "test"
+label = "a turn scored against the wrong sense set"
+failure_class = "collector.wrong-register"
+legacy_signature = "a turn about a mistaken assumption was scored as a reversal"
+migrated = false
+
+[[fault]]
+id = "test.collector_intent_register_reads_the_prose"
+kind = "seeded-gate"
+check = "test"
+label = "an intent register that reads the prose"
+failure_class = "collector.wrong-register"
+legacy_signature = "the tier measured the prose of the turn where it should have measured the stated intent"
+migrated = false
+
+[[fault]]
+id = "test.collector_budget_takes_the_worst"
+kind = "seeded-gate"
+check = "test"
+label = "a budget spent on the worst candidates"
+failure_class = "collector.budget-misspent"
+legacy_signature = "the budget was spent on the entries that scored lowest"
+migrated = false
+
+[[fault]]
+id = "test.collector_score_not_measured"
+kind = "seeded-gate"
+check = "test"
+label = "a nomination score nothing measured"
+failure_class = "collector.unmeasured-number"
+legacy_signature = "a nomination carried a score nothing measured"
+migrated = false
+
+[[fault]]
+id = "test.collector_sense_self_nomination"
+kind = "seeded-gate"
+check = "test"
+label = "an entry nominated by its own turn at tier 1"
+failure_class = "collector.self-nomination"
+legacy_signature = "an entry born in this turn nominated itself"
+migrated = false
+
+[[fault]]
+id = "test.collector_sense_voided_entry_renominated"
+kind = "seeded-gate"
+check = "test"
+label = "a voided entry nominated by tier 1"
+failure_class = "collector.retired-entry-renominated"
+legacy_signature = "a voided entry was nominated again by the sense tier"
+migrated = false
+
+[[fault]]
+id = "test.collector_report_drops_the_policy"
+kind = "seeded-gate"
+check = "test"
+label = "a report that drops half its policy"
+failure_class = "collector.unreadable-report"
+legacy_signature = "the report did not say which scoring produced it"
+migrated = false
+
+[[fault]]
+id = "test.collector_policy_names_no_run"
+kind = "seeded-gate"
+check = "test"
+label = "a calibration that names no run"
+failure_class = "collector.uncalibrated-policy"
+legacy_signature = "was read as a calibration"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_supersede_writes_a_constant"
+kind = "seeded-gate"
+check = "test"
+label = "a supersession that writes a constant"
+failure_class = "collector.silent-loss"
+legacy_signature = "the superseding entry does not say what superseded the old one"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_supersede_loses_its_fork"
+kind = "seeded-gate"
+check = "test"
+label = "a supersession with no fork behind it"
+failure_class = "collector.unattributable-patch"
+legacy_signature = "the superseding entry does not say which fork produced it"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_patch_never_handed_back"
+kind = "seeded-gate"
+check = "test"
+label = "a patch the reconciler never hands back"
+failure_class = "collector.verdict-unapplied"
+legacy_signature = "a verdict that produced a patch did not hand it back"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_partial_read_as_a_false_nomination"
+kind = "seeded-gate"
+check = "test"
+label = "a PARTIAL counted as a false nomination"
+failure_class = "collector.verdict-overapplied"
+legacy_signature = "a fork that said the prose bears on the entry was read as a false nomination"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_mention_superseded"
+kind = "seeded-gate"
+check = "test"
+label = "a mention applied as a supersession"
+failure_class = "collector.supersede-on-a-mention"
+legacy_signature = "NOT_THIS produced a patch"
+migrated = false
+[[fault]]
+id = "test.sense_cosine_unnormalised"
+kind = "seeded-gate"
+check = "test"
+label = "a cosine that forgot its second norm"
+failure_class = "sense.similarity-unnormalised"
+legacy_signature = "cosine of a vector with itself was not one"
+migrated = false
+
+[[fault]]
+id = "test.sense_contrastive_ignores_negative"
+kind = "seeded-gate"
+check = "test"
+label = "contrastive scoring that ignores the negative sense"
+failure_class = "sense.contrast-dropped"
+legacy_signature = "the contrastive score ignored the negative sense"
+migrated = false
+
+[[fault]]
+id = "test.sense_null_labels_unshuffled"
+kind = "seeded-gate"
+check = "test"
+label = "a null whose labels are never shuffled"
+failure_class = "sense.null-not-at-chance"
+legacy_signature = "d-prime on a shuffled-label null was far from zero"
+migrated = false
+
+[[fault]]
+id = "test.sense_p_without_floor"
+kind = "seeded-gate"
+check = "test"
+label = "a bootstrap p with no attainable floor"
+failure_class = "sense.p-without-floor"
+legacy_signature = "a bootstrap p-value came without its attainable floor"
+migrated = false
+
+[[fault]]
+id = "test.sense_metric_fixture_removed"
+kind = "seeded-gate"
+check = "test"
+label = "a metric whose failure fixture is gone"
+failure_class = "capture.instrument-never-failed"
+legacy_signature = "no failure fixture, so it can never be reported"
+migrated = false
+
+[[fault]]
+id = "test.record_data_line_two_lines"
+kind = "seeded-gate"
+check = "test"
+label = "two data lines read as one"
+failure_class = "record.line-silently-truncated"
+legacy_signature = "two lines were read as one, and the second was lost"
 migrated = false
 
 [[fault]]

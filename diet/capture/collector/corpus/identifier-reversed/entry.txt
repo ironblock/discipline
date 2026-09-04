@@ -1,0 +1,1 @@
+`check_record` is missing from the CLI, so callers reparse the record themselves

@@ -1,0 +1,4 @@
+A verdict is a whole word. What refuses `DONEISH` is the anchored
+document: after the verdict comes a reason or nothing, and `ISH` is
+neither. A reader that swallowed the tail would make `DONEISH` a `DONE`
+and `PARTIALLY` a `PARTIAL`.
