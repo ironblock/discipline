@@ -26,7 +26,9 @@
 
 use std::collections::BTreeSet;
 
-use crate::object::{EntryId, WorkingObject};
+use crate::object::WorkingObject;
+
+use super::{Evidence, Nomination};
 
 /// What kind of thing an anchor is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -243,19 +245,6 @@ impl Source {
     }
 }
 
-/// A live entry whose anchor recurred in new text.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Nomination {
-    /// The entry.
-    pub entry: EntryId,
-    /// The anchor that recurred.
-    pub anchor: Anchor,
-    /// Where.
-    pub source: Source,
-    /// The first occurrence.
-    pub hit: Hit,
-}
-
 /// What a turn brought that an entry's anchors are matched against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NewText<'a> {
@@ -298,9 +287,11 @@ pub fn nominate(object: &WorkingObject, new: NewText<'_>) -> Vec<Nomination> {
         if let Some((anchor, source, hit)) = found {
             nominations.push(Nomination {
                 entry: entry.id.clone(),
-                anchor,
-                source,
-                hit,
+                evidence: Evidence::Literal {
+                    anchor,
+                    source,
+                    hit,
+                },
             });
         }
     }
@@ -309,10 +300,22 @@ pub fn nominate(object: &WorkingObject, new: NewText<'_>) -> Vec<Nomination> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Anchor, AnchorKind, NewText, anchors, find, nominate};
+    use super::{
+        Anchor, AnchorKind, Evidence, NewText, Nomination, Source, anchors, find, nominate,
+    };
     use crate::formats::record::{Reasoning, Regime, Substrate};
     use crate::object::{EntryId, Patch, Provenance, WorkingObject};
     use std::collections::BTreeMap;
+
+    /// The literal evidence a nomination carries, or a panic naming what it
+    /// carried instead: this tier answers in the shared shape, and a sense
+    /// nomination reaching a literal assertion is a bug worth the panic.
+    fn literal(nomination: &Nomination) -> (&Anchor, Source) {
+        match &nomination.evidence {
+            Evidence::Literal { anchor, source, .. } => (anchor, *source),
+            other @ Evidence::Sense { .. } => panic!("tier 0 produced {other:?}"),
+        }
+    }
 
     fn texts(found: &[Anchor]) -> Vec<(&str, AnchorKind)> {
         found.iter().map(|a| (a.text.as_str(), a.kind)).collect()
@@ -416,7 +419,7 @@ mod tests {
         );
         assert_eq!(nominations.len(), 1, "{nominations:?}");
         assert_eq!(nominations[0].entry.as_str(), "e1");
-        assert_eq!(nominations[0].anchor.text, "check_record");
+        assert_eq!(literal(&nominations[0]).0.text, "check_record");
     }
 
     #[test]
@@ -480,7 +483,7 @@ mod tests {
             },
         );
         assert_eq!(by_tool.len(), 1);
-        assert_eq!(by_tool[0].source, super::Source::ToolOutput);
+        assert_eq!(literal(&by_tool[0]).1, Source::ToolOutput);
         let by_prose = nominate(
             &object,
             NewText {
@@ -489,7 +492,7 @@ mod tests {
                 tool_output: "diet/src/object.rs:1",
             },
         );
-        assert_eq!(by_prose[0].source, super::Source::Prose);
+        assert_eq!(literal(&by_prose[0]).1, Source::Prose);
     }
 
     /// What a corpus case says this tier owes it. The word is read off disk,

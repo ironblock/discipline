@@ -15,7 +15,7 @@
 use crate::formats::verdict::{Answer, Verdict};
 use crate::object::{EntryId, ObjectError, Patch, Provenance};
 
-use super::literal::Nomination;
+use super::Nomination;
 
 /// What a verdict came to.
 #[derive(Debug, Clone, PartialEq, Eq)]

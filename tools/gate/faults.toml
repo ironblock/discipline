@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 125
+red_faults = 128
 mechanics_assertions = 27
 migrated = 0
 
@@ -436,6 +436,24 @@ legacy_signature = "PARTIAL produced a patch"
 migrated = false
 
 [[fault]]
+id = "test.collector_uncalibrated_policy"
+kind = "seeded-gate"
+check = "test"
+label = "an uncalibrated nomination policy accepted"
+failure_class = "collector.uncalibrated-policy"
+legacy_signature = "the fixture policy was accepted by the door that ships"
+migrated = false
+
+[[fault]]
+id = "test.collector_budget_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "a nomination budget ignored"
+failure_class = "collector.budget-ignored"
+legacy_signature = "the budget did not bind"
+migrated = false
+
+[[fault]]
 id = "test.sense_cosine_unnormalised"
 kind = "seeded-gate"
 check = "test"
@@ -487,6 +505,15 @@ check = "test"
 label = "two data lines read as one"
 failure_class = "record.line-silently-truncated"
 legacy_signature = "two lines were read as one, and the second was lost"
+migrated = false
+
+[[fault]]
+id = "test.record_negative_zero_decimal"
+kind = "seeded-gate"
+check = "test"
+label = "a negative zero decimal accepted"
+failure_class = "record.second-spelling"
+legacy_signature = "was constructed, and the grammar would not read it back"
 migrated = false
 
 [[fault]]

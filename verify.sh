@@ -870,6 +870,16 @@ path = pathlib.Path("diet/src/capture/collector/literal.rs")
 source = path.read_text(encoding="utf-8")
 old = "        .any(|(a, b)| a.is_lowercase() && b.is_uppercase())\n}\n"
 new = "        .any(|(a, b)| a.is_lowercase() && b.is_uppercase())\n        || has_alpha\n}\n"
+# The sign let back onto a zero. `-0.0` is then a second spelling of `0.0`,
+# and a banked sampler temperature reads back as a number nobody wrote.
+inject_record_negative_zero_decimal() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/record/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = """decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
+new = """decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -977,6 +987,40 @@ old = """    if event_line.as_span().end() != text.len() {
     }
 """
 assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# An uncalibrated policy accepted. The threshold is then a number nobody
+# measured, and a nomination tier nobody can characterise spends confirm
+# forks at a rate nobody predicted.
+inject_collector_uncalibrated_policy() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """        let policy = Self::read(source)?;
+        match policy.calibrated_on {
+            Calibration::Fixture => Err(PolicyError::Fixture),
+            Calibration::Run(_) => Ok(policy),
+        }"""
+new = """        Self::read(source)"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The budget removed. One turn then nominates the whole object the first
+# time a threshold is set a little too low.
+inject_collector_budget_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "    scored.truncate(policy.budget as usize);\n"
+assert old in source
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
@@ -1542,6 +1586,10 @@ selftest() {
     'the old entry was not voided'
   seeded_case "a verdict that settles nothing settling"  test   inject_reconcile_partial_applies_a_patch \
     'PARTIAL produced a patch'
+  seeded_case "an uncalibrated nomination policy accepted" test inject_collector_uncalibrated_policy \
+    'the fixture policy was accepted by the door that ships'
+  seeded_case "a nomination budget ignored"           test     inject_collector_budget_ignored \
+    'the budget did not bind'
   seeded_case "a cosine that forgot its second norm"  test     inject_sense_cosine_unnormalised \
     'cosine of a vector with itself was not one'
   seeded_case "contrastive scoring that ignores the negative sense" test inject_sense_contrastive_ignores_negative \
@@ -1554,6 +1602,8 @@ selftest() {
     'no failure fixture, so it can never be reported'
   seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
     'two lines were read as one, and the second was lost'
+  seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
+    'was constructed, and the grammar would not read it back'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
