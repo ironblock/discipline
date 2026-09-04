@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 111
+red_faults = 117
 mechanics_assertions = 27
 migrated = 0
 
@@ -361,6 +361,60 @@ check = "test"
 label = "an empty payload read as absent"
 failure_class = "record.payload-dropped"
 legacy_signature = "an empty answer is a recorded answer, not a missing one"
+migrated = false
+
+[[fault]]
+id = "test.tangent_drop_removes"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent drop that deletes"
+failure_class = "object.disposition-deletes"
+legacy_signature = "a drop evicts to the archive and never deletes"
+migrated = false
+
+[[fault]]
+id = "test.tangent_park_renders"
+kind = "seeded-gate"
+check = "test"
+label = "a parked entry that still renders"
+failure_class = "object.park-still-live"
+legacy_signature = "a parked entry still speaks for the object"
+migrated = false
+
+[[fault]]
+id = "test.tangent_scope_by_recency"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent scoped by recency"
+failure_class = "object.scope-by-recency"
+legacy_signature = "scope is by provenance, not by recency"
+migrated = false
+
+[[fault]]
+id = "test.tangent_undisposed_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent closed leaving an entry unruled"
+failure_class = "object.closure-partial"
+legacy_signature = "closure is total: a tangent-born entry was left undisposed"
+migrated = false
+
+[[fault]]
+id = "test.tangent_prefix_asserted"
+kind = "seeded-gate"
+check = "test"
+label = "a prefix claimed intact, not compared"
+failure_class = "object.prefix-unmeasured"
+legacy_signature = "the prefix was reported intact after the trunk moved"
+migrated = false
+
+[[fault]]
+id = "test.tangent_id_reused"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent id opened twice"
+failure_class = "object.scope-ambiguous"
+legacy_signature = "a tangent id the record already carries was opened again"
 migrated = false
 
 [[fault]]

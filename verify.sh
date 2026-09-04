@@ -748,6 +748,124 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A tangent that drops an entry by removing it. Evict to the archive, never
+# delete: a drop is a ruling about the trunk, and the entry it ruled on has to
+# still be there for anyone to see what was explored.
+inject_tangent_drop_removes() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = """                Disposition::Drop => Patch::Retire {
+                    target: id.clone(),
+                    provenance: self.provenance(at_turn, CLOSING_LANE, None, index),
+                },"""
+new = """                Disposition::Drop => {
+                    object.entries.remove(id);
+                    continue;
+                }"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A parked entry that goes on speaking for the object. Park is the disposition
+# for a fact that was true inside the tangent and is not the trunk's; a park
+# that renders is a keep with a different name, and the trunk silently
+# inherits what the branch was exploring.
+inject_tangent_park_renders() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = """                Disposition::Park => Patch::Park {
+                    target: id.clone(),
+                    provenance: self.provenance(at_turn, CLOSING_LANE, None, index),
+                },"""
+new = """                Disposition::Park => continue,"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Scope decided by recency instead of provenance. The trunk goes on writing
+# while a tangent runs, so every fact it records after the fork turn is swept
+# into the tangent and retired by a closure that never created it.
+inject_tangent_scope_by_recency() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = "            .filter(|entry| entry.state.is_live() && born_under(entry) == Some(self.id.as_str()))"
+new = """            .filter(|entry| {
+                entry.state.is_live()
+                    && entry
+                        .provenances
+                        .first()
+                        .is_some_and(|provenance| provenance.turn >= self.at_turn)
+            })"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A closure that is not total. An entry the tangent created and nobody ruled
+# on stays live, so the trunk inherits it and nothing in the record says who
+# decided that.
+inject_tangent_undisposed_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if let Some(id) = scope.iter().find(|id| !dispositions.contains_key(id)) {
+            return Err(TangentError::Undisposed { id: id.clone() });
+        }
+"""
+new = ""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The prefix reported intact rather than compared. Rollback is free only for a
+# tangent that left the trunk alone, and a claim asserted instead of measured
+# is a claim about the design rather than about the run.
+inject_tangent_prefix_asserted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = "            prefix_intact: trunk_prefix(object, &self.id) == self.prefix_at_open,"
+new = "            prefix_intact: true,"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A tangent opened under an id the record already carries. The earlier
+# tangent's entries fall into the new one's scope, and its closure rules on
+# facts it never created.
+inject_tangent_id_reused() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if object.entries().any(|entry| born_under(entry) == Some(id)) {
+            return Err(TangentError::IdInUse { id: id.to_owned() });
+        }
+"""
+new = ""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1293,6 +1411,18 @@ selftest() {
     'a word the shell would expand was reported literal'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
     'an empty answer is a recorded answer, not a missing one'
+  seeded_case "a tangent drop that deletes"           test     inject_tangent_drop_removes \
+    'a drop evicts to the archive and never deletes'
+  seeded_case "a parked entry that still renders"     test     inject_tangent_park_renders \
+    'a parked entry still speaks for the object'
+  seeded_case "a tangent scoped by recency"           test     inject_tangent_scope_by_recency \
+    'scope is by provenance, not by recency'
+  seeded_case "a tangent closed leaving an entry unruled" test  inject_tangent_undisposed_ignored \
+    'closure is total: a tangent-born entry was left undisposed'
+  seeded_case "a prefix claimed intact, not compared" test     inject_tangent_prefix_asserted \
+    'the prefix was reported intact after the trunk moved'
+  seeded_case "a tangent id opened twice"             test     inject_tangent_id_reused \
+    'a tangent id the record already carries was opened again'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

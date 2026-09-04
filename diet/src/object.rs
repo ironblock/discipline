@@ -33,6 +33,14 @@
 //! exists. So does rendering the object into a prompt. The object is never in
 //! the prompt as the source of truth; the prompt is a render of it, produced
 //! once at a seam.
+//!
+//! [`tangent`] builds one operation on top of these semantics: ending an
+//! exploratory branch, which is prefix rollback plus a disposition over the
+//! entries the branch created. It lives beside the patch semantics rather
+//! than inside them because a tangent chooses among patches; it does not add
+//! a way to change an entry.
+
+pub mod tangent;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -90,6 +98,14 @@ pub struct Provenance {
     pub lane: String,
     /// The fork it came from, when it came from one.
     pub fork: Option<String>,
+    /// The tangent it was made under, when it was made under one.
+    ///
+    /// Written by [`tangent::Tangent::provenance`] and by nothing else, so
+    /// that "this entry was born in that tangent" is a fact of the record
+    /// rather than a guess from when the entry happened to arrive. The guess
+    /// is what recency would give, and the trunk goes on writing while a
+    /// tangent runs.
+    pub tangent: Option<String>,
     /// Where this patch sat in its lane's emission for the turn.
     ///
     /// Patches within one turn are logically simultaneous, and forks finish
@@ -143,6 +159,19 @@ pub enum Patch {
         /// Where the verdict came from.
         provenance: Provenance,
     },
+    /// Take an entry out of the live set without saying it stopped being
+    /// true. It stays in the object.
+    ///
+    /// Separate from `Retire` because the two say different things and a
+    /// reader deciding what to do with the entry needs to tell them apart:
+    /// retired means the fact stopped mattering, parked means it was never
+    /// the trunk's fact to begin with.
+    Park {
+        /// The entry.
+        target: EntryId,
+        /// Where the verdict came from.
+        provenance: Provenance,
+    },
 }
 
 impl Patch {
@@ -153,7 +182,8 @@ impl Patch {
             Self::Add { provenance, .. }
             | Self::Supersede { provenance, .. }
             | Self::Resolve { provenance, .. }
-            | Self::Retire { provenance, .. } => provenance,
+            | Self::Retire { provenance, .. }
+            | Self::Park { provenance, .. } => provenance,
         }
     }
 }
@@ -173,6 +203,13 @@ pub enum EntryState {
     Resolved,
     /// No longer relevant, and kept.
     Retired,
+    /// Out of the live set, and kept: true inside the tangent that created
+    /// it, and not the trunk's.
+    ///
+    /// Distinct from `Retired` because a later reader deciding whether to
+    /// reopen the tangent needs to know which of the two happened, and one
+    /// state slot holding both would not tell them.
+    Parked,
 }
 
 impl EntryState {
@@ -184,6 +221,7 @@ impl EntryState {
             Self::Voided { .. } => "voided",
             Self::Resolved => "resolved",
             Self::Retired => "retired",
+            Self::Parked => "parked",
         }
     }
 
@@ -543,6 +581,9 @@ impl WorkingObject {
             }
             Patch::Retire { target, provenance } => {
                 self.set_state(target, EntryState::Retired, provenance)?
+            }
+            Patch::Park { target, provenance } => {
+                self.set_state(target, EntryState::Parked, provenance)?
             }
         };
         self.version += 1;
@@ -910,6 +951,12 @@ fn provenance_value(provenance: &Provenance) -> Value {
     if let Some(fork) = &provenance.fork {
         members.insert("fork".to_owned(), Value::String(fork.clone()));
     }
+    // Only when present. A tangent that ran is a fact about the patch; a
+    // `null` on every trunk row would be a fact about nothing, and the dump
+    // is what a diff reads.
+    if let Some(tangent) = &provenance.tangent {
+        members.insert("tangent".to_owned(), Value::String(tangent.clone()));
+    }
     Value::Object(members)
 }
 
@@ -960,7 +1007,16 @@ mod tests {
             turn,
             lane: lane.to_owned(),
             fork: fork.map(str::to_owned),
+            tangent: None,
             index,
+        }
+    }
+
+    /// The same position, made under a tangent.
+    fn under(tangent: &str, provenance: Provenance) -> Provenance {
+        Provenance {
+            tangent: Some(tangent.to_owned()),
+            ..provenance
         }
     }
 
@@ -1178,14 +1234,33 @@ mod tests {
                 from(1, "a", Some("f1")),
             ))
             .expect("a fact");
+        object
+            .apply(&add(
+                "e2",
+                "a fact from an exploratory branch",
+                under("t1", at(2, "a", Some("f1"), 0)),
+            ))
+            .expect("a fact made under a tangent");
         let dump = object.dump();
         let lines: Vec<&str> = dump.lines().collect();
-        assert_eq!(lines.len(), 2, "a header line, then one line per entry");
+        assert_eq!(lines.len(), 3, "a header line, then one line per entry");
         assert!(lines[1].contains(r#"\"quote\""#), "quotes are escaped");
         assert!(!lines[1].contains('\n'), "one entry, one line");
+        // A patch made under a tangent says so on disk, or the scope a
+        // closure reads is a scope only the process that made it can see.
+        assert!(
+            !lines[1].contains(r#""tangent""#),
+            "a trunk patch claimed a tangent: {}",
+            lines[1]
+        );
+        assert!(
+            lines[2].contains(r#""tangent":"t1""#),
+            "the tangent a patch was made under is not in the dump: {}",
+            lines[2]
+        );
         // The header says which version and which regime, or the dump is not
         // a versioned dump.
-        assert!(lines[0].contains(r#""version":1"#), "header: {}", lines[0]);
+        assert!(lines[0].contains(r#""version":2"#), "header: {}", lines[0]);
         assert!(
             lines[0].contains(r#""arm":"baseline""#),
             "header: {}",
@@ -1622,25 +1697,36 @@ mod tests {
     }
 
     #[test]
-    fn a_retired_or_resolved_entry_cannot_be_superseded_over() {
-        for (mark, retire) in [(EntryState::Retired, true), (EntryState::Resolved, false)] {
+    fn a_retired_resolved_or_parked_entry_cannot_be_superseded_over() {
+        let marks = [
+            (
+                EntryState::Retired,
+                Patch::Retire {
+                    target: id("e1"),
+                    provenance: from(2, "structuring", None),
+                },
+            ),
+            (
+                EntryState::Resolved,
+                Patch::Resolve {
+                    target: id("e1"),
+                    provenance: from(2, "structuring", None),
+                },
+            ),
+            (
+                EntryState::Parked,
+                Patch::Park {
+                    target: id("e1"),
+                    provenance: under("t1", at(2, "structuring", None, 0)),
+                },
+            ),
+        ];
+        for (mark, marking) in marks {
             let mut object = object();
             object
                 .apply(&add("e1", "the rate is 0.42", from(1, "interview", None)))
                 .expect("the fact");
-            object
-                .apply(&if retire {
-                    Patch::Retire {
-                        target: id("e1"),
-                        provenance: from(2, "structuring", None),
-                    }
-                } else {
-                    Patch::Resolve {
-                        target: id("e1"),
-                        provenance: from(2, "structuring", None),
-                    }
-                })
-                .expect("the mark");
+            object.apply(&marking).expect("the mark");
             assert_eq!(
                 object.apply(&Patch::Supersede {
                     id: id("e2"),
@@ -1684,6 +1770,10 @@ mod tests {
                 target: id("e2"),
                 provenance: from(4, "reconciler", None),
             },
+            Patch::Park {
+                target: id("e2"),
+                provenance: under("t1", at(5, "reconciler", None, 0)),
+            },
         ];
         for patch in &patches {
             // Exhaustive on purpose: a variant added to `Patch` and not
@@ -1694,7 +1784,8 @@ mod tests {
                 Patch::Add { .. }
                 | Patch::Supersede { .. }
                 | Patch::Resolve { .. }
-                | Patch::Retire { .. } => {}
+                | Patch::Retire { .. }
+                | Patch::Park { .. } => {}
             }
             object.apply(patch).expect("the patch applies");
             assert_eq!(
@@ -1773,6 +1864,16 @@ mod tests {
                 target: id("a2"),
                 provenance: at(7, "structuring", None, 1),
             },
+            // A patch made under a tangent, in the same turn as the trunk's.
+            // A tangent is a scope over the object, not a second clock: its
+            // patches take their place in the turn's canonical order like
+            // any other, and the tangent it carries has to survive every
+            // ordering or the scope a closure reads depends on the race.
+            add(
+                "d1",
+                "the cache was already warm",
+                under("t1", at(7, "interview", Some("f3"), 0)),
+            ),
         ];
         let mut reference: Option<(String, Vec<(EntryId, EntryId)>)> = None;
         let mut orderings = 0;
@@ -1802,7 +1903,7 @@ mod tests {
             }
             orderings += 1;
         }
-        assert_eq!(orderings, 120, "every ordering of five patches was tried");
+        assert_eq!(orderings, 720, "every ordering of six patches was tried");
         let (dump, aliases) = reference.expect("at least one ordering");
         assert_eq!(
             aliases,
@@ -1810,6 +1911,10 @@ mod tests {
             "a2 aliases a1 whichever fork was faster"
         );
         assert!(dump.contains(r#""id":"c1""#));
+        assert!(
+            dump.contains(r#""tangent":"t1""#),
+            "the tangent a patch was made under did not survive the turn: {dump}"
+        );
     }
 
     /// Every ordering of `0..n`.
@@ -1858,6 +1963,24 @@ mod tests {
                 expected: 2,
                 found: 3
             })
+        );
+        // A tangent does not open a second index space. A lane emits one
+        // sequence per turn whether or not a tangent is running, so two
+        // patches at one position collide even when only one of them was
+        // made under a tangent -- and the alternative, widening the position
+        // to include the tangent, weakens the guard rather than the reverse.
+        assert_eq!(
+            object.apply_turn(&[
+                add("e1", "one", at(2, "interview", None, 0)),
+                add("e2", "two", under("t1", at(2, "interview", None, 0))),
+            ]),
+            Err(ObjectError::DuplicatePosition {
+                lane: "interview".to_owned(),
+                fork: None,
+                index: 0,
+            }),
+            "a tangent was read as a second index space, so a turn could be \
+             ordered by arrival as long as one patch carried one"
         );
     }
 
