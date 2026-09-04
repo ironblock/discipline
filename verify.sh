@@ -837,6 +837,29 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A subshell run against the shell's own state. `cd a; (cd b; ls); pwd` then
+# ends in `b`, and every relative path after it resolves against a directory
+# the session was never in.
+inject_mechanical_subshell_leaks() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Command::Subshell(inner) => {
+                let mut copy = state.clone();
+                self.run_list(inner, &mut copy, call);
+                false
+            }"""
+new = """            Command::Subshell(inner) => {
+                self.run_list(inner, state, call);
+                false
+            }"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # Contrastive scoring that never subtracts the authored negative sense. It
 # becomes raw cosine wearing another tag, and the one repair the bakeoff has
 # for an abstract description sitting near everything is reported as measured
@@ -982,6 +1005,149 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A `cd` the shell reported failing, applied anyway. The tracked working
+# directory then names a directory that is not there, which is the mistake the
+# whole lane exists to stop being made by a model.
+inject_mechanical_failed_cd_applied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = "        let refused = call.refusal(builtin, written.as_deref(), simple);\n"
+new = """        let refused: Option<String> = {
+            let _ = call.refusal(builtin, written.as_deref(), simple);
+            None
+        };
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# `popd` with nothing on the stack passed over in silence. The cwd stays
+# right and the record stops saying the session tried to leave.
+inject_mechanical_popd_empty_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        self.record_failure(call, simple, EMPTY_STACK.to_owned());
+        true
+    }"""
+new = """        false
+    }"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The lint's table of mechanical nouns emptied. Every ask template then passes,
+# and the working directory can go back to being an interview question.
+inject_mechanical_lint_table_emptied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = "pub const MECHANICAL_NOUNS: &[&str] = &[\n"
+new = "pub const MECHANICAL_NOUNS: &[&str] = &[];\nconst RETIRED_NOUNS: &[&str] = &[\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Mechanical entries routed through the groundedness gate. A derivation is not
+# a quotation, so "the working directory is /work/diet" is absent from the row
+# that says `cd diet` and the gate drops the lane's whole output as invention.
+inject_mechanical_entry_grounded() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        let patches = self.patches(turn);
+        object.apply_turn(&patches)
+"""
+new = """        let patches = self.patches(turn);
+        let texts: Vec<String> = patches
+            .iter()
+            .map(|patch| match patch {
+                Patch::Add { content, .. } => content.clone(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        let source = self
+            .commands
+            .iter()
+            .map(|run| run.line.as_str())
+            .collect::<Vec<_>>()
+            .join("\\n");
+        let floor = crate::capture::grounded::Floor::pre_registered(1, 2, "the seeded fault")
+            .expect("a floor");
+        let report = crate::capture::grounded::check(
+            &texts,
+            crate::formats::interview::FieldKind::ApiSurface,
+            crate::capture::grounded::ContractInput {
+                source: &source,
+                session_prefix: "",
+            },
+            &floor,
+        );
+        let kept = report.kept();
+        let patches: Vec<Patch> = patches
+            .into_iter()
+            .zip(texts.iter())
+            .filter(|(_, text)| kept.contains(&text.as_str()))
+            .map(|(patch, _)| patch)
+            .collect();
+        object.apply_turn(&patches)
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A word's command substitutions found by scanning the text the quoting has
+# already been taken out of, instead of by the grammar that read the quoting.
+# `echo '$(cat notes.txt)'` then records a file read that never happened,
+# which is the one thing this lane exists not to do.
+inject_mechanical_quoted_substitution() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = """    Ok(Word {
+        text,
+        literal,
+        substitutions,
+    })"""
+new = """    let mut substitutions = Vec::new();
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        if bytes[index] == b'$'
+            && bytes[index + 1] == b'('
+            && let Some(end) = text[index + 2..].find(')')
+        {
+            substitutions.push(text[index + 2..index + 2 + end].to_owned());
+            index = index + 2 + end + 1;
+            continue;
+        }
+        index += 1;
+    }
+    Ok(Word {
+        text,
+        literal,
+        substitutions,
+    })"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # The reading at which a metric counts as having failed, moved off the worst
 # the metric can say. An area under the curve of 0.9 is nearly perfect
 # separation, and a fixture that reaches it would then certify every number
@@ -994,6 +1160,21 @@ path = pathlib.Path("diet/src/capture/sense.rs")
 source = path.read_text(encoding="utf-8")
 old = "            Self::Auc => 0.5,\n"
 new = "            Self::Auc => 0.9,\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The lane renamed. Every derived entry then claims to have come from `main`,
+# the canonical lane, whose authority a mechanical derivation does not carry.
+inject_mechanical_lane_renamed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = 'pub const LANE: &str = "mechanical";'
+new = 'pub const LANE: &str = "main";'
 assert source.count(old) == 1
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -1017,6 +1198,24 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# An option word to a builtin read as the directory it names. `cd -P /work/x`
+# then states the working directory as `/work/-P`: an absolute path, marked
+# resolved, that every later relative path resolves against.
+inject_mechanical_option_is_a_directory() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        let optioned = simple.operands().iter().any(is_option);
+        let argument = simple.operands().iter().find(|word| !is_option(word));"""
+new = """        let optioned = false;
+        let argument = simple.operands().first();"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # The lexical pre-gate asked about the row's id instead of its text. The
 # shipped ids are slugs of their texts and mostly agree, so the with-gate arm
 # of every cell is computed from identifiers with a row silently dropped to
@@ -1035,6 +1234,23 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A flag's value read as a file operand. `touch -t 202401010000 f.txt` then
+# says the turn wrote a file named after the timestamp.
+inject_mechanical_flag_value_is_a_file() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """    FileCommand::plain("touch", Operands::Write, &["-d", "-r", "-t"]),
+    FileCommand::plain("mkdir", Operands::Write, &["-m"]),"""
+new = """    FileCommand::plain("touch", Operands::Write, &[]),
+    FileCommand::plain("mkdir", Operands::Write, &[]),"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # A standardised separation divided by one class's spread rather than by both.
 # It is one of the two pre-registered separation endpoints, and a cell could
 # report a separation computed from the positives alone.
@@ -1046,6 +1262,25 @@ path = pathlib.Path("diet/src/capture/sense.rs")
 source = path.read_text(encoding="utf-8")
 old = "    let pooled = f64::midpoint(positive.variance, negative.variance).sqrt();\n"
 new = "    let pooled = positive.variance.sqrt();\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The verb an entry uses to say what happened to a file, swapped. The lane
+# then writes, under capture authority, that a file it made was deleted.
+inject_mechanical_entry_verb_swapped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Self::Read => "read",
+            Self::Written => "wrote",
+            Self::Deleted => "deleted","""
+new = """            Self::Read => "read",
+            Self::Written => "deleted",
+            Self::Deleted => "wrote","""
 assert source.count(old) == 1
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -1068,6 +1303,29 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A pipeline's members never run. Nothing a pipeline reads is recorded, and a
+# pipeline is the ordinary shape of an agent's shell call.
+inject_mechanical_pipeline_skipped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if link.pipeline.len() > 1 {
+            for command in &link.pipeline {
+                let mut copy = state.clone();
+                self.run_command(command, &mut copy, call);
+            }
+            return false;
+        }"""
+new = """        if link.pipeline.len() > 1 {
+            return false;
+        }"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # A reported metric whose record carries a constant instead of the number the
 # metric produced. The record is the one door from a computed number to a
 # result, and the assembly can be guarded while the content is not.
@@ -1079,6 +1337,25 @@ path = pathlib.Path("diet/src/capture/sense.rs")
 source = path.read_text(encoding="utf-8")
 old = '            ("value".to_owned(), decimal(self.value, 4)),\n'
 new = '            ("value".to_owned(), decimal(0.0, 4)),\n'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A path written and then read by one call kept as one fact. The write is the
+# one discarded, so the lane tells a later reader the turn wrote nothing.
+inject_mechanical_write_lost_to_a_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """                && matches!(
+                    &fact.derived,
+                    Derived::Touch { path: held, touch: held_touch }
+                        if *held == path && held_touch.kind == kind
+                )"""
+new = """                && matches!(&fact.derived, Derived::Touch { path: held, .. } if *held == path)"""
 assert source.count(old) == 1
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -1131,7 +1408,6 @@ assert old in source
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
-
 # The sign let back onto a zero. `-0.0` is then a second spelling of `0.0`,
 # and a banked sampler temperature reads back as a number nobody wrote.
 inject_record_negative_zero_decimal() {
@@ -1760,6 +2036,42 @@ selftest() {
 
   seeded_case "a reported metric that reports a constant" test inject_sense_reported_value_constant \
     'the record of a metric is not the numbers the metric produced'
+
+  seeded_case "a subshell that shares the parent state" test   inject_mechanical_subshell_leaks \
+    'the subshell cd leaked into the parent'
+
+  seeded_case "a failed cd applied anyway"            test     inject_mechanical_failed_cd_applied \
+    'a failed cd moved the working directory'
+
+  seeded_case "popd on an empty stack ignored"        test     inject_mechanical_popd_empty_ignored \
+    'popd on an empty stack was silently ignored'
+
+  seeded_case "the mechanical-noun table emptied"     test     inject_mechanical_lint_table_emptied \
+    'a question about a mechanical fact went unflagged'
+
+  seeded_case "a mechanical entry sent through the gate" test  inject_mechanical_entry_grounded \
+    'a mechanical entry was dropped as if it needed grounding'
+
+  seeded_case "a quoted substitution descended into"  test     inject_mechanical_quoted_substitution \
+    'a single-quoted substitution was descended into'
+
+  seeded_case "the mechanical lane renamed"           test     inject_mechanical_lane_renamed \
+    'the lane was renamed'
+
+  seeded_case "an option word read as a directory"    test     inject_mechanical_option_is_a_directory \
+    'an option word was read as the directory it names'
+
+  seeded_case "a flag value read as a file"           test     inject_mechanical_flag_value_is_a_file \
+    'the lane read a file out of a flag.s value'
+
+  seeded_case "an entry with the wrong verb"          test     inject_mechanical_entry_verb_swapped \
+    'the entry used the wrong verb for what happened to the file'
+
+  seeded_case "a pipeline whose members never run"    test     inject_mechanical_pipeline_skipped \
+    'nothing in the pipeline ran'
+
+  seeded_case "a write lost to a read of the same path" test   inject_mechanical_write_lost_to_a_read \
+    'a write was lost to a read of the same path in the same call'
 
   seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
     'was constructed, and the grammar would not read it back'
