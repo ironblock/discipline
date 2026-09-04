@@ -33,8 +33,19 @@ every injection to a copy of the tree and reports the ones that change
 nothing. Run it afterwards, always -- these passes are how you get an answer
 worth checking, not the check.
 
-    merge-gate.py --base-red-faults N            # pass 1, on the conflicted tree
-    merge-gate.py --repair OURS THEIRS           # pass 2, after the conflicts are gone
+    merge-gate.py --union OURS THEIRS            # rebuild both files from the two sides
+    merge-gate.py --base-red-faults N            # patch conflict hunks in place
+    merge-gate.py --repair OURS THEIRS           # restore any injection in neither parent
+
+`--union` is the one to reach for. It ignores the conflict hunks entirely and
+rebuilds each file from the two sides: ours, plus every block of theirs whose
+name ours does not have. Hunks are an artifact of where the two texts happened
+to diverge -- git aligns two DIFFERENT injections on the identical boilerplate
+that opens their heredocs, and no hunk-level rule can tell that apart from one
+injection edited two ways. Rebuilding from names cannot make that mistake.
+
+It refuses when the two sides differ anywhere OUTSIDE the named blocks, and
+prints what differs: that part is a person's to read.
 """
 
 import argparse
@@ -50,6 +61,8 @@ ENTRY = re.compile(r"^\[\[fault\]\]\n(?:^(?!\[\[fault\]\]).*\n)+", re.M)
 # the body: a merge that took one and left the other happened once already.
 FUNC = re.compile(r"(?:^#[^\n]*\n)*^(inject_[a-z0-9_]+)\(\) \{\n.*?^\}\n", re.M | re.S)
 RED = re.compile(r"^red_faults = (\d+)\n$")
+RED_LINE = re.compile(r"^red_faults = (\d+)\n", re.M)
+CHECKS_LINE = re.compile(r"^readonly CHECKS=\(([^)]*)\)\n", re.M)
 
 GATE_FILES = ("verify.sh", "faults.toml")
 
@@ -108,6 +121,15 @@ def resolve(path: Path, base_red: int) -> int | None:
 
     def fix(m):
         ours, theirs = m.group(1), m.group(2)
+        # One side empty means the other side added lines here and this one
+        # did not -- the union is the side that has something. Safe because
+        # these two files are append-only lists: nothing removes a fault or an
+        # injection in the ordinary course, so an empty side is never a
+        # deletion this would be reverting.
+        if not ours.strip():
+            return theirs
+        if not theirs.strip():
+            return ours
         o, t = RED.match(ours), RED.match(theirs)
         if o and t:
             total = base_red + (int(o.group(1)) - base_red) + (int(t.group(1)) - base_red)
@@ -136,6 +158,118 @@ def resolve(path: Path, base_red: int) -> int | None:
         return None
     path.write_text(out, encoding="utf-8")
     return count
+
+
+def find_blocks(pattern, text):
+    """Every named block in a text, in order. Unlike `blocks`, this makes no
+    claim that the text is nothing but blocks -- it is a finder, and `blocks`
+    is a parser for one conflict hunk."""
+    key = key_of(pattern)
+    return [(key(m.group(0)), m.group(0)) for m in pattern.finditer(text) if key(m.group(0))]
+
+
+def strip_blocks(text: str, patterns) -> str:
+    """The file with every named block taken out, so what is left is the part
+    a union does not decide."""
+    for pattern in patterns:
+        text = pattern.sub("", text)
+    return text
+
+
+def insert_after_last(text: str, pattern, additions: list[str]) -> str:
+    """Put `additions` where the last block this pattern matches ends."""
+    if not additions:
+        return text
+    end = None
+    for m in pattern.finditer(text):
+        end = m.end()
+    if end is None:
+        raise ValueError("nothing to insert after")
+    joined = "".join(block if block.endswith("\n") else block + "\n" for block in additions)
+    return text[:end] + joined + text[end:]
+
+
+def union_file(path: Path, ours_ref: str, theirs_ref: str) -> bool:
+    """Rebuild one gate file from the two sides, by name."""
+    ours = show(ours_ref, str(path))
+    theirs = show(theirs_ref, str(path))
+    patterns = (FUNC, CASE) if path.name == "verify.sh" else (ENTRY,)
+
+    # The part no union decides. `red_faults` and the CHECKS array are the two
+    # lines that legitimately differ, and both are reconciled below.
+    def skeleton(text: str) -> str:
+        text = strip_blocks(text, patterns)
+        text = RED_LINE.sub("red_faults = N\n", text)
+        text = CHECKS_LINE.sub("CHECKS = ...\n", text)
+        # Removing a block leaves the blank lines that framed it, and how many
+        # depends on where the block sat. Runs of them are not a difference.
+        return re.sub(r"\n{2,}", "\n\n", text)
+
+    if skeleton(ours) != skeleton(theirs):
+        import difflib
+
+        diff = list(
+            difflib.unified_diff(
+                skeleton(ours).splitlines(True),
+                skeleton(theirs).splitlines(True),
+                fromfile=f"{ours_ref}:{path} (outside the named blocks)",
+                tofile=f"{theirs_ref}:{path} (outside the named blocks)",
+                n=2,
+            )
+        )
+        print(
+            f"{path}: the two sides differ outside the named blocks; that part "
+            f"is not a union and is yours to resolve:",
+            file=sys.stderr,
+        )
+        sys.stderr.writelines(diff[:80])
+        return False
+
+    built = ours
+    for pattern in patterns:
+        mine = {name for name, _ in find_blocks(pattern, ours)}
+        added = [
+            block for name, block in find_blocks(pattern, theirs) if name not in mine
+        ]
+        built = insert_after_last(built, pattern, added)
+        if added:
+            print(f"merge-gate: {path.name}: took {len(added)} block(s) from {theirs_ref}")
+
+    # `red_faults` is COUNTED from the assembled list, not computed from the
+    # two sides' deltas. The delta arithmetic is wrong whenever the branches
+    # share history the merge base does not -- a criss-cross, which a stack of
+    # lanes built on each other produces routinely -- and it double-counts
+    # every fault both sides inherited that way. The count follows from the
+    # list this union just built, and `check-fault-manifest.py --count-red` is
+    # the one reader that knows how to do it.
+    if RED_LINE.search(built):
+        built = RED_LINE.sub("red_faults = 0\n", built, count=1)
+        path.write_text(built, encoding="utf-8")
+        counted = subprocess.run(
+            [sys.executable, "scripts/check-fault-manifest.py", "--count-red"],
+            capture_output=True,
+            text=True,
+        )
+        if counted.returncode != 0 or not counted.stdout.strip().isdigit():
+            print(
+                f"{path}: could not count the assembled faults; the manifest says:\n"
+                + (counted.stderr or counted.stdout),
+                file=sys.stderr,
+            )
+            return False
+        total = int(counted.stdout.strip())
+        built = RED_LINE.sub(f"red_faults = {total}\n", built, count=1)
+        print(f"merge-gate: red_faults counted from the assembled list: {total}")
+
+    o, t = CHECKS_LINE.search(ours), CHECKS_LINE.search(theirs)
+    if o and t and o.group(0) != t.group(0):
+        mine = o.group(1).split()
+        joined = mine + [c for c in t.group(1).split() if c not in mine]
+        built = CHECKS_LINE.sub(f"readonly CHECKS=({' '.join(joined)})\n", built, count=1)
+        print(f"merge-gate: CHECKS unioned to {len(joined)}: {' '.join(joined)}")
+
+    path.write_text(built, encoding="utf-8")
+    return True
 
 
 def show(ref: str, path: str) -> str:
@@ -185,6 +319,13 @@ def main(argv: list[str]) -> int:
         "of both sides' deltas rather than either side's number",
     )
     parser.add_argument(
+        "--union",
+        nargs=2,
+        metavar=("OURS", "THEIRS"),
+        help="rebuild both gate files from the two sides, by name, ignoring "
+        "the conflict hunks entirely",
+    )
+    parser.add_argument(
         "--repair",
         nargs=2,
         metavar=("OURS", "THEIRS"),
@@ -197,14 +338,19 @@ def main(argv: list[str]) -> int:
         help="the gate files to work on",
     )
     args = parser.parse_args(argv)
-    if args.base_red_faults is None and args.repair is None:
-        parser.error("one of --base-red-faults or --repair is required")
+    if args.base_red_faults is None and args.repair is None and args.union is None:
+        parser.error("one of --union, --base-red-faults or --repair is required")
 
     paths = [Path(f) for f in args.files]
     for path in paths:
         if path.name not in GATE_FILES:
             print(f"refusing: {path} is neither verify.sh nor faults.toml", file=sys.stderr)
             return 2
+
+    if args.union is not None:
+        for path in paths:
+            if path.is_file() and not union_file(path, *args.union):
+                return 1
 
     if args.base_red_faults is not None:
         total = 0
