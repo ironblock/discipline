@@ -40,6 +40,18 @@
 //! in this module, [`Tally`] holds only what a caller fed it, and a reader
 //! should take these cases as a statement of where the boundary is and as
 //! nothing whatever about which asks a model in fact mimics.
+//!
+//! **Whether this lane earns its place is not settled here either.** Mimicry
+//! is a failure of prose emission, and prose is one modality of three. If
+//! schema-constrained emission or tool-mediated capture becomes the primary
+//! one, most of what this module detects stops being possible to emit at
+//! all -- there is no template to hand back when the shape is the tool's --
+//! and the lane shrinks to a fallback path. Which modality wins is the
+//! three-modality bakeoff's question, and that has not been run: it needs
+//! the models this tree does not have. So this is built to the issue and
+//! measured against nothing. A later reading that finds it mostly idle
+//! should suspect the modality changed under it rather than that the
+//! detector regressed.
 
 use std::collections::BTreeMap;
 
