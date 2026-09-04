@@ -33,6 +33,14 @@ the two can be diffed line for line. They were extracted there from the harness
 source with proven byte identity, and every archived drive that program
 recorded was asked in these words. They are `VERSION` 0 here.
 
-The trigger vocabulary and the per-model operating points that sat beside
-them in the research program are not here yet; they arrive with the rest of
-the dogma port.
+Beside the templates, two more pieces of the same dogma, pinned the same way:
+
+- `operating-points.toml`: the per-model operating points (sampler, gate and
+  no-think settings per model family), transcribed measurements with their
+  receipts. The tables are the research program's byte for byte; the receipts
+  are restated as content because they pointed at that program's tickets.
+  `diet::dogma::OPERATING_POINTS` carries the text and
+  `OPERATING_POINTS_DIGEST` pins it.
+- the trigger vocabulary, `diet::dogma::vocabulary`: the surprise words and
+  the error words, as Rust constants, pinned by the research program's own
+  digest values so the port is checkable from either side.

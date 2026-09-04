@@ -40,6 +40,8 @@
 use std::error::Error;
 use std::fmt;
 
+pub mod vocabulary;
+
 /// The version of the dogma this crate carries.
 ///
 /// A record produced under these templates carries this number as its
@@ -56,6 +58,19 @@ pub const VERSION: u32 = 0;
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
 pub const MANIFEST_DIGEST: &str = "e93b1fbf63c31266";
+
+/// The per-model operating points, as TOML text, exactly as pinned.
+///
+/// Transcribed measurements, with their receipts beside them; the tables are
+/// the research program's byte for byte. Exposed as text rather than parsed
+/// because this crate has no TOML reader beyond the regimen subset, and the
+/// operating points use tables and floats that subset does not admit. The
+/// consumer that parses it names its reader; the digest below is what it
+/// checks first.
+pub const OPERATING_POINTS: &str = include_str!("../../dogma/operating-points.toml");
+
+/// The digest of [`OPERATING_POINTS`] that [`VERSION`] was declared against.
+pub const OPERATING_POINTS_DIGEST: &str = "e93e72dce1cf9f1b";
 
 /// The manifest, exactly as pinned: one line per template, `name`, digest
 /// and byte length, tab-separated, after the comment lines.
@@ -533,8 +548,8 @@ pub fn digest(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        FORK_LOCAL_SENTENCE, FillError, Hole, MANIFEST, MANIFEST_DIGEST, Site, Template, digest,
-        fill_text,
+        FORK_LOCAL_SENTENCE, FillError, Hole, MANIFEST, MANIFEST_DIGEST, OPERATING_POINTS,
+        OPERATING_POINTS_DIGEST, Site, Template, digest, fill_text,
     };
     use std::collections::BTreeSet;
     use std::path::Path;
@@ -708,6 +723,42 @@ mod tests {
             "diet/dogma/MANIFEST.tsv changed and dogma::VERSION / MANIFEST_DIGEST did not: \
              a dogma version bump edits both, in one commit, with the reason"
         );
+    }
+
+    #[test]
+    fn the_operating_points_are_pinned() {
+        assert_eq!(
+            digest(OPERATING_POINTS),
+            OPERATING_POINTS_DIGEST,
+            "diet/dogma/operating-points.toml changed and dogma::VERSION / \
+             OPERATING_POINTS_DIGEST did not: a dogma version bump edits both"
+        );
+        // Every model table carries a sampler and a gate, and every listed
+        // no-think operation is one of the three the program runs.
+        let mut models = 0;
+        for line in OPERATING_POINTS.lines() {
+            let line = line.trim();
+            if line.starts_with('[') && !line.contains('.') {
+                models += 1;
+            }
+            if let Some(rest) = line.strip_prefix("nothink_ops") {
+                for op in rest.split(['[', ']', ',', '"', '=', ' ']) {
+                    let op = op.trim();
+                    assert!(
+                        op.is_empty() || ["extraction", "judgment", "audit"].contains(&op),
+                        "`{op}` is not an operation this program runs"
+                    );
+                }
+            }
+        }
+        assert_eq!(models, 4, "four model families are pinned");
+        for table in ["sampler", "gate"] {
+            assert_eq!(
+                OPERATING_POINTS.matches(&format!(".{table}]")).count(),
+                4,
+                "every model table carries a `{table}` table"
+            );
+        }
     }
 
     // The lane-scoped-sentence rule, as a check. The sentence is a claim that
