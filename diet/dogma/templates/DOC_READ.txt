@@ -1,0 +1,6 @@
+Pause. You just read {path}.
+EXCERPT: quote the load-bearing part verbatim (do not paraphrase, at most ~15 lines), or NONE if nothing was load-bearing.
+POINTER: anything else you noticed that isn't needed now but might matter later, each on its own line as POINTER: <what it is and what it's for> (<where it is>), or NONE.
+PLAN_IMPACT: one line on what this establishes or changes about your plan, or NONE.
+
+Answer only this question, then end your turn. Do not run a command — the main session continues in parallel.

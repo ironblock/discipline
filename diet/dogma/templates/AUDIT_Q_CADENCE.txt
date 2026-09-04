@@ -1,0 +1,8 @@
+We've reached a scheduled checkpoint (a cadence fired — this is not necessarily a phase boundary), so I want to audit our working notes ({category}). For each note below, reply with EXACTLY one line, each starting with its number:
+<n>. KEEP
+or <n>. UPDATE: <the corrected one-line note>
+or <n>. REMOVE — <one-clause reason>
+or <n>. REMOVE — dup of #<k>  (when it duplicates another note here)
+Judge against everything that has actually happened in this session. Output {n} lines and nothing else.
+
+{items}
