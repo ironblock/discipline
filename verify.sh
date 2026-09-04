@@ -759,6 +759,129 @@ source = path.read_text(encoding="utf-8")
 old = """decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
 new = """decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
 assert old in source
+# A subshell run against the shell's own state. `cd a; (cd b; ls); pwd` then
+# ends in `b`, and every relative path after it resolves against a directory
+# the session was never in.
+inject_mechanical_subshell_leaks() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Command::Subshell(inner) => {
+                let mut copy = state.clone();
+                self.run_list(inner, &mut copy, call);
+                false
+            }"""
+new = """            Command::Subshell(inner) => {
+                self.run_list(inner, state, call);
+                false
+            }"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A `cd` the shell reported failing, applied anyway. The tracked working
+# directory then names a directory that is not there, which is the mistake the
+# whole lane exists to stop being made by a model.
+inject_mechanical_failed_cd_applied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = "        let refused = call.refusal(builtin, written.as_deref(), simple);\n"
+new = """        let refused: Option<String> = {
+            let _ = call.refusal(builtin, written.as_deref(), simple);
+            None
+        };
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# `popd` with nothing on the stack passed over in silence. The cwd stays
+# right and the record stops saying the session tried to leave.
+inject_mechanical_popd_empty_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        self.record_failure(call, simple, EMPTY_STACK.to_owned());
+        true
+    }"""
+new = """        false
+    }"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The lint's table of mechanical nouns emptied. Every ask template then passes,
+# and the working directory can go back to being an interview question.
+inject_mechanical_lint_table_emptied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = "pub const MECHANICAL_NOUNS: &[&str] = &[\n"
+new = "pub const MECHANICAL_NOUNS: &[&str] = &[];\nconst RETIRED_NOUNS: &[&str] = &[\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Mechanical entries routed through the groundedness gate. A derivation is not
+# a quotation, so "the working directory is /work/diet" is absent from the row
+# that says `cd diet` and the gate drops the lane's whole output as invention.
+inject_mechanical_entry_grounded() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        let patches = self.patches(turn);
+        object.apply_turn(&patches)
+"""
+new = """        let patches = self.patches(turn);
+        let texts: Vec<String> = patches
+            .iter()
+            .map(|patch| match patch {
+                Patch::Add { content, .. } => content.clone(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        let source = self
+            .commands
+            .iter()
+            .map(|run| run.line.as_str())
+            .collect::<Vec<_>>()
+            .join("\\n");
+        let floor = crate::capture::grounded::Floor::pre_registered(1, 2, "the seeded fault")
+            .expect("a floor");
+        let report = crate::capture::grounded::check(
+            &texts,
+            crate::formats::interview::FieldKind::ApiSurface,
+            crate::capture::grounded::ContractInput {
+                source: &source,
+                session_prefix: "",
+            },
+            &floor,
+        );
+        let kept = report.kept();
+        let patches: Vec<Patch> = patches
+            .into_iter()
+            .zip(texts.iter())
+            .filter(|(_, text)| kept.contains(&text.as_str()))
+            .map(|(patch, _)| patch)
+            .collect();
+        object.apply_turn(&patches)
+"""
+assert source.count(old) == 1
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
@@ -1310,6 +1433,16 @@ selftest() {
     'an empty answer is a recorded answer, not a missing one'
   seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
     'was constructed, and the grammar would not read it back'
+  seeded_case "a subshell that shares the parent state" test   inject_mechanical_subshell_leaks \
+    'the subshell cd leaked into the parent'
+  seeded_case "a failed cd applied anyway"            test     inject_mechanical_failed_cd_applied \
+    'a failed cd moved the working directory'
+  seeded_case "popd on an empty stack ignored"        test     inject_mechanical_popd_empty_ignored \
+    'popd on an empty stack was silently ignored'
+  seeded_case "the mechanical-noun table emptied"     test     inject_mechanical_lint_table_emptied \
+    'a question about a mechanical fact went unflagged'
+  seeded_case "a mechanical entry sent through the gate" test  inject_mechanical_entry_grounded \
+    'a mechanical entry was dropped as if it needed grounding'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
