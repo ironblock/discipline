@@ -727,6 +727,71 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The producer read as the last command WRITTEN rather than the one whose
+# output the line carries. `cargo test | tail -15` is then a `tail` run, and
+# every routing decision downstream of it is about the wrong tool.
+inject_shell_producer_is_last_written() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "        match tail.pipeline.first()? {\n"
+new = "        match tail.pipeline.last()? {\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# One row dropped from the operator table. `>|` then has no spelling and no
+# reading, so a line that truncates a file parses as something else or not at
+# all -- and the table was, until this fault existed, guarded only by a test
+# that iterated it.
+inject_shell_operator_table_row_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "        (Self::Clobber, \">|\"),\n"
+new = ""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# `<<-` recorded as the operator and read as a plain heredoc. The body then
+# carries the leading tabs the shell strips before the command ever sees them,
+# so the recorded input is not the input that ran.
+inject_shell_heredoc_strip_keeps_tabs() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "        out.push_str(line.trim_start_matches('\\t'));\n"
+new = "        out.push_str(line);\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The command word counted among its own operands. The mechanical lane derives
+# the files a turn touched from the operands, so `rm -rf build` reports a file
+# called `rm`.
+inject_shell_command_word_is_an_operand() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = "        self.words.get(1..).unwrap_or(&[])\n"
+new = "        &self.words\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # An empty payload read as an absent one. The silence collapse the ablation
 # measures is an answer of no characters; a record that turns it into a
 # missing field reports the worst case as missing data.
@@ -1293,6 +1358,14 @@ selftest() {
     'a word the shell would expand was reported literal'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
     'an empty answer is a recorded answer, not a missing one'
+  seeded_case "the producer read as the last command" test     inject_shell_producer_is_last_written \
+    'produces its output with'
+  seeded_case "an operator dropped from the table"    test     inject_shell_operator_table_row_dropped \
+    'the table gained or lost an operator'
+  seeded_case "a stripping heredoc that keeps tabs"   test     inject_shell_heredoc_strip_keeps_tabs \
+    'did not strip the tabs the shell strips'
+  seeded_case "the command word read as an operand"   test     inject_shell_command_word_is_an_operand \
+    'the command word is not one of its own operands'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
