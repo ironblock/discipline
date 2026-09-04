@@ -289,6 +289,17 @@ pub enum DataError {
         /// The key.
         key: &'static str,
     },
+    /// An integer where a version was wanted, out of the range a version has.
+    /// Zero is the kind of value the schema names, so calling it a type error
+    /// sends whoever reads the refusal looking for the wrong thing.
+    NotAVersion {
+        /// The 1-based line.
+        line: usize,
+        /// The key.
+        key: &'static str,
+        /// What was written.
+        value: i64,
+    },
     /// An id bound twice.
     DuplicateId {
         /// The 1-based line of the second binding.
@@ -334,6 +345,12 @@ impl fmt::Display for DataError {
                 write!(f, "line {line}: `{key}` is {value:?}, which names nothing")
             }
             Self::Empty { line, key } => write!(f, "line {line}: `{key}` is empty"),
+            Self::NotAVersion { line, key, value } => {
+                write!(
+                    f,
+                    "line {line}: `{key}` is {value}, and versions start at one"
+                )
+            }
             Self::DuplicateId { line, id } => {
                 write!(f, "line {line}: the id {id:?} is already bound")
             }
@@ -398,7 +415,11 @@ fn take_version(
     match members.remove(key) {
         Some(Value::Integer(number)) => match u32::try_from(number) {
             Ok(version) if version > 0 => Ok(version),
-            _ => Err(DataError::WrongType { line, key }),
+            _ => Err(DataError::NotAVersion {
+                line,
+                key,
+                value: number,
+            }),
         },
         Some(_) => Err(DataError::WrongType { line, key }),
         None => Err(DataError::MissingKey { line, key }),
@@ -717,7 +738,9 @@ pub fn cosine(a: &[f64], b: &[f64]) -> Option<f64> {
 ///
 /// Pre-registered here rather than tuned on the data it is about to judge:
 /// cosines live in a narrow band, and a softmax at temperature one over them
-/// is nearly flat.
+/// is nearly flat. `softmax_scoring_is_a_probability_over_the_sense_set`
+/// holds it to that -- at a temperature that flattens the mass, the positive
+/// literal stops taking almost all of it.
 pub const SOFTMAX_TEMPERATURE: f64 = 0.1;
 
 /// One sense, placed by one embedder.
@@ -934,8 +957,10 @@ impl Scoring {
 
     /// The lowest value this scoring can produce.
     ///
-    /// A row the lexical gate dropped sits here, below every row that was
-    /// scored, rather than at a zero a scored row could tie.
+    /// A row the lexical gate dropped sits here, so it can never outrank a
+    /// row that was scored. Zero would not do: two of these scorings go
+    /// negative, and a dropped row parked at zero would sit above every row
+    /// the scoring placed on the negative side.
     #[must_use]
     pub fn floor(self) -> f64 {
         match self {
@@ -1829,9 +1854,19 @@ pub fn holm(ps: &[f64]) -> Vec<f64> {
 pub const NULL_SHUFFLES: u32 = 200;
 
 /// How far from one half the null's mean area under the curve may sit.
+///
+/// Bounded on both sides, because a band is only a claim when something can
+/// contradict it. The test named for that runs the null over sixteen seeds
+/// and requires this band to exceed every excursion it measures, and requires
+/// the same band to refuse a null sitting at an area of 0.85. A tolerance
+/// that can only ever be widened admits the finding it was meant to catch.
 pub const NULL_AUC_BAND: f64 = 0.1;
 
 /// How far from zero the null's mean standardised separation may sit.
+///
+/// Bounded on both sides by the same test as [`NULL_AUC_BAND`]: wider than
+/// every excursion measured over sixteen seeds, and narrow enough to refuse a
+/// null separating the two classes by a whole standard deviation.
 pub const NULL_D_PRIME_BAND: f64 = 0.25;
 
 /// The shuffled-label null: what the metrics say when the labels are random
@@ -2055,13 +2090,14 @@ impl Metric {
     }
 }
 
-/// A metric's value, and the value the same code produced on rows built to
-/// make it fail.
+/// A metric's value, and the value the same code produced on the rows the
+/// metric declares it must fail on.
 ///
-/// Private fields; [`Reported::take`] is the only door. A caller cannot
-/// assemble a report whose demonstrated failure the instrument never produced,
-/// which is the shape the groundedness gate settled on after a perfect score
-/// turned out to be a property of the probe rather than of the lane.
+/// Private fields, and [`Reported::take`] is the only door -- and it takes no
+/// failing rows, so there is nothing for a caller to substitute. A report
+/// whose demonstrated failure was staged somewhere else is the shape the
+/// groundedness gate settled on after a perfect score turned out to be a
+/// property of the probe rather than of the lane.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Reported {
     metric: Metric,
@@ -2115,24 +2151,25 @@ impl fmt::Display for MetricError {
 impl Error for MetricError {}
 
 impl Reported {
-    /// Report `metric` over `subject`, having demonstrated with `failing` that
-    /// the same code can report failure.
+    /// Report `metric` over `subject`, having demonstrated on the metric's own
+    /// failure fixture that the same code can report failure.
     ///
-    /// `failing` is rows, not a value: the demonstration is produced here, by
-    /// the metric, rather than asserted by the caller.
+    /// The demonstration is not a parameter. It is [`Metric::failure_fixture`]
+    /// and it is computed here, at the same budget, because a caller who could
+    /// hand in the failing rows could hand in rows whose reading is structural
+    /// rather than instrumental -- a precision fixture holding no positive row
+    /// scores zero because there was nothing to rank -- and certify the
+    /// subject with a failure staged somewhere else entirely. That is the
+    /// incident this type exists for.
     ///
     /// # Errors
     ///
-    /// Returns [`MetricError::InstrumentNeverFailed`] when the failing rows do
-    /// not fail, and [`MetricError::Undefined`] when the metric has no value
-    /// on either set of rows.
-    pub fn take(
-        metric: Metric,
-        k: usize,
-        subject: &[Scored],
-        failing: &[Scored],
-    ) -> Result<Self, MetricError> {
-        let on_failure_fixture = metric.compute(k, failing).ok_or(MetricError::Undefined {
+    /// Returns [`MetricError::InstrumentNeverFailed`] when the fixture does
+    /// not fail at this budget, and [`MetricError::Undefined`] when the metric
+    /// has no value on the fixture or on the subject.
+    pub fn take(metric: Metric, k: usize, subject: &[Scored]) -> Result<Self, MetricError> {
+        let failing = metric.failure_fixture();
+        let on_failure_fixture = metric.compute(k, &failing).ok_or(MetricError::Undefined {
             metric,
             on: "its failure fixture",
         })?;
@@ -2304,7 +2341,11 @@ pub struct PreRegistration {
 /// Fixed here, in code, before there is data: an endpoint chosen after the
 /// numbers are in is an endpoint the numbers chose.
 pub const PRE_REGISTRATION: PreRegistration = PreRegistration {
-    primary: "precision at a fixed nomination budget, top-k per session, per embedder, \
+    // The budget is over the register, not over a session: [`Row`] has no
+    // session key, the schema is closed, and an endpoint spelled for a
+    // grouping the instrument cannot compute is an endpoint nothing will
+    // answer. Grouping is a schema change and a later version.
+    primary: "precision at a fixed nomination budget, the top k of the register, per embedder, \
               scoring and gate",
     separation: "the area under the curve and the standardised separation, per cell",
     over_firing: "the share of hard-negative rows nominated within the budget",
@@ -2447,7 +2488,7 @@ fn decimal(value: f64, digits: usize) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::path::{Path, PathBuf};
 
     use super::{
@@ -2458,12 +2499,17 @@ mod tests {
         cosine, d_prime, holm, over_firing, paired_bootstrap, precision_at_k, register, score_rows,
         seeds, senses, shipped_senses, shuffled_null,
     };
-    use crate::formats::record::json::{self, Value};
+    use crate::formats::record::json::{self, Decimal, Value};
 
     const EPSILON: f64 = 1e-9;
 
     fn near(a: f64, b: f64) -> bool {
         (a - b).abs() < EPSILON
+    }
+
+    /// A decimal as a record holds it: digits as written.
+    fn decimal(spelled: &str) -> Value {
+        Value::Decimal(Decimal::parse(spelled).expect("a decimal"))
     }
 
     fn shipped() -> Vec<super::Sense> {
@@ -2560,6 +2606,67 @@ mod tests {
         }
     }
 
+    /// The fixture embedder with one text placed exactly where another sits:
+    /// an embedder that cannot tell the sense itself from a register row.
+    struct Impostor {
+        text: String,
+        as_if: String,
+    }
+
+    impl Impostor {
+        const ID: &'static str = "impostor";
+    }
+
+    impl Embedder for Impostor {
+        fn embed(&self, text: &str) -> Vec<f64> {
+            if self.text == text {
+                Fixture.embed(&self.as_if)
+            } else {
+                Fixture.embed(text)
+            }
+        }
+        fn id(&self) -> &str {
+            Self::ID
+        }
+    }
+
+    /// An embedder reading its vectors from a table.
+    ///
+    /// The fixture embedder's components are token counts, so every cosine it
+    /// produces is non-negative and no row it places can go under a control.
+    /// A real model's components have signs. This one lets a test put a row
+    /// where a real model could put it.
+    struct Placed(Vec<(String, Vec<f64>)>);
+
+    impl Placed {
+        const ID: &'static str = "placed";
+
+        /// Where a text the table does not name sits: between the extremes,
+        /// so a row that trips a control is the row the test placed there.
+        const ELSEWHERE: [f64; 2] = [1.0, 1.0];
+
+        fn at(pairs: &[(&str, [f64; 2])]) -> Self {
+            Self(
+                pairs
+                    .iter()
+                    .map(|(text, vector)| ((*text).to_owned(), vector.to_vec()))
+                    .collect(),
+            )
+        }
+    }
+
+    impl Embedder for Placed {
+        fn embed(&self, text: &str) -> Vec<f64> {
+            self.0
+                .iter()
+                .find(|(placed, _)| placed == text)
+                .map_or_else(|| Self::ELSEWHERE.to_vec(), |(_, vector)| vector.clone())
+        }
+        fn id(&self) -> &str {
+            Self::ID
+        }
+    }
+
     // ---- sense sets as versioned data ----
 
     #[test]
@@ -2593,49 +2700,71 @@ mod tests {
     fn the_sense_set_schema_is_closed() {
         let good = r#"{"set":"mistake","version":1,"polarity":"positive","text":"x"}"#;
         assert_eq!(senses(good).expect("a well-formed row").len(), 1);
+        // Each case carries the reason the reader must give for it. A refusal
+        // whose text nothing pins can say the opposite of what happened, and
+        // three refusals that collapse into one reason send whoever reads a
+        // rejected file looking for the wrong thing.
         let cases = [
             (
                 r#"{"set":"mistake","version":1,"polarity":"positive","text":"x","note":"y"}"#,
-                "an unknown key",
+                "line 1: `note` is not a key of this schema",
             ),
             (
                 r#"{"set":"mistake","version":1,"polarity":"positive"}"#,
-                "a missing key",
+                "line 1: no `text`",
             ),
             (
                 r#"{"set":"regret","version":1,"polarity":"positive","text":"x"}"#,
-                "an unknown set",
+                "line 1: `set` is \"regret\", which names nothing",
             ),
             (
                 r#"{"set":"mistake","version":1,"polarity":"neutral","text":"x"}"#,
-                "an unknown polarity",
+                "line 1: `polarity` is \"neutral\", which names nothing",
             ),
             (
                 r#"{"set":"mistake","version":"1","polarity":"positive","text":"x"}"#,
-                "a version that is not an integer",
+                "line 1: `version` is not the kind of value the schema names",
             ),
             (
                 r#"{"set":"mistake","version":0,"polarity":"positive","text":"x"}"#,
-                "a version of zero",
+                "line 1: `version` is 0, and versions start at one",
             ),
             (
                 r#"{"set":"mistake","version":1,"polarity":"positive","text":""}"#,
-                "an empty text",
+                "line 1: `text` is empty",
             ),
-            ("[1]", "a line that is not an object"),
-            ("", "no rows"),
+            ("", "no rows: a file of nothing is a missing file"),
             (
                 "{\"set\":\"mistake\",\"version\":1,\"polarity\":\"positive\",\"text\":\"x\"}\n\
                  {\"set\":\"mistake\",\"version\":1,\"polarity\":\"positive\",\"text\":\"x\"}",
-                "a text repeated",
+                "line 2: the text \"x\" is already present",
             ),
         ];
-        for (source, what) in cases {
-            assert!(
-                senses(source).is_err(),
-                "the sense-set schema admitted {what}: {source}"
+        let mut reasons = BTreeSet::new();
+        for (source, reason) in cases {
+            let err = senses(source)
+                .err()
+                .unwrap_or_else(|| panic!("the sense-set schema admitted {source}"));
+            assert_eq!(
+                err.to_string(),
+                reason,
+                "the sense-set schema refused {source} and said something else"
             );
+            reasons.insert(err.to_string());
         }
+        assert_eq!(
+            reasons.len(),
+            cases.len(),
+            "two refusals of the sense-set schema gave the same reason"
+        );
+        // A line the grammar itself rejects is refused as a line, carrying the
+        // parser's own complaint rather than a reason invented here.
+        let err = senses("[1]").expect_err("an array is not a row");
+        assert!(matches!(err, DataError::Line { line: 1, .. }), "{err:?}");
+        assert!(
+            err.to_string().starts_with("line 1: not an object line"),
+            "{err}"
+        );
     }
 
     // ---- the register ----
@@ -2692,46 +2821,59 @@ mod tests {
         let cases = [
             (
                 r#"{"id":"a/b","text":"x","label":"maybe","source":"authored"}"#,
-                "an unknown label",
+                "line 1: `label` is \"maybe\", which names nothing",
             ),
             (
                 r#"{"id":"a/b","text":"x","label":"positive","source":"mined"}"#,
-                "a source nothing has produced yet",
+                "line 1: `source` is \"mined\", which names nothing",
             ),
             (
                 r#"{"id":"a/b","text":"x","label":"positive","source":"authored","set":"mistake"}"#,
-                "an unknown key",
+                "line 1: `set` is not a key of this schema",
             ),
             (
                 r#"{"id":"a/b","text":"x","label":"positive"}"#,
-                "a missing key",
+                "line 1: no `source`",
             ),
             (
                 r#"{"id":"","text":"x","label":"positive","source":"authored"}"#,
-                "an empty id",
+                "line 1: `id` is empty",
             ),
             (
                 r#"{"id":"a/b","text":"","label":"positive","source":"authored"}"#,
-                "an empty text",
+                "line 1: `text` is empty",
             ),
-            ("", "no rows"),
+            ("", "no rows: a file of nothing is a missing file"),
+            (
+                "{\"id\":\"a\",\"text\":\"x\",\"label\":\"positive\",\"source\":\"authored\"}\n\
+                 {\"id\":\"a\",\"text\":\"y\",\"label\":\"positive\",\"source\":\"authored\"}",
+                "line 2: the id \"a\" is already bound",
+            ),
         ];
-        for (source, what) in cases {
-            assert!(
-                register(source).is_err(),
-                "the register schema admitted {what}: {source}"
+        let mut reasons = BTreeSet::new();
+        for (source, reason) in cases {
+            let err = register(source)
+                .err()
+                .unwrap_or_else(|| panic!("the register schema admitted {source}"));
+            assert_eq!(
+                err.to_string(),
+                reason,
+                "the register schema refused {source} and said something else"
             );
+            reasons.insert(err.to_string());
         }
-        assert!(
-            matches!(
-                register(
-                    "{\"id\":\"a\",\"text\":\"x\",\"label\":\"positive\",\"source\":\"authored\"}\n\
-                     {\"id\":\"a\",\"text\":\"y\",\"label\":\"positive\",\"source\":\"authored\"}"
-                ),
-                Err(DataError::DuplicateId { line: 2, .. })
-            ),
-            "an id bound twice was admitted"
+        assert_eq!(
+            reasons.len(),
+            cases.len(),
+            "two refusals of the register schema gave the same reason"
         );
+        assert!(matches!(
+            register(
+                "{\"id\":\"a\",\"text\":\"x\",\"label\":\"positive\",\"source\":\"authored\"}\n\
+                 {\"id\":\"a\",\"text\":\"y\",\"label\":\"positive\",\"source\":\"authored\"}"
+            ),
+            Err(DataError::DuplicateId { line: 2, .. })
+        ));
     }
 
     // ---- embedders ----
@@ -2823,6 +2965,25 @@ mod tests {
             Fixture::tokens("Oh, I see -- it's available!"),
             vec!["oh", "i", "see", "it", "s", "available"]
         );
+        // Counts, not presence. Every score in this module's tests comes from
+        // this embedder, and a set-of-tokens embedder places every register
+        // row carrying a repeated word somewhere else -- so the contract the
+        // control rows land at their extremes *by construction* under is this
+        // one, and it is asserted rather than assumed.
+        let twice = Fixture.embed("alpha alpha beta");
+        let once = Fixture.embed("alpha beta");
+        assert!(
+            twice != once,
+            "the fixture embedder counted a repeated token once, so it is a set and not a \
+             multiset"
+        );
+        let alpha = super::bucket(super::fnv1a(b"alpha"));
+        assert!(
+            near(twice[alpha], 2.0) && near(once[alpha], 1.0),
+            "a token twice is a component of two: {} against {}",
+            twice[alpha],
+            once[alpha]
+        );
     }
 
     #[test]
@@ -2844,29 +3005,46 @@ mod tests {
             "a text the cache does not hold embeds to nothing, not to a guess"
         );
         let cases = [
-            ("{\"text\":\"a\",\"vector\":[1,0]}", "an integer component"),
+            (
+                "{\"text\":\"a\",\"vector\":[1,0]}",
+                "line 1: `vector` is not the kind of value the schema names",
+            ),
             (
                 "{\"text\":\"a\",\"vector\":[1.0,0.0]}\n{\"text\":\"b\",\"vector\":[1.0]}",
-                "ragged rows",
+                "line 2: a vector of 1 components where the cache holds 2",
             ),
             (
                 "{\"text\":\"a\",\"vector\":[1.0]}\n{\"text\":\"a\",\"vector\":[0.5]}",
-                "a text twice",
+                "line 2: the text \"a\" is already present",
             ),
             (
                 "{\"text\":\"a\",\"vector\":[1.0],\"model\":\"m\"}",
-                "an unknown key",
+                "line 1: `model` is not a key of this schema",
             ),
-            ("{\"text\":\"a\",\"vector\":[]}", "an empty vector"),
-            ("{\"text\":\"a\"}", "a missing vector"),
-            ("", "no rows"),
+            (
+                "{\"text\":\"a\",\"vector\":[]}",
+                "line 1: `vector` is empty",
+            ),
+            ("{\"text\":\"a\"}", "line 1: no `vector`"),
+            ("", "no rows: a file of nothing is a missing file"),
         ];
-        for (source, what) in cases {
-            assert!(
-                Cached::load("m", source).is_err(),
-                "the cache schema admitted {what}: {source}"
+        let mut reasons = BTreeSet::new();
+        for (source, reason) in cases {
+            let err = Cached::load("m", source)
+                .err()
+                .unwrap_or_else(|| panic!("the cache schema admitted {source}"));
+            assert_eq!(
+                err.to_string(),
+                reason,
+                "the cache schema refused {source} and said something else"
             );
+            reasons.insert(err.to_string());
         }
+        assert_eq!(
+            reasons.len(),
+            cases.len(),
+            "two refusals of the cache schema gave the same reason"
+        );
     }
 
     #[test]
@@ -2902,6 +3080,31 @@ mod tests {
             let first: &Embedded = &set.paraphrases(*polarity)[0];
             assert_eq!(set.literal(*polarity).sense.text, first.sense.text);
         }
+        // Each refusal says which one it is. They were unexecuted, and an
+        // unexecuted reason can say the opposite of what happened.
+        assert_eq!(
+            SetError::NoParaphrase {
+                set: SenseSet::Mistake,
+                polarity: Polarity::Negative,
+            }
+            .to_string(),
+            "mistake has no negative sense, so there is nothing to score against"
+        );
+        assert_eq!(
+            SetError::MixedVersions {
+                set: SenseSet::Reversal,
+            }
+            .to_string(),
+            "reversal carries more than one version"
+        );
+        assert_eq!(
+            SetError::Unembeddable {
+                set: SenseSet::DurableFact,
+                text: "a sense".to_owned(),
+            }
+            .to_string(),
+            "durable_fact: the embedder could not place \"a sense\""
+        );
     }
 
     // ---- scoring ----
@@ -2965,18 +3168,130 @@ mod tests {
         let flat = EmbeddedSet::embed(&shipped(), SenseSet::Mistake, &Constant)
             .expect("a constant embedder still embeds");
         for scoring in Scoring::ALL {
-            assert!(
-                controls(&rows, &flat, &Constant, *scoring).is_err(),
-                "{}: the controls passed an embedder that cannot tell texts apart",
+            let err = controls(&rows, &flat, &Constant, *scoring)
+                .err()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{}: the controls passed an embedder that cannot tell texts apart",
+                        scoring.tag()
+                    )
+                });
+            assert!(matches!(err, ControlFailure::Inverted { .. }), "{err:?}");
+        }
+        // Every reason, rendered. They were unexecuted but for one, and a
+        // reason nothing renders can report the run that failed as the run
+        // that passed.
+        assert_eq!(
+            ControlFailure::Missing {
+                control: Control::VerbatimPositive,
+            }
+            .to_string(),
+            "verbatim_positive was never scored"
+        );
+        assert_eq!(
+            ControlFailure::Inverted {
+                top: 0.25,
+                bottom: 0.5,
+            }
+            .to_string(),
+            "the top control scored 0.25 and the bottom control 0.5"
+        );
+        assert_eq!(
+            ControlFailure::NotAtTop {
+                control: Control::VerbatimPositive,
+                score: 1.0,
+                row: "authored/positive/actually-the-flag".to_owned(),
+                other: 1.0,
+            }
+            .to_string(),
+            "verbatim_positive scored 1 and authored/positive/actually-the-flag reached it at \
+             1: the scoring cannot tell the sense itself from the register"
+        );
+        assert_eq!(
+            ControlFailure::NotAtBottom {
+                control: Control::UnrelatedWords,
+                score: 0.0,
+                row: "authored/hard_negative/mistakes-of-this-kind".to_owned(),
+                other: -1.0,
+            }
+            .to_string(),
+            "unrelated_words scored 0 and authored/hard_negative/mistakes-of-this-kind went \
+             under it at -1"
+        );
+        assert_eq!(
+            ControlFailure::Unscorable(ScoreError::Unembeddable {
+                id: "authored/positive/actually-the-flag".to_owned(),
+            })
+            .to_string(),
+            "authored/positive/actually-the-flag: the embedder could not place this row, and a \
+             miss is not a zero"
+        );
+    }
+
+    // The controls' whole claim is about the register: the sense verbatim
+    // must outscore every row of it, and no row may go under the bottom
+    // control. Under an embedder that ties them, the run is measuring the
+    // embedder's blind spot and calling it a separation.
+    #[test]
+    fn a_register_row_that_reaches_a_control_is_named_as_the_row_that_displaced_it() {
+        let rows = register_rows();
+        let displaced = rows
+            .iter()
+            .find(|row| row.id == "authored/positive/actually-the-flag")
+            .expect("the first register row")
+            .clone();
+        let impostor = Impostor {
+            text: displaced.text.clone(),
+            as_if: literal(SenseSet::Mistake, Polarity::Positive),
+        };
+        assert_eq!(impostor.id(), "impostor");
+        let set = EmbeddedSet::embed(&shipped(), SenseSet::Mistake, &impostor)
+            .expect("the shipped set embeds");
+        for scoring in Scoring::ALL {
+            let err = controls(&rows, &set, &impostor, *scoring)
+                .err()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{}: a register row reached the top control and the controls passed",
+                        scoring.tag()
+                    )
+                });
+            let ControlFailure::NotAtTop { control, row, .. } = &err else {
+                panic!("{}: {err:?}", scoring.tag())
+            };
+            assert_eq!(
+                (*control, row.as_str()),
+                (scoring.extremes().0, displaced.id.as_str()),
+                "{}: the wrong control or the wrong row was named",
                 scoring.tag()
             );
         }
-        assert!(
-            ControlFailure::Missing {
-                control: Control::VerbatimPositive
-            }
-            .to_string()
-            .contains("never scored")
+        // And a register row *under* the bottom control. The fixture
+        // embedder's components are token counts, so nothing it places can go
+        // there; a signed space is where a real embedder puts things.
+        let under = rows
+            .iter()
+            .find(|row| row.id == "authored/hard_negative/mistakes-of-this-kind")
+            .expect("a hard negative")
+            .clone();
+        let positive = literal(SenseSet::Mistake, Polarity::Positive);
+        let placed = Placed::at(&[
+            (positive.as_str(), [1.0, 0.0]),
+            (super::UNRELATED, [0.0, 1.0]),
+            (under.text.as_str(), [-1.0, 0.0]),
+        ]);
+        assert_eq!(placed.id(), "placed");
+        let signed = EmbeddedSet::embed(&shipped(), SenseSet::Mistake, &placed)
+            .expect("the shipped set embeds");
+        let err = controls(&rows, &signed, &placed, Scoring::RawCosine)
+            .expect_err("a register row went under the bottom control and the controls passed");
+        let ControlFailure::NotAtBottom { control, row, .. } = &err else {
+            panic!("{err:?}")
+        };
+        assert_eq!(
+            (*control, row.as_str()),
+            (Control::UnrelatedWords, under.id.as_str()),
+            "the wrong control or the wrong row was named"
         );
     }
 
@@ -3062,6 +3377,31 @@ mod tests {
 
     #[test]
     fn the_lexical_gate_admits_only_rows_carrying_a_seed_of_the_set() {
+        // The seeds by name, per set. The gate is one of the two factors the
+        // bakeoff exists to measure; a seed list that can be replaced with
+        // anything is a factor that measures nothing, and it is published
+        // into the pre-registration besides.
+        for (set, expected) in [
+            (
+                SenseSet::Mistake,
+                &["actually", "i was wrong", "turns out", "it turns out"][..],
+            ),
+            (
+                SenseSet::DurableFact,
+                &["actually", "turns out", "it turns out"][..],
+            ),
+            (
+                SenseSet::Reversal,
+                &["oh, i see", "is available as", "turns out"][..],
+            ),
+        ] {
+            assert_eq!(
+                seeds(set),
+                expected,
+                "{}: the seeds are not the words the register was mined by",
+                set.tag()
+            );
+        }
         for set in SenseSet::ALL {
             assert!(
                 !seeds(*set).is_empty(),
@@ -3086,11 +3426,60 @@ mod tests {
             !Gate::With.admits(SenseSet::Mistake, "Factually speaking, it was fine"),
             "a seed inside a word is not a seed"
         );
+        assert!(
+            !Gate::With.admits(SenseSet::Mistake, "It turns outrageous quickly"),
+            "a seed running into the next word is not a seed either"
+        );
+        assert!(
+            !Gate::With.admits(
+                SenseSet::Reversal,
+                "The build is available assuming a cache"
+            ),
+            "a seed running into the next word is not a seed either"
+        );
         assert!(Gate::Without.admits(SenseSet::Mistake, "The build takes four minutes"));
     }
 
     #[test]
     fn a_gated_out_row_sits_at_the_scorings_floor() {
+        // Each floor by name: the lowest value its scoring can produce.
+        // Contrastive is a difference of two cosines and so reaches -2, which
+        // the shipped fixture embedder cannot show because its components are
+        // token counts. A floor set above what the scoring can reach is a
+        // floor a dropped row outranks scored rows from.
+        for (scoring, floor) in [
+            (Scoring::RawCosine, -1.0),
+            (Scoring::Contrastive, -2.0),
+            (Scoring::Softmax, 0.0),
+            (Scoring::EnsembleMax, -1.0),
+        ] {
+            assert!(
+                near(scoring.floor(), floor),
+                "{}: the floor is {} where {floor} is the lowest the scoring can produce",
+                scoring.tag(),
+                scoring.floor()
+            );
+        }
+        // And the contrastive floor is not spare: a signed embedder reaches
+        // below a single cosine's -1, so a floor of -1 would rank a dropped
+        // row above a row that was scored.
+        let positive = literal(SenseSet::Mistake, Polarity::Positive);
+        let negative = literal(SenseSet::Mistake, Polarity::Negative);
+        let leaning = "a row leaning to the negative sense";
+        let placed = Placed::at(&[
+            (positive.as_str(), [1.0, 0.0]),
+            (negative.as_str(), [0.0, 1.0]),
+            (leaning, [-1.0, 1.0]),
+        ]);
+        let signed = EmbeddedSet::embed(&shipped(), SenseSet::Mistake, &placed)
+            .expect("the shipped set embeds");
+        let below = Scoring::Contrastive
+            .score(&placed.embed(leaning), &signed)
+            .expect("a score");
+        assert!(
+            below < -1.0 && below >= Scoring::Contrastive.floor(),
+            "a contrastive score reached {below}, which the floor must sit under"
+        );
         for scoring in Scoring::ALL {
             let rows = scored(Cell {
                 scoring: *scoring,
@@ -3115,6 +3504,31 @@ mod tests {
             assert!(rows.iter().all(|row| row.score >= scoring.floor()));
         }
         assert!(ungated().iter().all(|row| row.admitted));
+        // The gate decides on the row's *text*, row by row. The shipped ids
+        // are slugs of their texts and mostly agree by accident, so a gate
+        // asked about the wrong field drops a row that plainly carries its
+        // seed and nothing named would notice.
+        let shipped_rows = register_rows();
+        let gated = scored(Cell {
+            scoring: Scoring::RawCosine,
+            gate: Gate::With,
+        });
+        for (row, outcome) in shipped_rows.iter().zip(&gated) {
+            assert_eq!(
+                outcome.admitted,
+                Gate::With.admits(SenseSet::Mistake, &row.text),
+                "{}: the gate did not decide on the row's text",
+                row.id
+            );
+        }
+        assert!(
+            gated
+                .iter()
+                .find(|row| row.id == "authored/positive/i-was-wrong-about-the-cache")
+                .expect("the row whose id is not its text")
+                .admitted,
+            "a row carrying its seed in the text and not in the id was dropped"
+        );
     }
 
     #[test]
@@ -3247,6 +3661,20 @@ mod tests {
             })
             .collect();
         assert!(near(d_prime(&inverted).expect("a d-prime"), -7.0));
+        // Both spreads, pooled. The rows above have the same variance in each
+        // class, so they cannot tell a pooled standard deviation from one
+        // class's own; these have variances of 0.005 and 0.125.
+        let lopsided = [
+            row("p1", Label::Positive, 1.0),
+            row("p2", Label::Positive, 1.1),
+            row("n1", Label::Negative, 0.0),
+            row("n2", Label::Negative, 0.5),
+        ];
+        let separation = d_prime(&lopsided).expect("a d-prime");
+        assert!(
+            near(separation, 3.137_858_162_210_944),
+            "d-prime was standardised by one class's spread and not by both: {separation}"
+        );
         let too_few = [
             row("p1", Label::Positive, 0.8),
             row("n1", Label::Negative, 0.1),
@@ -3293,13 +3721,15 @@ mod tests {
             "the null's own subject must carry a separation for the null to erase"
         );
         let null = shuffled_null(&rows, NULL_SHUFFLES, 7).expect("a null over separated rows");
+        // Against the numbers, not against the constants: an assertion that
+        // reads the band back is loosened by the same edit that widens it.
         assert!(
-            null.mean_d_prime.abs() <= NULL_D_PRIME_BAND,
+            null.mean_d_prime.abs() <= 0.25,
             "d-prime on a shuffled-label null was far from zero: {}",
             null.mean_d_prime
         );
         assert!(
-            (null.mean_auc - 0.5).abs() <= NULL_AUC_BAND,
+            (null.mean_auc - 0.5).abs() <= 0.1,
             "the area under the curve on a shuffled-label null was outside the band around \
              chance: {}",
             null.mean_auc
@@ -3319,6 +3749,57 @@ mod tests {
             shuffles: 1,
         };
         assert!(!real.at_chance(), "a separation was read as chance");
+    }
+
+    // A band is a claim only when something can contradict it. These two are
+    // bounded on both sides: wider than every excursion the null has been
+    // measured at, and narrow enough that a null carrying a real separation
+    // in one metric alone is refused -- which the other band cannot do for it.
+    #[test]
+    fn the_null_bands_are_wider_than_measurement_and_narrower_than_a_finding() {
+        assert!(
+            near(NULL_D_PRIME_BAND, 0.25) && near(NULL_AUC_BAND, 0.1),
+            "the null's bands are not the numbers they were registered as: {NULL_D_PRIME_BAND} \
+             and {NULL_AUC_BAND}"
+        );
+        let rows = separated();
+        let mut widest_d_prime = 0.0_f64;
+        let mut widest_auc = 0.0_f64;
+        for seed in 1..=16 {
+            let null = shuffled_null(&rows, NULL_SHUFFLES, seed).expect("a null");
+            widest_d_prime = widest_d_prime.max(null.mean_d_prime.abs());
+            widest_auc = widest_auc.max((null.mean_auc - 0.5).abs());
+            assert!(
+                null.at_chance(),
+                "seed {seed}: a shuffled null was not read as chance: {null:?}"
+            );
+        }
+        assert!(
+            widest_d_prime < NULL_D_PRIME_BAND && widest_auc < NULL_AUC_BAND,
+            "the band is not wider than the null it was measured against: {widest_d_prime} and \
+             {widest_auc}"
+        );
+        // Each band alone, so neither can alibi the other. A null separating
+        // the two classes by a whole standard deviation, or ranking a
+        // positive above a negative five times in six, is not chance.
+        let d_prime_only = super::Null {
+            mean_auc: 0.5,
+            mean_d_prime: 1.0,
+            shuffles: NULL_SHUFFLES,
+        };
+        assert!(
+            !d_prime_only.at_chance(),
+            "a shuffled null separating the classes by a standard deviation was read as chance"
+        );
+        let auc_only = super::Null {
+            mean_auc: 0.85,
+            mean_d_prime: 0.0,
+            shuffles: NULL_SHUFFLES,
+        };
+        assert!(
+            !auc_only.at_chance(),
+            "a shuffled null ranking the classes apart was read as chance"
+        );
     }
 
     #[test]
@@ -3409,6 +3890,65 @@ mod tests {
         );
         assert!(Xorshift::seeded(0).next_u64() != 0, "every seed draws");
         assert!(Xorshift::seeded(9).below(0) == 0, "no index below nothing");
+        // And it generates. Adding one to a counter satisfies both of the
+        // assertions above, and every label shuffle and every resample index
+        // in this module would then be drawn by counting.
+        let mut generator = Xorshift::seeded(0);
+        let draws: Vec<u64> = (0..64).map(|_| generator.next_u64()).collect();
+        let strides: Vec<u64> = draws
+            .windows(2)
+            .map(|pair| pair[1].wrapping_sub(pair[0]))
+            .collect();
+        assert!(
+            strides.windows(2).any(|pair| pair[0] != pair[1]),
+            "the generator advanced by a constant stride, which is a counter and not a \
+             generator"
+        );
+        for bit in 0..64_u32 {
+            let ones = draws.iter().filter(|draw| (*draw >> bit) & 1 == 1).count();
+            assert!(
+                ones > 0 && ones < draws.len(),
+                "bit {bit} never changed across sixty-four draws, so the high bits are a \
+                 counter's"
+            );
+        }
+        assert_eq!(
+            BootstrapError::Unpaired { a: 6, b: 3 }.to_string(),
+            "6 rows against 3: a paired bootstrap pairs by row"
+        );
+        assert_eq!(BootstrapError::Empty.to_string(), "no rows to resample");
+        assert_eq!(
+            BootstrapError::NoResamples.to_string(),
+            "no resamples, so no p below one is attainable"
+        );
+    }
+
+    // The resampling is the procedure. A bootstrap that returns the observed
+    // statistic for every "resample" never crosses zero, so every p the
+    // bakeoff reports is the attainable floor -- and both samples above are
+    // degenerate enough that a true bootstrap agrees with it. This one is not:
+    // one row of six pulls the other way.
+    #[test]
+    fn a_paired_bootstrap_resamples_rather_than_repeating_the_observed_difference() {
+        let a = [1.0, 1.0, 1.0, -3.0, 1.0, 1.0];
+        let b = [0.0; 6];
+        let boot = paired_bootstrap(&a, &b, 999, 1).expect("a bootstrap");
+        assert!(near(boot.observed, 1.0 / 3.0), "{}", boot.observed);
+        assert!(
+            boot.p.value() > boot.p.floor() && boot.p.value() < 1.0,
+            "the resamples never crossed zero, so every resample was the observed difference \
+             and the p sits at its own floor: {:?}",
+            boot.p
+        );
+        assert!(near(boot.p.value(), 0.266), "{:?}", boot.p);
+        let other = paired_bootstrap(&a, &b, 999, 11).expect("a bootstrap");
+        assert!(
+            !near(other.p.value(), boot.p.value()),
+            "two seeds drew the same resamples: {:?} against {:?}",
+            boot.p,
+            other.p
+        );
+        assert!(near(other.p.value(), 0.253), "{:?}", other.p);
     }
 
     #[test]
@@ -3444,7 +3984,7 @@ mod tests {
                 "{}: no failure fixture, so it can never be reported",
                 metric.tag()
             );
-            let reported = Reported::take(*metric, 3, &subject, &fixture).unwrap_or_else(|err| {
+            let reported = Reported::take(*metric, 3, &subject).unwrap_or_else(|err| {
                 panic!(
                     "{}: not reportable, its failure fixture did not demonstrate failure: {err}",
                     metric.tag()
@@ -3453,37 +3993,101 @@ mod tests {
             assert!(metric.failed(reported.demonstrated_failure()));
             assert_eq!((reported.metric(), reported.budget()), (*metric, 3));
             assert!(reported.value().is_finite());
+            // The demonstration is this metric's own fixture at this budget,
+            // and it is not a parameter: there is nothing for a caller to
+            // substitute a staged failure into.
+            assert!(
+                near(
+                    reported.demonstrated_failure(),
+                    metric
+                        .compute(3, &fixture)
+                        .expect("the fixture has a value")
+                ),
+                "{}: the demonstration is not the metric's own fixture",
+                metric.tag()
+            );
             let Value::Object(members) = reported.record() else {
                 panic!("a record value")
             };
-            for key in ["value", "demonstrated_failure", "failure_reading"] {
-                assert!(
-                    matches!(members.get(key), Some(Value::Decimal(_))),
-                    "{}: `{key}` is not a decimal in the record",
-                    metric.tag()
-                );
-            }
             assert_eq!(
                 members.get("metric"),
                 Some(&Value::String(metric.tag().to_owned()))
             );
         }
+        // And the record carries the numbers, not merely their kind. This is
+        // precision at a budget of two over rows ranked exactly right, which
+        // is one; against a fixture holding eight non-positives above its
+        // positives, which is nothing; and the reading that counted as the
+        // failure travels with both.
+        let exact = [
+            row("s/p1", Label::Positive, 0.9),
+            row("s/p2", Label::Positive, 0.8),
+            row("s/n1", Label::Negative, 0.2),
+            row("s/h1", Label::HardNegative, 0.05),
+        ];
+        let reported = Reported::take(Metric::PrecisionAtK, 2, &exact).expect("reportable");
+        assert!(near(reported.value(), 1.0));
+        assert_eq!(
+            reported.record(),
+            Value::Object(BTreeMap::from([
+                (
+                    "metric".to_owned(),
+                    Value::String("precision_at_k".to_owned())
+                ),
+                ("budget".to_owned(), Value::Integer(2)),
+                ("value".to_owned(), decimal("1.0000")),
+                ("demonstrated_failure".to_owned(), decimal("0.0000")),
+                ("failure_reading".to_owned(), decimal("0.0000")),
+            ])),
+            "the record of a metric is not the numbers the metric produced"
+        );
+    }
+
+    // "Has been seen fail" is only as strong as the reading it is compared
+    // against. Moved, the same fixtures certify an instrument that never
+    // failed at all, and the moved number is written into the record besides.
+    #[test]
+    fn every_metric_names_the_reading_at_which_it_has_failed() {
+        for (metric, reading) in [
+            (Metric::PrecisionAtK, 0.0),
+            (Metric::OverFiring, 1.0),
+            (Metric::Auc, 0.5),
+            (Metric::DPrime, 0.0),
+        ] {
+            assert!(
+                near(metric.failure_reading(), reading),
+                "{}: failure is read at {} where {reading} is the worst the metric can say",
+                metric.tag(),
+                metric.failure_reading()
+            );
+            assert!(metric.failed(reading), "{}", metric.tag());
+        }
+        // Short of the reading is not failure. An area under the curve of
+        // 0.85 is nearly perfect separation, and a reading that counted it as
+        // failure would certify every number the bakeoff went on to report.
+        assert!(
+            !Metric::Auc.failed(0.85),
+            "a near-perfect ranking was counted as a failure to rank"
+        );
+        assert!(!Metric::PrecisionAtK.failed(0.5) && !Metric::DPrime.failed(0.5));
+        // Over-firing is the one metric where a larger number is the worse
+        // result, so its comparison runs the other way.
+        assert!(
+            !Metric::OverFiring.failed(0.5),
+            "firing at half the hard negatives was counted as firing at all of them"
+        );
+        assert!(Metric::OverFiring.failed(1.0) && !Metric::OverFiring.failed(0.99));
     }
 
     #[test]
     fn a_metric_that_has_not_been_seen_fail_is_not_reported() {
         let subject = ungated();
-        // Ranked exactly right, with a hard negative nobody nominated: every
-        // metric here reports success, so none of them may be reported at all.
-        let never_fails = [
-            row("p1", Label::Positive, 0.9),
-            row("p2", Label::Positive, 0.8),
-            row("n1", Label::Negative, 0.2),
-            row("n2", Label::Negative, 0.1),
-            row("h1", Label::HardNegative, 0.05),
-        ];
-        for metric in Metric::ALL {
-            let err = Reported::take(*metric, 3, &subject, &never_fails)
+        // Both budgeted fixtures are budget-sensitive by construction. Outside
+        // the budget they demonstrate, they report success -- and a metric
+        // whose instrument has not been seen fail at the budget it is being
+        // reported at says nothing about the subject.
+        for (metric, budget) in [(Metric::PrecisionAtK, 9), (Metric::OverFiring, 1)] {
+            let err = Reported::take(metric, budget, &subject)
                 .err()
                 .unwrap_or_else(|| {
                     panic!(
@@ -3491,17 +4095,25 @@ mod tests {
                         metric.tag()
                     )
                 });
-            assert!(
-                matches!(err, MetricError::InstrumentNeverFailed { .. }),
-                "{}: {err:?}",
-                metric.tag()
-            );
+            let MetricError::InstrumentNeverFailed { value, reading, .. } = &err else {
+                panic!("{}: {err:?}", metric.tag())
+            };
+            assert!(!metric.failed(*value), "{}: {err:?}", metric.tag());
+            assert!(near(*reading, metric.failure_reading()));
             assert!(err.to_string().contains("never been seen fail"), "{err}");
         }
         assert!(matches!(
-            Reported::take(Metric::Auc, 3, &subject, &[]),
+            Reported::take(Metric::Auc, 3, &[]),
             Err(MetricError::Undefined { .. })
         ));
+        assert_eq!(
+            MetricError::Undefined {
+                metric: Metric::DPrime,
+                on: "the subject",
+            }
+            .to_string(),
+            "d_prime is undefined on the subject"
+        );
     }
 
     // ---- the pre-registration ----
@@ -3512,52 +4124,207 @@ mod tests {
         let Value::Object(members) = &value else {
             panic!("an object")
         };
-        for key in [
-            "primary",
-            "separation",
-            "over_firing",
-            "comparator",
-            "correction",
-            "resamples",
-            "attainable_p_floor",
-            "null",
-            "cells",
-            "metrics",
-            "seeds",
-            "blocked_on",
-        ] {
-            assert!(
-                members.contains_key(key),
-                "the pre-registration is missing `{key}`"
-            );
-        }
-        let Some(Value::Array(blocked)) = members.get("blocked_on") else {
-            panic!("blocked_on is a list")
+        let keys: Vec<&str> = members.keys().map(String::as_str).collect();
+        assert_eq!(
+            keys,
+            [
+                "attainable_p_floor",
+                "blocked_on",
+                "cells",
+                "comparator",
+                "controls",
+                "correction",
+                "metrics",
+                "null",
+                "over_firing",
+                "primary",
+                "resamples",
+                "seeds",
+                "separation",
+                "sets",
+                "softmax_temperature",
+            ],
+            "the pre-registration does not carry what it was registered with"
+        );
+        // The endpoints in words. A pre-registration nothing pins can be
+        // rewritten once the numbers are in, which is the one thing it exists
+        // to prevent.
+        let text = |value: &str| Some(Value::String(value.to_owned()));
+        assert_eq!(
+            members.get("primary").cloned(),
+            text(
+                "precision at a fixed nomination budget, the top k of the register, per \
+                 embedder, scoring and gate"
+            ),
+            "the primary endpoint is not the endpoint that was registered"
+        );
+        assert_eq!(
+            members.get("separation").cloned(),
+            text("the area under the curve and the standardised separation, per cell"),
+            "the separation endpoint is not the endpoint that was registered"
+        );
+        assert_eq!(
+            members.get("over_firing").cloned(),
+            text("the share of hard-negative rows nominated within the budget"),
+            "the over-firing endpoint is not the endpoint that was registered"
+        );
+        assert_eq!(
+            members.get("comparator").cloned(),
+            text(
+                "an entailment cross-encoder as the accuracy ceiling, so the gap between it and \
+                 an embedder is priced rather than assumed"
+            ),
+            "the accuracy-ceiling comparator is not the one that was registered"
+        );
+        assert_eq!(
+            members.get("correction").cloned(),
+            text(
+                "paired bootstrap across embedders, Holm-corrected across cells, the attainable \
+                 p floor printed beside every p"
+            ),
+            "the correction is not the one that was registered"
+        );
+        // And what the run is waiting on, in words rather than by tag: a
+        // blocker whose description says nothing is a blocker nobody can act
+        // on, and the tags alone would still list four of them.
+        let blocker = |tag: &str, needs: &str| {
+            Value::Object(BTreeMap::from([
+                ("blocker".to_owned(), Value::String(tag.to_owned())),
+                ("needs".to_owned(), Value::String(needs.to_owned())),
+            ]))
         };
         assert_eq!(
-            blocked.len(),
-            Blocker::ALL.len(),
-            "every blocker is declared"
+            members.get("blocked_on").cloned(),
+            Some(Value::Array(vec![
+                blocker(
+                    "archived_transcripts",
+                    "archived transcripts to mine the register from",
+                ),
+                blocker(
+                    "judge_model",
+                    "a judge to label the mined register under seeded controls",
+                ),
+                blocker(
+                    "embedding_models",
+                    "embedding models and an entailment cross-encoder, each pinned by revision \
+                     and instruction prefix",
+                ),
+                blocker(
+                    "regime_spelling",
+                    "a ruling on how a processor-only run of local or no models is spelled as a \
+                     regime under `results/`",
+                ),
+            ])),
+            "the pre-registration does not say, in words, what the run is waiting on"
         );
-        for blocker in Blocker::ALL {
-            let declared = blocked.iter().any(|entry| {
-                matches!(entry, Value::Object(fields)
-                    if fields.get("blocker") == Some(&Value::String(blocker.tag().to_owned())))
-            });
-            assert!(declared, "{} is not declared as a blocker", blocker.tag());
-            assert!(!blocker.description().is_empty());
-        }
+        assert_eq!(PRE_REGISTRATION.blocked_on, Blocker::ALL);
+    }
+
+    // The instrument's own settings, published with the endpoints. A cell
+    // list, a seed table or a resample count that can be changed without the
+    // pre-registration noticing is a plan that describes a different run.
+    #[test]
+    fn the_pre_registration_carries_the_settings_the_instrument_runs_under() {
+        let value = PRE_REGISTRATION.value();
+        let Value::Object(members) = &value else {
+            panic!("an object")
+        };
+        assert_eq!(members.get("resamples"), Some(&Value::Integer(9999)));
+        assert_eq!(
+            members.get("attainable_p_floor").cloned(),
+            Some(decimal("0.000100")),
+            "the resample count and the floor it implies are not the same claim"
+        );
+        assert_eq!(
+            members.get("softmax_temperature").cloned(),
+            Some(decimal("0.1000"))
+        );
+        assert_eq!(
+            members.get("null").cloned(),
+            Some(Value::Object(BTreeMap::from([
+                ("shuffles".to_owned(), Value::Integer(200)),
+                ("auc_band".to_owned(), decimal("0.1000")),
+                ("d_prime_band".to_owned(), decimal("0.2500")),
+            ])))
+        );
+        let list = |items: &[&str]| {
+            Value::Array(
+                items
+                    .iter()
+                    .map(|item| Value::String((*item).to_owned()))
+                    .collect(),
+            )
+        };
+        assert_eq!(
+            members.get("sets").cloned(),
+            Some(list(&["mistake", "durable_fact", "reversal"]))
+        );
+        assert_eq!(
+            members.get("controls").cloned(),
+            Some(list(&[
+                "verbatim_positive",
+                "verbatim_negative",
+                "unrelated_words",
+            ]))
+        );
+        assert_eq!(
+            members.get("cells").cloned(),
+            Some(list(&[
+                "raw_cosine+without_gate",
+                "raw_cosine+with_gate",
+                "contrastive+without_gate",
+                "contrastive+with_gate",
+                "softmax+without_gate",
+                "softmax+with_gate",
+                "ensemble_max+without_gate",
+                "ensemble_max+with_gate",
+            ]))
+        );
         let Some(Value::Array(cells)) = members.get("cells") else {
             panic!("cells is a list")
         };
         assert_eq!(cells.len(), Cell::all().len());
+        let metric_entry = |tag: &str, reading: &str| {
+            Value::Object(BTreeMap::from([
+                ("metric".to_owned(), Value::String(tag.to_owned())),
+                ("failure_reading".to_owned(), decimal(reading)),
+            ]))
+        };
+        assert_eq!(
+            members.get("metrics").cloned(),
+            Some(Value::Array(vec![
+                metric_entry("precision_at_k", "0.0000"),
+                metric_entry("over_firing", "1.0000"),
+                metric_entry("auc", "0.5000"),
+                metric_entry("d_prime", "0.0000"),
+            ])),
+            "the readings the pre-registration calls failure are not the readings the metrics \
+             use"
+        );
+        assert_eq!(
+            members.get("seeds").cloned(),
+            Some(Value::Object(BTreeMap::from([
+                (
+                    "mistake".to_owned(),
+                    list(&["actually", "i was wrong", "turns out", "it turns out"]),
+                ),
+                (
+                    "durable_fact".to_owned(),
+                    list(&["actually", "turns out", "it turns out"]),
+                ),
+                (
+                    "reversal".to_owned(),
+                    list(&["oh, i see", "is available as", "turns out"]),
+                ),
+            ]))),
+            "the seeds the pre-registration publishes are not the seeds the gate applies"
+        );
         let mut rendered = String::new();
         json::render(&value, &mut rendered);
         assert!(
             json::line(&rendered).is_ok(),
             "the pre-registration does not read back as a record value: {rendered}"
         );
-        assert_eq!(PRE_REGISTRATION.blocked_on, Blocker::ALL);
     }
 
     // ---- vocabularies ----

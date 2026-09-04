@@ -858,6 +858,160 @@ path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
 
+# Controls that never look at the register. The two seeded control rows are
+# still scored and still compared with each other, so the run reports its
+# controls as being at their extremes -- while an embedder that cannot tell
+# the authored sense from a transcript sentence ties them and is not caught.
+inject_sense_controls_ignore_register() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """    let control_ids = [top.id(set.set()), bottom.id(set.set())];
+    for row in scored.iter().filter(|row| !control_ids.contains(&row.id)) {
+        if row.score >= top_score {
+            return Err(ControlFailure::NotAtTop {
+                control: top,
+                score: top_score,
+                row: row.id.clone(),
+                other: row.score,
+            });
+        }
+        if row.score < bottom_score {
+            return Err(ControlFailure::NotAtBottom {
+                control: bottom,
+                score: bottom_score,
+                row: row.id.clone(),
+                other: row.score,
+            });
+        }
+    }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# A paired bootstrap whose every resample is the observed sample. Nothing ever
+# crosses zero, so every p the bakeoff prints is the attainable floor -- the
+# smallest number the procedure can produce, reported for every comparison as
+# though it were a finding.
+inject_sense_bootstrap_never_resamples() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "    let total: f64 = (0..n).map(|_| differences[rng.below(n)]).sum();\n"
+new = "    let _ = rng;\n    let total: f64 = (0..n).map(|i| differences[i]).sum();\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The reading at which a metric counts as having failed, moved off the worst
+# the metric can say. An area under the curve of 0.9 is nearly perfect
+# separation, and a fixture that reaches it would then certify every number
+# the bakeoff goes on to report.
+inject_sense_failure_reading_moved() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Self::Auc => 0.5,\n"
+new = "            Self::Auc => 0.9,\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A pre-registration whose primary endpoint says nothing. The plan is the one
+# artefact that has to be fixed before the data arrives; emptied, it can be
+# written once the numbers are in and read as though it never had been.
+inject_sense_pre_registration_emptied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """    primary: "precision at a fixed nomination budget, the top k of the register, per embedder, \\
+              scoring and gate",
+"""
+new = '    primary: "",\n'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The lexical pre-gate asked about the row's id instead of its text. The
+# shipped ids are slugs of their texts and mostly agree, so the with-gate arm
+# of every cell is computed from identifiers with a row silently dropped to
+# the scoring's floor -- and the gate is one of the two factors the bakeoff
+# exists to measure.
+inject_sense_gate_reads_the_id() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            let admitted = cell.gate.admits(set.set(), &row.text);\n"
+new = "            let admitted = cell.gate.admits(set.set(), &row.id);\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A standardised separation divided by one class's spread rather than by both.
+# It is one of the two pre-registered separation endpoints, and a cell could
+# report a separation computed from the positives alone.
+inject_sense_d_prime_unpooled() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "    let pooled = f64::midpoint(positive.variance, negative.variance).sqrt();\n"
+new = "    let pooled = positive.variance.sqrt();\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The null's acceptance band widened until nothing is outside it. A
+# shuffled-label null separating the two classes by a whole standard deviation
+# is then reported as chance, and every cell measured against that null is
+# measured against itself.
+inject_sense_null_band_widened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "pub const NULL_D_PRIME_BAND: f64 = 0.25;\n"
+new = "pub const NULL_D_PRIME_BAND: f64 = 5.0;\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A reported metric whose record carries a constant instead of the number the
+# metric produced. The record is the one door from a computed number to a
+# result, and the assembly can be guarded while the content is not.
+inject_sense_reported_value_constant() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '            ("value".to_owned(), decimal(self.value, 4)),\n'
+new = '            ("value".to_owned(), decimal(0.0, 4)),\n'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1415,6 +1569,22 @@ selftest() {
     'no failure fixture, so it can never be reported'
   seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
     'two lines were read as one, and the second was lost'
+  seeded_case "controls that never look at the register" test inject_sense_controls_ignore_register \
+    'a register row reached the top control and the controls passed'
+  seeded_case "a bootstrap that never resamples"      test     inject_sense_bootstrap_never_resamples \
+    'every resample was the observed difference'
+  seeded_case "a failure reading off the worst reading" test   inject_sense_failure_reading_moved \
+    'is the worst the metric can say'
+  seeded_case "a pre-registration with nothing in it" test     inject_sense_pre_registration_emptied \
+    'the primary endpoint is not the endpoint that was registered'
+  seeded_case "a lexical gate asked about the id"     test     inject_sense_gate_reads_the_id \
+    'the gate did not decide on the row'
+  seeded_case "a separation over one class spread"    test     inject_sense_d_prime_unpooled \
+    'd-prime was standardised by one class'
+  seeded_case "a null band widened past a finding"    test     inject_sense_null_band_widened \
+    'bands are not the numbers they were registered as'
+  seeded_case "a reported metric that reports a constant" test inject_sense_reported_value_constant \
+    'the record of a metric is not the numbers the metric produced'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
