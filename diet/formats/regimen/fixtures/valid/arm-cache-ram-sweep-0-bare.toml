@@ -7,7 +7,7 @@
 # design note carry the full rationale.
 #
 # not carried: [serving.flags] — the regimen grammar has no nested table header
-# not carried: "--cache-ram" = 0 — the regimen grammar has no quoted key
+# not carried: "--cache-ram" = 0 — the regimen grammar has no nested table, which is what refuses it (a bare `--cache-ram` key is legal TOML and legal here; the source's quoting is optional)
 #   (the binding also sits under [serving.flags], which the grammar cannot open;
 #   the one-level [serving] header it hangs from is kept, empty)
 name = "l2-bare-cacheram0"

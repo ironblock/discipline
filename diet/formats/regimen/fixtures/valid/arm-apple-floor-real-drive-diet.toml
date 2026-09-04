@@ -2,7 +2,7 @@
 # Every binding the arm declares is expressible in regimen v1; nothing is omitted.
 #
 # S5, diet arm — Gemma 4 12B / oMLX. Trigger thresholds are Pi's RAW
-# constants (pi-parity.toml [triggers]), an IDENTITY not a deviation, per
+# constants (the parity declaration [triggers]), an IDENTITY not a deviation, per
 # the level-2 experiments' own doctrine: never tune thresholds away from
 # Pi's values just to chase a target entry count. seam_every_turns=2 mirrors
 # the native harness's existing turn-count-cadence deviation from Pi's
