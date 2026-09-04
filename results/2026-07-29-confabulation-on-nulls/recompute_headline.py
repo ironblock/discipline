@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Campaign one of the prompt-language factorial: re-derive the three headline figures the claim cites.
 
-WHY THIS EXISTS. `campaign-one.report.txt` is the instrument's own output and is
-the primary artifact, but it does NOT contain the numbers the ledger quotes.
-Those were computed in prose in `RESULTS.md` — 244/336, the 24-cell floor, and
-the harness-meta step — so the row was recomputable in principle and had no
-committed derivation. This is that derivation, which is what makes the row a
-gate-0 target rather than a claim someone would have to re-derive by hand and
-hope they matched (the recompute gate: a claim re-derives its number from its committed artifacts).
+WHY THIS EXISTS. The primary artifact in this directory is
+`campaign-one.graded.jsonl`, every call with its graded verdict. The three
+numbers the claim cites (244 of 336, the 24-cell floor, and the harness-meta
+step) were first computed in prose, so the row was recomputable in principle
+and had no committed derivation. This is that derivation, which is what makes
+the row a gate-0 target rather than a claim someone would have to re-derive by
+hand and hope they matched (the recompute gate: a claim re-derives its number
+from its committed artifacts).
 
 TWO COLLAPSE CONVENTIONS, and this is the whole reason a hand re-derivation is
 untrustworthy. The row uses BOTH, correctly, and the report names one of them
@@ -104,7 +105,7 @@ def main() -> int:
     out = json.dumps(result, indent=2) + "\n"
     if "--out" in sys.argv:
         # `--out` is a DIRECTORY and the file inside it is `headline.json`,
-        # matching die45_grade.py's convention so the recompute harness can
+        # matching the convention the extraction-seat grader used so the recompute harness can
         # drive both instruments the same way.
         d = Path(sys.argv[sys.argv.index("--out") + 1])
         d.mkdir(parents=True, exist_ok=True)
