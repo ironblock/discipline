@@ -24,10 +24,20 @@
 //!   threshold nominates nothing at all, and that silence is the tier's main
 //!   product -- most turns reverse nothing.
 //! * [`Register::Intent`] asks of each live entry: is this entry about what
-//!   the turn is now about? It is the entry's stated intent against the
-//!   turn's, measured as plain cosine, because both sides are transcript
-//!   prose rather than an authored description and there is no authored
-//!   opposite to contrast against.
+//!   the turn is now about? It is the turn's stated intent against the
+//!   entry's content, measured as plain cosine, because both sides are
+//!   transcript prose rather than an authored description and there is no
+//!   authored opposite to contrast against. The entry side is its whole
+//!   content and not a stated-intent field of its own: an entry in the
+//!   working object is a fact and a provenance, with no field structure to
+//!   narrow to, and a register that claimed to read a field the object does
+//!   not carry would be tuned against something nobody could point at.
+//!
+//! Only [`Register::Intent`] reaches a nomination. The reversal register is
+//! measured of the turn, once, and what it decides is whether there are any
+//! nominations at all -- so no nomination is evidence *from* it, and the
+//! vocabulary keeps both because a reader of either number has to be able to
+//! say which one it is.
 //!
 //! An entry is nominated when the turn clears the first and the entry clears
 //! the second, and at most `budget` entries are nominated per turn, taken by
@@ -106,19 +116,25 @@ impl Calibration {
 const FIXTURE_TAG: &str = "fixture";
 
 /// When this tier nominates, and how much it may spend doing it.
+///
+/// The fields are private and [`Policy::load`] is the only way to make one,
+/// because the calibration rule is a property of every policy in hand and
+/// not of one function call. A struct whose fields are public is a door with
+/// an open wall beside it: a caller assembles the numbers it likes, the
+/// refusal never runs, and the tier fires on a threshold nobody measured.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Policy {
     /// How a sense set is scored against a text.
-    pub scoring: Scoring,
+    scoring: Scoring,
     /// Whether the lexical pre-gate is applied.
-    pub gate: Gate,
+    gate: Gate,
     /// The score at or above which a register fires. A decimal, not a float:
     /// a threshold that reaches a record is a number the record reads back.
-    pub threshold: Decimal,
+    threshold: Decimal,
     /// The most entries this tier may nominate in one turn.
-    pub budget: u32,
+    budget: u32,
     /// Where the threshold came from.
-    pub calibrated_on: Calibration,
+    calibrated_on: Calibration,
 }
 
 /// Why a policy could not be used.
@@ -171,29 +187,75 @@ impl From<DataError> for PolicyError {
     }
 }
 
+/// Where a calibration run writes what it measured.
+const RESULTS: &str = "results/";
+
+/// Whether `name` names a run's results directory.
+///
+/// `results/` names its runs `YYYY-MM-DD-<slug>`, and that is the whole
+/// check: a reader handed this policy has to be able to go and open the run
+/// that set the threshold. What it refuses is what costs something -- a bare
+/// word, the template, a date with no run behind it, the fixture's own tag
+/// with a space on the end.
+///
+/// The shape is checked and the filesystem is not. This crate reads no
+/// directory, and a policy naming a run that has not been committed yet is a
+/// different failure from a policy naming no run at all -- the first is a
+/// missing file, which whoever opens it will discover; the second is a
+/// number nobody measured, which nobody discovers.
+fn names_a_run(name: &str) -> bool {
+    let Some(run) = name.strip_prefix(RESULTS) else {
+        return false;
+    };
+    let mut parts = run.splitn(4, '-');
+    let (Some(year), Some(month), Some(day), Some(slug)) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    let digits = |text: &str, count: usize| {
+        text.len() == count && text.chars().all(|character| character.is_ascii_digit())
+    };
+    digits(year, 4)
+        && digits(month, 2)
+        && digits(day, 2)
+        && !slug.is_empty()
+        && slug.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+        })
+}
+
 impl Policy {
     /// Read a policy for use.
     ///
     /// # Errors
     ///
-    /// Returns [`PolicyError::Uncalibrated`] for a policy that names no run,
+    /// Returns [`PolicyError::Uncalibrated`] for a policy whose
+    /// `calibrated_on` does not name a results directory,
     /// [`PolicyError::Fixture`] for the fixture policy, and
     /// [`PolicyError::Data`] for a file that is not one policy row.
     pub fn load(source: &str) -> Result<Self, PolicyError> {
         let policy = Self::read(source)?;
-        match policy.calibrated_on {
+        match &policy.calibrated_on {
             Calibration::Fixture => Err(PolicyError::Fixture),
+            Calibration::Run(directory) if !names_a_run(directory) => {
+                Err(PolicyError::Uncalibrated)
+            }
             Calibration::Run(_) => Ok(policy),
         }
     }
 
-    /// The shipped fixture policy, for tests and for nothing else.
+    /// The shipped fixture policy, for tests and for nothing else -- which
+    /// is why it compiles into nothing else. Every other way to hold a
+    /// [`Policy`] goes through [`Policy::load`], so the calibration rule is
+    /// a property of the type rather than of a caller's discipline.
     ///
     /// # Errors
     ///
     /// Returns [`PolicyError::Uncalibrated`] if the shipped fixture ever
     /// stops declaring itself a fixture -- which would make it a policy
     /// claiming a calibration it does not have.
+    #[cfg(test)]
     pub fn fixture() -> Result<Self, PolicyError> {
         let policy = Self::read(FIXTURE)?;
         match policy.calibrated_on {
@@ -427,7 +489,7 @@ mod tests {
         Calibration, FIXTURE, Policy, PolicyError, Register, SenseText, nominate_sense, value,
         written,
     };
-    use crate::capture::collector::Evidence;
+    use crate::capture::collector::{Evidence, Nomination};
     use crate::capture::sense::{Fixture, Gate, Scoring, shipped_senses};
     use crate::formats::record::json::Value;
     use crate::formats::record::{Reasoning, Regime, Substrate};
@@ -507,6 +569,29 @@ mod tests {
             matches!(Policy::load(missing), Err(PolicyError::Data(_))),
             "a policy with no calibrated_on key was read"
         );
+
+        // Naming a run is not spelling anything at all. Each of these is a
+        // threshold nobody could go and read the run for: a bare word, the
+        // template nobody ran, a date with no run behind it, a directory
+        // outside `results/`, and the fixture's own tag with a space on the
+        // end -- one keystroke from the file this repository ships.
+        for named in [
+            "nowhere",
+            "x",
+            "results",
+            "results/",
+            "results/_template",
+            "results/2026-01-30",
+            "runs/2026-01-30-nomination",
+            "fixture ",
+            "Fixture",
+        ] {
+            assert_eq!(
+                Policy::load(&row(named)),
+                Err(PolicyError::Uncalibrated),
+                "{named:?} was read as a calibration"
+            );
+        }
     }
 
     #[test]
@@ -516,32 +601,32 @@ mod tests {
             // an integer, or as a second spelling of zero, is a number that
             // reads back differently from the one that was written.
             (
-                r#"{"scoring":"contrastive","gate":"with_gate","threshold":"1","budget":3,"calibrated_on":"results/x"}"#,
+                r#"{"scoring":"contrastive","gate":"with_gate","threshold":"1","budget":3,"calibrated_on":"results/2026-01-30-nomination"}"#,
                 "an integer threshold",
             ),
             (
-                r#"{"scoring":"contrastive","gate":"with_gate","threshold":"5e-1","budget":3,"calibrated_on":"results/x"}"#,
+                r#"{"scoring":"contrastive","gate":"with_gate","threshold":"5e-1","budget":3,"calibrated_on":"results/2026-01-30-nomination"}"#,
                 "an exponent threshold",
             ),
             (
-                r#"{"scoring":"contrastive","gate":"with_gate","threshold":"-0.0","budget":3,"calibrated_on":"results/x"}"#,
+                r#"{"scoring":"contrastive","gate":"with_gate","threshold":"-0.0","budget":3,"calibrated_on":"results/2026-01-30-nomination"}"#,
                 "a negative zero threshold",
             ),
             // A budget of zero is a tier switched off, and a policy is not
             // the switch.
             (
-                r#"{"scoring":"contrastive","gate":"with_gate","threshold":"0.500","budget":0,"calibrated_on":"results/x"}"#,
+                r#"{"scoring":"contrastive","gate":"with_gate","threshold":"0.500","budget":0,"calibrated_on":"results/2026-01-30-nomination"}"#,
                 "a budget of zero",
             ),
             // A scoring nobody implemented.
             (
-                r#"{"scoring":"vibes","gate":"with_gate","threshold":"0.500","budget":3,"calibrated_on":"results/x"}"#,
+                r#"{"scoring":"vibes","gate":"with_gate","threshold":"0.500","budget":3,"calibrated_on":"results/2026-01-30-nomination"}"#,
                 "an unknown scoring",
             ),
             // A key the schema does not have: a policy that carries one has
             // a setting the reader is ignoring.
             (
-                r#"{"scoring":"contrastive","gate":"with_gate","threshold":"0.500","budget":3,"calibrated_on":"results/x","tweak":1}"#,
+                r#"{"scoring":"contrastive","gate":"with_gate","threshold":"0.500","budget":3,"calibrated_on":"results/2026-01-30-nomination","tweak":1}"#,
                 "an unknown key",
             ),
         ];
@@ -598,8 +683,28 @@ mod tests {
         .expect("a policy")
     }
 
+    /// The ids a call nominated, in the order it nominated them.
+    fn ids(nominations: &[Nomination]) -> Vec<&str> {
+        nominations.iter().map(|n| n.entry.as_str()).collect()
+    }
+
+    /// The scores those nominations carry, as the record would read them.
+    fn scores(nominations: &[Nomination]) -> Vec<String> {
+        nominations
+            .iter()
+            .map(|n| match &n.evidence {
+                Evidence::Sense { score, .. } => score.as_str().to_owned(),
+                other @ Evidence::Literal { .. } => panic!("tier 1 produced {other:?}"),
+            })
+            .collect()
+    }
+
     // A turn that reverses nothing nominates nothing, and that is the tier's
-    // ordinary answer rather than a failure.
+    // ordinary answer rather than a failure. The entry here would clear the
+    // second cut outright -- the turn's stated intent is its content, word
+    // for word -- so what makes the answer empty is the turn's own score and
+    // nothing else. A threshold that only holds because a second threshold
+    // holds beside it is a threshold nobody has measured.
     #[test]
     fn a_turn_that_is_not_a_reversal_nominates_nothing() {
         let object = object_with(&[("e1", "the parser drops continuation lines")]);
@@ -609,11 +714,11 @@ mod tests {
             SenseText {
                 turn: 18,
                 prose: "I read the file and it is as described.",
-                intent: "read the parser",
+                intent: "the parser drops continuation lines",
             },
             &senses,
             &Fixture,
-            &shipped("0.900", 3, Gate::Without),
+            &shipped("0.500", 3, Gate::Without),
         )
         .expect("scored");
         assert!(
@@ -622,15 +727,156 @@ mod tests {
         );
     }
 
+    // The other cut, on its own. The turn is reversal-shaped and clears the
+    // first threshold, and what the second one decides is which entries the
+    // turn is about: one of these two is the turn's stated intent and the
+    // other is a fact about the build. A tier that nominated both would hand
+    // the confirm fork a bill for every live entry every time a turn
+    // reversed anything.
+    #[test]
+    fn an_entry_the_turn_is_not_about_is_not_nominated() {
+        let object = object_with(&[
+            ("e1", "the parser drops continuation lines"),
+            ("e2", "the build takes four minutes on this box"),
+        ]);
+        let senses = shipped_senses().expect("the shipped senses");
+        let nominations = nominate_sense(
+            &object,
+            SenseText {
+                turn: 18,
+                prose: "the recorded limitation no longer applies",
+                intent: "the parser drops continuation lines",
+            },
+            &senses,
+            &Fixture,
+            &shipped("0.500", 9, Gate::Without),
+        )
+        .expect("scored");
+        assert_eq!(
+            ids(&nominations),
+            vec!["e1"],
+            "the tier nominated an entry the turn was not about"
+        );
+    }
+
+    // Which authored set the turn is scored against is the tier's premise.
+    // Scored against `mistake`, this tier would nominate on the turn where
+    // the operator got something wrong -- a real event class, and not the
+    // one an entry is retired by. The two turns below are each shaped like
+    // one set and not the other, and only one of them is this tier's.
+    #[test]
+    fn the_turn_is_scored_against_the_authored_reversal_senses() {
+        let object = object_with(&[("e1", "the parser drops continuation lines")]);
+        let senses = shipped_senses().expect("the shipped senses");
+        let ask = |prose: &str| {
+            nominate_sense(
+                &object,
+                SenseText {
+                    turn: 18,
+                    prose,
+                    intent: "the parser drops continuation lines",
+                },
+                &senses,
+                &Fixture,
+                &shipped("0.500", 9, Gate::Without),
+            )
+            .expect("scored")
+        };
+        assert!(
+            ask("the operator assumed something that was not true").is_empty(),
+            "a turn about a mistaken assumption was scored as a reversal"
+        );
+        assert_eq!(
+            ids(&ask("the recorded limitation no longer applies")),
+            vec!["e1"],
+            "a turn that retires a recorded limitation was not read as a reversal"
+        );
+    }
+
+    // The second register asks which entry the turn is about, and what it
+    // asks it of is the turn's stated intent. The prose is what said a
+    // reversal happened; it is not what says which fact was reversed, and a
+    // register that read it twice would nominate whichever entry happened to
+    // share the reversal's words.
+    #[test]
+    fn the_second_register_measures_the_stated_intent_and_not_the_prose() {
+        let object = object_with(&[
+            ("e1", "the parser drops continuation lines"),
+            ("e2", "a limitation that no longer applies"),
+        ]);
+        let senses = shipped_senses().expect("the shipped senses");
+        let nominations = nominate_sense(
+            &object,
+            SenseText {
+                turn: 18,
+                prose: "the recorded limitation no longer applies",
+                intent: "the parser drops continuation lines",
+            },
+            &senses,
+            &Fixture,
+            &shipped("0.500", 9, Gate::Without),
+        )
+        .expect("scored");
+        assert_eq!(
+            ids(&nominations),
+            vec!["e1"],
+            "the tier measured the prose of the turn where it should have measured the stated intent"
+        );
+    }
+
+    // The lexical pre-gate is one of the four settings a calibration run
+    // fixes, and the policy this repository ships selects it. The same turn,
+    // scoring the same, is admitted or refused by that setting alone: the
+    // seeded words are what the program's own reversals were found by before
+    // there was an embedder to find them, and whether they must be present
+    // is the factor the bakeoff varies.
+    #[test]
+    fn the_lexical_gate_decides_whether_a_turn_is_scored_at_all() {
+        let object = object_with(&[("e1", "the parser drops continuation lines")]);
+        let senses = shipped_senses().expect("the shipped senses");
+        let ask = |prose: &str, gate: Gate| {
+            nominate_sense(
+                &object,
+                SenseText {
+                    turn: 18,
+                    prose,
+                    intent: "the parser drops continuation lines",
+                },
+                &senses,
+                &Fixture,
+                &shipped("0.500", 9, gate),
+            )
+            .expect("scored")
+        };
+        let unseeded = "the recorded limitation no longer applies";
+        let seeded = "oh, i see: the recorded limitation no longer applies";
+        assert_eq!(
+            ids(&ask(unseeded, Gate::Without)),
+            vec!["e1"],
+            "the ungated policy did not nominate on a turn that scores well above its threshold"
+        );
+        assert!(
+            ask(unseeded, Gate::With).is_empty(),
+            "a turn carrying no seed was scored by a gated policy anyway"
+        );
+        assert_eq!(
+            ids(&ask(seeded, Gate::With)),
+            vec!["e1"],
+            "a gated policy refused a turn that carries one of its seeds"
+        );
+    }
+
     // The budget is the number of confirm forks one turn may spend, and it
-    // binds even when every entry clears the threshold.
+    // binds even when every entry clears the threshold. What it keeps is the
+    // top of the ranking: a budget that truncated the bottom would spend the
+    // tier's whole allowance on the entries least likely to be the one, and
+    // that is worse than no budget at all.
     #[test]
     fn the_budget_is_the_most_a_turn_may_spend() {
         let object = object_with(&[
             ("e1", "the parser drops continuation lines"),
             ("e2", "the parser drops continuation lines too"),
-            ("e3", "the parser drops continuation lines as well"),
-            ("e4", "the parser drops continuation lines besides"),
+            ("e3", "the build takes four minutes on this box"),
         ]);
         let senses = shipped_senses().expect("the shipped senses");
         let ask = |budget: u32| {
@@ -647,28 +893,48 @@ mod tests {
             )
             .expect("scored")
         };
-        assert_eq!(ask(2).len(), 2, "the budget did not bind");
-        assert!(ask(9).len() > 2, "the budget bound when it should not");
-        // Whatever the budget, the evidence says which register measured and
-        // what it measured, so a confirm fork is not handed a bare id.
+        let two = ask(2);
+        assert_eq!(two.len(), 2, "the budget did not bind");
+        assert_eq!(
+            ids(&two),
+            vec!["e1", "e2"],
+            "the budget was spent on the entries that scored lowest"
+        );
+        // The numbers a record reads back, and the numbers the fixture
+        // embedder measures: the turn's stated intent is `e1` word for word,
+        // `e2` says it again with one word more, and `e3` is about something
+        // else. A nomination whose score is not the score that was measured
+        // cannot be compared to the run that set the threshold, which is the
+        // whole argument for the policy having one.
+        let all = ask(9);
+        assert_eq!(ids(&all), vec!["e1", "e2", "e3"]);
+        assert_eq!(
+            scores(&all),
+            vec!["1.000".to_owned(), "0.913".to_owned(), "0.158".to_owned()],
+            "a nomination carried a score nothing measured"
+        );
+        // The evidence says which register measured, so a confirm fork is
+        // not handed a bare id.
         let one = ask(1);
-        let Some(Evidence::Sense { register, score }) = one.first().map(|n| n.evidence.clone())
-        else {
+        let Some(Evidence::Sense { register, .. }) = one.first().map(|n| n.evidence.clone()) else {
             panic!("tier 1 answered with something else: {one:?}");
         };
         assert_eq!(register, Register::Intent);
-        assert!(score.as_str().contains('.'), "{score:?}");
     }
 
     // An entry born in the turn that is reading it is not evidence about
-    // itself -- the same rule tier 0 keeps.
+    // itself -- the same rule tier 0 keeps. The two entries say different
+    // things on purpose: the object folds a repeated content into an alias
+    // of the entry that already holds it, so a second entry with the first
+    // one's words is not a second entry at all, and a test built that way
+    // would be naming an id nothing in the object has.
     #[test]
     fn an_entry_is_not_nominated_by_the_turn_that_made_it() {
         let mut object = object_with(&[("e1", "the parser drops continuation lines")]);
         object
             .apply(&Patch::Add {
                 id: EntryId::new("e18").expect("an id"),
-                content: "the parser drops continuation lines".to_owned(),
+                content: "the reader keeps every continuation line now".to_owned(),
                 provenance: Provenance {
                     turn: 18,
                     lane: "interview".to_owned(),
@@ -690,9 +956,50 @@ mod tests {
             &shipped("0.000", 9, Gate::Without),
         )
         .expect("scored");
-        assert!(
-            nominations.iter().all(|n| n.entry.as_str() != "e18"),
-            "an entry nominated itself: {nominations:?}"
+        assert_eq!(
+            ids(&nominations),
+            vec!["e1"],
+            "an entry born in this turn nominated itself"
+        );
+    }
+
+    // Once a verdict has voided an entry, the object has retired that fact,
+    // and this tier is the one with a budget: re-nominating a retired entry
+    // spends a confirm fork on an answer already on file, every turn, for
+    // as long as the object lives.
+    #[test]
+    fn a_voided_entry_is_not_nominated_again() {
+        let mut object = object_with(&[("e1", "the parser drops continuation lines")]);
+        object
+            .apply(&Patch::Supersede {
+                id: EntryId::new("a10/supersedes/e1").expect("an id"),
+                content: "the parser keeps continuation lines now".to_owned(),
+                voids: EntryId::new("e1").expect("an id"),
+                provenance: Provenance {
+                    turn: 10,
+                    lane: "interview".to_owned(),
+                    fork: None,
+                    index: 0,
+                },
+            })
+            .expect("superseded");
+        let senses = shipped_senses().expect("the shipped senses");
+        let nominations = nominate_sense(
+            &object,
+            SenseText {
+                turn: 18,
+                prose: "that limitation is gone now, it was fixed and no longer applies",
+                intent: "the parser drops continuation lines",
+            },
+            &senses,
+            &Fixture,
+            &shipped("0.000", 9, Gate::Without),
+        )
+        .expect("scored");
+        assert_eq!(
+            ids(&nominations),
+            vec!["a10/supersedes/e1"],
+            "a voided entry was nominated again by the sense tier"
         );
     }
 
@@ -713,5 +1020,24 @@ mod tests {
             Some(&Value::Decimal(policy.threshold.clone()))
         );
         assert_eq!(members.get("nominated"), Some(&Value::Integer(0)));
+        // The scoring and the gate are the other two factors a calibration
+        // run varies. A count and a threshold with neither of them beside it
+        // cannot be matched to the cell that produced the threshold, which
+        // is the only thing that makes the number readable later.
+        assert_eq!(
+            members.get("scoring"),
+            Some(&Value::String("contrastive".to_owned())),
+            "the report did not say which scoring produced it"
+        );
+        assert_eq!(
+            members.get("gate"),
+            Some(&Value::String("with_gate".to_owned())),
+            "the report did not say which lexical gate produced it"
+        );
+        assert_eq!(
+            members.keys().collect::<Vec<_>>(),
+            vec!["calibrated_on", "gate", "nominated", "scoring", "threshold"],
+            "the report grew or lost a member"
+        );
     }
 }

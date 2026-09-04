@@ -510,7 +510,12 @@ impl WorkingObject {
         self.entries.values()
     }
 
-    /// Every entry that still speaks for the object.
+    /// Every entry that still speaks for the object, in id order.
+    ///
+    /// The order is part of the contract because readers downstream -- the
+    /// collector's nominators among them -- present entries in the order
+    /// they arrive, and an order that depended on insertion would make their
+    /// output a property of the race rather than of the object.
     pub fn live(&self) -> impl Iterator<Item = &Entry> {
         self.entries.values().filter(|entry| entry.state.is_live())
     }

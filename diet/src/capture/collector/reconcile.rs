@@ -111,10 +111,13 @@ mod tests {
         }
     }
 
+    /// Where a verdict came from. The confirm fork is an interview fork --
+    /// a single ask with a constrained answer -- so it carries the lane that
+    /// already exists rather than a name coined here for it.
     fn at(turn: u32) -> Provenance {
         Provenance {
             turn,
-            lane: "collector".to_owned(),
+            lane: "interview".to_owned(),
             fork: Some("f1".to_owned()),
             index: 0,
         }
@@ -183,6 +186,19 @@ mod tests {
             Some("e1"),
             "a supersession that did not link the entry it voided"
         );
+        // A link to an entry whose text is not the fact that replaced it is
+        // the silent loss this module exists to prevent, wearing the shape
+        // of a repair. What the new entry says is the nominating prose, and
+        // where it came from is the fork that judged.
+        assert_eq!(
+            new.content, PROSE,
+            "the superseding entry does not say what superseded the old one"
+        );
+        assert_eq!(
+            new.provenances,
+            vec![at(18)],
+            "the superseding entry does not say which fork produced it"
+        );
         assert_eq!(object.entries().count(), 2, "an entry was deleted");
         assert_eq!(object.live().count(), 1);
     }
@@ -212,6 +228,15 @@ mod tests {
         let Outcome::Resolved(patch) = &done else {
             panic!("{done:?}")
         };
+        // The accessor is how a caller gets at what the reconciler produced.
+        // One that answered `None` for every verdict would leave the whole
+        // module applying nothing, with the four outcomes still distinct and
+        // every assertion about them still true.
+        assert_eq!(
+            done.patch(),
+            Some(patch),
+            "a verdict that produced a patch did not hand it back"
+        );
         object.apply(patch).expect("applied");
         assert_eq!(
             object
@@ -242,6 +267,10 @@ mod tests {
             before,
             "a verdict that applies nothing changed the object"
         );
+        // The two are not one answer. `NOT_THIS` is the false nomination the
+        // precision gate is calibrated against, and `PARTIAL` is prose that
+        // bears on the entry without settling it; counting a PARTIAL as a
+        // false nomination would inflate the very number the gate reads.
         assert_eq!(
             reconcile(
                 &nominations[0],
@@ -249,7 +278,18 @@ mod tests {
                 replacement()
             )
             .expect("ok"),
-            Outcome::NotThis
+            Outcome::NotThis,
+            "a fork that said the nomination was wrong was read as something else"
+        );
+        assert_eq!(
+            reconcile(
+                &nominations[0],
+                &verdict::parse("PARTIAL").expect("v"),
+                replacement()
+            )
+            .expect("ok"),
+            Outcome::Partial,
+            "a fork that said the prose bears on the entry was read as a false nomination"
         );
     }
 }

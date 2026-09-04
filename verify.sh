@@ -748,6 +748,8 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The sign let back onto a zero. `-0.0` is then a second spelling of `0.0`,
+# and a banked sampler temperature reads back as a number nobody wrote.
 inject_record_negative_zero_decimal() {
   python3 - <<'EOF'
 import pathlib
@@ -761,6 +763,10 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A cosine that divides by one norm and the square of the other. Every
+# similarity becomes a function of how long the sentence is, so the seeded
+# control row -- the sense text verbatim -- no longer sits at one, and every
+# ranking in the bakeoff is a ranking by length.
 inject_sense_cosine_unnormalised() {
   python3 - <<'EOF'
 import pathlib
@@ -774,6 +780,10 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# Contrastive scoring that never subtracts the authored negative sense. It
+# becomes raw cosine wearing another tag, and the one repair the bakeoff has
+# for an abstract description sitting near everything is reported as measured
+# and is not there.
 inject_sense_contrastive_ignores_negative() {
   python3 - <<'EOF'
 import pathlib
@@ -787,6 +797,9 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A shuffled-label null that never shuffles. It reports the real separation as
+# what chance looks like, so every cell measured against it is measured
+# against itself and no metric can be caught finding structure in noise.
 inject_sense_null_labels_unshuffled() {
   python3 - <<'EOF'
 import pathlib
@@ -800,6 +813,9 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A bootstrap p-value that travels without the floor its resample count
+# implies. A p of 0.001 from 999 resamples is the smallest number the
+# procedure can produce, and printed alone it reads as a finding.
 inject_sense_p_without_floor() {
   python3 - <<'EOF'
 import pathlib
@@ -813,6 +829,10 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A metric whose demonstrated-failure fixture is deleted. The metric still
+# computes and still prints, and nothing has ever seen it report failure --
+# which is the shape a perfect grounding score of 1.000 had on a probe where
+# fabrication was structurally impossible.
 inject_sense_metric_fixture_removed() {
   python3 - <<'EOF'
 import pathlib
@@ -834,6 +854,10 @@ path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
 
+# The one-object reader taking the first line of a file and dropping the rest.
+# Every data file this reader serves -- sense sets, registers, vector caches --
+# is read one line at a time, so a reader that silently accepts two returns a
+# row nobody wrote and loses one somebody did.
 inject_record_data_line_two_lines() {
   python3 - <<'EOF'
 import pathlib
@@ -849,6 +873,9 @@ path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
 
+# The answer's tail swallowed instead of anchored. `DONEISH` is then a
+# `DONE`, `PARTIALLY` a `PARTIAL`, and every word after the verdict is
+# discarded -- so the reconciler applies a judgment the fork did not give.
 inject_verdict_prefix_accepted() {
   python3 - <<'EOF'
 import pathlib
@@ -862,6 +889,9 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The boundary check in `upper_verdict` removed. A reason that names
+# `DONE_MARKER` is then a second answer, and one answer the fork did give is
+# refused as two.
 inject_verdict_identifier_read_as_a_verdict() {
   python3 - <<'EOF'
 import pathlib
@@ -875,6 +905,8 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A second verdict inside a reason accepted. The reconciler branches on one
+# word; `DONE - or PARTIAL` hands it two.
 inject_verdict_second_verdict_accepted() {
   python3 - <<'EOF'
 import pathlib
@@ -888,6 +920,8 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# An anchor matched inside a longer word. `plan_a` then recurs in every
+# `plan_ab`, and the entry is nominated by every mention of the longer name.
 inject_collector_substring_match() {
   python3 - <<'EOF'
 import pathlib
@@ -901,6 +935,8 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# An English word made an anchor. `plan` is in every third sentence of a
+# drive, and an entry anchored on it is nominated by everything.
 inject_collector_english_anchor() {
   python3 - <<'EOF'
 import pathlib
@@ -914,6 +950,8 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# An entry nominated by the turn that made it. Its own prose carries its own
+# anchors, so every new entry would go straight to a confirm fork.
 inject_collector_self_nomination() {
   python3 - <<'EOF'
 import pathlib
@@ -929,6 +967,10 @@ path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
 
+# A supersession that adds without voiding. Both facts are then live, the
+# object holds a contradiction, and the entry the archive was supposed to
+# make recoverable is instead one of two answers with nothing to choose
+# between them.
 inject_reconcile_supersede_without_voiding() {
   python3 - <<'EOF'
 import pathlib
@@ -957,6 +999,9 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A verdict that settles nothing made to settle something. `PARTIAL` says
+# the prose bears on the entry without replacing it; a reconciler that
+# resolves on it closes an entry the fork deliberately left open.
 inject_reconcile_partial_applies_a_patch() {
   python3 - <<'EOF'
 import pathlib
@@ -974,23 +1019,26 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The fixture policy accepted by the door that ships. Its threshold was
+# chosen to make the fixtures readable, which is exactly the property a
+# shipped threshold must not have, so a tier running on it spends confirm
+# forks at a rate nobody measured. The neighbouring case takes the other
+# half of the same door: a `calibrated_on` that names no run at all.
 inject_collector_uncalibrated_policy() {
   python3 - <<'EOF'
 import pathlib
 
 path = pathlib.Path("diet/src/capture/collector/sense.rs")
 source = path.read_text(encoding="utf-8")
-old = """        let policy = Self::read(source)?;
-        match policy.calibrated_on {
-            Calibration::Fixture => Err(PolicyError::Fixture),
-            Calibration::Run(_) => Ok(policy),
-        }"""
-new = """        Self::read(source)"""
-assert old in source
+old = "            Calibration::Fixture => Err(PolicyError::Fixture),\n"
+new = "            Calibration::Fixture => Ok(policy),\n"
+assert source.count(old) == 1
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The budget removed. One turn then nominates the whole object the first
+# time a threshold is set a little too low.
 inject_collector_budget_ignored() {
   python3 - <<'EOF'
 import pathlib
@@ -1000,6 +1048,482 @@ source = path.read_text(encoding="utf-8")
 old = "    scored.truncate(policy.budget as usize);\n"
 assert old in source
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# Tier 0 stopped after the first entry it found. A turn that reverses two
+# facts loses one of them, silently: no budget to point at and no report
+# saying anything was left out.
+inject_collector_one_nomination_per_turn() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '        }\n    }\n    nominations\n}'
+new = '        }\n    }\n    nominations.truncate(1);\n    nominations\n}'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Tier 0 read every entry rather than the live ones. An entry a verdict
+# already voided is nominated again on every later turn that names its
+# anchor, spending a confirm fork on an answer that is already on file.
+inject_collector_voided_entry_renominated() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '    for entry in object.live() {'
+new = '    for entry in object.entries() {'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Every hit reported offset zero. The offset is half of what a literal
+# nomination hands the confirm fork -- this anchor recurred, and here.
+inject_collector_hit_offset_lost() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '            hits.push(Hit { offset: at });'
+new = '            hits.push(Hit { offset: 0 });'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The scan resumed one byte past the start of the match instead of past
+# the match, so an anchor that overlaps itself is counted once per
+# shifted position.
+inject_collector_overlapping_scan() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '        from = at + needle.len();'
+new = '        from = at + 1;'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Only backticks set a span off. A double-quoted term is one of the three
+# anchor classes the tier claims, and it went untested for a whole branch.
+inject_collector_quoted_anchor_delimiter() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '    for delimiter in [\'`\', \'"\'] {'
+new = "    for delimiter in ['`'] {"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The minimum anchor length dropped to one byte, so two-character
+# coincidences become anchors and the tier fires on version numbers.
+inject_collector_short_shape_anchored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = 'const MIN_ANCHOR_LEN: usize = 3;'
+new = 'const MIN_ANCHOR_LEN: usize = 1;'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# `a::b` stopped being an identifier shape. A path through the module
+# tree is the one anchor class a Rust drive produces most.
+inject_collector_module_path_shape() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '    // a::b\n    if token.contains("::") && !token.starts_with(\':\') && !token.ends_with(\':\') {\n        return true;\n    }\n'
+new = ''
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The file-extension window widened, so a dotted word whose tail is an
+# English word is read as a file name and a record carries the wrong kind.
+inject_collector_extension_window() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '            && (1..=4).contains(&ext.len())'
+new = '            && (1..=12).contains(&ext.len())'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The anchor kinds swapped their spellings. A record then says `quoted`
+# for an identifier, and nothing reads it back.
+inject_collector_anchor_kind_permuted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Self::Identifier => "identifier",\n            Self::Path => "path",\n            Self::Quoted => "quoted",'
+new = '            Self::Identifier => "quoted",\n            Self::Path => "identifier",\n            Self::Quoted => "path",'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The source vocabulary lost its members, so a test that walked `ALL`
+# would walk nothing and pass.
+inject_collector_source_vocabulary_emptied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = "    pub const ALL: &'static [Self] = &[Self::Prose, Self::ToolOutput];"
+new = "    pub const ALL: &'static [Self] = &[];"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A nomination named the other tier. The two cost different things to be
+# wrong about, and the name is how a reader tells them apart later.
+inject_collector_tier_name_swapped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Evidence::Literal { .. } => "literal",\n            Evidence::Sense { .. } => "sense",'
+new = '            Evidence::Literal { .. } => "sense",\n            Evidence::Sense { .. } => "literal",'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The two registers swapped their spellings, so a nomination measured
+# against the turn's stated intent says it came from the reversal senses.
+inject_collector_register_permuted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Self::Reversal => "reversal",\n            Self::Intent => "intent",'
+new = '            Self::Reversal => "intent",\n            Self::Intent => "reversal",'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The lexical pre-gate stopped being applied. It is one of the four
+# settings a calibration run fixes, and the policy this tree ships selects
+# it, so a tier that ignores it is running a cell nobody measured.
+inject_collector_gate_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if !policy.gate.admits(SenseSet::Reversal, new.prose) {\n        return Ok(Vec::new());\n    }\n'
+new = ''
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The turn-level threshold stopped being compared. Silence on a turn that
+# reverses nothing is this tier's main product, and it was masked by the
+# per-entry cut for a whole branch.
+inject_collector_turn_threshold_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if turn_score < policy.cut() {\n        return Ok(Vec::new());\n    }\n'
+new = '    let _ = turn_score;\n'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The per-entry threshold stopped being compared, so a turn that reverses
+# anything nominates every live entry up to the budget.
+inject_collector_entry_threshold_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if score >= policy.cut() {\n            scored.push((score, entry));\n        }\n'
+new = '        scored.push((score, entry));\n'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The turn was scored against the authored `mistake` senses instead of
+# `reversal`. Both are real event classes; only one retires a fact.
+inject_collector_wrong_sense_set() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = 'EmbeddedSet::embed(senses, SenseSet::Reversal, embedder)'
+new = 'EmbeddedSet::embed(senses, SenseSet::Mistake, embedder)'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The second register measured the turn's prose twice instead of its
+# stated intent, so whichever entry shares the reversal's words is
+# nominated rather than the entry the turn is about.
+inject_collector_intent_register_reads_the_prose() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '    let intent = embedder.embed(new.intent);'
+new = '    let intent = embedder.embed(new.prose);'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Tier 1 nominated an entry born in the turn that is reading it. Tier 0
+# keeps the same rule and has its own case; this is the tier-1 copy, which
+# was pinned by a test that named an id the object never held.
+inject_collector_sense_self_nomination() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if entry.provenances.iter().any(|p| p.turn >= new.turn) {\n            continue;\n        }\n'
+new = ''
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Tier 1 read every entry rather than the live ones -- the same fault as
+# tier 0's, on the tier that has a budget to spend.
+inject_collector_sense_voided_entry_renominated() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '    for entry in object.live() {'
+new = '    for entry in object.entries() {'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The tier's report lost the scoring and the gate. A nomination count and
+# a threshold cannot be matched to the cell that produced them without the
+# other two factors beside them.
+inject_collector_report_drops_the_policy() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '        (\n            "scoring".to_owned(),\n            Value::String(policy.scoring.tag().to_owned()),\n        ),\n        (\n            "gate".to_owned(),\n            Value::String(policy.gate.tag().to_owned()),\n        ),\n'
+new = ''
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The calibration door stopped asking whether `calibrated_on` names a run
+# and only refused the fixture by name, so any other word is a
+# calibration -- the fixture's own tag with a space on the end included.
+inject_collector_policy_names_no_run() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Calibration::Run(directory) if !names_a_run(directory) => {\n                Err(PolicyError::Uncalibrated)\n            }\n'
+new = ''
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The superseding entry carried a constant instead of the fact that
+# replaced the old one. The link is right, the states are right, and the
+# object accumulates entries whose text is a placeholder.
+inject_reconcile_supersede_writes_a_constant() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/reconcile.rs")
+source = path.read_text(encoding="utf-8")
+old = '            content: replacement.content.to_owned(),'
+new = '            content: "superseded".to_owned(),'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The accessor a caller applies answered `None` for every verdict. The
+# four outcomes stay distinct, every assertion about them stays true, and
+# the module applies nothing.
+inject_reconcile_patch_never_handed_back() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/reconcile.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Self::Superseded(patch) | Self::Resolved(patch) => Some(patch),\n            Self::Partial | Self::NotThis => None,'
+new = '            Self::Superseded(_) | Self::Resolved(_) | Self::Partial | Self::NotThis => None,'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# PARTIAL collapsed into NOT_THIS. NOT_THIS is the false nomination the
+# precision gate is calibrated against, so conflating the two inflates the
+# number the gate reads.
+inject_reconcile_partial_read_as_a_false_nomination() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/reconcile.rs")
+source = path.read_text(encoding="utf-8")
+old = '        Verdict::Partial => Outcome::Partial,\n        Verdict::NotThis => Outcome::NotThis,\n'
+new = '        Verdict::Partial | Verdict::NotThis => Outcome::NotThis,\n'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The punctuation prose hangs on a token stayed part of the token, so an
+# anchor at the end of a sentence is not found at all.
+inject_collector_token_untrimmed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = "fn trim_token(token: &str) -> &str {\n"
+new = """fn trim_token(token: &str) -> &str {
+    if !token.is_empty() {
+        return token;
+    }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The ranking reversed, so the budget is spent on the entries least likely
+# to be the one. A precision-first tier with an anti-sorted budget is worse
+# than a tier with no budget at all.
+inject_collector_budget_takes_the_worst() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """        right
+            .partial_cmp(left)
+"""
+new = """        left
+            .partial_cmp(right)
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Every nomination carried a constant instead of the score that was measured.
+# The number is the only thing that can be compared to the run that set the
+# threshold, which is the whole argument for the policy having one.
+inject_collector_score_not_measured() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """        .filter_map(|(score, entry)| {"""
+new = """        .filter_map(|(_score, entry)| {"""
+assert source.count(old) == 1
+source = source.replace(old, new, 1)
+old = "                    score: written(score)?,"
+new = "                    score: written(0.0)?,"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The superseding entry lost the provenance of the fork that judged, so
+# nothing can attribute a wrong supersession to the turn that made it.
+inject_reconcile_supersede_loses_its_fork() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/reconcile.rs")
+source = path.read_text(encoding="utf-8")
+old = """            voids: nomination.entry.clone(),
+            provenance: replacement.provenance,"""
+new = """            voids: nomination.entry.clone(),
+            provenance: Provenance {
+                turn: 0,
+                ..replacement.provenance
+            },"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A fork that said the nomination was wrong superseded the entry anyway. A
+# mention is not a reversal, and the verdict is the only thing that tells
+# them apart.
+inject_reconcile_mention_superseded() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/reconcile.rs")
+source = path.read_text(encoding="utf-8")
+old = "        Verdict::NotThis => Outcome::NotThis,\n"
+new = """        Verdict::NotThis => Outcome::Superseded(Patch::Supersede {
+            id: EntryId::new(&format!(
+                "{}/supersedes/{}",
+                replacement.event, nomination.entry
+            ))?,
+            content: replacement.content.to_owned(),
+            voids: nomination.entry.clone(),
+            provenance: replacement.provenance,
+        }),
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
@@ -1582,6 +2106,64 @@ selftest() {
     'the fixture policy was accepted by the door that ships'
   seeded_case "a nomination budget ignored"           test     inject_collector_budget_ignored \
     'the budget did not bind'
+  seeded_case "a turn that nominates only its first entry" test inject_collector_one_nomination_per_turn \
+    'a turn that named two anchors nominated fewer than two entries'
+  seeded_case "a voided entry nominated by tier 0" test inject_collector_voided_entry_renominated \
+    'a voided entry was nominated again by the literal tier'
+  seeded_case "a hit that says nothing about where" test inject_collector_hit_offset_lost \
+    'the hits did not say where the anchor recurred'
+  seeded_case "an overlapping anchor scan" test inject_collector_overlapping_scan \
+    'an anchor that overlaps itself was counted at every shifted position'
+  seeded_case "a double-quoted span that is not an anchor" test inject_collector_quoted_anchor_delimiter \
+    'a double-quoted span was not anchored'
+  seeded_case "a two-byte shape read as an anchor" test inject_collector_short_shape_anchored \
+    'a two-byte shape was anchored'
+  seeded_case "a module path that is not an identifier" test inject_collector_module_path_shape \
+    'a path through the module tree was not anchored'
+  seeded_case "a sentence word read as a file extension" test inject_collector_extension_window \
+    'a dotted word whose tail is a word was read as a file name'
+  seeded_case "an anchor with the sentence still on it" test inject_collector_token_untrimmed \
+    'the punctuation prose hung on a token was kept as part of the anchor'
+  seeded_case "anchor kinds that swapped their names" test inject_collector_anchor_kind_permuted \
+    'the anchor kind vocabulary is not what it promises'
+  seeded_case "a source vocabulary with no members" test inject_collector_source_vocabulary_emptied \
+    'the source vocabulary is not what it promises'
+  seeded_case "a nomination that names the other tier" test inject_collector_tier_name_swapped \
+    'a nomination named the wrong tier'
+  seeded_case "registers that swapped their names" test inject_collector_register_permuted \
+    'the register vocabulary is not what it promises'
+  seeded_case "a lexical pre-gate the tier ignores" test inject_collector_gate_ignored \
+    'a turn carrying no seed was scored by a gated policy anyway'
+  seeded_case "a turn-level threshold never compared" test inject_collector_turn_threshold_ignored \
+    'an unremarkable turn nominated'
+  seeded_case "a per-entry threshold never compared" test inject_collector_entry_threshold_ignored \
+    'the tier nominated an entry the turn was not about'
+  seeded_case "a turn scored against the wrong sense set" test inject_collector_wrong_sense_set \
+    'a turn about a mistaken assumption was scored as a reversal'
+  seeded_case "an intent register that reads the prose" test inject_collector_intent_register_reads_the_prose \
+    'the tier measured the prose of the turn where it should have measured the stated intent'
+  seeded_case "a budget spent on the worst candidates" test inject_collector_budget_takes_the_worst \
+    'the budget was spent on the entries that scored lowest'
+  seeded_case "a nomination score nothing measured" test inject_collector_score_not_measured \
+    'a nomination carried a score nothing measured'
+  seeded_case "an entry nominated by its own turn at tier 1" test inject_collector_sense_self_nomination \
+    'an entry born in this turn nominated itself'
+  seeded_case "a voided entry nominated by tier 1" test inject_collector_sense_voided_entry_renominated \
+    'a voided entry was nominated again by the sense tier'
+  seeded_case "a report that drops half its policy" test inject_collector_report_drops_the_policy \
+    'the report did not say which scoring produced it'
+  seeded_case "a calibration that names no run" test inject_collector_policy_names_no_run \
+    'was read as a calibration'
+  seeded_case "a supersession that writes a constant" test inject_reconcile_supersede_writes_a_constant \
+    'the superseding entry does not say what superseded the old one'
+  seeded_case "a supersession with no fork behind it" test inject_reconcile_supersede_loses_its_fork \
+    'the superseding entry does not say which fork produced it'
+  seeded_case "a patch the reconciler never hands back" test inject_reconcile_patch_never_handed_back \
+    'a verdict that produced a patch did not hand it back'
+  seeded_case "a PARTIAL counted as a false nomination" test inject_reconcile_partial_read_as_a_false_nomination \
+    'a fork that said the prose bears on the entry was read as a false nomination'
+  seeded_case "a mention applied as a supersession" test inject_reconcile_mention_superseded \
+    'NOT_THIS produced a patch'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

@@ -54,6 +54,16 @@ impl AnchorKind {
             Self::Quoted => "quoted",
         }
     }
+
+    /// The kind a tag names.
+    ///
+    /// A record that says `path` is read back as a path, or as nothing: a
+    /// spelling nobody defined is a nomination nobody can attribute, and it
+    /// must say so rather than fall through to a default kind.
+    #[must_use]
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|kind| kind.tag() == tag)
+    }
 }
 
 /// One anchor of an entry.
@@ -197,9 +207,15 @@ pub struct Hit {
 }
 
 /// Whether `needle` occurs in `haystack` at `at` as a whole token: neither
-/// side continues the word. For a path, the boundary is a non-path
-/// character, so `src/lib.rs` inside `diet/src/lib.rs` is a hit and
-/// `lib.rs` inside `mylib.rs` is not.
+/// side continues the word.
+///
+/// A word character is a letter, a digit or an underscore, so the separators
+/// a path is built from -- `/`, `.`, `-` -- end a token rather than continue
+/// it. `lib.rs` is therefore a hit inside `diet/src/lib.rs`, which names the
+/// same file, and not inside `mylib.rs`, which names a different one. The
+/// cost of that rule is `object.rs` inside `object.rs.orig`: a longer name
+/// built by suffixing a separator is a hit, and the confirm fork is what
+/// tells the two apart.
 fn bounded(haystack: &str, at: usize, needle: &str) -> bool {
     let before = haystack[..at].chars().next_back();
     let after = haystack[at + needle.len()..].chars().next();
@@ -235,6 +251,9 @@ pub enum Source {
 }
 
 impl Source {
+    /// Both, so a report cannot name one and imply the set.
+    pub const ALL: &'static [Self] = &[Self::Prose, Self::ToolOutput];
+
     /// A stable name.
     #[must_use]
     pub fn tag(self) -> &'static str {
@@ -242,6 +261,16 @@ impl Source {
             Self::Prose => "prose",
             Self::ToolOutput => "tool_output",
         }
+    }
+
+    /// The source a tag names.
+    ///
+    /// Which of the two nominated matters to a reader weighing the
+    /// nomination -- the model's own prose and a tool's output are not the
+    /// same evidence -- so the spelling has to survive the round trip.
+    #[must_use]
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|source| source.tag() == tag)
     }
 }
 
@@ -260,14 +289,14 @@ pub struct NewText<'a> {
 ///
 /// One nomination per entry, by its first anchor to recur, prose before tool
 /// output. An entry born in the same turn as the text is never nominated by
-/// it. Entries are visited in id order, so the result does not depend on the
-/// object's insertion order.
+/// it, and an entry the object has already voided or resolved is not
+/// nominated at all: re-nominating a retired fact spends a confirm fork on
+/// every later turn that names it. [`WorkingObject::live`] yields entries in
+/// id order, so the result does not depend on the object's insertion order.
 #[must_use]
 pub fn nominate(object: &WorkingObject, new: NewText<'_>) -> Vec<Nomination> {
     let mut nominations = Vec::new();
-    let mut live: Vec<_> = object.live().collect();
-    live.sort_by(|a, b| a.id.cmp(&b.id));
-    for entry in live {
+    for entry in object.live() {
         if entry.provenances.iter().any(|p| p.turn >= new.turn) {
             continue;
         }
@@ -301,7 +330,7 @@ pub fn nominate(object: &WorkingObject, new: NewText<'_>) -> Vec<Nomination> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Anchor, AnchorKind, Evidence, NewText, Nomination, Source, anchors, find, nominate,
+        Anchor, AnchorKind, Evidence, Hit, NewText, Nomination, Source, anchors, find, nominate,
     };
     use crate::formats::record::{Reasoning, Regime, Substrate};
     use crate::object::{EntryId, Patch, Provenance, WorkingObject};
@@ -360,6 +389,72 @@ mod tests {
         assert_eq!(find("lib.rs", "see diet/src/lib.rs").len(), 1);
         assert!(find("lib.rs", "see mylib.rs").is_empty());
         assert_eq!(find("x", "x x x").len(), 3);
+        // A word character is a letter, a digit or an underscore, so a name
+        // suffixed across a separator is a hit and the fork decides.
+        assert_eq!(
+            find("object.rs", "cp object.rs.orig back").len(),
+            1,
+            "a separator was read as continuing the word"
+        );
+    }
+
+    /// The rest of the shape rules the module doc names, one assertion each.
+    /// The list in `anchors_are_shapes_prose_does_not_produce_by_accident`
+    /// is a sentence a reader can follow; these are the corners it does not
+    /// reach, and each one is a rule whose removal would change what tier 0
+    /// fires on.
+    #[test]
+    fn the_shapes_the_module_names_are_the_shapes_it_anchors() {
+        // A span set off in double quotes, not only in backticks. The author
+        // quoting it is the shape; the words inside need none of their own.
+        assert_eq!(
+            texts(&anchors("the CLI answers \"no such verb\" and stops")),
+            vec![("no such verb", AnchorKind::Quoted)],
+            "a double-quoted span was not anchored"
+        );
+        // `a::b`, with nothing else identifier-shaped about it: no
+        // underscore, no dot, no case change.
+        assert_eq!(
+            texts(&anchors("queue::pop is the caller")),
+            vec![("queue::pop", AnchorKind::Identifier)],
+            "a path through the module tree was not anchored"
+        );
+        // A dotted word whose tail is a word is a name, not a file. The kind
+        // is what a record carries, so the two must not be confused.
+        assert_eq!(
+            texts(&anchors("notes.summary is derived")),
+            vec![("notes.summary", AnchorKind::Identifier)],
+            "a dotted word whose tail is a word was read as a file name"
+        );
+        // The punctuation prose hangs on a token is not part of the anchor.
+        assert_eq!(
+            texts(&anchors("we chose plan_a, then moved on")),
+            vec![("plan_a", AnchorKind::Identifier)],
+            "the punctuation prose hung on a token was kept as part of the anchor"
+        );
+        // Below three bytes a shape is a coincidence.
+        assert!(
+            anchors("the aB flag and the \"xy\" span").is_empty(),
+            "a two-byte shape was anchored"
+        );
+    }
+
+    /// A nomination hands the confirm fork an offset, and an offset that is
+    /// always zero is not evidence about where anything recurred.
+    #[test]
+    fn a_hit_says_where_the_anchor_recurred() {
+        assert_eq!(
+            find("plan_a", "plan_a and later plan_a again"),
+            vec![Hit { offset: 0 }, Hit { offset: 17 }],
+            "the hits did not say where the anchor recurred"
+        );
+        // The scan resumes past the match it took, so a needle that overlaps
+        // itself is counted once rather than at every shifted position.
+        assert_eq!(
+            find("a a", "a a a"),
+            vec![Hit { offset: 0 }],
+            "an anchor that overlaps itself was counted at every shifted position"
+        );
     }
 
     fn regime() -> Regime {
@@ -440,6 +535,86 @@ mod tests {
             },
         );
         assert!(nominations.is_empty(), "{nominations:?}");
+    }
+
+    // The turn nominates every entry it names, not the first one it finds.
+    // A tier that stopped after one would drop a whole class of supersessions
+    // silently: no budget to point at, and no report saying anything was
+    // left out.
+    #[test]
+    fn every_entry_whose_anchor_recurs_is_nominated() {
+        let mut object = WorkingObject::open(regime());
+        add(
+            &mut object,
+            "e1",
+            "`check_record` is missing from the CLI",
+            5,
+        );
+        add(
+            &mut object,
+            "e2",
+            "diet/src/object.rs holds the reconciler",
+            6,
+        );
+        let nominations = nominate(
+            &object,
+            NewText {
+                turn: 18,
+                prose: "check_record landed, and diet/src/object.rs no longer holds the reconciler.",
+                tool_output: "",
+            },
+        );
+        assert_eq!(
+            nominations
+                .iter()
+                .map(|n| n.entry.as_str())
+                .collect::<Vec<_>>(),
+            vec!["e1", "e2"],
+            "a turn that named two anchors nominated fewer than two entries"
+        );
+    }
+
+    // Once a verdict has voided an entry, the object has retired that fact.
+    // Nominating it again spends a confirm fork on every later turn that
+    // names the anchor, forever, and the answer is already on file.
+    #[test]
+    fn a_voided_entry_is_not_nominated_again() {
+        let mut object = WorkingObject::open(regime());
+        add(
+            &mut object,
+            "e1",
+            "`check_record` is missing from the CLI",
+            5,
+        );
+        object
+            .apply(&Patch::Supersede {
+                id: EntryId::new("a12/supersedes/e1").expect("an id"),
+                content: "check_record is in the CLI as of the resolver change".to_owned(),
+                voids: EntryId::new("e1").expect("an id"),
+                provenance: Provenance {
+                    turn: 12,
+                    lane: "interview".to_owned(),
+                    fork: None,
+                    index: 0,
+                },
+            })
+            .expect("superseded");
+        let nominations = nominate(
+            &object,
+            NewText {
+                turn: 18,
+                prose: "check_record is what the linter calls now.",
+                tool_output: "",
+            },
+        );
+        assert_eq!(
+            nominations
+                .iter()
+                .map(|n| n.entry.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a12/supersedes/e1"],
+            "a voided entry was nominated again by the literal tier"
+        );
     }
 
     #[test]
