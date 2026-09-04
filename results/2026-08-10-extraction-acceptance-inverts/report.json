@@ -253,5 +253,5 @@
     },
     "sources_with_any_output": 31
   },
-  "judge_panel": "NOT RUN \u2014 mechanism-fact axis needs the judge-panel panel protocol (separate pass, per the design comment)"
+  "judge_panel": "NOT RUN \u2014 mechanism-fact axis needs the panel protocol (separate pass, per the design comment)"
 }
