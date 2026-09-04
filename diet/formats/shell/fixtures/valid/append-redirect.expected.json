@@ -1,0 +1,33 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [
+                  {
+                    "file": {
+                      "literal": true,
+                      "text": "verify.log"
+                    },
+                    "op": ">>"
+                  }
+                ],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "./verify.sh"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

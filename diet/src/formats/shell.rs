@@ -15,8 +15,16 @@
 //! distinct command, not a word that happens to start with a bracket, and a
 //! [`Group`] is distinct from it. A word carries whether it is [`Word::literal`]
 //! -- `cd $DIR` names a directory the reader cannot know, and saying so is the
-//! honest reading -- and a redirection says which descriptor it moved and to
-//! what, so `2>&1` is not mistaken for a file called `1`.
+//! honest reading -- and it carries the extent of every `$( … )` inside it in
+//! [`Word::substitutions`], so no lane has to find one by scanning text the
+//! quoting has already been taken out of. A redirection says which descriptor
+//! it moved and to what, so `2>&1` is not mistaken for a file called `1`.
+//!
+//! The router's question -- which command did the model actually want? -- is
+//! answered here too, by [`List::producer`], and for the same reason: the
+//! answer is neither the first word of the line nor the last simple command
+//! written (`cargo test | tail -15` is a test run), and a router that derives
+//! it separately is the second reader this module exists to prevent.
 //!
 //! Control flow is not in v0; its keywords are words. See the grammar's
 //! header for what that costs and what is refused outright.
@@ -70,10 +78,15 @@ pub enum Join {
 }
 
 impl Join {
-    /// Every join, so a projection cannot forget one.
-    pub const ALL: &'static [Self] = &[Self::And, Self::Or];
-
     /// The spelling the value space uses.
+    ///
+    /// There was a `Join::ALL` here, described as the thing that kept a
+    /// projection from forgetting a join. It did not: this match is
+    /// exhaustive, so the compiler already refuses a `Join` variant nothing
+    /// spells, and nothing anywhere read the table. `RedirOp::ALL` earns its
+    /// keep because it is the parse table -- read in both directions by
+    /// `tag` and `from_tag` -- and this one was a copy of that shape without
+    /// that reason.
     #[must_use]
     pub fn tag(self) -> &'static str {
         match self {
@@ -125,6 +138,23 @@ pub struct Word {
     /// replace those with something this reader cannot know, and a lane that
     /// treated the text as a path would be guessing.
     pub literal: bool,
+    /// The commands the shell runs before this word becomes a value: the text
+    /// between `$(` and its matching `)`, for each `$( … )` the grammar found.
+    ///
+    /// Carried on the word because quoting is a property of a PART and
+    /// `literal` is a property of the whole: `*.rs'$(cat notes.txt)'` is not
+    /// literal, because of the glob, and its single-quoted part is still three
+    /// characters and not a command. A reader that scanned `text` for `$(`
+    /// would run the second one and record a file the shell never opened, and
+    /// a reader that counted brackets by hand would stop at the `)` inside
+    /// `$(grep ')' f)`. The grammar already decides both, so it is the only
+    /// thing that decides them.
+    ///
+    /// Only `$( … )`. A backtick substitution is an expansion the grammar
+    /// reads and this field does not carry, so a lane sees nothing inside one
+    /// rather than half of it, and `${X:-$(cat f)}` runs its substitution only
+    /// when `X` is unset, which is a condition no reader here can evaluate.
+    pub substitutions: Vec<String>,
 }
 
 /// A redirection.
@@ -244,6 +274,24 @@ impl List {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
+    }
+
+    /// The command whose output the line produces: the FIRST command of the
+    /// last pipeline of the last item, descending into a compound producer.
+    ///
+    /// This is the rule a router classifies by, and it is not the last simple
+    /// command written. `cargo test | tail -15` is a test run and not a
+    /// `tail`; `cat notes.md | head -20` is a document read and not a `head`.
+    /// It lives here rather than in the router because a second reader of a
+    /// shell line is what this format exists to prevent, and because the
+    /// answer is a property of the line.
+    #[must_use]
+    pub fn producer(&self) -> Option<&Simple> {
+        let tail = self.items.last()?.chain.last()?;
+        match tail.pipeline.first()? {
+            Command::Simple(simple) => Some(simple),
+            Command::Subshell(inner) | Command::Group(inner) => inner.producer(),
+        }
     }
 }
 
@@ -492,18 +540,19 @@ fn redirection(pair: &Pair<'_, Rule>) -> Result<Redirection, ParseError> {
                         .map_err(|_| ParseError::Shape("a descriptor number that does not fit"))?,
                 );
             }
-            Rule::file_op | Rule::dup_op | Rule::heredoc_op => {
+            Rule::file_op | Rule::dup_op | Rule::heredoc_op | Rule::strip_op => {
                 op = RedirOp::from_tag(part.as_str());
             }
             Rule::word => target = Some(Target::File(word(&part)?)),
             Rule::dup_target => target = Some(Target::Descriptor(part.as_str().to_owned())),
             Rule::delim_text => delimiter = Some(part.as_str().to_owned()),
             Rule::heredoc_body => body = Some(part.as_str().to_owned()),
-            Rule::heredoc_end => {}
+            Rule::strip_body => body = Some(strip_leading_tabs(part.as_str())),
+            Rule::heredoc_end | Rule::strip_end => {}
             other => return Err(shape_of(other)),
         }
     }
-    if inner.as_rule() == Rule::heredoc {
+    if matches!(inner.as_rule(), Rule::heredoc_plain | Rule::heredoc_strip) {
         target = Some(Target::Heredoc {
             delimiter: delimiter.ok_or(ParseError::Shape("a heredoc with no delimiter"))?,
             body: body.unwrap_or_default(),
@@ -516,6 +565,20 @@ fn redirection(pair: &Pair<'_, Rule>) -> Result<Redirection, ParseError> {
     })
 }
 
+/// A `<<-` body, with the leading tabs the shell strips taken off each line.
+///
+/// The grammar accepts the tabs on the terminator; this takes them off the
+/// body, because the two halves of `<<-` are one operator and a reader that
+/// got the terminator right and the body wrong would be recording a body that
+/// never reached the command.
+fn strip_leading_tabs(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    for line in body.split_inclusive('\n') {
+        out.push_str(line.trim_start_matches('\t'));
+    }
+    out
+}
+
 /// A glob character: the shell would replace the word with whatever matches.
 fn is_glob(c: char) -> bool {
     matches!(c, '*' | '?' | '[')
@@ -525,20 +588,37 @@ fn is_glob(c: char) -> bool {
 /// the reader cannot know which without doing the expansion. A brace pair
 /// with neither a comma nor a range inside is left alone, as the shell
 /// leaves it.
+///
+/// EVERY pair is inspected, not the first. This looked at the first pair
+/// once, so `x{y}z{a,b}` reported literal on the strength of `y` while the
+/// shell expanded it to two words -- the exact overclaim this module's own
+/// seeded fault is about, shipped inside the check that fault protects.
 fn has_brace_expansion(run: &str) -> bool {
-    let Some(open) = run.find('{') else {
-        return false;
-    };
-    let Some(close) = run[open..].find('}') else {
-        return false;
-    };
-    let inside = &run[open + 1..open + close];
-    inside.contains(',') || inside.contains("..")
+    let bytes = run.as_bytes();
+    let mut at = 0;
+    while let Some(open) = run[at..].find('{') {
+        let open = at + open;
+        let Some(close) = run[open..].find('}') else {
+            return false;
+        };
+        let close = open + close;
+        let inside = &run[open + 1..close];
+        if inside.contains(',') || inside.contains("..") {
+            return true;
+        }
+        // Past this pair's closing brace, so a later pair is still seen.
+        at = close + 1;
+        if at >= bytes.len() {
+            break;
+        }
+    }
+    false
 }
 
 fn word(pair: &Pair<'_, Rule>) -> Result<Word, ParseError> {
     let mut text = String::new();
     let mut literal = true;
+    let mut substitutions = Vec::new();
     let mut first = true;
     for part in pair.clone().into_inner() {
         match part.as_rule() {
@@ -553,13 +633,15 @@ fn word(pair: &Pair<'_, Rule>) -> Result<Word, ParseError> {
                 for piece in part.into_inner() {
                     match piece.as_rule() {
                         Rule::double_escape => push_escaped(&mut text, piece.as_str()),
-                        Rule::expansion => literal &= push_expansion(&mut text, &piece)?,
+                        Rule::expansion => {
+                            literal &= push_expansion(&mut text, &piece, &mut substitutions)?;
+                        }
                         Rule::double_run | Rule::double_backslash => text.push_str(piece.as_str()),
                         other => return Err(shape_of(other)),
                     }
                 }
             }
-            Rule::expansion => literal &= push_expansion(&mut text, &part)?,
+            Rule::expansion => literal &= push_expansion(&mut text, &part, &mut substitutions)?,
             Rule::escaped => push_escaped(&mut text, part.as_str()),
             Rule::bare => {
                 let run = part.as_str();
@@ -575,13 +657,26 @@ fn word(pair: &Pair<'_, Rule>) -> Result<Word, ParseError> {
         }
         first = false;
     }
-    Ok(Word { text, literal })
+    Ok(Word {
+        text,
+        literal,
+        substitutions,
+    })
 }
 
+/// What a command substitution opens and closes with.
+const SUBSTITUTION_OPEN: &str = "$(";
+const SUBSTITUTION_CLOSE: &str = ")";
+
 /// The character after a backslash, or nothing for a joined line.
+///
+/// A line ending is CRLF or LF, matching `nl`: a backslash before a CRLF was
+/// once an escaped carriage return, so a continued line written on Windows put
+/// a `\r` in the middle of a word and ended the command on the newline.
 fn push_escaped(text: &mut String, escaped: &str) {
     if let Some(rest) = escaped.strip_prefix('\\')
         && rest != "\n"
+        && rest != "\r\n"
     {
         text.push_str(rest);
     }
@@ -590,13 +685,30 @@ fn push_escaped(text: &mut String, escaped: &str) {
 /// An expansion, kept as written. Returns whether the word is still literal:
 /// a lone `$` is the character itself, and everything else is something the
 /// shell would replace.
-fn push_expansion(text: &mut String, pair: &Pair<'_, Rule>) -> Result<bool, ParseError> {
+///
+/// A `$( … )` also leaves its inner text behind, because the grammar is where
+/// its extent is decided: `paren_inner` already knows that a `)` inside quotes
+/// closes nothing, and every reader that counted brackets for itself got that
+/// wrong.
+fn push_expansion(
+    text: &mut String,
+    pair: &Pair<'_, Rule>,
+    substitutions: &mut Vec<String>,
+) -> Result<bool, ParseError> {
     let inner = pair
         .clone()
         .into_inner()
         .next()
         .ok_or(ParseError::Shape("an expansion with no inner rule"))?;
     text.push_str(pair.as_str());
+    if inner.as_rule() == Rule::dollar_paren {
+        let whole = inner.as_str();
+        let opened = whole
+            .strip_prefix(SUBSTITUTION_OPEN)
+            .and_then(|rest| rest.strip_suffix(SUBSTITUTION_CLOSE))
+            .ok_or(ParseError::Shape("a substitution without its brackets"))?;
+        substitutions.push(opened.to_owned());
+    }
     Ok(inner.as_rule() == Rule::dollar_alone)
 }
 
@@ -716,7 +828,7 @@ fn redirection_value(redirection: &Redirection) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, Join, List, RedirOp, Target, parse};
+    use super::{Command, Join, List, RedirOp, Simple, Target, parse};
 
     fn words(list: &List) -> Vec<Vec<&str>> {
         list.simple_commands()
@@ -749,11 +861,129 @@ mod tests {
         assert_eq!(chain[2].join, Some(Join::Or));
     }
 
+    /// `&` marks the chain BEFORE it, and `;` marks nothing. The pair is
+    /// what makes the test able to fail: checking only the `&` line left a
+    /// reader that set `background` from "there was a separator at all"
+    /// passing, and the two lines differ by one character.
     #[test]
-    fn a_background_ampersand_marks_the_chain_before_it() {
+    fn a_background_ampersand_marks_the_chain_before_it_and_a_semicolon_does_not() {
         let parsed = parse("sleep 1 & echo done").expect("a list");
-        assert!(parsed.items[0].background);
-        assert!(!parsed.items[1].background);
+        assert_eq!(parsed.items.len(), 2, "`&` did not separate the two lists");
+        assert!(parsed.items[0].background, "`sleep 1` was not backgrounded");
+        assert!(!parsed.items[1].background, "`echo done` was backgrounded");
+
+        let sequenced = parse("sleep 1 ; echo done").expect("a list");
+        assert_eq!(sequenced.items.len(), 2);
+        assert!(
+            sequenced.items.iter().all(|item| !item.background),
+            "`;` backgrounded something"
+        );
+
+        // A trailing `&` has nothing after it and still marks what it follows.
+        let trailing = parse("cargo test &").expect("a list");
+        assert_eq!(trailing.items.len(), 1);
+        assert!(trailing.items[0].background);
+    }
+
+    /// `<<-` is the operator that strips leading tabs, from the body and from
+    /// its own terminator. Both halves, because v0 shipped the spelling with
+    /// neither: the operator was recorded, the body kept its tabs, and the
+    /// tab-indented terminator every real `<<-` has was refused.
+    #[test]
+    fn a_stripping_heredoc_strips_its_tabs_and_a_plain_one_keeps_them() {
+        let parsed = parse("cat <<-END\n\tindented\n\tEND\n").expect("a list");
+        let simple = parsed.simple_commands().next().expect("one command");
+        assert_eq!(simple.redirections[0].op, RedirOp::HeredocStrip);
+        assert!(
+            matches!(
+                &simple.redirections[0].target,
+                Target::Heredoc { body, .. } if body == "indented\n"
+            ),
+            "`<<-` did not strip the tabs the shell strips"
+        );
+
+        let plain = parse("cat <<END\n\tindented\nEND\n").expect("a list");
+        let simple = plain.simple_commands().next().expect("one command");
+        assert_eq!(simple.redirections[0].op, RedirOp::Heredoc);
+        assert!(
+            matches!(
+                &simple.redirections[0].target,
+                Target::Heredoc { body, .. } if body == "\tindented\n"
+            ),
+            "`<<` stripped a tab it must keep"
+        );
+
+        // Only `<<-` may have its terminator indented; `<<` reads the
+        // indented line as body and then never finds its delimiter.
+        assert!(parse("cat <<END\n\tbody\n\tEND\n").is_err());
+    }
+
+    /// A carriage return belongs to the line ending and nowhere else. It was
+    /// horizontal space once, which split `echo a\rb` into three words where
+    /// the shell gives two -- a wrong reading of the one input class (a file
+    /// written on Windows) the allowance existed to serve.
+    #[test]
+    fn a_carriage_return_ends_a_line_and_is_otherwise_an_ordinary_character() {
+        let crlf = parse("ls\r\npwd\r\n").expect("a list");
+        assert_eq!(words(&crlf), vec![vec!["ls"], vec!["pwd"]]);
+
+        let inside = parse("echo a\rb\n").expect("a list");
+        assert_eq!(words(&inside), vec![vec!["echo", "a\rb"]]);
+
+        // A backslash before a CRLF joins the lines, as it does before a LF.
+        let continued = parse("cargo test \\\r\n  --workspace\r\n").expect("a list");
+        assert_eq!(
+            words(&continued),
+            vec![vec!["cargo", "test", "--workspace"]]
+        );
+    }
+
+    /// A tilde expands only at the start of a word, so only there does it
+    /// cost the word its literalness.
+    #[test]
+    fn a_tilde_is_an_expansion_only_where_the_shell_expands_it() {
+        let parsed = parse(r#"cd ~/work && ls ~ a~b "x"~"#).expect("a list");
+        let literal: Vec<(&str, bool)> = parsed
+            .simple_commands()
+            .flat_map(|simple| simple.words.iter())
+            .map(|word| (word.text.as_str(), word.literal))
+            .collect();
+        assert_eq!(
+            literal,
+            vec![
+                ("cd", true),
+                ("~/work", false),
+                ("ls", true),
+                ("~", false),
+                ("a~b", true),
+                ("x~", true),
+            ]
+        );
+    }
+
+    /// The three glob characters, each of which costs a word its
+    /// literalness. `[` had no fixture and no test: it could be dropped from
+    /// `is_glob` and every gate stayed green.
+    #[test]
+    fn each_glob_character_makes_its_word_unliteral() {
+        let parsed = parse("rm -f *.tmp build/?.o log[0-9].txt plain.txt").expect("a list");
+        let simple = parsed.simple_commands().next().expect("one command");
+        let literal: Vec<(&str, bool)> = simple
+            .words
+            .iter()
+            .map(|word| (word.text.as_str(), word.literal))
+            .collect();
+        assert_eq!(
+            literal,
+            vec![
+                ("rm", true),
+                ("-f", true),
+                ("*.tmp", false),
+                ("build/?.o", false),
+                ("log[0-9].txt", false),
+                ("plain.txt", true),
+            ]
+        );
     }
 
     #[test]
@@ -778,6 +1008,54 @@ mod tests {
                 ("f*", false),
             ]
         );
+    }
+
+    // A word's substitutions come from the grammar's own `dollar_paren`
+    // extents, and not from a scan of the text it produced. `literal` is a
+    // property of the whole word and quoting is a property of a part, so a
+    // scan cannot tell `'$(cat f)'` -- three characters -- from the command
+    // beside it; and a scan that counted brackets stops at the `)` inside
+    // `$(grep ')' f)`.
+    #[test]
+    fn a_words_substitutions_are_the_ones_the_grammar_found() {
+        let cases: &[(&str, Vec<Vec<&str>>)] = &[
+            ("echo $(cat a.txt)", vec![vec![], vec!["cat a.txt"]]),
+            ("echo \"$(cat a.txt)\"", vec![vec![], vec!["cat a.txt"]]),
+            ("echo '$(cat a.txt)'", vec![vec![], vec![]]),
+            ("echo *.rs'$(cat a.txt)'", vec![vec![], vec![]]),
+            (
+                "echo \"$(grep ')' a.txt)\"",
+                vec![vec![], vec!["grep ')' a.txt"]],
+            ),
+            (
+                "echo $(cat a.txt)$(cat b.txt)",
+                vec![vec![], vec!["cat a.txt", "cat b.txt"]],
+            ),
+            (
+                "echo $(echo $(cat a.txt) done)",
+                vec![vec![], vec!["echo $(cat a.txt) done"]],
+            ),
+            ("echo ${X:-$(cat a.txt)}", vec![vec![], vec![]]),
+            ("echo `cat a.txt`", vec![vec![], vec![]]),
+        ];
+        for (line, expected) in cases {
+            let parsed = parse(line).unwrap_or_else(|err| panic!("{line}: {err}"));
+            let simple = parsed.simple_commands().next().expect("one command");
+            let found: Vec<Vec<&str>> = simple
+                .words
+                .iter()
+                .map(|word| word.substitutions.iter().map(String::as_str).collect())
+                .collect();
+            assert_eq!(&found, expected, "{line}");
+        }
+        let parsed = parse("V=$(pwd) cat < $(echo f.txt)").expect("a list");
+        let simple = parsed.simple_commands().next().expect("one command");
+        let value = simple.assignments[0].value.as_ref().expect("a value");
+        assert_eq!(value.substitutions, vec!["pwd".to_owned()]);
+        let Target::File(target) = &simple.redirections[0].target else {
+            panic!("a file target")
+        };
+        assert_eq!(target.substitutions, vec!["echo f.txt".to_owned()]);
     }
 
     #[test]
@@ -860,11 +1138,258 @@ mod tests {
         }
     }
 
+    /// Every operator, written out HERE rather than read from the table
+    /// under test. The version of this that looped over `RedirOp::ALL` to
+    /// check `RedirOp::ALL` asserted nothing a mutation could break: empty
+    /// the table and the loop passes on zero rounds, reorder it and it
+    /// passes, drop a row and it passes. The eleven spellings are the claim,
+    /// so the eleven spellings are in the test.
     #[test]
-    fn every_operator_reads_back_from_its_own_spelling() {
-        for (op, tag) in RedirOp::ALL {
-            assert_eq!(RedirOp::from_tag(tag), Some(*op), "{tag}");
-            assert_eq!(op.tag(), *tag);
+    fn every_operator_is_named_here_and_the_table_says_the_same() {
+        let named = [
+            (RedirOp::Write, ">"),
+            (RedirOp::Append, ">>"),
+            (RedirOp::Clobber, ">|"),
+            (RedirOp::WriteBoth, "&>"),
+            (RedirOp::AppendBoth, "&>>"),
+            (RedirOp::Read, "<"),
+            (RedirOp::HereString, "<<<"),
+            (RedirOp::DupOut, ">&"),
+            (RedirOp::DupIn, "<&"),
+            (RedirOp::Heredoc, "<<"),
+            (RedirOp::HeredocStrip, "<<-"),
+        ];
+        assert_eq!(
+            RedirOp::ALL.len(),
+            named.len(),
+            "the table gained or lost an operator and this test was not told"
+        );
+        for (op, tag) in named {
+            assert_eq!(op.tag(), tag, "{tag} is not what the table spells it");
+            assert_eq!(RedirOp::from_tag(tag), Some(op), "{tag} does not read back");
         }
+    }
+
+    /// Which operators name a file on disk, as three named groups rather
+    /// than as the two predicates restated. The lengths add up to the whole
+    /// table, so an operator added tomorrow cannot arrive unclassified.
+    #[test]
+    fn naming_a_file_is_a_partition_of_the_operators() {
+        let writes = [
+            RedirOp::Write,
+            RedirOp::Append,
+            RedirOp::Clobber,
+            RedirOp::WriteBoth,
+            RedirOp::AppendBoth,
+        ];
+        let reads = [RedirOp::Read];
+        // A duplication names a descriptor, a here-document carries its own
+        // body, and a here-string's target is the text itself: none of them
+        // is a path the mechanical lane may record as touched.
+        let neither = [
+            RedirOp::HereString,
+            RedirOp::DupOut,
+            RedirOp::DupIn,
+            RedirOp::Heredoc,
+            RedirOp::HeredocStrip,
+        ];
+        assert_eq!(
+            writes.len() + reads.len() + neither.len(),
+            RedirOp::ALL.len(),
+            "an operator is in the table and in none of these three groups"
+        );
+        for op in writes {
+            assert!(op.writes_file(), "{} must write a file", op.tag());
+            assert!(!op.reads_file(), "{} must not read a file", op.tag());
+        }
+        for op in reads {
+            assert!(op.reads_file(), "{} must read a file", op.tag());
+            assert!(!op.writes_file(), "{} must not write a file", op.tag());
+        }
+        for op in neither {
+            assert!(!op.writes_file(), "{} names no file to write", op.tag());
+            assert!(!op.reads_file(), "{} names no file to read", op.tag());
+        }
+    }
+
+    /// The two accessors the mechanical lane reads a command through. Both
+    /// were unpinned: emptying either left the whole gate green.
+    #[test]
+    fn the_command_word_is_the_first_word_and_the_operands_are_the_rest() {
+        let parsed = parse("CARGO_TARGET_DIR=/work/target cargo test --workspace -- capture")
+            .expect("a list");
+        let simple = parsed.simple_commands().next().expect("one command");
+        assert_eq!(
+            simple.command().map(|word| word.text.as_str()),
+            Some("cargo"),
+            "an assignment prefix is not the command word"
+        );
+        assert_eq!(
+            operands_of(simple),
+            vec!["test", "--workspace", "--", "capture"],
+            "the command word is not one of its own operands"
+        );
+
+        // A command of assignments alone runs nothing, so it has no command
+        // word and no operands -- not a first word that happens to be blank.
+        let only = parse("FOO=bar").expect("a list");
+        let simple = only.simple_commands().next().expect("one command");
+        assert_eq!(simple.command(), None);
+        assert!(simple.operands().is_empty());
+
+        // One word is a command and no operands, which is the case an
+        // off-by-one in either accessor gets wrong.
+        let bare = parse("pwd").expect("a list");
+        let simple = bare.simple_commands().next().expect("one command");
+        assert_eq!(simple.command().map(|word| word.text.as_str()), Some("pwd"));
+        assert!(simple.operands().is_empty());
+    }
+
+    /// The rule the router classifies by, in the cases where the answer is
+    /// not the first word and not the last command written.
+    #[test]
+    fn the_producer_is_the_head_of_the_last_pipeline_and_not_its_tail() {
+        for (line, want) in [
+            ("cargo test | tail -15", "cargo"),
+            ("cat notes.md | head -20", "cat"),
+            ("cd diet && cargo test", "cargo"),
+            ("cargo build |& tail -3", "cargo"),
+            ("ls; (cd a && git status --short)", "git"),
+            ("ls; { cd a; pwd; }", "pwd"),
+            ("pwd", "pwd"),
+        ] {
+            let parsed = parse(line).expect("a list");
+            assert_eq!(
+                parsed
+                    .producer()
+                    .and_then(|simple| simple.command())
+                    .map(|word| word.text.as_str()),
+                Some(want),
+                "{line:?} produces its output with {want}"
+            );
+        }
+        assert!(
+            parse("").expect("empty").producer().is_none(),
+            "a document with no command produces nothing"
+        );
+    }
+
+    /// No refusal in the invalid corpus is a [`ParseError::Shape`].
+    ///
+    /// The three refusals are not equals. `Syntax` is the grammar's, and is
+    /// the ordinary one. `Unsupported` is v0 declining to read a document the
+    /// grammar accepts -- `|&` after a subshell, which has nowhere on a
+    /// compound command to record the duplication -- and is a decision the
+    /// grammar's header states, so the fixtures that carry it are named here.
+    /// `Shape` is neither: it means the text parsed and the tree was not the
+    /// shape this module expected, which is drift between the normative file
+    /// and its implementation and never a fact about the input.
+    ///
+    /// The conformance harness cannot tell the three apart -- it asks only
+    /// that an invalid fixture be rejected -- so a widened grammar keeps the
+    /// corpus green while the reason files describe rules nothing reaches.
+    /// Widen `subshell` to `"(" ~ gap* ~ list? ~ gap* ~ close_paren` and `()`
+    /// is still refused, by `a bracket with no list inside` from here, rather
+    /// than by the rule `empty-subshell.reason` names. This test is what
+    /// notices.
+    #[test]
+    fn no_refusal_in_the_invalid_corpus_is_the_parsers_own() {
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("formats/shell/fixtures/invalid");
+        let v0_declines = ["pipe-both-after-subshell.sh"];
+        let mut checked = 0;
+        let mut seen_declined = 0;
+        for entry in std::fs::read_dir(&dir).expect("the invalid fixture directory") {
+            let path = entry.expect("a readable entry").path();
+            if path.extension().is_none_or(|ext| ext != "sh") {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .expect("a named fixture")
+                .to_owned();
+            let bytes = std::fs::read(&path).expect("a readable fixture");
+            // A fixture that is not text never reaches the grammar: its
+            // refusal is the decode, which the CLI and the harness do.
+            let Ok(text) = std::str::from_utf8(&bytes) else {
+                continue;
+            };
+            checked += 1;
+            let declines = v0_declines.contains(&name.as_str());
+            match parse(text) {
+                Err(super::ParseError::Syntax(_)) => assert!(
+                    !declines,
+                    "{name}: named as declined by v0, but the grammar refuses it"
+                ),
+                Err(super::ParseError::Unsupported(reason)) => {
+                    assert!(
+                        declines,
+                        "{name}: refused as unsupported ({reason}) and not named as declined"
+                    );
+                    seen_declined += 1;
+                }
+                Err(super::ParseError::Shape(reason)) => panic!(
+                    "{name}: refused by the parser ({reason}) and not by the grammar; \
+                     the grammar accepted a document its reason file says it refuses"
+                ),
+                Ok(_) => panic!("{name}: accepted"),
+            }
+        }
+        assert_eq!(
+            seen_declined,
+            v0_declines.len(),
+            "a fixture named as declined by v0 is no longer refused that way"
+        );
+        assert!(
+            checked >= 15,
+            "only {checked} invalid fixtures were text; the corpus is not being read"
+        );
+    }
+
+    /// `}` closes a group where a command starts and is an ordinary word
+    /// everywhere else, which is the mirror of `{`. The two were asymmetric:
+    /// `echo { a` parsed and `echo }` did not, although the shell reads both
+    /// as three words and two.
+    #[test]
+    fn a_closing_brace_closes_a_group_and_is_otherwise_a_word() {
+        assert_eq!(
+            words(&parse("echo }").expect("a list")),
+            vec![vec!["echo", "}"]]
+        );
+        assert_eq!(
+            words(&parse("echo { a").expect("a list")),
+            vec![vec!["echo", "{", "a"]]
+        );
+
+        let group = parse("{ cd a; ls; }").expect("a list");
+        assert!(matches!(
+            group.items[0].chain[0].pipeline[0],
+            Command::Group(_)
+        ));
+        assert_eq!(words(&group), vec![vec!["cd", "a"], vec!["ls"]]);
+
+        // Still refused where it would have to be a command: an unterminated
+        // group must not become a command called `}`.
+        assert!(parse("{ ls").is_err());
+        assert!(parse("ls; }").is_err());
+    }
+
+    /// A backslash before a newline INSIDE a word joins the two halves into
+    /// one word. `line-continuation.sh` only covers the continuation between
+    /// words, which `hs` handles; this is the `escaped` path, and dropping
+    /// its guard left `echo foo\<newline>bar` as a word with a newline in it.
+    #[test]
+    fn a_continuation_inside_a_word_joins_it() {
+        let parsed = parse("echo foo\\\nbar baz").expect("a list");
+        assert_eq!(words(&parsed), vec![vec!["echo", "foobar", "baz"]]);
+    }
+
+    fn operands_of(simple: &Simple) -> Vec<&str> {
+        simple
+            .operands()
+            .iter()
+            .map(|word| word.text.as_str())
+            .collect()
     }
 }
