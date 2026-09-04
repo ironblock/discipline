@@ -759,6 +759,52 @@ impl From<StructureError> for ParseError {
 // parsing
 // ---------------------------------------------------------------------------
 
+/// Read a JSON-lines document as plain objects, stopping before the schema.
+///
+/// A lane's contract file and a lane corpus's expectation are JSON that is
+/// not a record: rows with no `record` tag and no event schema to satisfy.
+/// They are read here rather than by a second decoder because the crate's
+/// standing finding about formats applies to its own value space first --
+/// eleven divergent readers of one format, and "I recreated it to be quick".
+/// This is the same grammar and the same [`json`] value space as a record,
+/// with the schema layer left off.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] for text the grammar rejects, for nesting past
+/// [`MAX_DEPTH`], and for a value the record's value space cannot hold. Never
+/// [`ParseError::Schema`] or [`ParseError::Structure`]: those layers are
+/// exactly what this function does not apply.
+pub fn objects(input: &str) -> Result<Vec<BTreeMap<String, Value>>, ParseError> {
+    let depth = nesting_depth(input);
+    if depth > MAX_DEPTH {
+        return Err(ParseError::TooDeep {
+            depth,
+            limit: MAX_DEPTH,
+        });
+    }
+    let mut parsed = RecordParser::parse(Rule::document, input)
+        .map_err(|err| ParseError::Syntax(Box::new(err)))?;
+    let document = parsed.next().ok_or(ParseError::Value(ValueError::Shape(
+        "a document with no rows",
+    )))?;
+
+    let mut rows = Vec::new();
+    for line in document.into_inner() {
+        if line.as_rule() != Rule::event_line {
+            continue; // a blank line
+        }
+        let object = line
+            .into_inner()
+            .find(|pair| pair.as_rule() == Rule::object)
+            .ok_or(ParseError::Value(ValueError::Shape(
+                "a line with no object",
+            )))?;
+        rows.push(json::object(&object)?);
+    }
+    Ok(rows)
+}
+
 /// Parse a session record.
 ///
 /// # Errors
@@ -1728,8 +1774,8 @@ pub fn project(source: &str) -> Result<Value, String> {
 mod tests {
     use super::json::Value;
     use super::{
-        Count, Event, Kind, ParseError, Reasoning, Regime, SchemaError, StructureError, Verdict,
-        parse, regime_value, render,
+        Count, Event, Kind, MAX_DEPTH, ParseError, Reasoning, Regime, SchemaError, StructureError,
+        Verdict, objects, parse, regime_value, render,
     };
 
     /// A `start` line whose regime is complete, as every record needs one.
@@ -2207,6 +2253,38 @@ mod tests {
         assert!(
             parse(&record("")).is_ok(),
             "the limit does not reject a record"
+        );
+    }
+
+    // The same crash, through the other door. `objects` is a second entry
+    // into the same recursive descent, and a limit on the door nobody walked
+    // through is not a limit -- the lane contract and every lane corpus
+    // expectation arrive this way.
+    #[test]
+    fn a_deeply_nested_object_document_is_a_verdict_and_not_a_crash() {
+        let just_past = format!(
+            "{{\"a\":{}1{}}}\n",
+            "{\"a\":".repeat(MAX_DEPTH),
+            "}".repeat(MAX_DEPTH)
+        );
+        assert!(
+            matches!(objects(&just_past), Err(ParseError::TooDeep { .. })),
+            "one level past the limit must be a verdict from `objects` as well \
+             as from `parse`"
+        );
+        let deep = format!(
+            "{{\"a\":{}1{}}}\n",
+            "{\"a\":".repeat(5000),
+            "}".repeat(5000)
+        );
+        assert!(
+            matches!(objects(&deep), Err(ParseError::TooDeep { .. })),
+            "5000 deep is a verdict and not a crash"
+        );
+        assert!(
+            objects(r#"{"tool":"update_record","parameters":{"content":{"type":"string"}}}"#)
+                .is_ok(),
+            "the limit does not reject a contract row"
         );
     }
 
