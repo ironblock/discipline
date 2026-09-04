@@ -1,0 +1,7 @@
+Three questions, one line each.
+
+DECISION: the call you made this turn
+LEARNED: the thing you now know
+PLAN: the next move
+
+Answer from this turn alone.

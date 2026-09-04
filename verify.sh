@@ -757,8 +757,8 @@ import pathlib
 
 path = pathlib.Path("diet/src/capture/mimicry.rs")
 source = path.read_text(encoding="utf-8")
-old = "    if of > 0 && every_field_inert && echoed > 0 {\n"
-new = "    let _ = every_field_inert;\n    if of > 0 && echoed > 0 {\n"
+old = "    if every_field_inert && echoed > 0 {\n"
+new = "    let _ = every_field_inert;\n    if echoed > 0 {\n"
 assert source.count(old) == 1
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -814,6 +814,227 @@ path = pathlib.Path("diet/src/capture/mimicry.rs")
 source = path.read_text(encoding="utf-8")
 old = "        matches!(self, Self::Answered { .. })\n"
 new = "        !matches!(self, Self::Unreadable { .. })\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The entry's content becomes the field's own label. The ids are still derived
+# from the event, so an assertion about ids alone holds -- and the object ends
+# up holding `decision` as the decision, which is the field-labels-as-content
+# failure committed by the module that exists to prevent it.
+inject_mimicry_content_is_the_field_label() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = """            patches.push(Patch::Add {
+                id: EntryId::new(&format!("{event}/{}", tag.kind.canonical_tag()))?,
+                content: content.clone(),
+                provenance,
+            });"""
+new = """            let _ = content;
+            patches.push(Patch::Add {
+                id: EntryId::new(&format!("{event}/{}", tag.kind.canonical_tag()))?,
+                content: tag.kind.canonical_tag().to_owned(),
+                provenance,
+            });"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A declined field written into the object as a fact. A decline says there is
+# nothing to record; recording it as content turns "nothing to add" into a
+# statement the model made about the work.
+inject_mimicry_decline_becomes_content() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = """            let (Some(tag), Outcome::Value(content)) = (field.tag.as_ref(), &field.outcome) else {
+                continue;
+            };"""
+new = """            let Some(tag) = field.tag.as_ref() else {
+                continue;
+            };
+            let written = field.raw.clone();
+            let content = match &field.outcome {
+                Outcome::Value(value) => value,
+                _ => &written,
+            };"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The retry hands the same question back. `STRENGTHENED` stays referenced, so
+# the shape reads as a guard against strengthening twice; the second fork is
+# spent on the text that already produced mimicry.
+inject_mimicry_retry_repeats_the_question() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = '    format!("{}\\n\\n{STRENGTHENED}", ask.trim_end())\n'
+new = """    if ask.contains(STRENGTHENED) {
+        return ask.to_owned();
+    }
+    ask.trim_end().to_owned()
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A sentence about two slots read as one slot. `<a> and <b>` is an answer
+# talking about the template, and condemning it takes a genuine short answer
+# out of the object.
+inject_mimicry_two_slots_read_as_one() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = """    let inner = body.strip_prefix(open)?.strip_suffix(close)?;
+    if inner.contains(close) {
+        return None;
+    }
+    Some(inner)"""
+new = """    let inner = body.strip_prefix(open)?.strip_suffix(close)?;
+    Some(inner)"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Every parenthesised span read as a form slot. A parenthetical answer is
+# prose, and the `your ... here` frame is the only shape that is a slot.
+inject_mimicry_any_parenthetical_is_a_slot() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = """    let lowered = inner.trim().to_lowercase();
+    lowered.starts_with("your") && lowered.ends_with("here")"""
+new = """    let lowered = inner.trim().to_lowercase();
+    !lowered.is_empty()"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The blank-event guard removed. `<event>/<field>` is never blank whatever the
+# event is, so `EntryId::new` cannot see it: the entry lands under `/decision`
+# and its provenance half names nothing.
+inject_mimicry_blank_event_id() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if event.trim().is_empty() {
+            // `<event>/<field>` is never blank whatever `event` is, so
+            // `EntryId::new` cannot see this: an id with an empty provenance
+            // half reads as an id and names nothing.
+            return Err(ObjectError::EmptyId);
+        }
+"""
+new = ""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The trailing punctuation an emitter types after a bare marker is kept, so
+# `TBD.` stops reading as a slot and the slot is captured as content.
+inject_mimicry_marker_punctuated() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = """fn unpunctuated(body: &str) -> &str {
+    body.trim_end_matches(['.', ':', ';', ',', '!', '?'])
+        .trim_end()
+}"""
+new = """fn unpunctuated(body: &str) -> &str {
+    body
+}"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Only the typographic ellipsis recognised. The three dots an emitter actually
+# types then read as content, which is the register the failure arrives in.
+inject_mimicry_ellipsis_typed_as_dots() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = """                let dots = body.chars().filter(|dot| *dot == '.').count();
+                bare == "\\u{2026}" || (dots >= 3 && dots == body.chars().count())"""
+new = """                let dots = body.chars().filter(|dot| *dot == '.').count();
+                let _ = dots;
+                bare == "\\u{2026}\""""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A heading announced with no value read as content. The template with its
+# values cut out is then an answer, and every empty field becomes an entry.
+inject_mimicry_empty_field_is_content() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = """    let said = normalise(text);
+    if said.is_empty() {
+        return Some(Inert::Empty);
+    }
+"""
+new = """    let said = normalise(text);
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The census stops counting the outcome this module invented. A run with a
+# damaged transport then reads as a run in which nothing went wrong.
+inject_mimicry_unreadable_uncounted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = "            AskOutcome::Unreadable { .. } => self.unreadable += 1,\n"
+new = "            AskOutcome::Unreadable { .. } => {}\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The text a mimicked ask came back with is dropped. Mimicry is evidence about
+# the ask, and a harvest with no text is a count with nothing behind it.
+inject_mimicry_mimicked_answer_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mimicry.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Self::Answered { answer, .. } | Self::Mimicked { answer, .. } => Some(answer),
+            Self::Unreadable { .. } => None,"""
+new = """            Self::Answered { answer, .. } => Some(answer),
+            Self::Mimicked { .. } | Self::Unreadable { .. } => None,"""
 assert source.count(old) == 1
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -1372,6 +1593,28 @@ selftest() {
     'a third fork fired on an ask already mimicked twice'
   seeded_case "mimicry recorded as a content entry"   test     inject_mimicry_recorded_as_content \
     'a mimicked ask reached the working object as content'
+  seeded_case "the field label written as content"    test     inject_mimicry_content_is_the_field_label \
+    'holding the sentence the model wrote'
+  seeded_case "a decline written into the object"     test     inject_mimicry_decline_becomes_content \
+    'a decline reached the working object as a fact the model stated'
+  seeded_case "the retry repeats the question"        test     inject_mimicry_retry_repeats_the_question \
+    'the retry is not the ask with its imperative said again'
+  seeded_case "two slots read as one slot"            test     inject_mimicry_two_slots_read_as_one \
+    'a sentence naming two slots was read as one slot'
+  seeded_case "any parenthetical read as a slot"      test     inject_mimicry_any_parenthetical_is_a_slot \
+    'a parenthetical answer was read as a form slot'
+  seeded_case "an entry whose event is blank"         test     inject_mimicry_blank_event_id \
+    'a blank event id minted entries under an id'
+  seeded_case "a marker with a full stop after it"    test     inject_mimicry_marker_punctuated \
+    'a marker an emitter punctuated was not read as a slot'
+  seeded_case "the ellipsis an emitter types"         test     inject_mimicry_ellipsis_typed_as_dots \
+    'three dots were not read as the ellipsis slot'
+  seeded_case "a heading with no value read as content" test     inject_mimicry_empty_field_is_content \
+    'a heading announced with nothing after it was read as content'
+  seeded_case "an unreadable emission uncounted"      test     inject_mimicry_unreadable_uncounted \
+    'an emission that was not an answer at all went uncounted'
+  seeded_case "a mimicked answer dropped"             test     inject_mimicry_mimicked_answer_dropped \
+    'the second answer of a mimicked ask was dropped'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

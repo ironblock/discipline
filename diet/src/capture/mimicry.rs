@@ -29,9 +29,17 @@
 //! field is inert and at least one of them is the ask coming back -- an
 //! all-decline answer is a decline, and an empty answer is silence. The
 //! labelled corpus under `diet/capture/mimicry/corpus/` is where that
-//! boundary is pinned; it is also the evidence about which asks invite an
-//! echo, which is the other reason mimicry is harvested rather than only
-//! suppressed.
+//! boundary is pinned.
+//!
+//! **That corpus is authored, not harvested.** Every case in it was written
+//! here by hand to state a rule; no model produced any of it and no drive was
+//! mined for it. The harvest mimicry detection exists to feed -- cases taken
+//! from archived drives, and with them the rate at which a given ask is
+//! mimicked, which is the profile cell -- cannot run in this tree: there is no
+//! archived drive here and nothing to drive. So no rate is reported anywhere
+//! in this module, [`Tally`] holds only what a caller fed it, and a reader
+//! should take these cases as a statement of where the boundary is and as
+//! nothing whatever about which asks a model in fact mimics.
 
 use std::collections::BTreeMap;
 
@@ -104,6 +112,15 @@ impl Placeholder {
     /// The whole value has to be the placeholder. A sentence that mentions a
     /// slot in passing is content, and reading it as a slot would cost the
     /// precision this detector exists to keep.
+    ///
+    /// A wrapped value is read wide: whatever sits between the one pair of
+    /// brackets, the value is the slot. The narrow reading -- a slot only when
+    /// the words between the brackets are words the ask wrote -- is not
+    /// available, because a slot whose words came from the ask is already an
+    /// [`Inert::Echo`], and a guard another guard covers cannot be seen red.
+    /// The price is stated rather than hidden: a genuine answer written wholly
+    /// inside one pair of brackets, in an answer with no other live field, is
+    /// read as the slot coming back.
     #[must_use]
     pub fn of(text: &str) -> Option<Self> {
         let body = text.trim();
@@ -117,8 +134,14 @@ impl Placeholder {
             Self::Square => wrapped(body, '[', ']').is_some(),
             Self::Brace => wrapped(body, '{', '}').is_some(),
             Self::Ellipsis => {
+                // `unpunctuated` has already taken the full stops off, so
+                // testing `bare` against `...` tests it against the empty
+                // string it always is -- which is how the ASCII form, the one
+                // an emitter actually types, went unrecognised. Count the dots
+                // instead: three or more, and nothing else in the value.
                 let bare = unpunctuated(body);
-                bare == "\u{2026}" || bare == "..."
+                let dots = body.chars().filter(|dot| *dot == '.').count();
+                bare == "\u{2026}" || (dots >= 3 && dots == body.chars().count())
             }
             Self::ToBeDecided => unpunctuated(body).eq_ignore_ascii_case("tbd"),
             Self::ToDo => unpunctuated(body).eq_ignore_ascii_case("todo"),
@@ -229,12 +252,15 @@ impl Classification {
     }
 }
 
-/// What a harvested case is labelled.
+/// The verdict a corpus case carries.
 ///
 /// The harvest is the point of detecting mimicry at all: a mimicked ask is a
-/// clean signal that the ask is badly shaped, and the rate per template is a
-/// profile cell. A label is written down, so it is a closed vocabulary with a
-/// lookup that iterates [`Label::ALL`], never a string compared in place.
+/// clean signal that the ask is badly shaped, and the rate per template would
+/// be a profile cell. That harvest cannot run here -- see the module doc --
+/// so every label this vocabulary has ever been written onto was written by
+/// hand onto an authored case. A label is written down, so it is a closed
+/// vocabulary with a lookup that iterates [`Label::ALL`], never a string
+/// compared in place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Label {
     /// The answer mimicked the ask.
@@ -286,7 +312,10 @@ pub fn classify(ask: &str, answer: &Answer) -> Classification {
             None => every_field_inert = false,
         }
     }
-    if of > 0 && every_field_inert && echoed > 0 {
+    // Not `of > 0` as well: `echoed` only rises inside the loop that raises
+    // `of`, so the count is already positive here and a conjunct that cannot
+    // be false is a place for a seeded fault to hide.
+    if every_field_inert && echoed > 0 {
         Classification::Mimicry(Echo { echoed, of })
     } else {
         Classification::Answer
@@ -373,11 +402,12 @@ pub const FORK_BUDGET: u32 = 2;
 /// that sentence again and names the failure. A model that returned the
 /// question does not need a different question; it needs to be told that
 /// returning the question is not an answer.
-const STRENGTHENED: &str = concat!(
-    "Answer from this turn alone. Do not repeat the question: handing the ",
-    "headings back is not an answer, and declining is better than filling ",
-    "the slots with the slot names."
-);
+///
+/// Nothing beyond that. A further clause -- that declining would be better
+/// than filling the slots with the slot names -- would be a behavioural nudge
+/// shipped unversioned, with no arm measuring it, into a lane whose whole
+/// argument is that advisory framing is what keeps a model able to decline.
+const STRENGTHENED: &str = "Answer from this turn alone. Do not repeat the question.";
 
 /// The ask as it is put the second time.
 ///
@@ -475,17 +505,35 @@ impl AskOutcome {
     ///
     /// This is not the groundedness gate and does not stand in for one. That
     /// gate binds per lane against the lane's contract input, and an ask put to
-    /// a fork carries no contract input here; a lane driver that holds one runs
-    /// [`crate::capture::grounded::check`] over what this hands back. Keeping
-    /// the ask out of the object and checking that an answer's content was in
-    /// what the model saw are different failures with different repairs, and
-    /// collapsing them would leave neither able to fail on its own.
+    /// a fork carries no contract input here. A lane driver that holds one can
+    /// run [`crate::capture::grounded::check`] over what this hands back, and
+    /// that covers less than the sentence suggests: four of the six field kinds
+    /// are judgment-class, and [`crate::capture::grounded::check`] returns a
+    /// judgment entry grounded without looking at anything, because grounding a
+    /// plan against what the model saw is a category error. For a decision, a
+    /// lesson, a plan or a blocker the only thing between the ask and the object
+    /// is [`classify`], which decides once, for the whole answer.
+    ///
+    /// One consequence of deciding once is stated here rather than left to be
+    /// found: an inert field inside an answer that says something else --
+    /// `PLAN: TBD` beside a real decision -- reaches the object as content. A
+    /// second, field-level rule would cover the first, and two rules that each
+    /// cover the other cannot both be proven red. Keeping the ask out of the
+    /// object and checking that an answer's content was in what the model saw
+    /// are different failures with different repairs, and collapsing them would
+    /// leave neither able to fail on its own.
     ///
     /// # Errors
     ///
     /// Returns [`ObjectError::EmptyId`] when `event` is blank, because an
     /// entry whose provenance cannot be named is worse than no entry.
     pub fn patches(&self, event: &str, at: &Provenance) -> Result<Vec<Patch>, ObjectError> {
+        if event.trim().is_empty() {
+            // `<event>/<field>` is never blank whatever `event` is, so
+            // `EntryId::new` cannot see this: an id with an empty provenance
+            // half reads as an id and names nothing.
+            return Err(ObjectError::EmptyId);
+        }
         if !self.is_content() {
             return Ok(Vec::new());
         }
@@ -549,9 +597,11 @@ pub fn run_ask(ask: &str, respond: &mut dyn FnMut(&str) -> String) -> AskOutcome
 
 /// What a run of asks came to, counted.
 ///
-/// One of these per ask kind is what a drive census carries: the rate at which
-/// a template is mimicked is the evidence for reshaping it, and a rate nobody
-/// counted is an opinion. The counters are outcomes rather than forks, because
+/// One of these per ask kind is what a drive census will carry: the rate at
+/// which a template is mimicked is the evidence for reshaping it, and a rate
+/// nobody counted is an opinion. No census consumes one yet and no drive has
+/// been run through it, so every number a `Tally` has ever held was put there
+/// by a caller in a test. The counters are outcomes rather than forks, because
 /// two forks on one ask is one non-answer and not two.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Tally {
@@ -613,7 +663,7 @@ mod tests {
     };
     use crate::formats::interview::{self, Answer};
     use crate::formats::record;
-    use crate::object::{Provenance, WorkingObject};
+    use crate::object::{ObjectError, Provenance, WorkingObject};
 
     /// One sample per placeholder shape.
     ///
@@ -1019,12 +1069,25 @@ mod tests {
             .expect("an event id");
         let mut object = WorkingObject::open(regime());
         object.apply_turn(&patches).expect("a turn");
-        let mut ids: Vec<String> = object.entries().map(|entry| entry.id.to_string()).collect();
-        ids.sort();
+        // The content as well as the id. An id assertion alone holds for a
+        // builder that writes the field's own label into the field, which is
+        // the failure this module is named for, committed by the module that
+        // exists to prevent it.
+        let mut held: Vec<String> = object
+            .entries()
+            .map(|entry| format!("{}={}", entry.id, entry.content))
+            .collect();
+        held.sort();
         assert_eq!(
-            ids,
-            vec!["t7/ask/decision".to_owned(), "t7/ask/evidence".to_owned()],
-            "an answered ask did not land every field under `<event id>/<field>`"
+            held,
+            vec![
+                "t7/ask/decision=the imperative belongs in the fork rather than \
+                 the system prompt"
+                    .to_owned(),
+                "t7/ask/evidence=Answer from this turn alone.".to_owned(),
+            ],
+            "an answered ask did not land every field under `<event id>/<field>` \
+             holding the sentence the model wrote"
         );
     }
 
@@ -1040,8 +1103,15 @@ mod tests {
         tally.observe(&run_ask(&mimicked_ask, &mut always));
         let mut once = |_: &str| genuine.clone();
         tally.observe(&run_ask(&mimicked_ask, &mut once));
+        let mut damaged = |_: &str| "DECISION: \0".to_owned();
+        tally.observe(&run_ask(&mimicked_ask, &mut damaged));
 
-        assert_eq!(tally.asked, 2);
+        assert_eq!(
+            tally.unreadable, 1,
+            "an emission that was not an answer at all went uncounted, so the \
+             census reports a run that went better than it did"
+        );
+        assert_eq!(tally.asked, 3);
         assert_eq!(tally.mimicked, 1, "one ask mimicked twice is one mimicry");
         assert_eq!(tally.answered, 1);
         assert_eq!(
@@ -1052,8 +1122,173 @@ mod tests {
         let mut rendered = String::new();
         crate::formats::record::json::render(&tally.value(), &mut rendered);
         assert_eq!(
-            rendered, "{\"answered\":1,\"asked\":2,\"mimicked\":1,\"retried\":1,\"unreadable\":0}",
+            rendered, "{\"answered\":1,\"asked\":3,\"mimicked\":1,\"retried\":1,\"unreadable\":1}",
             "the census value is not the tally"
+        );
+    }
+
+    #[test]
+    fn a_sentence_naming_two_slots_is_not_one_slot() {
+        assert_eq!(
+            Placeholder::of("<what you decided> and <what you learned>"),
+            None,
+            "a sentence naming two slots was read as one slot, and an answer \
+             that talks about the template is not the template"
+        );
+        let (ask, _, _) = case("a-short-genuine-answer-reusing-one-heading");
+        let answer = interview::parse("DECISION: <what you decided> and <what you learned>\n")
+            .expect("an answer");
+        assert!(
+            !classify(&ask, &answer).is_mimicry(),
+            "a sentence naming two slots was condemned as mimicry"
+        );
+    }
+
+    #[test]
+    fn a_parenthetical_answer_is_not_a_form_slot() {
+        assert_eq!(
+            Placeholder::of("(your earlier note was right)"),
+            None,
+            "a parenthetical answer was read as a form slot, and only the \
+             `your ... here` frame is one"
+        );
+        let (ask, _, _) = case("a-short-genuine-answer-reusing-one-heading");
+        let answer =
+            interview::parse("DECISION: (your earlier note was right)\n").expect("an answer");
+        assert!(
+            !classify(&ask, &answer).is_mimicry(),
+            "a parenthetical answer was condemned as mimicry"
+        );
+    }
+
+    #[test]
+    fn a_marker_an_emitter_punctuated_is_still_a_slot() {
+        for sample in ["TBD.", "TODO:", "\u{2026}."] {
+            assert!(
+                Placeholder::of(sample).is_some(),
+                "a marker an emitter punctuated was not read as a slot: `{sample}`"
+            );
+        }
+    }
+
+    #[test]
+    fn the_three_dots_an_emitter_types_are_the_ellipsis_slot() {
+        assert_eq!(
+            Placeholder::of("..."),
+            Some(Placeholder::Ellipsis),
+            "three dots were not read as the ellipsis slot, so a template \
+             handed back in the register an emitter actually types reads as \
+             content"
+        );
+        let (ask, _, _) = case("headings-with-placeholders");
+        let answer =
+            interview::parse("DECISION: ...\nLEARNED: ...\nPLAN: ...\n").expect("an answer");
+        assert!(
+            classify(&ask, &answer).is_mimicry(),
+            "an answer of nothing but dots was read as content"
+        );
+    }
+
+    #[test]
+    fn a_value_wholly_inside_one_pair_of_brackets_is_read_as_the_slot() {
+        assert_eq!(
+            Placeholder::of("[Placeholder::of, classify]"),
+            Some(Placeholder::Square),
+            "the wide reading is what makes a bracket shape a guard at all: a \
+             slot whose words came from the ask is already an echo"
+        );
+        assert_eq!(
+            Placeholder::of("the names are [Placeholder::of, classify]"),
+            None,
+            "a bracketed span inside a sentence is content, and only the whole \
+             value is a slot"
+        );
+    }
+
+    #[test]
+    fn a_heading_announced_with_no_value_is_inert() {
+        let (ask, _, _) = case("headings-with-placeholders");
+        let answer = interview::parse("DECISION:\nLEARNED:\nPLAN: what you intend next\n")
+            .expect("an answer");
+        assert_eq!(
+            classify(&ask, &answer),
+            Classification::Mimicry(Echo { echoed: 1, of: 3 }),
+            "a heading announced with nothing after it was read as content, so \
+             the template with its values cut out survives as entries"
+        );
+    }
+
+    #[test]
+    fn the_retry_names_the_failure_rather_than_repeating_the_question() {
+        let (ask, _, _) = case("headings-with-placeholders");
+        assert_eq!(
+            strengthen(&ask),
+            format!(
+                "{}\n\nAnswer from this turn alone. Do not repeat the question.",
+                ask.trim_end()
+            ),
+            "the retry is not the ask with its imperative said again and the \
+             failure named: a second fork spent on the text that already \
+             produced mimicry buys nothing"
+        );
+    }
+
+    #[test]
+    fn a_mimicked_answer_is_kept_for_the_harvest() {
+        let (ask, _, _) = case("headings-with-placeholders");
+        let mimicry = read(&corpus_dir().join("headings-with-placeholders.answer.txt"));
+        let mut respond = |_: &str| mimicry.clone();
+        let outcome = run_ask(&ask, &mut respond);
+        assert!(
+            outcome
+                .answer()
+                .is_some_and(|answer| answer.fields.len() == 3),
+            "the second answer of a mimicked ask was dropped: mimicry is \
+             evidence about the ask, and the harvest needs the text that came \
+             back"
+        );
+    }
+
+    #[test]
+    fn a_declined_field_is_an_answer_and_still_contributes_no_entry() {
+        let stem = "an-all-decline-answer";
+        let (ask, _, _) = case(stem);
+        let declined = read(&corpus_dir().join(format!("{stem}.answer.txt")));
+        let mut respond = |_: &str| declined.clone();
+        let outcome = run_ask(&ask, &mut respond);
+        assert!(
+            outcome.is_content(),
+            "an answer that declined every field is an answer"
+        );
+
+        let patches = outcome
+            .patches("t7/ask", &provenance())
+            .expect("an event id");
+        let mut object = WorkingObject::open(regime());
+        object.apply_turn(&patches).expect("a turn");
+        let held: Vec<String> = object
+            .entries()
+            .map(|entry| format!("{}={}", entry.id, entry.content))
+            .collect();
+        assert!(
+            held.is_empty(),
+            "a decline reached the working object as a fact the model stated: {}",
+            held.join(", ")
+        );
+    }
+
+    #[test]
+    fn an_ask_whose_event_cannot_be_named_writes_nothing() {
+        let stem = "a-genuine-answer-quoting-one-line-of-the-ask";
+        let (ask, _, _) = case(stem);
+        let genuine = read(&corpus_dir().join(format!("{stem}.answer.txt")));
+        let mut respond = |_: &str| genuine.clone();
+        let outcome = run_ask(&ask, &mut respond);
+        assert_eq!(
+            outcome.patches("   ", &provenance()),
+            Err(ObjectError::EmptyId),
+            "a blank event id minted entries under an id whose provenance half \
+             is empty, and an entry that names nothing is worse than no entry"
         );
     }
 }

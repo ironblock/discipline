@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 115
+red_faults = 126
 mechanics_assertions = 27
 migrated = 0
 
@@ -397,6 +397,105 @@ check = "test"
 label = "mimicry recorded as a content entry"
 failure_class = "mimicry.non-answer-captured"
 legacy_signature = "a mimicked ask reached the working object as content"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_content_is_the_field_label"
+kind = "seeded-gate"
+check = "test"
+label = "the field label written as content"
+failure_class = "mimicry.label-as-content"
+legacy_signature = "holding the sentence the model wrote"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_decline_becomes_content"
+kind = "seeded-gate"
+check = "test"
+label = "a decline written into the object"
+failure_class = "mimicry.decline-captured"
+legacy_signature = "a decline reached the working object as a fact the model stated"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_retry_repeats_the_question"
+kind = "seeded-gate"
+check = "test"
+label = "the retry repeats the question"
+failure_class = "mimicry.retry-unchanged"
+legacy_signature = "the retry is not the ask with its imperative said again"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_two_slots_read_as_one"
+kind = "seeded-gate"
+check = "test"
+label = "two slots read as one slot"
+failure_class = "mimicry.slot-over-matched"
+legacy_signature = "a sentence naming two slots was read as one slot"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_any_parenthetical_is_a_slot"
+kind = "seeded-gate"
+check = "test"
+label = "any parenthetical read as a slot"
+failure_class = "mimicry.parenthetical-over-matched"
+legacy_signature = "a parenthetical answer was read as a form slot"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_blank_event_id"
+kind = "seeded-gate"
+check = "test"
+label = "an entry whose event is blank"
+failure_class = "mimicry.entry-unprovenanced"
+legacy_signature = "a blank event id minted entries under an id"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_marker_punctuated"
+kind = "seeded-gate"
+check = "test"
+label = "a marker with a full stop after it"
+failure_class = "mimicry.marker-unrecognised"
+legacy_signature = "a marker an emitter punctuated was not read as a slot"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_ellipsis_typed_as_dots"
+kind = "seeded-gate"
+check = "test"
+label = "the ellipsis an emitter types"
+failure_class = "mimicry.ellipsis-unrecognised"
+legacy_signature = "three dots were not read as the ellipsis slot"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_empty_field_is_content"
+kind = "seeded-gate"
+check = "test"
+label = "a heading with no value read as content"
+failure_class = "mimicry.empty-field-captured"
+legacy_signature = "a heading announced with nothing after it was read as content"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_unreadable_uncounted"
+kind = "seeded-gate"
+check = "test"
+label = "an unreadable emission uncounted"
+failure_class = "mimicry.outcome-uncounted"
+legacy_signature = "an emission that was not an answer at all went uncounted"
+migrated = false
+
+[[fault]]
+id = "test.mimicry_mimicked_answer_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "a mimicked answer dropped"
+failure_class = "mimicry.harvest-dropped"
+legacy_signature = "the second answer of a mimicked ask was dropped"
 migrated = false
 
 [[fault]]
