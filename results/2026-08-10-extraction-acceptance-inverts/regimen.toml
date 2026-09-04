@@ -1,0 +1,6 @@
+# The regimen this run applied: the extraction-seat bakeoff of 2026-08-10, three
+# seats replaying one human-driven drive's main lane byte for byte. The record's
+# start row carries the drive's substrate; the seats are named in the claims.
+arm = "extraction-seat-bakeoff"
+substrate = "box-qwen36-27b-ud-q4kxl"
+dogma_version = 0
