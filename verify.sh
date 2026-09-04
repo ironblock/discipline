@@ -748,16 +748,33 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
-# A verdict read by prefix. `DONEISH` is then `DONE`, `PARTIALLY` is
-# `PARTIAL`, and the reconciler applies a judgment the fork did not give.
+# The answer's tail swallowed instead of anchored. `DONEISH` is then a
+# `DONE`, `PARTIALLY` a `PARTIAL`, and every word after the verdict is
+# discarded -- so the reconciler applies a judgment the fork did not give.
 inject_verdict_prefix_accepted() {
   python3 - <<'EOF'
 import pathlib
 
 path = pathlib.Path("diet/formats/verdict/grammar.pest")
 source = path.read_text(encoding="utf-8")
-old = 'verdict = @{ (^"SUPERSEDED" | ^"NOT_THIS" | ^"NOT THIS" | ^"PARTIAL" | ^"DONE") ~ !word_char }'
-new = 'verdict = @{ (^"SUPERSEDED" | ^"NOT_THIS" | ^"NOT THIS" | ^"PARTIAL" | ^"DONE") }'
+old = "document = { SOI ~ ws* ~ verdict ~ reason? ~ ws* ~ EOI }"
+new = "document = { SOI ~ ws* ~ verdict ~ reason? ~ ANY* ~ EOI }"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The boundary check in `upper_verdict` removed. A reason that names
+# `DONE_MARKER` is then a second answer, and one answer the fork did give is
+# refused as two.
+inject_verdict_identifier_read_as_a_verdict() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/verdict/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = 'upper_verdict = _{ ("SUPERSEDED" | "NOT_THIS" | "NOT THIS" | "PARTIAL" | "DONE") ~ !word_char }'
+new = 'upper_verdict = _{ "SUPERSEDED" | "NOT_THIS" | "NOT THIS" | "PARTIAL" | "DONE" }'
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -822,6 +839,58 @@ old = """        if entry.provenances.iter().any(|p| p.turn >= new.turn) {
 """
 assert old in source
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# A supersession that adds without voiding. Both facts are then live, the
+# object holds a contradiction, and the entry the archive was supposed to
+# make recoverable is instead one of two answers with nothing to choose
+# between them.
+inject_reconcile_supersede_without_voiding() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/reconcile.rs")
+source = path.read_text(encoding="utf-8")
+old = """        Verdict::Superseded => Outcome::Superseded(Patch::Supersede {
+            id: EntryId::new(&format!(
+                "{}/supersedes/{}",
+                replacement.event, nomination.entry
+            ))?,
+            content: replacement.content.to_owned(),
+            voids: nomination.entry.clone(),
+            provenance: replacement.provenance,
+        }),"""
+new = """        Verdict::Superseded => Outcome::Superseded(Patch::Add {
+            id: EntryId::new(&format!(
+                "{}/supersedes/{}",
+                replacement.event, nomination.entry
+            ))?,
+            content: replacement.content.to_owned(),
+            provenance: replacement.provenance,
+        }),"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A verdict that settles nothing made to settle something. `PARTIAL` says
+# the prose bears on the entry without replacing it; a reconciler that
+# resolves on it closes an entry the fork deliberately left open.
+inject_reconcile_partial_applies_a_patch() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/reconcile.rs")
+source = path.read_text(encoding="utf-8")
+old = "        Verdict::Partial => Outcome::Partial,\n"
+new = """        Verdict::Partial => Outcome::Resolved(Patch::Resolve {
+            target: nomination.entry.clone(),
+            provenance: replacement.provenance,
+        }),
+"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
@@ -1372,6 +1441,8 @@ selftest() {
     'an empty answer is a recorded answer, not a missing one'
   seeded_case "a verdict read by prefix"               test     inject_verdict_prefix_accepted \
     'verdict-as-a-prefix\.txt: accepted as'
+  seeded_case "an identifier in a reason read as a verdict" test inject_verdict_identifier_read_as_a_verdict \
+    'reason-naming-an-identifier\.txt: rejected'
   seeded_case "a second verdict in a reason accepted"  test     inject_verdict_second_verdict_accepted \
     'two-verdicts\.txt: accepted as'
   seeded_case "an anchor matched inside a longer word"  test     inject_collector_substring_match \
@@ -1380,6 +1451,10 @@ selftest() {
     'an English word became an anchor'
   seeded_case "an entry nominated by its own turn"     test     inject_collector_self_nomination \
     'an entry nominated itself'
+  seeded_case "a supersession that adds without voiding" test   inject_reconcile_supersede_without_voiding \
+    'the old entry was not voided'
+  seeded_case "a verdict that settles nothing settling"  test   inject_reconcile_partial_applies_a_patch \
+    'PARTIAL produced a patch'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

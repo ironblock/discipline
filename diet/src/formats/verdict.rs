@@ -204,6 +204,26 @@ mod tests {
         assert_eq!(parse("DONE").expect("a verdict").reason, None);
     }
 
+    // Rule 3 refuses a *second answer*, not every upper-case word that
+    // starts with one. Reasons name identifiers, and an identifier is not
+    // a judgment: the boundary check in `upper_verdict` is what tells
+    // `DONE_MARKER` from `DONE`, and lower-case `done` is English.
+    #[test]
+    fn a_reason_may_name_an_identifier_that_begins_with_a_verdict() {
+        for text in [
+            "NOT_THIS: DONE_MARKER is set by the other lane",
+            "PARTIAL: the DONEness of the branch is not the question",
+            "SUPERSEDED (the DONE_MARKER moved)",
+            "PARTIAL: the work is done, mostly",
+        ] {
+            assert!(
+                parse(text).is_ok(),
+                "{text:?} was refused, and it is one answer that happens to \
+                 name a thing"
+            );
+        }
+    }
+
     // The four rules, each with the tolerant reading it closes.
     #[test]
     fn prose_around_a_verdict_is_not_a_verdict() {

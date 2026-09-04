@@ -1,0 +1,1 @@
+I read past the MAX_DEPTH check to the walk itself; the bound is not the problem here.

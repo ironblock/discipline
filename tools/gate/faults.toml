@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 116
+red_faults = 119
 mechanics_assertions = 27
 migrated = 0
 
@@ -373,6 +373,15 @@ legacy_signature = "verdict-as-a-prefix\\.txt: accepted as"
 migrated = false
 
 [[fault]]
+id = "test.verdict_identifier_read_as_a_verdict"
+kind = "seeded-gate"
+check = "test"
+label = "an identifier in a reason read as a verdict"
+failure_class = "format.valid-fixture-rejected"
+legacy_signature = "reason-naming-an-identifier\\.txt: rejected"
+migrated = false
+
+[[fault]]
 id = "test.verdict_second_verdict_accepted"
 kind = "seeded-gate"
 check = "test"
@@ -406,6 +415,24 @@ check = "test"
 label = "an entry nominated by its own turn"
 failure_class = "collector.self-nomination"
 legacy_signature = "an entry nominated itself"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_supersede_without_voiding"
+kind = "seeded-gate"
+check = "test"
+label = "a supersession that adds without voiding"
+failure_class = "collector.supersede-without-void"
+legacy_signature = "the old entry was not voided"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_partial_applies_a_patch"
+kind = "seeded-gate"
+check = "test"
+label = "a verdict that settles nothing settling"
+failure_class = "collector.verdict-overapplied"
+legacy_signature = "PARTIAL produced a patch"
 migrated = false
 
 [[fault]]

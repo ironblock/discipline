@@ -17,9 +17,11 @@
 //! before any policy is tuned.
 //!
 //! * [`literal`] -- tier 0: an entry's anchors recurring in new text.
+//! * [`reconcile`] -- what a fork's verdict does to the entry it nominated.
 //!
 //! Small models classify; they never trigger or generate. Nothing in this
 //! module writes an entry: a nomination goes to a fork whose answer is a
 //! [`crate::formats::verdict`], and the reconciler applies a link.
 
 pub mod literal;
+pub mod reconcile;

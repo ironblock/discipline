@@ -1,0 +1,1 @@
+Actually, check_record exists now: the CLI gained it with the resolver change, so the reparse can go.

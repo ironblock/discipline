@@ -18,7 +18,14 @@
 //      verdict, and a reader that searched for the word would find one in
 //      `not DONE yet` too, with the opposite meaning.
 //   2. THE VERDICT IS A WHOLE WORD. `DONEISH` and `PARTIALLY` are not
-//      verdicts, and a prefix match would make them so.
+//      verdicts. What refuses them is the anchored document: after the
+//      verdict comes a reason or nothing, and `ISH` is neither. A boundary
+//      check on the verdict token itself would say the same thing a second
+//      time and could not be made to fail on its own, so the rule lives in
+//      one place and the anchor is what a seeded fault removes. The
+//      boundary check that does carry its own weight is in `upper_verdict`
+//      below, where a reason may name `DONE_MARKER` without that naming
+//      being a second answer.
 //   3. THERE IS ONE VERDICT. A reason may follow, set off by a colon, a
 //      dash or parentheses, and the reason may not contain a second verdict
 //      written as one -- upper case, a whole token: `DONE - or PARTIAL` is
@@ -39,9 +46,10 @@ nl = _{ "\r\n" | "\n" }
 // Anchored at both ends: a verdict is a property of the whole answer.
 document = { SOI ~ ws* ~ verdict ~ reason? ~ ws* ~ EOI }
 
-// Longest first where one is a prefix of another; the boundary check keeps a
-// word that merely begins with a verdict from being one.
-verdict = @{ (^"SUPERSEDED" | ^"NOT_THIS" | ^"NOT THIS" | ^"PARTIAL" | ^"DONE") ~ !word_char }
+// No spelling here is a prefix of another, and the document's end anchor is
+// what keeps a longer word that merely begins with one from being a verdict
+// (rule 2).
+verdict = @{ ^"SUPERSEDED" | ^"NOT_THIS" | ^"NOT THIS" | ^"PARTIAL" | ^"DONE" }
 word_char = _{ ASCII_ALPHANUMERIC | "_" }
 
 // A reason: set off by a colon that may hug the verdict, by a dash with
@@ -60,5 +68,7 @@ dash_setoff = _{ sp+ ~ ("—" | "–" | "--" | "-") ~ sp+ }
 reason_text = @{ reason_token ~ (sp+ ~ reason_token)* }
 reason_token = _{ !upper_verdict ~ (!sp ~ !nl ~ ANY)+ }
 
-// A verdict written as an answer would write it: upper case, whole.
+// A verdict written as an answer would write it: upper case, and whole --
+// `DONE_MARKER` in a reason is an identifier the reason names, not a second
+// answer, and the boundary check is what tells them apart.
 upper_verdict = _{ ("SUPERSEDED" | "NOT_THIS" | "NOT THIS" | "PARTIAL" | "DONE") ~ !word_char }

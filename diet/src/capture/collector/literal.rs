@@ -491,4 +491,101 @@ mod tests {
         );
         assert_eq!(by_prose[0].source, super::Source::Prose);
     }
+
+    /// What a corpus case says this tier owes it. The word is read off disk,
+    /// so it is looked up in the vocabulary rather than matched against
+    /// literals: a spelling nobody defined is a case nobody checked, and it
+    /// must say so instead of falling through.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Expectation {
+        Nominate,
+        DoNotNominate,
+    }
+
+    impl Expectation {
+        const ALL: &'static [Self] = &[Self::Nominate, Self::DoNotNominate];
+
+        fn tag(self) -> &'static str {
+            match self {
+                Self::Nominate => "nominate",
+                Self::DoNotNominate => "do_not_nominate",
+            }
+        }
+
+        fn written(word: &str) -> Option<Self> {
+            Self::ALL.iter().copied().find(|kind| kind.tag() == word)
+        }
+    }
+
+    // The committed corpus, walked. Each case is an entry recorded at an
+    // earlier turn, the text of a later one, and the single word this tier
+    // owes: `nominate` or `do_not_nominate`. The cases sit on disk rather
+    // than in this file because a tier checked only against examples
+    // written beside it is checked against its own reflection. The three
+    // silent cases are the point of a precision-first tier: an English
+    // restatement, a longer name that merely contains the anchor, and a
+    // turn on the same topic that never names it.
+    #[test]
+    fn the_committed_corpus_gets_the_answer_it_records() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capture/collector/corpus");
+        let mut nominating = 0_usize;
+        let mut silent = 0_usize;
+        for found in std::fs::read_dir(&dir).expect("the corpus is readable") {
+            let case = found.expect("a readable entry").path();
+            if !case.is_dir() {
+                continue;
+            }
+            let name = case
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .expect("a named case")
+                .to_owned();
+            let read = |file: &str| {
+                std::fs::read_to_string(case.join(file))
+                    .unwrap_or_else(|err| panic!("{name}: {file}: {err}"))
+            };
+            let mut object = WorkingObject::open(regime());
+            add(&mut object, "e1", read("entry.txt").trim(), 5);
+            // Tool output is optional: most cases are prose, and the one
+            // that is not says so by carrying the file.
+            let tool_output =
+                std::fs::read_to_string(case.join("tool_output.txt")).unwrap_or_default();
+            let nominations = nominate(
+                &object,
+                NewText {
+                    turn: 18,
+                    prose: read("prose.txt").trim(),
+                    tool_output: tool_output.trim(),
+                },
+            );
+            let word = read("expected");
+            let expectation = Expectation::written(word.trim())
+                .unwrap_or_else(|| panic!("{name}: `expected` reads {:?}", word.trim()));
+            match expectation {
+                Expectation::Nominate => {
+                    nominating += 1;
+                    assert!(
+                        !nominations.is_empty(),
+                        "{name}: the corpus expects a nomination and the tier gave none"
+                    );
+                }
+                Expectation::DoNotNominate => {
+                    silent += 1;
+                    assert!(
+                        nominations.is_empty(),
+                        "{name}: a false nomination: {nominations:?}"
+                    );
+                }
+            }
+        }
+        // A corpus that quietly emptied would pass every assertion above.
+        assert!(
+            nominating >= 5,
+            "the corpus lost nominating cases: {nominating}"
+        );
+        assert!(
+            silent >= 3,
+            "a corpus with no silent cases cannot catch over-firing: {silent}"
+        );
+    }
 }
