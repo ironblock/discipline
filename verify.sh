@@ -759,6 +759,10 @@ source = path.read_text(encoding="utf-8")
 old = """decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
 new = """decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
 assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # A subshell run against the shell's own state. `cd a; (cd b; ls); pwd` then
 # ends in `b`, and every relative path after it resolves against a directory
 # the session was never in.
@@ -989,8 +993,10 @@ import pathlib
 
 path = pathlib.Path("diet/src/bin/diet.rs")
 source = path.read_text(encoding="utf-8")
-old = '    ("parse-interview", "interview"),\n    ("check-record", "record"),'
-new = '    ("parse-interview", "record"),\n    ("check-record", "interview"),'
+old = '''    ("parse-interview", Operation::Format("interview")),
+    ("check-record", Operation::Format("record")),'''
+new = '''    ("parse-interview", Operation::Format("record")),
+    ("check-record", Operation::Format("interview")),'''
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
