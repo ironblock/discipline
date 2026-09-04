@@ -206,16 +206,65 @@ fn the_route_verb_answers_with_a_census_and_not_with_prose() {
         let (code, out, err) = run(&["route", path]);
         assert_eq!(code, 0, "route {path}: {err}");
         assert!(err.is_empty(), "route {path} wrote to stderr: {err}");
-        for key in [
-            "\"reduction\"",
-            "\"forks\"",
-            "\"naive_forks\"",
-            "\"per_class\"",
-            "\"unclassified\"",
-            "\"ok\":true",
-        ] {
-            assert!(out.contains(key), "route {path}: no {key} in {out}");
+        let answer: serde_json::Value = serde_json::from_str(&out)
+            .unwrap_or_else(|err| panic!("route {path}: stdout is not JSON ({err}): {out:?}"));
+        assert_eq!(answer["ok"], serde_json::json!(true), "route {path}");
+        // A lane is not a format, and a census answered under a format's
+        // name would be read as that format's value.
+        assert_eq!(
+            answer["format"],
+            serde_json::json!("route"),
+            "route {path}: answered under another name, `{}`",
+            answer["format"]
+        );
+
+        // The census the drive computes, not merely a census. The counts are
+        // read from the corpus's own expectation file, which is authored by
+        // hand beside the drive, so a binary that answered with an empty
+        // census -- or with any other drive's -- says so here.
+        let census = &answer["value"];
+        let expected: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(drive.with_extension("expected.json"))
+                .unwrap_or_else(|err| panic!("{}: {err}", drive.display())),
+        )
+        .expect("an expectation is JSON");
+        for key in ["forks", "naive_forks", "judgment_asks"] {
+            assert_eq!(
+                census[key], expected[key],
+                "route {path}: the census reports {key} {} where the drive spends {}",
+                census[key], expected[key]
+            );
         }
+        assert_eq!(
+            census["unclassified"].as_u64(),
+            expected["unclassified"]
+                .as_array()
+                .map(|ids| ids.len() as u64),
+            "route {path}: the census miscounts the calls the table could not place"
+        );
+        // Unwrapped, not compared as options: a missing count reads as
+        // `None`, and `None < Some(_)` would let this pass over a census
+        // that had no forks in it at all.
+        let forks = census["forks"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("route {path}: the census counts no forks: {census}"));
+        let naive = census["naive_forks"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("route {path}: the census counts no naive forks: {census}"));
+        assert!(
+            forks < naive,
+            "route {path}: the router spent no fewer forks than the naive design: {census}"
+        );
+        assert!(
+            census["reduction"].is_number(),
+            "route {path}: the reduction is not a number: {census}"
+        );
+        assert!(
+            census["per_class"]
+                .as_object()
+                .is_some_and(|fired| !fired.is_empty()),
+            "route {path}: a census that names no class that fired: {census}"
+        );
     }
 
     // A file that is not a record is the lane's `exit 1`, and it says so in

@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 123
+red_faults = 135
 mechanics_assertions = 27
 migrated = 0
 
@@ -361,6 +361,114 @@ check = "test"
 label = "an empty payload read as absent"
 failure_class = "record.payload-dropped"
 legacy_signature = "an empty answer is a recorded answer, not a missing one"
+migrated = false
+
+[[fault]]
+id = "test.router_ask_class_untuned"
+kind = "seeded-gate"
+check = "test"
+label = "an ask wired to another class's question"
+failure_class = "router.ask-untuned"
+legacy_signature = "the ask does not ask its own question"
+migrated = false
+
+[[fault]]
+id = "test.router_ask_imperative_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "a template without the imperative"
+failure_class = "router.ask-imperative-missing"
+legacy_signature = "the ask does not carry the fork-local imperative"
+migrated = false
+
+[[fault]]
+id = "test.router_census_class_miscounted"
+kind = "seeded-gate"
+check = "test"
+label = "a census that miscounts which classes fired"
+failure_class = "router.census-per-class"
+legacy_signature = "the census does not say which classes fired"
+migrated = false
+
+[[fault]]
+id = "test.router_route_census_hollow"
+kind = "seeded-gate"
+check = "test"
+label = "a route verb answering with a hollow census"
+failure_class = "router.census-not-computed"
+legacy_signature = "where the drive spends"
+migrated = false
+
+[[fault]]
+id = "test.router_table_row_shadowed"
+kind = "seeded-gate"
+check = "test"
+label = "a table row that can never fire"
+failure_class = "router.table-row-dead"
+legacy_signature = "can never fire"
+migrated = false
+
+[[fault]]
+id = "test.router_corpus_class_uncovered"
+kind = "seeded-gate"
+check = "test"
+label = "a corpus that stops covering a class"
+failure_class = "router.corpus-incomplete"
+legacy_signature = "call\\(s\\) in the corpus, fewer than"
+migrated = false
+
+[[fault]]
+id = "test.router_table_row_skipped"
+kind = "seeded-gate"
+check = "test"
+label = "a table row skipped, not refused"
+failure_class = "router.table-row-skipped"
+legacy_signature = "was skipped rather than refused"
+migrated = false
+
+[[fault]]
+id = "test.router_intent_lane_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "an intent taken from any lane"
+failure_class = "router.intent-off-lane"
+legacy_signature = "did not quote back what the model said it was about to do"
+migrated = false
+
+[[fault]]
+id = "test.router_intent_first_not_last"
+kind = "seeded-gate"
+check = "test"
+label = "the first stated intent, not the last"
+failure_class = "router.intent-stale"
+legacy_signature = "quoted an intent the model had already moved past"
+migrated = false
+
+[[fault]]
+id = "test.router_intent_marker_lost"
+kind = "seeded-gate"
+check = "test"
+label = "an intent marker lost from the table"
+failure_class = "router.intent-marker-lost"
+legacy_signature = "a marker was added or lost without a sentence that reaches it"
+migrated = false
+
+[[fault]]
+id = "test.router_unclassified_unattributed"
+kind = "seeded-gate"
+check = "test"
+label = "an unclassified call nobody can look up"
+failure_class = "router.unclassified-unattributed"
+legacy_signature = "must name the call, its turn, its tool and its word"
+migrated = false
+
+[[fault]]
+id = "test.router_class_vocabulary_shortened"
+kind = "seeded-gate"
+check = "test"
+label = "the declared default out of the vocabulary"
+failure_class = "router.vocabulary-shortened"
+legacy_signature = "left the vocabulary without leaving the tests that walk it"
 migrated = false
 
 [[fault]]

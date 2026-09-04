@@ -914,22 +914,16 @@ import pathlib
 
 path = pathlib.Path("diet/src/capture/router/mod.rs")
 source = path.read_text(encoding="utf-8")
-old = """        Decision {
-            trigger: Trigger::Call(id.to_owned()),
-            turn,
-            class: classified.class,
+old = """            class: classified.class,
             routing,
-        }"""
-new = """        Decision {
-            trigger: Trigger::Call(id.to_owned()),
-            turn,
-            class: classified.class,
+            ask: match routing {"""
+new = """            class: classified.class,
             routing: if routing == Routing::Defer {
                 Routing::Fork(AskKind::Judgment)
             } else {
                 routing
             },
-        }"""
+            ask: match routing {"""
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -943,7 +937,7 @@ import pathlib
 
 path = pathlib.Path("diet/src/capture/router/classes.tsv")
 source = path.read_text(encoding="utf-8")
-old = "test-run\tshell\tword=cargo arg=test|bench\n"
+old = "test-run\tshell\tword=cargo sub=test|bench\n"
 assert old in source
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
@@ -991,6 +985,210 @@ path = pathlib.Path("diet/src/capture/mechanical.rs")
 source = path.read_text(encoding="utf-8")
 old = "            (!word.literal).then_some(word.text.as_str())\n"
 new = "            Some(word.text.as_str())\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# An ask wired to another class's question. Both templates still carry the
+# imperative and both still render; what stops is the ask being about the
+# thing that was just done.
+inject_router_ask_class_untuned() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Self::ApiSurface => include_str!("asks/api_surface.txt"),
+            Self::Outcome => include_str!("asks/outcome.txt"),"""
+new = """            Self::ApiSurface => include_str!("asks/outcome.txt"),
+            Self::Outcome => include_str!("asks/api_surface.txt"),"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A template that lost the fork-local imperative. The ask still asks; what it
+# stops doing is telling the fork which turn it is answering from.
+inject_router_ask_imperative_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/asks/finding.txt")
+source = path.read_text(encoding="utf-8")
+old = "{imperative}\n"
+assert source.startswith(old)
+path.write_text(source[len(old) :], encoding="utf-8")
+EOF
+}
+
+# A census whose totals are right and whose per-class counts are not: the
+# drive is told a directory listing was forked.
+inject_router_census_class_miscounted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Routing::Silent => tally.silent += 1,\n"
+new = "            Routing::Silent => tally.forked += 1,\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# `diet route` answers with a census it did not compute: every count zero,
+# ok true, exit 0. The replay still runs, so nothing downstream complains.
+inject_router_route_census_hollow() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/bin/diet.rs")
+source = path.read_text(encoding="utf-8")
+old = """    let replayed = diet::capture::router::replay(&record).map_err(|err| err.to_string())?;
+    replayed.census.value().map_err(|err| err.to_string())"""
+new = """    diet::capture::router::replay(&record).map_err(|err| err.to_string())?;
+    diet::capture::router::Census::default()
+        .value()
+        .map_err(|err| err.to_string())"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A row moved below one that already claims every call it names. The row is
+# still in the table, still parses, and can never decide anything.
+inject_router_table_row_shadowed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/classes.tsv")
+source = path.read_text(encoding="utf-8")
+row = "directory-listing\tshell\tword=git sub=ls-files\n"
+below = "version-control\tshell\tword=git|hg|svn|jj\n"
+assert row in source and below in source
+source = source.replace(row, "", 1)
+path.write_text(source.replace(below, below + row, 1), encoding="utf-8")
+EOF
+}
+
+# The corpus stops covering a class. The calls that remain still route as
+# labelled, so only the coverage of the corpus itself says anything.
+inject_router_corpus_class_uncovered() {
+  python3 - <<'EOF'
+import pathlib
+
+corpus = pathlib.Path("diet/capture/router/corpus")
+for name in ("tool-families.jsonl", "tool-families.expected.json"):
+    path = corpus / name
+    assert path.exists(), path
+    path.unlink()
+EOF
+}
+
+# A table row that does not parse, skipped instead of refused. Every call in
+# the drive is then unknown, which is what a router with a perfect table
+# reports for a drive full of novel tools.
+inject_router_table_row_skipped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """        let [class, family, rule] = fields.as_slice() else {
+            return Err(TableError::Shape { line });
+        };"""
+new = """        let [class, family, rule] = fields.as_slice() else {
+            continue;
+        };"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The stated intent taken from whatever lane spoke last. An interview's own
+# answer is then quoted back to the drive as something the drive said.
+inject_router_intent_lane_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "                    .is_some_and(|lane| lane == CANONICAL_LANE)\n"
+new = "                    .is_some_and(|lane| lane != CANONICAL_LANE)\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The first stated intent instead of the last: the ask quotes back something
+# the model has already finished doing.
+inject_router_intent_first_not_last() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """    sentences
+        .iter()
+        .rev()
+        .map(|sentence| sentence.trim())"""
+new = """    sentences
+        .iter()
+        .map(|sentence| sentence.trim())"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A phrase the model states its intent with, dropped from the table. The
+# stated-intent hole then goes unfilled for every turn that used it.
+inject_router_intent_marker_lost() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '    "let me ",\n'
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# An unclassified call recorded without the tool and against the wrong turn.
+# The count is still right, and nothing it names can be looked up.
+inject_router_unclassified_unattributed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """                id: id.to_owned(),
+                turn,
+                tool: tool.to_owned(),
+                word: classified.word,"""
+new = """                id: id.to_owned(),
+                turn: turn + 1,
+                tool: String::new(),
+                word: classified.word,"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The declared default dropped out of the vocabulary. Every loop that walks
+# `Class::ALL` then walks past it rather than over it.
+inject_router_class_vocabulary_shortened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """        Self::VersionControl,
+        Self::Unknown,
+    ];"""
+new = """        Self::VersionControl,
+    ];"""
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -1543,6 +1741,30 @@ selftest() {
     'a word the shell would expand was reported literal'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
     'an empty answer is a recorded answer, not a missing one'
+  seeded_case "an ask wired to another class's question" test inject_router_ask_class_untuned \
+    'the ask does not ask its own question'
+  seeded_case "a template without the imperative"     test     inject_router_ask_imperative_dropped \
+    'the ask does not carry the fork-local imperative'
+  seeded_case "a census that miscounts which classes fired" test inject_router_census_class_miscounted \
+    'the census does not say which classes fired'
+  seeded_case "a route verb answering with a hollow census" test inject_router_route_census_hollow \
+    'where the drive spends'
+  seeded_case "a table row that can never fire"       test     inject_router_table_row_shadowed \
+    'can never fire'
+  seeded_case "a corpus that stops covering a class"  test     inject_router_corpus_class_uncovered \
+    'call\(s\) in the corpus, fewer than'
+  seeded_case "a table row skipped, not refused"      test     inject_router_table_row_skipped \
+    'was skipped rather than refused'
+  seeded_case "an intent taken from any lane"         test     inject_router_intent_lane_ignored \
+    'did not quote back what the model said it was about to do'
+  seeded_case "the first stated intent, not the last" test     inject_router_intent_first_not_last \
+    'quoted an intent the model had already moved past'
+  seeded_case "an intent marker lost from the table"  test     inject_router_intent_marker_lost \
+    'a marker was added or lost without a sentence that reaches it'
+  seeded_case "an unclassified call nobody can look up" test   inject_router_unclassified_unattributed \
+    'must name the call, its turn, its tool and its word'
+  seeded_case "the declared default out of the vocabulary" test inject_router_class_vocabulary_shortened \
+    'left the vocabulary without leaving the tests that walk it'
   seeded_case "a quoted substitution descended into"  test     inject_mechanical_quoted_substitution \
     'a single-quoted substitution was descended into'
   seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \

@@ -96,5 +96,73 @@
   ],
   "judgment_asks": 5,
   "forks": 16,
-  "naive_forks": 27
+  "naive_forks": 27,
+  "per_class": {
+    "build": {
+      "seen": 3,
+      "forked": 0,
+      "deferred": 0,
+      "silent": 3
+    },
+    "directory-listing": {
+      "seen": 1,
+      "forked": 0,
+      "deferred": 0,
+      "silent": 1
+    },
+    "edit": {
+      "seen": 2,
+      "forked": 2,
+      "deferred": 0,
+      "silent": 0
+    },
+    "inert": {
+      "seen": 1,
+      "forked": 0,
+      "deferred": 0,
+      "silent": 1
+    },
+    "search": {
+      "seen": 1,
+      "forked": 0,
+      "deferred": 0,
+      "silent": 1
+    },
+    "side-effect": {
+      "seen": 2,
+      "forked": 0,
+      "deferred": 2,
+      "silent": 0
+    },
+    "source-read": {
+      "seen": 3,
+      "forked": 3,
+      "deferred": 0,
+      "silent": 0
+    },
+    "test-run": {
+      "seen": 2,
+      "forked": 2,
+      "deferred": 0,
+      "silent": 0
+    },
+    "unknown": {
+      "seen": 3,
+      "forked": 3,
+      "deferred": 0,
+      "silent": 0
+    },
+    "version-control": {
+      "seen": 3,
+      "forked": 0,
+      "deferred": 0,
+      "silent": 3
+    },
+    "web-read": {
+      "seen": 1,
+      "forked": 1,
+      "deferred": 0,
+      "silent": 0
+    }
+  }
 }

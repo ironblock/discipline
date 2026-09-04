@@ -293,7 +293,9 @@ impl Family {
 
 /// Tool names and their families: the names seen in real drives. A harness
 /// that names its shell tool something else adds a row here and a call to
-/// the corpus; it does not get a guess.
+/// the corpus; it does not get a guess. The corpus half of that is enforced
+/// by `the_corpus_covers_every_class_and_every_tool_name_the_router_knows`,
+/// because a row with no drive behind it is the guess this table refuses.
 pub const FAMILIES: &[(&str, Family)] = &[
     ("bash", Family::Shell),
     ("Bash", Family::Shell),
@@ -308,7 +310,6 @@ pub const FAMILIES: &[(&str, Family)] = &[
     ("Edit", Family::Edit),
     ("Write", Family::Edit),
     ("MultiEdit", Family::Edit),
-    ("NotebookEdit", Family::Edit),
     ("edit_file", Family::Edit),
     ("write_file", Family::Edit),
     ("Glob", Family::Glob),
@@ -354,10 +355,13 @@ enum Term {
     Any,
     /// The command word is one of these.
     Word(Vec<String>),
-    /// Some operand equals one of these.
-    Arg(Vec<String>),
-    /// Some operand is the flag `-x`, alone or bundled, or `--x`.
-    Flag(String),
+    /// The subcommand -- the first operand that is not a flag -- is one of
+    /// these. Position matters: `cargo build --features test` names `build`,
+    /// and a term that took any operand would read it as a test run and
+    /// spend a fork on a build.
+    Sub(Vec<String>),
+    /// Some operand is one of these flags: `-x`, bundled, or `--x`.
+    Flag(Vec<String>),
     /// Some operand path, or the tool's path, has one of these extensions.
     Ext(Vec<String>),
 }
@@ -411,7 +415,7 @@ fn split_list(text: &str) -> Vec<String> {
 
 /// A tiny closed vocabulary, matched by iterating it, so the lint that
 /// refuses string-literal match arms holds here too.
-const TERM_KEYS: &[&str] = &["word", "arg", "flag", "ext"];
+const TERM_KEYS: &[&str] = &["word", "sub", "flag", "ext"];
 
 fn parse_term(text: &str, line: usize) -> Result<Term, TableError> {
     if text == "*" {
@@ -423,8 +427,8 @@ fn parse_term(text: &str, line: usize) -> Result<Term, TableError> {
     })?;
     match TERM_KEYS.iter().position(|known| *known == key) {
         Some(0) => Ok(Term::Word(split_list(value))),
-        Some(1) => Ok(Term::Arg(split_list(value))),
-        Some(2) => Ok(Term::Flag(value.to_owned())),
+        Some(1) => Ok(Term::Sub(split_list(value))),
+        Some(2) => Ok(Term::Flag(split_list(value))),
         Some(3) => Ok(Term::Ext(split_list(value))),
         _ => Err(TableError::Term {
             line,
@@ -443,8 +447,21 @@ fn parse_term(text: &str, line: usize) -> Result<Term, TableError> {
 /// output a router with a perfect table gives a drive full of novel tools.
 /// The two must not be spelled the same way.
 fn rules() -> Result<Vec<Rule>, TableError> {
+    parse_rules(TABLE)
+}
+
+/// The rules a table text spells.
+///
+/// Separate from [`rules`] because [`TABLE`] is compiled in and always
+/// parses, so the refusals below would otherwise be unreachable -- and a
+/// refusal nothing can reach is a refusal nobody has seen work.
+///
+/// # Errors
+///
+/// Returns the first row that is not a rule.
+fn parse_rules(table: &str) -> Result<Vec<Rule>, TableError> {
     let mut parsed = Vec::new();
-    for (index, raw) in TABLE.lines().enumerate() {
+    for (index, raw) in table.lines().enumerate() {
         let line = index + 1;
         let text = raw.trim_end();
         if text.is_empty() || text.starts_with('#') {
@@ -507,15 +524,18 @@ impl Term {
                 .word
                 .as_ref()
                 .is_some_and(|word| names.iter().any(|name| name == word)),
-            Self::Arg(values) => subject
+            Self::Sub(values) => subject
                 .operands
                 .iter()
-                .any(|operand| values.iter().any(|value| value == operand)),
-            Self::Flag(flag) => subject.operands.iter().any(|operand| {
-                operand.strip_prefix("--").is_some_and(|long| long == flag)
-                    || (operand.starts_with('-')
-                        && !operand.starts_with("--")
-                        && operand[1..].contains(flag.as_str()))
+                .find(|operand| !operand.starts_with('-'))
+                .is_some_and(|sub| values.iter().any(|value| value == sub)),
+            Self::Flag(flags) => subject.operands.iter().any(|operand| {
+                flags.iter().any(|flag| {
+                    operand.strip_prefix("--").is_some_and(|long| long == flag)
+                        || (operand.starts_with('-')
+                            && !operand.starts_with("--")
+                            && operand[1..].contains(flag.as_str()))
+                })
             }),
             Self::Ext(exts) => {
                 let has = |path: &str| {
@@ -545,10 +565,6 @@ fn producer(list: &List) -> Option<&Simple> {
         Command::Simple(simple) => Some(simple),
         Command::Subshell(inner) | Command::Group(inner) => producer(inner),
     }
-}
-
-fn basename(word: &str) -> &str {
-    word.rsplit('/').next().unwrap_or(word)
 }
 
 fn string_arg<'a>(args: &'a BTreeMap<String, Value>, keys: &[&str]) -> Option<&'a str> {
@@ -595,7 +611,8 @@ fn classify(rules: &[Rule], tool: &str, args: Option<&BTreeMap<String, Value>>) 
                 word: simple
                     .command()
                     .filter(|word| word.literal)
-                    .map(|word| basename(&word.text).to_owned()),
+                    .and_then(|word| mechanical::basename(&word.text))
+                    .map(str::to_owned),
                 operands: simple
                     .operands()
                     .iter()
@@ -630,11 +647,14 @@ fn classify(rules: &[Rule], tool: &str, args: Option<&BTreeMap<String, Value>>) 
 // ---------------------------------------------------------------------------
 
 /// Phrases with which the model says what it is about to do.
+///
+/// Every entry has to be reachable on its own or it is not a rule: `i am
+/// going to` and `i'm going to` were both here, and neither could ever
+/// decide anything, because `going to` had already matched every sentence
+/// they could.
 const INTENT_MARKERS: &[&str] = &[
     "i'll ",
     "i will ",
-    "i am going to ",
-    "i'm going to ",
     "going to ",
     "next i",
     "next, i",
@@ -677,15 +697,21 @@ pub fn stated_intent(text: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// An ask about to be rendered.
+///
+/// It owns the intent rather than borrowing it because a [`Decision`] carries
+/// its ask out of the router. An ask that borrowed from the router could not
+/// leave it, and so the stated-intent hole was filled nowhere: the templates
+/// had the hole, [`stated_intent`] found the sentence, and no path joined
+/// them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Ask<'a> {
+pub struct Ask {
     /// Which ask.
     pub kind: AskKind,
     /// What the model said it was about to do, if it said.
-    pub intent: Option<&'a str>,
+    pub intent: Option<String>,
 }
 
-impl Ask<'_> {
+impl Ask {
     /// Render the ask: the imperative and the intent filled here, the
     /// mechanical facts by the mechanical lane. A line whose hole has no
     /// value is dropped whole, so an ask never says `You said: ""`.
@@ -695,7 +721,7 @@ impl Ask<'_> {
         for line in self.kind.template().lines() {
             let line = line.replace("{imperative}", IMPERATIVE.trim());
             let line = if line.contains("{intent}") {
-                match self.intent {
+                match self.intent.as_deref() {
                     Some(intent) => line.replace("{intent}", intent),
                     None => continue,
                 }
@@ -733,6 +759,11 @@ pub struct Decision {
     pub class: Class,
     /// What was decided.
     pub routing: Routing,
+    /// The ask a fork will put, holding the intent the model stated on the
+    /// canonical lane. `None` for a silence and for a deferral: a routing
+    /// that asks nothing carries no question, so a caller cannot render one
+    /// for a step the router decided not to interrupt.
+    pub ask: Option<Ask>,
 }
 
 /// A call the table could not place. Typed, so that misrouting is counted
@@ -927,12 +958,6 @@ impl Router {
         })
     }
 
-    /// The intent the model last stated, for the asks that quote it.
-    #[must_use]
-    pub fn intent(&self) -> Option<&str> {
-        self.intent.as_deref()
-    }
-
     /// The census so far.
     #[must_use]
     pub fn census(&self) -> &Census {
@@ -1003,7 +1028,17 @@ impl Router {
             turn,
             class: Class::Unknown,
             routing: Routing::Fork(AskKind::Judgment),
+            ask: Some(self.ask(AskKind::Judgment)),
         })
+    }
+
+    /// The ask a fork of this kind will put, quoting back whatever the
+    /// canonical lane last said it was about to do.
+    fn ask(&self, kind: AskKind) -> Ask {
+        Ask {
+            kind,
+            intent: self.intent.clone(),
+        }
     }
 
     fn route_call(
@@ -1040,6 +1075,10 @@ impl Router {
             turn,
             class: classified.class,
             routing,
+            ask: match routing {
+                Routing::Fork(kind) => Some(self.ask(kind)),
+                Routing::Silent | Routing::Defer => None,
+            },
         }
     }
 }
@@ -1079,12 +1118,31 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        AskKind, Class, Family, IMPERATIVE, Router, Routing, Trigger, classify, replay, rules,
+        Ask, AskKind, Class, FAMILIES, Family, IMPERATIVE, INTENT_MARKERS, Router, Routing, Rule,
+        TableError, Term, Trigger, Unclassified, classify, parse_rules, replay, rules,
         stated_intent,
     };
     use crate::capture::mechanical::Facts;
     use crate::formats::record::json::Value;
     use crate::formats::record::{self, Event};
+
+    fn turn(index: u32) -> Event {
+        Event::Turn {
+            index,
+            prefill_tokens: record::Count::default(),
+        }
+    }
+
+    fn call(id: &str, at_turn: u32, tool: &str, args: BTreeMap<String, Value>) -> Event {
+        Event::ToolCall {
+            id: id.to_owned(),
+            at_turn,
+            tool: tool.to_owned(),
+            args: Some(args),
+            exit: Some(0),
+            output: None,
+        }
+    }
 
     fn shell(command: &str) -> BTreeMap<String, Value> {
         BTreeMap::from([("command".to_owned(), Value::String(command.to_owned()))])
@@ -1092,6 +1150,57 @@ mod tests {
 
     fn path(p: &str) -> BTreeMap<String, Value> {
         BTreeMap::from([("file_path".to_owned(), Value::String(p.to_owned()))])
+    }
+
+    #[test]
+    fn every_vocabulary_is_named_in_full_where_the_tests_walk_it() {
+        // Every loop below iterates one of these lists. A value dropped from
+        // a list silences the loops that walk it instead of failing them, so
+        // the lists are spelled out once, here, by name.
+        assert_eq!(
+            Class::ALL,
+            &[
+                Class::DirectoryListing,
+                Class::Inert,
+                Class::DocumentRead,
+                Class::SourceRead,
+                Class::WebRead,
+                Class::Search,
+                Class::Edit,
+                Class::SideEffect,
+                Class::TestRun,
+                Class::Build,
+                Class::VersionControl,
+                Class::Unknown,
+            ],
+            "a class left the vocabulary without leaving the tests that walk it"
+        );
+        assert_eq!(
+            AskKind::ALL,
+            &[
+                AskKind::Generic,
+                AskKind::ApiSurface,
+                AskKind::Outcome,
+                AskKind::Change,
+                AskKind::Finding,
+                AskKind::Reminder,
+                AskKind::Judgment,
+            ],
+            "an ask kind left the vocabulary without leaving the tests that walk it"
+        );
+        assert_eq!(
+            Family::ALL,
+            &[
+                Family::Shell,
+                Family::Read,
+                Family::Edit,
+                Family::Glob,
+                Family::Grep,
+                Family::Web,
+                Family::List,
+            ],
+            "a tool family left the vocabulary without leaving the tests that walk it"
+        );
     }
 
     #[test]
@@ -1135,6 +1244,129 @@ mod tests {
         assert!(!IMPERATIVE.trim().is_empty());
     }
 
+    /// The question each ask exists to put. Written out per kind rather than
+    /// derived, because what is under test is *which* question a class draws:
+    /// a template emptied of its question, or a kind wired to another kind's
+    /// file, still carries the imperative and still renders.
+    const ASKS_ABOUT: &[(AskKind, &str)] = &[
+        (AskKind::Generic, "What did this turn establish"),
+        (AskKind::ApiSurface, "Which names did it establish"),
+        (AskKind::Outcome, "What was its outcome"),
+        (AskKind::Change, "What did the change establish"),
+        (AskKind::Finding, "What in it would a later turn need"),
+        (AskKind::Reminder, "anything you meant to record"),
+        (AskKind::Judgment, "What did you decide"),
+    ];
+
+    #[test]
+    fn each_ask_asks_the_question_its_class_calls_for() {
+        assert_eq!(
+            ASKS_ABOUT.len(),
+            AskKind::ALL.len(),
+            "an ask kind with no question written down here"
+        );
+        for (kind, question) in ASKS_ABOUT {
+            assert!(
+                kind.template().contains(question),
+                "{}: the ask does not ask its own question, {question:?}",
+                kind.tag()
+            );
+        }
+        for kind in AskKind::ALL {
+            assert!(
+                kind.template().contains("Answer with the fields"),
+                "{}: the ask names no fields, so nothing can read the answer",
+                kind.tag()
+            );
+        }
+    }
+
+    /// Whether `narrow` matching implies `wide` matching.
+    fn implies(narrow: &Term, wide: &Term) -> bool {
+        match (narrow, wide) {
+            (_, Term::Any) => true,
+            (Term::Word(inner), Term::Word(outer))
+            | (Term::Sub(inner), Term::Sub(outer))
+            | (Term::Flag(inner), Term::Flag(outer))
+            | (Term::Ext(inner), Term::Ext(outer)) => {
+                inner.iter().all(|value| outer.contains(value))
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether every call `narrow` would match is already matched by `wide`.
+    fn covers(wide: &Rule, narrow: &Rule) -> bool {
+        wide.family == narrow.family
+            && wide
+                .terms
+                .iter()
+                .all(|term| narrow.terms.iter().any(|inner| implies(inner, term)))
+    }
+
+    #[test]
+    fn no_row_of_the_table_can_ever_fire_from_below_an_earlier_one() {
+        let rules = rules().expect("the table parses");
+        for (position, row) in rules.iter().enumerate() {
+            for earlier in &rules[..position] {
+                assert!(
+                    !covers(earlier, row),
+                    "row {} ({}) can never fire: the {} row above it already matches every call it names",
+                    position + 1,
+                    row.class.tag(),
+                    earlier.class.tag()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_table_row_that_is_not_a_rule_is_refused_and_not_skipped() {
+        // A router that skipped the rows it could not read would classify a
+        // whole drive as unknown and report that as a finding. The table is
+        // compiled in, so this is the only place the refusal is reachable.
+        let bad = [
+            ("edit\tshell\n", TableError::Shape { line: 1 }),
+            (
+                "nonesuch\tshell\t*\n",
+                TableError::Class {
+                    line: 1,
+                    text: "nonesuch".to_owned(),
+                },
+            ),
+            (
+                "edit\tnonesuch\t*\n",
+                TableError::Family {
+                    line: 1,
+                    text: "nonesuch".to_owned(),
+                },
+            ),
+            (
+                "edit\tshell\tnonesuch=x\n",
+                TableError::Term {
+                    line: 1,
+                    text: "nonesuch=x".to_owned(),
+                },
+            ),
+            ("# a table of comments\n", TableError::Empty),
+        ];
+        for (table, want) in bad {
+            assert_eq!(
+                parse_rules(table),
+                Err(want.clone()),
+                "a row that is not a rule was skipped rather than refused: {table:?}"
+            );
+            assert!(
+                want.to_string().contains("classes.tsv"),
+                "the refusal does not name the table it read: {want}"
+            );
+        }
+        assert!(
+            parse_rules("edit\tshell\t*\n").is_ok(),
+            "a row that is a rule was refused, so the cases above prove nothing"
+        );
+    }
+
     #[test]
     fn the_table_parses_and_covers_every_class_but_unknown() {
         let rules = rules().expect("the table parses");
@@ -1155,18 +1387,8 @@ mod tests {
     #[test]
     fn an_unknown_tool_call_routes_to_the_declared_default_and_says_so() {
         let mut router = Router::new().expect("the table parses");
-        router.observe(&Event::Turn {
-            index: 1,
-            prefill_tokens: record::Count::default(),
-        });
-        let decisions = router.observe(&Event::ToolCall {
-            id: "t1".to_owned(),
-            at_turn: 1,
-            tool: "bash".to_owned(),
-            args: Some(shell("xyzzy --frob")),
-            exit: Some(127),
-            output: None,
-        });
+        router.observe(&turn(1));
+        let decisions = router.observe(&call("t1", 1, "bash", shell("xyzzy --frob")));
         assert_eq!(decisions.len(), 1);
         assert_eq!(
             decisions[0].routing,
@@ -1174,11 +1396,27 @@ mod tests {
             "an unknown pattern must route to the declared default, never to silence"
         );
         assert_eq!(
+            decisions[0].turn, 1,
+            "a decision was attributed to a turn the call was not in"
+        );
+        assert_eq!(
             router.unclassified().len(),
             1,
             "an unknown pattern must be a typed event, or misrouting cannot be measured"
         );
-        assert_eq!(router.unclassified()[0].word.as_deref(), Some("xyzzy"));
+        // Every field, because each one answers a different question about
+        // the misroute: which call, when, whose tool, and the word nobody
+        // wrote a row for.
+        assert_eq!(
+            router.unclassified()[0],
+            Unclassified {
+                id: "t1".to_owned(),
+                turn: 1,
+                tool: "bash".to_owned(),
+                word: Some("xyzzy".to_owned()),
+            },
+            "the unclassified event must name the call, its turn, its tool and its word"
+        );
         // A tool whose NAME is unknown is unknown too, with no word.
         let decisions = router.observe(&Event::ToolCall {
             id: "t2".to_owned(),
@@ -1196,31 +1434,26 @@ mod tests {
     fn a_judgment_ask_waits_for_the_turn_boundary() {
         let mut router = Router::new().expect("the table parses");
         let mut all = Vec::new();
-        all.extend(router.observe(&Event::Turn {
-            index: 1,
-            prefill_tokens: record::Count::default(),
-        }));
-        all.extend(router.observe(&Event::ToolCall {
-            id: "t1".to_owned(),
-            at_turn: 1,
-            tool: "bash".to_owned(),
-            args: Some(shell("rm -rf build")),
-            exit: Some(0),
-            output: None,
-        }));
+        all.extend(router.observe(&turn(1)));
+        all.extend(router.observe(&call("t1", 1, "bash", shell("rm -rf build"))));
         assert!(
             all.iter()
                 .all(|d| d.routing != Routing::Fork(AskKind::Judgment)),
             "a judgment ask fired in the middle of a turn"
         );
         assert_eq!(all.last().map(|d| d.routing), Some(Routing::Defer));
-        let closing = router.observe(&Event::Turn {
-            index: 2,
-            prefill_tokens: record::Count::default(),
-        });
+        assert!(
+            all.last().is_some_and(|d| d.ask.is_none()),
+            "a routing that asks nothing carried a question anyway"
+        );
+        let closing = router.observe(&turn(2));
         assert_eq!(closing.len(), 1);
         assert_eq!(closing[0].routing, Routing::Fork(AskKind::Judgment));
         assert_eq!(closing[0].trigger, Trigger::TurnEnd(1));
+        assert_eq!(
+            closing[0].ask.as_ref().map(|ask| ask.kind),
+            Some(AskKind::Judgment)
+        );
         assert_eq!(router.census().judgment_asks, 1);
     }
 
@@ -1242,7 +1475,32 @@ mod tests {
                 Class::VersionControl,
             ),
             ("sed -i 's/a/b/' file.rs", Class::Edit),
+            ("sed --in-place 's/a/b/' file.rs", Class::Edit),
             ("sed -n 80,160p file.rs", Class::SourceRead),
+            // A package manager's subcommand decides the class. Both rows
+            // sat below the row that names the word alone, so every one of
+            // these was a deferred side effect.
+            ("npm test", Class::TestRun),
+            ("yarn test --watch=false", Class::TestRun),
+            ("npm run build", Class::Build),
+            ("pnpm install", Class::Build),
+            ("npm exec whatever", Class::SideEffect),
+            // One call per row, so a row deleted outright is a red test and
+            // not a silence.
+            ("patch -p1 < change.diff", Class::Edit),
+            ("rustc --edition 2024 main.rs", Class::Build),
+            // A runner whose name is the whole rule takes no subcommand.
+            // Sharing a row with `go test` had made `pytest tests/` unknown.
+            ("pytest tests/router", Class::TestRun),
+            ("go test ./...", Class::TestRun),
+            ("go build ./...", Class::Build),
+            // The subcommand is the first operand that is not a flag, so a
+            // flag's value does not stand in for it.
+            ("cargo build --features test", Class::Build),
+            ("cargo nextest run", Class::Unknown),
+            // A word the shell would expand is not the command it spells:
+            // the router refuses to guess what `~` resolves to.
+            ("~/bin/cargo test", Class::Unknown),
             ("curl -sS https://example.invalid/x", Class::WebRead),
             ("python3 scripts/check-library.py", Class::SideEffect),
             ("grep -rn 'fn parse' diet/", Class::Search),
@@ -1279,11 +1537,102 @@ mod tests {
             stated_intent("Next I am going to run the gate").as_deref(),
             Some("Next I am going to run the gate")
         );
+        // Two sentences state an intent. The ask quotes the last, because by
+        // the time it is put the earlier one is something the model has
+        // already done.
+        assert_eq!(
+            stated_intent("I'll read the parser. Then I will fix the caller.").as_deref(),
+            Some("Then I will fix the caller."),
+            "the ask quoted an intent the model had already moved past"
+        );
+    }
+
+    /// One sentence per marker, written out rather than composed from
+    /// [`INTENT_MARKERS`]: a test that iterated the table it guards passes
+    /// over a table somebody shortened. Each sentence carries exactly one
+    /// marker, so losing that marker loses this sentence.
+    const SPOKEN: &[&str] = &[
+        "I'll read the parser.",
+        "I will read the parser.",
+        "We are going to read the parser.",
+        "Next I read the parser.",
+        "Next, I read the parser.",
+        "The next step is the parser.",
+        "Let me read the parser.",
+    ];
+
+    #[test]
+    fn every_marker_the_model_states_an_intent_with_is_heard() {
+        assert_eq!(
+            SPOKEN.len(),
+            INTENT_MARKERS.len(),
+            "a marker was added or lost without a sentence that reaches it"
+        );
+        for sentence in SPOKEN {
+            assert_eq!(
+                stated_intent(sentence).as_deref(),
+                Some(*sentence),
+                "the model stated an intent and the router did not hear it"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ask_quotes_back_what_the_canonical_lane_said_it_would_do() {
+        let mut router = Router::new().expect("the table parses");
+        router.observe(&turn(1));
+        router.observe(&Event::Request {
+            id: "q1".to_owned(),
+            lane: "main".to_owned(),
+            retry_of: None,
+            text: None,
+        });
+        router.observe(&Event::Response {
+            id: "a1".to_owned(),
+            to_request: "q1".to_owned(),
+            output_tokens: record::Count::default(),
+            text: Some("The parser keeps every line. I'll read the caller.".to_owned()),
+        });
+        let decisions = router.observe(&call("t1", 1, "bash", shell("cat diet/src/lib.rs")));
+        let ask = decisions[0]
+            .ask
+            .as_ref()
+            .expect("a fork carries the ask it will put");
+        assert_eq!(ask.kind, AskKind::ApiSurface);
+        let rendered = ask.render(&Facts::default());
+        assert!(
+            rendered.contains("You said: \"I'll read the caller.\""),
+            "the ask did not quote back what the model said it was about to do: {rendered}"
+        );
+
+        // An interview lane's prose is the interview's, not the drive's.
+        // Quoting it back would put the router's own question to the model
+        // as though the model had said it.
+        let mut aside = Router::new().expect("the table parses");
+        aside.observe(&turn(1));
+        aside.observe(&Event::Request {
+            id: "q2".to_owned(),
+            lane: "interview".to_owned(),
+            retry_of: None,
+            text: None,
+        });
+        aside.observe(&Event::Response {
+            id: "a2".to_owned(),
+            to_request: "q2".to_owned(),
+            output_tokens: record::Count::default(),
+            text: Some("Let me answer that.".to_owned()),
+        });
+        let decisions = aside.observe(&call("t1", 1, "bash", shell("cat diet/src/lib.rs")));
+        assert_eq!(
+            decisions[0].ask.as_ref().and_then(|ask| ask.intent.clone()),
+            None,
+            "the ask quoted back something a lane other than the drive said"
+        );
     }
 
     #[test]
     fn a_line_with_an_unfilled_hole_is_dropped_whole() {
-        let ask = super::Ask {
+        let ask = Ask {
             kind: AskKind::Generic,
             intent: None,
         };
@@ -1297,9 +1646,9 @@ mod tests {
             "a hole survived rendering: {rendered}"
         );
         assert!(rendered.starts_with(IMPERATIVE.trim()));
-        let ask = super::Ask {
+        let ask = Ask {
             kind: AskKind::Generic,
-            intent: Some("I'll run the gate."),
+            intent: Some("I'll run the gate.".to_owned()),
         };
         let rendered = ask.render(&Facts::default());
         assert!(rendered.contains("You said: \"I'll run the gate.\""));
@@ -1413,10 +1762,69 @@ mod tests {
                 "{}: judgment asks",
                 path.display()
             );
+            // Which classes fired, and what the router did with each. The
+            // totals above are the same whichever class a call was counted
+            // under; this is the half that says the census knows.
+            let mut fired = serde_json::Map::new();
+            for (class, tally) in &replayed.census.per_class {
+                fired.insert(
+                    class.tag().to_owned(),
+                    serde_json::json!({
+                        "seen": tally.seen,
+                        "forked": tally.forked,
+                        "deferred": tally.deferred,
+                        "silent": tally.silent,
+                    }),
+                );
+            }
+            assert_eq!(
+                serde_json::Value::Object(fired),
+                expected["per_class"],
+                "{}: the census does not say which classes fired",
+                path.display()
+            );
             assert!(
                 replayed.census.forks() < replayed.census.naive_forks(),
                 "{}: the router spent no fewer forks than the naive design",
                 path.display()
+            );
+        }
+    }
+
+    /// How many calls of a class the corpus has to carry before its routing
+    /// is pinned by evidence rather than by one author's attention.
+    const CALLS_PER_CLASS: usize = 3;
+
+    #[test]
+    fn the_corpus_covers_every_class_and_every_tool_name_the_router_knows() {
+        let mut calls: BTreeMap<Class, usize> = BTreeMap::new();
+        let mut tools: BTreeSet<String> = BTreeSet::new();
+        for (_, parsed, _) in corpus() {
+            for event in &parsed.events {
+                if let Event::ToolCall { tool, .. } = event {
+                    tools.insert(tool.clone());
+                }
+            }
+            for decision in replay(&parsed).expect("the table parses").decisions {
+                if matches!(decision.trigger, Trigger::Call(_)) {
+                    *calls.entry(decision.class).or_default() += 1;
+                }
+            }
+        }
+        for class in Class::ALL {
+            let seen = calls.get(class).copied().unwrap_or_default();
+            assert!(
+                seen >= CALLS_PER_CLASS,
+                "{}: {seen} call(s) in the corpus, fewer than {CALLS_PER_CLASS}, \
+                 so this class's routing is pinned by nobody",
+                class.tag()
+            );
+        }
+        for (name, _) in FAMILIES {
+            assert!(
+                tools.contains(*name),
+                "{name}: a tool name with no call in the corpus, so the row \
+                 that gives it a family is a guess nothing checked"
             );
         }
     }
