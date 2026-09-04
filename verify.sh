@@ -983,6 +983,19 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+inject_mechanical_quoted_substitution() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = "            (!word.literal).then_some(word.text.as_str())\n"
+new = "            Some(word.text.as_str())\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1530,6 +1543,8 @@ selftest() {
     'a word the shell would expand was reported literal'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
     'an empty answer is a recorded answer, not a missing one'
+  seeded_case "a quoted substitution descended into"  test     inject_mechanical_quoted_substitution \
+    'a single-quoted substitution was descended into'
   seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
     'was constructed, and the grammar would not read it back'
   seeded_case "the declared default replaced by silence" test   inject_router_unknown_silent \

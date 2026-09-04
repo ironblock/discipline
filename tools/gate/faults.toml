@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 122
+red_faults = 123
 mechanics_assertions = 27
 migrated = 0
 
@@ -460,6 +460,15 @@ check = "test"
 label = "a mechanical entry sent through the gate"
 failure_class = "capture.mechanical-entry-gated"
 legacy_signature = "a mechanical entry was dropped as if it needed grounding"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_quoted_substitution"
+kind = "seeded-gate"
+check = "test"
+label = "a quoted substitution descended into"
+failure_class = "capture.invented-read"
+legacy_signature = "a single-quoted substitution was descended into"
 migrated = false
 
 [[fault]]
