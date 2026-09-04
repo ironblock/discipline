@@ -4,13 +4,16 @@ Sentences an AI coding agent wrote during real sessions, labelled against the
 sense sets in `../sets.jsonl`, for the embedding bakeoff and the collector's
 calibration. Rows are `{"id","text","label","source"}` and nothing else.
 
-`mistake.jsonl` is the authored register: written by hand for the
+`authored-mistake.jsonl` is the authored register: written by hand for the
 instrument's own tests, every row `source: authored`. It is not the corpus.
 
 `mined-mistake.jsonl` and `mined-reversal.jsonl` are the corpus, every row
 `source: mined`. `mined.provenance.jsonl` carries one row per corpus row
 with the archive it came from; `mined.judge-prompt.md` is the instrument
-that labelled it, pinned.
+that labelled it, pinned; `mined.controls.json` is the fourteen controls with
+the answers the judge never saw, and `mined.judge-controls.py` scores a
+verdict file against them: exit 0 when every control a batch carried is
+answered as keyed, 1 naming the first miss, 2 for a batch carrying none.
 
 ## Provenance, as content
 
