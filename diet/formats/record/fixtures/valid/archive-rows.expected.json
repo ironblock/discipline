@@ -1,0 +1,16 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrate\":{\"hardware\":\"one-gpu\",\"model\":\"a-model\",\"name\":\"local\",\"quantization\":\"q4\",\"reasoning\":\"on\",\"sampler\":{\"seed\":7}}}}\n{\"index\":1,\"prefill_tokens\":900,\"record\":\"turn\"}\n{\"id\":\"q1\",\"lane\":\"main\",\"record\":\"request\",\"text\":\"Find where the parser drops a line, then fix it.\"}\n{\"args\":{\"command\":\"grep -n 'fn parse' diet/src/formats/interview.rs\"},\"at_turn\":1,\"exit\":0,\"id\":\"t1\",\"output\":\"365:pub fn parse(input: &str) -> Result<Answer, ParseError> {\",\"record\":\"tool_call\",\"tool\":\"bash\"}\n{\"args\":{\"command\":\"cd diet && cargo test -- formats::interview\"},\"at_turn\":1,\"exit\":0,\"id\":\"t2\",\"output\":\"\",\"record\":\"tool_call\",\"tool\":\"bash\"}\n{\"id\":\"a1\",\"output_tokens\":40,\"record\":\"response\",\"text\":\"The parser keeps every line; the loss was in the caller. I'll fix the caller next.\",\"to_request\":\"q1\"}\n{\"index\":2,\"prefill_tokens\":1100,\"record\":\"turn\"}\n{\"id\":\"q2\",\"lane\":\"interview\",\"record\":\"request\",\"text\":\"What did this turn establish that a later turn would need?\"}\n{\"id\":\"a2\",\"output_tokens\":0,\"record\":\"response\",\"text\":\"\",\"to_request\":\"q2\"}\n{\"args\":{},\"at_turn\":2,\"exit\":127,\"id\":\"t3\",\"output\":\"xyzzy: command not found\",\"record\":\"tool_call\",\"tool\":\"xyzzy\"}\n{\"prefill_tokens_total\":2000,\"product_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"record\":\"summary\",\"turns\":2}\n",
+  "kinds": [
+    "start",
+    "turn",
+    "request",
+    "response",
+    "tool_call",
+    "summary"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "substrate": "local"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [
+                  {
+                    "heredoc": {
+                      "body": "import pathlib\nprint(pathlib.Path('.').resolve())\n",
+                      "delimiter": "EOF"
+                    },
+                    "op": "<<"
+                  }
+                ],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "python3"
+                  },
+                  {
+                    "literal": true,
+                    "text": "-"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

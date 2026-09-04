@@ -1,0 +1,3 @@
+A response's text is the text that came back, as one string. A list is a
+structure the record did not receive from any substrate, and a reader that
+accepted one would have to decide how to join it.

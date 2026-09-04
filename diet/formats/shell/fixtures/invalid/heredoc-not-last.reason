@@ -1,0 +1,4 @@
+A heredoc that is not the last thing on its line. The body starts after
+the rest of the line, and v0 reads a body only when it starts on the very
+next line: locating it past `| sort` is the later version the grammar
+header names.

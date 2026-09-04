@@ -1,0 +1,2 @@
+An empty subshell. The shell refuses it; a reader that accepted it would
+have a command that does nothing and carries no words to say so.

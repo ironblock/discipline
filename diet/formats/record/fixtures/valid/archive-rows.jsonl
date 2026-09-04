@@ -1,0 +1,11 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"a-model","quantization":"q4","sampler":{"seed":7},"reasoning":"on","hardware":"one-gpu"}}}
+{"record":"turn","index":1,"prefill_tokens":900}
+{"record":"request","id":"q1","lane":"main","text":"Find where the parser drops a line, then fix it."}
+{"record":"tool_call","id":"t1","at_turn":1,"tool":"bash","args":{"command":"grep -n 'fn parse' diet/src/formats/interview.rs"},"exit":0,"output":"365:pub fn parse(input: &str) -> Result<Answer, ParseError> {"}
+{"record":"tool_call","id":"t2","at_turn":1,"tool":"bash","args":{"command":"cd diet && cargo test -- formats::interview"},"exit":0,"output":""}
+{"record":"response","id":"a1","to_request":"q1","output_tokens":40,"text":"The parser keeps every line; the loss was in the caller. I'll fix the caller next."}
+{"record":"turn","index":2,"prefill_tokens":1100}
+{"record":"request","id":"q2","lane":"interview","text":"What did this turn establish that a later turn would need?"}
+{"record":"response","id":"a2","to_request":"q2","output_tokens":0,"text":""}
+{"record":"tool_call","id":"t3","at_turn":2,"tool":"xyzzy","args":{},"exit":127,"output":"xyzzy: command not found"}
+{"record":"summary","turns":2,"prefill_tokens_total":2000,"product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}

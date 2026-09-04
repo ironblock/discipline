@@ -1,0 +1,40 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [
+                  {
+                    "name": "CARGO_TARGET_DIR",
+                    "value": {
+                      "literal": true,
+                      "text": "/work/target"
+                    }
+                  },
+                  {
+                    "name": "RUST_LOG"
+                  }
+                ],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "cargo"
+                  },
+                  {
+                    "literal": true,
+                    "text": "build"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

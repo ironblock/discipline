@@ -1,0 +1,2 @@
+A separator may not lead. Nothing ran before it, and a reader that
+accepted the line would have to invent an empty command to attach it to.

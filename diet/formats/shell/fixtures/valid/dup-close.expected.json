@@ -1,0 +1,31 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [
+                  {
+                    "descriptor": "-",
+                    "fd": 3,
+                    "op": ">&"
+                  }
+                ],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "exec"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

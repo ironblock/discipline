@@ -1,0 +1,41 @@
+{
+  "list": [
+    {
+      "background": false,
+      "chain": [
+        {
+          "pipeline": [
+            {
+              "simple": {
+                "assignments": [],
+                "redirections": [],
+                "words": [
+                  {
+                    "literal": true,
+                    "text": "echo"
+                  },
+                  {
+                    "literal": true,
+                    "text": "a\"b"
+                  },
+                  {
+                    "literal": true,
+                    "text": "c\\d"
+                  },
+                  {
+                    "literal": true,
+                    "text": "e\\nf"
+                  },
+                  {
+                    "literal": false,
+                    "text": "$(ls -d \"x y\")"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
