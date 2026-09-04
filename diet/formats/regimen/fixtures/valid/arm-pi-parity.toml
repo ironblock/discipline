@@ -150,7 +150,7 @@ ratify = true
 audit_legacy_wording = true  # parity arm — reproduce the Pi archive wording
 extraction = true
 extraction_minimal_prefix = false  # pinned — this is the Pi-matching warm-27B
-                                    # reference regime every diet.toml-family arm
+                                    # reference regime every arm of the diet family
                                     # anchors against; the minimal-prefix change
                                     # flipped the code default to true, so this must
                                     # stay explicit or the anchor itself would silently
