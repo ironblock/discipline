@@ -1,9 +1,9 @@
 +++
 hypothesis = "Grounded acceptance of extracted facts inverts across seats: a small extractor answering a self-contained ask off the box accepts more, and a different set, than the large model extracting off the warm session prefix."
 result = "supported"
-product_sha256 = "dabba8d01c94e467d2db0cac818be719431eacc635823c112e2a62a696b5834a"
+product_sha256 = "f99a8c5c92ee619088a06313dc27bf95daeee0ed28af817a7d68d2b4ec48a083"
 controls_run = ["seat C, an encoder extracting spans offline from the same sources, as the model-free comparator", "byte-identity of every replayed main-lane request against the drive's own record, asserted per request by the grader's warmth table"]
-known_defects = ["The record's regime names one substrate, the drive's; the bakeoff compares three seats on three substrates (the 27B on the box, a 1.7B on the host's CPU, an encoder offline), which the start row cannot carry. The seats' substrates are stated in the hardware field and the claims until the schema has a shape for a comparison across substrates.", "The raw accepted counts are inflated by a fact-parser defect of that era (untagged lines and multi-line quotes counted as facts); the grader reports raw and deduped side by side and lists the two degenerate forks, and the claims cite the deduped figures.", "The judgment axis, whether an accepted fact is true of the mechanism, was not run; only the mechanical axes are graded.", "Seat C's summary names the drive it replayed by a path in the research program's repository, which a reader here cannot open; the drive itself is the human-driven drive of 2026-08-10."]
+known_defects = ["The record's regime names one substrate, the drive's; the bakeoff compares three seats on three substrates (the 27B on the box, a 1.7B on the host's CPU, an encoder offline), which the start row cannot carry. The seats' substrates are stated in the hardware field and the claims until the schema has a shape for a comparison across substrates.", "The raw accepted counts are inflated by a fact-parser defect of that era (untagged lines and multi-line quotes counted as facts); the grader reports raw and deduped side by side and lists the two degenerate forks, and the claims cite the deduped figures.", "The judgment axis, whether an accepted fact is true of the mechanism, was not run; only the mechanical axes are graded.", "Seat C's summary names the drive it replayed by a path in the research program's repository, which a reader here cannot open; the drive itself is the human-driven drive of 2026-08-10.", "A recompute over an archive has no session turns; turns and prefill_tokens_total are zero because the schema offers no other shape for a summary whose subject is a recompute."]
 turns = 0
 prefill_tokens_total = 0
 
@@ -40,7 +40,9 @@ against the drive's own record), with the extraction seat varied: seat A, the
 CPU answering the same ask carried in full with no prefix; seat C, an encoder
 (gliner_small-v2.1, threshold 0.5, seven labels) over the same sources
 offline. Sampler for the model seats: temperature 0.6, top_k 20, top_p 1.0,
-max_tokens 4096, thinking off. `grade.py` tallies facts offered against
+max_tokens 4096, thinking off. The encoder's parameters are read from its
+summary, which the record consumes by digest; the report does not derive from
+them, so they are attested, not reproduced. `grade.py` tallies facts offered against
 facts the grounding gate accepted, raw and deduped, and the containment of
 one seat's accepted items in another's. `report.json` is the committed
 result.
@@ -74,3 +76,4 @@ original report). The grader differs from that program's in eight passages
 that named its tickets, one of which is a string the report carries, so 79
 of the 80 committed fields are byte-identical to the original and the
 eightieth, a "not run" note, differs only in that wording.
+The grader's usage note names this directory's own invocation.
