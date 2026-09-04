@@ -1,0 +1,54 @@
+name: pkg-integration
+
+# A reusable workflow, composed by verify.yml. It runs the checks
+# .github/check-owners.tsv says this package owns -- derived, never named
+# here, so the table and the workflow cannot drift apart.
+#
+# Its own job because of the time budget below. The whole point of the
+# dev-loop lane is that a mechanism change is answered without the ten-minute
+# drive the research phase paid for every time, and a budget is only a budget
+# if exceeding it fails the build. Declared on the job that carries the lane
+# so that the number cannot be read as a budget for checks it does not cover.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: integration
+    runs-on: ubuntu-latest
+    # The declared budget: a CEILING, not a measurement. Nothing in this
+    # repository has timed this lane on this runner, and a number stated as
+    # though it had would be a claim. What it is for is a lane that has
+    # started waiting on something -- a socket, a download, a substrate --
+    # which the canned servers are built never to do. The budget a served
+    # dev-loop regimen gets is part of the ruling that picks the substrate.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      # Invoking cargo resolves rust-toolchain.toml, so rustup installs the
+      # pinned toolchain here rather than in the middle of a check.
+      - name: Resolve the pinned toolchain
+        run: |
+          cargo --version
+          rustc --version
+
+      - name: Run the checks this package owns
+        run: |
+          set -euo pipefail
+          mapfile -t checks < <(
+            awk -F'\t' -v pkg=integration '!/^#/ && NF>=2 && $2 == pkg { print $1 }' \
+              .github/check-owners.tsv
+          )
+          if [ "${#checks[@]}" -eq 0 ]; then
+            echo "::error::no check is owned by 'integration'; a workflow that runs nothing is not a pass"
+            exit 1
+          fi
+          args=()
+          for check in "${checks[@]}"; do args+=(--only "$check"); done
+          printf 'checks owned by integration: %s\n' "${checks[*]}"
+          ./verify.sh "${args[@]}"

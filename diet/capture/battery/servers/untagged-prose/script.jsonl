@@ -1,0 +1,19 @@
+{"record":"start","regime":{"arm":"dev-loop","dogma_version":0,"substrate":{"name":"canned","model":"none: a scripted fixture answers and nothing is served","quantization":"none","sampler":{"replayed":true},"reasoning":"off","hardware":"none: no substrate is served"}}}
+{"record":"turn","index":1,"prefill_tokens":0}
+{"record":"request","id":"exchange-1/ask","lane":"interview"}
+{"record":"response","id":"exchange-1/answer","to_request":"exchange-1/ask","output_tokens":0,"text":"This turn went fine and there is a fair amount that could be said about it."}
+{"record":"turn","index":2,"prefill_tokens":0}
+{"record":"request","id":"exchange-2/ask","lane":"interview"}
+{"record":"response","id":"exchange-2/answer","to_request":"exchange-2/ask","output_tokens":0,"text":"The tool would be the right way to record that, all things considered."}
+{"record":"turn","index":3,"prefill_tokens":0}
+{"record":"request","id":"exchange-3/ask","lane":"interview"}
+{"record":"response","id":"exchange-3/answer","to_request":"exchange-3/ask","output_tokens":0,"text":"The release before this session probably touched the reconciler somewhere."}
+{"record":"turn","index":4,"prefill_tokens":0}
+{"record":"request","id":"exchange-4/ask","lane":"interview"}
+{"record":"response","id":"exchange-4/answer","to_request":"exchange-4/ask","output_tokens":0,"text":"A number of things were established, broadly speaking."}
+{"record":"turn","index":5,"prefill_tokens":0}
+{"record":"request","id":"exchange-5/ask","lane":"interview"}
+{"record":"response","id":"exchange-5/answer","to_request":"exchange-5/ask","output_tokens":0,"text":"The render above looks about right to me."}
+{"record":"turn","index":6,"prefill_tokens":0}
+{"record":"request","id":"exchange-6/ask","lane":"interview"}
+{"record":"response","id":"exchange-6/answer","to_request":"exchange-6/ask","output_tokens":0,"text":"The excursion turned up something, more or less."}

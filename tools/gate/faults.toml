@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 111
+red_faults = 120
 mechanics_assertions = 27
 migrated = 0
 
@@ -361,6 +361,87 @@ check = "test"
 label = "an empty payload read as absent"
 failure_class = "record.payload-dropped"
 legacy_signature = "an empty answer is a recorded answer, not a missing one"
+migrated = false
+
+[[fault]]
+id = "test.battery_tool_prose_accepted"
+kind = "seeded-gate"
+check = "test"
+label = "prose accepted for a tool call"
+failure_class = "battery.tool-call-not-required"
+legacy_signature = "prose where a tool call was required must fail that behaviour and only that one"
+migrated = false
+
+[[fault]]
+id = "test.battery_seam_uncited"
+kind = "seeded-gate"
+check = "test"
+label = "a seam refill graded on any answer"
+failure_class = "battery.refill-uncited"
+legacy_signature = "an answer that repeats itself after the seam cites no entry id"
+migrated = false
+
+[[fault]]
+id = "test.battery_excursion_one_entry"
+kind = "seeded-gate"
+check = "test"
+label = "one entry accepted from an excursion"
+failure_class = "battery.excursion-not-closable"
+legacy_signature = "two fields holding one fact are one entry, and closure needs two"
+migrated = false
+
+[[fault]]
+id = "test.battery_behaviour_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "a behaviour dropped from the battery"
+failure_class = "battery.vocabulary-shrunk"
+legacy_signature = "the ask files on disk and the ones the battery includes disagree"
+migrated = false
+
+[[fault]]
+id = "test.battery_script_overrun"
+kind = "seeded-gate"
+check = "test"
+label = "a canned script out of step"
+failure_class = "battery.fixture-drift"
+legacy_signature = "the script has rows the battery never asked for"
+migrated = false
+
+[[fault]]
+id = "test.battery_tool_args_unchecked"
+kind = "seeded-gate"
+check = "test"
+label = "a tool call with no arguments"
+failure_class = "battery.tool-call-empty"
+legacy_signature = "a call with no arguments does not record anything"
+migrated = false
+
+[[fault]]
+id = "integration.drive_dangling_response"
+kind = "seeded-gate"
+check = "integration"
+label = "a drive archive that links nowhere"
+failure_class = "record.dangling-link"
+legacy_signature = "archive was refused by diet check-record"
+migrated = false
+
+[[fault]]
+id = "integration.drive_failure_set_unchecked"
+kind = "seeded-gate"
+check = "integration"
+label = "any red accepted from a fixture"
+failure_class = "lane.failure-set-unchecked"
+legacy_signature = "did not fail uses_offered_tool alone"
+migrated = false
+
+[[fault]]
+id = "integration.drive_failure_exits_zero"
+kind = "seeded-gate"
+check = "integration"
+label = "a failed battery that exits zero"
+failure_class = "lane.verdict-not-an-exit-code"
+legacy_signature = "answers nothing parseable passed the battery"
 migrated = false
 
 [[fault]]

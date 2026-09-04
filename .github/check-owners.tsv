@@ -27,6 +27,11 @@ regimen	diet
 # the toolchain could not build the binary it dispatches to. ---
 results	diet
 
+# --- integration: the dev-loop lane. Its own package because its own job
+# carries a time budget, and a budget declared on a job that runs other
+# checks is a budget for something else. ---
+integration	integration
+
 # --- pages: the published static surface ---
 pages	pages
 

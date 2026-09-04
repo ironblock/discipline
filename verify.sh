@@ -32,7 +32,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results regimen metadata hygiene pages ci history parity)
+readonly CHECKS=(fmt clippy test library results regimen integration metadata hygiene pages ci history parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -159,6 +159,85 @@ check_regimen() {
     return 2
   fi
   printf '  %d regimen document(s) parsed\n' "$seen"
+  return "$rc"
+}
+
+# The dev-loop lane: a scripted drive against a canned server, end to end.
+#
+# Everything else about the battery is decided by `cargo test`, which calls it
+# as a function. This is the half a function call cannot reach: whether a drive
+# WRITES a record the one authorized reader accepts, and whether the drive's
+# own exit code is a verdict. A record built and asserted on in memory is
+# asserted on by the code that built it.
+#
+# There is no substrate here and none is chosen here. The canned servers are
+# archived drives replayed off disk -- no socket, no port, no clock -- so this
+# lane is the same in a sandbox, on a laptop and in CI. Which weights a
+# `dev-loop` regimen pins is an open ruling; when it is made, the server that
+# serves them implements `Responder` and this lane grows a second row.
+#
+# Deliberately NOT a second opinion on whether the compliant fixture complies:
+# `cargo test` decides that from the corpus, and a rule asserted in two places
+# is a rule neither place can be seen to carry alone. All this asks of the
+# compliant drive is that it RAN -- an exit above 1 is a crash, not a verdict.
+check_integration() {
+  local rc=0 resolved bin work drive_rc=0
+
+  build_diet || return $?
+  cargo build --quiet -p discipline-diet --example drive || {
+    local build_rc=$?
+    echo "verify: the drive example did not build (exit ${build_rc})" >&2
+    return "$build_rc"
+  }
+
+  resolved="$(python3 scripts/resolve-diet.py)" || {
+    echo "verify: the diet binary could not be resolved" >&2
+    return 2
+  }
+  printf '  %s\n' "$resolved"
+  bin="$(printf '%s' "$resolved" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])')"
+
+  work="$(mktemp -d)" || {
+    echo "verify: could not stage a working directory for the drive" >&2
+    return 2
+  }
+
+  cargo run --quiet --example drive -- \
+    --server compliant --record "${work}/drive.jsonl" > /dev/null || drive_rc=$?
+  if [ "$drive_rc" -gt 1 ]; then
+    echo "verify: the drive did not run against the compliant canned server (exit ${drive_rc})" >&2
+    rc=1
+  fi
+
+  if "$bin" check-record "${work}/drive.jsonl" > /dev/null; then
+    printf '  ok  the drive wrote an archive diet check-record accepts\n'
+  else
+    echo "verify: the drive's archive was refused by diet check-record" >&2
+    rc=1
+  fi
+
+  # A fixture that fails for a NEW reason is as broken as one that stops
+  # failing, so the lane names the behaviour rather than accepting any red.
+  if cargo run --quiet --example drive -- \
+       --server prose-where-a-tool-was-offered \
+       --require-failure uses_offered_tool > /dev/null; then
+    printf '  ok  prose where a tool was offered failed uses_offered_tool, and nothing else\n'
+  else
+    echo "verify: the non-compliant canned server did not fail uses_offered_tool alone" >&2
+    rc=1
+  fi
+
+  # And a battery with failures is a non-zero exit, which is what makes this
+  # lane usable as a gate at all.
+  if cargo run --quiet --example drive -- --server untagged-prose > /dev/null 2>&1; then
+    echo "verify: a canned server that answers nothing parseable passed the battery" >&2
+    rc=1
+  else
+    printf '  ok  a canned server answering untagged prose exited non-zero\n'
+  fi
+
+  rm -rf "$work"
   return "$rc"
 }
 
@@ -748,6 +827,170 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# Prose accepted where a tool call was required. The whole reason to measure
+# compliance rather than capability is that a candidate which describes the
+# call instead of making it cannot drive the machinery at all.
+inject_battery_tool_prose_accepted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = """fn judge_uses_offered_tool(reply: &Reply) -> Outcome {
+    let offered = OFFERED_TOOL;"""
+new = """fn judge_uses_offered_tool(reply: &Reply) -> Outcome {
+    if reply.calls.is_empty() {
+        return Outcome::Pass;
+    }
+    let offered = OFFERED_TOOL;"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The seam refill graded on whether anything came back rather than on whether
+# the refilled entry was named. A candidate that answers past the render is
+# exactly the candidate a seam cannot be used with, and any non-empty answer
+# would satisfy it.
+inject_battery_seam_uncited() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = "        if second.text.contains(entry.as_str()) {"
+new = "        if !second.text.is_empty() {"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# One entry accepted from an excursion the ask told to produce two. Closure
+# disposes of entries by name, and an excursion that said one thing twice
+# leaves a closure nothing to choose between.
+inject_battery_excursion_one_entry() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = "    if born == EXCURSION_ENTRIES {"
+new = "    if born >= 1 {"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A behaviour dropped from the vocabulary. Nothing that iterates ALL can
+# notice a variant that is no longer in it, so what notices is the ask file
+# left on disk with no behaviour to claim it.
+inject_battery_behaviour_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = """        Self::ProducesClosableTangent,
+    ];"""
+new = """    ];"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A canned script with a row the battery never asks for. A fixture one
+# exchange out of step answers every probe with the previous probe's answer,
+# and goes on reporting whatever it reported before.
+inject_battery_script_overrun() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/capture/battery/servers/compliant/script.jsonl")
+source = path.read_text(encoding="utf-8")
+assert source.endswith("\n")
+path.write_text(
+    source
+    + '{"record":"turn","index":7,"prefill_tokens":0}\n'
+    + '{"record":"request","id":"exchange-7/ask","lane":"interview"}\n'
+    + '{"record":"response","id":"exchange-7/answer","to_request":"exchange-7/ask",'
+    + '"output_tokens":0,"text":"DECISION: one exchange too many"}\n',
+    encoding="utf-8",
+)
+EOF
+}
+
+# A response in the drive archive linked to a request that never happened.
+# The report is unaffected, which is the point: a drive can decide every
+# behaviour correctly and still write an archive nothing can read back.
+inject_drive_dangling_response() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = "            to_request: self.ask_id(exchange),"
+new = "            to_request: self.ask_id(exchange + 1),"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The lane accepting any red from a fixture declared to fail one behaviour.
+# A fixture that starts failing for a second reason is as broken as one that
+# stops failing, and both read as green once the set is not compared.
+inject_drive_failure_set_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/examples/drive.rs")
+source = path.read_text(encoding="utf-8")
+old = "            if failed == vec![wanted] {"
+new = "            if failed.is_empty() {"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A battery with failures exiting zero. Everything else the lane asserts is
+# downstream of the drive's exit code being a verdict at all.
+inject_drive_failure_exits_zero() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/examples/drive.rs")
+source = path.read_text(encoding="utf-8")
+old = """        None => {
+            if failed.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(EXIT_FAIL)
+            }
+        }"""
+new = """        None => {
+            let _ = &failed;
+            ExitCode::SUCCESS
+        }"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A tool call whose required arguments are not checked. `update_record` with
+# no `content` is a call that records nothing, and a candidate that makes it
+# looks compliant while writing nothing into the object.
+inject_battery_tool_args_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = "    for required in offered.required_args {"
+new = "    for required in &offered.required_args[..0] {"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1293,6 +1536,24 @@ selftest() {
     'a word the shell would expand was reported literal'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
     'an empty answer is a recorded answer, not a missing one'
+  seeded_case "prose accepted for a tool call"        test     inject_battery_tool_prose_accepted \
+    'prose where a tool call was required must fail that behaviour and only that one'
+  seeded_case "a seam refill graded on any answer"    test     inject_battery_seam_uncited \
+    'an answer that repeats itself after the seam cites no entry id'
+  seeded_case "one entry accepted from an excursion" test      inject_battery_excursion_one_entry \
+    'two fields holding one fact are one entry, and closure needs two'
+  seeded_case "a behaviour dropped from the battery" test      inject_battery_behaviour_dropped \
+    'the ask files on disk and the ones the battery includes disagree'
+  seeded_case "a canned script out of step"           test     inject_battery_script_overrun \
+    'the script has rows the battery never asked for'
+  seeded_case "a tool call with no arguments"         test     inject_battery_tool_args_unchecked \
+    'a call with no arguments does not record anything'
+  seeded_case "a drive archive that links nowhere"    integration inject_drive_dangling_response \
+    'archive was refused by diet check-record'
+  seeded_case "any red accepted from a fixture"       integration inject_drive_failure_set_unchecked \
+    'did not fail uses_offered_tool alone'
+  seeded_case "a failed battery that exits zero"      integration inject_drive_failure_exits_zero \
+    'answers nothing parseable passed the battery'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
