@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 117
+red_faults = 122
 mechanics_assertions = 27
 migrated = 0
 
@@ -370,6 +370,51 @@ check = "test"
 label = "a negative zero decimal accepted"
 failure_class = "record.second-spelling"
 legacy_signature = "was constructed, and the grammar would not read it back"
+migrated = false
+
+[[fault]]
+id = "test.router_unknown_silent"
+kind = "seeded-gate"
+check = "test"
+label = "the declared default replaced by silence"
+failure_class = "router.silent-default"
+legacy_signature = "an unknown pattern must route to the declared default, never to silence"
+migrated = false
+
+[[fault]]
+id = "test.router_judgment_mid_turn"
+kind = "seeded-gate"
+check = "test"
+label = "a judgment ask released mid-turn"
+failure_class = "router.judgment-mid-turn"
+legacy_signature = "a judgment ask fired in the middle of a turn"
+migrated = false
+
+[[fault]]
+id = "test.router_table_row_lost"
+kind = "seeded-gate"
+check = "test"
+label = "a row of the routing table lost"
+failure_class = "router.misrouted"
+legacy_signature = "misrouted call"
+migrated = false
+
+[[fault]]
+id = "test.router_unclassified_silent"
+kind = "seeded-gate"
+check = "test"
+label = "an unknown call routed but not recorded"
+failure_class = "router.unclassified-unrecorded"
+legacy_signature = "an unknown pattern must be a typed event"
+migrated = false
+
+[[fault]]
+id = "test.router_reduction_claimed"
+kind = "seeded-gate"
+check = "test"
+label = "a reduction claimed, not computed"
+failure_class = "router.reduction-claimed"
+legacy_signature = "the reduction is not the number its own counts give"
 migrated = false
 
 [[fault]]

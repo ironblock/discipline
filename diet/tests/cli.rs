@@ -180,3 +180,50 @@ fn every_format_is_published_under_exactly_one_verb() {
         "every format is published under a verb, and every verb names a format"
     );
 }
+
+// The router is a lane, not a format, and `route` is the first verb that is
+// not one format's projection. It must still behave like every other verb at
+// the boundary: a structured result on stdout, exit 0 when the drive is a
+// drive, exit 1 when it is not, and nothing a caller would have to parse out
+// of prose.
+#[test]
+fn the_route_verb_answers_with_a_census_and_not_with_prose() {
+    let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("capture/router/corpus");
+    let mut drives: Vec<PathBuf> = std::fs::read_dir(&corpus)
+        .unwrap_or_else(|err| panic!("{}: {err}", corpus.display()))
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+        .collect();
+    drives.sort();
+    assert!(
+        !drives.is_empty(),
+        "{}: no drives, so this test would pass over nothing",
+        corpus.display()
+    );
+    for drive in &drives {
+        let path = drive.to_str().expect("a UTF-8 path");
+        let (code, out, err) = run(&["route", path]);
+        assert_eq!(code, 0, "route {path}: {err}");
+        assert!(err.is_empty(), "route {path} wrote to stderr: {err}");
+        for key in [
+            "\"reduction\"",
+            "\"forks\"",
+            "\"naive_forks\"",
+            "\"per_class\"",
+            "\"unclassified\"",
+            "\"ok\":true",
+        ] {
+            assert!(out.contains(key), "route {path}: no {key} in {out}");
+        }
+    }
+
+    // A file that is not a record is the lane's `exit 1`, and it says so in
+    // the same shape as a success rather than on stderr.
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cli.rs");
+    let source = source.to_str().expect("a UTF-8 path");
+    let (code, out, err) = run(&["route", source]);
+    assert_eq!(code, 1, "a source file routed as a drive: {out}{err}");
+    assert!(out.contains("\"ok\":false"), "{out}");
+    assert!(out.contains("\"error\""), "{out}");
+}

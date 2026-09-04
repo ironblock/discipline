@@ -886,6 +886,99 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The declared default replaced by silence. A pattern nobody wrote a row for
+# is exactly the call nobody has looked at yet, and silence is how it stays
+# that way.
+inject_router_unknown_silent() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Self::Unknown => Routing::Fork(AskKind::Generic),\n"
+new = "            Self::Unknown => Routing::Silent,\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A judgment ask released in the middle of a turn: the question that needs
+# the model to have concluded something, asked before it has.
+inject_router_judgment_mid_turn() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """        Decision {
+            trigger: Trigger::Call(id.to_owned()),
+            turn,
+            class: classified.class,
+            routing,
+        }"""
+new = """        Decision {
+            trigger: Trigger::Call(id.to_owned()),
+            turn,
+            class: classified.class,
+            routing: if routing == Routing::Defer {
+                Routing::Fork(AskKind::Judgment)
+            } else {
+                routing
+            },
+        }"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A row of the table lost. A test run then routes as unknown, and the corpus
+# of real calls is what notices.
+inject_router_table_row_lost() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/classes.tsv")
+source = path.read_text(encoding="utf-8")
+old = "test-run\tshell\tword=cargo arg=test|bench\n"
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# An unknown call routed but not recorded. Misrouting is then a suspicion
+# again rather than a number.
+inject_router_unclassified_silent() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """            self.unclassified.push(Unclassified {
+                id: id.to_owned(),
+                turn,
+                tool: tool.to_owned(),
+                word: classified.word,
+            });
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# The reduction claimed rather than computed from the counts beside it.
+inject_router_reduction_claimed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "            let saved = naive.saturating_sub(self.forks());\n"
+new = "            let saved = naive;\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1433,6 +1526,16 @@ selftest() {
     'an empty answer is a recorded answer, not a missing one'
   seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
     'was constructed, and the grammar would not read it back'
+  seeded_case "the declared default replaced by silence" test   inject_router_unknown_silent \
+    'an unknown pattern must route to the declared default, never to silence'
+  seeded_case "a judgment ask released mid-turn"      test     inject_router_judgment_mid_turn \
+    'a judgment ask fired in the middle of a turn'
+  seeded_case "a row of the routing table lost"       test     inject_router_table_row_lost \
+    'misrouted call'
+  seeded_case "an unknown call routed but not recorded" test   inject_router_unclassified_silent \
+    'an unknown pattern must be a typed event'
+  seeded_case "a reduction claimed, not computed"     test     inject_router_reduction_claimed \
+    'the reduction is not the number its own counts give'
   seeded_case "a subshell that shares the parent state" test   inject_mechanical_subshell_leaks \
     'the subshell cd leaked into the parent'
   seeded_case "a failed cd applied anyway"            test     inject_mechanical_failed_cd_applied \
