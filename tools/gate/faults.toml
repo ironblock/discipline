@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 111
+red_faults = 117
 mechanics_assertions = 27
 migrated = 0
 
@@ -361,6 +361,60 @@ check = "test"
 label = "an empty payload read as absent"
 failure_class = "record.payload-dropped"
 legacy_signature = "an empty answer is a recorded answer, not a missing one"
+migrated = false
+
+[[fault]]
+id = "test.sense_cosine_unnormalised"
+kind = "seeded-gate"
+check = "test"
+label = "a cosine that forgot its second norm"
+failure_class = "sense.similarity-unnormalised"
+legacy_signature = "cosine of a vector with itself was not one"
+migrated = false
+
+[[fault]]
+id = "test.sense_contrastive_ignores_negative"
+kind = "seeded-gate"
+check = "test"
+label = "contrastive scoring that ignores the negative sense"
+failure_class = "sense.contrast-dropped"
+legacy_signature = "the contrastive score ignored the negative sense"
+migrated = false
+
+[[fault]]
+id = "test.sense_null_labels_unshuffled"
+kind = "seeded-gate"
+check = "test"
+label = "a null whose labels are never shuffled"
+failure_class = "sense.null-not-at-chance"
+legacy_signature = "d-prime on a shuffled-label null was far from zero"
+migrated = false
+
+[[fault]]
+id = "test.sense_p_without_floor"
+kind = "seeded-gate"
+check = "test"
+label = "a bootstrap p with no attainable floor"
+failure_class = "sense.p-without-floor"
+legacy_signature = "a bootstrap p-value came without its attainable floor"
+migrated = false
+
+[[fault]]
+id = "test.sense_metric_fixture_removed"
+kind = "seeded-gate"
+check = "test"
+label = "a metric whose failure fixture is gone"
+failure_class = "capture.instrument-never-failed"
+legacy_signature = "no failure fixture, so it can never be reported"
+migrated = false
+
+[[fault]]
+id = "test.record_data_line_two_lines"
+kind = "seeded-gate"
+check = "test"
+label = "two data lines read as one"
+failure_class = "record.line-silently-truncated"
+legacy_signature = "two lines were read as one, and the second was lost"
 migrated = false
 
 [[fault]]

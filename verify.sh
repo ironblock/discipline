@@ -748,6 +748,116 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A cosine that divides by one norm and the square of the other. Every
+# similarity becomes a function of how long the sentence is, so the seeded
+# control row -- the sense text verbatim -- no longer sits at one, and every
+# ranking in the bakeoff is a ranking by length.
+inject_sense_cosine_unnormalised() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "    let norm_a = a.iter().map(|x| x * x).sum::<f64>().sqrt();\n"
+new = "    let norm_a = a.iter().map(|x| x * x).sum::<f64>();\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Contrastive scoring that never subtracts the authored negative sense. It
+# becomes raw cosine wearing another tag, and the one repair the bakeoff has
+# for an abstract description sitting near everything is reported as measured
+# and is not there.
+inject_sense_contrastive_ignores_negative() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "                Some(toward - away)\n"
+new = "                let _ = away;\n                Some(toward)\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A shuffled-label null that never shuffles. It reports the real separation as
+# what chance looks like, so every cell measured against it is measured
+# against itself and no metric can be caught finding structure in noise.
+inject_sense_null_labels_unshuffled() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            let j = rng.below(i + 1);\n            labels.swap(i, j);\n"
+new = "            let _ = rng.below(i + 1);\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A bootstrap p-value that travels without the floor its resample count
+# implies. A p of 0.001 from 999 resamples is the smallest number the
+# procedure can produce, and printed alone it reads as a finding.
+inject_sense_p_without_floor() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            floor: attainable_p_floor(resamples),\n"
+new = "            floor: 0.0,\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A metric whose demonstrated-failure fixture is deleted. The metric still
+# computes and still prints, and nothing has ever seen it report failure --
+# which is the shape a perfect grounding score of 1.000 had on a probe where
+# fabrication was structurally impossible.
+inject_sense_metric_fixture_removed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """    (
+        Metric::Auc,
+        &[
+            ("failing/positive/0.1", Label::Positive, 0.1),
+            ("failing/positive/0.2", Label::Positive, 0.2),
+            ("failing/negative/0.8", Label::Negative, 0.8),
+            ("failing/negative/0.9", Label::Negative, 0.9),
+        ],
+    ),
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# The one-object reader taking the first line of a file and dropping the rest.
+# Every data file this reader serves -- sense sets, registers, vector caches --
+# is read one line at a time, so a reader that silently accepts two returns a
+# row nobody wrote and loses one somebody did.
+inject_record_data_line_two_lines() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/json.rs")
+source = path.read_text(encoding="utf-8")
+old = """    if event_line.as_span().end() != text.len() {
+        return Err(LineError::NotOneLine);
+    }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1293,6 +1403,18 @@ selftest() {
     'a word the shell would expand was reported literal'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
     'an empty answer is a recorded answer, not a missing one'
+  seeded_case "a cosine that forgot its second norm"  test     inject_sense_cosine_unnormalised \
+    'cosine of a vector with itself was not one'
+  seeded_case "contrastive scoring that ignores the negative sense" test inject_sense_contrastive_ignores_negative \
+    'the contrastive score ignored the negative sense'
+  seeded_case "a null whose labels are never shuffled" test   inject_sense_null_labels_unshuffled \
+    'd-prime on a shuffled-label null was far from zero'
+  seeded_case "a bootstrap p with no attainable floor" test   inject_sense_p_without_floor \
+    'a bootstrap p-value came without its attainable floor'
+  seeded_case "a metric whose failure fixture is gone" test   inject_sense_metric_fixture_removed \
+    'no failure fixture, so it can never be reported'
+  seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
+    'two lines were read as one, and the second was lost'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
