@@ -357,6 +357,9 @@ mod tests {
         for text in [
             "01.5", ".5", "1.", "1e5", "abc", "1.5.2", "", "-", "+1.5", "1,5", "-0.0", "-0.00",
             "-0.",
+            // The negative branch spells "at least one digit after the point"
+            // a second time, and only the positive copy was guarded.
+            "-1.", "-10.",
         ] {
             assert!(
                 Decimal::new(text).is_none(),

@@ -1,0 +1,4 @@
+Process substitution. `<(...)` is a subshell whose output becomes a filename,
+which is neither a redirection nor a word, and v0 has no third thing for it to
+be. The mechanical lane would have to record a file that exists only for the
+length of the command.
