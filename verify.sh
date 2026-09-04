@@ -812,6 +812,215 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A resample that draws once instead of once for every fork. The report still
+# carries a p and still carries its floor, and the p is now a statement about a
+# sample of one. This is the failure a bootstrap actually has: not summing
+# nothing, which shows up at once, but resampling wrongly.
+inject_ablation_resample_single_draw() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = "        for _ in 0..pairs {\n"
+new = "        for _ in 0..1 {\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The generator frozen: every draw returns the same index, so a resample is one
+# fork counted over and over. Deterministic, reproducible, and not a sample.
+inject_ablation_frozen_generator() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = """        self.0 = state;
+        state
+    }
+"""
+new = """        let _ = state;
+        self.0
+    }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Each arm credited with the other arm's outcomes. The p is untouched, so
+# nothing downstream of the counts can notice: the reported line states a real
+# p about a comparison that was never made.
+inject_ablation_rates_swapped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = """        successes_a: count(a),
+        successes_b: count(b),
+"""
+new = """        successes_a: count(b),
+        successes_b: count(a),
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The silence endpoint dropped from the pre-registration. What is left is the
+# single endpoint of the experiment this one exists to improve on, and a
+# wording that buys engagement with occasional silence reads as a win.
+inject_ablation_endpoint_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = "    pub const ALL: &'static [Self] = &[Self::Engagement, Self::Silence];"
+new = "    pub const ALL: &'static [Self] = &[Self::Engagement];"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Every arm of the plan printed with the control's imperative. The plan is the
+# one artefact this instrument produces before a run, and it would name eight
+# arms that all say the same thing.
+inject_ablation_plan_one_imperative() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = "                .map(|arm| (arm, self.render(arm)))\n"
+new = "                .map(|arm| (arm, self.render(Arm::CONTROL)))\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The control reported under a clause's name. Two arms then answer to one name
+# in the results table, and one of the two is the arm the design rests on.
+inject_ablation_arm_names_collide() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = 'pub const CONTROL_TAG: &str = "none";'
+new = 'pub const CONTROL_TAG: &str = "scope";'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The clause separator removed, so an arm's clauses run together. The sentence
+# handed to every fork of a run is the one variable this experiment
+# manipulates, and it would go out malformed.
+inject_ablation_clauses_run_together() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = """            if !out.is_empty() {
+                out.push(' ');
+            }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# A row taken out of the placeholder table. A form handed back with TODO where
+# an answer goes then counts as engagement, which is the endpoint counting a
+# blank as a win.
+inject_ablation_placeholder_word_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = 'const PLACEHOLDER_WORDS: &[&str] = &["tbd", "todo", "...", "\\u{2026}"];'
+new = 'const PLACEHOLDER_WORDS: &[&str] = &["tbd", "...", "\\u{2026}"];'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A blank clause text admitted. The arm carrying that clause is then the
+# control wearing another name, and the ablation compares two arms that are
+# one arm.
+inject_ablation_blank_clause_allowed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = """            if text.trim().is_empty() {
+                return Err(ClauseError::BlankText(clause));
+            }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# A case removed from the grading corpus, its expectation left behind. A
+# corpus walked in one direction only reports a corpus somebody deleted a case
+# out of as a corpus that passed.
+inject_ablation_corpus_case_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(
+    "diet/capture/ablation/corpus/the-form-handed-back-with-its-blanks.answer.txt"
+)
+assert path.is_file()
+path.unlink()
+EOF
+}
+
+# An untagged decline read as content. The same words then grade two ways
+# depending on whether a tag was written over them, and the arm most likely to
+# draw a reply with no tag on it is the brevity clause under test.
+inject_ablation_untagged_decline_engages() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = "        Outcome::Unparseable => decline::classify(field.raw.trim()).is_decline(),\n"
+new = "        Outcome::Unparseable => false,\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The second reader of the record grammar left unbounded. One reader then
+# returns a verdict on deeply nested text and the other hands it the stack,
+# and which of the two a caller reaches depends on which module it imported.
+inject_json_objects_unbounded() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/json.rs")
+source = path.read_text(encoding="utf-8")
+old = """    if let Some(depth) = too_deep(text) {
+        return Err(LineError::TooDeep {
+            depth,
+            limit: MAX_DEPTH,
+        });
+    }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1363,6 +1572,30 @@ selftest() {
     'counted as engagement and as silence at once'
   seeded_case "a p reported without its floor"         test     inject_ablation_p_floor_dropped \
     'a p reported without its attainable floor'
+  seeded_case "a resample that draws once"            test     inject_ablation_resample_single_draw \
+    'the resamples no longer draw one outcome for every fork'
+  seeded_case "a generator that never advances"       test     inject_ablation_frozen_generator \
+    'a seeded draw did not reach every fork in 64 tries'
+  seeded_case "each arm credited with the other's"    test     inject_ablation_rates_swapped \
+    'the first arm held on 5 of these 6 forks and the bootstrap counted'
+  seeded_case "the silence endpoint unregistered"     test     inject_ablation_endpoint_dropped \
+    'the pre-registration no longer carries two endpoints'
+  seeded_case "one imperative for every arm"          test     inject_ablation_plan_one_imperative \
+    'the plan does not pair the arm'
+  seeded_case "two arms under one name"               test     inject_ablation_arm_names_collide \
+    'two arms of the ablation are reported under one name'
+  seeded_case "an arm's clauses run together"         test     inject_ablation_clauses_run_together \
+    'the imperative an arm puts in the fork is not its clauses separated by one'
+  seeded_case "a placeholder nobody counts"           test     inject_ablation_placeholder_word_dropped \
+    'the-placeholder-words-nobody-replaced: graded .engaged. where the corpus says .inert.'
+  seeded_case "a blank clause text admitted"          test     inject_ablation_blank_clause_allowed \
+    'a clause table with a blank clause text was not refused for that reason'
+  seeded_case "a grading case quietly dropped"        test     inject_ablation_corpus_case_dropped \
+    'the corpus holds a case with no expectation or an expectation with no case'
+  seeded_case "an untagged decline read as content"   test     inject_ablation_untagged_decline_engages \
+    'an-untagged-decline: graded .engaged. where the corpus says .inert.'
+  seeded_case "the second reader left unbounded"      test     inject_json_objects_unbounded \
+    'a JSON Lines reader that does not bound its nesting'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

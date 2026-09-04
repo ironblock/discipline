@@ -50,7 +50,8 @@ use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
 
-use crate::formats::interview::{Answer, Outcome};
+use crate::formats::decline;
+use crate::formats::interview::{Answer, Field, Outcome};
 use crate::formats::record::json::{self, Value};
 
 // ---------------------------------------------------------------------------
@@ -229,9 +230,6 @@ impl Ablation {
     pub fn load(source: &str) -> Result<Self, ClauseError> {
         let rows =
             json::objects(source).map_err(|err| ClauseError::NotJsonLines(err.to_string()))?;
-        if rows.is_empty() {
-            return Err(ClauseError::NoRows);
-        }
         let mut version: Option<i64> = None;
         let mut found: Vec<Option<String>> = vec![None; Clause::ALL.len()];
         let mut seen: BTreeSet<Clause> = BTreeSet::new();
@@ -284,6 +282,11 @@ impl Ablation {
             }
             found[clause.position() as usize] = Some(text);
         }
+        // A table with no rows declared no version, and a table with rows
+        // declared one on every row. The two are one question, asked once:
+        // a second emptiness check further down would be a rule no test could
+        // ever reach, and a rule nobody can see fail is not a rule.
+        let version = version.ok_or(ClauseError::NoRows)?;
         let mut texts = Vec::with_capacity(Clause::ALL.len());
         for clause in Clause::ALL.iter().copied() {
             let text = found[clause.position() as usize]
@@ -291,10 +294,7 @@ impl Ablation {
                 .ok_or(ClauseError::NoRowForClause(clause))?;
             texts.push((clause, text));
         }
-        Ok(Self {
-            version: version.ok_or(ClauseError::NoRows)?,
-            texts,
-        })
+        Ok(Self { version, texts })
     }
 
     /// Which version of the imperative this table is.
@@ -485,10 +485,34 @@ fn is_placeholder(text: &str) -> bool {
         return true;
     }
     PLACEHOLDER_SHAPES.iter().any(|(open, close)| {
-        trimmed.len() > open.len() + close.len()
+        // A bracket pair with nothing between it is a blank whose name was
+        // not even filled in, so the comparison admits the pair itself.
+        trimmed.len() >= open.len() + close.len()
             && trimmed.starts_with(open)
             && trimmed.ends_with(close)
     })
+}
+
+/// Whether a field's text declines.
+///
+/// The interview format types a TAGGED field's value and hands back
+/// [`Outcome::Decline`] when it is one. A region that carried no tag has no
+/// value for it to have typed -- its text is the whole of it -- so that text
+/// goes to the decline format here. Without this step the same words grade
+/// two ways: `LEARNED: I have nothing to add.` is inert and a bare
+/// `I have nothing to add.` counts as engagement, and the arm most likely to
+/// draw a short reply with no tag on it is the brevity clause under test.
+///
+/// A field the interview format already read as a value is not asked again.
+/// It classified that value through the same decline format, and a second
+/// reading of one text is how two answers to `is this a decline` come to
+/// exist.
+fn declines(field: &Field) -> bool {
+    match field.outcome {
+        Outcome::Decline(_) => true,
+        Outcome::Unparseable => decline::classify(field.raw.trim()).is_decline(),
+        Outcome::Value(_) => false,
+    }
 }
 
 /// What `answer` amounts to.
@@ -497,12 +521,17 @@ fn is_placeholder(text: &str) -> bool {
 /// endpoints cannot disagree about the same answer.
 ///
 /// A field says something when its text is not blank, not a decline, and not
-/// a placeholder. Whether it carried a tag does not enter into it: an answer
-/// written as prose is still an answer, and grading it as silence would count
-/// a formatting miss as a collapse. Echo of the ask is a fourth way to say
-/// nothing and is not read here -- it needs the ask, which these graders are
-/// not given, and it is the mimicry detector's endpoint rather than this
-/// ablation's.
+/// a placeholder. Whether it carried a tag does not enter into it, in either
+/// direction: an answer written as prose is still an answer, and grading it
+/// as silence would count a formatting miss as a collapse; a decline written
+/// as prose is still a decline, and grading it as engagement would count an
+/// answer that said it had nothing to say as one that said something.
+///
+/// Echo of the ask is a fourth way to say nothing and is not read here -- it
+/// needs the ask, which these graders are not given, and it is the mimicry
+/// detector's endpoint rather than this ablation's. The corpus carries an
+/// echoed ask graded as engagement so that the seam is written down where a
+/// later reader will trip over it.
 #[must_use]
 pub fn grade(answer: &Answer) -> Grade {
     let mut any_text = false;
@@ -512,7 +541,7 @@ pub fn grade(answer: &Answer) -> Grade {
             continue;
         }
         any_text = true;
-        if matches!(field.outcome, Outcome::Decline(_)) {
+        if declines(field) {
             continue;
         }
         if is_placeholder(&field.raw) {
@@ -960,11 +989,43 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        Ablation, Arm, Bootstrap, BootstrapError, CONTROL_TAG, Clause, ClauseError, Endpoint,
-        Grade, P_DIGITS, Rate, arms, attainable_p_floor, engagement, grade, paired_bootstrap,
-        silence,
+        Ablation, Arm, Bootstrap, BootstrapError, CLAUSE_KEY, CONTROL_TAG, Clause, ClauseError,
+        Endpoint, Grade, P_DIGITS, Preferred, Prng, Rate, TEXT_KEY, VERSION_KEY, arms,
+        attainable_p_floor, engagement, grade, paired_bootstrap, silence,
     };
     use crate::formats::interview;
+
+    /// Every arm, by the name it is reported under and the imperative it puts
+    /// in the fork.
+    ///
+    /// Written out here rather than computed from the vocabulary. A test that
+    /// asks the code what it rendered and then asserts that it rendered that
+    /// cannot see a table that shrank, a name that collided with another
+    /// arm's, or a separator that vanished -- and those are the three ways
+    /// the one string this ablation varies goes wrong without anything
+    /// failing.
+    const PRE_REGISTERED_ARMS: &[(&str, &str)] = &[
+        ("none", ""),
+        ("scope", "Answer from this turn."),
+        ("exclusion", "Do not answer from earlier turns."),
+        (
+            "scope+exclusion",
+            "Answer from this turn. Do not answer from earlier turns.",
+        ),
+        ("brevity", "A sentence is enough."),
+        (
+            "scope+brevity",
+            "Answer from this turn. A sentence is enough.",
+        ),
+        (
+            "exclusion+brevity",
+            "Do not answer from earlier turns. A sentence is enough.",
+        ),
+        (
+            "scope+exclusion+brevity",
+            "Answer from this turn. Do not answer from earlier turns. A sentence is enough.",
+        ),
+    ];
 
     fn shipped() -> Ablation {
         Ablation::shipped().expect("the shipped clause table reads")
@@ -986,33 +1047,55 @@ mod tests {
     ///
     /// A directory walk that finds nothing passes every assertion over it, so
     /// the emptiness is the first thing asserted rather than the last thing
-    /// noticed.
+    /// noticed. The pairing is asserted in both directions for the same
+    /// reason: a walk that asks only whether every case has an expectation
+    /// reports a corpus a case was deleted out of as a corpus that passed,
+    /// and the case that goes missing is the one whose grade some other case
+    /// also happens to carry.
     fn corpus() -> Vec<(String, interview::Answer, Grade)> {
         const SUFFIX: &str = ".answer.txt";
+        const EXPECTATION: &str = ".grade";
         let dir = corpus_dir();
-        let mut names: Vec<String> = std::fs::read_dir(&dir)
-            .unwrap_or_else(|err| panic!("{}: {err}", dir.display()))
-            .filter_map(Result::ok)
-            .filter_map(|entry| entry.file_name().into_string().ok())
-            .filter_map(|name| name.strip_suffix(SUFFIX).map(str::to_owned))
-            .collect();
+        let mut names: Vec<String> = Vec::new();
+        let mut expectations: Vec<String> = Vec::new();
+        for entry in
+            std::fs::read_dir(&dir).unwrap_or_else(|err| panic!("{}: {err}", dir.display()))
+        {
+            let file = entry
+                .unwrap_or_else(|err| panic!("{}: {err}", dir.display()))
+                .file_name()
+                .into_string()
+                .unwrap_or_else(|name| panic!("{}: {name:?} is not UTF-8", dir.display()));
+            if let Some(stem) = file.strip_suffix(SUFFIX) {
+                names.push(stem.to_owned());
+            } else if let Some(stem) = file.strip_suffix(EXPECTATION) {
+                expectations.push(stem.to_owned());
+            } else {
+                panic!(
+                    "{}: a stray file in the corpus, which is a file nothing reads",
+                    dir.join(&file).display()
+                );
+            }
+        }
         names.sort();
+        expectations.sort();
         assert!(
             !names.is_empty(),
             "{}: no cases, so every assertion over this corpus would hold vacuously",
             dir.display()
         );
+        assert_eq!(
+            names, expectations,
+            "the corpus holds a case with no expectation or an expectation with no case, so it \
+             walks fewer cases than it looks like it does"
+        );
         let mut cases = Vec::new();
         for name in names {
             let source = std::fs::read_to_string(dir.join(format!("{name}{SUFFIX}")))
                 .unwrap_or_else(|err| panic!("{name}{SUFFIX}: {err}"));
-            let expectation = dir.join(format!("{name}.grade"));
-            let written = std::fs::read_to_string(&expectation).unwrap_or_else(|err| {
-                panic!(
-                    "{}: every case is paired with its expected grade: {err}",
-                    expectation.display()
-                )
-            });
+            let expectation = dir.join(format!("{name}{EXPECTATION}"));
+            let written = std::fs::read_to_string(&expectation)
+                .unwrap_or_else(|err| panic!("{}: {err}", expectation.display()));
             let grade = Grade::from_tag(written.trim()).unwrap_or_else(|| {
                 panic!(
                     "{}: `{}` is not a grade",
@@ -1227,26 +1310,237 @@ mod tests {
         );
     }
 
+    // Acceptance: both endpoints are declared before any arm runs, and each
+    // is declared in the direction it will be read in. The lines are written
+    // out here rather than gathered from `Endpoint::ALL`, because a test that
+    // iterates the table it is guarding cannot see a table with an endpoint
+    // taken out of it, and cannot see a direction that was turned around.
     #[test]
-    fn the_plan_states_both_endpoints_and_every_arm() {
+    fn both_endpoints_are_pre_registered_in_the_direction_each_is_read_in() {
+        assert_eq!(
+            Endpoint::ALL.len(),
+            2,
+            "the pre-registration no longer carries two endpoints, and an \
+             ablation of one endpoint is the experiment this one exists to \
+             improve on"
+        );
+        assert_eq!(Endpoint::Engagement.tag(), "engagement");
+        assert_eq!(Endpoint::Silence.tag(), "silence");
+        assert_eq!(Endpoint::Engagement.preferred(), Preferred::Higher);
+        assert_eq!(
+            Endpoint::Silence.preferred(),
+            Preferred::Lower,
+            "silence is declared as an outcome to want more of, so a wording \
+             that collapses answers would be read as the winner"
+        );
+        let rendered = shipped().plan(999).to_string();
+        for line in [
+            "  engagement  (higher is better)  a field of the answer that is not blank, a \
+             decline or a blank left in",
+            "  silence  (lower is better)  an answer carrying no text at all",
+        ] {
+            assert!(
+                rendered.contains(line),
+                "the pre-registration no longer states the endpoint line `{line}`:\n{rendered}"
+            );
+        }
+    }
+
+    // Acceptance: the plan is the artifact this branch produces, and every
+    // arm in it is named with the imperative that arm actually puts in the
+    // fork. A plan that prints one imperative eight times is a plan for an
+    // experiment with one arm.
+    #[test]
+    fn the_plan_pairs_every_arm_with_its_own_imperative_and_says_none_has_run() {
         let plan = shipped().plan(999);
         let rendered = plan.to_string();
-        for endpoint in Endpoint::ALL {
+        for (name, imperative) in PRE_REGISTERED_ARMS {
+            let line = format!("  {name}  {imperative}");
             assert!(
-                rendered.contains(endpoint.tag()),
-                "the plan omits the endpoint `{}`",
-                endpoint.tag()
-            );
-            assert!(rendered.contains(endpoint.preferred().tag()));
-        }
-        for arm in arms() {
-            assert!(
-                rendered.contains(&arm.tag()),
-                "the plan omits the arm `{}`",
-                arm.tag()
+                rendered.contains(&line),
+                "the plan does not pair the arm `{name}` with its own imperative \
+                 `{imperative}`:\n{rendered}"
             );
         }
+        assert!(
+            rendered
+                .contains("no arm has been run: driving one needs a model, and there is none here"),
+            "the plan no longer discloses that no arm has been run, which is the only \
+             thing it can honestly say about a result:\n{rendered}"
+        );
         assert_eq!(plan.attainable_p_floor().fixed(P_DIGITS), "0.0010");
+    }
+
+    // A results table is read by the names in its first column. Two arms
+    // under one name is two rows nobody can tell apart, and the arm the
+    // reader takes for the full sentence may be the one clause of it.
+    #[test]
+    fn every_arm_is_reported_under_a_name_no_other_arm_answers_to() {
+        let tags: Vec<String> = arms().into_iter().map(Arm::tag).collect();
+        for (index, tag) in tags.iter().enumerate() {
+            for (other, later) in tags.iter().enumerate().skip(index + 1) {
+                assert_ne!(
+                    tag, later,
+                    "two arms of the ablation are reported under one name: arm {index} and \
+                     arm {other} are both `{tag}`"
+                );
+            }
+        }
+        assert_eq!(tags.len(), PRE_REGISTERED_ARMS.len());
+        for (index, (name, _)) in PRE_REGISTERED_ARMS.iter().enumerate() {
+            assert_eq!(
+                &tags[index], name,
+                "the arm at index {index} is reported as `{}` where the pre-registration \
+                 names `{name}`",
+                tags[index]
+            );
+        }
+    }
+
+    // The rendered imperative is the only thing the arms of this ablation
+    // differ in. Nothing else in the tree pins its text, so a clause boundary
+    // that vanished would go into every fork of a run with the gate green.
+    #[test]
+    fn the_full_arm_renders_the_sentence_this_ablation_takes_apart() {
+        let table = shipped();
+        assert_eq!(table.text(Clause::Scope), "Answer from this turn.");
+        assert_eq!(
+            table.text(Clause::Exclusion),
+            "Do not answer from earlier turns."
+        );
+        assert_eq!(table.text(Clause::Brevity), "A sentence is enough.");
+        assert_eq!(
+            table.render(Arm::of(Clause::ALL)),
+            "Answer from this turn. Do not answer from earlier turns. A sentence is enough.",
+            "the imperative an arm puts in the fork is not its clauses separated by one \
+             space, and that text is the whole of what this experiment manipulates"
+        );
+    }
+
+    // A bootstrap that resamples wrongly is the failure mode a bootstrap
+    // actually has, and it is invisible to every test that hands it a vector
+    // where the draws cannot matter. This vector is mixed, so the p is a
+    // fact about the draws: a resample that takes one outcome instead of
+    // six, or takes the same fork six times, reports a different one.
+    #[test]
+    fn a_resample_draws_one_outcome_for_every_fork_there_is() {
+        let a = [true, true, true, false, true, true];
+        let b = [false, true, false, false, true, false];
+        let result = paired_bootstrap(&a, &b, 99, 7).expect("a well-formed bootstrap");
+        assert_eq!(
+            result.p_value(),
+            Rate::new(3, 100).expect("a rate"),
+            "the resamples no longer draw one outcome for every fork: this vector at this \
+             seed crosses twice in 99 resamples"
+        );
+    }
+
+    #[test]
+    fn the_generator_advances_so_a_resample_is_not_one_fork_counted_over() {
+        let mut prng = Prng(7);
+        let drawn: BTreeMap<u64, usize> = (0..64).fold(BTreeMap::new(), |mut seen, _| {
+            *seen.entry(prng.below(6)).or_default() += 1;
+            seen
+        });
+        assert_eq!(
+            drawn.len(),
+            6,
+            "a seeded draw did not reach every fork in 64 tries, so a resample is one fork \
+             counted over and over rather than the sample it claims to be"
+        );
+    }
+
+    // The p is a statement about two counts, and the counts are printed in
+    // the same line as the p. An arm credited with the other arm outcomes
+    // reports a real p about a comparison that never happened.
+    #[test]
+    fn each_arms_rate_counts_that_arms_own_outcomes() {
+        let a = [true, true, true, false, true, true];
+        let b = [false, true, false, false, true, false];
+        let result = paired_bootstrap(&a, &b, 99, 7).expect("a well-formed bootstrap");
+        assert_eq!(
+            result.rate_a().numerator(),
+            5,
+            "the first arm held on 5 of these 6 forks and the bootstrap counted {} of them",
+            result.rate_a().numerator()
+        );
+        assert_eq!(result.rate_b().numerator(), 2);
+        assert_eq!(result.rate_a().denominator(), 6);
+        assert_eq!(result.rate_b().denominator(), 6);
+        assert!(
+            result.report().starts_with("5/6 against 2/6: p "),
+            "the reported line opens with counts that are not the ones it was handed: {}",
+            result.report()
+        );
+    }
+
+    // Eleven ways a clause table is refused, and each of them is a rule
+    // somebody could delete. A refusal nothing has ever seen fire is a
+    // sentence in a Display impl.
+    #[test]
+    fn a_clause_table_that_breaks_the_schema_says_which_rule_it_broke() {
+        let cases: Vec<(&str, &str, ClauseError)> = vec![
+            ("no rows at all", "", ClauseError::NoRows),
+            (
+                "a blank clause text",
+                "{\"version\":1,\"clause\":\"scope\",\"text\":\" \"}\n",
+                ClauseError::BlankText(Clause::Scope),
+            ),
+            (
+                "a clause text spanning lines",
+                "{\"version\":1,\"clause\":\"exclusion\",\"text\":\"one\\ntwo\"}\n",
+                ClauseError::TextSpansLines(Clause::Exclusion),
+            ),
+            (
+                "two rows for one clause",
+                "{\"version\":1,\"clause\":\"scope\",\"text\":\"x\"}\n\
+                 {\"version\":1,\"clause\":\"scope\",\"text\":\"y\"}\n",
+                ClauseError::DuplicateClause(Clause::Scope),
+            ),
+            (
+                "a row with no version",
+                "{\"clause\":\"scope\",\"text\":\"x\"}\n",
+                ClauseError::MissingKey(VERSION_KEY),
+            ),
+            (
+                "a row with no clause",
+                "{\"version\":1,\"text\":\"x\"}\n",
+                ClauseError::MissingKey(CLAUSE_KEY),
+            ),
+            (
+                "a row with no text",
+                "{\"version\":1,\"clause\":\"scope\"}\n",
+                ClauseError::MissingKey(TEXT_KEY),
+            ),
+            (
+                "a version written as a string",
+                "{\"version\":\"1\",\"clause\":\"scope\",\"text\":\"x\"}\n",
+                ClauseError::WrongType(VERSION_KEY),
+            ),
+            (
+                "a clause written as a number",
+                "{\"version\":1,\"clause\":1,\"text\":\"x\"}\n",
+                ClauseError::WrongType(CLAUSE_KEY),
+            ),
+            (
+                "a text written as a number",
+                "{\"version\":1,\"clause\":\"scope\",\"text\":1}\n",
+                ClauseError::WrongType(TEXT_KEY),
+            ),
+            (
+                "a clause the vocabulary does not have",
+                "{\"version\":1,\"clause\":\"tone\",\"text\":\"x\"}\n",
+                ClauseError::UnknownClause("tone".to_owned()),
+            ),
+        ];
+        for (label, source, expected) in cases {
+            let got = Ablation::load(source);
+            assert_eq!(
+                got,
+                Err(expected),
+                "a clause table with {label} was not refused for that reason: {got:?}"
+            );
+        }
     }
 
     #[test]

@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 114
+red_faults = 126
 mechanics_assertions = 27
 migrated = 0
 
@@ -388,6 +388,114 @@ check = "test"
 label = "a p reported without its floor"
 failure_class = "ablation.p-floor-omitted"
 legacy_signature = "a p reported without its attainable floor"
+migrated = false
+
+[[fault]]
+id = "test.ablation_resample_single_draw"
+kind = "seeded-gate"
+check = "test"
+label = "a resample that draws once"
+failure_class = "ablation.resample-degenerate"
+legacy_signature = "the resamples no longer draw one outcome for every fork"
+migrated = false
+
+[[fault]]
+id = "test.ablation_frozen_generator"
+kind = "seeded-gate"
+check = "test"
+label = "a generator that never advances"
+failure_class = "ablation.resample-frozen"
+legacy_signature = "a seeded draw did not reach every fork in 64 tries"
+migrated = false
+
+[[fault]]
+id = "test.ablation_rates_swapped"
+kind = "seeded-gate"
+check = "test"
+label = "each arm credited with the other's"
+failure_class = "ablation.rate-misattributed"
+legacy_signature = "the first arm held on 5 of these 6 forks and the bootstrap counted"
+migrated = false
+
+[[fault]]
+id = "test.ablation_endpoint_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "the silence endpoint unregistered"
+failure_class = "ablation.endpoint-unregistered"
+legacy_signature = "the pre-registration no longer carries two endpoints"
+migrated = false
+
+[[fault]]
+id = "test.ablation_plan_one_imperative"
+kind = "seeded-gate"
+check = "test"
+label = "one imperative for every arm"
+failure_class = "ablation.plan-arms-collapsed"
+legacy_signature = "the plan does not pair the arm"
+migrated = false
+
+[[fault]]
+id = "test.ablation_arm_names_collide"
+kind = "seeded-gate"
+check = "test"
+label = "two arms under one name"
+failure_class = "ablation.arm-name-collision"
+legacy_signature = "two arms of the ablation are reported under one name"
+migrated = false
+
+[[fault]]
+id = "test.ablation_clauses_run_together"
+kind = "seeded-gate"
+check = "test"
+label = "an arm's clauses run together"
+failure_class = "ablation.imperative-malformed"
+legacy_signature = "the imperative an arm puts in the fork is not its clauses separated by one"
+migrated = false
+
+[[fault]]
+id = "test.ablation_placeholder_word_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "a placeholder nobody counts"
+failure_class = "ablation.placeholder-uncounted"
+legacy_signature = "the-placeholder-words-nobody-replaced: graded .engaged. where the corpus says .inert."
+migrated = false
+
+[[fault]]
+id = "test.ablation_blank_clause_allowed"
+kind = "seeded-gate"
+check = "test"
+label = "a blank clause text admitted"
+failure_class = "ablation.blank-clause-admitted"
+legacy_signature = "a clause table with a blank clause text was not refused for that reason"
+migrated = false
+
+[[fault]]
+id = "test.ablation_corpus_case_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "a grading case quietly dropped"
+failure_class = "ablation.corpus-unpaired"
+legacy_signature = "the corpus holds a case with no expectation or an expectation with no case"
+migrated = false
+
+[[fault]]
+id = "test.ablation_untagged_decline_engages"
+kind = "seeded-gate"
+check = "test"
+label = "an untagged decline read as content"
+failure_class = "ablation.untagged-decline-engages"
+legacy_signature = "an-untagged-decline: graded .engaged. where the corpus says .inert."
+migrated = false
+
+[[fault]]
+id = "test.json_objects_unbounded"
+kind = "seeded-gate"
+check = "test"
+label = "the second reader left unbounded"
+failure_class = "record.json-lines-unbounded"
+legacy_signature = "a JSON Lines reader that does not bound its nesting"
 migrated = false
 
 [[fault]]

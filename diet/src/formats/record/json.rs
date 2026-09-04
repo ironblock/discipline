@@ -13,7 +13,7 @@ use std::fmt;
 use pest::Parser as _;
 use pest::iterators::Pair;
 
-use super::{RecordParser, Rule};
+use super::{MAX_DEPTH, RecordParser, Rule, too_deep};
 
 /// A value a record may carry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,6 +155,17 @@ pub fn object(pair: &Pair<'_, Rule>) -> Result<BTreeMap<String, Value>, ValueErr
 /// Why a JSON Lines text could not be read as objects.
 #[derive(Debug)]
 pub enum LineError {
+    /// The text nests deeper than [`MAX_DEPTH`].
+    ///
+    /// Checked before the grammar runs, for the same reason the record's own
+    /// reader checks it: the grammar is what would otherwise recurse until
+    /// the stack ran out, and a stack overflow is not a verdict.
+    TooDeep {
+        /// How deep it went.
+        depth: usize,
+        /// The limit.
+        limit: usize,
+    },
     /// The text is not JSON Lines in the record's value space.
     Syntax(Box<pest::error::Error<Rule>>),
     /// A line parsed, and its value space could not be read.
@@ -164,6 +175,12 @@ pub enum LineError {
 impl fmt::Display for LineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::TooDeep { depth, limit } => write!(
+                f,
+                "nested {depth} deep, and the limit is {limit}; deeper than \
+                 that the parser runs out of stack, and a crash is not a \
+                 verdict"
+            ),
             Self::Syntax(err) => write!(f, "{err}"),
             Self::Value(err) => write!(f, "{err}"),
         }
@@ -190,12 +207,19 @@ impl From<ValueError> for LineError {
 ///
 /// # Errors
 ///
-/// Returns [`LineError::Syntax`] when the text is not JSON Lines in the
-/// record's value space -- a `null`, an exponent, a binary float, an object
-/// spanning two lines -- and [`LineError::Value`] for a line the value space
-/// cannot decode: a duplicate key, an integer outside `i64`, an escape naming
-/// no character.
+/// Returns [`LineError::TooDeep`] for text nested past [`MAX_DEPTH`],
+/// [`LineError::Syntax`] when the text is not JSON Lines in the record's
+/// value space -- a `null`, an exponent, a binary float, an object spanning
+/// two lines -- and [`LineError::Value`] for a line the value space cannot
+/// decode: a duplicate key, an integer outside `i64`, an escape naming no
+/// character.
 pub fn objects(text: &str) -> Result<Vec<BTreeMap<String, Value>>, LineError> {
+    if let Some(depth) = too_deep(text) {
+        return Err(LineError::TooDeep {
+            depth,
+            limit: MAX_DEPTH,
+        });
+    }
     let document = RecordParser::parse(Rule::document, text)
         .map_err(|err| LineError::Syntax(Box::new(err)))?
         .next()
@@ -343,4 +367,63 @@ fn render_string(text: &str, out: &mut String) {
         }
     }
     out.push('"');
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LineError, MAX_DEPTH, Value, objects};
+
+    // A crash is not a verdict, and this is the second public reader of the
+    // record grammar. The first one refuses text nested past the limit before
+    // the parser sees it; a reader that skips the check aborts the process on
+    // input its neighbour returns an error about.
+    #[test]
+    fn a_line_nested_past_the_limit_is_a_verdict_and_not_a_crash() {
+        let deep = format!(
+            "{{\"a\":{}0{}}}\n",
+            "[".repeat(MAX_DEPTH + 1),
+            "]".repeat(MAX_DEPTH + 1)
+        );
+        assert!(
+            matches!(objects(&deep), Err(LineError::TooDeep { .. })),
+            "a JSON Lines reader that does not bound its nesting hands the \
+             stack to the input"
+        );
+        let shallow = format!(
+            "{{\"a\":{}0{}}}\n",
+            "[".repeat(MAX_DEPTH - 1),
+            "]".repeat(MAX_DEPTH - 1)
+        );
+        assert!(
+            objects(&shallow).is_ok(),
+            "the limit rejects a line a record would accept"
+        );
+    }
+
+    // The value space is the record's, not a second one written for the
+    // occasion: what a record refuses in a line, this refuses in a line.
+    #[test]
+    fn a_line_the_value_space_cannot_decode_is_refused_rather_than_dropped() {
+        assert!(matches!(
+            objects("{\"a\":1,\"a\":2}\n"),
+            Err(LineError::Value(_))
+        ));
+        assert!(matches!(
+            objects("{\"a\":99999999999999999999}\n"),
+            Err(LineError::Value(_))
+        ));
+        assert!(matches!(
+            objects("{\"a\":null}\n"),
+            Err(LineError::Syntax(_))
+        ));
+    }
+
+    #[test]
+    fn one_object_per_line_and_blank_lines_are_not_objects() {
+        let read = objects("{\"a\":1}\n\n{\"b\":\"two\"}\n").expect("two objects");
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0].get("a"), Some(&Value::Integer(1)));
+        assert_eq!(read[1].get("b"), Some(&Value::String("two".to_owned())));
+        assert!(objects("").expect("no objects").is_empty());
+    }
 }
