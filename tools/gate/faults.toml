@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 120
+red_faults = 135
 mechanics_assertions = 27
 migrated = 0
 
@@ -427,12 +427,147 @@ legacy_signature = "archive was refused by diet check-record"
 migrated = false
 
 [[fault]]
-id = "integration.drive_failure_set_unchecked"
+id = "test.battery_regime_invented"
+kind = "seeded-gate"
+check = "test"
+label = "a regime nothing served"
+failure_class = "battery.regime-invented"
+legacy_signature = "regime the responder never answered under"
+migrated = false
+
+[[fault]]
+id = "test.battery_archive_truncated"
+kind = "seeded-gate"
+check = "test"
+label = "a drive archive cut to its first row"
+failure_class = "battery.archive-incomplete"
+legacy_signature = "holds a turn for every behaviour or it is not the archive of this drive"
+migrated = false
+
+[[fault]]
+id = "test.battery_archive_payloads_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "an archive with its payloads dropped"
+failure_class = "battery.archive-is-a-ledger"
+legacy_signature = "is a ledger of a drive and not the archive of one"
+migrated = false
+
+[[fault]]
+id = "test.battery_ask_blanked"
+kind = "seeded-gate"
+check = "test"
+label = "a probe put with an empty prompt"
+failure_class = "battery.ask-not-put"
+legacy_signature = "was put with something other than the ask its file carries"
+migrated = false
+
+[[fault]]
+id = "test.battery_tool_never_offered"
+kind = "seeded-gate"
+check = "test"
+label = "a tool offered with no probe"
+failure_class = "battery.offer-not-put"
+legacy_signature = "a tool the battery never offered is a tool the candidate was never asked to call"
+migrated = false
+
+[[fault]]
+id = "test.battery_offer_unnamed_in_the_ask"
+kind = "seeded-gate"
+check = "test"
+label = "an ask that never names its tool"
+failure_class = "battery.offer-unnamed-in-the-ask"
+legacy_signature = "never names it, so a candidate reading its prompt"
+migrated = false
+
+[[fault]]
+id = "test.battery_seam_render_empty"
+kind = "seeded-gate"
+check = "test"
+label = "a seam that renders nothing"
+failure_class = "battery.seam-rendered-nothing"
+legacy_signature = "the refill ask names no entry"
+migrated = false
+
+[[fault]]
+id = "test.battery_seam_renders_only_the_id"
+kind = "seeded-gate"
+check = "test"
+label = "a seam that renders only an id"
+failure_class = "battery.seam-rendered-no-object"
+legacy_signature = "carries an entry id and not the object it belongs to"
+migrated = false
+
+[[fault]]
+id = "test.battery_tokens_from_bytes"
+kind = "seeded-gate"
+check = "test"
+label = "byte lengths written as token counts"
+failure_class = "battery.counts-not-reported"
+legacy_signature = "wrote a prompt cost the responder never reported"
+migrated = false
+
+[[fault]]
+id = "test.battery_report_claims_compliance"
+kind = "seeded-gate"
+check = "test"
+label = "a report that claims compliance"
+failure_class = "battery.report-disagrees-with-verdict"
+legacy_signature = "claims a compliance the battery did not decide"
+migrated = false
+
+[[fault]]
+id = "test.battery_script_without_turns"
+kind = "seeded-gate"
+check = "test"
+label = "a canned script with no turns"
+failure_class = "battery.fixture-answers-nothing"
+legacy_signature = "a script with no turns answers nothing"
+migrated = false
+
+[[fault]]
+id = "test.battery_turn_without_answer"
+kind = "seeded-gate"
+check = "test"
+label = "a canned script with a hole"
+failure_class = "battery.fixture-has-a-hole"
+legacy_signature = "a turn with no response row is a hole in the script"
+migrated = false
+
+[[fault]]
+id = "test.battery_completion_unchecked"
+kind = "seeded-gate"
+check = "test"
+label = "an answer that is not whole accepted"
+failure_class = "battery.incomplete-answer-accepted"
+legacy_signature = "the reason must say the answer was empty"
+migrated = false
+
+[[fault]]
+id = "integration.drive_expected_red_refused"
+kind = "seeded-gate"
+check = "integration"
+label = "an expected red refused by the lane"
+failure_class = "lane.expected-red-refused"
+legacy_signature = "did not fail uses_offered_tool alone"
+migrated = false
+
+[[fault]]
+id = "integration.drive_wrong_red_accepted"
 kind = "seeded-gate"
 check = "integration"
 label = "any red accepted from a fixture"
 failure_class = "lane.failure-set-unchecked"
-legacy_signature = "did not fail uses_offered_tool alone"
+legacy_signature = "accepted a red it was not required to have"
+migrated = false
+
+[[fault]]
+id = "integration.drive_failure_unnamed"
+kind = "seeded-gate"
+check = "integration"
+label = "a red the drive does not name"
+failure_class = "lane.verdict-without-a-subject"
+legacy_signature = "did not name the behaviour that failed"
 migrated = false
 
 [[fault]]
@@ -441,7 +576,7 @@ kind = "seeded-gate"
 check = "integration"
 label = "a failed battery that exits zero"
 failure_class = "lane.verdict-not-an-exit-code"
-legacy_signature = "answers nothing parseable passed the battery"
+legacy_signature = "answers nothing parseable did not exit 1"
 migrated = false
 
 [[fault]]

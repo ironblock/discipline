@@ -23,7 +23,9 @@
 
 use std::process::ExitCode;
 
-use diet::capture::battery::{Battery, Behaviour, CannedResponder, render_value, servers_dir};
+use std::path::{Path, PathBuf};
+
+use diet::capture::battery::{Battery, Behaviour, CannedResponder, render_value};
 use diet::formats::record;
 
 /// A usage error, kept distinct from a battery failure the way the CLI keeps
@@ -31,6 +33,16 @@ use diet::formats::record;
 const EXIT_USAGE: u8 = 2;
 /// A behaviour that did not hold.
 const EXIT_FAIL: u8 = 1;
+
+/// Where the canned servers live, found from the crate's own directory.
+///
+/// Resolved here rather than in the library so that no artifact linking the
+/// crate carries the absolute path of whatever machine built it. A corpus
+/// found through the working directory instead is a corpus that silently
+/// walks zero files when the runner starts somewhere else.
+fn servers_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("capture/battery/servers")
+}
 
 fn usage() -> String {
     let mut out = String::from(

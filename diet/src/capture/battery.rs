@@ -22,10 +22,14 @@
 //! Two consequences are in the types rather than in a convention:
 //!
 //! * **The substrate is supplied, never chosen here.** [`Responder::regime`]
-//!   is required, and the record the drive writes names it. Which serving
-//!   engine, which weights and what time budget a dev-loop regimen pins is an
-//!   open ruling; a default here would settle it by accident, and the run
-//!   whose result surprises somebody is the run nobody thought to tag.
+//!   is required, and the record the drive writes names it. A required trait
+//!   method only stops a regime being invented at the seam; that the archive
+//!   opens on the regime the responder answered under is a second rule, and
+//!   `the_archive_opens_on_the_regime_the_responder_answered_under` is what
+//!   holds it. Which serving engine, which weights and what time budget a
+//!   dev-loop regimen pins is an open ruling; a default here would settle it
+//!   by accident, and the run whose result surprises somebody is the run
+//!   nobody thought to tag.
 //! * **A canned responder is a fixture, not a service.** [`CannedResponder`]
 //!   replays an archived drive off disk. It opens no socket and binds no port,
 //!   so the battery is the same offline, in a sandbox, and on a machine that
@@ -219,7 +223,9 @@ pub struct ToolInvocation {
 /// The token counts come from the responder rather than from a count this
 /// module makes: nothing here can tokenize, and a length in bytes written into
 /// a field named for tokens is a measurement of the wrong thing that reads
-/// like a measurement of the right one.
+/// like a measurement of the right one. What the archive writes into those
+/// fields is asked of a responder reporting counts of its own, by
+/// `the_archive_counts_the_tokens_the_responder_reported`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Reply {
     /// The prose that came back. May be empty: an answer of nothing at all is
@@ -510,8 +516,9 @@ impl<'a> Exchange<'a> {
             }
             Behaviour::SurvivesSeamRefill => self.put_seam_refill(responder),
             Behaviour::ProducesClosableTangent => {
+                let answer_id = self.answer_id(self.next);
                 let reply = self.send(responder, self.behaviour.ask().to_owned(), None);
-                judge_produces_closable_tangent(&reply, self.regime, self.turn)
+                judge_produces_closable_tangent(&reply, self.regime, self.turn, &answer_id)
             }
         }
     }
@@ -694,14 +701,27 @@ fn judge_declines_correctly(reply: &Reply) -> Outcome {
     Outcome::Pass
 }
 
-fn judge_produces_closable_tangent(reply: &Reply, regime: &Regime, turn: u32) -> Outcome {
+/// The excursion's entries are named after the response they came out of.
+///
+/// `answer_id` is the id of the record row that carried them, so an entry a
+/// closure disposes of can be traced back to the row that produced it. An id
+/// minted from a counter alone would name nothing in the record.
+fn judge_produces_closable_tangent(
+    reply: &Reply,
+    regime: &Regime,
+    turn: u32,
+    answer_id: &str,
+) -> Outcome {
     let answer = match read_answer(&reply.text) {
         Ok(answer) => answer,
         Err(outcome) => return outcome,
     };
     let mut patches = Vec::new();
     for (index, (kind, content)) in tagged_values(&answer).into_iter().enumerate() {
-        let id = match EntryId::new(&format!("excursion/{}/{index}", kind.canonical_tag())) {
+        let id = match EntryId::new(&format!(
+            "{answer_id}/excursion/{}/{index}",
+            kind.canonical_tag()
+        )) {
             Ok(id) => id,
             Err(err) => return Outcome::Fail(refused(&err)),
         };
@@ -742,16 +762,6 @@ fn refused(err: &ObjectError) -> String {
 // ---------------------------------------------------------------------------
 // the canned responder
 // ---------------------------------------------------------------------------
-
-/// Where the canned servers live.
-///
-/// Resolved from the crate's own directory at compile time. A corpus found
-/// through the working directory is a corpus that silently walks zero files
-/// when the test runner starts somewhere else.
-#[must_use]
-pub fn servers_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("capture/battery/servers")
-}
 
 /// A canned server: an archived drive, replayed.
 ///
@@ -947,12 +957,22 @@ pub fn render_value(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ASKS, Battery, Behaviour, CannedResponder, EXCURSION_ENTRIES, OFFERED_TOOL, Outcome, Probe,
-        REFILL_ASK, Reply, Responder, ToolInvocation, servers_dir,
+        ASKS, Battery, BatteryError, Behaviour, CannedResponder, EXCURSION_ENTRIES, OFFERED_TOOL,
+        Offer, Outcome, Probe, REFILL_ASK, Reply, Responder, ToolInvocation, Value,
     };
-    use crate::formats::record::Regime;
+    use crate::formats::record::{Count, Event, Record, Regime};
     use std::collections::{BTreeMap, BTreeSet};
     use std::path::{Path, PathBuf};
+
+    /// Where the canned servers live, found from the crate's own directory.
+    ///
+    /// Here rather than in the library so that no artifact linking the crate
+    /// carries the absolute path of whatever machine built it. A corpus found
+    /// through the working directory instead is a corpus that silently walks
+    /// zero files when the test runner starts somewhere else.
+    fn servers_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("capture/battery/servers")
+    }
 
     /// What a canned server's `expected.tsv` says about one behaviour.
     ///
@@ -1041,12 +1061,18 @@ mod tests {
     }
 
     /// A responder that answers every probe with the same text and calls.
+    ///
+    /// The token counts are its own, reported the way a served substrate
+    /// reports them, so a test can ask what the archive wrote into the fields
+    /// named for them.
     #[derive(Debug)]
     struct Flat {
         id: String,
         regime: Regime,
         text: String,
         calls: Vec<ToolInvocation>,
+        prefill: Count,
+        output: Count,
     }
 
     impl Flat {
@@ -1056,6 +1082,8 @@ mod tests {
                 regime: canned().regime().clone(),
                 text: text.to_owned(),
                 calls: Vec::new(),
+                prefill: Count::default(),
+                output: Count::default(),
             }
         }
     }
@@ -1073,9 +1101,67 @@ mod tests {
             Reply {
                 text: self.text.clone(),
                 calls: self.calls.clone(),
-                ..Reply::default()
+                prefill_tokens: self.prefill,
+                output_tokens: self.output,
             }
         }
+    }
+
+    /// A canned server that keeps what it was put and what it said.
+    ///
+    /// The shipped responders ignore the probe, which is honest for a replay
+    /// but leaves the prompts the battery builds reaching nothing that can be
+    /// asked about them. This one is put the same probes and remembers them,
+    /// so what was sent is evidence rather than an assumption.
+    #[derive(Debug)]
+    struct Recording {
+        inner: CannedResponder,
+        put: Vec<Probe>,
+        said: Vec<Reply>,
+    }
+
+    impl Recording {
+        fn wrapping(inner: CannedResponder) -> Self {
+            Self {
+                inner,
+                put: Vec::new(),
+                said: Vec::new(),
+            }
+        }
+
+        /// What the first exchange of `behaviour` was put with.
+        fn first_ask(&self, behaviour: Behaviour) -> &str {
+            self.put
+                .iter()
+                .find(|probe| probe.behaviour == behaviour && probe.exchange == 1)
+                .map_or_else(
+                    || panic!("`{}` was never put at all", behaviour.tag()),
+                    |probe| probe.ask.as_str(),
+                )
+        }
+    }
+
+    impl Responder for Recording {
+        fn id(&self) -> &str {
+            self.inner.id()
+        }
+
+        fn regime(&self) -> &Regime {
+            self.inner.regime()
+        }
+
+        fn reply(&mut self, probe: &Probe) -> Reply {
+            let reply = self.inner.reply(probe);
+            self.put.push(probe.clone());
+            self.said.push(reply.clone());
+            reply
+        }
+    }
+
+    /// Every event of a compliant drive, as the drive would write it to a file.
+    fn compliant_archive() -> Vec<Event> {
+        let mut responder = canned();
+        Battery::drive(&mut responder).record().events
     }
 
     fn canned() -> CannedResponder {
@@ -1120,6 +1206,31 @@ mod tests {
             "{}: the ask files on disk and the ones the battery includes disagree",
             dir.display()
         );
+    }
+
+    /// The one thing an ask file's wording is checked against that is not the
+    /// ask file itself. Everything else about the corpus -- that a row exists,
+    /// that the file is not empty, that the probe carries it -- reads the same
+    /// bytes on both sides, so replacing a file with a single character would
+    /// hold: the offer is the one place where the code has an independent say
+    /// in what the prose has to contain.
+    #[test]
+    fn an_ask_that_offers_a_tool_names_it_and_the_arguments_a_call_needs() {
+        let ask = Behaviour::UsesOfferedTool.ask();
+        assert!(
+            ask.contains(OFFERED_TOOL.tool),
+            "the ask that offers `{}` never names it, so a candidate reading its prompt is \
+             asked to call something it was never told about",
+            OFFERED_TOOL.tool
+        );
+        for required in OFFERED_TOOL.required_args {
+            assert!(
+                ask.contains(required),
+                "the ask that offers `{}` never names its `{required}` argument, and a call \
+                 that omits it is what the battery then fails the behaviour for",
+                OFFERED_TOOL.tool
+            );
+        }
     }
 
     #[test]
@@ -1267,6 +1378,379 @@ mod tests {
             report.compliant(),
             "the compliant canned server must pass every behaviour: {:?}",
             report.failures()
+        );
+    }
+
+    #[test]
+    fn the_archive_opens_on_the_regime_the_responder_answered_under() {
+        let mut responder = canned();
+        let answered_under = responder.regime().clone();
+        let events = Battery::drive(&mut responder).record().events;
+        let Some(Event::Start { regime }) = events.first() else {
+            panic!("the drive's archive does not open on a start row");
+        };
+        assert_eq!(
+            **regime, answered_under,
+            "the archive opens on a regime the responder never answered under, which puts a \
+             substrate tag on a record nothing served"
+        );
+    }
+
+    #[test]
+    fn the_archive_holds_a_row_for_every_exchange_the_battery_put() {
+        let events = compliant_archive();
+        let turns: Vec<u32> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Turn { index, .. } => Some(*index),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            turns,
+            vec![1, 2, 3, 4, 5],
+            "the archive holds a turn for every behaviour or it is not the archive of this drive"
+        );
+
+        let asks: Vec<&str> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Request { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            asks,
+            vec![
+                "answers_parseably/1/ask",
+                "uses_offered_tool/1/ask",
+                "declines_correctly/1/ask",
+                "survives_seam_refill/1/ask",
+                "survives_seam_refill/2/ask",
+                "produces_closable_tangent/1/ask",
+            ],
+            "the archive is missing an exchange the battery put"
+        );
+
+        let answers: Vec<&str> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Response { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            answers,
+            vec![
+                "answers_parseably/1/answer",
+                "uses_offered_tool/1/answer",
+                "declines_correctly/1/answer",
+                "survives_seam_refill/1/answer",
+                "survives_seam_refill/2/answer",
+                "produces_closable_tangent/1/answer",
+            ],
+            "the archive is missing an answer the battery was given"
+        );
+
+        let calls: Vec<&str> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::ToolCall { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            calls,
+            vec!["uses_offered_tool/1/answer/call/0"],
+            "the archive is missing the tool call the compliant server made"
+        );
+
+        let seams: Vec<&str> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Seam { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            seams,
+            vec!["survives_seam_refill/seam"],
+            "the archive is missing the seam the refill rendered at"
+        );
+    }
+
+    #[test]
+    fn the_archive_keeps_the_prompts_the_answers_and_the_tool_arguments() {
+        let mut responder = Recording::wrapping(canned());
+        let events = Battery::drive(&mut responder).record().events;
+
+        let sent: Vec<Option<String>> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Request { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        for (row, probe) in sent.iter().zip(&responder.put) {
+            assert_eq!(
+                row.as_deref(),
+                Some(probe.ask.as_str()),
+                "the archive kept no prompt for `{}`, so it is a ledger of a drive and not \
+                 the archive of one",
+                probe.behaviour.tag()
+            );
+        }
+
+        let back: Vec<Option<String>> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Response { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        for (row, reply) in back.iter().zip(&responder.said) {
+            assert_eq!(
+                row.as_deref(),
+                Some(reply.text.as_str()),
+                "the archive kept no answer, so nothing can be replayed out of it"
+            );
+        }
+
+        let carried: Vec<Option<BTreeMap<String, Value>>> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::ToolCall { args, .. } => Some(args.clone()),
+                _ => None,
+            })
+            .collect();
+        let made: Vec<&ToolInvocation> = responder
+            .said
+            .iter()
+            .flat_map(|reply| reply.calls.iter())
+            .collect();
+        for (row, call) in carried.iter().zip(&made) {
+            assert_eq!(
+                row.as_ref(),
+                Some(&call.args),
+                "the archive kept no arguments for the call to `{}`, so what was recorded \
+                 through it is gone",
+                call.tool
+            );
+        }
+    }
+
+    #[test]
+    fn every_behaviour_is_put_with_the_ask_its_file_carries() {
+        let mut responder = Recording::wrapping(canned());
+        let _ = Battery::drive(&mut responder);
+
+        for behaviour in Behaviour::ALL.iter().copied() {
+            assert_eq!(
+                responder.first_ask(behaviour),
+                behaviour.ask(),
+                "`{}` was put with something other than the ask its file carries",
+                behaviour.tag()
+            );
+        }
+
+        let offered: Vec<(Behaviour, Option<Offer>)> = responder
+            .put
+            .iter()
+            .map(|probe| (probe.behaviour, probe.offered))
+            .collect();
+        assert_eq!(
+            offered,
+            vec![
+                (Behaviour::AnswersParseably, None),
+                (Behaviour::UsesOfferedTool, Some(OFFERED_TOOL)),
+                (Behaviour::DeclinesCorrectly, None),
+                (Behaviour::SurvivesSeamRefill, None),
+                (Behaviour::SurvivesSeamRefill, None),
+                (Behaviour::ProducesClosableTangent, None),
+            ],
+            "a tool the battery never offered is a tool the candidate was never asked to call"
+        );
+    }
+
+    /// That the follow-up itself was put is
+    /// `the_archive_keeps_the_prompts_the_answers_and_the_tool_arguments`'s
+    /// rule and `every_behaviour_has_an_ask_and_every_ask_file_is_named_by_one`'s;
+    /// what is asked here is whether the object went with it.
+    #[test]
+    fn the_refill_ask_carries_the_object_the_seam_rendered() {
+        let mut responder = Recording::wrapping(canned());
+        let _ = Battery::drive(&mut responder);
+        let refill = responder
+            .put
+            .iter()
+            .find(|probe| probe.behaviour == Behaviour::SurvivesSeamRefill && probe.exchange == 2)
+            .map_or_else(
+                || panic!("the seam behaviour never put a second exchange"),
+                |probe| probe.ask.clone(),
+            );
+
+        assert!(
+            refill.contains("survives_seam_refill/1/answer"),
+            "the refill ask names no entry, so nothing was rendered back into the prompt"
+        );
+        assert!(
+            refill.contains("the seam render is the only state the next turn carries"),
+            "the refill ask carries an entry id and not the object it belongs to, so the seam \
+             rendered nothing a candidate could answer from"
+        );
+    }
+
+    /// Row by row against what the responder said, rather than against a
+    /// count of rows: an archive missing rows altogether is what
+    /// `the_archive_holds_a_row_for_every_exchange_the_battery_put` refuses,
+    /// and a rule two tests both refuse is a rule neither can be seen to
+    /// carry alone.
+    #[test]
+    fn the_archive_counts_the_tokens_the_responder_reported() {
+        let mut responder = Flat::new("DECISION: the counts came from the responder");
+        responder.prefill = Count::new(7).unwrap_or_default();
+        responder.output = Count::new(11).unwrap_or_default();
+        let events = Battery::drive(&mut responder).record().events;
+
+        let prefills: Vec<u64> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Turn { prefill_tokens, .. } => Some(prefill_tokens.get()),
+                _ => None,
+            })
+            .collect();
+        for (wrote, reported) in prefills.iter().zip([7_u64, 7, 7, 14, 7]) {
+            assert_eq!(
+                *wrote, reported,
+                "the archive wrote a prompt cost the responder never reported; the seam \
+                 behaviour is two exchanges and every other behaviour is one"
+            );
+        }
+
+        let outputs: Vec<u64> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Response { output_tokens, .. } => Some(output_tokens.get()),
+                _ => None,
+            })
+            .collect();
+        for (wrote, reported) in outputs.iter().zip([11_u64; 6]) {
+            assert_eq!(
+                *wrote, reported,
+                "the archive wrote an answer cost the responder never reported, which is a \
+                 measurement of the wrong thing under the name of the right one"
+            );
+        }
+    }
+
+    #[test]
+    fn the_rendered_report_says_what_the_battery_decided() {
+        let dir = servers_dir().join("untagged-prose");
+        let mut responder =
+            CannedResponder::load(&dir).unwrap_or_else(|err| panic!("{}: {err}", dir.display()));
+        let report = Battery::run(&mut responder);
+        let rendered = report.value();
+        let Value::Object(top) = &rendered else {
+            panic!("the report did not render as an object")
+        };
+        assert_eq!(
+            top.get("compliant"),
+            Some(&Value::Boolean(report.compliant())),
+            "the rendered report claims a compliance the battery did not decide"
+        );
+        assert_eq!(
+            top.get("responder"),
+            Some(&Value::String(report.responder().to_owned())),
+            "the rendered report names a responder the battery did not put"
+        );
+        let Some(Value::Object(rows)) = top.get("behaviours") else {
+            panic!("the rendered report says nothing about any behaviour")
+        };
+        for behaviour in Behaviour::ALL.iter().copied() {
+            let outcome = report
+                .outcome(behaviour)
+                .unwrap_or_else(|| panic!("the report says nothing about `{}`", behaviour.tag()));
+            let Some(Value::Object(row)) = rows.get(behaviour.tag()) else {
+                panic!(
+                    "the rendered report says nothing about `{}`",
+                    behaviour.tag()
+                )
+            };
+            assert_eq!(
+                row.get("pass"),
+                Some(&Value::Boolean(outcome.is_pass())),
+                "the rendered report grades `{}` as something other than what the battery \
+                 decided",
+                behaviour.tag()
+            );
+            let reason = row.get("reason").and_then(|value| match value {
+                Value::String(text) => Some(text.as_str()),
+                _ => None,
+            });
+            assert_eq!(
+                reason,
+                outcome.reason(),
+                "the rendered report drops the reason `{}` was decided as it was",
+                behaviour.tag()
+            );
+        }
+    }
+
+    #[test]
+    fn a_canned_script_that_answers_nothing_is_refused_rather_than_replayed() {
+        let opening = Event::Start {
+            regime: Box::new(canned().regime().clone()),
+        };
+
+        let empty = Record {
+            events: vec![opening.clone()],
+        };
+        assert_eq!(
+            CannedResponder::from_record("empty", &empty).err(),
+            Some(BatteryError::NoExchanges),
+            "a script with no turns answers nothing, and replaying it reports every behaviour \
+             failed for a reason that is about the fixture"
+        );
+
+        let unanswered = Record {
+            events: vec![
+                opening,
+                Event::Turn {
+                    index: 1,
+                    prefill_tokens: Count::default(),
+                },
+            ],
+        };
+        assert_eq!(
+            CannedResponder::from_record("unanswered", &unanswered).err(),
+            Some(BatteryError::TurnWithoutAnswer { turn: 1 }),
+            "a turn with no response row is a hole in the script, and a hole answers one \
+             probe with another probe's answer"
+        );
+    }
+
+    #[test]
+    fn an_answer_that_is_not_whole_fails_the_parse_behaviour() {
+        let mut nothing = Flat::new("");
+        let reason = Battery::run(&mut nothing)
+            .outcome(Behaviour::AnswersParseably)
+            .and_then(Outcome::reason)
+            .unwrap_or_else(|| panic!("an answer of nothing at all is not a parseable answer"))
+            .to_owned();
+        assert!(
+            reason.contains("empty"),
+            "the reason must say the answer was empty, and says: {reason}"
+        );
+
+        let mut cut_off = Flat::new("DECISION:");
+        let reason = Battery::run(&mut cut_off)
+            .outcome(Behaviour::AnswersParseably)
+            .and_then(Outcome::reason)
+            .unwrap_or_else(|| panic!("an answer cut off mid-tag is not a whole answer"))
+            .to_owned();
+        assert!(
+            reason.contains("cut off"),
+            "the reason must say the answer was cut off, and says: {reason}"
         );
     }
 

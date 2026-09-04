@@ -173,15 +173,20 @@ check_regimen() {
 # There is no substrate here and none is chosen here. The canned servers are
 # archived drives replayed off disk -- no socket, no port, no clock -- so this
 # lane is the same in a sandbox, on a laptop and in CI. Which weights a
-# `dev-loop` regimen pins is an open ruling; when it is made, the server that
-# serves them implements `Responder` and this lane grows a second row.
+# `dev-loop` regimen pins, and what wall budget a lane serving them gets, are
+# open rulings; when they are made, the server that serves them implements
+# `Responder` and this lane grows a second row. Until then it runs beside the
+# other checks the crate owns and declares no budget of its own, because a
+# ceiling nobody measured would answer the second of those rulings by
+# accident.
 #
-# Deliberately NOT a second opinion on whether the compliant fixture complies:
-# `cargo test` decides that from the corpus, and a rule asserted in two places
-# is a rule neither place can be seen to carry alone. All this asks of the
-# compliant drive is that it RAN -- an exit above 1 is a crash, not a verdict.
+# Deliberately NOT a second opinion on whether the compliant fixture complies,
+# nor on what the archive holds: `cargo test` decides both from the corpus,
+# and a rule asserted in two places is a rule neither place can be seen to
+# carry alone. All this asks of the compliant drive is that it RAN -- an exit
+# above 1 is a crash, not a verdict.
 check_integration() {
-  local rc=0 resolved bin work drive_rc=0
+  local rc=0 resolved bin work drive_rc=0 wrong_rc=0 prose_rc=0
 
   build_diet || return $?
   cargo build --quiet -p discipline-diet --example drive || {
@@ -228,13 +233,41 @@ check_integration() {
     rc=1
   fi
 
-  # And a battery with failures is a non-zero exit, which is what makes this
-  # lane usable as a gate at all.
-  if cargo run --quiet --example drive -- --server untagged-prose > /dev/null 2>&1; then
-    echo "verify: a canned server that answers nothing parseable passed the battery" >&2
-    rc=1
+  # The other direction of that same comparison. Required against a set it
+  # matches, "and nothing else" is satisfied by any red at all; required
+  # against a behaviour this fixture passes, the drive has to refuse.
+  cargo run --quiet --example drive -- \
+    --server prose-where-a-tool-was-offered \
+    --require-failure produces_closable_tangent \
+    > /dev/null 2> "${work}/wrong-requirement.err" || wrong_rc=$?
+  if [ "$wrong_rc" -eq 1 ]; then
+    printf '  ok  the drive refused a red it was not required to have\n'
   else
-    printf '  ok  a canned server answering untagged prose exited non-zero\n'
+    echo "verify: the drive accepted a red it was not required to have (exit ${wrong_rc})" >&2
+    rc=1
+  fi
+
+  # A verdict a reader cannot act on is half a verdict, so the drive says
+  # which behaviour went red on its way out. The exit code above is the
+  # gate; this reads the stream that code was written beside.
+  if grep -q 'uses_offered_tool failed:' "${work}/wrong-requirement.err"; then
+    printf '  ok  the drive named the behaviour that failed\n'
+  else
+    echo "verify: the drive did not name the behaviour that failed" >&2
+    rc=1
+  fi
+
+  # And a battery with failures exits 1 EXACTLY, which is what makes this
+  # lane usable as a gate at all. Not merely non-zero: a drive that could not
+  # read its fixture, or that crashed before building a battery, is also
+  # non-zero, and a lane that cannot tell those from a verdict reports a
+  # verdict nobody reached.
+  cargo run --quiet --example drive -- --server untagged-prose > /dev/null 2>&1 || prose_rc=$?
+  if [ "$prose_rc" -eq 1 ]; then
+    printf '  ok  a canned server answering untagged prose exited 1, the verdict code\n'
+  else
+    echo "verify: a canned server that answers nothing parseable did not exit 1, the verdict code (exit ${prose_rc})" >&2
+    rc=1
   fi
 
   rm -rf "$work"
@@ -935,10 +968,11 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
-# The lane accepting any red from a fixture declared to fail one behaviour.
-# A fixture that starts failing for a second reason is as broken as one that
-# stops failing, and both read as green once the set is not compared.
-inject_drive_failure_set_unchecked() {
+# An expected red refused: the drive exits 0 only when NOTHING failed, so a
+# fixture declared to fail one behaviour is rejected for failing it. This is
+# the tightening direction of the same comparison; the loosening is
+# inject_drive_wrong_red_accepted, and one fault cannot stand for both.
+inject_drive_expected_red_refused() {
   python3 - <<'EOF'
 import pathlib
 
@@ -988,6 +1022,295 @@ old = "    for required in offered.required_args {"
 new = "    for required in &offered.required_args[..0] {"
 assert source.count(old) == 1
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The lane accepting any red from a fixture declared to fail one behaviour.
+# A fixture that starts failing for a second reason is as broken as one that
+# stops failing, and both read as green once the set is only ever compared
+# against a set it already matches.
+inject_drive_wrong_red_accepted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/examples/drive.rs")
+source = path.read_text(encoding="utf-8")
+old = "            if failed == vec![wanted] {"
+new = "            let _ = wanted;\n            if !failed.is_empty() {"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A drive that returns a verdict without saying what went red. The exit code
+# still discriminates, so every lane assertion that reads only the code stays
+# green while the reader is left with a number.
+inject_drive_failure_unnamed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/examples/drive.rs")
+source = path.read_text(encoding="utf-8")
+old = """        .map(|(behaviour, reason)| {
+            eprintln!("drive: {} failed: {reason}", behaviour.tag());
+            behaviour
+        })"""
+new = """        .map(|(behaviour, reason)| {
+            let _ = reason;
+            behaviour
+        })"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A regime in the archive that nothing served. The report is unaffected and
+# every behaviour is decided exactly as before; what changes is that the
+# record now carries a substrate tag for a substrate no candidate ran on.
+inject_battery_regime_invented() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = "        let regime = responder.regime().clone();\n"
+new = (
+    "        let mut regime = responder.regime().clone();\n"
+    '        "dev-loop-1.5b-instruct".clone_into(&mut regime.substrate.model);\n'
+    '        "cpu, 4 cores".clone_into(&mut regime.substrate.hardware);\n'
+)
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The drive's archive reduced to its opening row. `diet check-record` accepts
+# a record of one start row, so the lane's round trip stays green: what the
+# archive is missing is every exchange the drive actually had.
+inject_battery_archive_truncated() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = "            events: self.events.clone(),"
+new = "            events: self.events.iter().take(1).cloned().collect(),"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# An archive with every payload dropped: the prompts, the answers and the
+# arguments a tool was called with. The rows are all still there and still
+# link to each other, so it is a valid record -- a ledger of a drive rather
+# than the archive of one.
+inject_battery_archive_payloads_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+for old, new in (
+    ("            text: Some(probe.ask.clone()),", "            text: None,"),
+    ("                args: Some(call.args.clone()),", "                args: None,"),
+    ("            text: Some(reply.text.clone()),", "            text: None,"),
+):
+    assert source.count(old) == 1
+    source = source.replace(old, new, 1)
+path.write_text(source, encoding="utf-8")
+EOF
+}
+
+# Every probe put with an empty prompt. A replay ignores what it was asked, so
+# every behaviour is still decided as its fixture is labelled -- and the whole
+# ask corpus would be decorative.
+inject_battery_ask_blanked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = "self.behaviour.ask().to_owned()"
+assert source.count(old) == 5
+path.write_text(source.replace(old, "String::new()"), encoding="utf-8")
+EOF
+}
+
+# The tool offered with no probe. Nothing the battery ships reads the offer,
+# so the behaviour is still decided the same way for every fixture -- and a
+# candidate that reads its prompt would be asked to call a tool it was never
+# told about.
+inject_battery_tool_never_offered() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = """                let reply = self.send(
+                    responder,
+                    self.behaviour.ask().to_owned(),
+                    Some(OFFERED_TOOL),
+                );"""
+new = "                let reply = self.send(responder, self.behaviour.ask().to_owned(), None);"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A seam that renders nothing. The behaviour is decided on whether the second
+# answer names the entry, and a canned script names it either way, so the
+# object need never have been built.
+inject_battery_seam_render_empty() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = "        Some((id, object.dump()))"
+new = "        Some((id, String::new()))"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A seam that renders the entry's id and not the entry. The refill ask then
+# carries an identifier with nothing behind it, which is the failure the
+# behaviour exists to catch dressed as the behaviour passing.
+inject_battery_seam_renders_only_the_id() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = "        Some((id, object.dump()))"
+new = "        let rendered = id.as_str().to_owned();\n        Some((id, rendered))"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Byte lengths written into the fields named for tokens. Nothing here can
+# tokenize; a length in bytes under the name of a token count is a
+# measurement of the wrong thing that reads like a measurement of the right
+# one, and every fixture's honest zero becomes a plausible number.
+inject_battery_tokens_from_bytes() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+for old, new in (
+    (
+        "            output_tokens: reply.output_tokens,",
+        "            output_tokens: Count::new(reply.text.len() as u64).unwrap_or_default(),",
+    ),
+    (
+        "        self.prefill = self.prefill.saturating_add(reply.prefill_tokens);",
+        "        self.prefill = self\n            .prefill\n"
+        "            .saturating_add(Count::new(probe.ask.len() as u64).unwrap_or_default());",
+    ),
+):
+    assert source.count(old) == 1
+    source = source.replace(old, new, 1)
+path.write_text(source, encoding="utf-8")
+EOF
+}
+
+# A rendered report that says every drive complied. The drive still exits 1,
+# so the gate does not lie -- the document a human reads does.
+inject_battery_report_claims_compliance() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = '            ("compliant".to_owned(), Value::Boolean(self.compliant())),'
+new = '            ("compliant".to_owned(), Value::Boolean(true)),'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A canned script with no turns replayed anyway. It answers every probe with
+# nothing, so the battery reports five failures whose reasons are about the
+# fixture rather than about a candidate.
+inject_battery_script_without_turns() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if script.is_empty() {
+            return Err(BatteryError::NoExchanges);
+        }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# A hole in a canned script replayed anyway. A turn with no response row
+# answers one probe with the next turn's answer, and every behaviour after it
+# is decided against the wrong reply.
+inject_battery_turn_without_answer() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if let Some(position) = answered.iter().position(|seen| !seen) {
+            return Err(BatteryError::TurnWithoutAnswer {
+                turn: u32::try_from(position + 1).unwrap_or(u32::MAX),
+            });
+        }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# An answer that is not whole read as one. An emission of nothing at all, and
+# one cut off mid-tag, are the collapses this battery exists to catch; graded
+# only on whether some field carried content they read as ordinary failures
+# or, with one field, as passes.
+inject_battery_completion_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/battery.rs")
+source = path.read_text(encoding="utf-8")
+old = """    match answer.completion {
+        Completion::Empty => {
+            return Outcome::Fail("the answer was empty: nothing came back at all".to_owned());
+        }
+        Completion::Truncated(signal) => {
+            return Outcome::Fail(format!("the answer was cut off: {}", signal.name()));
+        }
+        Completion::Complete => {}
+    }
+"""
+new = "    let _ = &answer.completion;\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# An ask that offers a tool without naming it. Every canned fixture answers
+# from a script and never reads its prompt, so all three go on being decided
+# exactly as they are labelled while the one prompt that has to name a tool
+# names none.
+inject_battery_offer_unnamed_in_the_ask() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/capture/battery/asks/uses_offered_tool.txt")
+source = path.read_text(encoding="utf-8")
+assert "update_record" in source
+path.write_text(
+    "Record one fact this turn established by calling the tool that is offered\n"
+    "for it. Do not describe the call in prose; make it.\n",
+    encoding="utf-8",
+)
 EOF
 }
 
@@ -1550,10 +1873,40 @@ selftest() {
     'a call with no arguments does not record anything'
   seeded_case "a drive archive that links nowhere"    integration inject_drive_dangling_response \
     'archive was refused by diet check-record'
-  seeded_case "any red accepted from a fixture"       integration inject_drive_failure_set_unchecked \
+  seeded_case "a regime nothing served"               test     inject_battery_regime_invented \
+    'regime the responder never answered under'
+  seeded_case "a drive archive cut to its first row"  test     inject_battery_archive_truncated \
+    'holds a turn for every behaviour or it is not the archive of this drive'
+  seeded_case "an archive with its payloads dropped"  test     inject_battery_archive_payloads_dropped \
+    'is a ledger of a drive and not the archive of one'
+  seeded_case "a probe put with an empty prompt"      test     inject_battery_ask_blanked \
+    'was put with something other than the ask its file carries'
+  seeded_case "a tool offered with no probe"          test     inject_battery_tool_never_offered \
+    'a tool the battery never offered is a tool the candidate was never asked to call'
+  seeded_case "an ask that never names its tool"      test     inject_battery_offer_unnamed_in_the_ask \
+    'never names it, so a candidate reading its prompt'
+  seeded_case "a seam that renders nothing"           test     inject_battery_seam_render_empty \
+    'the refill ask names no entry'
+  seeded_case "a seam that renders only an id"        test     inject_battery_seam_renders_only_the_id \
+    'carries an entry id and not the object it belongs to'
+  seeded_case "byte lengths written as token counts"  test     inject_battery_tokens_from_bytes \
+    'wrote a prompt cost the responder never reported'
+  seeded_case "a report that claims compliance"       test     inject_battery_report_claims_compliance \
+    'claims a compliance the battery did not decide'
+  seeded_case "a canned script with no turns"         test     inject_battery_script_without_turns \
+    'a script with no turns answers nothing'
+  seeded_case "a canned script with a hole"           test     inject_battery_turn_without_answer \
+    'a turn with no response row is a hole in the script'
+  seeded_case "an answer that is not whole accepted"  test     inject_battery_completion_unchecked \
+    'the reason must say the answer was empty'
+  seeded_case "an expected red refused by the lane"   integration inject_drive_expected_red_refused \
     'did not fail uses_offered_tool alone'
+  seeded_case "any red accepted from a fixture"       integration inject_drive_wrong_red_accepted \
+    'accepted a red it was not required to have'
+  seeded_case "a red the drive does not name"         integration inject_drive_failure_unnamed \
+    'did not name the behaviour that failed'
   seeded_case "a failed battery that exits zero"      integration inject_drive_failure_exits_zero \
-    'answers nothing parseable passed the battery'
+    'answers nothing parseable did not exit 1'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
