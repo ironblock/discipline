@@ -1,0 +1,228 @@
+# Level-2 calibration: the Pi A/B-3 diet reference config as data — the parity anchor every Level-2 calibration run config-diffs against at load time (cut2 production run of 2026-07-08; frozen as historical record 2026-07-20).
+#
+# Rendered as a regimen v1 conformance fixture. Every binding the regimen
+# grammar can express is carried below byte-identical in key, value spelling
+# and table placement, in the arm's own order. What the grammar cannot express
+# is listed here and is NOT approximated anywhere in this file:
+#
+# not carried: [thinking.reference] (table header; Run 1 — config-identical to Pi) — the regimen grammar has no nested table header
+# not carried: thinking.reference.main = false — the regimen grammar has no nested table header
+# not carried: thinking.reference.interview = false — the regimen grammar has no nested table header
+# not carried: thinking.reference.extraction = false — the regimen grammar has no nested table header
+# not carried: [thinking.shipping] (table header; Run 2 — the per-lane doctrine) — the regimen grammar has no nested table header
+# not carried: thinking.shipping.main = true — the regimen grammar has no nested table header
+# not carried: thinking.shipping.interview = true — the regimen grammar has no nested table header
+# not carried: thinking.shipping.extraction = false — the regimen grammar has no nested table header
+# not carried: serving.expected_absent = ["--cache-ram", "-cram"] — the regimen grammar has no array value
+# not carried: [serving.flags] (table header; empty in the arm) — the regimen grammar has no nested table header
+# not carried: [reference.profile] (table header) — the regimen grammar has no nested table header
+# not carried: reference.profile.total_forks = 192 — the regimen grammar has no nested table header
+# not carried: reference.profile.total_steps = 91 — the regimen grammar has no nested table header
+# not carried: reference.profile.forks_per_step = 2.1 — the regimen grammar has no nested table header
+# not carried: reference.profile.object_entries = 162 — the regimen grammar has no nested table header
+# not carried: reference.profile.entries_per_turn = 12.5 — the regimen grammar has no nested table header
+# not carried: reference.profile.seam_turns_diet = [1, 3, 4, 6, 8, 10, 11, 12, 13] — the regimen grammar has no nested table header and no array value
+# not carried: reference.profile.seam_turns_bare = [1, 3, 5, 7, 9, 11] — the regimen grammar has no nested table header and no array value
+# not carried: [[deviation]] #1 (array-of-tables header) — the regimen grammar has no array of tables
+# not carried: [[deviation]] #1 key = "extraction_model" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #1 kind = "irreducible" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #1 native = "27B full-prefix warm-cache fork (on the main model)" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #1 reference = "1.7B minimal-prefix extractor (:8184)" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #1 reason = """…""" (an 8-line multi-line basic string) — the regimen grammar has no array of tables and no multi-line string
+# not carried: [[deviation]] #2 (array-of-tables header) — the regimen grammar has no array of tables
+# not carried: [[deviation]] #2 key = "seam_trigger" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #2 kind = "harness" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #2 native = "turn-count cadence (every_turns=2)" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #2 reference = "ctx-threshold at DIET_CTX=30000" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #2 reason = """…""" (a 6-line multi-line basic string) — the regimen grammar has no array of tables and no multi-line string
+# not carried: [[deviation]] #3 (array-of-tables header) — the regimen grammar has no array of tables
+# not carried: [[deviation]] #3 key = "step_granularity" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #3 kind = "irreducible" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #3 native = "bash: one command per step (~30 steps/turn on heavy turns)" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #3 reference = "agent: multiple tool calls per step (~7 steps/turn)" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #3 fair_window_enrichment = 1.7 — the regimen grammar has no array of tables
+# not carried: [[deviation]] #3 reason = """…""" (a 17-line multi-line basic string) — the regimen grammar has no array of tables and no multi-line string
+# not carried: [[deviation]] #4 (array-of-tables header) — the regimen grammar has no array of tables
+# not carried: [[deviation]] #4 key = "max_tokens" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #4 kind = "unrecoverable-parity" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #4 native = "4096 (Run 1) / ~8000 (Run 2)" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #4 reference = "unrecoverable — the archive logs response USAGE, not request limits" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #4 reason = """…""" (an 11-line multi-line basic string) — the regimen grammar has no array of tables and no multi-line string
+# not carried: [[deviation]] #5 (array-of-tables header) — the regimen grammar has no array of tables
+# not carried: [[deviation]] #5 key = "serving.--cache-ram" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #5 kind = "swept" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #5 native = "16384 MiB, DECLARED EXPLICIT (arm-{diet,bare}-cacheram16384.toml)" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #5 reference = "ABSENT — relies on the 8192 MiB compiled default (see [serving] above)" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #5 reason = """…""" (a 13-line multi-line basic string) — the regimen grammar has no array of tables and no multi-line string
+# not carried: [[deviation]] #6 (array-of-tables header) — the regimen grammar has no array of tables
+# not carried: [[deviation]] #6 key = "serving.--cache-ram" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #6 kind = "swept" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #6 native = "0 MiB, DECLARED EXPLICIT (arm-{diet,bare}-cacheram0.toml)" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #6 reference = "ABSENT — relies on the 8192 MiB compiled default (see [serving] above)" — the regimen grammar has no array of tables
+# not carried: [[deviation]] #6 reason = """…""" (a 16-line multi-line basic string) — the regimen grammar has no array of tables and no multi-line string
+#
+# ---------------------------------------------------------------------------
+# The Pi A/B-3 diet reference config as DATA (Fable's doctrine: "reference
+# conformance is data too"). Every Level-2 calibration run prints a mechanical
+# config-diff against this file as its preamble, so config drift between the
+# reimplementation and the reference is a DECLARED list at load time, not a
+# discovery three hours into a fire.
+#
+# Source: the Pi A/B results write-up, the cut2 drive script, the live-capture
+# and template modules, and the archived A/B-3 arms bundle.
+#
+# FROZEN as historical record (2026-07-20): Pi retires as a live comparison
+# target — its own reference (the run this file describes) turned out to be
+# permanently unmeasurable in its own right (the soak driver that produced it
+# was never committed). Run 1's own parity-preamble check against this file
+# stays meaningful (it certified bare-fidelity ×3 exact — see §3 of the REV-7
+# switchover certification), but no FUTURE run should be newly gated against
+# this file: REV-7 (the switchover certification) is the governing gate going
+# forward, and it is internal (bare-vs-diet), not a Pi comparison.
+
+[reference]
+run = "A/B-3 diet (cut2 production, 2026-07-08)"
+model_main = "Qwen3.6-27B"           # :8082 — the agent + interview/audit lane
+model_extract = "Qwen3-1.7B"         # :8184 — Pi's mechanical extraction lane
+diet_ctx = 30000                     # forces multiple compaction seams per arm
+arm_tokens = 0                       # always-armed (DIET_ARM_TOKENS=0)
+thinking_level = "off"               # RECOVERABLE (archive thinking_level_change record):
+                                     # Pi ran thinking OFF *globally* — the main (judgment)
+                                     # lane included. A valid measurement of a DIFFERENT
+                                     # regime, not a wrong one. See the per-lane thinking
+                                     # doctrine below.
+
+# The FULL generation envelope — not just temperature. The parity-coverage bug class
+# bit TWICE in one day (max_tokens, then thinking_level) because this section pinned
+# only `temperature`; both misses were undeclared deviations the envelope audit caught
+# pre-verdict (the native fire ran thinking-ON vs this thinking-OFF reference, and
+# `max_tokens=2500` starved a thinking-ON recall answer to empty content). Rule: pin
+# EVERY generation parameter, or the next unpinned one bites the same way. Values are
+# the beellama launch defaults — the sampler Pi's requests inherited (request params
+# are not in the archive, only usage is).
+[sampler]
+temperature = 0.6
+top_k = 20
+top_p = 1.0
+min_p = 0.0                          # --min-p 0.0 (launch default)
+# max_tokens: NOT recoverable — the archive logs usage, not request limits. Pi's
+# OBSERVED max generation was 2494 tok/turn (bare) / 1933 (diet), thinking-off. Run 1
+# uses a limit >= that (Pi never approached it, so behaviourally identical); the exact
+# Pi limit is an unrecoverable-but-inert declared deviation. Guarded regardless of
+# value by the non-empty-content validity condition (empty content = instrument
+# failure, never a grade). Run 2 (thinking-on) raises this to ~8000.
+max_tokens = 4096
+# No frequency / presence / repeat penalty in the beellama launch (defaults off / 1.0).
+
+# ---------------------------------------------------------------------------
+# THE PER-LANE THINKING DOCTRINE — first-class config, not intent (RD suite's
+# per-class-effort conclusion). Thinking belongs ON wherever a lane does JUDGMENT
+# work, OFF only for provably NON-JUDGMENT lanes (a speed optimisation: fewer decoded
+# tokens, no quality cost where no judgment is made).
+#
+#   main lane        judgment (the audit reasoning)            -> ON
+#   interview forks  judgment (evidence / rationale slots)     -> ON
+#   extraction forks provably non-judgment (mechanical harvest) -> OFF
+#
+# Pi's reference (thinking_level=off) lacks this split — everything off. So there are
+# two configs, hence two runs:
+#   Run 1 (calibration)   config-identical to Pi: OFF on ALL lanes, capture included.
+#                         Reproduces Pi's judgment-slot-starved capture regime.
+#                         PIN B (Pi's 2.0 / 0.75) governs HERE.
+#   Run 2 (establishing)  the shipping split. No Pi anchor; own pre-reg; PIN B N/A;
+#                         gated on Run 1 passing; inherits the ~8000 token budget.
+#   Run 2 - Run 1 = the thinking-regime effect on recall-through-seams (a free
+#   controlled result: same substrate / script / probes, both arms, both regimes).
+#
+# The arm states the two configs as the sub-tables [thinking.reference] (Run 1 —
+# config-identical to Pi) and [thinking.shipping] (Run 2 — the per-lane doctrine).
+# A nested table header is not in the regimen grammar, so neither is rendered here;
+# their six bindings are listed as not carried at the top of this file.
+
+# Pi's raw capture-gate constants (from the template and live-capture modules).
+[triggers]
+evidence_threshold = 3000            # EVIDENCE_SIZE_THRESHOLD
+extract_threshold = 1500             # DIET_EXTRACT_MIN_CHARS
+trio_cooldown = 3                    # DIET_TRIO_COOLDOWN
+open_next_every = 10                 # DIET_OPEN_NEXT_EVERY
+supersede = true
+ratify = true
+audit_legacy_wording = true  # parity arm — reproduce the Pi archive wording
+extraction = true
+extraction_minimal_prefix = false  # pinned — this is the Pi-matching warm-27B
+                                    # reference regime every diet.toml-family arm
+                                    # anchors against; the minimal-prefix change
+                                    # flipped the code default to true, so this must
+                                    # stay explicit or the anchor itself would silently
+                                    # drift off what Pi/Run1/Run2 measured.
+
+# ---------------------------------------------------------------------------
+# SERVING FLAGS (the blocking-mechanism gap in the cache-RAM characterization,
+# closed 2026-08-04). Declares the server LAUNCH flags this reference assumes
+# are in force — diffed by the parity preamble the same way [triggers] is: an
+# arm's [serving] table that disagrees with this one, on a key not covered by
+# a [[deviation]] entry (key = "serving.<flag>"), is undeclared drift (exit 3).
+# Unlike [triggers] (which the harness applies itself), a serving flag is only
+# OBSERVABLE, not controllable from here — the parity preamble's --check-live
+# reads it off the running server (the fingerprint instrument, reading the
+# server process's command line) rather than trusting a launch script.
+#
+# `flags`            : flag -> expected LITERAL value, in the exact argv
+#                       spelling the launch script uses (no long/short alias
+#                       normalization is attempted — declare whichever form
+#                       is actually passed; --cache-ram's short form -cram is
+#                       listed separately below for exactly this reason).
+# `expected_absent`  : flags that must be ABSENT from the live argv entirely
+#                       — i.e. this reference knowingly relies on the
+#                       compiled-in default, not an explicit choice.
+#                       `--cache-ram`/`-cram` are here because the cache-RAM
+#                       characterization found that both the in-repo proxied
+#                       launch script and production omit it outright: the
+#                       8192 MiB default ceiling behind Run 1's 86 full
+#                       re-prefills ("forcing full prompt re-processing due to
+#                       lack of cache data") was never a decision anyone made.
+#                       Declaring that reliance here makes it a checked fact
+#                       instead of an unstated assumption — a future arm that
+#                       starts passing --cache-ram explicitly (e.g. the
+#                       cache-RAM sweep itself) must either match this
+#                       reference (impossible once it's explicit) or add a
+#                       [[deviation]] entry keyed "serving.--cache-ram", same
+#                       as any other change.
+[serving]
+# The arm's one binding here, expected_absent = ["--cache-ram", "-cram"], is an
+# array value, which the regimen grammar cannot express; it is listed as not
+# carried at the top of this file. The arm's [serving.flags] sub-table is a
+# nested table header, which the grammar cannot express either; it is empty at
+# Run 1 / Run 2 — nothing beyond the compiled defaults is pinned by this
+# reference. A future arm (e.g. the cache-RAM sweep) declares explicit values
+# there per cell, each backed by a [[deviation]] entry.
+
+# Observed arrival profile (the thing to match, not the raw thresholds). The arm
+# keeps it in a [reference.profile] sub-table, a nested table header the regimen
+# grammar cannot express, so its seven bindings are listed as not carried at the
+# top of this file. Its rationale, kept here: total_forks breaks down as evidence
+# 34, trio 81, supersede 31, seam-add 9, open_next 9, audit 28; entries_per_turn
+# is 162 / 13 turns — the object-scale target; the diet arm saw 9 ctx-triggered
+# seams and the bare arm 6.
+
+# ---------------------------------------------------------------------------
+# DECLARED DEVIATIONS — the permanent, explained differences between the native
+# exercise pipeline and this reference. Each is either irreducible (architectural
+# / harness) or a compensating tune that matches the reference's OBSERVED profile
+# rather than its raw constants. The config-diff preamble cross-references these
+# by key so a difference is never a silent discovery.
+# ---------------------------------------------------------------------------
+# The arm records six [[deviation]] entries (extraction_model, seam_trigger,
+# step_granularity, max_tokens, and two swept serving.--cache-ram cells). An
+# array of tables — and the multi-line `reason` string each carries — is not in
+# the regimen grammar, so none is rendered here; every binding is listed as not
+# carried at the top of this file.
+
+# NOTE: capture thresholds are an IDENTITY, not a deviation — native uses Pi's raw
+# constants (evidence 3000 / extract 1500 / trio_cd 3 / open_next 10). An earlier
+# draft tuned them UP to counteract the step-granularity enrichment; that was
+# rejected (Fable): turning thresholds AWAY from Pi's values to make an aggregate
+# statistic match is overfitting config to the reference, and the knob is a cliff
+# (see the step_granularity deviation). The enrichment it would have chased is
+# instead declared under step_granularity and controlled at the entry level by the
+# attribution-on-pass readout.

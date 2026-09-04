@@ -1,0 +1,22 @@
+# Mac floor suite, stage 4 (Gemma bring-up): the Gemma 4 12B floor-vertex smoke drive, a harness bring-up run.
+#
+# Rendered as a regimen v1 conformance fixture. Every one of the arm's 7
+# key = value bindings is carried byte-identical in key, value spelling and
+# table placement; nothing is omitted, because the arm uses no arrays, nested
+# tables, string escapes or exponents. Only comments were edited: the ticket
+# reference is dropped and the repository path is restated as content.
+#
+# Gemma 4 12B floor-vertex smoke drive. Not a pre-registered
+# experiment — bring-up run to confirm the harness drives oMLX end-to-end
+# and captures real usage.prompt_tokens_details telemetry.
+# Sampler values per the harness's Gemma sampler-table entry (measured operating
+# point: temp 0 makes real capability look absent; card-required temp/top_k/top_p).
+name = "gemma-12b-floor-vertex-smoke"
+
+[sampler]
+temperature = 1.0
+top_k = 64
+top_p = 0.95
+max_tokens = 4096
+preserve_thinking = false
+enable_thinking = true

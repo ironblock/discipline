@@ -1,0 +1,83 @@
+{
+  "limits": {
+    "table": {
+      "max_steps": {
+        "integer": 30
+      },
+      "tool_timeout_s": {
+        "integer": 120
+      },
+      "turn_timeout_s": {
+        "integer": 2400
+      }
+    }
+  },
+  "name": {
+    "string": "die45-seat-b-offboard17b"
+  },
+  "sampler": {
+    "table": {
+      "enable_thinking": {
+        "boolean": false
+      },
+      "interview_thinking": {
+        "boolean": false
+      },
+      "max_tokens": {
+        "integer": 4096
+      },
+      "preserve_thinking": {
+        "boolean": true
+      },
+      "temperature": {
+        "float": 0.6
+      },
+      "top_k": {
+        "integer": 20
+      },
+      "top_p": {
+        "float": 1.0
+      }
+    }
+  },
+  "serving": {
+    "table": {}
+  },
+  "triggers": {
+    "table": {
+      "enabled": {
+        "boolean": true
+      },
+      "evidence_threshold": {
+        "integer": 3000
+      },
+      "extract_threshold": {
+        "integer": 1500
+      },
+      "extraction": {
+        "boolean": true
+      },
+      "extraction_minimal_prefix": {
+        "boolean": true
+      },
+      "open_next_every": {
+        "integer": 10
+      },
+      "ratify": {
+        "boolean": false
+      },
+      "rationale": {
+        "boolean": false
+      },
+      "seam_every_turns": {
+        "integer": 0
+      },
+      "supersede": {
+        "boolean": true
+      },
+      "trio_cooldown": {
+        "integer": 3
+      }
+    }
+  }
+}

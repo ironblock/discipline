@@ -1,0 +1,115 @@
+# Level-2 experiment, human-drive DEFAULT arm (re-derived from intent; first real drive 2026-08-15).
+#
+# This is the regimen a human driver runs under when no experiment has been
+# declared, rendered as a regimen v1 conformance fixture. Every one of the
+# arm's 30 key = value bindings is carried byte-identical in key, value
+# spelling and table placement; nothing is omitted, because the arm uses no
+# arrays, nested tables, string escapes or exponents. Only comments were
+# edited: the rationale is kept, ticket identifiers and repository paths are
+# restated as content or dropped.
+#
+# Two fossils this file exists to end:
+#   1. `seam_every_turns = 2` was Run 1/2's experimental APPARATUS — a matched
+#      validity constant mirroring Pi's measured compaction positions across
+#      both arms (the level-2 preregistration; the manipulated variable was
+#      diet-vs-bare) — which fossilized into "how drives work" across
+#      handoffs. The compaction model's design is boundary-driven: "a
+#      once-per-phase cost paid deliberately."
+#   2. The phase controller the FSM was meant to be already exists in a human
+#      drive: the driver. Seams fire when they say so (`seam_on_request`,
+#      POST /api/seam / the SPA's seam control), and the audit prompt may say
+#      "phase boundary" because one was actually declared (AUDIT_Q_HUMAN —
+#      the rule that a prompt asserts only what was actually declared, here
+#      applied to the dogma's own assertions).
+#
+# Cadence-fired seams remain EXPRESSIBLE (seam_every_turns > 0) as
+# experimental arms for A/B — never the drive default. Arms-are-data.
+name = "die24-human"
+
+# Streaming is explicit, though this is also now `serve --drive`'s code default
+# (`DriveSession::new` resolves an undeclared `stream` to `true` for exactly
+# this arm class) — recorded here for the same clarity-over-implicit reason
+# `extraction_minimal_prefix` is stated below despite matching its own
+# default. Withholding output until decode completes inflated measured T0
+# idle by the full decode duration and suppressed interrupt-early behaviour
+# (the ruling's decisive argument); SSE chunks reassemble into the identical
+# `turn.request`/`turn.response` record shape a non-streaming call produces.
+stream = true
+
+# Deferred: a human's drive answers at settlement; the capture round rides the
+# idle the driver's own read/type time provides. MUST stay top-level — `Arm`'s
+# `capture` field is not nested under any table, and TOML has no way to "exit"
+# a table back to the root without a new `[section]` header. This field used
+# to sit after `[limits]`, where it silently parsed as an unknown key inside
+# `limits` and was dropped — every drive with that file version silently ran
+# `Sync` (blocking dead-air) instead of `Deferred`, contradicting this exact
+# comment. Caught before this arm's first real drive (2026-08-15); see
+# the exercise guide's own "TOP-LEVEL, not under [limits]" warning, which
+# this file didn't follow.
+capture = "deferred"
+
+[sampler]
+# The full Run-2 envelope, stated not inherited (the Run-2 diet arm's REV-8
+# §5.2 rationale: a per-request server default is invisible to the launch-flag
+# fingerprint). Values are the box's measured production defaults.
+temperature = 0.6
+top_k = 20
+top_p = 1.0
+min_p = 0.0
+repeat_penalty = 1.0
+presence_penalty = 0.0
+frequency_penalty = 0.0
+max_tokens = 8000            # the token-starvation law (Run 2 §6.1): the budget
+                             # must not bind; 4096 with thinking ON would be
+                             # tighter than Run 1's thinking-off budget
+preserve_thinking = true     # load-bearing on this build
+enable_thinking = true       # the shipping split: main lane thinks...
+interview_thinking = true    # ...and so do interview/audit forks (Run-2 posture)
+
+[limits]
+# Corey's ruling, live mid-drive (2026-08-15): no step-count judgment on what's
+# "legitimate" agentic work — every prior value here was a model's guess, not
+# his intent, and tonight's own turn 2 (deep multi-file exploration) hit 30
+# mid-file with no final answer. u32::MAX, not a bigger arbitrary guess:
+# turn_timeout_s below remains the real backstop (a step still can't run past
+# wall-clock 2400s), so this removes the step-count ceiling specifically
+# without touching the separate hang-protection class (capture_timeout_s /
+# turn_timeout_s / tool_timeout_s) pending explicit scope on those.
+max_steps = 4294967295
+turn_timeout_s = 2400
+tool_timeout_s = 120
+# The capture lane's own bound, stated not inherited — this is the arm
+# whose first real drive (2026-08-15) hung on a degenerate extraction fork that
+# ran 401s / 7094 tokens while holding the session in `capture-running` with no
+# driver-side way out, because every fork inherited turn_timeout_s above (2400s
+# = 40 min). Explicit here for the same clarity-over-implicit reason `stream`
+# and `extraction_minimal_prefix` are, though 300 is also the code default.
+# Healthy forks in that same session: extraction 20.1s/41.2s, interview
+# 1.7-11.8s. Raise it only for an arm whose capture lane really is slower —
+# never to paper over a runaway.
+capture_timeout_s = 300
+
+[triggers]
+enabled = true
+evidence_threshold = 3000
+extract_threshold = 1500
+trio_cooldown = 3
+open_next_every = 10
+ratify = true
+supersede = true
+extraction = true
+extraction_minimal_prefix = true  # explicit, though this is also now the code
+                                   # default — this is the live human-drive arm that
+                                   # ratification exists to fix, so recorded here for
+                                   # clarity rather than left implicit. Needs the site's
+                                   # DIET_ROUTE_EXTRACTION=1 + DIET_EXTRACT_URL to actually
+                                   # take effect (this flag alone only changes the prompt
+                                   # shape, not where the fork is sent).
+rationale = false
+seam_every_turns = 0         # cadence OFF — the fossil, ended
+seam_on_request = true       # the human is the phase controller
+
+# No [serving] block on purpose: `serve --drive` does not enforce one
+# (the driving surface never reads it, a rule the drive protocol records) and a decorative declaration is worse than none.
+# No `goal` on purpose: a general drive has no pre-declarable assignment;
+# an experiment-shaped drive should copy this arm and declare one.
