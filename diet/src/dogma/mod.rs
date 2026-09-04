@@ -70,7 +70,7 @@ pub const MANIFEST_DIGEST: &str = "e93b1fbf63c31266";
 pub const OPERATING_POINTS: &str = include_str!("../../dogma/operating-points.toml");
 
 /// The digest of [`OPERATING_POINTS`] that [`VERSION`] was declared against.
-pub const OPERATING_POINTS_DIGEST: &str = "e93e72dce1cf9f1b";
+pub const OPERATING_POINTS_DIGEST: &str = "ae5e3496eb1976df";
 
 /// The manifest, exactly as pinned: one line per template, `name`, digest
 /// and byte length, tab-separated, after the comment lines.
@@ -734,7 +734,9 @@ mod tests {
              OPERATING_POINTS_DIGEST did not: a dogma version bump edits both"
         );
         // Every model table carries a sampler and a gate, and every listed
-        // no-think operation is one of the three the program runs.
+        // no-think operation is one of the three the program runs. Read
+        // line by line, so it assumes the arrays stay on one line, which the
+        // pinned file's do; the digest is the guard, this is the description.
         let mut models = 0;
         for line in OPERATING_POINTS.lines() {
             let line = line.trim();

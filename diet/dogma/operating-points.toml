@@ -6,9 +6,16 @@
 # what every future fire does and makes results before and after
 # non-comparable. Changing one is a dogma version bump.
 #
-# Matched by substring against the served model id. The tables are the
-# research program's, byte for byte; the receipts are restated here as
-# content, since they pointed at that program's tickets and documents.
+# Matched by substring against the served model id, IN FILE ORDER: the first
+# table whose `match` is a substring of the id wins. That is why `qwen3`, a
+# substring of `qwen3.6` and `qwen3.5`, comes after both. A consumer that
+# reads these tables into an unordered map and matches from it has changed
+# the rule; match in file order, or by the longest `match` that fits.
+#
+# The tables are the research program's, byte for byte; the receipts are
+# restated here as content, since they pointed at that program's tickets and
+# documents. The pinned digest covers this whole file, comments included: an
+# edit to a comment is an edit to the dogma's file and is bumped like one.
 #
 # `nothink_ops` = operations safe to run with thinking suppressed. Everything
 # not listed keeps thinking.
