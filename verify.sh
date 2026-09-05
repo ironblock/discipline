@@ -1055,6 +1055,23 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The lane accepting any red from a fixture declared to fail one behaviour.
+# A fixture that starts failing for a second reason is as broken as one that
+# stops failing, and both read as green once the set is only ever compared
+# against a set it already matches.
+inject_drive_wrong_red_accepted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/examples/drive.rs")
+source = path.read_text(encoding="utf-8")
+old = "            if failed == vec![wanted] {"
+new = "            let _ = wanted;\n            if !failed.is_empty() {"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # An expected red refused: the drive exits 0 only when NOTHING failed, so a
 # fixture declared to fail one behaviour is rejected for failing it. This is
 # the tightening direction of the same comparison; the loosening is
