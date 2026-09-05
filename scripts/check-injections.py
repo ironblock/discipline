@@ -32,6 +32,8 @@ import os
 import re
 import shutil
 import subprocess
+
+import gatelib
 import sys
 import tempfile
 from pathlib import Path
@@ -42,7 +44,6 @@ FUNC = re.compile(r"^(inject_[a-z0-9_]+)\(\) \{", re.M)
 # DEFINITIONS, so a definition deleted outright is invisible to it -- there is
 # nothing to run and report inert. The selftest catches it, eventually, as
 # "changed nothing"; that is forty minutes away and this is not.
-CASE = re.compile(r"seeded_case\s+\"[^\"]*\"\s+\S+\s+(inject_[a-z0-9_]+)")
 # Every helper an injection may call, sourced alongside it. Extracted by name
 # rather than by sourcing verify.sh, which would run the gate.
 HELPERS = re.compile(r"^(?:seed_commit)\(\) \{\n.*?^\}\n", re.M | re.S)
@@ -94,7 +95,7 @@ def main() -> int:
     if not names:
         print("check-injections: verify.sh defines no injections", file=sys.stderr)
         return 2
-    named = {m.group(1) for m in CASE.finditer(text)}
+    named = {case.injection for case in gatelib.seeded_cases(text)}
     undefined = sorted(named - set(names))
     if undefined:
         print(

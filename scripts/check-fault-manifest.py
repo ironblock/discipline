@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import pathlib
 import re
+
+import gatelib
 import subprocess
 import sys
 import tomllib
@@ -44,7 +46,6 @@ REGIMEN_INVALID = ROOT / "diet" / "formats" / "regimen" / "fixtures" / "invalid"
 NOT_TOML = "NOT-TOML:"
 RELOCATING = {"subset-fixture"}
 
-CASE = re.compile(r'seeded_case\s+"([^"]+)"\s+(\w+)\s+(\w+)\s*\\\s*\n\s*\'([^\']*)\'')
 MECH = re.compile(r'expect_exit\s+"([^"]+)"\s+(\d+)')
 REQ = re.compile(r"REQUIRED_(HYGIENE|PAGES)_CLASSES=\(([^)]*)\)", re.DOTALL)
 
@@ -62,7 +63,7 @@ def observed() -> dict[str, set[str]]:
     seen: dict[str, set[str]] = {k: set() for k in
                                  ("seeded-gate", "mechanics", "results-fixture",
                                   "pattern-class", "subset-fixture")}
-    for label, check, inject, sig in CASE.findall(s):
+    for label, check, inject, sig in gatelib.seeded_cases(s):
         ident = f"{check}.{inject.removeprefix('inject_')}"
         seen["seeded-gate"].add(ident)
         DETAILS[ident] = {"label": label, "legacy_signature": sig}

@@ -51,6 +51,8 @@ prints what differs: that part is a person's to read.
 import argparse
 import re
 import subprocess
+
+import gatelib
 import sys
 from pathlib import Path
 
@@ -70,7 +72,22 @@ GATE_FILES = ("verify.sh", "faults.toml")
 def key_of(pattern):
     if pattern is ENTRY:
         return lambda block: (m := re.search(r'^id = "([^"]+)"', block, re.M)) and m.group(1)
-    return lambda block: (m := re.search(r"inject_[a-z0-9_]+", block)) and m.group(0)
+    if pattern is CASE:
+        # A case is a CALL, so it has no definition line to anchor on. It is
+        # keyed by the injection it names, and which injection that is comes
+        # from the one reader of that spelling rather than from a fourth
+        # regex here.
+        return lambda block: (
+            (cases := gatelib.seeded_cases(block)) and cases[0].injection
+        )
+    # A definition is anchored on its definition line, not on the first name
+    # anywhere in the block: the rationale comment above an injection
+    # routinely names another one ("the deliberate pair of inject_alpha"),
+    # and keying on that makes the union think it already holds a body it has
+    # never seen.
+    return lambda block: (
+        m := re.search(r"^(inject_[a-z0-9_]+)\(\) \{", block, re.M)
+    ) and m.group(1)
 
 
 def blocks(pattern, side):
@@ -374,6 +391,16 @@ def inert_injections(root: Path) -> list[str] | None:
         cwd=root,
     )
     if run.returncode not in (0, 1):
+        return None
+    # The pre-flight has an early refusal -- a seeded case naming an
+    # injection defined nowhere -- that returns 1 having printed only to
+    # stderr. Its stdout carries no summary, and reading that absence as an
+    # empty list says "nothing is inert" about a tree nobody examined, on
+    # exactly the merge this tool exists to repair.
+    if not any(
+        line.startswith("check-injections:") and "change nothing" in line
+        for line in run.stdout.splitlines()
+    ):
         return None
     return [
         line.split()[0]
