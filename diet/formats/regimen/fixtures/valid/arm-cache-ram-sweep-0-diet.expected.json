@@ -41,7 +41,15 @@
     }
   },
   "serving": {
-    "table": {}
+    "table": {
+      "flags": {
+        "table": {
+          "--cache-ram": {
+            "integer": 0
+          }
+        }
+      }
+    }
   },
   "triggers": {
     "table": {
