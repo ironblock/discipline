@@ -56,7 +56,7 @@ from pathlib import Path
 
 HUNK = re.compile(r"^<<<<<<< [^\n]*\n(.*?)^=======\n(.*?)^>>>>>>> [^\n]*\n", re.M | re.S)
 CASE = re.compile(r"^  seeded_case .*?\n(?:^    .*\n)+", re.M)
-ENTRY = re.compile(r"^\[\[fault\]\]\n(?:^(?!\[\[fault\]\]).*\n)+", re.M)
+ENTRY = re.compile(r"^\[\[fault\]\]\n(?:^(?!\[\[fault\]\]).*(?:\n|$))+", re.M)
 # The comment above an injection is the reason it exists, and it travels with
 # the body: a merge that took one and left the other happened once already.
 FUNC = re.compile(r"(?:^#[^\n]*\n)*^(inject_[a-z0-9_]+)\(\) \{\n.*?^\}\n", re.M | re.S)
@@ -185,8 +185,14 @@ def insert_after_last(text: str, pattern, additions: list[str]) -> str:
         end = m.end()
     if end is None:
         raise ValueError("nothing to insert after")
+    head, tail = text[:end], text[end:]
+    # A file whose last line carries no newline ends its last block at EOF,
+    # and splicing there appends the next block onto that line: `migrated =
+    # false[[fault]]`, which is a syntax error, not a fault list. One byte.
+    if head and not head.endswith("\n"):
+        head += "\n"
     joined = "".join(block if block.endswith("\n") else block + "\n" for block in additions)
-    return text[:end] + joined + text[end:]
+    return head + joined + tail
 
 
 def union_file(path: Path, ours_ref: str, theirs_ref: str) -> bool:
@@ -243,8 +249,11 @@ def union_file(path: Path, ours_ref: str, theirs_ref: str) -> bool:
     # list this union just built, and `check-fault-manifest.py --count-red` is
     # the one reader that knows how to do it.
     if RED_LINE.search(built):
-        built = RED_LINE.sub("red_faults = 0\n", built, count=1)
-        path.write_text(built, encoding="utf-8")
+        # Nothing is on disk yet, and nothing may be until every check below
+        # has passed. An earlier version wrote a `red_faults = 0` placeholder
+        # here so the counter could see the assembled file -- but the counter
+        # reads `verify.sh`, never this one, and the failure return left that
+        # zero on disk with the conflict markers already gone.
         counted = subprocess.run(
             [sys.executable, "scripts/check-fault-manifest.py", "--count-red"],
             capture_output=True,

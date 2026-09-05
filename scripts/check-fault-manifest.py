@@ -89,6 +89,19 @@ def main() -> int:
     # reader for the count rather than reimplementing the arithmetic or
     # scraping it out of a failure message. One reader, structured answer.
     counting = "--count-red" in sys.argv
+
+    # Asked for the count, answer the count -- before the manifest is read at
+    # all. The count derives from `verify.sh` and the fixture directories and
+    # never from the manifest, and the caller is a tool that has just
+    # assembled a fault list and is holding a manifest that does not yet
+    # agree with it. Refusing to answer because the file it is about to
+    # rewrite is missing, empty or not yet valid TOML is refusing exactly
+    # when asked. `observed()` also fills DETAILS, which the loop below reads.
+    seen = observed()
+    if counting:
+        print(sum(len(seen[k]) for k in seen if k != "mechanics"))
+        return 0
+
     failures: list[str] = []
 
     if not MANIFEST.is_file():
@@ -104,9 +117,6 @@ def main() -> int:
     if not entries:
         print(f"{MANIFEST}: declares no faults, so it defines no parity", file=sys.stderr)
         return 1
-
-    # Before the loop: `observed()` is what fills DETAILS, which the loop reads.
-    seen = observed()
 
     declared: dict[str, set[str]] = {}
     for index, entry in enumerate(entries):
@@ -153,14 +163,6 @@ def main() -> int:
             f"[meta] mechanics_assertions is {meta.get('mechanics_assertions')}, "
             f"observed {len(seen['mechanics'])}"
         )
-
-    # Asked for the count, answer the count. Deliberately before the failure
-    # report: the caller is a tool that has just assembled the fault list and
-    # is asking what `red_faults` must say, so the one failure it is about to
-    # fix must not silence the answer.
-    if counting:
-        print(sum(len(seen[k]) for k in seen if k != "mechanics"))
-        return 0
 
     for message in failures:
         print(message, file=sys.stderr)
