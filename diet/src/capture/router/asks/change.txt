@@ -1,0 +1,5 @@
+{imperative}
+You are in {cwd}.
+You last edited {last_edited}.
+You said: "{intent}"
+You just changed something. What did the change establish, and what did it depend on being true? Answer with the fields LEARNED, EVIDENCE and STUCK, one per line, and write NONE for a field with nothing to record.

@@ -19,6 +19,7 @@
 use std::fmt::Write as _;
 use std::process::ExitCode;
 
+#[cfg(test)]
 use diet::formats::Format;
 use diet::formats::record::json::{self, Value};
 
@@ -28,23 +29,48 @@ const EXIT_USAGE: u8 = 2;
 /// Exit code for input that is not what the subcommand says it is.
 const EXIT_INPUT: u8 = 1;
 
-/// The verb each format is exposed under.
+/// What a verb does with the file it is given.
+///
+/// Until the capture lanes arrived every verb read one format, and the table
+/// below could be a pair. A lane is not a format: routing a drive reads a
+/// record and answers with a census, so the answer is not that record's
+/// value and the format table must not claim it. The column says which kind
+/// a verb is, so that `every_format_has_a_command` can still insist every
+/// format is exposed without also insisting every verb is a format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Operation {
+    /// Read a document of this format and answer with its value.
+    Format(&'static str),
+    /// Route an archived drive and answer with the router's census.
+    Route,
+}
+
+/// The verb each operation is exposed under.
 ///
 /// A table, not a match: `scripts/check-library.py` refuses a match arm on a
 /// string literal in this crate, and `every_format_has_a_command` refuses a
 /// format that this table forgets.
-const COMMANDS: &[(&str, &str)] = &[
-    ("classify-decline", "decline"),
-    ("parse-interview", "interview"),
-    ("check-record", "record"),
-    ("check-regimen", "regimen"),
-    ("parse-shell", "shell"),
+const COMMANDS: &[(&str, Operation)] = &[
+    ("classify-decline", Operation::Format("decline")),
+    ("parse-interview", Operation::Format("interview")),
+    ("check-record", Operation::Format("record")),
+    ("check-regimen", Operation::Format("regimen")),
+    ("parse-shell", Operation::Format("shell")),
+    ("route", Operation::Route),
 ];
 
 fn usage() -> String {
     let mut out = String::from("usage: diet <command> <path>\n\ncommands:\n");
-    for (command, format) in COMMANDS {
-        let _ = writeln!(out, "  {command:<18} read a `{format}` document");
+    for (command, operation) in COMMANDS {
+        let _ = match operation {
+            Operation::Format(format) => {
+                writeln!(out, "  {command:<18} read a `{format}` document")
+            }
+            Operation::Route => writeln!(
+                out,
+                "  {command:<18} route an archived drive and report its census"
+            ),
+        };
     }
     out.push_str("\nEvery command writes a JSON result to stdout. Exit 0 when the\n");
     out.push_str("document is what the command says it is, 1 when it is not, 2 on\n");
@@ -59,7 +85,7 @@ fn main() -> ExitCode {
         return ExitCode::from(EXIT_USAGE);
     };
 
-    let Some(format) = format_for(command) else {
+    let Some((_, operation)) = COMMANDS.iter().find(|(verb, _)| verb == command) else {
         eprintln!("diet: `{command}` is not a command\n");
         eprint!("{}", usage());
         return ExitCode::from(EXIT_USAGE);
@@ -74,9 +100,16 @@ fn main() -> ExitCode {
             return ExitCode::from(EXIT_USAGE);
         }
     };
-    let outcome = match std::str::from_utf8(&source) {
-        Ok(text) => (format.project)(text),
-        Err(err) => Err(format!("not UTF-8: {err}")),
+    let text = std::str::from_utf8(&source).map_err(|err| format!("not UTF-8: {err}"));
+    let (subject, outcome) = match operation {
+        Operation::Format(name) => {
+            let Some(format) = diet::formats::format(name) else {
+                eprintln!("diet: `{name}` is not a format this binary carries");
+                return ExitCode::from(EXIT_USAGE);
+            };
+            (format.name, text.and_then(|text| (format.project)(text)))
+        }
+        Operation::Route => ("route", text.and_then(route)),
     };
 
     let (ok, key, held) = match outcome {
@@ -84,7 +117,7 @@ fn main() -> ExitCode {
         Err(reason) => (false, "error", Value::String(reason)),
     };
     let result = Value::Object(std::collections::BTreeMap::from([
-        ("format".to_owned(), Value::String(format.name.to_owned())),
+        ("format".to_owned(), Value::String(subject.to_owned())),
         ("path".to_owned(), Value::String(path.clone())),
         ("ok".to_owned(), Value::Boolean(ok)),
         (key.to_owned(), held),
@@ -100,15 +133,32 @@ fn main() -> ExitCode {
     }
 }
 
-/// The format `command` reads, if it is a command.
+/// The format `command` reads, if it is a command that reads one. Only the
+/// test below asks: `main` dispatches on the operation itself.
+#[cfg(test)]
 fn format_for(command: &str) -> Option<&'static Format> {
-    let (_, name) = COMMANDS.iter().find(|(verb, _)| *verb == command)?;
-    diet::formats::format(name)
+    let (_, operation) = COMMANDS.iter().find(|(verb, _)| *verb == command)?;
+    match operation {
+        Operation::Format(name) => diet::formats::format(name),
+        Operation::Route => None,
+    }
+}
+
+/// Route a drive: read it as a record, replay it, answer with the census.
+///
+/// The census is the answer because it is the claim this lane makes -- how
+/// many forks a drive spent against how many the naive design would have --
+/// and a caller that had to count the decisions itself would be a second
+/// implementation of the router.
+fn route(text: &str) -> Result<Value, String> {
+    let record = diet::formats::record::parse(text).map_err(|err| err.to_string())?;
+    let replayed = diet::capture::router::replay(&record).map_err(|err| err.to_string())?;
+    replayed.census.value().map_err(|err| err.to_string())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{COMMANDS, format_for};
+    use super::{COMMANDS, Operation, format_for};
     use diet::formats::FORMATS;
 
     // A format with no command is a format the boundary does not expose, so
@@ -116,20 +166,34 @@ mod tests {
     // binary exists to prevent.
     #[test]
     fn every_format_has_a_command_and_every_command_a_format() {
-        let exposed: std::collections::BTreeSet<&str> =
-            COMMANDS.iter().map(|(_, format)| *format).collect();
+        let exposed: std::collections::BTreeSet<&str> = COMMANDS
+            .iter()
+            .filter_map(|(_, operation)| match operation {
+                Operation::Format(name) => Some(*name),
+                Operation::Route => None,
+            })
+            .collect();
         let declared: std::collections::BTreeSet<&str> =
             FORMATS.iter().map(|format| format.name).collect();
         assert_eq!(
             exposed, declared,
             "the CLI and FORMATS disagree about which formats exist"
         );
-        for (command, name) in COMMANDS {
-            assert_eq!(
-                format_for(command).map(|format| format.name),
-                Some(*name),
-                "`{command}` does not resolve to `{name}`"
-            );
+        for (command, operation) in COMMANDS {
+            match operation {
+                Operation::Format(name) => assert_eq!(
+                    format_for(command).map(|format| format.name),
+                    Some(*name),
+                    "`{command}` does not resolve to `{name}`"
+                ),
+                // A lane's verb has no format, and must not borrow one: a
+                // census answered under a format's name would read as that
+                // format's value.
+                Operation::Route => assert!(
+                    format_for(command).is_none(),
+                    "`{command}` is a lane, and it resolved to a format"
+                ),
+            }
         }
     }
 

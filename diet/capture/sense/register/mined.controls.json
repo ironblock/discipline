@@ -1,0 +1,91 @@
+{
+ "what": "The controls salted into every judge batch, four per batch of forty-five rows, shuffled in and indistinguishable from the rows; the answers here were withheld from the judge. Round one carried the first eleven; round two carried all fourteen.",
+ "scoring": "A batch scores when every control in it is answered as keyed for its own set (the other set's label is not judged, since the prompt labels the two classes independently); a batch with any control missed is void and re-judged by a fresh session. Observed: round one 96 of 96 across 24 batches, round two 80 of 80 across 20 batches. One answer in the author's first key (ctrl09 as negative) contradicted the prompt's own definition and was corrected to hard_negative before scoring; no judge verdict was changed.",
+ "seen_red": "mined.judge-controls.py scores a verdict file against this key and exits 1 naming the first miss; a verdict file with one control flipped is the seeded fault, and the README states the exit codes.",
+ "controls": [
+  {
+   "id": "ctrl00",
+   "set": "mistake",
+   "answer": "positive",
+   "text": "Wait, the flag I added was never read by the resolver; I assumed it was and it wasn't."
+  },
+  {
+   "id": "ctrl01",
+   "set": "mistake",
+   "answer": "positive",
+   "text": "Turns out the file I edited was a copy under a different path, so none of my changes were being compiled."
+  },
+  {
+   "id": "ctrl02",
+   "set": "mistake",
+   "answer": "positive",
+   "text": "I was wrong about the cache key: it is the file path, not the content hash."
+  },
+  {
+   "id": "ctrl03",
+   "set": "mistake",
+   "answer": "negative",
+   "text": "Ran the format check and the linter; both were clean."
+  },
+  {
+   "id": "ctrl04",
+   "set": "mistake",
+   "answer": "negative",
+   "text": "Next I will read the grammar and then the fixtures."
+  },
+  {
+   "id": "ctrl05",
+   "set": "mistake",
+   "answer": "hard_negative",
+   "text": "Mistakes of this kind usually come from assuming a flag is honoured without reading the code."
+  },
+  {
+   "id": "ctrl06",
+   "set": "mistake",
+   "answer": "hard_negative",
+   "text": "If the cache were keyed by content, a rename would not invalidate it."
+  },
+  {
+   "id": "ctrl07",
+   "set": "reversal",
+   "answer": "positive",
+   "text": "Oh, I see now: the earlier note said the server has no cache endpoint, but it does, at /slots."
+  },
+  {
+   "id": "ctrl08",
+   "set": "reversal",
+   "answer": "positive",
+   "text": "The recorded limitation no longer applies; the newer build added the flag I said was missing."
+  },
+  {
+   "id": "ctrl09",
+   "set": "reversal",
+   "answer": "hard_negative",
+   "text": "The server still has no way to save a slot to disk, as noted earlier."
+  },
+  {
+   "id": "ctrl10",
+   "set": "reversal",
+   "answer": "hard_negative",
+   "text": "It would be nice if that limitation went away in a future release."
+  },
+  {
+   "id": "ctrl11",
+   "set": "reversal",
+   "answer": "positive",
+   "text": "The earlier record said checkpoints were unsupported on this model; the log shows them being created, so that record is out of date."
+  },
+  {
+   "id": "ctrl12",
+   "set": "reversal",
+   "answer": "hard_negative",
+   "text": "When the prefix matches, the server restores the slot's state from the saved checkpoint."
+  },
+  {
+   "id": "ctrl13",
+   "set": "reversal",
+   "answer": "negative",
+   "text": "The build takes about four minutes on a fresh target directory."
+  }
+ ]
+}

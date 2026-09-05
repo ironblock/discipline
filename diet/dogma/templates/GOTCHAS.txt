@@ -1,0 +1,3 @@
+Pause. In the step you just completed, did anything behave differently than you expected — an API that works another way, an error and its actual cause, a limitation or unsupported feature you discovered? List each on its own line as
+GOTCHA: <what is true> — IMPLICATION: <what must be done differently>
+Only discoveries from this step. If none, reply NONE.

@@ -1,0 +1,1 @@
+Summarize the conversation above concisely, in your own words, covering the key facts, findings, and context established so far. This summary will completely replace the conversation history, so make sure someone with no other context could continue the work from it alone. Do not use any tools — respond with the summary text only.

@@ -1,0 +1,82 @@
+# Per-model operating points: part of the dogma.
+#
+# These are TRANSCRIBED MEASUREMENTS, not preferences. Each entry exists
+# because a run measured it, and the receipt beside it says what was measured.
+# Do not tune one without a fact-key evaluation; a changed value here changes
+# what every future fire does and makes results before and after
+# non-comparable. Changing one is a dogma version bump.
+#
+# Matched by substring against the served model id, IN FILE ORDER: the first
+# table whose `match` is a substring of the id wins. That is why `qwen3`, a
+# substring of `qwen3.6` and `qwen3.5`, comes after both. A consumer that
+# reads these tables into an unordered map and matches from it has changed
+# the rule; match in file order, or by the longest `match` that fits.
+#
+# The tables are the research program's, byte for byte; the receipts are
+# restated here as content, since they pointed at that program's tickets and
+# documents. The pinned digest covers this whole file, comments included: an
+# edit to a comment is an edit to the dogma's file and is bumped like one.
+#
+# `nothink_ops` = operations safe to run with thinking suppressed. Everything
+# not listed keeps thinking.
+
+[qwen3_6]
+match           = "qwen3.6"
+nothink_ops     = ["extraction"]
+thinking_kwarg  = true
+preserve_thinking = true
+[qwen3_6.sampler]
+temperature = 0.3
+top_k       = 20
+top_p       = 1.0
+[qwen3_6.gate]
+temperature = 0.0
+votes       = 1
+[qwen3_6.receipts]
+nothink = "Measured: suppressing thinking collapses this family's judgment (open questions captured 19 -> 0), so judgment keeps thinking and only extraction is safe without it."
+thinking_kwarg = "the /no_think soft switch is DEAD on this model; the kwarg is the only working control."
+preserve_thinking = "Load-bearing for cache cleanliness: with it off, the prefix a fork re-sends is not byte-identical to what the session sent, and the fork prefills cold. Must never leave the launch line."
+gate = "The '9 of 9' precision figure in circulation is the pre-commit gate's 8 of 8 pooled with a separate run's 1 of 1: nine correct precision draws of nine, arithmetically exact, resolved 2026-08-14. Not a report error; two runs' figures were being read as one. The sampler values were never in dispute."
+
+[qwen3_5]
+match          = "qwen3.5"
+nothink_ops    = ["extraction"]
+thinking_kwarg = true
+[qwen3_5.sampler]
+temperature = 0.3
+top_k       = 20
+top_p       = 1.0
+[qwen3_5.gate]
+temperature = 0.0
+votes       = 1
+
+[qwen3]
+match          = "qwen3"          # the original Qwen3 honours /no_think
+nothink_ops    = ["extraction"]
+thinking_kwarg = false
+[qwen3.sampler]
+temperature = 0.3
+top_k       = 20
+top_p       = 1.0
+[qwen3.gate]
+temperature = 0.0
+votes       = 1
+
+[gemma]
+match             = "gemma"
+nothink_ops       = ["extraction", "judgment", "audit"]
+thinking_kwarg    = true
+preserve_thinking = false
+[gemma.sampler]
+temperature = 1.0
+top_k       = 64
+top_p       = 0.95
+[gemma.gate]
+temperature = 1.0
+votes       = 5
+[gemma.receipts]
+sampler = "Measured on the cross-model run: the model card's temp 1.0 / top_k 64 / top_p 0.95 is REQUIRED; temp 0 made real capability look absent."
+gate = "needs majority vote (5) even to review; a single sample is not enough on this model."
+nothink = "no-think is SAFE broadly here — judgment stayed robust (18 -> 17), the opposite of Qwen."
+preserve_thinking = "absent by spec on this model."
+note = "needs an explicit proactive-capture prompt; Gemma captures reactively where Qwen captures proactively."

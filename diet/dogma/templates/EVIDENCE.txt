@@ -1,0 +1,6 @@
+Pause. You just ingested a large piece of material ({source}, roughly {size} characters). Two questions:
+1. Was a specific part of it load-bearing for what you did or are about to do? Quote that part VERBATIM (do not paraphrase, at most ~15 lines) as
+EXCERPT: <verbatim quote>
+2. Did you notice anything else in it that is not needed now but might matter later? Each on its own line as
+POINTER: <what it is and what it's for> (<where it is>)
+If the material was only general context with no load-bearing part, reply NONE.
