@@ -11,7 +11,7 @@
 //! and the two must never disagree about the same file. So anything TOML
 //! rejects, this grammar must reject too.
 //!
-//! v1 adds FLOATS and TABLES, because v0 could not spell an arm. Every arm a
+//! v1 adds FLOATS, TABLES and ARRAYS, because v0 could not spell an arm. Every arm a
 //! public claim depends on carries a temperature and groups its settings, and
 //! a regimen that cannot express a temperature is not a regimen -- v0's
 //! restriction was scaffolding, not a position. Rendering `0.6` as the string
@@ -20,13 +20,16 @@
 //! a value that IDENTIFIES a regime is a different regime.
 //!
 //! Deliberately absent still, and expected to arrive when something needs
-//! them: arrays, datetimes, nested tables, dotted keys, quoted keys,
-//! multi-line strings, string escapes, exponents, `+` before a number,
-//! leading zeros, and underscores in numbers.
+//! them: datetimes, a THIRD level of table, dotted keys outside a header,
+//! quoted keys, arrays of arrays and arrays of tables, multi-line arrays and
+//! strings, string escapes, exponents, `+` before a number, leading zeros,
+//! and underscores in numbers.
 //!
 //! Three rules this grammar cannot state, which the parser therefore enforces:
 //! a key may appear at most once in its own table, a table header may appear
 //! at most once in a document, and an integer literal must fit in an `i64`.
+//! A two-segment header's parent is created if the document has not declared
+//! it, and a header may not take the name of a key already bound.
 
 file      =  { SOI ~ item* ~ EOI }
 
@@ -36,15 +39,22 @@ statement = _{ sp* ~ (pair ~ (sp* ~ comment)? | comment) ~ sp* ~ (nl | &EOI) }
 trailing  = _{ sp+ ~ &EOI }
 
 // `[sampler]` opens a table: every pair after it, up to the next header,
-// belongs to it. One level and one bare key -- `[a.b]` is a dotted key
-// wearing brackets, and dotted keys are still absent.
+// belongs to it. `[serving.flags]` opens a table one level inside another.
 //
-// The rule admits ANY table name rather than the three the arms use today
-// (`sampler`, `limits`, `triggers`), for the same reason `key` admits any
-// bare key rather than a list of the fields a regimen happens to carry: a
-// grammar states shape, and a vocabulary in a grammar is a vocabulary nobody
-// can extend without editing the normative file.
-table_header = { sp* ~ "[" ~ sp* ~ key ~ sp* ~ "]" ~ sp* ~ comment? ~ (nl | &EOI) }
+// TWO segments and no more. The depth is not a taste: `[serving.flags]` is
+// where a cache-ram sweep puts the one binding that makes each of its cells
+// what it is, and without it four of nineteen ported arms projected
+// identically to their siblings except by name -- a regime that cannot tell
+// two regimes apart. A third level has no such case behind it, and a grammar
+// that grows for a case nobody has is a grammar that has stopped stating
+// anything.
+//
+// The rule admits ANY table name rather than the ones the arms use today, for
+// the same reason `key` admits any bare key rather than a list of the fields
+// a regimen happens to carry: a grammar states shape, and a vocabulary in a
+// grammar is a vocabulary nobody can extend without editing the normative
+// file.
+table_header = { sp* ~ "[" ~ sp* ~ key ~ ("." ~ key)? ~ sp* ~ "]" ~ sp* ~ comment? ~ (nl | &EOI) }
 
 pair      =  { key ~ sp* ~ "=" ~ sp* ~ value }
 key       =  { (ASCII_ALPHANUMERIC | "_" | "-")+ }
@@ -52,7 +62,23 @@ key       =  { (ASCII_ALPHANUMERIC | "_" | "-")+ }
 // `float` before `integer`: PEG choice is ordered and does not re-enter, so
 // `integer` would take the `0` of `0.6` and strand `.6` for the statement
 // rule to choke on.
-value     = _{ string | boolean | float | integer }
+value     = _{ string | boolean | float | integer | array }
+
+// `expected_absent = ["--cache-ram", "-cram"]`. An array holds SCALARS, on
+// one line: the arms that need one are asserting which serving flags are
+// absent and which operations run without thinking, and both are a handful of
+// strings. An array of arrays and an array of tables are still refused, and a
+// multi-line array is refused, because nothing has asked and a form nobody
+// writes is a form nobody reads correctly.
+//
+// A trailing comma is admitted because TOML admits it and a subset that
+// refused it would refuse a document the other reader accepts.
+//
+// Values are not required to share a type. TOML stopped requiring it, and a
+// regimen that refused a mixed array would be refusing something `tomllib`
+// reads -- which is the one direction this grammar may not take.
+array     =  { "[" ~ sp* ~ (array_value ~ (sp* ~ "," ~ sp* ~ array_value)* ~ sp* ~ ","?)? ~ sp* ~ "]" }
+array_value = _{ string | boolean | float | integer }
 string    =  { "\"" ~ inner ~ "\"" }
 inner     =  { char* }
 // Two rules rather than one with two spellings, so that the parser matches on

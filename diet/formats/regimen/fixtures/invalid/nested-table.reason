@@ -1,3 +1,0 @@
-A nested table header. `[a.b]` is a dotted key wearing brackets, and dotted
-keys are absent for the reason `dotted-key.toml` gives. One level of table
-is what an arm needs; a second would be a shape nothing has asked for.

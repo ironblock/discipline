@@ -1131,8 +1131,8 @@ import pathlib
 
 path = pathlib.Path("diet/src/formats/regimen.rs")
 source = path.read_text(encoding="utf-8")
-old = "                    Some(Value::Table(_)) => return Err(ParseError::DuplicateTable { name }),\n"
-new = "                    Some(Value::Table(_)) => {}\n"
+old = "        Some(Value::Table(_)) if rest.is_empty() => {\n            return Err(ParseError::DuplicateTable { name });\n        }\n"
+new = "        Some(Value::Table(_)) if rest.is_empty() => {}\n"
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -1220,6 +1220,39 @@ source = path.read_text(encoding="utf-8")
 m = re.search(r"^inject_inert_injection\(\) \{\n.*?^\}\n", source, re.M | re.S)
 assert m
 path.write_text(source[: m.start()] + source[m.end() :], encoding="utf-8")
+EOF
+}
+
+# The second level of table flattened: `[serving.flags]` bindings land beside
+# `[serving]`'s own. The four cache-ram sweep arms then project identically to
+# their siblings except by name, which is a regimen that cannot tell two
+# regimes apart -- the exact hazard the level was grown for.
+inject_regimen_nested_table_flattened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "    let mut scope = entries;\n    for segment in segments {\n"
+new = "    let mut scope = entries;\n    for segment in segments.iter().take(1) {\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# An array read by a second reader instead of the one a binding uses. A
+# decimal inside brackets is then whatever that reader makes of the digits,
+# and `0.6` means one thing at the top level and another inside an array.
+inject_regimen_array_second_reader() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "                .map(|item| value_of(key, &item))\n"
+new = "                .map(|item| Ok(Value::String(item.as_str().to_owned())))\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
@@ -2409,6 +2442,10 @@ selftest() {
     'but the committed file hashes to'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing'
+  seeded_case "a nested table flattened"              test     inject_regimen_nested_table_flattened \
+    'holds its own binding and the table below it'
+  seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
+    'an array item was read by something other than the value reader'
   seeded_case "a case naming no injection"            injections inject_case_without_an_injection \
     'named by a seeded case, defined nowhere'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
