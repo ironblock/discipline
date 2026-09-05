@@ -1593,7 +1593,11 @@ fn target_of(argument: Option<&Word>, state: &State) -> Cwd {
 const TILDE: &str = "~";
 
 /// The last element of a path-like word: `./target/debug/diet` is `diet`.
-fn basename(word: &str) -> Option<&str> {
+///
+/// The router reads a command word by this function rather than by one of
+/// its own. Two spellings of one rule disagree eventually, and this one had
+/// already disagreed with a second copy on `..` and on a trailing slash.
+pub(crate) fn basename(word: &str) -> Option<&str> {
     Path::new(word).file_name().and_then(|name| name.to_str())
 }
 

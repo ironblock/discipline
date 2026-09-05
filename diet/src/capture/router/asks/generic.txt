@@ -1,1 +1,5 @@
-What did this turn establish that a later turn would need?
+{imperative}
+You are in {cwd}.
+You last edited {last_edited}.
+You said: "{intent}"
+What did this turn establish that a later turn would need? Answer with the fields LEARNED, EVIDENCE and STUCK, one per line, and write NONE for a field with nothing to record.
