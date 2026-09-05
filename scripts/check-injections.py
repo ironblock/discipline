@@ -14,6 +14,12 @@ text that moved. Fourteen injections were silently emptied that way once. The
 selftest would have caught it; it would have taken forty minutes to say so,
 and the merge had already been pushed.
 
+Two questions, because one is not enough. First: does every seeded case name
+an injection that EXISTS? A merge can delete a definition outright, and this
+script enumerates definitions -- so the deleted one leaves nothing to run and
+nothing to report, while the case that names it goes on claiming coverage.
+Then: does every injection change the tree?
+
 Each injection runs against its own copy of the tracked tree, in a fresh `git
 init` so the ones that build history have a repository to build it in. The
 fingerprint is every tracked file's digest plus the repository's refs and
@@ -31,6 +37,12 @@ import tempfile
 from pathlib import Path
 
 FUNC = re.compile(r"^(inject_[a-z0-9_]+)\(\) \{", re.M)
+# The injection a seeded case names. A case naming one that is not defined is
+# the failure this script could not see until it looked: it enumerates
+# DEFINITIONS, so a definition deleted outright is invisible to it -- there is
+# nothing to run and report inert. The selftest catches it, eventually, as
+# "changed nothing"; that is forty minutes away and this is not.
+CASE = re.compile(r"seeded_case\s+\"[^\"]*\"\s+\S+\s+(inject_[a-z0-9_]+)")
 # Every helper an injection may call, sourced alongside it. Extracted by name
 # rather than by sourcing verify.sh, which would run the gate.
 HELPERS = re.compile(r"^(?:seed_commit)\(\) \{\n.*?^\}\n", re.M | re.S)
@@ -82,6 +94,18 @@ def main() -> int:
     if not names:
         print("check-injections: verify.sh defines no injections", file=sys.stderr)
         return 2
+    named = {m.group(1) for m in CASE.finditer(text)}
+    undefined = sorted(named - set(names))
+    if undefined:
+        print(
+            f"check-injections: {len(undefined)} seeded case(s) name an injection "
+            f"that is not defined",
+            file=sys.stderr,
+        )
+        for name in undefined:
+            print(f"  {name}  named by a seeded case, defined nowhere", file=sys.stderr)
+        return 1
+
     tracked = tracked_files(root)
     helpers = "\n".join(match.group(0) for match in HELPERS.finditer(text))
 
