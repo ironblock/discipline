@@ -67,9 +67,9 @@ enable_thinking = true       # the shipping split: main lane thinks...
 interview_thinking = true    # ...and so do interview/audit forks (Run-2 posture)
 
 [limits]
-# Corey's ruling, live mid-drive (2026-08-15): no step-count judgment on what's
-# "legitimate" agentic work — every prior value here was a model's guess, not
-# his intent, and tonight's own turn 2 (deep multi-file exploration) hit 30
+# The owner's ruling, live mid-drive (2026-08-15): no step-count judgment on
+# what's "legitimate" agentic work — every prior value here was a model's guess,
+# not their intent, and that drive's own turn 2 (deep multi-file exploration) hit 30
 # mid-file with no final answer. u32::MAX, not a bigger arbitrary guess:
 # turn_timeout_s below remains the real backstop (a step still can't run past
 # wall-clock 2400s), so this removes the step-count ceiling specifically
