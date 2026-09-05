@@ -84,6 +84,11 @@ def observed() -> dict[str, set[str]]:
 
 
 def main() -> int:
+    # `--count-red` prints the number `red_faults` must carry and nothing
+    # else, so a tool that has just assembled the fault list can ask THIS
+    # reader for the count rather than reimplementing the arithmetic or
+    # scraping it out of a failure message. One reader, structured answer.
+    counting = "--count-red" in sys.argv
     failures: list[str] = []
 
     if not MANIFEST.is_file():
@@ -148,6 +153,14 @@ def main() -> int:
             f"[meta] mechanics_assertions is {meta.get('mechanics_assertions')}, "
             f"observed {len(seen['mechanics'])}"
         )
+
+    # Asked for the count, answer the count. Deliberately before the failure
+    # report: the caller is a tool that has just assembled the fault list and
+    # is asking what `red_faults` must say, so the one failure it is about to
+    # fix must not silence the answer.
+    if counting:
+        print(sum(len(seen[k]) for k in seen if k != "mechanics"))
+        return 0
 
     for message in failures:
         print(message, file=sys.stderr)
