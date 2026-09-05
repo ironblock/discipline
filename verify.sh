@@ -1116,8 +1116,8 @@ import pathlib
 
 path = pathlib.Path("diet/src/formats/regimen.rs")
 source = path.read_text(encoding="utf-8")
-old = "                let scope = match &table {\n"
-new = "                let scope = match &None::<String> {\n"
+old = "                    Some(segments) => scope_of(&mut entries, segments),\n"
+new = "                    Some(_) => &mut entries,\n"
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
