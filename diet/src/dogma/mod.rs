@@ -33,9 +33,19 @@
 //! [`VERSION`], regenerate the manifest, and say why in the commit message. A
 //! record's regime carries the version it ran under as `dogma_version`.
 //!
+//! The same rule holds for every pin, adopted from review as a repository
+//! rule: a diff that touches any pin constant ([`MANIFEST_DIGEST`],
+//! [`OPERATING_POINTS_DIGEST`], the vocabulary's pins) carries a version bump
+//! with its reason stated, and a reviewer reads for it by eye, because
+//! nothing mechanical can know a bump is due. A test can hold that text and
+//! pin agree; only a person can hold that the version moved for the reason
+//! the diff gives.
+//!
 //! This module is the interface between the seat that owns the dogma and the
 //! capture code that reads it. Capture code takes a [`Template`] and asks it
-//! for text; it never carries ask text of its own.
+//! for text; it never carries ask text of its own. The operating points are
+//! read the same way, through [`operating_points`], which holds the text
+//! against its digest before handing it out.
 
 use std::error::Error;
 use std::fmt;
@@ -47,7 +57,14 @@ pub mod vocabulary;
 /// A record produced under these templates carries this number as its
 /// regime's `dogma_version`. Two records with different versions were asked
 /// different questions, and their numbers do not compare.
-pub const VERSION: u32 = 0;
+///
+/// History, one line per bump, with its reason:
+///
+/// * 0: the twenty templates, as the research program froze them.
+/// * 1, 2026-09-04: the operating points and the trigger vocabulary joined
+///   the templates under this number; a record at 0 ran under the templates
+///   alone, with neither pinned.
+pub const VERSION: u32 = 1;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -62,14 +79,26 @@ pub const MANIFEST_DIGEST: &str = "e93b1fbf63c31266";
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
 /// Transcribed measurements, with their receipts beside them; the tables are
-/// the research program's byte for byte. Exposed as text rather than parsed
+/// the research program's byte for byte. Text rather than a parsed table
 /// because this crate has no TOML reader beyond the regimen subset, and the
-/// operating points use tables and floats that subset does not admit. The
-/// consumer that parses it names its reader; the digest below is what it
-/// checks first.
-pub const OPERATING_POINTS: &str = include_str!("../../dogma/operating-points.toml");
+/// operating points use tables and floats that subset does not admit.
+///
+/// Private, and read by [`operating_points`] alone. Text with a digest
+/// beside it is an interface only while nothing reads the text around the
+/// check. The compiler refuses a reader of this constant outside the module;
+/// it refuses nothing about the file the constant embeds, which a second
+/// `include_str!` or a read from disk opens just as well. So a test refuses
+/// any other mention of this constant's name or of the file's name under
+/// `diet/src` and `diet/tests`, this module and its submodules included,
+/// which privacy does not bar.
+const OPERATING_POINTS_TEXT: &str = include_str!("../../dogma/operating-points.toml");
 
-/// The digest of [`OPERATING_POINTS`] that [`VERSION`] was declared against.
+/// The digest the operating points' text is pinned by, declared against
+/// [`VERSION`].
+///
+/// Public where the text is not: a run reports the pin it ran under, and
+/// [`operating_points`] holds the text against this number before a byte of
+/// it is handed out.
 pub const OPERATING_POINTS_DIGEST: &str = "ae5e3496eb1976df";
 
 /// The manifest, exactly as pinned: one line per template, `name`, digest
@@ -545,14 +574,70 @@ pub fn digest(text: &str) -> String {
     format!("{hash:016x}")
 }
 
+/// The operating points' text does not match the digest it is pinned by.
+///
+/// The text and the digest are edited together, under a version bump; a
+/// mismatch is that edit half-done, or a dogma edit that carried no bump. A
+/// value rather than a panic, so that the consumer which would have parsed
+/// the text is the one that decides what a run without its dogma does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinDrift {
+    /// The digest the text was pinned by.
+    pub pinned: &'static str,
+    /// The digest the text has.
+    pub found: String,
+}
+
+impl fmt::Display for PinDrift {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { pinned, found } = self;
+        write!(
+            f,
+            "the operating points' text does not match its pinned digest: \
+             pinned {pinned}, found {found}"
+        )
+    }
+}
+
+impl Error for PinDrift {}
+
+/// The operating points, as TOML text, once the digest has vouched for them.
+///
+/// The only reader of the pinned text. The digest is computed and held
+/// against [`OPERATING_POINTS_DIGEST`] before the text is returned, so there
+/// is no path on which a consumer holds text the pin has not checked: a
+/// digest beside a text that anything can read around it is a comment, not
+/// an interface. The consumer that parses the text names its reader; it is
+/// handed out as text because this crate has no TOML reader beyond the
+/// regimen subset, and the operating points use tables and floats that
+/// subset does not admit.
+///
+/// # Errors
+///
+/// Returns [`PinDrift`] when the text's digest is not the pinned one: the
+/// operating points were edited without their version bump, or the digest
+/// was, and either way the dogma this crate carries is not the dogma it
+/// declares.
+pub fn operating_points() -> Result<&'static str, PinDrift> {
+    let found = digest(OPERATING_POINTS_TEXT);
+    if found == OPERATING_POINTS_DIGEST {
+        Ok(OPERATING_POINTS_TEXT)
+    } else {
+        Err(PinDrift {
+            pinned: OPERATING_POINTS_DIGEST,
+            found,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        FORK_LOCAL_SENTENCE, FillError, Hole, MANIFEST, MANIFEST_DIGEST, OPERATING_POINTS,
-        OPERATING_POINTS_DIGEST, Site, Template, digest, fill_text,
+        FORK_LOCAL_SENTENCE, FillError, Hole, MANIFEST, MANIFEST_DIGEST, OPERATING_POINTS_DIGEST,
+        PinDrift, Site, Template, digest, fill_text, operating_points,
     };
     use std::collections::BTreeSet;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     fn manifest() -> Vec<(String, String, usize)> {
         MANIFEST
@@ -725,20 +810,21 @@ mod tests {
         );
     }
 
+    // Through the accessor, which is the pin check: a drift is the Err this
+    // test refuses to unwrap, with both digests in it.
     #[test]
     fn the_operating_points_are_pinned() {
-        assert_eq!(
-            digest(OPERATING_POINTS),
-            OPERATING_POINTS_DIGEST,
-            "diet/dogma/operating-points.toml changed and dogma::VERSION / \
-             OPERATING_POINTS_DIGEST did not: a dogma version bump edits both"
+        let text = operating_points().expect(
+            "the operating points' file changed and dogma::VERSION / \
+             OPERATING_POINTS_DIGEST did not: a dogma version bump edits both, the file \
+             and the digest, in one commit, with the reason",
         );
         // Every model table carries a sampler and a gate, and every listed
         // no-think operation is one of the three the program runs. Read
         // line by line, so it assumes the arrays stay on one line, which the
         // pinned file's do; the digest is the guard, this is the description.
         let mut models = 0;
-        for line in OPERATING_POINTS.lines() {
+        for line in text.lines() {
             let line = line.trim();
             if line.starts_with('[') && !line.contains('.') {
                 models += 1;
@@ -756,11 +842,132 @@ mod tests {
         assert_eq!(models, 4, "four model families are pinned");
         for table in ["sampler", "gate"] {
             assert_eq!(
-                OPERATING_POINTS.matches(&format!(".{table}]")).count(),
+                text.matches(&format!(".{table}]")).count(),
                 4,
                 "every model table carries a `{table}` table"
             );
         }
+    }
+
+    /// Every `.rs` file under `dir`, recursively, in a stable order.
+    fn rust_sources(dir: &Path, into: &mut Vec<PathBuf>) {
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
+            .unwrap_or_else(|err| panic!("{}: {err}", dir.display()))
+            .map(|entry| entry.expect("a readable entry").path())
+            .collect();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                rust_sources(&path, into);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+                into.push(path);
+            }
+        }
+    }
+
+    // The ruling's condition on text-with-a-digest: it is an interface only
+    // while nothing reads the text around the check. The compiler holds that
+    // for the constant's name outside this module, since the constant is
+    // private; it holds nothing for the file the constant embeds, which a
+    // second `include_str!` or a read from disk opens anywhere. So this scan
+    // holds both names, the constant's and the file's, over the crate's two
+    // source roots, `diet/src` and `diet/tests`: the constant may appear at
+    // its declaration and inside the accessor, the file's name at the
+    // declaration alone. The file's needle is its hyphenated stem, which no
+    // Rust identifier can carry, so every hit is a string, a path or prose,
+    // with or without the extension. Both needles are assembled at run time
+    // so that this test's own source is not the reader it finds; a name
+    // assembled the same way elsewhere is out of the scan's reach, which is
+    // its limit.
+    #[test]
+    fn the_operating_points_have_one_reader() {
+        let constant = format!("{}{}", "OPERATING_POINTS", "_TEXT");
+        let file = format!("{}-{}", "operating", "points");
+        let declaration = format!("const {constant}:");
+        let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let this = Path::new("dogma/mod.rs");
+        let mut declarations = 0;
+        let mut scanned_this = false;
+        for root in ["src", "tests"] {
+            let dir = crate_dir.join(root);
+            let mut sources = Vec::new();
+            rust_sources(&dir, &mut sources);
+            assert!(!sources.is_empty(), "no Rust source under diet/{root}");
+            for path in &sources {
+                let relative = path.strip_prefix(&dir).expect("a path under its root");
+                let shown = format!("diet/{root}/{}", relative.display());
+                let source =
+                    std::fs::read_to_string(path).unwrap_or_else(|err| panic!("{shown}: {err}"));
+                let lines: Vec<&str> = source.lines().collect();
+                if root != "src" || relative != this {
+                    if let Some(index) = lines
+                        .iter()
+                        .position(|line| line.contains(&constant) || line.contains(&file))
+                    {
+                        panic!(
+                            "{shown}:{}: reads the operating points' text, or names its file; \
+                             every reader goes through dogma::operating_points(), which \
+                             checks the digest first",
+                            index + 1
+                        );
+                    }
+                    continue;
+                }
+                scanned_this = true;
+                // The accessor's span: its header line through the first
+                // later line that is exactly a closing brace, which rustfmt
+                // keeps at column zero for a top-level fn.
+                let start = lines
+                    .iter()
+                    .position(|line| line.contains("pub fn operating_points("))
+                    .expect("the accessor is declared in this file");
+                let end = (start + 1..lines.len())
+                    .find(|&index| lines[index] == "}")
+                    .expect("the accessor closes");
+                for (index, line) in lines.iter().enumerate() {
+                    if line.trim_start().starts_with(&declaration) {
+                        declarations += 1;
+                        continue;
+                    }
+                    assert!(
+                        !line.contains(&file),
+                        "{shown}:{}: names the operating points' file away from its \
+                         declaration; the text is embedded once and read through \
+                         operating_points(), which checks the digest first",
+                        index + 1
+                    );
+                    assert!(
+                        !line.contains(&constant) || (start..=end).contains(&index),
+                        "{shown}:{}: a second reader of the operating points' text; every \
+                         reader goes through operating_points(), which checks the digest \
+                         first",
+                        index + 1
+                    );
+                }
+            }
+        }
+        assert!(scanned_this, "dogma/mod.rs was not among the files scanned");
+        assert_eq!(
+            declarations, 1,
+            "the operating points' text is declared once"
+        );
+    }
+
+    // A drift's message carries the remedy's two halves: the number the
+    // version was declared against, and the number the text has now.
+    #[test]
+    fn a_pin_drift_names_both_digests() {
+        let drift = PinDrift {
+            pinned: OPERATING_POINTS_DIGEST,
+            found: digest(""),
+        };
+        let shown = drift.to_string();
+        assert!(
+            shown.contains("does not match its pinned digest"),
+            "{shown}"
+        );
+        assert!(shown.contains(OPERATING_POINTS_DIGEST), "{shown}");
+        assert!(shown.contains("cbf29ce484222325"), "{shown}");
     }
 
     // The lane-scoped-sentence rule, as a check. The sentence is a claim that
