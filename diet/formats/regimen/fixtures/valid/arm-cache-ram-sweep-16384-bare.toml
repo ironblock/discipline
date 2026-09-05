@@ -1,13 +1,17 @@
 # Level-2 --cache-ram sweep, cell 1 (16384 MiB): the bare capture-intensity arm, cloned from the Run-1 Pi-parity control (verbatim-summary replay, thinking off) with --cache-ram declared explicit; its compaction first_at was re-pinned on 2026-08-05.
 #
-# Rendered as a regimen v1 conformance fixture. Bindings the grammar cannot
-# express are not carried and not approximated:
+# Rendered as a regimen v1 conformance fixture.
 #
-# not carried: [serving.flags] — the regimen grammar has no nested table header
-# not carried: "--cache-ram" = 16384 — the regimen grammar has no nested table
-#   (the binding sits under [serving.flags]) and no quoted key
-#
-# The one-level [serving] header itself is kept, empty, as the arm declares it.
+# carried: [serving.flags] and the binding under it -- the one line that makes
+#   this cell what it is. Before the grammar grew a second level of table the
+#   sweep's four cells projected to two documents: each cell was identical to
+#   the other cell of its arm but for `name`, and both diet cells were also
+#   indistinguishable from an arm of a different experiment. Measured over the
+#   nineteen ported arms: four such pairs before this rendering, none after.
+# not carried: the source's quoting of the key. It writes "--cache-ram" = 16384;
+#   this grammar has no quoted key, so the fixture writes --cache-ram = 16384. TOML
+#   reads a bare key and a basic-string key of the same characters as one key,
+#   so the binding is carried exactly and only its spelling differs.
 #
 # --cache-ram SWEEP, CELL 1 (16384 MiB). Cloned from the run 1 bare arm
 # (Run 1 Pi-parity control, verbatim-summary replay, thinking OFF), originally
@@ -36,9 +40,10 @@ tool_timeout_s = 120
 # --cache-ram sweep cell 1: --cache-ram DECLARED explicit at 16384 MiB. See
 # the diet arm of this cell's [serving] comment — same declared deviation,
 # same [[deviation]] entry in the parity declaration covers both arms of this cell.
-# (The declaration itself sat under [serving.flags]; the header block above
-# says why it is not carried.)
+# (The declaration sits under [serving.flags], which this fixture now carries.)
 [serving]
+[serving.flags]
+--cache-ram = 16384
 
 [native_compaction]
 every_turns = 2

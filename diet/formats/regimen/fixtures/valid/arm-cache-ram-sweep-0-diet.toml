@@ -1,7 +1,15 @@
 # Level 2 --cache-ram sweep, cell 2 (0 MiB, the floor), per the 2026-08-07 ruling.
 #
-# not carried: [serving.flags] — the regimen grammar has no nested table header
-# not carried: "--cache-ram" = 0 (under [serving.flags]) — the regimen grammar has no nested table, which is what refuses it (a bare `--cache-ram` key is legal TOML and legal here; the source's quoting is optional)
+# carried: [serving.flags] and the binding under it -- the one line that makes
+#   this cell what it is. Before the grammar grew a second level of table the
+#   sweep's four cells projected to two documents: each cell was identical to
+#   the other cell of its arm but for `name`, and both diet cells were also
+#   indistinguishable from an arm of a different experiment. Measured over the
+#   nineteen ported arms: four such pairs before this rendering, none after.
+# not carried: the source's quoting of the key. It writes "--cache-ram" = 0;
+#   this grammar has no quoted key, so the fixture writes --cache-ram = 0. TOML
+#   reads a bare key and a basic-string key of the same characters as one key,
+#   so the binding is carried exactly and only its spelling differs.
 #
 # Cloned from the 16384 MiB cell arm with exactly one change: --cache-ram = 0
 # instead of 16384. Per the 2026-08-07 ruling on the sweep:
@@ -46,4 +54,5 @@ rationale = false
 # drift). The parity preamble's live check verifies the live server
 # actually has --cache-ram=0 in force before any drive fires.
 [serving]
-# the arm's only content under this header lives in [serving.flags], which is not carried (see the header block)
+[serving.flags]
+--cache-ram = 0
