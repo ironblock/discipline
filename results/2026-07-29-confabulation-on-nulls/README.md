@@ -1,6 +1,7 @@
 +++
 hypothesis = "A generative interview fired at a step where nothing capture-worthy happened confabulates an entry in a majority of calls, in every prompt-language cell, and the harness's own compaction turn does so at a higher rate still."
 result = "supported"
+kind = "reproducible-by-config"
 product_sha256 = "7b2ff52e12b693a77bcbd50c86bc431c14c18168cbcf05cf94d3b74f7f7a4464"
 controls_run = ["sixteen gold steps with a known capture-worthy event, graded alongside the null steps", "the harness-meta null step, the compaction turn itself, scored by two independent criteria that must agree"]
 known_defects = ["The asks fired were the campaign's own twenty-four prompt-language variants, carried per row in the artifact, not the pinned dogma templates; dogma_version names the pinned set in force for comparison, not the words sent.", "Every parse rate in this campaign is a floor: answers were graded through the interview parser of that era, before its heading, bold-tag and wrapper-fence defects were fixed, and this campaign was never regraded.", "The grading itself (is_confabulation per row) is consumed, not recomputed: it is the archived grader's verdict, mechanical on the parsed answer, and this directory re-derives the three headline figures from it."]
