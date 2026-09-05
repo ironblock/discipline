@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 177
+red_faults = 178
 mechanics_assertions = 27
 migrated = 0
 
@@ -1818,4 +1818,13 @@ label = "a write lost to a read of the same path"
 failure_class = "capture.fact-discarded"
 legacy_signature = "a write was lost to a read of the same path in the same call"
 
+migrated = false
+
+[[fault]]
+id = "test.regimen_header_comment_is_a_table"
+kind = "seeded-gate"
+check = "test"
+label = "a header comment read as a table"
+failure_class = "regimen.header-comment-as-table"
+legacy_signature = "a comment after a table header is not a table the header opened"
 migrated = false

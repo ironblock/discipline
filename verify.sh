@@ -1107,6 +1107,25 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A comment after a table header read as part of the table. `comment` is a
+# non-silent rule, so the header yields it among its children, and taking
+# every child as a segment opens a table NAMED for the comment: the
+# projection disagrees with tomllib about the same bytes, a third segment
+# walks off the end of `scope_of` into `unreachable!`, and `[b]` twice stops
+# colliding when the second carries a comment -- which accepts a document
+# TOML refuses, the one direction this subset may never take.
+inject_regimen_header_comment_is_a_table() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "                    .filter(|part| part.as_rule() == Rule::key)\n"
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
 # A table header that opens nothing. Every key lands at the top level, so
 # `[sampler] seed` and a document-level `seed` become one binding and the arm
 # that named both is recorded as an arm that named one.
@@ -2430,6 +2449,8 @@ selftest() {
     'a float projected as something other than a decimal'
   seeded_case "a table header that opens nothing"     test     inject_regimen_table_scope_flattened \
     'its keys are not the document.s'
+  seeded_case "a header comment read as a table"      test     inject_regimen_header_comment_is_a_table \
+    'a comment after a table header is not a table the header opened'
   seeded_case "two tables of one name accepted"       test     inject_regimen_table_collision_unchecked \
     'a table opened twice was not refused'
   seeded_case "the float rule widened past the record" test    inject_regimen_float_rule_widened \

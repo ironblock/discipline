@@ -255,8 +255,19 @@ pub fn parse(input: &str) -> Result<Regimen, ParseError> {
     for pair in file.into_inner() {
         match pair.as_rule() {
             Rule::table_header => {
+                // Only the keys. `comment` is a non-silent rule, so a
+                // header with a trailing comment yields it as one more
+                // child -- and taking every child as a segment made
+                // `[sampler] # which sampler` open a table NAMED for the
+                // comment. Three ways for one cause: the projection said
+                // `sampler."# which sampler".seed` where TOML says
+                // `sampler.seed`, a third segment walked off the end of
+                // `scope_of` into `unreachable!`, and `[b]` twice with a
+                // comment on the second stopped colliding -- which is the
+                // one direction a subset may never take.
                 let segments: Vec<String> = pair
                     .into_inner()
+                    .filter(|part| part.as_rule() == Rule::key)
                     .map(|part| part.as_str().to_owned())
                     .collect();
                 open_table(&mut entries, &segments)?;
@@ -500,6 +511,39 @@ mod tests {
     fn an_oversized_integer_is_rejected() {
         let err = parse("n = 99999999999999999999\n").expect_err("overflows i64");
         assert!(matches!(err, ParseError::IntegerOutOfRange { key, .. } if key == "n"));
+    }
+
+    #[test]
+    fn a_comment_after_a_table_header_is_not_part_of_the_table() {
+        // `comment` is a non-silent rule, so a header carrying one yields it
+        // among the header's children. Taking every child as a segment named
+        // a table for the comment -- and since a comment is arbitrary text,
+        // that is an arbitrary table name arriving from a place the document
+        // does not bind anything.
+        let plain = parse("[sampler]\nseed = 7\n").expect("document is a regimen");
+        let noted = parse("[sampler] # which sampler\nseed = 7\n").expect("document is a regimen");
+        assert_eq!(
+            noted, plain,
+            "a comment after a table header is not a table the header opened"
+        );
+
+        // Two levels, where the third segment used to walk off the end of
+        // `scope_of` into `unreachable!` -- a crash where the caller asked
+        // for a verdict.
+        let deep = parse("[a.b] # noted\nx = 1\n").expect("document is a regimen");
+        assert_eq!(
+            deep,
+            parse("[a.b]\nx = 1\n").expect("document is a regimen"),
+            "a comment after a table header is not a table the header opened"
+        );
+
+        // And the collision must survive the comment: `[b]` twice is refused
+        // by TOML, so a comment that made the second one a different table
+        // would accept a document the other reader of these bytes rejects.
+        assert!(
+            parse("[b]\n[b] # noted\n").is_err(),
+            "a comment after a table header is not a table the header opened"
+        );
     }
 
     #[test]
