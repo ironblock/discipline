@@ -1,0 +1,13 @@
+{
+  "sampler": {
+    "table": {
+      "inner": {
+        "table": {
+          "x": {
+            "integer": 1
+          }
+        }
+      }
+    }
+  }
+}

@@ -31,6 +31,13 @@ What stays here is what is not a format question. Three cross-checks:
      be bound by ``regimen.toml`` and must equal it; and the required three
      must equal what the record's ``start`` row carries.
   3. ``product_sha256`` must equal the summary row's ``product_sha256``.
+  4. Every ``consumes`` entry on every claim row must name a file in the
+     directory whose SHA-256 is the digest recorded beside it. The record
+     carried those digests and nothing compared them to the bytes, so a claim
+     could cite evidence it had never read -- provenance for the wrong
+     artefact, which reads exactly like provenance for the right one.
+     ``diet check-record`` stays shape-only: a format check is pure, and this
+     linter is the reader that has the filesystem.
 
 Stdlib only, by design: this runs in ``verify.sh`` and must not need an
 install step to tell the truth. It needs a built ``diet``, and refuses --
@@ -47,8 +54,11 @@ directories is an error, not a pass.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import argparse
 import datetime
+import hashlib
 import json
 import pathlib
 import re
@@ -61,6 +71,11 @@ FENCE = "+++"
 REQUIRED_KEYS: dict[str, type | tuple[type, ...]] = {
     "hypothesis": str,
     "result": str,
+    # Which of the two gate-0 kinds this directory is. Required here rather
+    # than only in check-recompute.py so that a directory cannot be added
+    # without declaring it: an undeclared directory is neither recomputed nor
+    # knowingly skipped, which is how a gate comes to run over nothing.
+    "kind": str,
     "regime": dict,
     "product_sha256": str,
     "controls_run": list,
@@ -74,6 +89,12 @@ REQUIRED_REGIME_KEYS: dict[str, type | tuple[type, ...]] = {
 }
 
 SECTIONS = ["Observation", "Hypothesis", "Test", "Results", "Conclusion"]
+
+# The two kinds a directory may declare. Spelled here as well as in
+# check-recompute.py because this linter refuses a third spelling and that one
+# decides what to run; a directory whose kind neither reader knows would
+# otherwise be caught by neither.
+KINDS = ("reproducible-by-config", "historical-observation")
 
 REQUIRED_FILES = ["run.jsonl", "regimen.toml", "README.md"]
 
@@ -339,6 +360,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
         else:
             summary = summaries[0]
         recorded_regime = value.get("regime")
+        check_consumed(directory, rows, fail)
 
     # --- regimen.toml ----------------------------------------------------
     regimen: dict | None = None
@@ -417,6 +439,10 @@ def check_run(directory: pathlib.Path) -> list[str]:
                         f"regimen.toml binds {regimen[key]!r}"
                     )
 
+    kind = front.get("kind")
+    if isinstance(kind, str) and kind not in KINDS:
+        fail(f"front-matter `kind` is {kind!r}, which is neither {' nor '.join(KINDS)}")
+
     sha = front.get("product_sha256")
     if isinstance(sha, str):
         if not SHA256.fullmatch(sha):
@@ -457,6 +483,68 @@ def check_run(directory: pathlib.Path) -> list[str]:
         )
 
     return failures
+
+
+def digest_of(path: pathlib.Path) -> str:
+    """The SHA-256 of a file, read in chunks so a large artefact is not held."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def check_consumed(
+    directory: pathlib.Path, rows: list[dict], fail: Callable[[str], None]
+) -> None:
+    """Every claim's consumed evidence, hashed against the committed file.
+
+    The record states which artefacts a claim was derived from and the digest
+    each one had. Until this existed, both halves were shape-checked and
+    neither was compared to anything: a claim could name a file that had since
+    changed, or a file that was never there, and the whole gate stayed green.
+    A digest that is never checked is a decoration on a claim.
+    """
+    for row in rows:
+        if row.get("record") != "claim":
+            continue
+        claim = row.get("id", "<unnamed>")
+        entries = row.get("consumes")
+        if not isinstance(entries, list):
+            continue  # shape is diet's question, and it has already answered
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            stated, recorded = entry.get("path"), entry.get("sha256")
+            if not isinstance(stated, str) or not isinstance(recorded, str):
+                continue
+            # A results directory is self-contained: its evidence is committed
+            # beside it. A path that leaves the directory names something this
+            # repository does not carry, and a digest of it would be a digest
+            # of whatever happened to be on the machine that ran the linter.
+            parts = pathlib.PurePosixPath(stated).parts
+            if stated.startswith("/") or ".." in parts:
+                fail(
+                    f"claim `{claim}` consumes `{stated}`, which is outside the "
+                    f"run directory; evidence is committed beside the claim"
+                )
+                continue
+            if stated == "run.jsonl":
+                fail(
+                    f"claim `{claim}` consumes `run.jsonl`, whose digest it is "
+                    f"itself part of; a record cannot state its own hash"
+                )
+                continue
+            artefact = directory / stated
+            if not artefact.is_file():
+                fail(f"claim `{claim}` consumes `{stated}`, which is not a file here")
+                continue
+            found = digest_of(artefact)
+            if found != recorded:
+                fail(
+                    f"claim `{claim}` consumes `{stated}` at sha256 {recorded}, "
+                    f"but the committed file hashes to {found}"
+                )
 
 
 def run_directories(root: pathlib.Path) -> list[pathlib.Path]:

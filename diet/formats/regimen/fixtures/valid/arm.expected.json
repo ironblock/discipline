@@ -1,0 +1,47 @@
+{
+  "arm": {
+    "string": "imperative-ablated"
+  },
+  "dogma_version": {
+    "integer": 1
+  },
+  "limits": {
+    "table": {
+      "max_tokens": {
+        "integer": 4096
+      },
+      "wall_seconds": {
+        "integer": 1800
+      }
+    }
+  },
+  "replay": {
+    "boolean": false
+  },
+  "sampler": {
+    "table": {
+      "seed": {
+        "integer": 7
+      },
+      "temperature": {
+        "float": 0.6
+      },
+      "top_p": {
+        "float": 0.95
+      }
+    }
+  },
+  "seed": {
+    "integer": -17
+  },
+  "triggers": {
+    "table": {
+      "on_decline": {
+        "string": "retry-once"
+      },
+      "on_silence": {
+        "string": "record"
+      }
+    }
+  }
+}

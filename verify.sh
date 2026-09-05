@@ -32,7 +32,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results regimen metadata hygiene pages ci history injections parity)
+readonly CHECKS=(fmt clippy test library results recompute regimen metadata hygiene pages ci history injections parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -161,6 +161,13 @@ check_regimen() {
   printf '  %d regimen document(s) parsed\n' "$seen"
   return "$rc"
 }
+
+# Gate 0: every results directory's recorded numbers re-derive from the
+# artefacts committed beside it, or the directory declares itself historical
+# and is counted as skipped. `results` checks that the report agrees with the
+# record; both were written by the same run, so agreement between them is not
+# derivation. Zero recomputable directories is exit 2, not a pass.
+check_recompute() { python3 scripts/check-recompute.py; }
 
 check_metadata() { python3 scripts/check-repo-metadata.py; }
 
@@ -835,463 +842,6 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
-# A subshell run against the shell's own state. `cd a; (cd b; ls); pwd` then
-# ends in `b`, and every relative path after it resolves against a directory
-# the session was never in.
-inject_mechanical_subshell_leaks() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/mechanical.rs")
-source = path.read_text(encoding="utf-8")
-old = """            Command::Subshell(inner) => {
-                let mut copy = state.clone();
-                self.run_list(inner, &mut copy, call);
-                false
-            }"""
-new = """            Command::Subshell(inner) => {
-                self.run_list(inner, state, call);
-                false
-            }"""
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# A `cd` the shell reported failing, applied anyway. The tracked working
-# directory then names a directory that is not there, which is the mistake the
-# whole lane exists to stop being made by a model.
-inject_mechanical_failed_cd_applied() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/mechanical.rs")
-source = path.read_text(encoding="utf-8")
-old = "        let refused = call.refusal(builtin, written.as_deref(), simple);\n"
-new = """        let refused: Option<String> = {
-            let _ = call.refusal(builtin, written.as_deref(), simple);
-            None
-        };
-"""
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# `popd` with nothing on the stack passed over in silence. The cwd stays
-# right and the record stops saying the session tried to leave.
-inject_mechanical_popd_empty_ignored() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/mechanical.rs")
-source = path.read_text(encoding="utf-8")
-old = """        self.record_failure(call, simple, EMPTY_STACK.to_owned());
-        true
-    }"""
-new = """        false
-    }"""
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# The lint's table of mechanical nouns emptied. Every ask template then passes,
-# and the working directory can go back to being an interview question.
-inject_mechanical_lint_table_emptied() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/mechanical.rs")
-source = path.read_text(encoding="utf-8")
-old = "pub const MECHANICAL_NOUNS: &[&str] = &[\n"
-new = "pub const MECHANICAL_NOUNS: &[&str] = &[];\nconst RETIRED_NOUNS: &[&str] = &[\n"
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# Mechanical entries routed through the groundedness gate. A derivation is not
-# a quotation, so "the working directory is /work/diet" is absent from the row
-# that says `cd diet` and the gate drops the lane's whole output as invention.
-inject_mechanical_entry_grounded() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/mechanical.rs")
-source = path.read_text(encoding="utf-8")
-old = """        let patches = self.patches(turn);
-        object.apply_turn(&patches)
-"""
-new = """        let patches = self.patches(turn);
-        let texts: Vec<String> = patches
-            .iter()
-            .map(|patch| match patch {
-                Patch::Add { content, .. } => content.clone(),
-                other => format!("{other:?}"),
-            })
-            .collect();
-        let source = self
-            .commands
-            .iter()
-            .map(|run| run.line.as_str())
-            .collect::<Vec<_>>()
-            .join("\\n");
-        let floor = crate::capture::grounded::Floor::pre_registered(1, 2, "the seeded fault")
-            .expect("a floor");
-        let report = crate::capture::grounded::check(
-            &texts,
-            crate::formats::interview::FieldKind::ApiSurface,
-            crate::capture::grounded::ContractInput {
-                source: &source,
-                session_prefix: "",
-            },
-            &floor,
-        );
-        let kept = report.kept();
-        let patches: Vec<Patch> = patches
-            .into_iter()
-            .zip(texts.iter())
-            .filter(|(_, text)| kept.contains(&text.as_str()))
-            .map(|(patch, _)| patch)
-            .collect();
-        object.apply_turn(&patches)
-"""
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# The declared default replaced by silence. A pattern nobody wrote a row for
-# is exactly the call nobody has looked at yet, and silence is how it stays
-# that way.
-inject_router_unknown_silent() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/mod.rs")
-source = path.read_text(encoding="utf-8")
-old = "            Self::Unknown => Routing::Fork(AskKind::Generic),\n"
-new = "            Self::Unknown => Routing::Silent,\n"
-assert old in source
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# A judgment ask released in the middle of a turn: the question that needs
-# the model to have concluded something, asked before it has.
-inject_router_judgment_mid_turn() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/mod.rs")
-source = path.read_text(encoding="utf-8")
-old = """            class: classified.class,
-            routing,
-            ask: match routing {"""
-new = """            class: classified.class,
-            routing: if routing == Routing::Defer {
-                Routing::Fork(AskKind::Judgment)
-            } else {
-                routing
-            },
-            ask: match routing {"""
-assert old in source
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# A row of the table lost. A test run then routes as unknown, and the corpus
-# of real calls is what notices.
-inject_router_table_row_lost() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/classes.tsv")
-source = path.read_text(encoding="utf-8")
-old = "test-run\tshell\tword=cargo sub=test|bench\n"
-assert old in source
-path.write_text(source.replace(old, "", 1), encoding="utf-8")
-EOF
-}
-
-# An unknown call routed but not recorded. Misrouting is then a suspicion
-# again rather than a number.
-inject_router_unclassified_silent() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/mod.rs")
-source = path.read_text(encoding="utf-8")
-old = """            self.unclassified.push(Unclassified {
-                id: id.to_owned(),
-                turn,
-                tool: tool.to_owned(),
-                word: classified.word,
-            });
-"""
-assert old in source
-path.write_text(source.replace(old, "", 1), encoding="utf-8")
-EOF
-}
-
-# The reduction claimed rather than computed from the counts beside it.
-inject_router_reduction_claimed() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/mod.rs")
-source = path.read_text(encoding="utf-8")
-old = "            let saved = naive.saturating_sub(self.forks());\n"
-new = "            let saved = naive;\n"
-assert old in source
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# A word's command substitutions found by scanning the text the quoting has
-# already been taken out of, instead of by the grammar that read the quoting.
-# `echo '$(cat notes.txt)'` then records a file read that never happened,
-# which is the one thing this lane exists not to do.
-inject_mechanical_quoted_substitution() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/formats/shell.rs")
-source = path.read_text(encoding="utf-8")
-old = """    Ok(Word {
-        text,
-        literal,
-        substitutions,
-    })"""
-new = """    let mut substitutions = Vec::new();
-    let bytes = text.as_bytes();
-    let mut index = 0;
-    while index + 1 < bytes.len() {
-        if bytes[index] == b'$'
-            && bytes[index + 1] == b'('
-            && let Some(end) = text[index + 2..].find(')')
-        {
-            substitutions.push(text[index + 2..index + 2 + end].to_owned());
-            index = index + 2 + end + 1;
-            continue;
-        }
-        index += 1;
-    }
-    Ok(Word {
-        text,
-        literal,
-        substitutions,
-    })"""
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# An ask wired to another class's question. Both templates still carry the
-# imperative and both still render; what stops is the ask being about the
-# thing that was just done.
-inject_router_ask_class_untuned() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/mod.rs")
-source = path.read_text(encoding="utf-8")
-old = """            Self::ApiSurface => include_str!("asks/api_surface.txt"),
-            Self::Outcome => include_str!("asks/outcome.txt"),"""
-new = """            Self::ApiSurface => include_str!("asks/outcome.txt"),
-            Self::Outcome => include_str!("asks/api_surface.txt"),"""
-assert old in source
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# A template that lost the fork-local imperative. The ask still asks; what it
-# stops doing is telling the fork which turn it is answering from.
-inject_router_ask_imperative_dropped() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/asks/finding.txt")
-source = path.read_text(encoding="utf-8")
-old = "{imperative}\n"
-assert source.startswith(old)
-path.write_text(source[len(old) :], encoding="utf-8")
-EOF
-}
-
-# A census whose totals are right and whose per-class counts are not: the
-# drive is told a directory listing was forked.
-inject_router_census_class_miscounted() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/mod.rs")
-source = path.read_text(encoding="utf-8")
-old = "            Routing::Silent => tally.silent += 1,\n"
-new = "            Routing::Silent => tally.forked += 1,\n"
-assert old in source
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# `diet route` answers with a census it did not compute: every count zero,
-# ok true, exit 0. The replay still runs, so nothing downstream complains.
-inject_router_route_census_hollow() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/bin/diet.rs")
-source = path.read_text(encoding="utf-8")
-old = """    let replayed = diet::capture::router::replay(&record).map_err(|err| err.to_string())?;
-    replayed.census.value().map_err(|err| err.to_string())"""
-new = """    diet::capture::router::replay(&record).map_err(|err| err.to_string())?;
-    diet::capture::router::Census::default()
-        .value()
-        .map_err(|err| err.to_string())"""
-assert old in source
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# A row moved below one that already claims every call it names. The row is
-# still in the table, still parses, and can never decide anything.
-inject_router_table_row_shadowed() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/classes.tsv")
-source = path.read_text(encoding="utf-8")
-row = "directory-listing\tshell\tword=git sub=ls-files\n"
-below = "version-control\tshell\tword=git|hg|svn|jj\n"
-assert row in source and below in source
-source = source.replace(row, "", 1)
-path.write_text(source.replace(below, below + row, 1), encoding="utf-8")
-EOF
-}
-
-# The corpus stops covering a class. The calls that remain still route as
-# labelled, so only the coverage of the corpus itself says anything.
-inject_router_corpus_class_uncovered() {
-  python3 - <<'EOF'
-import pathlib
-
-corpus = pathlib.Path("diet/capture/router/corpus")
-for name in ("tool-families.jsonl", "tool-families.expected.json"):
-    path = corpus / name
-    assert path.exists(), path
-    path.unlink()
-EOF
-}
-
-# A table row that does not parse, skipped instead of refused. Every call in
-# the drive is then unknown, which is what a router with a perfect table
-# reports for a drive full of novel tools.
-inject_router_table_row_skipped() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/mod.rs")
-source = path.read_text(encoding="utf-8")
-old = """        let [class, family, rule] = fields.as_slice() else {
-            return Err(TableError::Shape { line });
-        };"""
-new = """        let [class, family, rule] = fields.as_slice() else {
-            continue;
-        };"""
-assert old in source
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# The stated intent taken from whatever lane spoke last. An interview's own
-# answer is then quoted back to the drive as something the drive said.
-inject_router_intent_lane_ignored() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/mod.rs")
-source = path.read_text(encoding="utf-8")
-old = "                    .is_some_and(|lane| lane == CANONICAL_LANE)\n"
-new = "                    .is_some_and(|lane| lane != CANONICAL_LANE)\n"
-assert old in source
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# The first stated intent instead of the last: the ask quotes back something
-# the model has already finished doing.
-inject_router_intent_first_not_last() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/mod.rs")
-source = path.read_text(encoding="utf-8")
-old = """    sentences
-        .iter()
-        .rev()
-        .map(|sentence| sentence.trim())"""
-new = """    sentences
-        .iter()
-        .map(|sentence| sentence.trim())"""
-assert old in source
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# A phrase the model states its intent with, dropped from the table. The
-# stated-intent hole then goes unfilled for every turn that used it.
-inject_router_intent_marker_lost() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/mod.rs")
-source = path.read_text(encoding="utf-8")
-old = '    "let me ",\n'
-assert old in source
-path.write_text(source.replace(old, "", 1), encoding="utf-8")
-EOF
-}
-
-# An unclassified call recorded without the tool and against the wrong turn.
-# The count is still right, and nothing it names can be looked up.
-inject_router_unclassified_unattributed() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/mod.rs")
-source = path.read_text(encoding="utf-8")
-old = """                id: id.to_owned(),
-                turn,
-                tool: tool.to_owned(),
-                word: classified.word,"""
-new = """                id: id.to_owned(),
-                turn: turn + 1,
-                tool: String::new(),
-                word: classified.word,"""
-assert old in source
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# The declared default dropped out of the vocabulary. Every loop that walks
-# `Class::ALL` then walks past it rather than over it.
-inject_router_class_vocabulary_shortened() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/router/mod.rs")
-source = path.read_text(encoding="utf-8")
-old = """        Self::VersionControl,
-        Self::Unknown,
-    ];"""
-new = """        Self::VersionControl,
-    ];"""
-assert old in source
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
 inject_cli_usage_exit() {
   sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
@@ -1485,8 +1035,18 @@ inject_diet_bin_ignored() {
     scripts/resolve-diet.py
 }
 
+# A results directory carrying a regimen.toml the format refuses.
+#
+# This wrote `arm = 1.5` until the grammar grew floats, at which point the
+# injection kept changing the tree and stopped changing the VERDICT -- the
+# gate went green and the seeded case reported "did not fire". An injection
+# is proven to change the tree by `check-injections`, which cannot see that
+# the change no longer means anything; only the selftest can. So the text
+# here is one both readers refuse permanently rather than one the current
+# subset happens to exclude: an unterminated string is not TOML and never
+# will be.
 inject_regimen() {
-  printf 'arm = 1.5\n' > results/_template/regimen.toml
+  printf 'arm = "unterminated\n' > results/_template/regimen.toml
 }
 
 inject_toml_subset() {
@@ -1531,6 +1091,171 @@ inject_history() {
 # file, or one a line-based merge spliced into silence, still reports its
 # seeded case RED -- because the gate it runs was already failing, or because
 # it was going to fail anyway -- and proves nothing about the guard it names.
+# A float rendered as its digits in quotes. `0.6` becomes `"0.6"` and a
+# consumer can no longer tell a temperature from a label that reads like one
+# -- the exact lie the ruling that added floats to the regimen refused.
+inject_regimen_float_as_a_string() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = '        Value::Float(number) => ("float", Json::Decimal(number.clone())),\n'
+new = '        Value::Float(number) => ("float", Json::String(number.as_str().to_owned())),\n'
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A table header that opens nothing. Every key lands at the top level, so
+# `[sampler] seed` and a document-level `seed` become one binding and the arm
+# that named both is recorded as an arm that named one.
+inject_regimen_table_scope_flattened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "                let scope = match &table {\n"
+new = "                let scope = match &None::<String> {\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Two tables of one name, unchecked. One of the two would have to disappear,
+# and a regimen that quietly drops a binding is not the regime that ran.
+inject_regimen_table_collision_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "        Some(Value::Table(_)) if rest.is_empty() => {\n            return Err(ParseError::DuplicateTable { name });\n        }\n"
+new = "        Some(Value::Table(_)) if rest.is_empty() => {}\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The regimen's float rule widened past the record's decimal. `-0.0` is then
+# a regimen float and not a record decimal, so the same digits are a value or
+# an error depending on which side of the format you ask.
+inject_regimen_float_rule_widened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/regimen/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = 'float     = @{ ("-" ~ negative_float) | (int_part ~ "." ~ ASCII_DIGIT+) }\n'
+new = 'float     = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }\n'
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A summary that states a turn count the rows do not carry. The report and
+# the record agree -- both say three -- so the results linter passes them, and
+# only a re-derivation from the rows themselves can see that the run held two.
+# This is the fault that separates gate 0 from the linter: a flipped digit in
+# the front-matter alone would have turned `results` red too, and a seeded
+# case another gate also catches proves nothing about this one.
+inject_recompute_summary_not_derived() {
+  python3 - <<'EOF'
+import pathlib
+
+report = pathlib.Path("results/_template/README.md")
+source = report.read_text(encoding="utf-8")
+assert "turns = 2\n" in source
+report.write_text(source.replace("turns = 2\n", "turns = 3\n", 1), encoding="utf-8")
+
+record = pathlib.Path("results/_template/run.jsonl")
+source = record.read_text(encoding="utf-8")
+old = '{"record":"summary","turns":2,'
+new = '{"record":"summary","turns":3,'
+assert old in source
+record.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A directory that declares no kind. It is then neither recomputed nor counted
+# as knowingly skipped, and the census that says so is the only thing standing
+# between "nothing to check here" and "nothing was checked".
+inject_recompute_kind_undeclared() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/_template/README.md")
+source = path.read_text(encoding="utf-8")
+old = 'kind = "reproducible-by-config"\n'
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# A consumed digest that no longer matches its file. The claim then cites
+# evidence it never read, which reads exactly like evidence it did.
+inject_results_consumed_digest_stale() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/_template/product.txt")
+path.write_text(path.read_text(encoding="utf-8") + "one more line\n", encoding="utf-8")
+EOF
+}
+
+# A seeded case naming an injection that does not exist. The pre-flight
+# enumerates DEFINITIONS, so a definition deleted outright leaves nothing to
+# run and nothing to report inert -- the case goes on claiming coverage over a
+# guard nothing exercises. Found on the dev-loop lane, where a merge dropped
+# one function whose anchor another injection shared, and only the selftest
+# noticed, seven hours later.
+inject_case_without_an_injection() {
+  python3 - <<'EOF'
+import pathlib
+import re
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+m = re.search(r"^inject_inert_injection\(\) \{\n.*?^\}\n", source, re.M | re.S)
+assert m
+path.write_text(source[: m.start()] + source[m.end() :], encoding="utf-8")
+EOF
+}
+
+# The second level of table flattened: `[serving.flags]` bindings land beside
+# `[serving]`'s own. The four cache-ram sweep arms then project identically to
+# their siblings except by name, which is a regimen that cannot tell two
+# regimes apart -- the exact hazard the level was grown for.
+inject_regimen_nested_table_flattened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "    let mut scope = entries;\n    for segment in segments {\n"
+new = "    let mut scope = entries;\n    for segment in segments.iter().take(1) {\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# An array read by a second reader instead of the one a binding uses. A
+# decimal inside brackets is then whatever that reader makes of the digits,
+# and `0.6` means one thing at the top level and another inside an array.
+inject_regimen_array_second_reader() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "                .map(|item| value_of(key, &item))\n"
+new = "                .map(|item| Ok(Value::String(item.as_str().to_owned())))\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_inert_injection() {
   python3 - <<'EOF'
 import pathlib
@@ -1560,6 +1285,440 @@ inject_parity() {
 inject_ci() {
   # Take a check's owner away: it then runs in no workflow, while CI is green.
   sed -i '/^hygiene\t/d' .github/check-owners.tsv
+}
+# A subshell run against the shell's own state. `cd a; (cd b; ls); pwd` then
+# ends in `b`, and every relative path after it resolves against a directory
+# the session was never in.
+inject_mechanical_subshell_leaks() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Command::Subshell(inner) => {
+                let mut copy = state.clone();
+                self.run_list(inner, &mut copy, call);
+                false
+            }"""
+new = """            Command::Subshell(inner) => {
+                self.run_list(inner, state, call);
+                false
+            }"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A `cd` the shell reported failing, applied anyway. The tracked working
+# directory then names a directory that is not there, which is the mistake the
+# whole lane exists to stop being made by a model.
+inject_mechanical_failed_cd_applied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = "        let refused = call.refusal(builtin, written.as_deref(), simple);\n"
+new = """        let refused: Option<String> = {
+            let _ = call.refusal(builtin, written.as_deref(), simple);
+            None
+        };
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# `popd` with nothing on the stack passed over in silence. The cwd stays
+# right and the record stops saying the session tried to leave.
+inject_mechanical_popd_empty_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        self.record_failure(call, simple, EMPTY_STACK.to_owned());
+        true
+    }"""
+new = """        false
+    }"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The lint's table of mechanical nouns emptied. Every ask template then passes,
+# and the working directory can go back to being an interview question.
+inject_mechanical_lint_table_emptied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = "pub const MECHANICAL_NOUNS: &[&str] = &[\n"
+new = "pub const MECHANICAL_NOUNS: &[&str] = &[];\nconst RETIRED_NOUNS: &[&str] = &[\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# Mechanical entries routed through the groundedness gate. A derivation is not
+# a quotation, so "the working directory is /work/diet" is absent from the row
+# that says `cd diet` and the gate drops the lane's whole output as invention.
+inject_mechanical_entry_grounded() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        let patches = self.patches(turn);
+        object.apply_turn(&patches)
+"""
+new = """        let patches = self.patches(turn);
+        let texts: Vec<String> = patches
+            .iter()
+            .map(|patch| match patch {
+                Patch::Add { content, .. } => content.clone(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        let source = self
+            .commands
+            .iter()
+            .map(|run| run.line.as_str())
+            .collect::<Vec<_>>()
+            .join("\\n");
+        let floor = crate::capture::grounded::Floor::pre_registered(1, 2, "the seeded fault")
+            .expect("a floor");
+        let report = crate::capture::grounded::check(
+            &texts,
+            crate::formats::interview::FieldKind::ApiSurface,
+            crate::capture::grounded::ContractInput {
+                source: &source,
+                session_prefix: "",
+            },
+            &floor,
+        );
+        let kept = report.kept();
+        let patches: Vec<Patch> = patches
+            .into_iter()
+            .zip(texts.iter())
+            .filter(|(_, text)| kept.contains(&text.as_str()))
+            .map(|(patch, _)| patch)
+            .collect();
+        object.apply_turn(&patches)
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The declared default replaced by silence. A pattern nobody wrote a row for
+# is exactly the call nobody has looked at yet, and silence is how it stays
+# that way.
+inject_router_unknown_silent() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Self::Unknown => Routing::Fork(AskKind::Generic),\n"
+new = "            Self::Unknown => Routing::Silent,\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A judgment ask released in the middle of a turn: the question that needs
+# the model to have concluded something, asked before it has.
+inject_router_judgment_mid_turn() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """            class: classified.class,
+            routing,
+            ask: match routing {"""
+new = """            class: classified.class,
+            routing: if routing == Routing::Defer {
+                Routing::Fork(AskKind::Judgment)
+            } else {
+                routing
+            },
+            ask: match routing {"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A row of the table lost. A test run then routes as unknown, and the corpus
+# of real calls is what notices.
+inject_router_table_row_lost() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/classes.tsv")
+source = path.read_text(encoding="utf-8")
+old = "test-run\tshell\tword=cargo sub=test|bench\n"
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# An unknown call routed but not recorded. Misrouting is then a suspicion
+# again rather than a number.
+inject_router_unclassified_silent() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """            self.unclassified.push(Unclassified {
+                id: id.to_owned(),
+                turn,
+                tool: tool.to_owned(),
+                word: classified.word,
+            });
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# The reduction claimed rather than computed from the counts beside it.
+inject_router_reduction_claimed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "            let saved = naive.saturating_sub(self.forks());\n"
+new = "            let saved = naive;\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A word's command substitutions found by scanning the text the quoting has
+# already been taken out of, instead of by the grammar that read the quoting.
+# `echo '$(cat notes.txt)'` then records a file read that never happened,
+# which is the one thing this lane exists not to do.
+inject_mechanical_quoted_substitution() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = """    Ok(Word {
+        text,
+        literal,
+        substitutions,
+    })"""
+new = """    let mut substitutions = Vec::new();
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        if bytes[index] == b'$'
+            && bytes[index + 1] == b'('
+            && let Some(end) = text[index + 2..].find(')')
+        {
+            substitutions.push(text[index + 2..index + 2 + end].to_owned());
+            index = index + 2 + end + 1;
+            continue;
+        }
+        index += 1;
+    }
+    Ok(Word {
+        text,
+        literal,
+        substitutions,
+    })"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# An ask wired to another class's question. Both templates still carry the
+# imperative and both still render; what stops is the ask being about the
+# thing that was just done.
+inject_router_ask_class_untuned() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Self::ApiSurface => include_str!("asks/api_surface.txt"),
+            Self::Outcome => include_str!("asks/outcome.txt"),"""
+new = """            Self::ApiSurface => include_str!("asks/outcome.txt"),
+            Self::Outcome => include_str!("asks/api_surface.txt"),"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A template that lost the fork-local imperative. The ask still asks; what it
+# stops doing is telling the fork which turn it is answering from.
+inject_router_ask_imperative_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/asks/finding.txt")
+source = path.read_text(encoding="utf-8")
+old = "{imperative}\n"
+assert source.startswith(old)
+path.write_text(source[len(old) :], encoding="utf-8")
+EOF
+}
+# A census whose totals are right and whose per-class counts are not: the
+# drive is told a directory listing was forked.
+inject_router_census_class_miscounted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Routing::Silent => tally.silent += 1,\n"
+new = "            Routing::Silent => tally.forked += 1,\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# `diet route` answers with a census it did not compute: every count zero,
+# ok true, exit 0. The replay still runs, so nothing downstream complains.
+inject_router_route_census_hollow() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/bin/diet.rs")
+source = path.read_text(encoding="utf-8")
+old = """    let replayed = diet::capture::router::replay(&record).map_err(|err| err.to_string())?;
+    replayed.census.value().map_err(|err| err.to_string())"""
+new = """    diet::capture::router::replay(&record).map_err(|err| err.to_string())?;
+    diet::capture::router::Census::default()
+        .value()
+        .map_err(|err| err.to_string())"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A row moved below one that already claims every call it names. The row is
+# still in the table, still parses, and can never decide anything.
+inject_router_table_row_shadowed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/classes.tsv")
+source = path.read_text(encoding="utf-8")
+row = "directory-listing\tshell\tword=git sub=ls-files\n"
+below = "version-control\tshell\tword=git|hg|svn|jj\n"
+assert row in source and below in source
+source = source.replace(row, "", 1)
+path.write_text(source.replace(below, below + row, 1), encoding="utf-8")
+EOF
+}
+# The corpus stops covering a class. The calls that remain still route as
+# labelled, so only the coverage of the corpus itself says anything.
+inject_router_corpus_class_uncovered() {
+  python3 - <<'EOF'
+import pathlib
+
+corpus = pathlib.Path("diet/capture/router/corpus")
+for name in ("tool-families.jsonl", "tool-families.expected.json"):
+    path = corpus / name
+    assert path.exists(), path
+    path.unlink()
+EOF
+}
+# A table row that does not parse, skipped instead of refused. Every call in
+# the drive is then unknown, which is what a router with a perfect table
+# reports for a drive full of novel tools.
+inject_router_table_row_skipped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """        let [class, family, rule] = fields.as_slice() else {
+            return Err(TableError::Shape { line });
+        };"""
+new = """        let [class, family, rule] = fields.as_slice() else {
+            continue;
+        };"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The stated intent taken from whatever lane spoke last. An interview's own
+# answer is then quoted back to the drive as something the drive said.
+inject_router_intent_lane_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "                    .is_some_and(|lane| lane == CANONICAL_LANE)\n"
+new = "                    .is_some_and(|lane| lane != CANONICAL_LANE)\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The first stated intent instead of the last: the ask quotes back something
+# the model has already finished doing.
+inject_router_intent_first_not_last() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """    sentences
+        .iter()
+        .rev()
+        .map(|sentence| sentence.trim())"""
+new = """    sentences
+        .iter()
+        .map(|sentence| sentence.trim())"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A phrase the model states its intent with, dropped from the table. The
+# stated-intent hole then goes unfilled for every turn that used it.
+inject_router_intent_marker_lost() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '    "let me ",\n'
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# An unclassified call recorded without the tool and against the wrong turn.
+# The count is still right, and nothing it names can be looked up.
+inject_router_unclassified_unattributed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """                id: id.to_owned(),
+                turn,
+                tool: tool.to_owned(),
+                word: classified.word,"""
+new = """                id: id.to_owned(),
+                turn: turn + 1,
+                tool: String::new(),
+                word: classified.word,"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The declared default dropped out of the vocabulary. Every loop that walks
+# `Class::ALL` then walks past it rather than over it.
+inject_router_class_vocabulary_shortened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """        Self::VersionControl,
+        Self::Unknown,
+    ];"""
+new = """        Self::VersionControl,
+    ];"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
 }
 # A cosine that divides by one norm and the square of the other. Every
 # similarity becomes a function of how long the sentence is, so the seeded
@@ -2257,78 +2416,38 @@ selftest() {
     'a word the shell would expand was reported literal'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
     'an empty answer is a recorded answer, not a missing one'
-  seeded_case "an ask wired to another class's question" test inject_router_ask_class_untuned \
-    'the ask does not ask its own question'
-  seeded_case "a template without the imperative"     test     inject_router_ask_imperative_dropped \
-    'the ask does not carry the fork-local imperative'
-  seeded_case "a census that miscounts which classes fired" test inject_router_census_class_miscounted \
-    'the census does not say which classes fired'
-  seeded_case "a route verb answering with a hollow census" test inject_router_route_census_hollow \
-    'where the drive spends'
-  seeded_case "a table row that can never fire"       test     inject_router_table_row_shadowed \
-    'can never fire'
-  seeded_case "a corpus that stops covering a class"  test     inject_router_corpus_class_uncovered \
-    'call\(s\) in the corpus, fewer than'
-  seeded_case "a table row skipped, not refused"      test     inject_router_table_row_skipped \
-    'was skipped rather than refused'
-  seeded_case "an intent taken from any lane"         test     inject_router_intent_lane_ignored \
-    'did not quote back what the model said it was about to do'
-  seeded_case "the first stated intent, not the last" test     inject_router_intent_first_not_last \
-    'quoted an intent the model had already moved past'
-  seeded_case "an intent marker lost from the table"  test     inject_router_intent_marker_lost \
-    'a marker was added or lost without a sentence that reaches it'
-  seeded_case "an unclassified call nobody can look up" test   inject_router_unclassified_unattributed \
-    'must name the call, its turn, its tool and its word'
-  seeded_case "the declared default out of the vocabulary" test inject_router_class_vocabulary_shortened \
-    'left the vocabulary without leaving the tests that walk it'
-  seeded_case "a quoted substitution descended into"  test     inject_mechanical_quoted_substitution \
-    'a single-quoted substitution was descended into'
   seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
     'was constructed, and the grammar would not read it back'
-  seeded_case "the declared default replaced by silence" test   inject_router_unknown_silent \
-    'an unknown pattern must route to the declared default, never to silence'
-
-  seeded_case "a judgment ask released mid-turn"      test     inject_router_judgment_mid_turn \
-    'a judgment ask fired in the middle of a turn'
-
-  seeded_case "a row of the routing table lost"       test     inject_router_table_row_lost \
-    'misrouted call'
-
-  seeded_case "an unknown call routed but not recorded" test   inject_router_unclassified_silent \
-    'an unknown pattern must be a typed event'
-
-  seeded_case "a reduction claimed, not computed"     test     inject_router_reduction_claimed \
-    'the reduction is not the number its own counts give'
-
-  seeded_case "a subshell that shares the parent state" test   inject_mechanical_subshell_leaks \
-    'the subshell cd leaked into the parent'
-
-  seeded_case "a failed cd applied anyway"            test     inject_mechanical_failed_cd_applied \
-    'a failed cd moved the working directory'
-
-  seeded_case "popd on an empty stack ignored"        test     inject_mechanical_popd_empty_ignored \
-    'popd on an empty stack was silently ignored'
-
-  seeded_case "the mechanical-noun table emptied"     test     inject_mechanical_lint_table_emptied \
-    'a question about a mechanical fact went unflagged'
-
-  seeded_case "a mechanical entry sent through the gate" test  inject_mechanical_entry_grounded \
-    'a mechanical entry was dropped as if it needed grounding'
-
   seeded_case "the producer read as the last command" test     inject_shell_producer_is_last_written \
     'produces its output with'
-
   seeded_case "an operator dropped from the table"    test     inject_shell_operator_table_row_dropped \
     'the table gained or lost an operator'
-
   seeded_case "a stripping heredoc that keeps tabs"   test     inject_shell_heredoc_strip_keeps_tabs \
     'did not strip the tabs the shell strips'
-
   seeded_case "the command word read as an operand"   test     inject_shell_command_word_is_an_operand \
     'the command word is not one of its own operands'
-
+  seeded_case "a regimen float rendered as a string"  test     inject_regimen_float_as_a_string \
+    'a float projected as something other than a decimal'
+  seeded_case "a table header that opens nothing"     test     inject_regimen_table_scope_flattened \
+    'its keys are not the document.s'
+  seeded_case "two tables of one name accepted"       test     inject_regimen_table_collision_unchecked \
+    'a table opened twice was not refused'
+  seeded_case "the float rule widened past the record" test    inject_regimen_float_rule_widened \
+    'the regimen grammar and the record.s decimal disagree'
+  seeded_case "a summary the rows do not carry"       recompute inject_recompute_summary_not_derived \
+    'the report does not re-derive'
+  seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
+    '0 recomputed, 0 declared historical, 1 undeclared'
+  seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
+    'but the committed file hashes to'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing'
+  seeded_case "a nested table flattened"              test     inject_regimen_nested_table_flattened \
+    'holds its own binding and the table below it'
+  seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
+    'an array item was read by something other than the value reader'
+  seeded_case "a case naming no injection"            injections inject_case_without_an_injection \
+    'named by a seeded case, defined nowhere'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
@@ -2361,6 +2480,52 @@ selftest() {
     'hygiene: internal-ticket-id:'
   seeded_case "history with an undeterminable base"   history  inject_history_no_base \
     'an undeterminable base is a failure, not an empty scan'
+  seeded_case "an ask wired to another class's question" test inject_router_ask_class_untuned \
+    'the ask does not ask its own question'
+  seeded_case "a template without the imperative"     test     inject_router_ask_imperative_dropped \
+    'the ask does not carry the fork-local imperative'
+  seeded_case "a census that miscounts which classes fired" test inject_router_census_class_miscounted \
+    'the census does not say which classes fired'
+  seeded_case "a route verb answering with a hollow census" test inject_router_route_census_hollow \
+    'where the drive spends'
+  seeded_case "a table row that can never fire"       test     inject_router_table_row_shadowed \
+    'can never fire'
+  seeded_case "a corpus that stops covering a class"  test     inject_router_corpus_class_uncovered \
+    'call\(s\) in the corpus, fewer than'
+  seeded_case "a table row skipped, not refused"      test     inject_router_table_row_skipped \
+    'was skipped rather than refused'
+  seeded_case "an intent taken from any lane"         test     inject_router_intent_lane_ignored \
+    'did not quote back what the model said it was about to do'
+  seeded_case "the first stated intent, not the last" test     inject_router_intent_first_not_last \
+    'quoted an intent the model had already moved past'
+  seeded_case "an intent marker lost from the table"  test     inject_router_intent_marker_lost \
+    'a marker was added or lost without a sentence that reaches it'
+  seeded_case "an unclassified call nobody can look up" test   inject_router_unclassified_unattributed \
+    'must name the call, its turn, its tool and its word'
+  seeded_case "the declared default out of the vocabulary" test inject_router_class_vocabulary_shortened \
+    'left the vocabulary without leaving the tests that walk it'
+  seeded_case "a quoted substitution descended into"  test     inject_mechanical_quoted_substitution \
+    'a single-quoted substitution was descended into'
+  seeded_case "the declared default replaced by silence" test   inject_router_unknown_silent \
+    'an unknown pattern must route to the declared default, never to silence'
+  seeded_case "a judgment ask released mid-turn"      test     inject_router_judgment_mid_turn \
+    'a judgment ask fired in the middle of a turn'
+  seeded_case "a row of the routing table lost"       test     inject_router_table_row_lost \
+    'misrouted call'
+  seeded_case "an unknown call routed but not recorded" test   inject_router_unclassified_silent \
+    'an unknown pattern must be a typed event'
+  seeded_case "a reduction claimed, not computed"     test     inject_router_reduction_claimed \
+    'the reduction is not the number its own counts give'
+  seeded_case "a subshell that shares the parent state" test   inject_mechanical_subshell_leaks \
+    'the subshell cd leaked into the parent'
+  seeded_case "a failed cd applied anyway"            test     inject_mechanical_failed_cd_applied \
+    'a failed cd moved the working directory'
+  seeded_case "popd on an empty stack ignored"        test     inject_mechanical_popd_empty_ignored \
+    'popd on an empty stack was silently ignored'
+  seeded_case "the mechanical-noun table emptied"     test     inject_mechanical_lint_table_emptied \
+    'a question about a mechanical fact went unflagged'
+  seeded_case "a mechanical entry sent through the gate" test  inject_mechanical_entry_grounded \
+    'a mechanical entry was dropped as if it needed grounding'
   seeded_case "a cosine that forgot its second norm"  test     inject_sense_cosine_unnormalised \
     'cosine of a vector with itself was not one'
   seeded_case "contrastive scoring that ignores the negative sense" test inject_sense_contrastive_ignores_negative \

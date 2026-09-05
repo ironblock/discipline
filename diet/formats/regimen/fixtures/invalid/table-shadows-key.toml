@@ -1,0 +1,4 @@
+sampler = 1
+
+[sampler]
+temperature = 0.6

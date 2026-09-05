@@ -1,0 +1,8 @@
+# A sweep cell, whose defining binding is one level down.
+name = "sweep-16384-diet"
+
+[serving]
+expected_absent = ["--cache-ram", "-cram"]
+
+[serving.flags]
+--cache-ram = 16384

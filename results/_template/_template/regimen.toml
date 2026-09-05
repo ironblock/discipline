@@ -1,6 +1,6 @@
 # The regimen this run applied.
 #
-# This file is a `regimen` v1 document: `diet::formats::regimen` parses it,
+# This file is a `regimen` v0 document: `diet::formats::regimen` parses it,
 # and `verify.sh` runs `exercise` over every regimen.toml under results/ so
 # that the format stays load-bearing rather than decorative.
 arm = "baseline"

@@ -1,0 +1,26 @@
+{
+  "name": {
+    "string": "sweep-16384-diet"
+  },
+  "serving": {
+    "table": {
+      "expected_absent": {
+        "array": [
+          {
+            "string": "--cache-ram"
+          },
+          {
+            "string": "-cram"
+          }
+        ]
+      },
+      "flags": {
+        "table": {
+          "--cache-ram": {
+            "integer": 16384
+          }
+        }
+      }
+    }
+  }
+}

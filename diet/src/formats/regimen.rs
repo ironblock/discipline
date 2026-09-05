@@ -1,9 +1,14 @@
-//! The `regimen` format, v0.
+//! The `regimen` format, v1.
 //!
 //! The grammar at `diet/formats/regimen/grammar.pest` is normative. This
-//! module implements it and adds the two rules a PEG cannot state: a key may
-//! appear at most once in a document, and an integer literal must fit in an
-//! `i64`.
+//! module implements it and adds the three rules a PEG cannot state: a key
+//! may appear at most once in its own table, a table header may appear at
+//! most once in a document, and an integer literal must fit in an `i64`.
+//!
+//! A float is held as the record's [`Decimal`] -- the digits as written --
+//! and is built through [`Decimal::new`], which checks the text against the
+//! record's own rule. That is the anti-drift device: the regimen grammar and
+//! the record grammar both spell a decimal, and only one of them enforces it.
 
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
@@ -14,20 +19,34 @@ use pest::Parser as _;
 use pest::iterators::Pair;
 use pest_derive::Parser;
 
+use crate::formats::record::json::Decimal;
+
 #[derive(Parser)]
 #[grammar = "../formats/regimen/grammar.pest"]
 struct RegimenParser;
 
-/// A scalar a regimen may hold in v0.
+/// A value a regimen may hold.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
-    /// A double-quoted string. v0 has no escapes, so the bytes between the
-    /// quotes are the value.
+    /// A double-quoted string. There are no escapes, so the bytes between
+    /// the quotes are the value.
     String(String),
     /// A signed 64-bit integer.
     Integer(i64),
+    /// A float, kept as the exact decimal it was written as. A temperature
+    /// through an `f64` is a different temperature, and a regime is
+    /// identified by its settings.
+    Float(Decimal),
     /// `true` or `false`.
     Boolean(bool),
+    /// An array of scalars, on one line. Never an array of arrays or of
+    /// tables: nothing has asked, and a form nobody writes is a form nobody
+    /// reads correctly.
+    Array(Vec<Value>),
+    /// A `[header]` and the bindings under it. Two levels: a table may hold
+    /// one table, which holds scalars. `[serving.flags]` is where a sweep
+    /// puts the binding that makes each of its cells what it is.
+    Table(BTreeMap<String, Value>),
 }
 
 /// A parsed regimen document.
@@ -80,10 +99,48 @@ impl<'a> IntoIterator for &'a Regimen {
 pub enum ParseError {
     /// The document does not match the grammar.
     Syntax(Box<pest::error::Error<Rule>>),
-    /// The document binds the same key more than once.
+    /// The document binds the same key more than once in one table.
     DuplicateKey {
+        /// The table the key was bound in, or `None` at the top level.
+        table: Option<String>,
         /// The key bound twice.
         key: String,
+    },
+    /// The document opens the same table twice.
+    DuplicateTable {
+        /// The header that arrived a second time.
+        name: String,
+    },
+    /// A two-segment header whose parent is bound to something that is not a
+    /// table.
+    ParentIsNotATable {
+        /// The header that could not be opened.
+        name: String,
+        /// The parent segment that is bound to a scalar.
+        parent: String,
+    },
+    /// The document opens a table whose name a top-level key already holds.
+    ///
+    /// Its own variant rather than a second spelling of `DuplicateTable`:
+    /// the two are different facts about the document, they are told apart
+    /// by different fixtures, and a corpus whose reasons differ while its
+    /// messages do not pins one case twice and the other never.
+    TableShadowsKey {
+        /// The header that collided with a binding.
+        name: String,
+    },
+    /// A float the grammar accepted that the record's decimal constructor
+    /// refuses.
+    ///
+    /// Unreachable while the two rules agree, and the reason it is an error
+    /// rather than an `expect`: the regimen grammar spells a decimal and the
+    /// record grammar enforces one, so a drift between them has to surface
+    /// as a verdict on the document rather than as a panic in the reader.
+    FloatNotADecimal {
+        /// The key the literal was bound to.
+        key: String,
+        /// The literal as it appeared in the document.
+        literal: String,
     },
     /// An integer literal is well-formed but does not fit in an `i64`.
     IntegerOutOfRange {
@@ -111,7 +168,27 @@ impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Syntax(err) => write!(f, "regimen syntax error: {err}"),
-            Self::DuplicateKey { key } => write!(f, "duplicate key `{key}`"),
+            Self::DuplicateKey { table: None, key } => write!(f, "duplicate key `{key}`"),
+            Self::DuplicateKey {
+                table: Some(table),
+                key,
+            } => write!(f, "duplicate key `{key}` in table `{table}`"),
+            Self::DuplicateTable { name } => write!(f, "duplicate table `{name}`"),
+            Self::ParentIsNotATable { name, parent } => write!(
+                f,
+                "table `{name}` cannot be opened: `{parent}` is bound to a value, \
+                 not to a table"
+            ),
+            Self::TableShadowsKey { name } => write!(
+                f,
+                "table `{name}` has the name of a key the document already binds"
+            ),
+            Self::FloatNotADecimal { key, literal } => write!(
+                f,
+                "float `{literal}` bound to `{key}` is not a decimal the record \
+                 would read back; the regimen grammar and the record grammar \
+                 have drifted"
+            ),
             Self::IntegerOutOfRange { key, literal } => {
                 write!(
                     f,
@@ -134,6 +211,10 @@ impl Error for ParseError {
         match self {
             Self::Syntax(err) => Some(err),
             Self::DuplicateKey { .. }
+            | Self::DuplicateTable { .. }
+            | Self::ParentIsNotATable { .. }
+            | Self::TableShadowsKey { .. }
+            | Self::FloatNotADecimal { .. }
             | Self::IntegerOutOfRange { .. }
             | Self::UnexpectedRule { .. } => None,
         }
@@ -145,10 +226,14 @@ impl Error for ParseError {
 /// # Errors
 ///
 /// Returns [`ParseError::Syntax`] if the input does not match the grammar,
-/// [`ParseError::DuplicateKey`] if a key is bound twice,
-/// [`ParseError::IntegerOutOfRange`] if an integer literal overflows `i64`,
-/// and [`ParseError::UnexpectedRule`] if the grammar produced a value rule
-/// this reader does not know.
+/// [`ParseError::DuplicateKey`] if a key is bound twice in one table,
+/// [`ParseError::DuplicateTable`] if a header arrives twice,
+/// [`ParseError::TableShadowsKey`] if a header takes a top-level key's name,
+/// [`ParseError::IntegerOutOfRange`] if an integer literal
+/// overflows `i64`, [`ParseError::FloatNotADecimal`] if the record's decimal
+/// constructor refuses a float this grammar accepted, and
+/// [`ParseError::UnexpectedRule`] if the grammar produced a value rule this
+/// reader does not know.
 ///
 /// # Panics
 ///
@@ -161,24 +246,105 @@ pub fn parse(input: &str) -> Result<Regimen, ParseError> {
         .next()
         .expect("Rule::file yields exactly one pair on success");
 
-    let mut entries = BTreeMap::new();
+    let mut entries: BTreeMap<String, Value> = BTreeMap::new();
+    // Which table the pairs now arriving belong to. `None` until the first
+    // header, which is the only place a top-level binding may sit -- as in
+    // TOML, where a key after `[sampler]` is `sampler`'s and not the
+    // document's.
+    let mut table: Option<Vec<String>> = None;
     for pair in file.into_inner() {
-        if pair.as_rule() != Rule::pair {
-            continue;
-        }
-        let (key, value) = binding(pair)?;
-        match entries.entry(key) {
-            Entry::Vacant(slot) => {
-                slot.insert(value);
+        match pair.as_rule() {
+            Rule::table_header => {
+                let segments: Vec<String> = pair
+                    .into_inner()
+                    .map(|part| part.as_str().to_owned())
+                    .collect();
+                open_table(&mut entries, &segments)?;
+                table = Some(segments);
             }
-            Entry::Occupied(slot) => {
-                return Err(ParseError::DuplicateKey {
-                    key: slot.key().clone(),
-                });
+            Rule::pair => {
+                let (key, value) = binding(pair)?;
+                let scope = match &table {
+                    None => &mut entries,
+                    Some(segments) => scope_of(&mut entries, segments),
+                };
+                match scope.entry(key) {
+                    Entry::Vacant(slot) => {
+                        slot.insert(value);
+                    }
+                    Entry::Occupied(slot) => {
+                        return Err(ParseError::DuplicateKey {
+                            table: table.as_ref().map(|segments| segments.join(".")),
+                            key: slot.key().clone(),
+                        });
+                    }
+                }
             }
+            _ => {}
         }
     }
     Ok(Regimen { entries })
+}
+
+/// Open the table a header names, creating a parent the document has not
+/// declared.
+///
+/// TOML admits `[serving.flags]` with no `[serving]` before it, so this does
+/// too -- the alternative would refuse a document the other reader of these
+/// bytes accepts, which is the one direction a subset may not take. What it
+/// refuses is the same header twice and a header over a key already bound to
+/// a value: either way one of the two bindings would have to disappear.
+fn open_table(
+    entries: &mut BTreeMap<String, Value>,
+    segments: &[String],
+) -> Result<(), ParseError> {
+    let name = segments.join(".");
+    let [parent, rest @ ..] = segments else {
+        unreachable!("a table header always carries at least one key")
+    };
+    match entries.get(parent) {
+        Some(Value::Table(_)) if rest.is_empty() => {
+            return Err(ParseError::DuplicateTable { name });
+        }
+        Some(Value::Table(_)) => {}
+        Some(_) if rest.is_empty() => return Err(ParseError::TableShadowsKey { name }),
+        Some(_) => {
+            return Err(ParseError::ParentIsNotATable {
+                name,
+                parent: parent.clone(),
+            });
+        }
+        None => {
+            entries.insert(parent.clone(), Value::Table(BTreeMap::new()));
+        }
+    }
+    let Some(child) = rest.first() else {
+        return Ok(());
+    };
+    let Some(Value::Table(inner)) = entries.get_mut(parent) else {
+        unreachable!("the parent was just established as a table")
+    };
+    if inner.contains_key(child) {
+        return Err(ParseError::DuplicateTable { name });
+    }
+    inner.insert(child.clone(), Value::Table(BTreeMap::new()));
+    Ok(())
+}
+
+/// The map a header's bindings go into. The header was opened first, so every
+/// segment on the way is a table.
+fn scope_of<'a>(
+    entries: &'a mut BTreeMap<String, Value>,
+    segments: &[String],
+) -> &'a mut BTreeMap<String, Value> {
+    let mut scope = entries;
+    for segment in segments {
+        let Some(Value::Table(inner)) = scope.get_mut(segment) else {
+            unreachable!("every segment of an opened header is a table")
+        };
+        scope = inner;
+    }
+    scope
 }
 
 fn binding(pair: Pair<'_, Rule>) -> Result<(String, Value), ParseError> {
@@ -189,10 +355,21 @@ fn binding(pair: Pair<'_, Rule>) -> Result<(String, Value), ParseError> {
         .as_str()
         .to_owned();
     let raw = inner.next().expect("a pair always carries a value");
+    let value = value_of(&key, &raw)?;
+    Ok((key, value))
+}
 
-    let value = match raw.as_rule() {
+/// One value, whatever rule the grammar read it as.
+///
+/// Shared by a binding and by an array's items so that a decimal inside an
+/// array is built by the same constructor as one beside it. A second reader
+/// for array items is how `0.6` comes to mean one thing at the top level and
+/// another inside brackets.
+fn value_of(key: &str, raw: &Pair<'_, Rule>) -> Result<Value, ParseError> {
+    Ok(match raw.as_rule() {
         Rule::string => Value::String(
-            raw.into_inner()
+            raw.clone()
+                .into_inner()
                 .next()
                 .expect("a string always wraps an inner")
                 .as_str()
@@ -208,18 +385,35 @@ fn binding(pair: Pair<'_, Rule>) -> Result<(String, Value), ParseError> {
         Rule::integer => {
             let literal = raw.as_str();
             Value::Integer(literal.parse().map_err(|_| ParseError::IntegerOutOfRange {
-                key: key.clone(),
+                key: key.to_owned(),
                 literal: literal.to_owned(),
             })?)
         }
+        Rule::array => Value::Array(
+            raw.clone()
+                .into_inner()
+                .map(|item| value_of(key, &item))
+                .collect::<Result<_, _>>()?,
+        ),
+        // Built through the record's constructor, never from the text
+        // directly: that constructor parses with the RECORD's decimal rule,
+        // so the two grammars cannot drift without this failing loudly.
+        Rule::float => {
+            let literal = raw.as_str();
+            Value::Float(
+                Decimal::new(literal).ok_or_else(|| ParseError::FloatNotADecimal {
+                    key: key.to_owned(),
+                    literal: literal.to_owned(),
+                })?,
+            )
+        }
         other => {
             return Err(ParseError::UnexpectedRule {
-                key,
+                key: key.to_owned(),
                 rule: format!("{other:?}"),
             });
         }
-    };
-    Ok((key, value))
+    })
 }
 
 /// This document, as the record's value space.
@@ -233,27 +427,42 @@ pub fn project(source: &str) -> Result<crate::formats::record::json::Value, Stri
         .map(|parsed| {
             let mut members = std::collections::BTreeMap::new();
             for (key, value) in parsed.iter() {
-                let tagged = match value {
-                    Value::String(text) => ("string", Json::String(text.clone())),
-                    Value::Integer(number) => ("integer", Json::Integer(*number)),
-                    Value::Boolean(flag) => ("boolean", Json::Boolean(*flag)),
-                };
-                members.insert(
-                    key.to_owned(),
-                    Json::Object(std::collections::BTreeMap::from([(
-                        tagged.0.to_owned(),
-                        tagged.1,
-                    )])),
-                );
+                members.insert(key.to_owned(), tagged(value));
             }
             Json::Object(members)
         })
         .map_err(|err| err.to_string())
 }
 
+/// One value, tagged with the kind the grammar read it as.
+///
+/// The tag is the point: a consumer reads `{"integer": 0}` and knows the
+/// document said `0` and not `"0"`, which is the whole reason a regime is a
+/// format rather than a bag of strings.
+fn tagged(value: &Value) -> crate::formats::record::json::Value {
+    use crate::formats::record::json::Value as Json;
+    let (kind, held) = match value {
+        Value::String(text) => ("string", Json::String(text.clone())),
+        Value::Integer(number) => ("integer", Json::Integer(*number)),
+        Value::Float(number) => ("float", Json::Decimal(number.clone())),
+        Value::Boolean(flag) => ("boolean", Json::Boolean(*flag)),
+        Value::Array(items) => ("array", Json::Array(items.iter().map(tagged).collect())),
+        Value::Table(inner) => (
+            "table",
+            Json::Object(
+                inner
+                    .iter()
+                    .map(|(key, held)| (key.clone(), tagged(held)))
+                    .collect(),
+            ),
+        ),
+    };
+    Json::Object(std::collections::BTreeMap::from([(kind.to_owned(), held)]))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ParseError, Value, parse};
+    use super::{Decimal, ParseError, Value, parse};
 
     #[test]
     fn parses_the_three_scalar_kinds() {
@@ -281,7 +490,10 @@ mod tests {
     #[test]
     fn a_duplicate_key_is_rejected() {
         let err = parse("arm = \"a\"\narm = \"b\"\n").expect_err("duplicate key");
-        assert!(matches!(err, ParseError::DuplicateKey { key } if key == "arm"));
+        assert!(
+            matches!(err, ParseError::DuplicateKey { table: None, key } if key == "arm"),
+            "a duplicate at the top level is not a duplicate inside a table"
+        );
     }
 
     #[test]
@@ -291,10 +503,279 @@ mod tests {
     }
 
     #[test]
-    fn v0_admits_no_tables() {
+    fn a_table_scopes_the_keys_that_follow_it() {
+        // The length first, and with a message: a reader that opened the
+        // table and then bound its keys at the top level anyway would leave
+        // an empty `sampler` beside a stray `temperature`, which is three
+        // bindings where the document names two.
+        let one = parse("arm = \"baseline\"\n\n[sampler]\ntemperature = 0.6\n")
+            .expect("document is a regimen");
+        assert_eq!(
+            one.len(),
+            2,
+            "a table is one binding of the document, and its keys are not the document's"
+        );
+
+        let regimen = parse(
+            "arm = \"baseline\"\nseed = 1\n\n[sampler]\nseed = 7\ntemperature = 0.6\n\n[limits]\nwall_seconds = 1800\n",
+        )
+        .expect("document is a regimen");
+
+        // `seed` is bound at the top level and again under `[sampler]`, and
+        // the two are different bindings. A reader that flattened the
+        // document would have reported a duplicate, or kept one of them.
+        assert_eq!(regimen.get("seed"), Some(&Value::Integer(1)));
+        let Some(Value::Table(sampler)) = regimen.get("sampler") else {
+            panic!("`[sampler]` did not become a table");
+        };
+        assert_eq!(sampler.get("seed"), Some(&Value::Integer(7)));
+        assert_eq!(
+            sampler.get("temperature"),
+            Some(&Value::Float(
+                Decimal::new("0.6").expect("0.6 is a decimal")
+            ))
+        );
+        let Some(Value::Table(limits)) = regimen.get("limits") else {
+            panic!("`[limits]` did not become a table");
+        };
+        assert_eq!(limits.get("wall_seconds"), Some(&Value::Integer(1800)));
+        assert_eq!(regimen.len(), 4, "arm, seed, sampler, limits");
+    }
+
+    /// Two levels, and the second is where a sweep cell states the binding
+    /// that makes it what it is.
+    ///
+    /// Four of nineteen ported arms projected identically to their siblings
+    /// except by name while the grammar had one level: the cache-ram sweep
+    /// puts `--cache-ram` under `[serving.flags]`, and a regimen that cannot
+    /// spell that cannot tell those regimes apart. The grammar refused the
+    /// header rather than dropping the binding, which was the right refusal
+    /// and the reason this level exists now.
+    #[test]
+    fn a_table_may_hold_one_table_and_no_more() {
+        let regimen = parse(
+            "name = \"sweep\"\n\n[serving]\nexpected_absent = [\"--cache-ram\"]\n\n[serving.flags]\n--cache-ram = 16384\n",
+        )
+        .expect("document is a regimen");
+        let Some(Value::Table(serving)) = regimen.get("serving") else {
+            panic!("`[serving]` did not become a table");
+        };
+        let Some(Value::Table(flags)) = serving.get("flags") else {
+            panic!("`[serving.flags]` did not become a table inside `serving`");
+        };
+        assert_eq!(
+            flags.get("--cache-ram"),
+            Some(&Value::Integer(16384)),
+            "the table below `serving` holds its own binding and the table below it"
+        );
+        assert_eq!(
+            serving.len(),
+            2,
+            "`serving` holds its own binding and the table below it"
+        );
+
+        // A parent the document never declared is created, because TOML
+        // admits `[a.b]` with no `[a]` and a subset may not refuse what the
+        // other reader of these bytes accepts.
+        let implied = parse("[serving.flags]\nx = 1\n").expect("document is a regimen");
+        assert!(matches!(implied.get("serving"), Some(Value::Table(_))));
+
+        // A third level is refused. Two has a case behind it; three does not.
         assert!(matches!(
-            parse("[section]\narm = \"a\"\n"),
+            parse("[a.b.c]\nx = 1\n"),
             Err(ParseError::Syntax(_))
         ));
+    }
+
+    #[test]
+    fn a_header_may_not_open_over_a_value_or_open_twice() {
+        assert!(
+            matches!(
+                parse("serving = 1\n[serving.flags]\nx = 2\n"),
+                Err(ParseError::ParentIsNotATable { name, parent })
+                    if name == "serving.flags" && parent == "serving"
+            ),
+            "a header whose parent is a value was not refused"
+        );
+        assert!(
+            matches!(
+                parse("[a.b]\nx = 1\n[a.b]\ny = 2\n"),
+                Err(ParseError::DuplicateTable { name }) if name == "a.b"
+            ),
+            "a nested table opened twice was not refused"
+        );
+        // Keys are unique per table, and `x` under `[a]` is not `x` under
+        // `[a.b]`.
+        let regimen = parse("[a]\nx = 1\n[a.b]\nx = 2\n").expect("document is a regimen");
+        let Some(Value::Table(a)) = regimen.get("a") else {
+            panic!("`[a]` did not become a table");
+        };
+        assert_eq!(a.get("x"), Some(&Value::Integer(1)));
+        let Some(Value::Table(b)) = a.get("b") else {
+            panic!("`[a.b]` did not become a table");
+        };
+        assert_eq!(b.get("x"), Some(&Value::Integer(2)));
+    }
+
+    /// An array holds scalars, on one line, and its items are read by the
+    /// same reader as a binding's value -- so a decimal inside brackets is
+    /// the decimal the record would read, not a second opinion about digits.
+    #[test]
+    fn an_array_holds_scalars_read_by_the_same_reader() {
+        let regimen =
+            parse("ops = [\"extraction\", \"judgment\"]\nmixed = [1, 0.5, true]\nempty = []\n")
+                .expect("document is a regimen");
+        assert_eq!(
+            regimen.get("ops"),
+            Some(&Value::Array(vec![
+                Value::String("extraction".into()),
+                Value::String("judgment".into()),
+            ])),
+            "an array item was read by something other than the value reader"
+        );
+        assert_eq!(
+            regimen.get("mixed"),
+            Some(&Value::Array(vec![
+                Value::Integer(1),
+                Value::Float(Decimal::new("0.5").expect("0.5 is a decimal")),
+                Value::Boolean(true),
+            ])),
+            "an array item was read by something other than the value reader"
+        );
+        assert_eq!(regimen.get("empty"), Some(&Value::Array(vec![])));
+
+        // A trailing comma is TOML's and so is admitted; the forms nothing
+        // writes are not.
+        assert!(parse("a = [\"x\", ]\n").is_ok());
+        for refused in ["a = [[1]]\n", "a = [{ b = 1 }]\n", "a = [\n  1,\n]\n"] {
+            assert!(
+                matches!(parse(refused), Err(ParseError::Syntax(_))),
+                "{refused:?} was accepted"
+            );
+        }
+        // The decimal rule is the record's inside an array too.
+        assert!(matches!(parse("a = [-0.0]\n"), Err(ParseError::Syntax(_))));
+    }
+
+    /// A float reaches the value space as a NUMBER. Rendering `0.6` as the
+    /// string `"0.6"` loses the one thing the type carries -- a consumer
+    /// then cannot tell a temperature from a label that reads like one --
+    /// and it is the exact lie the ruling that added floats refused.
+    #[test]
+    fn a_float_projects_as_a_number_and_not_as_its_digits_in_quotes() {
+        use crate::formats::record::json::Value as Json;
+        let projected = super::project("temperature = 0.6\n").expect("document is a regimen");
+        let Json::Object(members) = &projected else {
+            panic!("a regimen projects as an object");
+        };
+        let Some(Json::Object(tagged)) = members.get("temperature") else {
+            panic!("`temperature` is missing from the projection");
+        };
+        assert!(
+            matches!(tagged.get("float"), Some(Json::Decimal(_))),
+            "a float projected as something other than a decimal: {tagged:?}"
+        );
+    }
+
+    #[test]
+    fn a_table_may_not_arrive_twice_or_take_a_key_s_name() {
+        assert!(
+            matches!(
+                parse("[sampler]\na = 1\n[sampler]\nb = 2\n"),
+                Err(ParseError::DuplicateTable { name }) if name == "sampler"
+            ),
+            "a table opened twice was not refused"
+        );
+        assert!(
+            matches!(
+                parse("sampler = 1\n[sampler]\na = 2\n"),
+                Err(ParseError::TableShadowsKey { name }) if name == "sampler"
+            ),
+            "a table opened twice was not refused: it took a key's name"
+        );
+        assert!(matches!(
+            parse("[sampler]\na = 1\na = 2\n"),
+            Err(ParseError::DuplicateKey { table: Some(table), key }) if table == "sampler" && key == "a"
+        ));
+    }
+
+    /// A temperature is the digits it was written as, through and back.
+    ///
+    /// This is the whole reason a float is a `Decimal` and not an `f64`:
+    /// `0.6` through a double is `0.59999999999999998`, and a regime
+    /// identified by its settings would then be a different regime on the
+    /// way out than it was on the way in.
+    #[test]
+    fn a_float_round_trips_byte_exact() {
+        for literal in ["0.6", "0.95", "1.0", "0.000", "-0.142", "12.750", "0.1"] {
+            let regimen = parse(&format!("t = {literal}\n")).expect("document is a regimen");
+            let Some(Value::Float(held)) = regimen.get("t") else {
+                panic!("{literal} did not read as a float");
+            };
+            assert_eq!(held.as_str(), literal, "{literal} did not survive the read");
+        }
+    }
+
+    /// The regimen grammar spells a decimal and the RECORD's grammar
+    /// enforces one. Two rules that must agree, so a table of literals is
+    /// driven through both and they must give the same verdict.
+    ///
+    /// It asks the GRAMMAR, not `parse`. Asking `parse` proves nothing about
+    /// the grammar: `Decimal::new` refuses anything the record would not
+    /// read, so a widened `float` rule turns into a `FloatNotADecimal` on
+    /// the same documents and every corpus fixture stays rejected. That is
+    /// the parser covering for the normative file -- the same shape as a
+    /// `ParseError::Shape` standing in for a grammar refusal -- and it is
+    /// what this test is placed one level down to see.
+    #[test]
+    fn the_float_rule_and_the_records_decimal_rule_agree() {
+        fn the_grammar_reads_a_float(literal: &str) -> bool {
+            use pest::Parser as _;
+            super::RegimenParser::parse(super::Rule::float, literal)
+                .ok()
+                .and_then(|mut pairs| pairs.next())
+                // A rule that matched a prefix has not read this text.
+                .is_some_and(|matched| matched.as_str() == literal)
+        }
+
+        for literal in [
+            "0.6", "0.0", "-0.1", "10.25", "0.000", "-12.5", "1.0", "0.10",
+            // and the spellings both must refuse
+            "-0.0", "-0.00", "7e-1", "1.", ".5", "01.5", "+1.5", "1.5.2", "1_0.5", "0x1.5",
+        ] {
+            assert_eq!(
+                the_grammar_reads_a_float(literal),
+                Decimal::new(literal).is_some(),
+                "`{literal}`: the regimen grammar and the record's decimal disagree"
+            );
+        }
+    }
+
+    /// No document the corpus holds may be refused by
+    /// [`ParseError::FloatNotADecimal`]. That error exists so a drift
+    /// between the two grammars surfaces instead of panicking, and reaching
+    /// it means the drift has already happened.
+    #[test]
+    fn no_invalid_fixture_is_refused_for_a_drift_between_the_grammars() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("formats/regimen/fixtures/invalid");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).expect("the invalid fixture directory") {
+            let path = entry.expect("a readable entry").path();
+            if path.extension().is_none_or(|ext| ext != "toml") {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            checked += 1;
+            assert!(
+                !matches!(parse(&text), Err(ParseError::FloatNotADecimal { .. })),
+                "{}: refused because the regimen grammar and the record's decimal \
+                 have drifted, not because the document is wrong",
+                path.display()
+            );
+        }
+        assert!(checked >= 20, "only {checked} invalid fixtures were read");
     }
 }
