@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 127
+red_faults = 128
 mechanics_assertions = 27
 migrated = 0
 
@@ -451,6 +451,15 @@ check = "results"
 label = "a consumed digest gone stale"
 failure_class = "results.provenance-unchecked"
 legacy_signature = "but the committed file hashes to"
+migrated = false
+
+[[fault]]
+id = "injections.case_without_an_injection"
+kind = "seeded-gate"
+check = "injections"
+label = "a case naming no injection"
+failure_class = "gate.case-without-an-injection"
+legacy_signature = "named by a seeded case, defined nowhere"
 migrated = false
 
 [[fault]]

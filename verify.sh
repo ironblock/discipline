@@ -1202,6 +1202,25 @@ path.write_text(path.read_text(encoding="utf-8") + "one more line\n", encoding="
 EOF
 }
 
+# A seeded case naming an injection that does not exist. The pre-flight
+# enumerates DEFINITIONS, so a definition deleted outright leaves nothing to
+# run and nothing to report inert -- the case goes on claiming coverage over a
+# guard nothing exercises. Found on the dev-loop lane, where a merge dropped
+# one function whose anchor another injection shared, and only the selftest
+# noticed, seven hours later.
+inject_case_without_an_injection() {
+  python3 - <<'EOF'
+import pathlib
+import re
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+m = re.search(r"^inject_inert_injection\(\) \{\n.*?^\}\n", source, re.M | re.S)
+assert m
+path.write_text(source[: m.start()] + source[m.end() :], encoding="utf-8")
+EOF
+}
+
 inject_inert_injection() {
   python3 - <<'EOF'
 import pathlib
@@ -1554,6 +1573,8 @@ selftest() {
     'but the committed file hashes to'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing'
+  seeded_case "a case naming no injection"            injections inject_case_without_an_injection \
+    'named by a seeded case, defined nowhere'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
