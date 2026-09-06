@@ -32,7 +32,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results regimen metadata hygiene pages ci history injections parity)
+readonly CHECKS=(fmt clippy test library results regimen metadata hygiene pages ci history injections resolver parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -189,6 +189,12 @@ check_history() { python3 scripts/check-history.py; }
 # invocation and not only in --selftest: an inert injection is introduced by
 # an edit, and the edit is what should fail.
 check_injections() { python3 scripts/check-injections.py; }
+
+# The merge resolver, exercised on fixtures before it is trusted to resolve a
+# merge. `merge-gate.py` rebuilds the gate files from both sides by name, and
+# for its first three hundred lines nothing ran it: five defects lived in it
+# at once, each in a behaviour no command had ever executed.
+check_resolver() { python3 scripts/check-merge-gate.py; }
 
 # The fault-migration manifest defines what parity means for the replacement
 # gate. A manifest that has drifted from this script defines the wrong parity.
@@ -1527,10 +1533,30 @@ inject_history() {
 }
 
 # An injection that changes nothing. This is the whole failure the
-# `injections` gate exists for: a body whose anchor no longer matches the
-# file, or one a line-based merge spliced into silence, still reports its
-# seeded case RED -- because the gate it runs was already failing, or because
-# it was going to fail anyway -- and proves nothing about the guard it names.
+# A seeded case naming an injection that does not exist. The pre-flight
+# enumerates DEFINITIONS, so a definition deleted outright leaves nothing to
+# run and nothing to report inert -- the case goes on claiming coverage over a
+# guard nothing exercises. Found on the dev-loop lane, where a merge dropped
+# one function whose anchor another injection shared, and only the selftest
+# noticed, seven hours later.
+inject_case_without_an_injection() {
+  python3 - <<'EOF'
+import pathlib
+import re
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+m = re.search(r"^inject_inert_injection\(\) \{\n.*?^\}\n", source, re.M | re.S)
+assert m
+path.write_text(source[: m.start()] + source[m.end() :], encoding="utf-8")
+EOF
+}
+
+# An injection that changes nothing, which is the failure the `injections`
+# gate exists for: a body whose anchor no longer matches the file, or one a
+# line-based merge spliced into silence, still reports its seeded case RED --
+# because the gate it runs was already failing, or because it was going to
+# fail anyway -- and proves nothing about the guard it names.
 inject_inert_injection() {
   python3 - <<'EOF'
 import pathlib
@@ -1539,6 +1565,24 @@ path = pathlib.Path("verify.sh")
 source = path.read_text(encoding="utf-8")
 old = "inject_history_no_base() {\n"
 new = "inject_that_changes_nothing() {\n  :\n}\n\ninject_history_no_base() {\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The resolver keying a block on the first injection name anywhere inside it,
+# rationale comment included. A comment reading "the deliberate pair of
+# inject_alpha" then keys the block that introduces inject_beta as
+# inject_alpha, the union sees a name it already holds, and the genuinely new
+# body is skipped with no warning and exit 0. Silence is the whole hazard.
+inject_keyed_by_a_comment() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/merge-gate.py")
+source = path.read_text(encoding="utf-8")
+old = '        m := re.search(r"^(inject_[a-z0-9_]+)\\(\\) \\{", block, re.M)\n    ) and m.group(1)\n'
+new = '        m := re.search(r"inject_[a-z0-9_]+", block)\n    ) and m.group(0)\n'
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -2329,6 +2373,10 @@ selftest() {
 
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing'
+  seeded_case "a case naming no injection"            injections inject_case_without_an_injection \
+    'named by a seeded case, defined nowhere'
+  seeded_case "the resolver keying on a comment"       resolver inject_keyed_by_a_comment \
+    'keyed as .*inject_alpha'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \

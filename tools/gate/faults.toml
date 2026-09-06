@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 163
+red_faults = 165
 mechanics_assertions = 27
 migrated = 0
 
@@ -388,6 +388,15 @@ check = "test"
 label = "the command word read as an operand"
 failure_class = "shell.operand-overcounted"
 legacy_signature = "the command word is not one of its own operands"
+migrated = false
+
+[[fault]]
+id = "injections.case_without_an_injection"
+kind = "seeded-gate"
+check = "injections"
+label = "a case naming no injection"
+failure_class = "gate.case-without-an-injection"
+legacy_signature = "named by a seeded case, defined nowhere"
 migrated = false
 
 [[fault]]
@@ -1696,4 +1705,13 @@ label = "a write lost to a read of the same path"
 failure_class = "capture.fact-discarded"
 legacy_signature = "a write was lost to a read of the same path in the same call"
 
+migrated = false
+
+[[fault]]
+id = "resolver.keyed_by_a_comment"
+kind = "seeded-gate"
+check = "resolver"
+label = "the resolver keying on a comment"
+failure_class = "gate.resolver-keys-on-a-comment"
+legacy_signature = "keyed as .*inject_alpha"
 migrated = false
