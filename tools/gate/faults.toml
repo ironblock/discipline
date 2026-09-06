@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 178
+red_faults = 179
 mechanics_assertions = 27
 migrated = 0
 
@@ -1827,4 +1827,12 @@ check = "test"
 label = "a header comment read as a table"
 failure_class = "regimen.header-comment-as-table"
 legacy_signature = "a comment after a table header is not a table the header opened"
+migrated = false
+[[fault]]
+id = "resolver.keyed_by_a_comment"
+kind = "seeded-gate"
+check = "resolver"
+label = "the resolver keying on a comment"
+failure_class = "gate.resolver-keys-on-a-comment"
+legacy_signature = "keyed as .*inject_alpha"
 migrated = false

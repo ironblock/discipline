@@ -32,7 +32,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results recompute regimen metadata hygiene pages ci history injections parity)
+readonly CHECKS=(fmt clippy test library results recompute regimen metadata hygiene pages ci history injections resolver parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -196,6 +196,12 @@ check_history() { python3 scripts/check-history.py; }
 # invocation and not only in --selftest: an inert injection is introduced by
 # an edit, and the edit is what should fail.
 check_injections() { python3 scripts/check-injections.py; }
+
+# The merge resolver, exercised on fixtures before it is trusted to resolve a
+# merge. `merge-gate.py` rebuilds the gate files from both sides by name, and
+# for its first three hundred lines nothing ran it: five defects lived in it
+# at once, each in a behaviour no command had ever executed.
+check_resolver() { python3 scripts/check-merge-gate.py; }
 
 # The fault-migration manifest defines what parity means for the replacement
 # gate. A manifest that has drifted from this script defines the wrong parity.
@@ -2139,6 +2145,23 @@ assert old in source
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
+# The resolver keying a block on the first injection name anywhere inside it,
+# rationale comment included. A comment reading "the deliberate pair of
+# inject_alpha" then keys the block that introduces inject_beta as
+# inject_alpha, the union sees a name it already holds, and the genuinely new
+# body is skipped with no warning and exit 0. Silence is the whole hazard.
+inject_keyed_by_a_comment() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/merge-gate.py")
+source = path.read_text(encoding="utf-8")
+old = '        m := re.search(r"^(inject_[a-z0-9_]+)\\(\\) \\{", block, re.M)\n    ) and m.group(1)\n'
+new = '        m := re.search(r"inject_[a-z0-9_]+", block)\n    ) and m.group(0)\n'
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
 
 # Every pattern in a table, shown catching its own class. A pattern that has
 # never caught anything is a guess.
@@ -2593,6 +2616,8 @@ selftest() {
     'nothing in the pipeline ran'
   seeded_case "a write lost to a read of the same path" test   inject_mechanical_write_lost_to_a_read \
     'a write was lost to a read of the same path in the same call'
+  seeded_case "the resolver keying on a comment"       resolver inject_keyed_by_a_comment \
+    'keyed as .*inject_alpha'
 
   echo
   echo "--- results fixtures, checked directly ---"

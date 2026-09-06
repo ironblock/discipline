@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import pathlib
 import re
+
+import gatelib
 import subprocess
 import sys
 import tomllib
@@ -44,7 +46,6 @@ REGIMEN_INVALID = ROOT / "diet" / "formats" / "regimen" / "fixtures" / "invalid"
 NOT_TOML = "NOT-TOML:"
 RELOCATING = {"subset-fixture"}
 
-CASE = re.compile(r'seeded_case\s+"([^"]+)"\s+(\w+)\s+(\w+)\s*\\\s*\n\s*\'([^\']*)\'')
 MECH = re.compile(r'expect_exit\s+"([^"]+)"\s+(\d+)')
 REQ = re.compile(r"REQUIRED_(HYGIENE|PAGES)_CLASSES=\(([^)]*)\)", re.DOTALL)
 
@@ -62,7 +63,7 @@ def observed() -> dict[str, set[str]]:
     seen: dict[str, set[str]] = {k: set() for k in
                                  ("seeded-gate", "mechanics", "results-fixture",
                                   "pattern-class", "subset-fixture")}
-    for label, check, inject, sig in CASE.findall(s):
+    for label, check, inject, sig in gatelib.seeded_cases(s):
         ident = f"{check}.{inject.removeprefix('inject_')}"
         seen["seeded-gate"].add(ident)
         DETAILS[ident] = {"label": label, "legacy_signature": sig}
@@ -89,6 +90,26 @@ def main() -> int:
     # reader for the count rather than reimplementing the arithmetic or
     # scraping it out of a failure message. One reader, structured answer.
     counting = "--count-red" in sys.argv
+    counting_mechanics = "--count-mechanics" in sys.argv
+
+    # Asked for the count, answer the count -- before the manifest is read at
+    # all. The count derives from `verify.sh` and the fixture directories and
+    # never from the manifest, and the caller is a tool that has just
+    # assembled a fault list and is holding a manifest that does not yet
+    # agree with it. Refusing to answer because the file it is about to
+    # rewrite is missing, empty or not yet valid TOML is refusing exactly
+    # when asked. `observed()` also fills DETAILS, which the loop below reads.
+    seen = observed()
+    if counting:
+        print(sum(len(seen[k]) for k in seen if k != "mechanics"))
+        return 0
+    # The same question for the other total the manifest carries. A branch
+    # that adds a mechanics assertion changes this line, and a resolver that
+    # cannot recount it refuses a merge over a number it could have derived.
+    if counting_mechanics:
+        print(len(seen["mechanics"]))
+        return 0
+
     failures: list[str] = []
 
     if not MANIFEST.is_file():
@@ -104,9 +125,6 @@ def main() -> int:
     if not entries:
         print(f"{MANIFEST}: declares no faults, so it defines no parity", file=sys.stderr)
         return 1
-
-    # Before the loop: `observed()` is what fills DETAILS, which the loop reads.
-    seen = observed()
 
     declared: dict[str, set[str]] = {}
     for index, entry in enumerate(entries):
