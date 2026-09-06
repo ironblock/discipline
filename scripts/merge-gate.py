@@ -48,6 +48,19 @@ injection edited two ways. Rebuilding from names cannot make that mistake.
 
 It refuses when the two sides differ anywhere OUTSIDE the named blocks, and
 prints what differs: that part is a person's to read.
+
+An epitaph, so that it is not rebuilt. `--base-red-faults` was a third mode,
+and it is gone rather than repaired. It computed `red_faults` as the merge
+base plus each side's delta -- the arithmetic this repository retracted forty
+minutes after adopting it, because a criss-cross double-counts whatever both
+branches inherited by two routes, which a stack of lanes produces routinely.
+And it drove a hunk-based resolver that reproduced, verbatim, the heredoc
+splice this docstring opens with: a review built the hunk, the output passed
+`bash -n`, and `verify.sh` then died with `inject_b: command not found`, exit
+127. Its hunk-level helpers went with it. It was deleted rather than fixed
+because a second, worse path to the same answer only preserves the chance
+somebody takes it -- `--union` supersedes it, and COUNTS instead of computing.
+Do not reintroduce base-plus-deltas.
 """
 
 import argparse
@@ -187,6 +200,12 @@ def union_file(path: Path, ours_ref: str, theirs_ref: str) -> bool:
                 n=2,
             )
         )
+        # Ratified as stage 2's argument rather than as a defect to patch
+        # here (#46, the gate orchestrator): this refusal fires on a shape
+        # branches produce routinely, and the only safe way to stop refusing
+        # is a gate that PARSES the file instead of pattern-matching it.
+        # Until that exists, the cost is a hand resolution per branch, and
+        # that cost is the argument.
         # A mechanics assertion is the difference this refusal meets most
         # often, and it is NOT given a block pattern on purpose: `expect_exit`
         # is a statement inside a check function, with setup above it that has

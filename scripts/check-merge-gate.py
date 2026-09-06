@@ -19,6 +19,83 @@ So each of those is a fixture here, named for what it protects, and the
 suite is the check. A fixture that goes green for the wrong reason is worth
 nothing, so each asserts on the specific value it is about rather than on
 "no exception was raised".
+
+The suite was then put to a second, harder question. Not "does each fixture
+catch its own lesion" -- all thirteen do, each seen red under a lesion to the
+behaviour it names, none collateral -- but "could that behaviour be broken
+ANOTHER way with the suite still green?" It could, eleven times. Four are
+closed, in the commit that added the thirteenth fixture.
+
+EIGHT ARE OPEN, listed below, and not one of them is a hypothesis: every one
+names a mutation that was applied to a copy of this tree and left the suite
+reporting `0 failed`. They are recorded here, rather than in a tracker,
+because the fixture each one indicts is a few lines further down this file.
+
+  1. `a seeded case spelled across continuation lines is seen` -- drop the
+     `held = []` reset in gatelib.logical_lines and the real verify.sh reads
+     0 cases, down from 105. Green: the assertion is a SET of one field, and
+     the input is a lone call with no line before it or after it.
+
+  2. `a commented-out seeded case is not a case` -- anchor only half the
+     guard and `#seeded_case ...` with NO space after the hash (what an
+     editor's comment-toggle emits) comes back as a live case naming an
+     injection that exists nowhere: the precise false red this guard was
+     written to prevent. Green by token-offset coincidence -- the fixture's
+     own input spells it `# ` with a space, which shifts the fields.
+
+  3. `a seeded case keeps its label and signature through the reader` --
+     truncate a label at its first comma, or strip a signature's
+     backslashes, and check-fault-manifest.py disagrees with verify.sh about
+     the case that proves each fault. Green: the one synthetic call has no
+     comma, no backslash and no metacharacter in it, and no fixture anywhere
+     holds a FIELD against the real tree.
+
+  4. `no second reader parses a seeded case's FIELDS` -- the assertion is a
+     two-substring grep on one physical line, so it pins a SPELLING and not
+     a behaviour. The same regression was reproduced three ways, all green:
+     `re.compile(` wrapped onto the next line (an idiom already present in
+     this directory), an inline `re.findall`, and a hand-rolled `.split()`
+     reader -- which reads 0 of 105 cases and turns check-injections' "does
+     every case name an injection that exists?" into a no-op that passes
+     everything.
+
+  5. `the shared reader agrees with verify.sh's own count of cases` -- the
+     count leg is strong and tree-anchored. The `c.injection not in text`
+     leg has no discriminating power at all, because any token the reader
+     copies out of a line is by construction a substring of the file. Pair
+     every case with the NEXT case's injection name: count, names and set
+     all stay right, the whole suite stays green, and every label and
+     signature is now attached to the wrong injection -- exactly the pairing
+     check-fault-manifest.py depends on.
+
+  6. `a total this tool recounts is not a difference between the sides` --
+     the negative control is `something_else = true`, a boolean, so it is
+     immune to the over-normalizations that actually happen to a numeric
+     normalizer. Three were run green, among them one under which
+     `migrated = 0` and `migrated = 7` read as no difference at all, so one
+     side's authored count is silently written to disk.
+
+  7. `an added mechanics assertion is a difference, not a silent union` --
+     the fixture pins only that two skeletons differ, and never reaches the
+     refusal it is named for. NO FIXTURE IN THIS FILE CALLS `union_file`.
+     So turning that refusal into warn-and-proceed -- "fixing the refusal
+     into a guess", the thing this fixture exists to prevent -- is
+     invisible, and so is an `expect_exit` normalizer in `skeleton_of` that
+     makes the common shape compare equal.
+
+  8. `a pre-flight that reported no summary is not read as nothing-inert` --
+     partly closed. Its caller escape is fixed: `repair` no longer reads a
+     None as nothing-inert. Two remain. The POSITIVE arm is unpinned and is
+     coupled across two files by a bare string literal -- check-injections.py
+     prints the summary, merge-gate.py recognises it by `startswith` -- so
+     rewording either leaves inert_injections returning None forever. And
+     the stub writes nothing at all to stdout, so the fixture cannot tell
+     "keys on the summary line" from "keys on any output whatsoever".
+
+Item 7 is the review's finding 12 recurring one level down: the resolver was
+given a gate, and the gate's fixtures reach its helpers rather than its entry
+point. Read that as the standing caution for anyone adding a fixture here --
+assert through the function a merge actually calls.
 """
 
 import importlib.util
