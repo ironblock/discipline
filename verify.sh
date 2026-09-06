@@ -1033,6 +1033,20 @@ path.write_text("\n".join(lines), encoding="utf-8")
 EOF
 }
 
+# A run directory inside a run directory. Every walker is one level deep, so
+# the inner one is linted by nothing while carrying a claim record and a
+# product digest -- which is how two of them came to be committed here.
+inject_results_nested_directory() {
+  # Staged through a temporary directory: `cp -r x x/y` copies a directory
+  # into itself, which warns and leaves a partial tree. An injection whose
+  # own mechanism half-fails proves nothing about the gate.
+  local stage
+  stage="$(mktemp -d)"
+  cp -r results/_template "${stage}/_template"
+  mv "${stage}/_template" results/_template/_template
+  rmdir "${stage}"
+}
+
 # A DIET_BIN that the resolver quietly ignores. The documented way to pin a
 # run to a specific build being a silent no-op is how four instruments banked
 # numbers through a release binary seven days behind its source.
@@ -2635,6 +2649,8 @@ selftest() {
     'a write was lost to a read of the same path in the same call'
   seeded_case "the resolver keying on a comment"       resolver inject_keyed_by_a_comment \
     'keyed as .*inject_alpha'
+  seeded_case "a run directory inside a run directory" results inject_results_nested_directory \
+    'a run directory inside a run directory'
 
   echo
   echo "--- results fixtures, checked directly ---"

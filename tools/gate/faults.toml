@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 179
+red_faults = 181
 mechanics_assertions = 29
 migrated = 0
 
@@ -643,6 +643,15 @@ legacy_signature = "an undeterminable base is a failure, not an empty scan"
 migrated = false
 
 [[fault]]
+id = "results.results_nested_directory"
+kind = "seeded-gate"
+check = "results"
+label = "a run directory inside a run directory"
+failure_class = "results.nested-run-directory"
+legacy_signature = "a run directory inside a run directory"
+migrated = false
+
+[[fault]]
 id = "results.2026-01-01-missing-run-jsonl"
 kind = "results-fixture"
 check = "results"
@@ -854,6 +863,14 @@ kind = "results-fixture"
 check = "results"
 label = "2026-01-26-readme-is-not-utf8"
 failure_class = "results.unreadable-encoding"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-28-symlinked-evidence"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-28-symlinked-evidence"
+failure_class = "results.provenance-escapes-the-directory"
 migrated = false
 
 [[fault]]

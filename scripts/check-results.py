@@ -560,7 +560,32 @@ def check_consumed(
                 )
                 continue
             artefact = directory / stated
-            if not artefact.is_file():
+            # `..` and a leading `/` are refused above, but a SYMLINK carries
+            # neither and `is_file()` follows it: a committed link can name a
+            # path outside the directory, outside the repository, and the
+            # digest recorded would be a digest of whatever happened to sit
+            # there on the machine that ran the linter -- the machine-local
+            # bytes this check exists to rule out. A directory symlink does it
+            # with no `..` in the path at all. So containment is checked on
+            # the RESOLVED path, which is the only form that can answer it.
+            try:
+                resolved = artefact.resolve(strict=True)
+            except (OSError, RuntimeError):
+                fail(
+                    "results.provenance-unchecked",
+                    f"claim `{claim}` consumes `{stated}`, which does not resolve to a file here",
+                )
+                continue
+            here = directory.resolve()
+            if not resolved.is_relative_to(here):
+                fail(
+                    "results.provenance-escapes-the-directory",
+                    f"claim `{claim}` consumes `{stated}`, which resolves to "
+                    f"`{resolved}`, outside the run directory; evidence is "
+                    f"committed beside the claim, and a link is not evidence",
+                )
+                continue
+            if not resolved.is_file():
                 fail("results.provenance-unchecked", f"claim `{claim}` consumes `{stated}`, which is not a file here")
                 continue
             found = digest_of(artefact)
@@ -579,6 +604,26 @@ def run_directories(root: pathlib.Path) -> list[pathlib.Path]:
     reject sit unlinted while other tooling still walks it.
     """
     return sorted(p for p in root.iterdir() if p.is_dir())
+
+
+def nested_run_directories(root: pathlib.Path) -> list[pathlib.Path]:
+    """Run directories sitting INSIDE a run directory.
+
+    Every walker here is one level deep, which is not a bug in the walkers --
+    a results directory is a flat, dated, registered thing. What it means is
+    that anything a level down is walked by nobody, and two such directories
+    were committed with claim records and product digests in them, unlinted
+    and unregistered. Skipping them quietly is how they got there. An
+    unregistered artefact accumulates authority by sitting still, so this
+    refuses rather than ignores: a claim record nothing grades is worse than
+    no claim record, because it reads like one that passed.
+    """
+    nested = []
+    for directory in run_directories(root):
+        for inner in run_directories(directory):
+            if any((inner / f).is_file() for f in REQUIRED_FILES):
+                nested.append(inner)
+    return sorted(nested)
 
 
 def main(argv: list[str]) -> int:
@@ -628,6 +673,13 @@ def main(argv: list[str]) -> int:
         found = run_directories(root)
         if not found:
             failures.append(f"{root}: root holds no run directories")
+        for inner in nested_run_directories(root):
+            failures.append(
+                f"{inner}: a run directory inside a run directory. Every walker "
+                f"here is one level deep, so this one is linted by nothing and "
+                f"registered nowhere while carrying the files of a real result  "
+                f"[results.nested-run-directory]"
+            )
         targets += found
 
     for directory in args.directories:
