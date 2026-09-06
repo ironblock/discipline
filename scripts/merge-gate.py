@@ -362,7 +362,17 @@ def repair(path: Path, ours_ref: str, theirs_ref: str) -> bool:
         # default --files is relative and `Path("verify.sh").parent` is `.`.
         inert = inert_injections(Path.cwd().resolve())
         if inert is None:
-            break
+            # Refuse, do not stop. Breaking here leaves `repair` reporting
+            # "0 restored" and exit 0 -- the same silent success as having
+            # found nothing, on a tree nobody managed to examine. The whole
+            # point of this pass is the trees where the answer is not "none".
+            print(
+                "merge-gate: the pre-flight could not be asked which "
+                "injections are inert, so this pass has checked nothing. "
+                "Fix `check-injections.py` first; do not read this as clean.",
+                file=sys.stderr,
+            )
+            return False
         candidates = [n for n in inert if n in disagree and n not in swapped]
         if not candidates:
             break

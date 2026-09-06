@@ -91,27 +91,90 @@ def _key_is_the_function():
     # A rationale comment naming another injection -- "the deliberate pair of
     # inject_alpha" -- mis-keyed the block it introduced. The union then saw
     # a name it already had and skipped the genuinely new body, silently.
-    text = (
-        "# The deliberate pair of inject_alpha: the two anchor on one line,\n"
-        "# which is how a merge once deleted both.\n"
-        "inject_beta() {\n  :\n}\n"
-    )
-    found = MG.find_blocks(MG.FUNC, text)
-    if [name for name, _ in found] != ["inject_beta"]:
-        return f"keyed as {[n for n, _ in found]}, not ['inject_beta']"
+    # Tabled over the spellings a rationale comment actually uses. One
+    # sample lets a keyer that merely drops the `^...() {` anchor pass: a
+    # comment written "inject_alpha()" then keys the block again, which is
+    # the partial fix a single-sample green would bless.
+    for comment in (
+        "# The deliberate pair of inject_alpha: the two anchor on one line.\n",
+        "# The deliberate pair of inject_alpha(): the two anchor on one line.\n",
+        "# Pairs with inject_alpha() { ... }, which a merge once deleted.\n",
+    ):
+        text = comment + "inject_beta() {\n  :\n}\n"
+        found = MG.find_blocks(MG.FUNC, text)
+        if [name for name, _ in found] != ["inject_beta"]:
+            return (
+                f"keyed as {[n for n, _ in found]}, not ['inject_beta'], "
+                f"for a comment spelled {comment.strip()!r}"
+            )
+        # And the comment must still be part of the block. If it stops being
+        # swallowed, keying gets easier and this fixture's own precondition
+        # quietly disappears -- along with the rationale a merge is supposed
+        # to carry with the body.
+        if comment not in found[0][1]:
+            return "the block was keyed correctly but left its rationale comment behind"
+
+    # A comment naming an injection with no definition under it is not a
+    # block: a keyer that reads names out of prose invents them.
+    if MG.find_blocks(MG.FUNC, "# inject_alpha is mentioned and not defined\n"):
+        return "a comment with no definition under it was read as a block"
     return None
 
 
 @fixture("a union keeps a block whose comment names another injection")
 def _union_keeps_miskeyed():
+    # Exact equality, not a count and a substring. The extent is the thing:
+    # a greedy pattern swallows alpha's body into beta's block, a pattern
+    # that drops the comment group leaves the rationale behind, and one that
+    # loses the trailing newline breaks the splice -- and a substring test
+    # sees none of the three.
+    beta = "# The deliberate pair of inject_alpha.\ninject_beta() {\n  :\n}\n"
     ours = "inject_alpha() {\n  :\n}\n"
-    theirs = ours + (
-        "# The deliberate pair of inject_alpha.\ninject_beta() {\n  :\n}\n"
-    )
+    theirs = ours + beta
     mine = {n for n, _ in MG.find_blocks(MG.FUNC, ours)}
     added = [b for n, b in MG.find_blocks(MG.FUNC, theirs) if n not in mine]
-    if len(added) != 1 or "inject_beta()" not in added[0]:
-        return f"the union took {len(added)} block(s); inject_beta was dropped"
+    if added != [beta]:
+        return f"the union took {added!r}, not exactly theirs' new block with its comment"
+    return None
+
+
+@fixture("the resolver spans every injection verify.sh defines")
+def _func_spans_the_tree():
+    # The counterpart the suite was missing. Seeded cases are held against
+    # the real file twice over; injection bodies were held against nothing,
+    # so narrowing the name class to `inject_[a-z]+` found 12 blocks where
+    # the tree has 105 -- a union would have dropped 93 injections in
+    # silence, with every fixture green.
+    text = (ROOT / "verify.sh").read_text(encoding="utf-8")
+    found = MG.find_blocks(MG.FUNC, text)
+    spanned = {name for name, _ in found}
+    # Counted a second way, without the block pattern, so the two readings
+    # cannot drift together.
+    defined = set(re.findall(r"^(inject_[a-z0-9_]+)\(\) \{", text, re.M))
+    if not defined:
+        return "no injection definitions found in verify.sh at all"
+    if spanned != defined:
+        missed = sorted(defined - spanned)[:3]
+        invented = sorted(spanned - defined)[:3]
+        return (
+            f"the resolver spans {len(spanned)} injection(s); verify.sh "
+            f"defines {len(defined)}. Missed {missed}; invented {invented}"
+        )
+    lines = text.splitlines(True)
+    for name, block in found:
+        # Every block ends at its own closing brace, with the newline the
+        # splice depends on.
+        if not block.endswith("}\n"):
+            return f"{name}'s block does not end at a closing brace and newline"
+        # And where the file puts a comment immediately above a definition,
+        # that comment is part of the block -- the reason travels with the
+        # body, which is this resolver's own stated law.
+        start = next(
+            (i for i, line in enumerate(lines) if line.startswith(f"{name}() {{")),
+            None,
+        )
+        if start and lines[start - 1].startswith("#") and lines[start - 1] not in block:
+            return f"{name} left the rationale comment directly above it behind"
     return None
 
 
