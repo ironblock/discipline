@@ -4,7 +4,7 @@ result = "supported"
 kind = "reproducible-by-config"
 product_sha256 = "f99a8c5c92ee619088a06313dc27bf95daeee0ed28af817a7d68d2b4ec48a083"
 controls_run = ["seat C, an encoder extracting spans offline from the same sources, as the model-free comparator", "byte-identity of every replayed main-lane request against the drive's own record, asserted per request by the grader's warmth table"]
-known_defects = ["The record's regime names one substrate, the drive's; the bakeoff compares three seats on three substrates (the 27B on the box, a 1.7B on the host's CPU, an encoder offline), which the start row cannot carry. The seats' substrates are stated in the hardware field and the claims until the schema has a shape for a comparison across substrates.", "The raw accepted counts are inflated by a fact-parser defect of that era (untagged lines and multi-line quotes counted as facts); the grader reports raw and deduped side by side and lists the two degenerate forks, and the claims cite the deduped figures.", "The judgment axis, whether an accepted fact is true of the mechanism, was not run; only the mechanical axes are graded.", "Seat C's summary names the drive it replayed by a path in the research program's repository, which a reader here cannot open; the drive itself is the human-driven drive of 2026-08-10.", "A recompute over an archive has no session turns; turns and prefill_tokens_total are zero because the schema offers no other shape for a summary whose subject is a recompute."]
+known_defects = ["The record's regime names one substrate, the drive's; the bakeoff compares three seats on three substrates (the 27B on the box, a 1.7B on the host's CPU, an encoder offline), which the start row cannot carry. The seats' substrates are stated in the hardware field and the claims until the schema has a shape for a comparison across substrates.", "The raw accepted counts are inflated by a fact-parser defect of that era (untagged lines and multi-line quotes counted as facts); the grader reports raw and deduped side by side and lists the two degenerate forks, and the claims cite the deduped figures.", "The judgment axis, whether an accepted fact is true of the mechanism, was not run; only the mechanical axes are graded.", "Identifiers in the three seats' logs and in seat C's summary are ALIASES, not the strings the run wrote: the research program's ticket tokens were renamed to the public names for the same things, and seat C's `source_log`, formerly a path in that program's repository which a reader here could not open, is now a registry-style id. The map is private. Nothing else was touched -- the recompute reproduces all 80 report fields from the aliased artifacts, and `report.json` is byte-identical to the pre-scrub product, which is what shows the substitution changed identifiers and not measurements.", "A recompute over an archive has no session turns; turns and prefill_tokens_total are zero because the schema offers no other shape for a summary whose subject is a recompute."]
 turns = 0
 prefill_tokens_total = 0
 
@@ -19,6 +19,36 @@ dogma_version = 0
 The second recompute-confirmed row ported from the research program. The
 grader over the three seats' replay logs reproduces every one of the 80
 report fields, here as it did there.
+
+**Provenance of the committed artifacts.** The three seats' logs, seat C's summary and the grader are the research
+program's artifacts, committed here after two scrubs, both stated so that a
+reader knows what they are holding.
+
+**Paths.** Home-directory paths inside tool-output strings were removed (2,574
+bytes). **Identifiers.** The program's ticket tokens were replaced by the public
+names for the same things, consistently, and seat C's `source_log` -- a path in
+that program's repository -- became a registry-style id. The map lives on the
+private side and stays there: it holds both halves of every substitution, so
+publishing it would undo the scrub it describes.
+
+The aliases are a *renaming*, not a redaction, and the difference matters. A
+redacted token would have destroyed the record's structure -- three seats whose
+arm names all read `[REDACTED]` could not be told apart, and the grader reads
+those names. Because the renaming is consistent, every relation the record
+asserts survives it, and the proof of that is mechanical rather than asserted:
+
+    bash recompute.sh
+    recompute: 10 consumed artifact(s) hash as the record says
+    recompute: 80/80 fields reproduce            rc=0
+
+and `report.json` hashes to `f99a8c5c...` before the scrub and after it, the
+same value this directory's `product_sha256` states. Identifiers changed;
+measurements did not.
+
+The engine's name is deliberately **not** scrubbed. It is a declared factor of
+the science, carried as a substrate's `engine` field with the binary digest as
+its identity, and a factor the record is required to state cannot also be a
+token the export removes.
 
 ## Observation
 
