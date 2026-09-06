@@ -2371,6 +2371,23 @@ prove_mechanics() {
   expect_exit "an unscannable page is rejected, not called clean" 1 \
     bash "${ROOT}/scripts/hygiene.sh" --patterns "${ROOT}/scripts/pages-patterns.tsv" \
       --tree "${box}/utf16"
+
+  # The results-fixture loop grades on the class the manifest declares, so the
+  # emission is load-bearing: a `failure_class` nothing prints is a field the
+  # grader cannot read, and the loop silently falls back to "exited 1" -- which
+  # is the state this branch was in while twenty-four declared defects went
+  # unexercised. Pinned in both directions.
+  expect_exit "every results fixture emits the class its fault declares" 0 \
+    bash -c "cd '${ROOT}' && python3 scripts/check-fault-manifest.py --fixture-classes \
+      | while IFS=\$'\\t' read -r name want; do \
+          out=\$(python3 scripts/check-results.py \"tests/fixtures/results-bad/\${name}\" 2>&1) \
+            && exit 1; \
+          grep -qF \"[\${want}]\" <<<\"\${out}\" || { echo \"\${name}: no \${want}\"; exit 1; }; \
+        done"
+  expect_exit "a fixture red for another fixture's reason is not a pass" 1 \
+    bash -c "cd '${ROOT}' \
+      && out=\$(python3 scripts/check-results.py tests/fixtures/results-bad/2026-01-27-UPPERCASE-slug 2>&1); \
+      grep -qF '[results.sections-wrong]' <<<\"\${out}\""
 }
 
 selftest() {
@@ -2625,16 +2642,35 @@ selftest() {
   # it needs exactly one fresh build where the resolver will look -- the same
   # thing check_results does before it runs the linter for real.
   ( cd "${ROOT}" && build_diet ) || SELFTEST_BROKEN+=("results fixtures: diet did not build")
-  local dir rc
+  # Graded on the failure class the manifest DECLARES for each fixture, not on
+  # "exited 1". Every one of these fixtures carries exactly one defect and the
+  # manifest names the class it must produce; grading on the exit code alone
+  # cannot tell a fixture that failed for its own reason from one that failed
+  # for a reason nobody checked. That is not a hypothetical -- adding `kind` to
+  # REQUIRED_KEYS made all thirty go red on a missing key while twenty-four of
+  # their declared defects went unexercised, and this loop reported thirty REDs
+  # throughout. Red for the wrong reason is the WRONG verdict in a green shirt.
+  local dir rc name want out
+  local -A WANT=()
+  while IFS=$'\t' read -r name want; do
+    [ -n "$name" ] && WANT["$name"]="$want"
+  done < <(cd "${ROOT}" && python3 scripts/check-fault-manifest.py --fixture-classes)
   for dir in "${ROOT}"/tests/fixtures/results-bad/*/; do
-    rc=0
-    python3 "${ROOT}/scripts/check-results.py" "$dir" > /dev/null 2>&1 || rc=$?
-    if [ "$rc" -eq 1 ]; then
-      printf 'RED   check-results.py exit %-3d  %s\n' "$rc" "$(basename "$dir")"
+    rc=0; name="$(basename "$dir")"
+    out="$(python3 "${ROOT}/scripts/check-results.py" "$dir" 2>&1)" || rc=$?
+    want="${WANT[$name]-}"
+    if [ -z "$want" ]; then
+      printf 'GREEN %-52s <-- NO FAULT DECLARED FOR THIS FIXTURE\n' "$name"
+      SELFTEST_BROKEN+=("results fixture $name: declared by no fault")
+    elif [ "$rc" -ne 1 ]; then
+      printf 'GREEN exit %-3d %-46s <-- FIXTURE DID NOT FAIL\n' "$rc" "$name"
+      SELFTEST_BROKEN+=("results fixture $name")
+    elif ! grep -qF "[$want]" <<<"$out"; then
+      printf 'GREEN exit %-3d %-46s <-- RED FOR THE WRONG REASON, wanted %s\n' \
+        "$rc" "$name" "$want"
+      SELFTEST_BROKEN+=("results fixture $name: red, but not $want")
     else
-      printf 'GREEN check-results.py exit %-3d  %s  <-- FIXTURE DID NOT FAIL\n' \
-        "$rc" "$(basename "$dir")"
-      SELFTEST_BROKEN+=("results fixture $(basename "$dir")")
+      printf 'RED   exit %-3d %-46s %s\n' "$rc" "$name" "$want"
     fi
   done
 

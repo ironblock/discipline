@@ -35,7 +35,7 @@
 [meta]
 source = "verify.sh"
 red_faults = 179
-mechanics_assertions = 27
+mechanics_assertions = 29
 migrated = 0
 
 
@@ -735,7 +735,12 @@ id = "results.2026-01-12-two-summary-records"
 kind = "results-fixture"
 check = "results"
 label = "2026-01-12-two-summary-records"
-failure_class = "results.summary-record-count"
+# Was declared `results.summary-record-count`, which the linter cannot emit
+# for this fixture: diet refuses the record outright, so the linter's own
+# summary-row count is never reached. Telling the two refusals apart would
+# mean reading diet's error and reaching a verdict about the format, which
+# is the second reader this design removes. The relay has one class.
+failure_class = "results.record-refused"
 migrated = false
 
 [[fault]]
@@ -743,7 +748,8 @@ id = "results.2026-01-13-malformed-jsonl"
 kind = "results-fixture"
 check = "results"
 label = "2026-01-13-malformed-jsonl"
-failure_class = "results.jsonl-malformed"
+# Was `results.jsonl-malformed`; see the note on two-summary-records above.
+failure_class = "results.record-refused"
 migrated = false
 
 [[fault]]
@@ -1080,6 +1086,24 @@ failure_class = "pages.forbidden-pattern"
 pattern = "api-key-shape"
 migrated = false
 
+
+[[fault]]
+id = "mech.every-results-fixture-emits-the-class-its-fault-declares"
+kind = "mechanics"
+check = "results"
+label = "every results fixture emits the class its fault declares"
+failure_class = "results.class-not-emitted"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-fixture-red-for-another-fixture-s-reason-is-not-a-pass"
+kind = "mechanics"
+check = "results"
+label = "a fixture red for another fixture's reason is not a pass"
+failure_class = "results.graded-on-the-exit-code"
+legacy_signature = ""
+migrated = false
 
 [[fault]]
 id = "mech.cargo-build-target-dir-is-where-cargo-built"

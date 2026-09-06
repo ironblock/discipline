@@ -279,18 +279,23 @@ def resolve(value: object, path: tuple[object, ...]) -> tuple[bool, object]:
     return True, current
 
 
-def split_front_matter(text: str) -> tuple[str | None, str, str | None]:
-    """Split a report into (front-matter source, body, error).
+def split_front_matter(text: str) -> tuple[str | None, str, str | None, str | None]:
+    """Split a report into (front-matter source, body, error, failure class).
 
-    Exactly one of the front-matter source or the error is not ``None``.
+    Exactly one of the front-matter source or the error is not ``None``. The
+    two ways the fence can be wrong are different failures and are declared
+    separately in the manifest, so the split says which one it met rather than
+    leaving the caller to re-derive it from the message text.
     """
     lines = text.split("\n")
     if not lines or lines[0].strip() != FENCE:
-        return None, "", f"does not open with a {FENCE!r} front-matter fence"
+        return None, "", f"does not open with a {FENCE!r} front-matter fence", \
+            "results.front-matter-absent"
     for index in range(1, len(lines)):
         if lines[index].strip() == FENCE:
-            return "\n".join(lines[1:index]), "\n".join(lines[index + 1 :]), None
-    return None, "", f"front-matter fence {FENCE!r} is never closed"
+            return "\n".join(lines[1:index]), "\n".join(lines[index + 1 :]), None, None
+    return None, "", f"front-matter fence {FENCE!r} is never closed", \
+        "results.front-matter-unterminated"
 
 
 def body_sections(body: str) -> list[str]:
@@ -321,23 +326,29 @@ def check_run(directory: pathlib.Path) -> list[str]:
     """Lint one run directory. Returns a list of failure messages."""
     failures: list[str] = []
 
-    def fail(message: str) -> None:
-        failures.append(f"{directory}: {message}")
+    def fail(failure_class: str, message: str) -> None:
+        # The class is EMITTED, not merely declared. The manifest names a
+        # `failure_class` for every one of these fixtures, and for as long as
+        # nothing printed it the selftest could only grade on "exited 1" --
+        # so a fixture going red for a reason nobody checked graded the same
+        # as one going red for its own. Red for the wrong reason is the WRONG
+        # verdict wearing the right exit code.
+        failures.append(f"{directory}: {message}  [{failure_class}]")
 
     name = directory.name
     if name != TEMPLATE_DIR:
         match = DIR_NAME.fullmatch(name)
         if not match:
-            fail("name is not `YYYY-MM-DD-<slug>` with a lowercase hyphenated slug")
+            fail("results.name-malformed", "name is not `YYYY-MM-DD-<slug>` with a lowercase hyphenated slug")
         else:
             try:
                 datetime.date.fromisoformat(match.group(1))
             except ValueError:
-                fail(f"name carries an impossible date `{match.group(1)}`")
+                fail("results.name-malformed", f"name carries an impossible date `{match.group(1)}`")
 
     missing = [f for f in REQUIRED_FILES if not (directory / f).is_file()]
     for f in missing:
-        fail(f"missing required file `{f}`")
+        fail("results.required-file-missing", f"missing required file `{f}`")
     if missing:
         return failures
 
@@ -346,7 +357,10 @@ def check_run(directory: pathlib.Path) -> list[str]:
     summary: dict | None = None
     recorded_regime: dict | None = None
     if not verdict.ok:
-        fail(f"run.jsonl is not a session record, says diet check-record: {verdict.error}")
+        fail(
+            "results.record-refused",
+            f"run.jsonl is not a session record, says diet check-record: {verdict.error}",
+        )
         # Nothing below reads the record. The number and digest checks need a
         # summary row, and a summary row is only known to exist once diet has
         # said the file is a record; reaching for one here would be this
@@ -356,7 +370,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
         rows = [json.loads(line) for line in value.get("canonical", "").splitlines() if line.strip()]
         summaries = [r for r in rows if r.get("record") == "summary"]
         if len(summaries) != 1:
-            fail(f"run.jsonl holds {len(summaries)} summary rows, expected exactly 1")
+            fail("results.summary-record-count", f"run.jsonl holds {len(summaries)} summary rows, expected exactly 1")
         else:
             summary = summaries[0]
         recorded_regime = value.get("regime")
@@ -373,29 +387,30 @@ def check_run(directory: pathlib.Path) -> list[str]:
     # tomllib raises bare ValueError for an integer too large to convert, and
     # TOMLDecodeError is itself a ValueError, so one clause covers both.
     except (ValueError, UnicodeDecodeError, OSError) as err:
-        fail(f"regimen.toml is not TOML: {err}")
+        fail("results.regimen-not-toml", f"regimen.toml is not TOML: {err}")
 
     # --- README.md front-matter -----------------------------------------
     try:
         text = read_text(directory / "README.md")
     except Unreadable as err:
-        fail(str(err))
+        fail("results.unreadable-encoding", str(err))
         return failures
-    source, body, err = split_front_matter(text)
+    source, body, err, err_class = split_front_matter(text)
     if err is not None or source is None:
-        fail(f"README.md {err}")
+        fail(err_class or "results.front-matter-absent", f"README.md {err}")
         return failures
     try:
         front = tomllib.loads(source)
     except ValueError as exc:
-        fail(f"README.md front-matter is not TOML: {exc}")
+        fail("results.front-matter-not-toml", f"README.md front-matter is not TOML: {exc}")
         return failures
 
     for key, expected in REQUIRED_KEYS.items():
         if key not in front:
-            fail(f"front-matter is missing required key `{key}`")
+            fail("results.required-key-missing", f"front-matter is missing required key `{key}`")
         elif not has_type(front[key], expected):
             fail(
+                "results.key-mistyped",
                 f"front-matter key `{key}` is {type(front[key]).__name__}, "
                 f"expected {type_name(expected)}"
             )
@@ -403,15 +418,16 @@ def check_run(directory: pathlib.Path) -> list[str]:
     for key in ("controls_run", "known_defects"):
         value = front.get(key)
         if isinstance(value, list) and not all(isinstance(item, str) for item in value):
-            fail(f"front-matter key `{key}` must be a list of strings")
+            fail("results.key-mistyped", f"front-matter key `{key}` must be a list of strings")
 
     regime = front.get("regime")
     if isinstance(regime, dict):
         for key, expected in REQUIRED_REGIME_KEYS.items():
             if key not in regime:
-                fail(f"front-matter is missing required key `regime.{key}`")
+                fail("results.required-key-missing", f"front-matter is missing required key `regime.{key}`")
             elif not has_type(regime[key], expected):
                 fail(
+                    "results.key-mistyped",
                     f"front-matter key `regime.{key}` is {type(regime[key]).__name__}, "
                     f"expected {type_name(expected)}"
                 )
@@ -423,6 +439,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
                     recorded_regime[key], regime[key]
                 ):
                     fail(
+                        "results.regime-disagrees-with-regimen",
                         f"front-matter `regime.{key}` is {regime[key]!r} but the "
                         f"record's start row carries {recorded_regime[key]!r}"
                     )
@@ -432,27 +449,29 @@ def check_run(directory: pathlib.Path) -> list[str]:
             # nothing backs.
             for key in regime:
                 if key not in regimen:
-                    fail(f"regimen.toml does not bind `{key}`, so `regime.{key}` is unbacked")
+                    fail("results.regime-unbacked", f"regimen.toml does not bind `{key}`, so `regime.{key}` is unbacked")
                 elif not same_value(regimen[key], regime[key]):
                     fail(
+                        "results.regime-disagrees-with-regimen",
                         f"front-matter `regime.{key}` is {regime[key]!r} but "
                         f"regimen.toml binds {regimen[key]!r}"
                     )
 
     kind = front.get("kind")
     if isinstance(kind, str) and kind not in KINDS:
-        fail(f"front-matter `kind` is {kind!r}, which is neither {' nor '.join(KINDS)}")
+        fail("results.kind-undeclared", f"front-matter `kind` is {kind!r}, which is neither {' nor '.join(KINDS)}")
 
     sha = front.get("product_sha256")
     if isinstance(sha, str):
         if not SHA256.fullmatch(sha):
-            fail("front-matter `product_sha256` is not 64 lowercase hex characters")
+            fail("results.sha-malformed", "front-matter `product_sha256` is not 64 lowercase hex characters")
         elif summary is not None:
             recorded = summary.get("product_sha256")
             if recorded is None:
-                fail("the record's summary row does not carry `product_sha256`")
+                fail("results.sha-disagrees-with-summary", "the record's summary row does not carry `product_sha256`")
             elif recorded != sha:
                 fail(
+                    "results.sha-disagrees-with-summary",
                     f"front-matter `product_sha256` is {sha} but the summary "
                     f"record carries {recorded!r}"
                 )
@@ -466,11 +485,13 @@ def check_run(directory: pathlib.Path) -> list[str]:
             found, at_path = resolve(summary, path)
             if not found:
                 fail(
+                    "results.number-unbound-in-summary",
                     f"front-matter `{shown}` states {value!r}, but the summary "
                     f"record binds no `{shown}`"
                 )
             elif not (is_number(at_path) and same_value(at_path, value)):
                 fail(
+                    "results.number-contradicts-summary",
                     f"front-matter `{shown}` states {value!r} but the summary "
                     f"record binds `{shown}` to {at_path!r}"
                 )
@@ -479,6 +500,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
     headings = body_sections(body)
     if headings != SECTIONS:
         fail(
+            "results.sections-wrong",
             f"README.md sections are {headings!r}, expected exactly {SECTIONS!r} in order"
         )
 
@@ -495,7 +517,7 @@ def digest_of(path: pathlib.Path) -> str:
 
 
 def check_consumed(
-    directory: pathlib.Path, rows: list[dict], fail: Callable[[str], None]
+    directory: pathlib.Path, rows: list[dict], fail: Callable[[str, str], None]
 ) -> None:
     """Every claim's consumed evidence, hashed against the committed file.
 
@@ -525,23 +547,26 @@ def check_consumed(
             parts = pathlib.PurePosixPath(stated).parts
             if stated.startswith("/") or ".." in parts:
                 fail(
+                    "results.provenance-unchecked",
                     f"claim `{claim}` consumes `{stated}`, which is outside the "
                     f"run directory; evidence is committed beside the claim"
                 )
                 continue
             if stated == "run.jsonl":
                 fail(
+                    "results.provenance-unchecked",
                     f"claim `{claim}` consumes `run.jsonl`, whose digest it is "
                     f"itself part of; a record cannot state its own hash"
                 )
                 continue
             artefact = directory / stated
             if not artefact.is_file():
-                fail(f"claim `{claim}` consumes `{stated}`, which is not a file here")
+                fail("results.provenance-unchecked", f"claim `{claim}` consumes `{stated}`, which is not a file here")
                 continue
             found = digest_of(artefact)
             if found != recorded:
                 fail(
+                    "results.provenance-unchecked",
                     f"claim `{claim}` consumes `{stated}` at sha256 {recorded}, "
                     f"but the committed file hashes to {found}"
                 )
