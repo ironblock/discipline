@@ -779,7 +779,12 @@ id = "results.2026-01-12-two-summary-records"
 kind = "results-fixture"
 check = "results"
 label = "2026-01-12-two-summary-records"
-failure_class = "results.summary-record-count"
+# Was declared `results.summary-record-count`, which the linter cannot emit
+# for this fixture: diet refuses the record outright, so the linter's own
+# summary-row count is never reached. Telling the two refusals apart would
+# mean reading diet's error and reaching a verdict about the format, which
+# is the second reader this design removes. The relay has one class.
+failure_class = "results.record-refused"
 migrated = false
 
 [[fault]]
@@ -787,7 +792,8 @@ id = "results.2026-01-13-malformed-jsonl"
 kind = "results-fixture"
 check = "results"
 label = "2026-01-13-malformed-jsonl"
-failure_class = "results.jsonl-malformed"
+# Was `results.jsonl-malformed`; see the note on two-summary-records above.
+failure_class = "results.record-refused"
 migrated = false
 
 [[fault]]
@@ -1418,7 +1424,6 @@ check = "regimen"
 label = "non-ascii-bare-key"
 failure_class = "format.subset-violated"
 migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
-migrated = false
 [[fault]]
 id = "test.regimen_float_as_a_string"
 kind = "seeded-gate"
