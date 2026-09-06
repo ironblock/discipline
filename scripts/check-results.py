@@ -571,9 +571,14 @@ def check_consumed(
             try:
                 resolved = artefact.resolve(strict=True)
             except (OSError, RuntimeError):
+                # Same sentence as the not-a-file branch below, deliberately:
+                # "there is no such file" and "there is something there that
+                # is not a file" are one fault to the person reading it, and
+                # one guard with two spellings is one the seeded case can only
+                # half cover.
                 fail(
                     "results.provenance-unchecked",
-                    f"claim `{claim}` consumes `{stated}`, which does not resolve to a file here",
+                    f"claim `{claim}` consumes `{stated}`, which is not a file here",
                 )
                 continue
             here = directory.resolve()

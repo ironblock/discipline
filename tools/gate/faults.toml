@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 183
+red_faults = 188
 mechanics_assertions = 29
 migrated = 0
 
@@ -640,6 +640,51 @@ check = "history"
 label = "history with an undeterminable base"
 failure_class = "history.base-undeterminable"
 legacy_signature = "an undeterminable base is a failure, not an empty scan"
+migrated = false
+
+[[fault]]
+id = "results.results_consumes_outside"
+kind = "seeded-gate"
+check = "results"
+label = "a claim consuming evidence outside"
+failure_class = "results.provenance-escapes-the-directory"
+legacy_signature = "outside the run directory"
+migrated = false
+
+[[fault]]
+id = "results.results_consumes_the_record"
+kind = "seeded-gate"
+check = "results"
+label = "a claim consuming its own record"
+failure_class = "results.provenance-self-hash"
+legacy_signature = "a record cannot state its own hash"
+migrated = false
+
+[[fault]]
+id = "results.results_consumes_a_missing_file"
+kind = "seeded-gate"
+check = "results"
+label = "a claim consuming a file not there"
+failure_class = "results.provenance-unchecked"
+legacy_signature = "which is not a file here"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_script_missing"
+kind = "seeded-gate"
+check = "recompute"
+label = "reproducible, with nothing to run"
+failure_class = "results.recompute-absent"
+legacy_signature = "carries no recompute.sh"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_nothing_recomputable"
+kind = "seeded-gate"
+check = "recompute"
+label = "a gate 0 with nothing recomputable"
+failure_class = "results.recompute-over-nothing"
+legacy_signature = "nothing was recomputed"
 migrated = false
 
 [[fault]]

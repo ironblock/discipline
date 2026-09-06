@@ -1252,6 +1252,67 @@ exit 0
 SH
 }
 
+# A claim naming evidence outside its own directory. A results directory is
+# self-contained: a path that climbs out names something this repository does
+# not carry, and its digest would be of whatever sat there on the machine.
+inject_results_consumes_outside() {
+  python3 - <<'EOF'
+import json, pathlib
+path = pathlib.Path("results/_template/run.jsonl")
+rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+for row in rows:
+    if row.get("record") == "claim":
+        row["consumes"][0]["path"] = "../_template/product.txt"
+path.write_text("\n".join(json.dumps(r, separators=(",", ":")) for r in rows) + "\n",
+                encoding="utf-8")
+EOF
+}
+
+# A claim consuming the record that carries it. The digest would be of a file
+# the digest is part of, so it can never be stated correctly -- a record
+# cannot hash itself.
+inject_results_consumes_the_record() {
+  python3 - <<'EOF'
+import json, pathlib
+path = pathlib.Path("results/_template/run.jsonl")
+rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+for row in rows:
+    if row.get("record") == "claim":
+        row["consumes"][0]["path"] = "run.jsonl"
+path.write_text("\n".join(json.dumps(r, separators=(",", ":")) for r in rows) + "\n",
+                encoding="utf-8")
+EOF
+}
+
+# A claim naming evidence that is not there at all. Until the digests were
+# checked this was invisible: a claim could cite a file nobody committed.
+inject_results_consumes_a_missing_file() {
+  python3 - <<'EOF'
+import json, pathlib
+path = pathlib.Path("results/_template/run.jsonl")
+rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+for row in rows:
+    if row.get("record") == "claim":
+        row["consumes"][0]["path"] = "never-committed.txt"
+path.write_text("\n".join(json.dumps(r, separators=(",", ":")) for r in rows) + "\n",
+                encoding="utf-8")
+EOF
+}
+
+# A directory that declares itself reproducible and ships nothing to reproduce
+# it with. Gate 0 must not read the declaration as the deed.
+inject_recompute_script_missing() {
+  rm -f results/_template/recompute.sh
+}
+
+# Every directory declared historical, so gate 0 has nothing to run. A census
+# reading "0 recomputed, N historical, 0 undeclared" is a gate over nothing,
+# and the tripwire for it is the reason exit 2 exists.
+inject_recompute_nothing_recomputable() {
+  sed -i 's/^kind = "reproducible-by-config"$/kind = "historical-observation"/' \
+    results/_template/README.md
+}
+
 inject_recompute_kind_undeclared() {
   python3 - <<'EOF'
 import pathlib
@@ -2549,6 +2610,16 @@ selftest() {
     'does not compare the report to the artefacts'
   seeded_case "a recompute that edits what it checks"  recompute inject_recompute_tampers \
     'tampering, not recomputation'
+  seeded_case "a claim consuming evidence outside"     results   inject_results_consumes_outside \
+    'outside the run directory'
+  seeded_case "a claim consuming its own record"       results   inject_results_consumes_the_record \
+    'a record cannot state its own hash'
+  seeded_case "a claim consuming a file not there"     results   inject_results_consumes_a_missing_file \
+    'which is not a file here'
+  seeded_case "reproducible, with nothing to run"      recompute inject_recompute_script_missing \
+    'carries no recompute.sh'
+  seeded_case "a gate 0 with nothing recomputable"     recompute inject_recompute_nothing_recomputable \
+    'nothing was recomputed'
   seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
     'but the committed file hashes to'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
