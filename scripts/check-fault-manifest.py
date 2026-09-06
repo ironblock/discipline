@@ -91,6 +91,7 @@ def main() -> int:
     # scraping it out of a failure message. One reader, structured answer.
     counting = "--count-red" in sys.argv
     counting_mechanics = "--count-mechanics" in sys.argv
+    listing_fixtures = "--fixture-classes" in sys.argv
 
     # Asked for the count, answer the count -- before the manifest is read at
     # all. The count derives from `verify.sh` and the fixture directories and
@@ -108,6 +109,19 @@ def main() -> int:
     # cannot recount it refuses a merge over a number it could have derived.
     if counting_mechanics:
         print(len(seen["mechanics"]))
+        return 0
+    # The selftest greps each results fixture's output for the class declared
+    # here. It is emitted from THIS script because the manifest has one reader
+    # and a second one in the shell would be free to disagree with it.
+    if listing_fixtures:
+        try:
+            entries = tomllib.loads(MANIFEST.read_text(encoding="utf-8"))["fault"]
+        except (OSError, ValueError, KeyError) as err:
+            print(f"cannot read the manifest: {err}", file=sys.stderr)
+            return 1
+        for entry in entries:
+            if entry.get("kind") == "results-fixture":
+                print(f"{entry.get('label')}\t{entry.get('failure_class')}")
         return 0
 
     failures: list[str] = []
@@ -171,6 +185,14 @@ def main() -> int:
             f"[meta] mechanics_assertions is {meta.get('mechanics_assertions')}, "
             f"observed {len(seen['mechanics'])}"
         )
+
+    # Asked for the count, answer the count. Deliberately before the failure
+    # report: the caller is a tool that has just assembled the fault list and
+    # is asking what `red_faults` must say, so the one failure it is about to
+    # fix must not silence the answer.
+    if counting:
+        print(sum(len(seen[k]) for k in seen if k != "mechanics"))
+        return 0
 
     for message in failures:
         print(message, file=sys.stderr)

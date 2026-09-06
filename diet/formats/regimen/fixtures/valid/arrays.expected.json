@@ -1,0 +1,41 @@
+{
+  "empty": {
+    "array": []
+  },
+  "mixed": {
+    "array": [
+      {
+        "string": "a"
+      },
+      {
+        "integer": 1
+      },
+      {
+        "float": 0.5
+      },
+      {
+        "boolean": true
+      }
+    ]
+  },
+  "nothink_ops": {
+    "array": [
+      {
+        "string": "extraction"
+      },
+      {
+        "string": "judgment"
+      },
+      {
+        "string": "audit"
+      }
+    ]
+  },
+  "trailing": {
+    "array": [
+      {
+        "string": "x"
+      }
+    ]
+  }
+}
