@@ -26,10 +26,12 @@ behaviour it names, none collateral -- but "could that behaviour be broken
 ANOTHER way with the suite still green?" It could, eleven times. Four are
 closed, in the commit that added the thirteenth fixture.
 
-EIGHT ARE OPEN, listed below, and not one of them is a hypothesis: every one
-names a mutation that was applied to a copy of this tree and left the suite
-reporting `0 failed`. They are recorded here, rather than in a tracker,
-because the fixture each one indicts is a few lines further down this file.
+Of the remaining eight, one is now closed too -- the entry point, below --
+leaving SEVEN OPEN. Not one of the seven is a hypothesis: every one names a
+mutation that was applied to a copy of this tree and left the suite reporting
+`0 failed`. They are recorded here, rather than only in a tracker, because
+the fixture each one indicts is a few lines further down this file. They are
+listed in the order their consequence matters, worst first.
 
   1. `a seeded case spelled across continuation lines is seen` -- drop the
      `held = []` reset in gatelib.logical_lines and the real verify.sh reads
@@ -75,15 +77,7 @@ because the fixture each one indicts is a few lines further down this file.
      `migrated = 0` and `migrated = 7` read as no difference at all, so one
      side's authored count is silently written to disk.
 
-  7. `an added mechanics assertion is a difference, not a silent union` --
-     the fixture pins only that two skeletons differ, and never reaches the
-     refusal it is named for. NO FIXTURE IN THIS FILE CALLS `union_file`.
-     So turning that refusal into warn-and-proceed -- "fixing the refusal
-     into a guess", the thing this fixture exists to prevent -- is
-     invisible, and so is an `expect_exit` normalizer in `skeleton_of` that
-     makes the common shape compare equal.
-
-  8. `a pre-flight that reported no summary is not read as nothing-inert` --
+  7. `a pre-flight that reported no summary is not read as nothing-inert` --
      partly closed. Its caller escape is fixed: `repair` no longer reads a
      None as nothing-inert. Two remain. The POSITIVE arm is unpinned and is
      coupled across two files by a bare string literal -- check-injections.py
@@ -92,13 +86,20 @@ because the fixture each one indicts is a few lines further down this file.
      the stub writes nothing at all to stdout, so the fixture cannot tell
      "keys on the summary line" from "keys on any output whatsoever".
 
-Item 7 is the review's finding 12 recurring one level down: the resolver was
-given a gate, and the gate's fixtures reach its helpers rather than its entry
-point. Read that as the standing caution for anyone adding a fixture here --
-assert through the function a merge actually calls.
+CLOSED, and the reason the rest are worth reading: no fixture in this file
+called `union_file` at all -- the resolver was given a gate, and the gate's
+fixtures reached its helpers rather than its entry point, which is the
+review's finding 12 recurring one level down. Turning the refusal into
+warn-and-proceed, and normalizing `expect_exit` away inside `skeleton_of`,
+were both invisible. Two fixtures now drive `union_file` itself, and both
+mutations go red under them. Take that as the standing rule for anyone
+adding a fixture here: assert through the function a merge actually calls.
 """
 
+import contextlib
 import importlib.util
+import io
+import os
 import re
 import subprocess
 import sys
@@ -446,6 +447,108 @@ def _no_summary_is_not_empty():
         answer = MG.inert_injections(root)
     if answer is not None:
         return f"read a summary-less refusal as {answer!r} instead of 'could not ask'"
+    return None
+
+
+# Two commits of one gate file, so `union_file` can be driven the way a merge
+# drives it -- through `git show`, against a real path on disk. Everything
+# below this point asserts on the ENTRY POINT rather than on a helper: the
+# review's finding 12 was a resolver reachable from nothing, and a suite that
+# only reaches `skeleton_of` and `find_blocks` reproduces it one level down.
+CHECK_BODY = """\
+check_thing() {
+  local box="${1}"
+  mkdir -p "${box}/one"
+  expect_exit 'the first thing' 0 true
+}
+
+inject_alpha() {
+  :
+}
+"""
+
+# An assertion added inside an existing check function, bringing no setup with
+# it. This is the common shape, and the one an `expect_exit` normalizer in
+# `skeleton_of` would make compare EQUAL.
+CHECK_GROWN = CHECK_BODY.replace(
+    "  expect_exit 'the first thing' 0 true\n",
+    "  expect_exit 'the first thing' 0 true\n"
+    "  expect_exit 'the second thing' 1 false\n",
+)
+
+BETA = "\n# The deliberate pair of inject_alpha.\ninject_beta() {\n  :\n}\n"
+
+
+def two_commits(box: Path, ours_text: str, theirs_text: str) -> tuple[str, str]:
+    """One file, committed twice. Returns the two SHAs."""
+    def git(*args: str) -> str:
+        run = subprocess.run(
+            ("git",) + args, cwd=box, capture_output=True, text=True
+        )
+        if run.returncode != 0:
+            raise RuntimeError(f"git {' '.join(args)}: {run.stderr.strip()}")
+        return run.stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "gate@example.invalid")
+    git("config", "user.name", "gate")
+    shas = []
+    for text in (ours_text, theirs_text):
+        (box / "verify.sh").write_text(text, encoding="utf-8")
+        git("add", "verify.sh")
+        git("commit", "-qm", "side")
+        shas.append(git("rev-parse", "HEAD"))
+    return shas[0], shas[1]
+
+
+def drive_union(ours_text: str, theirs_text: str):
+    """Run `union_file` in a throwaway repo. Returns (took, stderr, on disk)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        box = Path(tmp)
+        ours, theirs = two_commits(box, ours_text, theirs_text)
+        here = os.getcwd()
+        err = io.StringIO()
+        try:
+            os.chdir(box)
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                took = MG.union_file(Path("verify.sh"), ours, theirs)
+        finally:
+            os.chdir(here)
+        return took, err.getvalue(), (box / "verify.sh").read_text(encoding="utf-8")
+
+
+@fixture("the union refuses an added mechanics assertion and rewrites nothing")
+def _union_refuses_and_does_not_write():
+    # The refusal itself, not a proxy for it. No fixture reached `union_file`
+    # before this one, so "fix the refusal into a guess" -- the edit the
+    # neighbouring fixture says it exists to prevent -- was invisible, and so
+    # was an `expect_exit` normalizer in `skeleton_of`, under which this shape
+    # compares equal and the assertion is dropped in silence.
+    took, err, on_disk = drive_union(CHECK_BODY, CHECK_GROWN)
+    if took is not False:
+        return f"the union proceeded on an expect_exit-only difference: took={took!r}"
+    if on_disk != CHECK_GROWN:
+        return "a refused union rewrote the file anyway"
+    if "mechanics assertion(s) differ" not in err:
+        return f"the refusal did not say what it met: {err.strip()[:160]!r}"
+    if "the second thing" not in err:
+        return "the refusal named no assertion, so the reader cannot act on it"
+    return None
+
+
+@fixture("the union takes a block by name and writes the assembled file")
+def _union_takes_a_block_and_writes():
+    # The positive arm, for the same reason: a refusal fixture alone is
+    # satisfied by a `union_file` that refuses everything.
+    took, err, on_disk = drive_union(CHECK_BODY, CHECK_BODY + BETA)
+    if took is not True:
+        return f"the union refused a difference confined to a named block: {err.strip()[:160]!r}"
+    if "inject_beta() {" not in on_disk:
+        return "the union returned True without writing the block it took"
+    if "# The deliberate pair of inject_alpha." not in on_disk:
+        return "the block travelled without the comment that explains it"
+    if "inject_alpha() {" not in on_disk:
+        return "the union dropped ours while taking theirs"
     return None
 
 
