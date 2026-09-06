@@ -2,8 +2,6 @@
 #
 # A regimen v1 conformance fixture of that arm as written. What the regimen grammar
 # cannot express is not carried and not approximated:
-#   not carried: expected_absent = ["--cache-ram", "-cram"] — the regimen grammar has no arrays
-#   not carried: [serving.flags] (a nested header, empty in the source) — the regimen grammar has no nested tables
 #
 # Transcribed from the REV-9 Run 2 preregistration §4, not designed here. Run 2
 # compares against nothing (§1), so this file's job is to state the shipping default
@@ -88,7 +86,11 @@ rationale = false            # the rationale lane is its own study's, excluded f
 # matches the Pi-parity arm's reference exactly (identity, no deviation
 # needed) — Run 2 relies on the --cache-ram compiled default, unchanged from
 # Run 1. The Pi-parity arm's [serving] comment carries the full rationale.
+# carried since the schema batch grew arrays and a second level of table:
+#   expected_absent (an array) and the [serving.flags] header the arm opens
+#   empty. Both were declared "not carried" here while the grammar refused
+#   them; the grammar no longer does, and a fixture that keeps saying so
+#   states something false about the normative file beside it.
 [serving]
-# The arm's one serving binding, expected_absent = ["--cache-ram", "-cram"], is an
-# array, and its [serving.flags] header is a nested table: neither is carried (see
-# the header block). The table is kept so the arm's shape survives as written.
+expected_absent = ["--cache-ram", "-cram"]
+[serving.flags]

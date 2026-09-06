@@ -5,8 +5,6 @@
 # regime. PIN B (Pi's 2.0/0.75) governs this run. Run 2 (shipping split: main +
 # interview thinking ON) gets its own arm file, gated on Run 1 passing.
 #
-# not carried: expected_absent = ["--cache-ram", "-cram"] — the regimen grammar has no array value
-# not carried: [serving.flags] — the regimen grammar has no nested table header (the arm declares it with nothing under it)
 # The [serving] header itself is carried, empty, as the arm writes it; only its two members above are not.
 #   the arm's rationale for [serving], kept for the record: identity with the Pi-parity arm's
 #   reference (no deviation needed) — Run 1 relies on the --cache-ram compiled default, same
@@ -48,4 +46,11 @@ rationale = false
 # regimen grammar and are listed as not carried in the header above; the arm's
 # rationale was that run 1 relies on the --cache-ram compiled default, the same as
 # the parity declaration's reference.
+# carried since the schema batch grew arrays and a second level of table:
+#   expected_absent (an array) and the [serving.flags] header the arm opens
+#   empty. Both were declared "not carried" here while the grammar refused
+#   them; the grammar no longer does, and a fixture that keeps saying so
+#   states something false about the normative file beside it.
 [serving]
+expected_absent = ["--cache-ram", "-cram"]
+[serving.flags]
