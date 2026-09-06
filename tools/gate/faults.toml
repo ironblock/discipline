@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 181
+red_faults = 183
 mechanics_assertions = 29
 migrated = 0
 
@@ -640,6 +640,24 @@ check = "history"
 label = "history with an undeterminable base"
 failure_class = "history.base-undeterminable"
 legacy_signature = "an undeterminable base is a failure, not an empty scan"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_cannot_fail"
+kind = "seeded-gate"
+check = "recompute"
+label = "a recompute that cannot fail"
+failure_class = "results.recompute-cannot-fail"
+legacy_signature = "does not compare the report to the artefacts"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_tampers"
+kind = "seeded-gate"
+check = "recompute"
+label = "a recompute that edits what it checks"
+failure_class = "results.recompute-tampers"
+legacy_signature = "tampering, not recomputation"
 migrated = false
 
 [[fault]]

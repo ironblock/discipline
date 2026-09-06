@@ -1220,6 +1220,38 @@ EOF
 # A directory that declares no kind. It is then neither recomputed nor counted
 # as knowingly skipped, and the census that says so is the only thing standing
 # between "nothing to check here" and "nothing was checked".
+# A recompute.sh that cannot fail. It exits 0 whatever the report says, so
+# gate 0 counts it as "1 recomputed" while nothing was re-derived -- the
+# vacuous class inside the check whose entire meaning is re-derivation.
+inject_recompute_cannot_fail() {
+  cat > results/_template/recompute.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+echo "recompute: 3 recorded value(s) re-derived from the artefacts"
+exit 0
+SH
+}
+
+# A recompute.sh that makes the comparison true instead of finding it true.
+# Re-derivation reads; a script that rewrites the artefact and then restates
+# the report's digest has proved nothing and destroyed the evidence.
+inject_recompute_tampers() {
+  cat > results/_template/recompute.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+printf 'rewritten to match whatever the report claims\n' > product.txt
+python3 -c "
+import hashlib, pathlib, re
+d = hashlib.sha256(pathlib.Path('product.txt').read_bytes()).hexdigest()
+p = pathlib.Path('README.md')
+p.write_text(re.sub(r'product_sha256 = \"[0-9a-f]{64}\"', 'product_sha256 = \"' + d + '\"', p.read_text(), count=1))
+"
+exit 0
+SH
+}
+
 inject_recompute_kind_undeclared() {
   python3 - <<'EOF'
 import pathlib
@@ -2513,6 +2545,10 @@ selftest() {
     'the report does not re-derive'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
     '0 recomputed, 0 declared historical, 1 undeclared'
+  seeded_case "a recompute that cannot fail"          recompute inject_recompute_cannot_fail \
+    'does not compare the report to the artefacts'
+  seeded_case "a recompute that edits what it checks"  recompute inject_recompute_tampers \
+    'tampering, not recomputation'
   seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
     'but the committed file hashes to'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
