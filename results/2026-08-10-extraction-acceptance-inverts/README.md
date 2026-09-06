@@ -10,7 +10,7 @@ prefill_tokens_total = 0
 
 [regime]
 arm = "extraction-seat-bakeoff"
-substrate = "box-qwen36-27b-ud-q4kxl"
+substrate = "accel24-beellama-qwen27b-q4kxl"
 dogma_version = 0
 +++
 
