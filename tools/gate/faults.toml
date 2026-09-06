@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 188
+red_faults = 203
 mechanics_assertions = 29
 migrated = 0
 
@@ -391,96 +391,6 @@ legacy_signature = "the command word is not one of its own operands"
 migrated = false
 
 [[fault]]
-id = "test.regimen_float_as_a_string"
-kind = "seeded-gate"
-check = "test"
-label = "a regimen float rendered as a string"
-failure_class = "regimen.float-stringified"
-legacy_signature = "a float projected as something other than a decimal"
-migrated = false
-
-[[fault]]
-id = "test.regimen_table_scope_flattened"
-kind = "seeded-gate"
-check = "test"
-label = "a table header that opens nothing"
-failure_class = "regimen.table-scope-lost"
-legacy_signature = "its keys are not the document.s"
-migrated = false
-
-[[fault]]
-id = "test.regimen_table_collision_unchecked"
-kind = "seeded-gate"
-check = "test"
-label = "two tables of one name accepted"
-failure_class = "regimen.table-collision-unchecked"
-legacy_signature = "a table opened twice was not refused"
-migrated = false
-
-[[fault]]
-id = "test.regimen_float_rule_widened"
-kind = "seeded-gate"
-check = "test"
-label = "the float rule widened past the record"
-failure_class = "regimen.decimal-drift"
-legacy_signature = "the regimen grammar and the record.s decimal disagree"
-migrated = false
-
-[[fault]]
-id = "recompute.recompute_summary_not_derived"
-kind = "seeded-gate"
-check = "recompute"
-label = "a summary the rows do not carry"
-failure_class = "results.summary-not-derived"
-legacy_signature = "the report does not re-derive"
-migrated = false
-
-[[fault]]
-id = "recompute.recompute_kind_undeclared"
-kind = "seeded-gate"
-check = "recompute"
-label = "a results directory declaring no kind"
-failure_class = "results.kind-undeclared"
-legacy_signature = "0 recomputed, 0 declared historical, 1 undeclared"
-migrated = false
-
-[[fault]]
-id = "results.results_consumed_digest_stale"
-kind = "seeded-gate"
-check = "results"
-label = "a consumed digest gone stale"
-failure_class = "results.provenance-unchecked"
-legacy_signature = "but the committed file hashes to"
-migrated = false
-
-[[fault]]
-id = "test.regimen_nested_table_flattened"
-kind = "seeded-gate"
-check = "test"
-label = "a nested table flattened"
-failure_class = "regimen.table-depth-lost"
-legacy_signature = "holds its own binding and the table below it"
-migrated = false
-
-[[fault]]
-id = "test.regimen_array_second_reader"
-kind = "seeded-gate"
-check = "test"
-label = "an array read by a second reader"
-failure_class = "regimen.array-second-reader"
-legacy_signature = "an array item was read by something other than the value reader"
-migrated = false
-
-[[fault]]
-id = "injections.case_without_an_injection"
-kind = "seeded-gate"
-check = "injections"
-label = "a case naming no injection"
-failure_class = "gate.case-without-an-injection"
-legacy_signature = "named by a seeded case, defined nowhere"
-migrated = false
-
-[[fault]]
 id = "injections.inert_injection"
 kind = "seeded-gate"
 check = "injections"
@@ -497,6 +407,140 @@ label = "an empty payload read as absent"
 failure_class = "record.payload-dropped"
 legacy_signature = "an empty answer is a recorded answer, not a missing one"
 migrated = false
+
+[[fault]]
+id = "test.tangent_drop_removes"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent drop that deletes"
+failure_class = "object.disposition-deletes"
+legacy_signature = "a drop evicts to the archive and never deletes"
+migrated = false
+
+[[fault]]
+id = "test.tangent_park_renders"
+kind = "seeded-gate"
+check = "test"
+label = "a parked entry that still renders"
+failure_class = "object.park-still-live"
+legacy_signature = "a parked entry still speaks for the object"
+migrated = false
+
+[[fault]]
+id = "test.tangent_scope_by_recency"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent scoped by recency"
+failure_class = "object.scope-by-recency"
+legacy_signature = "scope is by provenance, not by recency"
+migrated = false
+
+[[fault]]
+id = "test.tangent_undisposed_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent closed leaving an entry unruled"
+failure_class = "object.closure-partial"
+legacy_signature = "closure is total: a tangent-born entry was left undisposed"
+migrated = false
+
+[[fault]]
+id = "test.tangent_prefix_asserted"
+kind = "seeded-gate"
+check = "test"
+label = "a prefix claimed intact, not compared"
+failure_class = "object.prefix-unmeasured"
+legacy_signature = "the prefix was reported intact after the trunk moved"
+migrated = false
+
+[[fault]]
+id = "test.tangent_id_reused"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent id opened twice"
+failure_class = "object.scope-ambiguous"
+legacy_signature = "a tangent id the record already carries was opened again"
+migrated = false
+
+[[fault]]
+id = "test.tangent_provenance_ignores_turn"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent that dates a fact at the fork"
+failure_class = "object.provenance-undated"
+legacy_signature = "a tangent dated a patch at a turn other than the one it was made at"
+migrated = false
+
+[[fault]]
+id = "test.tangent_ruling_dated_at_fork"
+kind = "seeded-gate"
+check = "test"
+label = "a closure ruling dated at the fork"
+failure_class = "object.ruling-predates-fact"
+legacy_signature = "the closure filed its ruling at a turn it did not close at"
+migrated = false
+
+[[fault]]
+id = "test.tangent_closing_lane_coined"
+kind = "seeded-gate"
+check = "test"
+label = "a closure under a coined lane"
+failure_class = "object.lane-coined"
+legacy_signature = "the closure filed its ruling under a lane the record does not already have"
+migrated = false
+
+[[fault]]
+id = "test.tangent_disposition_missing_from_all"
+kind = "seeded-gate"
+check = "test"
+label = "a disposition missing from the list"
+failure_class = "object.vocabulary-incomplete"
+legacy_signature = "the dispositions a closure can rule with are not the three the record names"
+migrated = false
+
+[[fault]]
+id = "test.tangent_scope_offers_a_ruled_entry"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent that offers a settled fact again"
+failure_class = "object.scope-reoffers-ruled"
+legacy_signature = "the tangent offered a fact the record had already ruled on for disposition a second time"
+migrated = false
+
+[[fault]]
+id = "test.tangent_prefix_counts_dead_rows"
+kind = "seeded-gate"
+check = "test"
+label = "a prefix that counts dead trunk rows"
+failure_class = "object.prefix-counts-dead"
+legacy_signature = "a trunk row that was already dead at the fork was counted into the prefix"
+migrated = false
+
+[[fault]]
+id = "test.tangent_prefix_only_grew"
+kind = "seeded-gate"
+check = "test"
+label = "a prefix called intact whenever it only grew"
+failure_class = "object.prefix-growth-only"
+legacy_signature = "the prefix was reported unmoved after the trunk wrote a fact of its own"
+migrated = false
+
+[[fault]]
+id = "test.object_park_renders_as_retired"
+kind = "seeded-gate"
+check = "test"
+label = "a parked entry that reads as retired"
+failure_class = "object.state-name-collapsed"
+legacy_signature = "a state renders under a name the dump does not promise"
+migrated = false
+
+[[fault]]
+id = "test.object_park_needs_no_tangent"
+kind = "seeded-gate"
+check = "test"
+label = "a park with no tangent behind it"
+failure_class = "object.park-untangented"
+legacy_signature = "an entry was parked under no tangent, so it left the live set"
 
 [[fault]]
 id = "test.record_negative_zero_decimal"
@@ -640,78 +684,6 @@ check = "history"
 label = "history with an undeterminable base"
 failure_class = "history.base-undeterminable"
 legacy_signature = "an undeterminable base is a failure, not an empty scan"
-migrated = false
-
-[[fault]]
-id = "results.results_consumes_outside"
-kind = "seeded-gate"
-check = "results"
-label = "a claim consuming evidence outside"
-failure_class = "results.provenance-escapes-the-directory"
-legacy_signature = "outside the run directory"
-migrated = false
-
-[[fault]]
-id = "results.results_consumes_the_record"
-kind = "seeded-gate"
-check = "results"
-label = "a claim consuming its own record"
-failure_class = "results.provenance-self-hash"
-legacy_signature = "a record cannot state its own hash"
-migrated = false
-
-[[fault]]
-id = "results.results_consumes_a_missing_file"
-kind = "seeded-gate"
-check = "results"
-label = "a claim consuming a file not there"
-failure_class = "results.provenance-unchecked"
-legacy_signature = "which is not a file here"
-migrated = false
-
-[[fault]]
-id = "recompute.recompute_script_missing"
-kind = "seeded-gate"
-check = "recompute"
-label = "reproducible, with nothing to run"
-failure_class = "results.recompute-absent"
-legacy_signature = "carries no recompute.sh"
-migrated = false
-
-[[fault]]
-id = "recompute.recompute_nothing_recomputable"
-kind = "seeded-gate"
-check = "recompute"
-label = "a gate 0 with nothing recomputable"
-failure_class = "results.recompute-over-nothing"
-legacy_signature = "nothing was recomputed"
-migrated = false
-
-[[fault]]
-id = "recompute.recompute_cannot_fail"
-kind = "seeded-gate"
-check = "recompute"
-label = "a recompute that cannot fail"
-failure_class = "results.recompute-cannot-fail"
-legacy_signature = "does not compare the report to the artefacts"
-migrated = false
-
-[[fault]]
-id = "recompute.recompute_tampers"
-kind = "seeded-gate"
-check = "recompute"
-label = "a recompute that edits what it checks"
-failure_class = "results.recompute-tampers"
-legacy_signature = "tampering, not recomputation"
-migrated = false
-
-[[fault]]
-id = "results.results_nested_directory"
-kind = "seeded-gate"
-check = "results"
-label = "a run directory inside a run directory"
-failure_class = "results.nested-run-directory"
-legacy_signature = "a run directory inside a run directory"
 migrated = false
 
 [[fault]]
@@ -926,14 +898,6 @@ kind = "results-fixture"
 check = "results"
 label = "2026-01-26-readme-is-not-utf8"
 failure_class = "results.unreadable-encoding"
-migrated = false
-
-[[fault]]
-id = "results.2026-01-28-symlinked-evidence"
-kind = "results-fixture"
-check = "results"
-label = "2026-01-28-symlinked-evidence"
-failure_class = "results.provenance-escapes-the-directory"
 migrated = false
 
 [[fault]]
@@ -1168,24 +1132,6 @@ migrated = false
 
 
 [[fault]]
-id = "mech.every-results-fixture-emits-the-class-its-fault-declares"
-kind = "mechanics"
-check = "results"
-label = "every results fixture emits the class its fault declares"
-failure_class = "results.class-not-emitted"
-legacy_signature = ""
-migrated = false
-
-[[fault]]
-id = "mech.a-fixture-red-for-another-fixture-s-reason-is-not-a-pass"
-kind = "mechanics"
-check = "results"
-label = "a fixture red for another fixture's reason is not a pass"
-failure_class = "results.graded-on-the-exit-code"
-legacy_signature = ""
-migrated = false
-
-[[fault]]
 id = "mech.cargo-build-target-dir-is-where-cargo-built"
 kind = "mechanics"
 check = "regimen"
@@ -1416,38 +1362,6 @@ failure_class = "pages.unscannable-encoding"
 expected_exit = "1"
 migrated = false
 [[fault]]
-id = "subset.parent-is-not-a-table"
-kind = "subset-fixture"
-check = "regimen"
-label = "parent-is-not-a-table"
-failure_class = "format.subset-violated"
-migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
-migrated = false
-[[fault]]
-id = "subset.duplicate-key-in-table"
-kind = "subset-fixture"
-check = "regimen"
-label = "duplicate-key-in-table"
-failure_class = "format.subset-violated"
-migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
-migrated = false
-[[fault]]
-id = "subset.duplicate-table"
-kind = "subset-fixture"
-check = "regimen"
-label = "duplicate-table"
-failure_class = "format.subset-violated"
-migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
-migrated = false
-[[fault]]
-id = "subset.table-shadows-key"
-kind = "subset-fixture"
-check = "regimen"
-label = "table-shadows-key"
-failure_class = "format.subset-violated"
-migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
-migrated = false
-[[fault]]
 id = "subset.capitalised-boolean"
 kind = "subset-fixture"
 check = "regimen"
@@ -1510,6 +1424,226 @@ check = "regimen"
 label = "non-ascii-bare-key"
 failure_class = "format.subset-violated"
 migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+[[fault]]
+id = "test.regimen_float_as_a_string"
+kind = "seeded-gate"
+check = "test"
+label = "a regimen float rendered as a string"
+failure_class = "regimen.float-stringified"
+legacy_signature = "a float projected as something other than a decimal"
+migrated = false
+
+[[fault]]
+id = "test.regimen_table_scope_flattened"
+kind = "seeded-gate"
+check = "test"
+label = "a table header that opens nothing"
+failure_class = "regimen.table-scope-lost"
+legacy_signature = "its keys are not the document.s"
+migrated = false
+
+[[fault]]
+id = "test.regimen_table_collision_unchecked"
+kind = "seeded-gate"
+check = "test"
+label = "two tables of one name accepted"
+failure_class = "regimen.table-collision-unchecked"
+legacy_signature = "a table opened twice was not refused"
+migrated = false
+
+[[fault]]
+id = "test.regimen_float_rule_widened"
+kind = "seeded-gate"
+check = "test"
+label = "the float rule widened past the record"
+failure_class = "regimen.decimal-drift"
+legacy_signature = "the regimen grammar and the record.s decimal disagree"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_summary_not_derived"
+kind = "seeded-gate"
+check = "recompute"
+label = "a summary the rows do not carry"
+failure_class = "results.summary-not-derived"
+legacy_signature = "the report does not re-derive"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_kind_undeclared"
+kind = "seeded-gate"
+check = "recompute"
+label = "a results directory declaring no kind"
+failure_class = "results.kind-undeclared"
+legacy_signature = "0 recomputed, 0 declared historical, 1 undeclared"
+migrated = false
+
+[[fault]]
+id = "results.results_consumed_digest_stale"
+kind = "seeded-gate"
+check = "results"
+label = "a consumed digest gone stale"
+failure_class = "results.provenance-unchecked"
+legacy_signature = "but the committed file hashes to"
+migrated = false
+
+[[fault]]
+id = "test.regimen_nested_table_flattened"
+kind = "seeded-gate"
+check = "test"
+label = "a nested table flattened"
+failure_class = "regimen.table-depth-lost"
+legacy_signature = "holds its own binding and the table below it"
+migrated = false
+
+[[fault]]
+id = "test.regimen_array_second_reader"
+kind = "seeded-gate"
+check = "test"
+label = "an array read by a second reader"
+failure_class = "regimen.array-second-reader"
+legacy_signature = "an array item was read by something other than the value reader"
+migrated = false
+
+[[fault]]
+id = "injections.case_without_an_injection"
+kind = "seeded-gate"
+check = "injections"
+label = "a case naming no injection"
+failure_class = "gate.case-without-an-injection"
+legacy_signature = "named by a seeded case, defined nowhere"
+migrated = false
+
+[[fault]]
+id = "results.results_consumes_outside"
+kind = "seeded-gate"
+check = "results"
+label = "a claim consuming evidence outside"
+failure_class = "results.provenance-escapes-the-directory"
+legacy_signature = "outside the run directory"
+migrated = false
+
+[[fault]]
+id = "results.results_consumes_the_record"
+kind = "seeded-gate"
+check = "results"
+label = "a claim consuming its own record"
+failure_class = "results.provenance-self-hash"
+legacy_signature = "a record cannot state its own hash"
+migrated = false
+
+[[fault]]
+id = "results.results_consumes_a_missing_file"
+kind = "seeded-gate"
+check = "results"
+label = "a claim consuming a file not there"
+failure_class = "results.provenance-unchecked"
+legacy_signature = "which is not a file here"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_script_missing"
+kind = "seeded-gate"
+check = "recompute"
+label = "reproducible, with nothing to run"
+failure_class = "results.recompute-absent"
+legacy_signature = "carries no recompute.sh"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_nothing_recomputable"
+kind = "seeded-gate"
+check = "recompute"
+label = "a gate 0 with nothing recomputable"
+failure_class = "results.recompute-over-nothing"
+legacy_signature = "nothing was recomputed"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_cannot_fail"
+kind = "seeded-gate"
+check = "recompute"
+label = "a recompute that cannot fail"
+failure_class = "results.recompute-cannot-fail"
+legacy_signature = "does not compare the report to the artefacts"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_tampers"
+kind = "seeded-gate"
+check = "recompute"
+label = "a recompute that edits what it checks"
+failure_class = "results.recompute-tampers"
+legacy_signature = "tampering, not recomputation"
+migrated = false
+
+[[fault]]
+id = "results.results_nested_directory"
+kind = "seeded-gate"
+check = "results"
+label = "a run directory inside a run directory"
+failure_class = "results.nested-run-directory"
+legacy_signature = "a run directory inside a run directory"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-28-symlinked-evidence"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-28-symlinked-evidence"
+failure_class = "results.provenance-escapes-the-directory"
+migrated = false
+
+[[fault]]
+id = "mech.every-results-fixture-emits-the-class-its-fault-declares"
+kind = "mechanics"
+check = "results"
+label = "every results fixture emits the class its fault declares"
+failure_class = "results.class-not-emitted"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-fixture-red-for-another-fixture-s-reason-is-not-a-pass"
+kind = "mechanics"
+check = "results"
+label = "a fixture red for another fixture's reason is not a pass"
+failure_class = "results.graded-on-the-exit-code"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "subset.parent-is-not-a-table"
+kind = "subset-fixture"
+check = "regimen"
+label = "parent-is-not-a-table"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.duplicate-key-in-table"
+kind = "subset-fixture"
+check = "regimen"
+label = "duplicate-key-in-table"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.duplicate-table"
+kind = "subset-fixture"
+check = "regimen"
+label = "duplicate-table"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.table-shadows-key"
+kind = "subset-fixture"
+check = "regimen"
+label = "table-shadows-key"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
 [[fault]]
 id = "test.router_ask_class_untuned"
 kind = "seeded-gate"

@@ -922,6 +922,12 @@ impl Lane {
                     turn,
                     lane: LANE.to_owned(),
                     fork: None,
+                    // Trunk, always. This lane derives its facts from the
+                    // record row, which the trunk goes on writing while a
+                    // tangent runs, and `tangent::Tangent::provenance` is the
+                    // only thing that writes a scope in. Stamping one here by
+                    // hand would put a scope in the record nothing checked.
+                    tangent: None,
                     index,
                 },
             });
@@ -2284,7 +2290,9 @@ mod tests {
             .iter()
             .map(|patch| match patch {
                 Patch::Add { id, .. } | Patch::Supersede { id, .. } => id.to_string(),
-                Patch::Resolve { target, .. } | Patch::Retire { target, .. } => target.to_string(),
+                Patch::Resolve { target, .. }
+                | Patch::Retire { target, .. }
+                | Patch::Park { target, .. } => target.to_string(),
             })
             .collect();
         assert_eq!(ids, vec!["t1/ran"], "an unknown tool derived something");
