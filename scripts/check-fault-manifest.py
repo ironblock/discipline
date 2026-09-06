@@ -90,6 +90,7 @@ def main() -> int:
     # reader for the count rather than reimplementing the arithmetic or
     # scraping it out of a failure message. One reader, structured answer.
     counting = "--count-red" in sys.argv
+    counting_mechanics = "--count-mechanics" in sys.argv
 
     # Asked for the count, answer the count -- before the manifest is read at
     # all. The count derives from `verify.sh` and the fixture directories and
@@ -101,6 +102,12 @@ def main() -> int:
     seen = observed()
     if counting:
         print(sum(len(seen[k]) for k in seen if k != "mechanics"))
+        return 0
+    # The same question for the other total the manifest carries. A branch
+    # that adds a mechanics assertion changes this line, and a resolver that
+    # cannot recount it refuses a merge over a number it could have derived.
+    if counting_mechanics:
+        print(len(seen["mechanics"]))
         return 0
 
     failures: list[str] = []

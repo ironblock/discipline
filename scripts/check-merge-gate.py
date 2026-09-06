@@ -226,6 +226,62 @@ def _reader_matches_the_tree():
 
 
 # --------------------------------------------------------------------------
+# what counts as a difference
+# --------------------------------------------------------------------------
+
+META = (
+    "[meta]\nred_faults = {red}\nmechanics_assertions = {mech}\n\n"
+    '[[fault]]\nid = "a.first"\nkind = "seeded-gate"\nmigrated = false\n'
+)
+
+
+@fixture("a total this tool recounts is not a difference between the sides")
+def _recountable_totals_are_not_differences():
+    # Both sides derive `red_faults` and `mechanics_assertions` from the
+    # assembled tree, and the union recomputes both. Refusing a merge over a
+    # number it is about to overwrite is a refusal with nothing in it -- and
+    # it fired on every branch that added a mechanics assertion, which is
+    # most of them.
+    ours = META.format(red=165, mech=27)
+    theirs = META.format(red=166, mech=28)
+    if MG.skeleton_of(ours, (MG.ENTRY,)) != MG.skeleton_of(theirs, (MG.ENTRY,)):
+        return "two manifests differing only in their recounted totals read as different"
+    # ... but a real difference outside the blocks must still be one.
+    altered = theirs.replace("[meta]", "[meta]\nsomething_else = true")
+    if MG.skeleton_of(ours, (MG.ENTRY,)) == MG.skeleton_of(altered, (MG.ENTRY,)):
+        return "a genuine difference outside the blocks was normalized away"
+    return None
+
+
+@fixture("an added mechanics assertion is a difference, not a silent union")
+def _mechanics_assertion_is_a_difference():
+    # `expect_exit` is deliberately NOT given a block pattern. It is a
+    # statement inside a check function with undelimited setup above it, so a
+    # pattern guessing its extent would splice one assertion's setup onto
+    # another -- the exact hazard this tool exists to prevent. Refusing is
+    # the correct answer; what was wrong was refusing without saying why.
+    # This fixture pins the refusal, so nobody "fixes" it into a guess.
+    body = (
+        "check_hygiene() {\n"
+        '  mkdir -p "${box}/one"\n'
+        '  expect_exit "the first mechanic" 1 \\\n'
+        '    bash scripts/hygiene.sh --tree "${box}/one"\n'
+        "}\n"
+    )
+    grown = body.replace(
+        "}\n",
+        '\n  mkdir -p "${box}/two"\n'
+        '  expect_exit "a brand new mechanic" 2 \\\n'
+        '    bash scripts/hygiene.sh --tree "${box}/two"\n}\n',
+    )
+    if MG.skeleton_of(body, (MG.FUNC, MG.CASE)) == MG.skeleton_of(
+        grown, (MG.FUNC, MG.CASE)
+    ):
+        return "an added mechanics assertion was treated as no difference at all"
+    return None
+
+
+# --------------------------------------------------------------------------
 # asking the pre-flight
 # --------------------------------------------------------------------------
 
