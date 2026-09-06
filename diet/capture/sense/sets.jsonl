@@ -1,0 +1,18 @@
+{"set":"mistake","version":1,"polarity":"positive","text":"The operator assumed something that wasn't true."}
+{"set":"mistake","version":1,"polarity":"positive","text":"A belief the agent was acting on turned out to be false."}
+{"set":"mistake","version":1,"polarity":"positive","text":"What was taken for granted about the system did not hold."}
+{"set":"mistake","version":1,"polarity":"negative","text":"A general discussion of how errors can happen, with no particular mistake made."}
+{"set":"mistake","version":1,"polarity":"negative","text":"A hypothetical about what might go wrong if something were assumed."}
+{"set":"mistake","version":1,"polarity":"negative","text":"A routine step that went as expected."}
+{"set":"durable_fact","version":1,"polarity":"positive","text":"A durable, non-obvious fact about how the internal systems actually work, that a new agent would re-derive at cost."}
+{"set":"durable_fact","version":1,"polarity":"positive","text":"Something about the system's real behaviour that is not written down and took effort to discover."}
+{"set":"durable_fact","version":1,"polarity":"positive","text":"A standing property of the tooling that anyone starting fresh would have to learn again the hard way."}
+{"set":"durable_fact","version":1,"polarity":"negative","text":"A passing detail of this task that no later session would need."}
+{"set":"durable_fact","version":1,"polarity":"negative","text":"An obvious fact anyone could read off the documentation in a moment."}
+{"set":"durable_fact","version":1,"polarity":"negative","text":"A temporary state of the working tree that the next command changes."}
+{"set":"reversal","version":1,"polarity":"positive","text":"A recorded limitation no longer applies."}
+{"set":"reversal","version":1,"polarity":"positive","text":"Something previously believed impossible is now available, and the earlier note is out of date."}
+{"set":"reversal","version":1,"polarity":"positive","text":"Oh, I see now: the thing the record says cannot be done can be done after all."}
+{"set":"reversal","version":1,"polarity":"negative","text":"A recorded limitation restated as still holding."}
+{"set":"reversal","version":1,"polarity":"negative","text":"A mention of an old constraint without any change to it."}
+{"set":"reversal","version":1,"polarity":"negative","text":"A wish that a limitation would go away."}

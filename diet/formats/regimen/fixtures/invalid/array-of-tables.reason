@@ -1,0 +1,2 @@
+An inline table inside an array. Neither inline tables nor arrays of tables
+are in this subset; a table is opened by a header and holds bindings.

@@ -180,3 +180,99 @@ fn every_format_is_published_under_exactly_one_verb() {
         "every format is published under a verb, and every verb names a format"
     );
 }
+
+// The router is a lane, not a format, and `route` is the first verb that is
+// not one format's projection. It must still behave like every other verb at
+// the boundary: a structured result on stdout, exit 0 when the drive is a
+// drive, exit 1 when it is not, and nothing a caller would have to parse out
+// of prose.
+#[test]
+fn the_route_verb_answers_with_a_census_and_not_with_prose() {
+    let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("capture/router/corpus");
+    let mut drives: Vec<PathBuf> = std::fs::read_dir(&corpus)
+        .unwrap_or_else(|err| panic!("{}: {err}", corpus.display()))
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+        .collect();
+    drives.sort();
+    assert!(
+        !drives.is_empty(),
+        "{}: no drives, so this test would pass over nothing",
+        corpus.display()
+    );
+    for drive in &drives {
+        let path = drive.to_str().expect("a UTF-8 path");
+        let (code, out, err) = run(&["route", path]);
+        assert_eq!(code, 0, "route {path}: {err}");
+        assert!(err.is_empty(), "route {path} wrote to stderr: {err}");
+        let answer: serde_json::Value = serde_json::from_str(&out)
+            .unwrap_or_else(|err| panic!("route {path}: stdout is not JSON ({err}): {out:?}"));
+        assert_eq!(answer["ok"], serde_json::json!(true), "route {path}");
+        // A lane is not a format, and a census answered under a format's
+        // name would be read as that format's value.
+        assert_eq!(
+            answer["format"],
+            serde_json::json!("route"),
+            "route {path}: answered under another name, `{}`",
+            answer["format"]
+        );
+
+        // The census the drive computes, not merely a census. The counts are
+        // read from the corpus's own expectation file, which is authored by
+        // hand beside the drive, so a binary that answered with an empty
+        // census -- or with any other drive's -- says so here.
+        let census = &answer["value"];
+        let expected: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(drive.with_extension("expected.json"))
+                .unwrap_or_else(|err| panic!("{}: {err}", drive.display())),
+        )
+        .expect("an expectation is JSON");
+        for key in ["forks", "naive_forks", "judgment_asks"] {
+            assert_eq!(
+                census[key], expected[key],
+                "route {path}: the census reports {key} {} where the drive spends {}",
+                census[key], expected[key]
+            );
+        }
+        assert_eq!(
+            census["unclassified"].as_u64(),
+            expected["unclassified"]
+                .as_array()
+                .map(|ids| ids.len() as u64),
+            "route {path}: the census miscounts the calls the table could not place"
+        );
+        // Unwrapped, not compared as options: a missing count reads as
+        // `None`, and `None < Some(_)` would let this pass over a census
+        // that had no forks in it at all.
+        let forks = census["forks"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("route {path}: the census counts no forks: {census}"));
+        let naive = census["naive_forks"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("route {path}: the census counts no naive forks: {census}"));
+        assert!(
+            forks < naive,
+            "route {path}: the router spent no fewer forks than the naive design: {census}"
+        );
+        assert!(
+            census["reduction"].is_number(),
+            "route {path}: the reduction is not a number: {census}"
+        );
+        assert!(
+            census["per_class"]
+                .as_object()
+                .is_some_and(|fired| !fired.is_empty()),
+            "route {path}: a census that names no class that fired: {census}"
+        );
+    }
+
+    // A file that is not a record is the lane's `exit 1`, and it says so in
+    // the same shape as a success rather than on stderr.
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cli.rs");
+    let source = source.to_str().expect("a UTF-8 path");
+    let (code, out, err) = run(&["route", source]);
+    assert_eq!(code, 1, "a source file routed as a drive: {out}{err}");
+    assert!(out.contains("\"ok\":false"), "{out}");
+    assert!(out.contains("\"error\""), "{out}");
+}

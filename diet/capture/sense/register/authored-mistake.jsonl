@@ -1,0 +1,12 @@
+{"id":"authored/positive/actually-the-flag","text":"Actually, the flag was never read by the resolver; I assumed it was and it wasn't.","label":"positive","source":"authored"}
+{"id":"authored/positive/i-was-wrong-about-the-cache","text":"I was wrong about the cache: it is keyed by path, not by content.","label":"positive","source":"authored"}
+{"id":"authored/positive/turns-out-the-test-binary","text":"Turns out the test binary was built from the previous tree, so the guard I thought was running was not.","label":"positive","source":"authored"}
+{"id":"authored/positive/it-turns-out-the-working-directory","text":"It turns out the working directory was never what I said it was after the subshell.","label":"positive","source":"authored"}
+{"id":"authored/positive/the-parser-was-fine","text":"The parser was fine; the loss was in the caller, which I had ruled out without checking.","label":"positive","source":"authored"}
+{"id":"authored/negative/ran-the-format-check","text":"Ran the format check and the linter; both were clean.","label":"negative","source":"authored"}
+{"id":"authored/negative/the-build-takes","text":"The build takes about four minutes on a fresh target directory.","label":"negative","source":"authored"}
+{"id":"authored/negative/i-renamed-the-capture-lane","text":"I renamed the capture lane and added a register fixture.","label":"negative","source":"authored"}
+{"id":"authored/negative/next-i-will-read","text":"Next I will read the grammar and then the fixtures.","label":"negative","source":"authored"}
+{"id":"authored/hard_negative/mistakes-of-this-kind","text":"Mistakes of this kind usually come from assuming a flag is honoured without reading the code.","label":"hard_negative","source":"authored"}
+{"id":"authored/hard_negative/if-the-cache-were-keyed","text":"If the cache were keyed by content, a rename would not invalidate it.","label":"hard_negative","source":"authored"}
+{"id":"authored/hard_negative/someone-could-be-wrong","text":"Someone could be wrong about the working directory after a subshell, which is why the lane tracks it.","label":"hard_negative","source":"authored"}

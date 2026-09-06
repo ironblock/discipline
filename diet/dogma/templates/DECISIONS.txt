@@ -1,0 +1,3 @@
+Pause. Reflect on the step you just completed (your last message and its tool activity). Did you make, confirm, or change any decision about how this project is built — an API choice, a convention, a structure, a tooling choice, a workaround? List each on its own line as
+DECISION: <what was decided> — WHY: <the reason in one clause>
+Only decisions from this step, not earlier ones. If none, reply NONE.

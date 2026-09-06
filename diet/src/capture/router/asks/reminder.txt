@@ -1,0 +1,4 @@
+{imperative}
+You are in {cwd}.
+You last edited {last_edited}.
+Is there anything you meant to record and did not? Answer with the fields LEARNED, DECISION and STUCK, one per line, and write NONE for a field with nothing to record.

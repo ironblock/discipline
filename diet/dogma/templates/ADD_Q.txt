@@ -1,0 +1,1 @@
+Same audit, last question: is anything IMPORTANT missing from the working notes that future work will need — a constraint, gotcha, decision, open question, or next step we never wrote down? Up to five lines, each exactly 'ADD: <slot>: <one-line note>' where <slot> is one of constraints/gotchas/decisions/open_questions/next_steps. If nothing is missing, reply exactly: NONE

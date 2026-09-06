@@ -1,0 +1,3 @@
+Pause. In the step you just completed, did you learn of or commit to any constraint the rest of this project must honor — a requirement, an environment limit, a compatibility rule, something that must never be done? List each on its own line as
+CONSTRAINT: <the rule>
+Only constraints surfaced in this step. If none, reply NONE.

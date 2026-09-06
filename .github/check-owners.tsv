@@ -27,6 +27,10 @@ regimen	diet
 # the toolchain could not build the binary it dispatches to. ---
 results	diet
 
+# --- recompute: gate 0. Owned by diet for the same reason results is: the
+# linter it sits beside dispatches the record verdict to the built binary. ---
+recompute	diet
+
 # --- pages: the published static surface ---
 pages	pages
 
@@ -36,4 +40,5 @@ metadata	repo
 ci	repo
 history	repo
 injections	repo
+resolver	repo
 parity	repo

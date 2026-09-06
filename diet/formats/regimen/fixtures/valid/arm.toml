@@ -1,0 +1,18 @@
+# an arm, as a public claim depends on it
+arm = "imperative-ablated"
+dogma_version = 1
+replay = false
+seed = -17
+
+[sampler]
+temperature = 0.6
+top_p = 0.95
+seed = 7
+
+[limits]
+wall_seconds = 1800
+max_tokens = 4096
+
+[triggers]
+on_decline = "retry-once"
+on_silence = "record"
