@@ -24,7 +24,7 @@
 #
 # Cadence-fired seams remain EXPRESSIBLE (seam_every_turns > 0) as
 # experimental arms for A/B — never the drive default. Arms-are-data.
-name = "die24-human"
+name = "human-drive-human"
 
 # Streaming is explicit, though this is also now `serve --drive`'s code default
 # (`DriveSession::new` resolves an undeclared `stream` to `true` for exactly

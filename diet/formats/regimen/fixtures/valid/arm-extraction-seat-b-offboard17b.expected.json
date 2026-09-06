@@ -13,7 +13,7 @@
     }
   },
   "name": {
-    "string": "die45-seat-b-offboard17b"
+    "string": "extraction-seat-b-offboard17b"
   },
   "sampler": {
     "table": {
@@ -41,7 +41,21 @@
     }
   },
   "serving": {
-    "table": {}
+    "table": {
+      "expected_absent": {
+        "array": [
+          {
+            "string": "--cache-ram"
+          },
+          {
+            "string": "-cram"
+          }
+        ]
+      },
+      "flags": {
+        "table": {}
+      }
+    }
   },
   "triggers": {
     "table": {

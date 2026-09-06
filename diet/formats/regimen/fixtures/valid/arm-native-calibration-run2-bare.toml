@@ -2,8 +2,6 @@
 #
 # Rendered as a regimen v1 conformance fixture of the arm as written. Bindings the
 # grammar cannot express are not carried and not approximated:
-#   not carried: expected_absent = ["--cache-ram", "-cram"] — the regimen grammar has no array
-#   not carried: [serving.flags] — the regimen grammar has no nested table header
 # The serving header itself is carried, empty, as the arm writes it; only those two
 # members are not.
 #
@@ -55,7 +53,14 @@ tool_timeout_s = 120
 # exactly (identity, no deviation needed); run 2 relies on the --cache-ram compiled
 # default, unchanged from run 1. Its one binding (an array) and its nested table are
 # not carried; see the header.
+# carried since the schema batch grew arrays and a second level of table:
+#   expected_absent (an array) and the [serving.flags] header the arm opens
+#   empty. Both were declared "not carried" here while the grammar refused
+#   them; the grammar no longer does, and a fixture that keeps saying so
+#   states something false about the normative file beside it.
 [serving]
+expected_absent = ["--cache-ram", "-cram"]
+[serving.flags]
 
 [native_compaction]
 every_turns = 2

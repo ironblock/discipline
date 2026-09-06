@@ -5,24 +5,6 @@
 # and table placement, in the arm's own order. What the grammar cannot express
 # is listed here and is NOT approximated anywhere in this file:
 #
-# not carried: [thinking.reference] (table header; Run 1 — config-identical to Pi) — the regimen grammar has no nested table header
-# not carried: thinking.reference.main = false — the regimen grammar has no nested table header
-# not carried: thinking.reference.interview = false — the regimen grammar has no nested table header
-# not carried: thinking.reference.extraction = false — the regimen grammar has no nested table header
-# not carried: [thinking.shipping] (table header; Run 2 — the per-lane doctrine) — the regimen grammar has no nested table header
-# not carried: thinking.shipping.main = true — the regimen grammar has no nested table header
-# not carried: thinking.shipping.interview = true — the regimen grammar has no nested table header
-# not carried: thinking.shipping.extraction = false — the regimen grammar has no nested table header
-# not carried: serving.expected_absent = ["--cache-ram", "-cram"] — the regimen grammar has no array value
-# not carried: [serving.flags] (table header; empty in the arm) — the regimen grammar has no nested table header
-# not carried: [reference.profile] (table header) — the regimen grammar has no nested table header
-# not carried: reference.profile.total_forks = 192 — the regimen grammar has no nested table header
-# not carried: reference.profile.total_steps = 91 — the regimen grammar has no nested table header
-# not carried: reference.profile.forks_per_step = 2.1 — the regimen grammar has no nested table header
-# not carried: reference.profile.object_entries = 162 — the regimen grammar has no nested table header
-# not carried: reference.profile.entries_per_turn = 12.5 — the regimen grammar has no nested table header
-# not carried: reference.profile.seam_turns_diet = [1, 3, 4, 6, 8, 10, 11, 12, 13] — the regimen grammar has no nested table header and no array value
-# not carried: reference.profile.seam_turns_bare = [1, 3, 5, 7, 9, 11] — the regimen grammar has no nested table header and no array value
 # not carried: [[deviation]] #1 (array-of-tables header) — the regimen grammar has no array of tables
 # not carried: [[deviation]] #1 key = "extraction_model" — the regimen grammar has no array of tables
 # not carried: [[deviation]] #1 kind = "irreducible" — the regimen grammar has no array of tables
@@ -136,8 +118,20 @@ max_tokens = 4096
 #
 # The arm states the two configs as the sub-tables [thinking.reference] (Run 1 —
 # config-identical to Pi) and [thinking.shipping] (Run 2 — the per-lane doctrine).
-# A nested table header is not in the regimen grammar, so neither is rendered here;
-# their six bindings are listed as not carried at the top of this file.
+# Both are carried: the schema batch gave the grammar a second level of table.
+# Run 1 — config-identical to Pi. (The arm writes this comment on the header
+# line; it is moved above because a two-segment header with a trailing comment
+# panics the reader — reported, not worked around silently.)
+[thinking.reference]
+main = false
+interview = false
+extraction = false
+# Run 2 — the per-lane doctrine. Comment moved off the header line for the
+# same reason as [thinking.reference] above.
+[thinking.shipping]
+main = true
+interview = true
+extraction = false
 
 # Pi's raw capture-gate constants (from the template and live-capture modules).
 [triggers]
@@ -189,21 +183,25 @@ extraction_minimal_prefix = false  # pinned — this is the Pi-matching warm-27B
 #                       [[deviation]] entry keyed "serving.--cache-ram", same
 #                       as any other change.
 [serving]
-# The arm's one binding here, expected_absent = ["--cache-ram", "-cram"], is an
-# array value, which the regimen grammar cannot express; it is listed as not
-# carried at the top of this file. The arm's [serving.flags] sub-table is a
-# nested table header, which the grammar cannot express either; it is empty at
-# Run 1 / Run 2 — nothing beyond the compiled defaults is pinned by this
-# reference. A future arm (e.g. the cache-RAM sweep) declares explicit values
-# there per cell, each backed by a [[deviation]] entry.
+expected_absent = ["--cache-ram", "-cram"]
 
-# Observed arrival profile (the thing to match, not the raw thresholds). The arm
-# keeps it in a [reference.profile] sub-table, a nested table header the regimen
-# grammar cannot express, so its seven bindings are listed as not carried at the
-# top of this file. Its rationale, kept here: total_forks breaks down as evidence
-# 34, trio 81, supersede 31, seam-add 9, open_next 9, audit 28; entries_per_turn
-# is 162 / 13 turns — the object-scale target; the diet arm saw 9 ctx-triggered
-# seams and the bare arm 6.
+[serving.flags]
+# Empty at Run 1 / Run 2 — nothing beyond the compiled defaults is pinned by this
+# reference. A later arm (the cache-RAM sweep) declares explicit values here per
+# cell, each backed by a [[deviation]] entry. The header is carried empty because
+# the arm opens it empty; the grammar admits both the header and the array above
+# since the schema batch.
+
+# Observed arrival profile (the thing to match, not the raw thresholds), carried
+# in the arm's own [reference.profile] sub-table.
+[reference.profile]
+total_forks = 192                    # evidence 34, trio 81, supersede 31, seam-add 9, open_next 9, audit 28
+total_steps = 91
+forks_per_step = 2.1
+object_entries = 162
+entries_per_turn = 12.5              # 162 / 13 turns — the object-scale target
+seam_turns_diet = [1, 3, 4, 6, 8, 10, 11, 12, 13]   # 9 ctx-triggered seams
+seam_turns_bare = [1, 3, 5, 7, 9, 11]               # 6 ctx-triggered seams
 
 # ---------------------------------------------------------------------------
 # DECLARED DEVIATIONS — the permanent, explained differences between the native

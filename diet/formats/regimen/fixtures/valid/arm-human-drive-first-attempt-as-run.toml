@@ -1,8 +1,14 @@
 # the human-driven session arm as it ran in attempt 1 of the first human-paced drives (2026-08-09): the T0/ecological instrument, a person pacing turns against the served model
 # as run, this attempt omitted the [triggers] table and so fired the bare control while intending diet; it is preserved as the record of what actually drove
 #
-# not carried: [serving.flags] — the regimen grammar has no nested table header (one level only)
-# not carried: "--cache-ram" = 8192 — the regimen grammar has no nested table to hold it and no quoted key
+# carried since the schema batch grew a second level of table: [serving.flags]
+#   and the binding under it. This is the fifth arm of the five whose
+#   defining serving flag sat one level down; the four cache-ram sweep cells
+#   were re-rendered first and this one was missed.
+# not carried: the source's quoting of the key. It writes "--cache-ram" = 8192;
+#   this grammar has no quoted key, so the fixture writes --cache-ram = 8192.
+#   TOML reads a bare key and a basic-string key of the same characters as one
+#   key, so the binding is carried exactly and only its spelling differs.
 #
 # [serving] is kept as the header the arm declared; it is empty here because its only content was the flags table above
 name = "human-driven"
@@ -19,3 +25,5 @@ interview_thinking = true   # moot (no capture forks); set for consistency
 # turn_timeout_s = 2400
 # tool_timeout_s = 120
 [serving]
+[serving.flags]
+--cache-ram = 8192

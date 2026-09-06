@@ -69,6 +69,20 @@
     }
   },
   "serving": {
-    "table": {}
+    "table": {
+      "expected_absent": {
+        "array": [
+          {
+            "string": "--cache-ram"
+          },
+          {
+            "string": "-cram"
+          }
+        ]
+      },
+      "flags": {
+        "table": {}
+      }
+    }
   }
 }
