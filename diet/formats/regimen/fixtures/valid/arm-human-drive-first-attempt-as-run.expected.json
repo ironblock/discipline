@@ -28,6 +28,14 @@
     }
   },
   "serving": {
-    "table": {}
+    "table": {
+      "flags": {
+        "table": {
+          "--cache-ram": {
+            "integer": 8192
+          }
+        }
+      }
+    }
   }
 }

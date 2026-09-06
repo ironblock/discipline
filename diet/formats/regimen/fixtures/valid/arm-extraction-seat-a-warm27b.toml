@@ -1,8 +1,6 @@
 # The extraction-seat bench, seat A: warm full-prefix fork on the main
 # 27B (the validated native design; the current default topology).
 #
-# not carried: expected_absent = ["--cache-ram", "-cram"] — the regimen grammar has no arrays
-# not carried: [serving.flags] — the regimen grammar has no nested tables (the source opens it and binds nothing under it)
 #
 # Fired by `exercise replay-capture` against the recorded source session (the
 # `l2-diet` drive, recorded 2026-08-10): the spine replays byte-identically
@@ -60,4 +58,11 @@ rationale = false
 
 # Same substrate expectation as the source drive's arm: the frozen production
 # config relies on the compiled --cache-ram default.
+# carried since the schema batch grew arrays and a second level of table:
+#   expected_absent (an array) and the [serving.flags] header the arm opens
+#   empty. Both were declared "not carried" here while the grammar refused
+#   them; the grammar no longer does, and a fixture that keeps saying so
+#   states something false about the normative file beside it.
 [serving]
+expected_absent = ["--cache-ram", "-cram"]
+[serving.flags]

@@ -1,7 +1,5 @@
 # Level-2 calibration, Run 1, the bare arm ("l2-bare"): config-identical to Pi, main lane thinking OFF.
 #
-# not carried: expected_absent = ["--cache-ram", "-cram"] — the regimen grammar has no arrays
-# not carried: [serving.flags] (a nested table header, empty in the source) — the regimen grammar has no nested tables
 # [serving] itself is kept below with nothing in it, as the arm's only binding under it is the array above.
 #
 # The control lane injects Pi's verbatim summaries and does no capture forks, so
@@ -22,8 +20,14 @@ tool_timeout_s = 120
 # Matches the Pi-parity arm's serving reference exactly (identity, no deviation
 # needed) — Run 1 relies on the --cache-ram compiled default, same as Pi's
 # regime. The full rationale lives with the Pi-parity arm's [serving] comment.
+# carried since the schema batch grew arrays and a second level of table:
+#   expected_absent (an array) and the [serving.flags] header the arm opens
+#   empty. Both were declared "not carried" here while the grammar refused
+#   them; the grammar no longer does, and a fixture that keeps saying so
+#   states something false about the normative file beside it.
 [serving]
-# (expected_absent and [serving.flags] are not carried; see the header)
+expected_absent = ["--cache-ram", "-cram"]
+[serving.flags]
 
 [native_compaction]
 every_turns = 2
