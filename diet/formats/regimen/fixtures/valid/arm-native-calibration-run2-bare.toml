@@ -1,9 +1,8 @@
 # Level-2 experiment, Run 2 (REV-9): the BARE control arm — native GENERATIVE compaction (PIN 4b).
 #
-# Rendered as a regimen v1 conformance fixture of the arm as written. Bindings the
-# grammar cannot express are not carried and not approximated:
-# The serving header itself is carried, empty, as the arm writes it; only those two
-# members are not.
+# Rendered as a regimen v1 conformance fixture of the arm as written. Every binding
+# the arm carries is expressible in the grammar and is carried: [serving] holds its
+# array, and [serving.flags] is opened empty as the arm opens it.
 #
 # Transcribed from the REV-9 Run 2 preregistration, §4. The important sentence:
 # "This arm is a *live system*, not a static control — its variance is a first-class
@@ -52,7 +51,7 @@ tool_timeout_s = 120
 # The arm's serving rationale, kept: it matches the parity declaration's reference
 # exactly (identity, no deviation needed); run 2 relies on the --cache-ram compiled
 # default, unchanged from run 1. Its one binding (an array) and its nested table are
-# not carried; see the header.
+# both carried below.
 # carried since the schema batch grew arrays and a second level of table:
 #   expected_absent (an array) and the [serving.flags] header the arm opens
 #   empty. Both were declared "not carried" here while the grammar refused

@@ -3,9 +3,9 @@
 # outputs (the offline GLiNER seat instrument), scored on the same quality
 # rubric as seats A/B.
 #
-# Regimen v1 conformance fixture of that arm as written. Two constructs in the
-# source are outside the v1 grammar and are not carried, not approximated:
-# The [serving] header itself is kept, and is empty here for that reason.
+# Regimen v1 conformance fixture of that arm as written. Every construct the arm
+# uses is inside the v1 grammar and is carried: [serving] holds its array and
+# [serving.flags] is opened empty, as the arm writes them.
 #
 # Identical to seat A (warm full-prefix fork on the main 27B) except `extraction = false`. In-loop
 # this seat is the CONTROL for the physics: interviews (the same gate config
