@@ -1,0 +1,14 @@
+{
+  "cwd": {
+    "kind": "path",
+    "path": "/work"
+  },
+  "failures": [
+    {
+      "command": "popd",
+      "event": "t1",
+      "report": "bash: popd: directory stack empty"
+    }
+  ],
+  "files": {}
+}

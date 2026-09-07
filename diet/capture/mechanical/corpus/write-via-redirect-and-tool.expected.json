@@ -1,0 +1,21 @@
+{
+  "cwd": {
+    "kind": "path",
+    "path": "/work"
+  },
+  "failures": [],
+  "files": {
+    "/work/diet/src/new.rs": {
+      "event": "t2",
+      "kind": "written",
+      "resolved": true,
+      "turn": 1
+    },
+    "/work/out.txt": {
+      "event": "t1",
+      "kind": "written",
+      "resolved": true,
+      "turn": 1
+    }
+  }
+}

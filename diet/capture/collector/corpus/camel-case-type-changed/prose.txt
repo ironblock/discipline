@@ -1,0 +1,1 @@
+ParseError gained a Shape variant when the shell parser landed, so the unreachable arm is gone.

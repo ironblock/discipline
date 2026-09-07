@@ -1,0 +1,21 @@
+{
+  "cwd": {
+    "kind": "path",
+    "path": "/work"
+  },
+  "failures": [],
+  "files": {
+    "/work/new.txt": {
+      "event": "t1",
+      "kind": "written",
+      "resolved": true,
+      "turn": 1
+    },
+    "/work/old.txt": {
+      "event": "t1",
+      "kind": "deleted",
+      "resolved": true,
+      "turn": 1
+    }
+  }
+}

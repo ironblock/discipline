@@ -1,0 +1,3 @@
+{imperative}
+You said: "{intent}"
+You just read a document. What in it would a later turn need, stated as fact rather than as a pointer to the document? Answer with the fields LEARNED, EVIDENCE and STUCK, one per line; EVIDENCE quotes the document, and NONE is an answer.

@@ -1,0 +1,3 @@
+{imperative}
+You said: "{intent}"
+The turn has ended. What did you decide, and what do you intend next? Answer with the fields DECISION and PLAN, one per line, and write NONE for a field with nothing to record.

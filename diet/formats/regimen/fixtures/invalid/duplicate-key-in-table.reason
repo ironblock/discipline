@@ -1,0 +1,3 @@
+NOT-TOML: The same key bound twice inside one table. Uniqueness is per
+table, not per document -- `seed` may sit at the top level and again under
+`[sampler]` -- but twice in one scope is one binding too many.

@@ -1,0 +1,85 @@
+# The classification table: what a tool call was for, decided by pattern.
+#
+# Format: class<TAB>family<TAB>rule
+#
+#   class   one of the router's classes (see `Class::ALL`)
+#   family  the tool family the rule applies to: shell, read, edit, glob,
+#           grep, web, list -- the tool NAME is mapped to a family by the
+#           `FAMILIES` table in router/mod.rs, because harnesses name the
+#           same tool differently and the corpus pins the names seen
+#   rule    a conjunction of `key=value` terms, space-separated:
+#             word=a|b     the last simple command's first word (basename)
+#             sub=a|b      the subcommand: the first operand that is not a
+#                          flag. Position matters -- a term that took any
+#                          operand would read `cargo build --features test`
+#                          as a test run
+#             flag=x|y     any operand starts with `-x`, or is `--x`,
+#                          for one of these
+#             ext=a|b      any operand path (or the read tool's path) has
+#                          one of these extensions
+#             *            matches anything of the family
+#
+# Rows are tried in order; the first row whose family and every term match
+# wins. A call matching no row is `unknown`, which routes to the declared
+# default -- a fork with the generic ask -- and emits an unclassified event.
+# Silence is never the default: the 53% of steps that were inert were inert
+# by class, not by absence from this table.
+#
+# Order is load-bearing, so a row that an earlier row already claims can
+# never fire. `no_row_of_the_table_can_ever_fire_from_below_an_earlier_one`
+# refuses such a row: two of them sat here unreachable behind the
+# side-effect row, and `npm test` was deferred to the turn boundary instead
+# of being asked for its outcome.
+#
+# Document versus source is decided by extension, and the document set is
+# the small one: everything not listed is source, because a reader that
+# defaulted to "document" would route every unfamiliar file extension to the
+# finding ask instead of the api-surface ask.
+
+# --- listings and probes: inert, no fork ---
+directory-listing	shell	word=ls|tree|find|dir
+directory-listing	list	*
+directory-listing	shell	word=git sub=ls-files
+inert	shell	word=echo|printf|pwd|wc|date|which|whoami|nproc|free|df|du|env|printenv|true|false|sleep|uname|id|hostname|stat|file|basename|dirname|realpath|readlink|type|command|test
+
+# `sed -i` rewrites the file it is pointed at, and `sed -n 80,160p` reads it.
+# The row sits above the reads because rows are tried in order and the read
+# row names `sed` too: an in-place edit read as a read is a turn whose change
+# nothing recorded. Both spellings of the flag: `sed --in-place` rewrote the
+# file just as `sed -i` did, and was read as a read.
+edit	shell	word=sed flag=i|in-place
+
+# --- reads: a document asks for a finding, source asks for the api surface ---
+document-read	read	ext=md|txt|rst|html|htm|adoc|org
+document-read	shell	word=cat|head|tail|sed|less|more|bat ext=md|txt|rst|html|htm|adoc|org
+source-read	read	*
+source-read	shell	word=cat|head|tail|sed|less|more|bat|awk|cut|nl|od|xxd|hexdump
+web-read	web	*
+web-read	shell	word=curl|wget|http
+
+# --- searches ---
+search	grep	*
+search	glob	*
+search	shell	word=grep|rg|ag|ack|fgrep|egrep|locate|fd
+
+# --- edits ---
+edit	edit	*
+edit	shell	word=patch|tee
+
+# --- runs whose outcome is the point ---
+test-run	shell	word=cargo sub=test|bench
+test-run	shell	word=pytest|jest|mocha|vitest
+test-run	shell	word=go sub=test
+test-run	shell	word=npm|yarn|pnpm sub=test
+test-run	shell	word=verify.sh
+build	shell	word=cargo sub=build|check|clippy|fmt|doc|run
+build	shell	word=go sub=build|vet
+build	shell	word=npm|yarn|pnpm sub=build|run|install|ci
+build	shell	word=tsc|rustc|gcc|clang|javac|zig
+version-control	shell	word=git|hg|svn|jj
+
+# --- side effects: whatever the rows above did not name ---
+# This row is last among the shell rows because its only term is the word,
+# and it names words the rows above qualify with a subcommand: `npm test` is
+# a test run and `npm ci` is a build. Above them it claimed both.
+side-effect	shell	word=rm|mv|cp|mkdir|rmdir|touch|chmod|chown|ln|install|apt|apt-get|pip|pip3|npm|yarn|pnpm|brew|dd|truncate|python|python3|node|ruby|perl|bash|sh|zsh|make|cmake|docker|kill|pkill|export|unset|source

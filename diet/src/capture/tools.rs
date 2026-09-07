@@ -835,6 +835,14 @@ pub fn apply(call: &Event, index: u32, saw: ContractInput<'_>) -> Result<Effect,
         turn: *at_turn,
         lane: LANE.to_owned(),
         fork: None,
+        // Trunk. `object::tangent::Tangent::provenance` is the only thing in
+        // the library that writes a scope in, and a caller that stamped one
+        // here by hand would put a scope in the record nothing checked --
+        // which is the guess this field exists to replace. A tool call made
+        // while a tangent is open is a real case and it is not this one: it
+        // arrives when something hands this lane the open tangent, and then
+        // it is that tangent that mints the provenance, not this line.
+        tangent: None,
         index,
     };
     match named {
