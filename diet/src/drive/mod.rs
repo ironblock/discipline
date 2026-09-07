@@ -548,12 +548,19 @@ fn archive(
                     *text = Some(wire::body(&attempt.sent));
                 }
             }
-            Event::Response {
-                to_request, text, ..
-            } => {
-                if let Some(answer) = answered
-                    && &answer.produced_by == to_request
-                {
+            Event::Response { text, .. } => {
+                // No id check here, and its absence is deliberate. A call has
+                // AT MOST ONE answer -- the journal writes a `Received` when
+                // one comes back, retries happen when one does not, and a cap
+                // is not retried -- so the response row a call produces is
+                // that call's answer by construction. The first version
+                // matched `answer.produced_by` against the row's
+                // `to_request`, and no input this client can produce makes
+                // that condition false: a guard nothing can make fire is a
+                // guard that has never been seen red, which this repository
+                // does not keep. The REQUEST side is the opposite case and is
+                // matched by id below, because a retried call has several.
+                if let Some(answer) = answered {
                     *text = Some(answer.text.clone());
                 }
             }
@@ -690,7 +697,12 @@ mod tests {
                 attempt: Duration::from_millis(2_000),
                 call: Duration::from_millis(4_000),
                 max_output_tokens: 128,
-                retries: 0,
+                // One retry, so `a_retried_call_archives_each_attempt_with_\
+                // what_that_attempt_sent` has a second attempt to archive. The
+                // canned server answers first time in every other test here,
+                // so nothing else changes: a retry that never happens costs
+                // nothing.
+                retries: 1,
             },
             grammar: None,
         }
@@ -862,6 +874,94 @@ mod tests {
         assert!(output.is_some(), "and what the command returned");
     }
 
+    #[test]
+    fn a_retried_call_archives_each_attempt_with_what_that_attempt_sent() {
+        // The reason the request texts are matched by id rather than taken
+        // from "the last attempt". A hung-up connection is retried, so this
+        // call has two request rows -- and the second is a different message
+        // list from the first, because the drive rebuilds the prompt from a
+        // prefix the seam may have moved. A record that gave both rows the
+        // same body would be an archive of a session that did not happen.
+        let ground = Ground::make("retried");
+        let mut script = three_turns();
+        script.turns.truncate(1);
+        script.turns[0].fork = None;
+        script.turns[0].commands = Vec::new();
+
+        let mut acts = vec![Act::Hangup];
+        acts.extend(canned::acts().into_iter().take(1));
+        let drive = against(&script, acts, &ground).expect("the drive ran after the retry");
+
+        let requests: Vec<_> = drive
+            .record
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Request { id, text, .. } => Some((id.clone(), text.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(requests.len(), 2, "the hangup was retried: {requests:?}");
+        assert!(
+            requests.iter().all(|(_, text)| text.is_some()),
+            "and each row carries the body ITS attempt sent"
+        );
+        let responses = drive
+            .record
+            .events
+            .iter()
+            .filter(|event| matches!(event, Event::Response { .. }))
+            .count();
+        assert_eq!(
+            responses, 1,
+            "one answer per call, which is why the response side needs no id match"
+        );
+    }
+
+    #[test]
+    fn a_two_turn_script_summarises_two_turns() {
+        // The turn count is COUNTED. Written as `3` it agrees with every
+        // three-turn assertion in this file and with nothing else, and the
+        // record's own summary rule cannot catch it because the rows and the
+        // summary would be wrong together.
+        let ground = Ground::make("two-turns");
+        let mut script = three_turns();
+        script.turns.truncate(2);
+        let acts = canned::acts()
+            .into_iter()
+            .take(canned::calls(&script))
+            .collect();
+        let drive = against(&script, acts, &ground).expect("the drive ran");
+
+        let Some(Event::Summary { turns, .. }) = drive.record.events.last() else {
+            panic!("the last row is the summary")
+        };
+        assert_eq!(*turns, 2);
+    }
+
+    #[test]
+    fn a_record_this_drive_cannot_write_is_a_halt_and_not_a_file() {
+        // `run` renders its own record and parses it back, so "produces a
+        // record `check-record` accepts" is a fact of the function. Without
+        // the parse-back the drive would return a `Record` value it built and
+        // a `rendered` string nothing had read, and the first thing to notice
+        // would be a red lane.
+        //
+        // A regime with an empty `substrate.sampler` is the case: the schema
+        // refuses a blank field, and this drive found that defect in its own
+        // first fixture rather than in CI.
+        let ground = Ground::make("unrecordable");
+        let mut script = three_turns();
+        script.regime.substrate.sampler = BTreeMap::new();
+        let halt = against(&script, canned::acts(), &ground)
+            .expect_err("a record the format refuses is not a drive that succeeded");
+        assert!(matches!(&halt, Halt::Unrecordable { .. }), "{halt:?}");
+        assert!(
+            halt.to_string().contains("defect here"),
+            "and it says whose defect it is: {halt}"
+        );
+    }
+
     // -----------------------------------------------------------------------
     // the numbers, and what happens when they are not there
     // -----------------------------------------------------------------------
@@ -983,10 +1083,20 @@ mod tests {
         assert_eq!(drive.uncaptured.len(), 2, "two forks, two censuses");
         let first = &drive.uncaptured[0];
         assert_eq!(first.turn, 1);
+        assert_eq!(
+            (first.regions, first.captured),
+            (4, 2),
+            "the fixture answer has four regions and this fold keeps exactly the \
+             two tagged ones that carried a value. Asserted as numbers rather \
+             than as `captured < regions`, which stayed true when the fold \
+             started keeping the DECLINE as an entry: a decline is a lane \
+             saying it has nothing, and banking it as a fact is the confabulation \
+             the decline vocabulary exists to prevent: {first:?}"
+        );
         assert!(
-            first.captured > 0 && first.captured < first.regions,
-            "the fixture answer has regions this fold keeps and regions it does \
-             not, or the census proves nothing: {first:?}"
+            !drive.product.contains("evidence:"),
+            "and the decline did not become an entry: {}",
+            drive.product
         );
         assert!(
             first.passed_over.iter().any(|tag| tag.contains("EVIDENCE")),
