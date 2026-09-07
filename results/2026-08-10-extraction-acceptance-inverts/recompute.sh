@@ -24,7 +24,7 @@ if bad: sys.exit(1)
 print(f"recompute: {len(seen)} consumed artifact(s) hash as the record says")
 PY
 python3 "$here/grade.py" --seat-a "$here/seat-a" --seat-b "$here/seat-b" --seat-c "$here/seat-c" --gliner "$here/seat-c" --out "$tmp" >/dev/null || { echo "recompute: the grader failed"; exit 2; }
-python3 - "$tmp/report.json" "$here/report.json" <<'PY'
+python3 - "$tmp/report.json" "$here/report.json" <<'PY' || exit 1
 import json, sys
 got, want = (json.load(open(p)) for p in sys.argv[1:3])
 def flat(o, p=""):
