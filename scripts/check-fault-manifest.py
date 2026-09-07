@@ -46,6 +46,11 @@ REGIMEN_INVALID = ROOT / "diet" / "formats" / "regimen" / "fixtures" / "invalid"
 NOT_TOML = "NOT-TOML:"
 RELOCATING = {"subset-fixture"}
 
+# The kinds `verify.sh --selftest` proves red itself, and so the kinds a shard
+# can be assigned. Named once: the census script and the report at the bottom
+# both derive from this, and they used to be two lists that agreed by hand.
+SELFTEST_KINDS = ("seeded-gate", "results-fixture", "pattern-class")
+
 MECH = re.compile(r'expect_exit\s+"([^"]+)"\s+(\d+)')
 REQ = re.compile(r"REQUIRED_(HYGIENE|PAGES)_CLASSES=\(([^)]*)\)", re.DOTALL)
 
@@ -63,10 +68,16 @@ def observed() -> dict[str, set[str]]:
     seen: dict[str, set[str]] = {k: set() for k in
                                  ("seeded-gate", "mechanics", "results-fixture",
                                   "pattern-class", "subset-fixture")}
-    for label, check, inject, sig in gatelib.seeded_cases(s):
+    for label, check, inject, sig, scope in gatelib.seeded_cases(s):
         ident = f"{check}.{inject.removeprefix('inject_')}"
         seen["seeded-gate"].add(ident)
         DETAILS[ident] = {"label": label, "legacy_signature": sig}
+        # Only the `test` check takes a scope, so only its cases carry a
+        # target here. Recording an empty one for the rest would make three
+        # hundred manifest entries restate that a Python check has no cargo
+        # test target.
+        if check == "test":
+            DETAILS[ident]["target"] = scope
     for label, _want in MECH.findall(s):
         seen["mechanics"].add("mech." + re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-"))
     for kind, body in REQ.findall(s):
@@ -92,6 +103,12 @@ def main() -> int:
     counting = "--count-red" in sys.argv
     counting_mechanics = "--count-mechanics" in sys.argv
     listing_fixtures = "--fixture-classes" in sys.argv
+    # The same question narrowed to the faults `--selftest` itself proves --
+    # the subset fixtures go red on every run through check_regimen and are
+    # never in a shard. check-selftest-census.py asks for this rather than
+    # subtracting one number from another, because a subtraction is a second
+    # opinion about which kinds the selftest runs.
+    counting_selftest = "--count-selftest-red" in sys.argv
 
     # Asked for the count, answer the count -- before the manifest is read at
     # all. The count derives from `verify.sh` and the fixture directories and
@@ -109,6 +126,9 @@ def main() -> int:
     # cannot recount it refuses a merge over a number it could have derived.
     if counting_mechanics:
         print(len(seen["mechanics"]))
+        return 0
+    if counting_selftest:
+        print(sum(len(seen[k]) for k in SELFTEST_KINDS))
         return 0
     # The selftest greps each results fixture's output for the class declared
     # here. It is emitted from THIS script because the manifest has one reader
@@ -162,6 +182,17 @@ def main() -> int:
                         f"{where}: {field} is {stated!r}, but verify.sh's "
                         f"case says {actual!r}"
                     )
+        # A `test` fault with no target runs the whole workspace: every test
+        # binary linked and every test run, to ask whether one gate fired.
+        # That was the selftest's bill. Refused rather than defaulted, because
+        # a default here is a cost nobody sees and nobody files.
+        if kind == "seeded-gate" and entry.get("check") == "test":
+            target = entry.get("target")
+            if not isinstance(target, str) or not target.strip():
+                failures.append(
+                    f"{where}: a `test` fault must name the target its scope runs -- "
+                    f"`lib`, `bins`, `all` or `test:NAME`, each optionally /FILTER"
+                )
         if entry.get("migrated") is True and "failure_class" not in entry:
             failures.append(f"{where}: marked migrated with no failure_class")
         # An entry whose assertion moves must name where it lands, or the
@@ -175,6 +206,30 @@ def main() -> int:
             failures.append(f"verify.sh proves `{ident}` ({kind}), which the manifest omits")
         for ident in sorted(have - want):
             failures.append(f"the manifest claims `{ident}` ({kind}), which verify.sh does not prove")
+
+    # A scope must not be able to satisfy the signature that grades it.
+    #
+    # verify.sh prints one line naming the scope before it runs the tests, and
+    # the selftest greps the whole log for the case's signature. A signature
+    # the scope line itself matches cannot tell "red for its own fault" from
+    # "red for something else" -- the evidence would be in the log whatever
+    # happened. It cannot manufacture a false RED, because the exit code is
+    # still the verdict; it can hide a WRONG, which is the verdict this gate
+    # was given a signature to be able to reach.
+    for ident, detail in sorted(DETAILS.items()):
+        signature, scope = detail.get("legacy_signature"), detail.get("target")
+        if not signature or not scope:
+            continue
+        announced = f"test scope: {scope} (1 test(s) selected)"
+        try:
+            if re.search(signature, announced):
+                failures.append(
+                    f"`{ident}`: its signature /{signature}/ matches the line naming "
+                    f"its own scope, so the log carries the signature whether or not "
+                    f"the gate fired"
+                )
+        except re.error as err:
+            failures.append(f"`{ident}`: its signature is not a regex: {err}")
 
     meta = doc.get("meta") or {}
     red = sum(len(seen[k]) for k in seen if k != "mechanics")
@@ -204,7 +259,7 @@ def main() -> int:
     # explains itself. `--selftest` reports 67; the manifest says 75 red; the
     # difference is the 8 subset fixtures, which go red on every run through
     # check_regimen rather than in the selftest.
-    by_selftest = sum(len(seen[k]) for k in ("seeded-gate", "results-fixture", "pattern-class"))
+    by_selftest = sum(len(seen[k]) for k in SELFTEST_KINDS)
     by_per_run = len(seen["subset-fixture"])
     migrated = sum(1 for e in entries if e.get("migrated") is True)
     print(

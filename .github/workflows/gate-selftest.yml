@@ -2,6 +2,18 @@ name: gate-selftest
 
 # The gate's own test, composed by verify.yml. Every line of its output must
 # read RED: a gate that has never been seen red is not a gate.
+#
+# Sharded, because the fault list is 266 long and 181 of those rebuild the
+# crate in a sandbox. Sharding is a division of labour and NOT a selection of
+# faults: `--shard K/N` decides which job runs a fault, never whether it runs.
+# The two are told apart after the fact -- each shard writes down the ordinals
+# it ran, and verify.yml's gate job adds them up and refuses unless they are
+# exactly the manifest's list, each fault once. A shard that quietly ran
+# nothing exits 0 and reports `success` like any other; the census is the only
+# thing that can tell you it did.
+#
+# N is `strategy.job-total`, so the matrix below is the one place the shard
+# count is written. Change the list and the flag follows.
 
 on:
   workflow_call:
@@ -11,13 +23,35 @@ permissions:
 
 jobs:
   selftest:
-    name: selftest
+    name: selftest ${{ matrix.shard }}
     runs-on: ubuntu-latest
+    strategy:
+      # Every shard runs. `fail-fast` would cancel the others on the first
+      # red, and a cancelled shard files no census -- so a real failure would
+      # arrive alongside a census failure blaming the shards it cancelled.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v5
 
       - name: Resolve the pinned toolchain
         run: cargo --version
 
-      - name: ./verify.sh --selftest
-        run: ./verify.sh --selftest
+      - name: ./verify.sh --selftest --shard ${{ matrix.shard }}
+        run: >-
+          ./verify.sh --selftest
+          --shard ${{ matrix.shard }}/${{ strategy.job-total }}
+          --census "${{ runner.temp }}/census.tsv"
+
+      # Uploaded only on success, deliberately. A shard that failed has
+      # already failed the build; its census would say nothing the failure
+      # does not, and the aggregate reporting "shard 5 filed no census" is a
+      # true statement about a shard that did not finish.
+      - name: Keep this shard's census
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-census-${{ matrix.shard }}
+          path: ${{ runner.temp }}/census.tsv
+          if-no-files-found: error
+          retention-days: 7

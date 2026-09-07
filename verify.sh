@@ -5,6 +5,7 @@
 #
 #   verify.sh                 run every check
 #   verify.sh --only CHECK    run one check (repeatable)
+#   verify.sh --only test --scope SPEC   narrow the test check (selftest only)
 #   verify.sh --list          name the checks, in order
 #   verify.sh --selftest      prove the gate goes red on seeded faults
 #   verify.sh --selftest --shard K/N    run this job's share of the faults
@@ -61,11 +62,111 @@ check_fmt() { cargo fmt --all --check; }
 
 check_clippy() { cargo clippy --workspace --all-targets -- -D warnings; }
 
+# What `--scope` narrows the `test` check to: which test binaries are built,
+# and which tests inside them run. Empty means the whole workspace, which is
+# what a contributor gets and what CI's package job runs.
+#
+# It exists for the selftest. A seeded case mutates one file and asks whether
+# one gate fires; building and running the whole workspace to answer that was
+# most of what remained of the selftest's wall clock once the sandbox stopped
+# recompiling from scratch. The saving is mostly in the BINARIES NOT BUILT --
+# a fault in the library does not need tests/cli.rs and tests/conformance.rs
+# linked -- and only secondarily in the tests not run.
+#
+# A flag rather than an environment variable, deliberately. An environment
+# variable is inherited by everything started under it, so a scope exported
+# once in CI would narrow every `test` run beneath it, silently and for good;
+# a gate that runs less than it says is the failure this repository exists to
+# refuse. A flag is on the command line of the one process that carries it,
+# and scripts/check-ci-coverage.py refuses the spelling in any workflow the
+# gate depends on.
+VERIFY_TEST_SCOPE=""
+
+# SPEC is TARGET or TARGET/FILTER.
+#   lib            the library's own tests
+#   bins           the binaries' tests
+#   test:NAME      the integration target tests/NAME.rs
+#   all            the whole workspace, for a fault no one target catches
+# FILTER is passed to the test harness, so it is a substring of a test's path.
+#
+# Sets SCOPE_ARGS (cargo's, selecting targets) and SCOPE_FILTER (the test
+# harness's). Kept apart because they go on opposite sides of `--`, and the
+# control below needs to put `--list` there too: one flat list would spell
+# `-- FILTER -- --list`, which the harness reads as two filters.
+#
+# Returns 1 if the spec is not one of those, because a spec nobody recognises
+# must not quietly become "everything" -- that is the shape of a filter which
+# has silently stopped filtering.
+SCOPE_ARGS=()
+SCOPE_FILTER=""
+scope_args() {
+  local spec="$1" target
+  SCOPE_FILTER=""
+  case "$spec" in
+    */*) target="${spec%%/*}"; SCOPE_FILTER="${spec#*/}" ;;
+    *)   target="$spec" ;;
+  esac
+  case "$target" in
+    lib)    SCOPE_ARGS=(--lib) ;;
+    bins)   SCOPE_ARGS=(--bins) ;;
+    all)    SCOPE_ARGS=() ;;
+    test:*) SCOPE_ARGS=(--test "${target#test:}") ;;
+    *) return 1 ;;
+  esac
+  return 0
+}
+
 # `--no-fail-fast` because cargo otherwise stops at the first test binary that
 # fails, and the failures it then never prints are the ones a seeded case has
 # to recognise: a broken unit test in the library would hide every conformance
 # failure behind it, and the log would say the gate fired for the wrong reason.
-check_test() { cargo test --workspace --no-fail-fast; }
+check_test() {
+  local -a args=(--workspace --no-fail-fast)
+  if [ -n "$VERIFY_TEST_SCOPE" ]; then
+    scope_args "$VERIFY_TEST_SCOPE" || {
+      echo "verify: --scope '${VERIFY_TEST_SCOPE}': want lib, bins, all or" \
+           "test:NAME, each optionally followed by /FILTER" >&2
+      return "$EXIT_MISUSE"
+    }
+    args+=("${SCOPE_ARGS[@]}")
+  fi
+
+  # THE SELECTED-COUNT CONTROL.
+  #
+  # `cargo test` with a filter that matches no test prints `running 0 tests`
+  # and EXITS 0. So a scope with a typo in it, or one left behind after the
+  # module it named was renamed, is a check that ran nothing and passed --
+  # which is the whole failure this repository refuses, arriving through the
+  # door that was opened to make the gate faster.
+  #
+  # So the scope is asked what it selects BEFORE anything runs. `--list` is
+  # the harness's own answer to that question rather than a count scraped out
+  # of a run's output, and asking first means a bad scope is refused without
+  # running a single test.
+  #
+  # This runs unscoped too. An unscoped workspace run cannot select nothing
+  # today, but "cannot today" is how a guard becomes decoration; the cost is
+  # one cargo invocation against an already-built tree.
+  local listing rc=0
+  listing="$(cargo test "${args[@]}" -- --list ${SCOPE_FILTER:+"$SCOPE_FILTER"} 2>&1)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    # Not the control's failure: the tree did not build, or the target does
+    # not exist. Hand back what cargo said, and its status.
+    printf '%s\n' "$listing"
+    return "$rc"
+  fi
+  local selected=0
+  selected="$(grep -c ': test$' <<< "$listing")" || selected=0
+  if [ "$selected" -eq 0 ]; then
+    printf 'verify: the test scope %s selected no tests, and a check of nothing is not a pass\n' \
+      "${VERIFY_TEST_SCOPE:-<the whole workspace>}" >&2
+    return "$EXIT_FAIL"
+  fi
+  printf 'test scope: %s (%d test(s) selected)\n' \
+    "${VERIFY_TEST_SCOPE:-the whole workspace}" "$selected"
+
+  cargo test "${args[@]}" ${SCOPE_FILTER:+-- "$SCOPE_FILTER"}
+}
 
 # Two rules about the library saying what it says. Field kinds, verdicts and
 # outcome classes are enums with exhaustive matches -- the compiler enforces
@@ -325,6 +426,13 @@ sandbox() {
   # nothing about the gate.
   rm -rf -- "$dest"
   mkdir -p "$dest"
+
+  # The list first, so the check below is a shell builtin per file rather than
+  # a process. This loop used to run `mkdir` and `cp` per path -- two forks
+  # times a thousand files times two hundred cases. Measured on this tree,
+  # back to back: 7.4s and 7.7s for the fork-per-file loop, 0.52s and 0.50s
+  # for one batched `cp`. It cost as much as the compile it existed to feed.
+  local -a files=()
   while IFS= read -r -d '' path; do
     # -f after dereference: a broken symlink, or one pointing at a directory,
     # would make `cp` fail mid-copy and leave a half-built sandbox.
@@ -332,9 +440,29 @@ sandbox() {
       echo "selftest: ${path} is not a regular file (missing, or a symlink to one)" >&2
       return 1
     fi
-    mkdir -p "${dest}/$(dirname -- "$path")"
-    cp -L -- "${ROOT}/${path}" "${dest}/${path}"
+    files+=("$path")
   done < <(git -C "$ROOT" ls-files -z --cached --others --exclude-standard)
+  if [ "${#files[@]}" -eq 0 ]; then
+    echo "selftest: git names no files to copy; a sandbox of nothing proves nothing" >&2
+    return 1
+  fi
+
+  # `--parents` rebuilds each path's directories under dest, and -L matches
+  # the dereference the check above tests for. Still deliberately NOT `-p`:
+  # preserving mtimes would make a box's sources look older than artifacts
+  # left in the shared cargo target by the case before it, so cargo would
+  # declare them fresh and run the wrong binary.
+  #
+  # The pipeline's status is `cp`'s: `set -o pipefail` is in force and xargs
+  # exits non-zero if any `cp` it spawns does. Nothing here reads a status
+  # through a filter -- the rule this script opens with is about `| grep` and
+  # `| tee` standing in for a command's own exit code.
+  ( cd "$ROOT" && printf '%s\0' "${files[@]}" |
+      xargs -0 cp -L --parents -t "$dest" ) || {
+    echo "selftest: the sandbox tree could not be copied" >&2
+    return 1
+  }
+
   git -C "$dest" init --quiet
   git -C "$dest" add --all
 }
@@ -390,7 +518,7 @@ SELFTEST_BOX=""
 # a signature: `cargo test` prints it on success too, so matching it would
 # certify a dead gate. Match the failure text instead.
 seeded_case() {
-  local label="$1" check="$2" inject="$3" expect="$4"
+  local label="$1" check="$2" inject="$3" expect="$4" scope="${5-}"
   local box="$SELFTEST_BOX"
   local started="$SECONDS"
   # Recorded before the shard is consulted. This list answers "has every check
@@ -399,6 +527,27 @@ seeded_case() {
   SEEDED_CHECKS+=("$check")
   in_shard || return 0
   SELFTEST_CASES=$(( SELFTEST_CASES + 1 ))
+
+  # A `test` case says which tests it needs; anything else says nothing,
+  # because `--scope` narrows that one check and verify.sh refuses it
+  # elsewhere. Both halves are reported here rather than left to become a
+  # confusing exit 2 from inside the box, and scripts/check-fault-manifest.py
+  # refuses the same two states before a run ever starts.
+  local -a scoped=()
+  if [ "$check" = "test" ]; then
+    if [ -z "$scope" ]; then
+      printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- NO TEST SCOPE DECLARED\n' \
+        "$(( SECONDS - started ))" "$check" "$label"
+      SELFTEST_BROKEN+=("${label}: a test case must name the tests it needs")
+      return
+    fi
+    scoped=(--scope "$scope")
+  elif [ -n "$scope" ]; then
+    printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- A SCOPE ON A CHECK THAT TAKES NONE\n' \
+      "$(( SECONDS - started ))" "$check" "$label"
+    SELFTEST_BROKEN+=("${label}: only the test check takes a scope")
+    return
+  fi
   # One log per case, kept for the run, because the box itself is overwritten
   # by the case after this one and a failure is read after the fact.
   local log="${SELFTEST_LOGS}/$(printf '%03d' "$SELFTEST_CASES").log"
@@ -472,7 +621,8 @@ seeded_case() {
   # behave differently there than a contributor would ever see.
   local rc=0
   ( cd "$box" && bash "${ROOT}/scripts/hermetic.sh" \
-      env CARGO_TARGET_DIR="${SELFTEST_TARGET}" bash ./verify.sh --only "$check" ) \
+      env CARGO_TARGET_DIR="${SELFTEST_TARGET}" \
+      bash ./verify.sh --only "$check" ${scoped+"${scoped[@]}"} ) \
     > "$log" 2>&1 || rc=$?
 
   if [ "$rc" -eq 0 ]; then
@@ -1753,6 +1903,31 @@ inject_parity() {
 inject_ci() {
   # Take a check's owner away: it then runs in no workflow, while CI is green.
   sed -i '/^hygiene\t/d' .github/check-owners.tsv
+}
+
+# A branch filter on the PULL-REQUEST trigger. On `push` the same filter is
+# what stops one sha being gated twice, once per event; here it leaves every
+# pull request against another branch with no run at all and its required
+# checks pending forever. Two spellings a line apart, opposite verdicts --
+# which is why the rule is mechanical and not a comment.
+inject_ci_pr_branch_filter() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/verify.yml")
+source = path.read_text(encoding="utf-8")
+path.write_text(
+    source.replace("  pull_request:\n", "  pull_request:\n    branches: [main]\n", 1),
+    encoding="utf-8",
+)
+EOF
+}
+
+# A gating workflow that narrows the test check to part of the suite. The job
+# is green, the run is faster, and most of the tests did not happen.
+inject_ci_scoped_test() {
+  sed -i 's|^\( *\)\./verify\.sh "\${args\[@\]}"$|\1./verify.sh "${args[@]}" --scope lib|' \
+    .github/workflows/pkg-diet.yml
 }
 # A subshell run against the shell's own state. `cd a; (cd b; ls); pwd` then
 # ends in `b`, and every relative path after it resolves against a directory
@@ -4035,136 +4210,136 @@ selftest() {
   seeded_case "clippy lint violation"                 clippy   inject_clippy \
     'ptr_arg'
   seeded_case "failing unit test"                     test     inject_test \
-    'seeded_fault::seeded_failure \.\.\. FAILED'
+    'seeded_fault::seeded_failure \.\.\. FAILED' 'lib/seeded_fault'
   seeded_case "non-conforming format fixture"         test     inject_conformance \
-    'conformance failure\(s\)'
+    'conformance failure\(s\)' 'test:conformance/formats::regimen'
   seeded_case "FORMATS emptied, harness covers none"  test     inject_formats_empty \
-    'FORMATS is empty'
+    'FORMATS is empty' 'test:conformance'
   seeded_case "decline grammar loses its end anchor"  test     inject_decline_unanchored \
-    'coordinated-with-and\.txt: accepted as'
+    'coordinated-with-and\.txt: accepted as' 'test:conformance/formats::decline'
   seeded_case "interview drops continuation lines"    test     inject_interview_drops_continuations \
-    'multi-line-continuation\.txt: parsed to'
+    'multi-line-continuation\.txt: parsed to' 'test:conformance/formats::interview'
   seeded_case "interview blind to truncation"         test     inject_interview_truncation_blind \
-    'truncated-unterminated-fence\.txt: parsed to'
+    'truncated-unterminated-fence\.txt: parsed to' 'test:conformance/formats::interview'
   seeded_case "interview discards trailing content"   test     inject_interview_discards_trailing \
-    'content lost parsing'
+    'content lost parsing' 'lib/formats::interview::tests'
   seeded_case "an event kind with no fixture"         test     inject_record_unfixtured_kind \
-    'no fixture.*spurious'
+    'no fixture.*spurious' 'lib/formats::record::tests'
   seeded_case "record substrate made optional"        test     inject_record_substrate_optional \
-    'regime-missing-substrate\.jsonl: accepted as'
+    'regime-missing-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
-    'retry-of-itself\.jsonl: accepted as'
+    'retry-of-itself\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "record nesting left unbounded"         test     inject_record_depth_unbounded \
-    'deep-nesting\.jsonl: accepted as'
+    'deep-nesting\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "grounding floor made inert"            test     inject_grounded_floor_inert \
-    'a lane that mostly fabricated must be rejected whole'
+    'a lane that mostly fabricated must be rejected whole' 'lib/capture::grounded::tests'
   seeded_case "grounding gates a judgment field"      test     inject_grounded_gates_judgment \
-    'the gate touched a judgment-class field'
+    'the gate touched a judgment-class field' 'lib/capture'
   seeded_case "a score with no demonstrated failure"  test     inject_grounded_undemonstrated \
-    'a measurement was handed back whose instrument never failed'
+    'a measurement was handed back whose instrument never failed' 'lib/capture::grounded::tests'
   seeded_case "grounding loosened to recombination"   test     inject_grounded_loose_matching \
-    'a sentence the source never said was scored as present in it'
+    'a sentence the source never said was scored as present in it' 'lib/capture::grounded::tests'
   seeded_case "a floor of zero"                       test     inject_grounded_zero_floor \
-    'a floor of zero was accepted, and every lane meets it'
+    'a floor of zero was accepted, and every lane meets it' 'lib/capture::grounded::tests'
   seeded_case "supersede deletes what it replaced"    test     inject_object_supersede_deletes \
-    'the voided entry is still here'
+    'the voided entry is still here' 'lib'
   seeded_case "the reconciler stops deduping"         test     inject_object_no_dedup \
-    'the same fact, wrapped differently, is the same fact'
+    'the same fact, wrapped differently, is the same fact' 'lib/object'
   seeded_case "a correction that restates what it voids" test   inject_object_self_void \
-    'an entry was voided by itself'
+    'an entry was voided by itself' 'lib/object::tests'
   seeded_case "a state change over a supersede link"  test     inject_object_state_overwrite \
-    'a correction was erased by a later state change'
+    'a correction was erased by a later state change' 'lib/object::tests'
   seeded_case "a no-op patch that claims an entry"    test     inject_object_false_attribution \
-    'the patch claimed entries no diff can support'
+    'the patch claimed entries no diff can support' 'lib/object::tests'
   seeded_case "a usage error that exits zero"         test     inject_cli_usage_exit \
-    'a usage error must be distinguishable from a bad document'
+    'a usage error must be distinguishable from a bad document' 'test:cli'
   seeded_case "a verb wired to the wrong format"      test     inject_cli_wrong_format \
-    'a valid fixture of its own format did not read'
+    'a valid fixture of its own format did not read' 'test:cli'
   seeded_case "a CLI that prints no result"           test     inject_cli_silent \
-    'stdout is not JSON'
+    'stdout is not JSON' 'test:cli'
   seeded_case "the regime moves under a patch"        test     inject_object_regime_mutable \
-    'moved the regime the object was opened under'
+    'moved the regime the object was opened under' 'lib/object::tests'
   seeded_case "dedup rebinds instead of aliasing"     test     inject_object_no_alias \
-    'a lane was told the object had never heard of the id it chose'
+    'a lane was told the object had never heard of the id it chose' 'lib/object::tests'
   seeded_case "a turn applied in arrival order"       test     inject_object_unsorted_turn \
-    'the outcome of a turn depended on the order its patches arrived in'
+    'the outcome of a turn depended on the order its patches arrived in' 'lib/object::tests'
   seeded_case "a self-supersede through an alias"     test     inject_object_alias_self_void \
-    'was not named as one'
+    'was not named as one' 'lib/object::tests'
   seeded_case "a field kind nothing covers"           test     inject_field_kind_variant \
-    'non-exhaustive patterns'
+    'non-exhaustive patterns' 'lib'
   seeded_case "a subshell read as a group"            test     inject_shell_subshell_as_group \
-    'the bracketed list was not read as a subshell'
+    'the bracketed list was not read as a subshell' 'lib'
   seeded_case "a stderr pipe read as a plain pipe"    test     inject_shell_stderr_pipe_flat \
-    'did not become the duplication it abbreviates'
+    'did not become the duplication it abbreviates' 'lib/formats::shell::tests'
   seeded_case "an expanding word reported literal"    test     inject_shell_expansion_literal \
-    'a word the shell would expand was reported literal'
+    'a word the shell would expand was reported literal' 'lib'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
-    'an empty answer is a recorded answer, not a missing one'
+    'an empty answer is a recorded answer, not a missing one' 'lib/formats::record::tests'
   seeded_case "a tangent drop that deletes"           test     inject_tangent_drop_removes \
-    'a drop evicts to the archive and never deletes'
+    'a drop evicts to the archive and never deletes' 'lib/object::tangent::tests'
 
   seeded_case "a parked entry that still renders"     test     inject_tangent_park_renders \
-    'a parked entry still speaks for the object'
+    'a parked entry still speaks for the object' 'lib/object::tangent::tests'
 
   seeded_case "a tangent scoped by recency"           test     inject_tangent_scope_by_recency \
-    'scope is by provenance, not by recency'
+    'scope is by provenance, not by recency' 'lib/object::tangent::tests'
 
   seeded_case "a tangent closed leaving an entry unruled" test  inject_tangent_undisposed_ignored \
-    'closure is total: a tangent-born entry was left undisposed'
+    'closure is total: a tangent-born entry was left undisposed' 'lib/object::tangent::tests'
 
   seeded_case "a prefix claimed intact, not compared" test     inject_tangent_prefix_asserted \
-    'the prefix was reported intact after the trunk moved'
+    'the prefix was reported intact after the trunk moved' 'lib/object::tangent::tests'
 
   seeded_case "a tangent id opened twice"             test     inject_tangent_id_reused \
-    'a tangent id the record already carries was opened again'
+    'a tangent id the record already carries was opened again' 'lib/object::tangent::tests'
 
   seeded_case "a tangent that dates a fact at the fork" test   inject_tangent_provenance_ignores_turn \
-    'a tangent dated a patch at a turn other than the one it was made at'
+    'a tangent dated a patch at a turn other than the one it was made at' 'lib/object::tangent::tests'
 
   seeded_case "a closure ruling dated at the fork"    test     inject_tangent_ruling_dated_at_fork \
-    'the closure filed its ruling at a turn it did not close at'
+    'the closure filed its ruling at a turn it did not close at' 'lib/object::tangent::tests'
 
   seeded_case "a closure under a coined lane"         test     inject_tangent_closing_lane_coined \
-    'the closure filed its ruling under a lane the record does not already have'
+    'the closure filed its ruling under a lane the record does not already have' 'lib/object::tangent::tests'
 
   seeded_case "a disposition missing from the list"   test     inject_tangent_disposition_missing_from_all \
-    'the dispositions a closure can rule with are not the three the record names'
+    'the dispositions a closure can rule with are not the three the record names' 'lib/object::tangent::tests'
 
   seeded_case "a tangent that offers a settled fact again" test inject_tangent_scope_offers_a_ruled_entry \
-    'the tangent offered a fact the record had already ruled on for disposition a second time'
+    'the tangent offered a fact the record had already ruled on for disposition a second time' 'lib/object::tangent::tests'
 
   seeded_case "a prefix that counts dead trunk rows"  test     inject_tangent_prefix_counts_dead_rows \
-    'a trunk row that was already dead at the fork was counted into the prefix'
+    'a trunk row that was already dead at the fork was counted into the prefix' 'lib/object::tangent::tests'
 
   seeded_case "a prefix called intact whenever it only grew" test inject_tangent_prefix_only_grew \
-    'the prefix was reported unmoved after the trunk wrote a fact of its own'
+    'the prefix was reported unmoved after the trunk wrote a fact of its own' 'lib/object::tangent::tests'
 
   seeded_case "a parked entry that reads as retired"  test     inject_object_park_renders_as_retired \
-    'a state renders under a name the dump does not promise'
+    'a state renders under a name the dump does not promise' 'lib/object::tests'
 
   seeded_case "a park with no tangent behind it"      test     inject_object_park_needs_no_tangent \
-    'an entry was parked under no tangent, so it left the live set'
+    'an entry was parked under no tangent, so it left the live set' 'lib/object::tests'
 
   seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
-    'was constructed, and the grammar would not read it back'
+    'was constructed, and the grammar would not read it back' 'lib'
   seeded_case "the producer read as the last command" test     inject_shell_producer_is_last_written \
-    'produces its output with'
+    'produces its output with' 'lib/formats::shell::tests'
   seeded_case "an operator dropped from the table"    test     inject_shell_operator_table_row_dropped \
-    'the table gained or lost an operator'
+    'the table gained or lost an operator' 'lib/formats::shell::tests'
   seeded_case "a stripping heredoc that keeps tabs"   test     inject_shell_heredoc_strip_keeps_tabs \
-    'did not strip the tabs the shell strips'
+    'did not strip the tabs the shell strips' 'lib/formats::shell::tests'
   seeded_case "the command word read as an operand"   test     inject_shell_command_word_is_an_operand \
-    'the command word is not one of its own operands'
+    'the command word is not one of its own operands' 'lib'
   seeded_case "a regimen float rendered as a string"  test     inject_regimen_float_as_a_string \
-    'a float projected as something other than a decimal'
+    'a float projected as something other than a decimal' 'lib/formats::regimen::tests'
   seeded_case "a table header that opens nothing"     test     inject_regimen_table_scope_flattened \
-    'its keys are not the document.s'
+    'its keys are not the document.s' 'lib/formats::regimen::tests'
   seeded_case "a header comment read as a table"      test     inject_regimen_header_comment_is_a_table \
-    'a comment after a table header is not a table the header opened'
+    'a comment after a table header is not a table the header opened' 'lib/formats::regimen::tests'
   seeded_case "two tables of one name accepted"       test     inject_regimen_table_collision_unchecked \
-    'a table opened twice was not refused'
+    'a table opened twice was not refused' 'lib/formats::regimen::tests'
   seeded_case "the float rule widened past the record" test    inject_regimen_float_rule_widened \
-    'the regimen grammar and the record.s decimal disagree'
+    'the regimen grammar and the record.s decimal disagree' 'lib/formats::regimen::tests'
   seeded_case "a summary the rows do not carry"       recompute inject_recompute_summary_not_derived \
     'the report does not re-derive'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
@@ -4188,9 +4363,9 @@ selftest() {
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing'
   seeded_case "a nested table flattened"              test     inject_regimen_nested_table_flattened \
-    'holds its own binding and the table below it'
+    'holds its own binding and the table below it' 'lib/formats::regimen::tests'
   seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
-    'an array item was read by something other than the value reader'
+    'an array item was read by something other than the value reader' 'lib/formats::regimen::tests'
   seeded_case "a case naming no injection"            injections inject_case_without_an_injection \
     'named by a seeded case, defined nowhere'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
@@ -4219,6 +4394,10 @@ selftest() {
     'hygiene: external-subresource:'
   seeded_case "a check no workflow runs"              ci       inject_ci \
     'has no owner in check-owners\.tsv'
+  seeded_case "pull requests filtered by branch"      ci       inject_ci_pr_branch_filter \
+    'carries .branches: \[main\]. and is reached'
+  seeded_case "CI narrowing the test check"           ci       inject_ci_scoped_test \
+    'passes .--scope. to verify\.sh'
   seeded_case "parity drifts from what is proven"     parity   inject_parity \
     'which verify\.sh does not prove'
   seeded_case "a forbidden id in a commit message"    history  inject_history \
@@ -4226,251 +4405,251 @@ selftest() {
   seeded_case "history with an undeterminable base"   history  inject_history_no_base \
     'an undeterminable base is a failure, not an empty scan'
   seeded_case "an ask wired to another class's question" test inject_router_ask_class_untuned \
-    'the ask does not ask its own question'
+    'the ask does not ask its own question' 'lib/capture::router::tests'
   seeded_case "a template without the imperative"     test     inject_router_ask_imperative_dropped \
-    'the ask does not carry the fork-local imperative'
+    'the ask does not carry the fork-local imperative' 'lib/capture::router::tests'
   seeded_case "a census that miscounts which classes fired" test inject_router_census_class_miscounted \
-    'the census does not say which classes fired'
+    'the census does not say which classes fired' 'lib/capture::router::tests'
   seeded_case "a route verb answering with a hollow census" test inject_router_route_census_hollow \
-    'where the drive spends'
+    'where the drive spends' 'test:cli'
   seeded_case "a table row that can never fire"       test     inject_router_table_row_shadowed \
-    'can never fire'
+    'can never fire' 'lib/capture::router::tests'
   seeded_case "a corpus that stops covering a class"  test     inject_router_corpus_class_uncovered \
-    'call\(s\) in the corpus, fewer than'
+    'call\(s\) in the corpus, fewer than' 'lib/capture::router::tests'
   seeded_case "a table row skipped, not refused"      test     inject_router_table_row_skipped \
-    'was skipped rather than refused'
+    'was skipped rather than refused' 'lib/capture::router::tests'
   seeded_case "an intent taken from any lane"         test     inject_router_intent_lane_ignored \
-    'did not quote back what the model said it was about to do'
+    'did not quote back what the model said it was about to do' 'lib/capture::router::tests'
   seeded_case "the first stated intent, not the last" test     inject_router_intent_first_not_last \
-    'quoted an intent the model had already moved past'
+    'quoted an intent the model had already moved past' 'lib/capture::router::tests'
   seeded_case "an intent marker lost from the table"  test     inject_router_intent_marker_lost \
-    'a marker was added or lost without a sentence that reaches it'
+    'a marker was added or lost without a sentence that reaches it' 'lib/capture::router::tests'
   seeded_case "an unclassified call nobody can look up" test   inject_router_unclassified_unattributed \
-    'must name the call, its turn, its tool and its word'
+    'must name the call, its turn, its tool and its word' 'lib/capture::router::tests'
   seeded_case "the declared default out of the vocabulary" test inject_router_class_vocabulary_shortened \
-    'left the vocabulary without leaving the tests that walk it'
+    'left the vocabulary without leaving the tests that walk it' 'lib/capture::router::tests'
   seeded_case "a quoted substitution descended into"  test     inject_mechanical_quoted_substitution \
-    'a single-quoted substitution was descended into'
+    'a single-quoted substitution was descended into' 'lib'
   seeded_case "the declared default replaced by silence" test   inject_router_unknown_silent \
-    'an unknown pattern must route to the declared default, never to silence'
+    'an unknown pattern must route to the declared default, never to silence' 'lib/capture::router::tests'
   seeded_case "a judgment ask released mid-turn"      test     inject_router_judgment_mid_turn \
-    'a judgment ask fired in the middle of a turn'
+    'a judgment ask fired in the middle of a turn' 'lib/capture::router::tests'
   seeded_case "a row of the routing table lost"       test     inject_router_table_row_lost \
-    'misrouted call'
+    'misrouted call' 'lib/capture::router::tests'
   seeded_case "an unknown call routed but not recorded" test   inject_router_unclassified_silent \
-    'an unknown pattern must be a typed event'
+    'an unknown pattern must be a typed event' 'lib/capture::router::tests'
   seeded_case "a reduction claimed, not computed"     test     inject_router_reduction_claimed \
-    'the reduction is not the number its own counts give'
+    'the reduction is not the number its own counts give' 'lib/capture::router::tests'
   seeded_case "a subshell that shares the parent state" test   inject_mechanical_subshell_leaks \
-    'the subshell cd leaked into the parent'
+    'the subshell cd leaked into the parent' 'lib/capture::mechanical::tests'
   seeded_case "a failed cd applied anyway"            test     inject_mechanical_failed_cd_applied \
-    'a failed cd moved the working directory'
+    'a failed cd moved the working directory' 'lib/capture::mechanical::tests'
   seeded_case "popd on an empty stack ignored"        test     inject_mechanical_popd_empty_ignored \
-    'popd on an empty stack was silently ignored'
+    'popd on an empty stack was silently ignored' 'lib/capture::mechanical::tests'
   seeded_case "the mechanical-noun table emptied"     test     inject_mechanical_lint_table_emptied \
-    'a question about a mechanical fact went unflagged'
+    'a question about a mechanical fact went unflagged' 'lib/capture::mechanical::tests'
   seeded_case "a mechanical entry sent through the gate" test  inject_mechanical_entry_grounded \
-    'a mechanical entry was dropped as if it needed grounding'
+    'a mechanical entry was dropped as if it needed grounding' 'lib/capture::mechanical::tests'
   seeded_case "a cosine that forgot its second norm"  test     inject_sense_cosine_unnormalised \
-    'cosine of a vector with itself was not one'
+    'cosine of a vector with itself was not one' 'lib/capture'
   seeded_case "contrastive scoring that ignores the negative sense" test inject_sense_contrastive_ignores_negative \
-    'the contrastive score ignored the negative sense'
+    'the contrastive score ignored the negative sense' 'lib/capture::sense::tests'
   seeded_case "a null whose labels are never shuffled" test   inject_sense_null_labels_unshuffled \
-    'd-prime on a shuffled-label null was far from zero'
+    'd-prime on a shuffled-label null was far from zero' 'lib/capture::sense::tests'
   seeded_case "a bootstrap p with no attainable floor" test   inject_sense_p_without_floor \
-    'a bootstrap p-value came without its attainable floor'
+    'a bootstrap p-value came without its attainable floor' 'lib/capture::sense::tests'
   seeded_case "a metric whose failure fixture is gone" test   inject_sense_metric_fixture_removed \
-    'no failure fixture, so it can never be reported'
+    'no failure fixture, so it can never be reported' 'lib/capture::sense::tests'
   seeded_case "a register mislabelled at its source" test     inject_sense_register_source_mislabelled \
-    'and a row says otherwise'
+    'and a row says otherwise' 'lib/capture::sense::tests'
   seeded_case "a file in the register naming nothing"  test     inject_sense_register_unnamed_file \
-    'not a declared sidecar'
+    'not a declared sidecar' 'lib/capture::sense::tests'
   seeded_case "a mined row nobody can trace"          test     inject_sense_provenance_join_dropped \
-    'a row nobody can trace was accepted'
+    'a row nobody can trace was accepted' 'lib/capture::sense::tests'
   seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
-    'two lines were read as one, and the second was lost'
+    'two lines were read as one, and the second was lost' 'lib/formats::record::json::tests'
   seeded_case "controls that never look at the register" test inject_sense_controls_ignore_register \
-    'a register row reached the top control and the controls passed'
+    'a register row reached the top control and the controls passed' 'lib/capture::sense::tests'
   seeded_case "a bootstrap that never resamples"      test     inject_sense_bootstrap_never_resamples \
-    'every resample was the observed difference'
+    'every resample was the observed difference' 'lib/capture::sense::tests'
   seeded_case "a failure reading off the worst reading" test   inject_sense_failure_reading_moved \
-    'is the worst the metric can say'
+    'is the worst the metric can say' 'lib/capture::sense::tests'
   seeded_case "a pre-registration with nothing in it" test     inject_sense_pre_registration_emptied \
-    'the primary endpoint is not the endpoint that was registered'
+    'the primary endpoint is not the endpoint that was registered' 'lib/capture::sense::tests'
   seeded_case "a lexical gate asked about the id"     test     inject_sense_gate_reads_the_id \
-    'the gate did not decide on the row'
+    'the gate did not decide on the row' 'lib/capture::sense::tests'
   seeded_case "a separation over one class spread"    test     inject_sense_d_prime_unpooled \
-    'd-prime was standardised by one class'
+    'd-prime was standardised by one class' 'lib/capture::sense::tests'
   seeded_case "a null band widened past a finding"    test     inject_sense_null_band_widened \
-    'bands are not the numbers they were registered as'
+    'bands are not the numbers they were registered as' 'lib/capture::sense::tests'
   seeded_case "a reported metric that reports a constant" test inject_sense_reported_value_constant \
-    'the record of a metric is not the numbers the metric produced'
+    'the record of a metric is not the numbers the metric produced' 'lib/capture::sense::tests'
   seeded_case "the mechanical lane renamed"           test     inject_mechanical_lane_renamed \
-    'the lane was renamed'
+    'the lane was renamed' 'lib/capture::mechanical::tests'
   seeded_case "an option word read as a directory"    test     inject_mechanical_option_is_a_directory \
-    'an option word was read as the directory it names'
+    'an option word was read as the directory it names' 'lib/capture::mechanical::tests'
   seeded_case "a flag value read as a file"           test     inject_mechanical_flag_value_is_a_file \
-    'the lane read a file out of a flag.s value'
+    'the lane read a file out of a flag.s value' 'lib/capture::mechanical::tests'
   seeded_case "an entry with the wrong verb"          test     inject_mechanical_entry_verb_swapped \
-    'the entry used the wrong verb for what happened to the file'
+    'the entry used the wrong verb for what happened to the file' 'lib/capture::mechanical::tests'
   seeded_case "a pipeline whose members never run"    test     inject_mechanical_pipeline_skipped \
-    'nothing in the pipeline ran'
+    'nothing in the pipeline ran' 'lib/capture::mechanical::tests'
   seeded_case "a write lost to a read of the same path" test   inject_mechanical_write_lost_to_a_read \
-    'a write was lost to a read of the same path in the same call'
+    'a write was lost to a read of the same path in the same call' 'lib/capture::mechanical::tests'
   seeded_case "the resolver keying on a comment"       resolver inject_keyed_by_a_comment \
     'keyed as .*inject_alpha'
   seeded_case "a run directory inside a run directory" results inject_results_nested_directory \
     'a run directory inside a run directory'
   seeded_case "a verdict read by prefix"               test     inject_verdict_prefix_accepted \
-    'verdict-as-a-prefix\.txt: accepted as'
+    'verdict-as-a-prefix\.txt: accepted as' 'test:conformance/formats::verdict'
   seeded_case "an identifier in a reason read as a verdict" test inject_verdict_identifier_read_as_a_verdict \
-    'reason-naming-an-identifier\.txt: rejected'
+    'reason-naming-an-identifier\.txt: rejected' 'test:conformance/formats::verdict'
   seeded_case "a second verdict in a reason accepted"  test     inject_verdict_second_verdict_accepted \
-    'two-verdicts\.txt: accepted as'
+    'two-verdicts\.txt: accepted as' 'test:conformance/formats::verdict'
   seeded_case "an anchor matched inside a longer word"  test     inject_collector_substring_match \
-    'an anchor matched inside a longer word'
+    'an anchor matched inside a longer word' 'lib/capture::collector::literal::tests'
   seeded_case "an English word made an anchor"         test     inject_collector_english_anchor \
-    'an English word became an anchor'
+    'an English word became an anchor' 'lib/capture::collector::literal::tests'
   seeded_case "an entry nominated by its own turn"     test     inject_collector_self_nomination \
-    'an entry nominated itself'
+    'an entry nominated itself' 'lib/capture::collector::literal::tests'
   seeded_case "a supersession that adds without voiding" test   inject_reconcile_supersede_without_voiding \
-    'the old entry was not voided'
+    'the old entry was not voided' 'lib/capture::collector::reconcile::tests'
   seeded_case "a verdict that settles nothing settling"  test   inject_reconcile_partial_applies_a_patch \
-    'PARTIAL produced a patch'
+    'PARTIAL produced a patch' 'lib/capture::collector::reconcile::tests'
   seeded_case "an uncalibrated nomination policy accepted" test inject_collector_uncalibrated_policy \
-    'the fixture policy was accepted by the door that ships'
+    'the fixture policy was accepted by the door that ships' 'lib/capture::collector::sense::tests'
   seeded_case "a nomination budget ignored"           test     inject_collector_budget_ignored \
-    'the budget did not bind'
+    'the budget did not bind' 'lib/capture::collector::sense::tests'
   seeded_case "a turn that nominates only its first entry" test inject_collector_one_nomination_per_turn \
-    'a turn that named two anchors nominated fewer than two entries'
+    'a turn that named two anchors nominated fewer than two entries' 'lib/capture::collector::literal::tests'
   seeded_case "a voided entry nominated by tier 0" test inject_collector_voided_entry_renominated \
-    'a voided entry was nominated again by the literal tier'
+    'a voided entry was nominated again by the literal tier' 'lib/capture::collector::literal::tests'
   seeded_case "a hit that says nothing about where" test inject_collector_hit_offset_lost \
-    'the hits did not say where the anchor recurred'
+    'the hits did not say where the anchor recurred' 'lib/capture::collector::literal::tests'
   seeded_case "an overlapping anchor scan" test inject_collector_overlapping_scan \
-    'an anchor that overlaps itself was counted at every shifted position'
+    'an anchor that overlaps itself was counted at every shifted position' 'lib/capture::collector::literal::tests'
   seeded_case "a double-quoted span that is not an anchor" test inject_collector_quoted_anchor_delimiter \
-    'a double-quoted span was not anchored'
+    'a double-quoted span was not anchored' 'lib/capture::collector::literal::tests'
   seeded_case "a two-byte shape read as an anchor" test inject_collector_short_shape_anchored \
-    'a two-byte shape was anchored'
+    'a two-byte shape was anchored' 'lib/capture::collector::literal::tests'
   seeded_case "a module path that is not an identifier" test inject_collector_module_path_shape \
-    'a path through the module tree was not anchored'
+    'a path through the module tree was not anchored' 'lib/capture::collector::literal::tests'
   seeded_case "a sentence word read as a file extension" test inject_collector_extension_window \
-    'a dotted word whose tail is a word was read as a file name'
+    'a dotted word whose tail is a word was read as a file name' 'lib/capture::collector::literal::tests'
   seeded_case "an anchor with the sentence still on it" test inject_collector_token_untrimmed \
-    'the punctuation prose hung on a token was kept as part of the anchor'
+    'the punctuation prose hung on a token was kept as part of the anchor' 'lib/capture::collector::literal::tests'
   seeded_case "anchor kinds that swapped their names" test inject_collector_anchor_kind_permuted \
-    'the anchor kind vocabulary is not what it promises'
+    'the anchor kind vocabulary is not what it promises' 'lib/capture::collector::tests'
   seeded_case "a source vocabulary with no members" test inject_collector_source_vocabulary_emptied \
-    'the source vocabulary is not what it promises'
+    'the source vocabulary is not what it promises' 'lib/capture::collector::tests'
   seeded_case "a nomination that names the other tier" test inject_collector_tier_name_swapped \
-    'a nomination named the wrong tier'
+    'a nomination named the wrong tier' 'lib/capture::collector::tests'
   seeded_case "registers that swapped their names" test inject_collector_register_permuted \
-    'the register vocabulary is not what it promises'
+    'the register vocabulary is not what it promises' 'lib/capture::collector::tests'
   seeded_case "a lexical pre-gate the tier ignores" test inject_collector_gate_ignored \
-    'a turn carrying no seed was scored by a gated policy anyway'
+    'a turn carrying no seed was scored by a gated policy anyway' 'lib/capture::collector::sense::tests'
   seeded_case "a turn-level threshold never compared" test inject_collector_turn_threshold_ignored \
-    'an unremarkable turn nominated'
+    'an unremarkable turn nominated' 'lib/capture::collector::sense::tests'
   seeded_case "a per-entry threshold never compared" test inject_collector_entry_threshold_ignored \
-    'the tier nominated an entry the turn was not about'
+    'the tier nominated an entry the turn was not about' 'lib/capture::collector::sense::tests'
   seeded_case "a turn scored against the wrong sense set" test inject_collector_wrong_sense_set \
-    'a turn about a mistaken assumption was scored as a reversal'
+    'a turn about a mistaken assumption was scored as a reversal' 'lib/capture::collector::sense::tests'
   seeded_case "an intent register that reads the prose" test inject_collector_intent_register_reads_the_prose \
-    'the tier measured the prose of the turn where it should have measured the stated intent'
+    'the tier measured the prose of the turn where it should have measured the stated intent' 'lib/capture::collector::sense::tests'
   seeded_case "a budget spent on the worst candidates" test inject_collector_budget_takes_the_worst \
-    'the budget was spent on the entries that scored lowest'
+    'the budget was spent on the entries that scored lowest' 'lib/capture::collector::sense::tests'
   seeded_case "a nomination score nothing measured" test inject_collector_score_not_measured \
-    'a nomination carried a score nothing measured'
+    'a nomination carried a score nothing measured' 'lib/capture::collector::sense::tests'
   seeded_case "an entry nominated by its own turn at tier 1" test inject_collector_sense_self_nomination \
-    'an entry born in this turn nominated itself'
+    'an entry born in this turn nominated itself' 'lib/capture::collector::sense::tests'
   seeded_case "a voided entry nominated by tier 1" test inject_collector_sense_voided_entry_renominated \
-    'a voided entry was nominated again by the sense tier'
+    'a voided entry was nominated again by the sense tier' 'lib/capture::collector::sense::tests'
   seeded_case "a report that drops half its policy" test inject_collector_report_drops_the_policy \
-    'the report did not say which scoring produced it'
+    'the report did not say which scoring produced it' 'lib/capture::collector::sense::tests'
   seeded_case "a calibration that names no run" test inject_collector_policy_names_no_run \
-    'was read as a calibration'
+    'was read as a calibration' 'lib/capture::collector::sense::tests'
   seeded_case "a supersession that writes a constant" test inject_reconcile_supersede_writes_a_constant \
-    'the superseding entry does not say what superseded the old one'
+    'the superseding entry does not say what superseded the old one' 'lib/capture::collector::reconcile::tests'
   seeded_case "a supersession with no fork behind it" test inject_reconcile_supersede_loses_its_fork \
-    'the superseding entry does not say which fork produced it'
+    'the superseding entry does not say which fork produced it' 'lib/capture::collector::reconcile::tests'
   seeded_case "a patch the reconciler never hands back" test inject_reconcile_patch_never_handed_back \
-    'a verdict that produced a patch did not hand it back'
+    'a verdict that produced a patch did not hand it back' 'lib/capture::collector::reconcile::tests'
   seeded_case "a PARTIAL counted as a false nomination" test inject_reconcile_partial_read_as_a_false_nomination \
-    'a fork that said the prose bears on the entry was read as a false nomination'
+    'a fork that said the prose bears on the entry was read as a false nomination' 'lib/capture::collector::reconcile::tests'
   seeded_case "a mention applied as a supersession" test inject_reconcile_mention_superseded \
-    'NOT_THIS produced a patch'
+    'NOT_THIS produced a patch' 'lib/capture::collector::reconcile::tests'
   seeded_case "self-capture exempt from grounding"    test     inject_tools_ungrounded \
-    'modality does not exempt a lane from grounding'
+    'modality does not exempt a lane from grounding' 'lib/capture::tools::tests'
   seeded_case "a reminder cadence that never fires"   test     inject_tools_reminder_silent \
-    'ten silent turns must be reminded at every third turn'
+    'ten silent turns must be reminded at every third turn' 'lib/capture::tools::tests'
   seeded_case "a harness tool call read as a capture" test     inject_tools_foreign_call \
-    'a harness tool call is not a capture tool and writes nothing'
+    'a harness tool call is not a capture tool and writes nothing' 'lib/capture::tools::tests'
   seeded_case "a phase proposal that writes a fact"   test     inject_tools_proposal_writes \
-    'a phase-transition proposal is advisory and writes nothing'
+    'a phase-transition proposal is advisory and writes nothing' 'lib/capture::tools::tests'
   seeded_case "a capture grounded in its own echo"   test     inject_tools_self_echo \
-    'a harness that repeats a capture back grounded the capture in itself'
+    'a harness that repeats a capture back grounded the capture in itself' 'lib/capture::tools::tests'
   seeded_case "a capture grounded in a later turn"   test     inject_tools_future_output \
-    'a turn-1 capture was grounded in a turn-2 tool output'
+    'a turn-1 capture was grounded in a turn-2 tool output' 'lib/capture::tools::tests'
   seeded_case "a superseding entry with a minted id" test     inject_tools_supersede_minted \
-    'a superseding entry id must be derived from the row that carried it'
+    'a superseding entry id must be derived from the row that carried it' 'lib/capture::tools::tests'
   seeded_case "a verdict that resolves elsewhere"    test     inject_tools_resolve_elsewhere \
-    'a verdict resolved an entry the model never named'
+    'a verdict resolved an entry the model never named' 'lib/capture::tools::tests'
   seeded_case "the asks reworded to nothing"         test     inject_tools_ask_words \
-    'the words this lane says out loud are the only product it has'
+    'the words this lane says out loud are the only product it has' 'lib/capture::tools::tests'
   seeded_case "an ask that drops its own question"   test     inject_tools_ask_question_dropped \
-    'an ask carrying a deferral is the question and then the deferral'
+    'an ask carrying a deferral is the question and then the deferral' 'lib/capture::tools::tests'
   seeded_case "the sweep asking as the cadence"      test     inject_tools_sweep_kind \
-    'the sweep and the cadence are one ask wearing two names'
+    'the sweep and the cadence are one ask wearing two names' 'lib/capture::tools::tests'
   seeded_case "a closed choice left in its own case" test     inject_tools_choice_uncanonical \
-    'a harness may shout a closed choice back at us'
+    'a harness may shout a closed choice back at us' 'lib/capture::tools::tests'
   seeded_case "a phase proposal with no reason"      test     inject_tools_proposal_reasonless \
-    'the reason is the whole of what it carries into one'
+    'the reason is the whole of what it carries into one' 'lib/capture::tools::tests'
   seeded_case "a reminder that drops the deferral"   test     inject_tools_reminder_deferral_dropped \
-    'the cadence reminded without what the router put off in that turn'
+    'the cadence reminded without what the router put off in that turn' 'lib/capture::tools::tests'
   seeded_case "tools described in one character"     test     inject_tools_description_thin \
-    'a foreign harness registers this text verbatim'
+    'a foreign harness registers this text verbatim' 'lib/capture::tools::tests'
   seeded_case "an offered tool the contract omits"   test     inject_tools_contract_undescribed \
-    'an offered tool with no row is refused before a harness ever sees it'
+    'an offered tool with no row is refused before a harness ever sees it' 'lib/capture::tools::tests'
   seeded_case "one tool described twice"             test     inject_tools_contract_duplicate \
-    'one tool described twice leaves the harness to the order of the file'
+    'one tool described twice leaves the harness to the order of the file' 'lib/capture::tools::tests'
   seeded_case "a verdict the lane cannot honour"     test     inject_tools_verdict_list_open \
-    'this lane refuses it at runtime: the model is invited to say a word'
+    'this lane refuses it at runtime: the model is invited to say a word' 'lib/capture::tools::tests'
   seeded_case "a turn swept after it recorded"       test     inject_tools_silent_kept \
-    'a turn the model did record in the end was swept anyway'
+    'a turn the model did record in the end was swept anyway' 'lib/capture::tools::tests'
   seeded_case "the object reader with no limit"      test     inject_record_objects_undepthed \
-    'one level past the limit must be a verdict from `objects`'
+    'one level past the limit must be a verdict from `objects`' 'lib/formats::record::tests'
   seeded_case "a corpus that drives one tool"       test     inject_tools_corpus_one_tool \
-    'is offered to the model and no corpus case ever calls it'
+    'is offered to the model and no corpus case ever calls it' 'lib/capture::tools::tests'
   seeded_case "the ablation's control arm dropped"     test     inject_ablation_no_control \
-    'the control arm is missing: an ablation with no sentence-removed arm'
+    'the control arm is missing: an ablation with no sentence-removed arm' 'lib/capture::ablation::tests'
   seeded_case "silence counted as engagement"          test     inject_ablation_silence_engages \
-    'counted as engagement and as silence at once'
+    'counted as engagement and as silence at once' 'lib/capture::ablation::tests'
   seeded_case "a p reported without its floor"         test     inject_ablation_p_floor_dropped \
-    'a p reported without its attainable floor'
+    'a p reported without its attainable floor' 'lib/capture::ablation::tests'
   seeded_case "a resample that draws once"            test     inject_ablation_resample_single_draw \
-    'the resamples no longer draw one outcome for every fork'
+    'the resamples no longer draw one outcome for every fork' 'lib/capture::ablation::tests'
   seeded_case "a generator that never advances"       test     inject_ablation_frozen_generator \
-    'a seeded draw did not reach every fork in 64 tries'
+    'a seeded draw did not reach every fork in 64 tries' 'lib/capture::ablation::tests'
   seeded_case "each arm credited with the other's"    test     inject_ablation_rates_swapped \
-    'the first arm held on 5 of these 6 forks and the bootstrap counted'
+    'the first arm held on 5 of these 6 forks and the bootstrap counted' 'lib/capture::ablation::tests'
   seeded_case "the silence endpoint unregistered"     test     inject_ablation_endpoint_dropped \
-    'the pre-registration no longer carries two endpoints'
+    'the pre-registration no longer carries two endpoints' 'lib/capture::ablation::tests'
   seeded_case "one imperative for every arm"          test     inject_ablation_plan_one_imperative \
-    'the plan does not pair the arm'
+    'the plan does not pair the arm' 'lib/capture::ablation::tests'
   seeded_case "two arms under one name"               test     inject_ablation_arm_names_collide \
-    'two arms of the ablation are reported under one name'
+    'two arms of the ablation are reported under one name' 'lib/capture::ablation::tests'
   seeded_case "an arm's clauses run together"         test     inject_ablation_clauses_run_together \
-    'the imperative an arm puts in the fork is not its clauses separated by one'
+    'the imperative an arm puts in the fork is not its clauses separated by one' 'lib/capture::ablation::tests'
   seeded_case "a placeholder nobody counts"           test     inject_ablation_placeholder_word_dropped \
-    'the-placeholder-words-nobody-replaced: graded .engaged. where the corpus says .inert.'
+    'the-placeholder-words-nobody-replaced: graded .engaged. where the corpus says .inert.' 'lib/capture::ablation::tests'
   seeded_case "a blank clause text admitted"          test     inject_ablation_blank_clause_allowed \
-    'a clause table with a blank clause text was not refused for that reason'
+    'a clause table with a blank clause text was not refused for that reason' 'lib/capture::ablation::tests'
   seeded_case "a grading case quietly dropped"        test     inject_ablation_corpus_case_dropped \
-    'the corpus holds a case with no expectation or an expectation with no case'
+    'the corpus holds a case with no expectation or an expectation with no case' 'lib/capture::ablation::tests'
   seeded_case "an untagged decline read as content"   test     inject_ablation_untagged_decline_engages \
-    'an-untagged-decline: graded .engaged. where the corpus says .inert.'
+    'an-untagged-decline: graded .engaged. where the corpus says .inert.' 'lib/capture::ablation::tests'
   seeded_case "the second reader left unbounded"      test     inject_json_objects_unbounded \
-    'a JSON Lines reader that does not bound its nesting'
+    'a JSON Lines reader that does not bound its nesting' 'lib/formats::record::json::tests'
 
   echo
   echo "--- results fixtures, checked directly ---"
@@ -4616,6 +4795,82 @@ EOF
     bash -c "cd '${builds}' && CARGO_TARGET_DIR= DIET_BIN='${builds}/diet/src/main.rs' \
       python3 '${ROOT}/scripts/resolve-diet.py'"
 
+  # --- the shard census ---
+  #
+  # Sharding the selftest divides the labour; the one way it could become
+  # fault SELECTION is a shard that ran less than it was assigned and exited 0
+  # like every other one. No shard can detect that about itself, so the claim
+  # is checked afterwards from the ordinals each shard writes down. These are
+  # the states that must be refused, and the first is the state that must not.
+  local census; scratch; census="$SCRATCH"
+  python3 - "$census" \
+    "$(python3 "${ROOT}/scripts/check-fault-manifest.py" --count-selftest-red)" <<'EOF'
+import pathlib
+import sys
+
+root, total = pathlib.Path(sys.argv[1]), int(sys.argv[2])
+SHARDS = 4
+
+
+def share(shard, n=None, of=SHARDS):
+    n = total if n is None else n
+    return [i for i in range(1, n + 1) if (i - 1) % of + 1 == shard]
+
+
+def write(case, shard, ordinals, said_total=None):
+    # Each shard's artifact arrives in a directory of its own, as
+    # download-artifact leaves them.
+    where = root / case / f"shard-{shard}"
+    where.mkdir(parents=True, exist_ok=True)
+    (where / "census.tsv").write_text(
+        f"shard\t{shard}\nshards\t{SHARDS}\ntotal\t{total if said_total is None else said_total}\n"
+        + "".join(f"ordinal\t{n}\n" for n in ordinals),
+        encoding="utf-8",
+    )
+
+
+# The state where download-artifact found nothing: no shard reported at all.
+(root / "none").mkdir(parents=True, exist_ok=True)
+
+for k in range(1, SHARDS + 1):
+    write("whole", k, share(k))
+    write("skipped", k, share(k)[1:] if k == 2 else share(k))
+    if k != 3:
+        write("missing", k, share(k))
+    write("wrong-total", k, share(k, n=total - 1), said_total=total - 1)
+    write("twice", k, share(k) + ([share(2)[0]] if k == 1 else []))
+EOF
+  expect_exit "shards that between them ran every fault are a whole" 0 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/whole"
+  expect_exit "a shard that skipped a fault it was assigned" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/skipped"
+  expect_exit "a shard that filed no census at all" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/missing"
+  expect_exit "a census that adds up to the wrong manifest" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/wrong-total"
+  expect_exit "one fault claimed by two shards" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/twice"
+  expect_exit "no shard reporting at all is not a pass" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/none"
+
+  # --- the scope's own control ---
+  #
+  # `cargo test` with a filter matching no test prints `running 0 tests` and
+  # EXITS 0. Every scoped case in the list above therefore rests on this: a
+  # scope that has gone stale -- a module renamed under it, a typo -- must be
+  # a failure and not a fast green. Through SELFTEST_TARGET so it costs an
+  # incremental build rather than a cold one.
+  expect_exit "a test scope that selects nothing is not a pass" 1 \
+    env CARGO_TARGET_DIR="${SELFTEST_TARGET}" \
+    bash "${ROOT}/verify.sh" --only test --scope lib/a_test_this_repository_does_not_have
+  expect_exit "a scope spelling nobody defined is a misuse, not everything" 2 \
+    env CARGO_TARGET_DIR="${SELFTEST_TARGET}" \
+    bash "${ROOT}/verify.sh" --only test --scope 'whatever'
+  expect_exit "a scope without exactly --only test is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --scope lib
+  expect_exit "a shard outside 1..N is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --selftest --shard 9/8
+
   prove_patterns "hygiene" scripts/hygiene-patterns.tsv scripts/seed-hygiene-fault.sh \
     "${REQUIRED_HYGIENE_CLASSES[@]}"
   prove_patterns "pages" scripts/pages-patterns.tsv scripts/seed-pages-fault.sh \
@@ -4687,6 +4942,11 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --selftest) mode="selftest"; shift ;;
+    --scope)
+      [ "$#" -ge 2 ] || { echo "verify: --scope needs a spec" >&2; exit "$EXIT_MISUSE"; }
+      VERIFY_TEST_SCOPE="$2"
+      shift 2
+      ;;
     --shard)
       [ "$#" -ge 2 ] || { echo "verify: --shard needs K/N" >&2; exit "$EXIT_MISUSE"; }
       shard_arg="$2"
@@ -4714,7 +4974,13 @@ while [ "$#" -gt 0 ]; do
       ;;
     --census)
       [ "$#" -ge 2 ] || { echo "verify: --census needs a path" >&2; exit "$EXIT_MISUSE"; }
-      SELFTEST_CENSUS="$2"
+      # Resolved here, against the directory the caller is in. Parsing
+      # happens before the `cd "$ROOT"` below, so a relative path left alone
+      # would land somewhere the caller never named.
+      case "$2" in
+        /*) SELFTEST_CENSUS="$2" ;;
+        *)  SELFTEST_CENSUS="$(pwd)/$2" ;;
+      esac
       shift 2
       ;;
     --list) printf '%s\n' "${CHECKS[@]}"; exit 0 ;;
@@ -4731,6 +4997,17 @@ cd "$ROOT"
 if [ "$mode" != "selftest" ] &&
    { [ "$SELFTEST_SHARD" -ne 0 ] || [ -n "$SELFTEST_CENSUS" ]; }; then
   echo "verify: --shard and --census are for --selftest" >&2
+  exit "$EXIT_MISUSE"
+fi
+
+# A scope narrows ONE check, so it may only be given when that check is the
+# only one asked for. `verify.sh --scope lib` on its own would otherwise read
+# as "run everything" while running a fraction of the tests, and read that way
+# in a workflow, where nobody would see it.
+if [ -n "$VERIFY_TEST_SCOPE" ] &&
+   { [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ] ||
+     [ "${selected[0]-}" != "test" ]; }; then
+  echo "verify: --scope narrows the test check, so it needs exactly --only test" >&2
   exit "$EXIT_MISUSE"
 fi
 

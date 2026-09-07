@@ -8,6 +8,13 @@ and each has bitten real projects:
   * A package workflow exists that the root workflow never calls.
   * A called job the gate job does not depend on. Its failure cannot fail the
     build.
+  * A `branches:` filter on a gate workflow's `pull_request` trigger. Pull
+    requests against every other branch then have no run at all. (The same
+    filter on `push` is the opposite: it stops a sha being gated twice, once
+    per event, and skips nothing a pull request covers.)
+  * A `--scope` passed to verify.sh from a gating workflow. It narrows the
+    test check to part of the suite, which is a gate running less than it says
+    while reporting the same green.
   * A `paths:` filter on a gate workflow. A skipped job is not a failed job:
     `!failure()` passes on skipped, and a whole workflow filtered out leaves
     its required check pending forever. Path filtering is therefore banned on
@@ -47,6 +54,10 @@ JOBS_BLOCK = re.compile(r"^jobs:\s*$", re.MULTILINE)
 NEEDS = re.compile(r"^\s*needs:\s*\[([^\]]*)\]\s*$", re.MULTILINE)
 PATH_FILTER = re.compile(r"^\s*paths(-ignore)?:\s*$", re.MULTILINE)
 WORKFLOW_CALL = re.compile(r"^\s*workflow_call:\s*$", re.MULTILINE)
+SCOPE_FLAG = re.compile(r"--scope\b")
+ON_BLOCK = re.compile(r"^on:\s*$", re.MULTILINE)
+EVENT = re.compile(r"^  ([A-Za-z_][A-Za-z0-9_]*):")
+BRANCH_FILTER = re.compile(r"^ {4,}branches(-ignore)?:")
 
 
 def declared_checks(failures: list[str]) -> list[str]:
@@ -78,6 +89,37 @@ def owners(failures: list[str]) -> dict[str, str]:
             failures.append(f"{OWNERS}:{number}: `{check}` is owned twice")
         table[check] = owner
     return table
+
+
+def pull_request_branch_filter(text: str) -> str | None:
+    """The branch filter under `pull_request:`, if the workflow carries one.
+
+    A branch filter on `push:` is how the same sha stops being gated twice --
+    once by the push event and once by the pull-request event -- and it skips
+    nothing a pull request covers. The same filter under `pull_request:` is a
+    different thing entirely: it leaves pull requests targeting any other
+    branch with no run at all, which is the class `paths:` is banned for.
+
+    Read line-wise, like the rest of this script, and scoped to the `on:`
+    block so that a `branches:` key belonging to a job cannot be mistaken for
+    one belonging to an event.
+    """
+    block = ON_BLOCK.search(text)
+    if not block:
+        return None
+    event = None
+    for line in text[block.end():].split("\n"):
+        if line and not line[0].isspace():
+            break                      # out of `on:` and into the next key
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        named = EVENT.match(line)
+        if named:
+            event = named.group(1)
+            continue
+        if event == "pull_request" and BRANCH_FILTER.match(line):
+            return line.strip()
+    return None
 
 
 def main() -> int:
@@ -140,7 +182,7 @@ def main() -> int:
         for job in sorted(needed - gate_jobs):
             failures.append(f"{ROOT_WORKFLOW}: the gate needs `{job}`, which is not a job")
 
-    # 4. nothing reachable from the gate may filter by path
+    # 4. nothing reachable from the gate may filter by path, or narrow a check
     gating = {ROOT_WORKFLOW} | called
     for wf in sorted(WORKFLOWS.glob("*.yml")):
         text = wf.read_text(encoding="utf-8")
@@ -151,8 +193,32 @@ def main() -> int:
                 f"A skipped job is not a failed job, and a filtered-out workflow leaves "
                 f"its required check pending forever"
             )
+        # `verify.sh --only test --scope SPEC` runs a fraction of the tests. It
+        # exists for the selftest's sandboxes, where one fault is being asked
+        # about one gate, and `--selftest` passes it per case from inside. A
+        # workflow that spells it is a gate running less than it says while
+        # reporting the same green, which is path filtering wearing a
+        # different hat.
+        if SCOPE_FLAG.search(text) and wf.name in gating:
+            failures.append(
+                f"{wf.name}: passes `--scope` to verify.sh and is reached from the "
+                f"gate's `needs`. That narrows the test check to part of the suite; "
+                f"the selftest scopes its own sandboxes and CI must not"
+            )
 
-    # 5. every pkg-* workflow is callable and is actually called
+    # 5. no gating workflow may filter its pull-request trigger by branch
+    for wf in sorted(WORKFLOWS.glob("*.yml")):
+        if wf.name not in gating:
+            continue
+        found = pull_request_branch_filter(wf.read_text(encoding="utf-8"))
+        if found:
+            failures.append(
+                f"{wf.name}: `pull_request` carries `{found}` and is reached from the "
+                f"gate's `needs`. A pull request against any other branch would then "
+                f"have no run at all, and its required checks would stay pending"
+            )
+
+    # 6. every pkg-* workflow is callable and is actually called
     for wf in sorted(WORKFLOWS.glob("pkg-*.yml")) + sorted(WORKFLOWS.glob("gate-*.yml")):
         text = wf.read_text(encoding="utf-8")
         if not WORKFLOW_CALL.search(text):
