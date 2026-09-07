@@ -145,6 +145,7 @@ becomes = '''
         turns: 3,'''
 catches = [
     "drive::tests::a_retried_call_archives_each_attempt_with_what_that_attempt_sent",
+    "drive::tests::a_stripped_retry_archives_the_body_that_attempt_actually_sent",
     "drive::tests::a_two_turn_script_summarises_two_turns",
 ]
 
@@ -199,6 +200,7 @@ becomes = '''
             }'''
 catches = [
     "drive::tests::a_retried_call_archives_each_attempt_with_what_that_attempt_sent",
+    "drive::tests::a_stripped_retry_archives_the_body_that_attempt_actually_sent",
     "drive::tests::the_record_is_an_archive_and_not_a_ledger",
 ]
 
@@ -206,7 +208,7 @@ catches = [
 id = "drive.the-request-body-is-whichever-attempt-was-last"
 failure_class = "drive.the-request-body-is-whichever-attempt-was-last"
 target = "diet/src/drive/mod.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
                 if let Some(attempt) = call.attempts.iter().find(|a| &a.id == id) {
                     *text = Some(wire::body(&attempt.sent));
@@ -217,6 +219,7 @@ becomes = '''
                     *text = Some(wire::body(&attempt.sent));
                 }'''
 catches = [
+    "drive::tests::a_stripped_retry_archives_the_body_that_attempt_actually_sent",
 ]
 
 [[fault]]
@@ -348,6 +351,7 @@ catches = [
     "drive::tests::a_command_that_never_ran_stops_the_drive",
     "drive::tests::a_record_this_drive_cannot_write_is_a_halt_and_not_a_file",
     "drive::tests::a_retried_call_archives_each_attempt_with_what_that_attempt_sent",
+    "drive::tests::a_stripped_retry_archives_the_body_that_attempt_actually_sent",
     "drive::tests::a_two_turn_script_summarises_two_turns",
     "drive::tests::every_entry_names_the_turn_it_actually_came_from",
     "drive::tests::the_record_is_an_archive_and_not_a_ledger",

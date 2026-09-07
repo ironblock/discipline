@@ -1289,6 +1289,103 @@ mod tests {
         assert_eq!(canned::calls(&shorter), 5);
     }
 
+    /// Every fault in this lane's `gate.toml` still names source that exists,
+    /// and every field an orchestrator acts on.
+    ///
+    /// The manifest carries each mutation's exact source text so #46's
+    /// orchestrator can apply it. That only works while the text is still in
+    /// the file it names, and nothing else checks: the orchestrator is not
+    /// built, and `check-fault-manifest.py` reads the gate's own manifest
+    /// rather than a package's. A manifest nobody checks goes stale, and a
+    /// stale seeded fault silently stops testing what it says it tests.
+    ///
+    /// `catches` and `expect_exit` are checked too, not just the anchor: a
+    /// `catches` naming a test that was renamed or deleted would have the
+    /// fault applied, the named test not run, and the run scored against a
+    /// catcher that does not exist.
+    ///
+    /// Scanned rather than parsed as TOML, because this crate has no TOML
+    /// reader for multi-line strings and writing one to check a file this
+    /// repository generates would be a second reader of a format that already
+    /// has one. A scan that finds no faults fails rather than passing over
+    /// nothing.
+    #[test]
+    fn every_seeded_fault_still_names_source_that_is_there() {
+        let manifest = include_str!("../../drive/gate.toml");
+        // The lane's whole source, so a catcher can be looked for wherever
+        // its test lives rather than only in this file.
+        let lane = concat!(
+            include_str!("mod.rs"),
+            include_str!("canned.rs"),
+            include_str!("digest.rs"),
+            include_str!("script.rs")
+        );
+        let mut checked = 0;
+        for block in manifest.split("\n[[fault]]\n").skip(1) {
+            let id = between(block, "id = \"", "\"").expect("a fault has an id");
+            let target = between(block, "target = \"", "\"").expect("a fault has a target");
+            let anchor =
+                between(block, "anchor = '''\n", "'''\nbecomes = ").expect("a fault has an anchor");
+
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .expect("the workspace root")
+                .join(target);
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|why| panic!("{id}: {} could not be read: {why}", path.display()));
+            assert_eq!(
+                source.matches(anchor).count(),
+                1,
+                "{id}: its anchor no longer appears exactly once in {target}. The \
+                 manifest is stale: either the mutation has to move with the code, \
+                 or the fault it seeds is gone."
+            );
+
+            between(block, "expect_exit = ", "\n")
+                .expect("a fault declares the exit it expects")
+                .parse::<i32>()
+                .unwrap_or_else(|why| panic!("{id}: its `expect_exit` is not a number: {why}"));
+
+            let catches = between(block, "catches = [\n", "]").expect("a fault names its catchers");
+            let mut named = 0;
+            for line in catches.lines() {
+                let Some(name) = between(line, "\"", "\"") else {
+                    continue;
+                };
+                let leaf = name.rsplit("::").next().unwrap_or(name);
+                assert_eq!(
+                    lane.matches(&format!("fn {leaf}(")).count(),
+                    1,
+                    "{id}: it claims to be caught by `{name}`, and no such test is in \
+                     the lane. A fault whose catcher was renamed or deleted is applied, \
+                     caught by nothing, and scored against a name."
+                );
+                named += 1;
+            }
+            assert!(
+                named > 0,
+                "{id}: a fault with an empty `catches` is a mutation nothing proves"
+            );
+            checked += 1;
+        }
+        let declared: usize = between(manifest, "\nfaults = ", "\n")
+            .expect("the package block declares a count")
+            .parse()
+            .expect("the count is a number");
+        assert_eq!(
+            checked, declared,
+            "the manifest declares its own count and this reads it: hardcoding the \
+             number here let `faults = 9001` pass"
+        );
+    }
+
+    /// The text between `open` and the next `close` after it.
+    fn between<'a>(haystack: &'a str, open: &str, close: &str) -> Option<&'a str> {
+        let start = haystack.find(open)? + open.len();
+        let end = haystack[start..].find(close)? + start;
+        Some(&haystack[start..end])
+    }
+
     #[test]
     fn what_the_record_cannot_spell_is_named_rather_than_dropped() {
         let ground = Ground::make("unspellable");
