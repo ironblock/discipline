@@ -186,7 +186,6 @@ becomes = '''
             | Self::AbsentOrOutside => true,'''
 catches = [
     "isolation::tests::an_ambiguous_denial_is_named_as_one",
-    "isolation::tests::the_record_is_read_from_the_run_and_not_written_down_as_a_constant",
 ]
 
 [[fault]]
@@ -201,6 +200,7 @@ becomes = '''
         let _ = (first, exit);
         None'''
 catches = [
+    "isolation::tests::a_command_the_sandbox_could_not_execute_is_not_the_sandbox_failing",
     "isolation::tests::a_runner_that_could_not_build_the_sandbox_is_not_a_command_result",
 ]
 
@@ -208,12 +208,13 @@ catches = [
 id = "isolation.execvp-read-as-a-setup-failure"
 failure_class = "isolation.execvp-read-as-a-setup-failure"
 target = "diet/src/isolation/bwrap.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
         let is_runner = first.starts_with("bwrap: ") && !first.starts_with("bwrap: execvp ");'''
 becomes = '''
         let is_runner = first.starts_with("bwrap: ");'''
 catches = [
+    "isolation::tests::a_command_the_sandbox_could_not_execute_is_not_the_sandbox_failing",
 ]
 
 [[fault]]
@@ -237,7 +238,7 @@ catches = [
 id = "isolation.network-under-none-is-recorded"
 failure_class = "isolation.network-under-none-is-recorded"
 target = "diet/src/isolation/policy.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
             if policy.isolation == Isolation::None && network == Network::None {
                 return Err(PolicyError::Unenforceable {
@@ -249,13 +250,14 @@ anchor = '''
 becomes = '''
 '''
 catches = [
+    "isolation::tests::a_policy_is_read_from_the_regimen_or_refused_with_a_reason",
 ]
 
 [[fault]]
 id = "isolation.a-relative-worktree-is-accepted"
 failure_class = "isolation.a-relative-worktree-is-accepted"
 target = "diet/src/isolation/mod.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
         if !worktree.is_absolute() {
             return Err(NotRun::Worktree {
@@ -268,13 +270,14 @@ anchor = '''
 becomes = '''
 '''
 catches = [
+    "isolation::tests::a_working_tree_that_cannot_mean_one_thing_is_refused_before_anything_runs",
 ]
 
 [[fault]]
 id = "isolation.the-note-is-attached-to-every-denial"
 failure_class = "isolation.the-note-is-attached-to-every-denial"
 target = "diet/src/isolation/mod.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
         if self
             .denials()
@@ -284,13 +287,14 @@ anchor = '''
 becomes = '''
         if !self.denials().is_empty() {'''
 catches = [
+    "isolation::tests::an_ambiguous_denial_is_named_as_one",
 ]
 
 [[fault]]
 id = "isolation.an-empty-command-runs-the-runner"
 failure_class = "isolation.an-empty-command-runs-the-runner"
 target = "diet/src/isolation/mod.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
         if argv.is_empty() {
             return Err(NotRun::Nothing);
@@ -299,6 +303,7 @@ anchor = '''
 becomes = '''
 '''
 catches = [
+    "isolation::tests::an_empty_command_is_refused_rather_than_running_the_runner_alone",
 ]
 
 [[fault]]
