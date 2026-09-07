@@ -349,37 +349,53 @@ impl Call {
     /// A capped answer is bankable. Truncation is a typed outcome and the
     /// census counts it; refusing it here would be grading it as wrong, which
     /// is the thing the outcome type exists to stop.
+    ///
+    /// The refusals come out in [`Refusal::ALL`]'s order BY CONSTRUCTION --
+    /// this walks the vocabulary and asks each one -- rather than by sorting
+    /// a list built in whatever order the checks happened to run. The sort
+    /// was here first, and mutating it away changed no answer, because
+    /// nothing could produce two refusals out of order to begin with. A guard
+    /// that cannot fire is not a guard; the order is now a property of the
+    /// loop.
     #[must_use]
     pub fn bank(&self) -> Bank {
-        let mut refusals = Vec::new();
-
-        match &self.outcome {
-            Outcome::Answered(answer) | Outcome::Capped(answer) => {
-                match answer.echo.verdict() {
-                    Verdict::Confirmed => {}
-                    Verdict::Mismatched => refusals.push(Refusal::RegimeMismatch),
-                    Verdict::Unverified => refusals.push(Refusal::RegimeUnverified),
-                    Verdict::NothingPinned => refusals.push(Refusal::RegimeUnpinned),
-                }
-                if self
-                    .attempts
-                    .last()
-                    .is_some_and(|attempt| !attempt.stripped.is_empty())
-                {
-                    refusals.push(Refusal::RegimeStripped);
-                }
-            }
-            Outcome::Timeout { .. } => refusals.push(Refusal::Timeout),
-            Outcome::Refused { .. } => refusals.push(Refusal::ServerRefused),
-            Outcome::Failed { .. } => refusals.push(Refusal::TransportFailed),
-            Outcome::Unreadable { .. } => refusals.push(Refusal::Unreadable),
-        }
-
+        let refusals: Vec<Refusal> = Refusal::ALL
+            .iter()
+            .copied()
+            .filter(|refusal| self.refuses(*refusal))
+            .collect();
         if refusals.is_empty() {
             Bank::Bankable
         } else {
-            refusals.sort_unstable();
             Bank::Refused(refusals)
+        }
+    }
+
+    /// Whether this call carries `refusal`.
+    ///
+    /// An exhaustive match, so a refusal added to the vocabulary fails to
+    /// compile here until somebody says when it fires.
+    fn refuses(&self, refusal: Refusal) -> bool {
+        let verdict = self.outcome.answer().map(|answer| answer.echo.verdict());
+        match refusal {
+            Refusal::RegimeMismatch => verdict == Some(Verdict::Mismatched),
+            Refusal::RegimeUnverified => verdict == Some(Verdict::Unverified),
+            Refusal::RegimeUnpinned => verdict == Some(Verdict::NothingPinned),
+            Refusal::RegimeStripped => {
+                // Only where there is a result to bank: a call that timed out
+                // having stripped a pin is refused for the timeout, and a
+                // second reason for an answer that does not exist would be an
+                // accounting of nothing.
+                self.outcome.answer().is_some()
+                    && self
+                        .attempts
+                        .last()
+                        .is_some_and(|attempt| !attempt.stripped.is_empty())
+            }
+            Refusal::Timeout => matches!(self.outcome, Outcome::Timeout { .. }),
+            Refusal::ServerRefused => matches!(self.outcome, Outcome::Refused { .. }),
+            Refusal::TransportFailed => matches!(self.outcome, Outcome::Failed { .. }),
+            Refusal::Unreadable => matches!(self.outcome, Outcome::Unreadable { .. }),
         }
     }
 }
@@ -1430,6 +1446,38 @@ mod tests {
             asked.len(),
             1,
             "nothing was stripped and nothing was retried"
+        );
+        assert!(matches!(call.outcome, Outcome::Refused { .. }));
+        assert!(call.attempts[0].stripped.is_empty());
+    }
+
+    #[test]
+    fn a_quoted_request_naming_exactly_one_pin_still_strips_nothing() {
+        // The case the "exactly one" bound does NOT catch, and the reason the
+        // complaint is read rather than the whole body: the server objects to
+        // `max_tokens`, quotes the request back, and the request carries a
+        // single pin. A whole-body search finds one pinned setting, believes
+        // it, and retries under a regime nobody declared.
+        let card = SamplerCard::empty()
+            .with_decimal(SamplerSetting::Temperature, "0.6")
+            .expect("0.6 is a decimal");
+        let (call, asked) = honest(
+            vec![
+                Act::Status(
+                    400,
+                    "{\"error\":{\"message\":\"max_tokens is above the model's limit\",\
+                     \"request\":{\"temperature\":0.6}}}"
+                        .to_owned(),
+                ),
+                Act::Answer(answered("never reached", "stop", "\"temperature\":0.6")),
+            ],
+            &shaped(card, 5_000, 20_000, 2),
+        );
+
+        assert_eq!(
+            asked.len(),
+            1,
+            "the complaint named no pin this request sent"
         );
         assert!(matches!(call.outcome, Outcome::Refused { .. }));
         assert!(call.attempts[0].stripped.is_empty());
