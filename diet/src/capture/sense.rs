@@ -539,7 +539,11 @@ impl Error for DataError {}
 type DataLine = (usize, BTreeMap<String, Value>);
 
 /// Every non-blank line of a data file, decoded through the one reader.
-fn rows(source: &str) -> Result<Vec<DataLine>, DataError> {
+///
+/// `pub(crate)` because the collector's nomination policy is read by these
+/// same five helpers. Two readers of one row shape is the drift this
+/// repository spends a gate on.
+pub(crate) fn rows(source: &str) -> Result<Vec<DataLine>, DataError> {
     let mut decoded = Vec::new();
     for (index, text) in source.lines().enumerate() {
         if text.trim().is_empty() {
@@ -556,7 +560,7 @@ fn rows(source: &str) -> Result<Vec<DataLine>, DataError> {
 }
 
 /// A required, non-empty string member, removed from the row.
-fn take_text(
+pub(crate) fn take_text(
     members: &mut BTreeMap<String, Value>,
     line: usize,
     key: &'static str,
@@ -590,7 +594,7 @@ fn take_version(
 }
 
 /// A required member of a closed vocabulary, removed from the row.
-fn take_tag<T>(
+pub(crate) fn take_tag<T>(
     members: &mut BTreeMap<String, Value>,
     line: usize,
     key: &'static str,
@@ -601,7 +605,7 @@ fn take_tag<T>(
 }
 
 /// Nothing left in the row: the schema is closed.
-fn closed(members: &BTreeMap<String, Value>, line: usize) -> Result<(), DataError> {
+pub(crate) fn closed(members: &BTreeMap<String, Value>, line: usize) -> Result<(), DataError> {
     match members.keys().next() {
         Some(key) => Err(DataError::UnknownKey {
             line,

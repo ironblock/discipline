@@ -56,6 +56,7 @@ const COMMANDS: &[(&str, Operation)] = &[
     ("check-record", Operation::Format("record")),
     ("check-regimen", Operation::Format("regimen")),
     ("parse-shell", Operation::Format("shell")),
+    ("parse-verdict", Operation::Format("verdict")),
     ("route", Operation::Route),
 ];
 

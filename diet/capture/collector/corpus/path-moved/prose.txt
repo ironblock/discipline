@@ -1,0 +1,1 @@
+I moved the reconciler out of diet/src/object.rs into its own module, leaving the alias table behind.
