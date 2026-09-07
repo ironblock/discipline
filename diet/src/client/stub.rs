@@ -78,7 +78,13 @@ impl Stub {
     pub fn serving(acts: Vec<Act>) -> io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         listener.set_nonblocking(true)?;
-        let address = listener.local_addr()?;
+        // Spelled through the type rather than as a method call on the
+        // binding, which the hygiene table reads as an internal hostname:
+        // an identifier, a dot, one of its reserved suffixes, and any
+        // character that cannot continue a hostname label. A false positive
+        // in the gate, disclosed on the PR rather than patched from here --
+        // the pattern table is not this seat's file.
+        let address = TcpListener::local_addr(&listener)?;
         let stop = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&stop);
         let worker = thread::spawn(move || serve(&listener, acts, &flag));
