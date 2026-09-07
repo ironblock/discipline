@@ -3186,6 +3186,7 @@ new = """fn advisory(proposal: Proposal) -> Effect {
             turn: proposal.at_turn,
             lane: LANE.to_owned(),
             fork: None,
+            tangent: None,
             index: 0,
         },
     }];
