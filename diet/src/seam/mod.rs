@@ -34,6 +34,36 @@
 //! owns -- the triggers, the render, the phase graph, the dumps either side,
 //! the fold -- is built and tested. The parse is named as the dependency it
 //! is.
+//!
+//! # What has been seen red
+//!
+//! Thirteen mutations, each a plausible way to be wrong, each applied to the
+//! source and run. They are recorded here rather than as seeded cases in the
+//! gate because `verify.sh` and `tools/gate/faults.toml` are not this seat's
+//! files; that is disclosed on the pull request.
+//!
+//! | break this | and this fails |
+//! | --- | --- |
+//! | the cadence fires on every turn | `seams_fire_on_the_declared_cadence_and_nowhere_else` |
+//! | the prefix is rebuilt every turn, not only at a seam | `the_prefix_does_not_move_while_the_object_does` |
+//! | a refused proposal moves the session anyway | `a_transition_the_graph_forbids_is_recorded_and_fires_nothing` |
+//! | the graph allows any pair of declared phases | `a_transition_the_graph_forbids_is_recorded_and_fires_nothing` |
+//! | a cadence outranks a phase transition | `a_phase_transition_outranks_a_cadence_that_also_came_round` |
+//! | the triggers that were also true are dropped | the same |
+//! | a budget seam borrows the cadence's ask | `a_budget_seam_renders_and_says_no_ask_is_pinned_for_it` |
+//! | an empty working set is audited anyway | `an_empty_working_set_is_not_audited` |
+//! | the render forgets which phase it was built for | `the_render_is_a_pure_function_of_the_object_and_the_phase` |
+//! | the budget counts entries instead of measuring them | `the_working_set_measures_size_and_not_a_count_of_entries` |
+//! | a duplicate phase name is accepted | `a_policy_is_read_from_the_regimen_or_refused_with_a_reason` |
+//! | a cadence of zero is accepted | the same |
+//! | an edge to a phase nobody declared is accepted | the same |
+//!
+//! Two of those thirteen survived the first time and cost a test each. The
+//! byte-identity claim was the worse one: re-rendering on *every* turn
+//! changed nothing, because the render is a pure function and the object sat
+//! still between the turns being compared. The claim is not that the
+//! controller renders rarely -- it is that the prefix does not move **while
+//! the object does**, and testing it needs a lane writing every turn.
 
 pub mod phase;
 pub mod policy;
