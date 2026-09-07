@@ -52,11 +52,27 @@
 //! | `Content-Length` is ignored and the body read to close | `a_content_length_reply_is_answered_without_waiting_for_the_connection_to_close` |
 //! | a chunked body is not decoded | `a_chunked_reply_is_decoded_rather_than_handed_to_the_reader_with_its_framing` |
 //! | `header` gives up on the status line | the three framing tests above |
+//! | a chunk size from the wire is added to (`ffffffffffffffff` overflows) | `transport::…::a_chunked_body_is_whole_only_when_its_terminator_has_arrived` |
+//! | a truncated reply is clamped to what arrived | `a_reply_that_announces_more_than_it_sends_is_truncated_not_a_shorter_answer` |
+//! | the whole-call budget stops binding an attempt | `the_whole_call_budget_binds_even_where_each_attempt_is_inside_its_own` |
+//! | the 4xx search reads the whole reply, not the complaint | `a_quoted_request_naming_exactly_one_pin_still_strips_nothing` |
+//! | a complaint naming two pins strips the first | `a_complaint_naming_two_pinned_settings_strips_neither` |
+//! | a pin this request never sent may be stripped | `a_complaint_naming_a_setting_this_request_did_not_pin_strips_nothing` |
+//! | the refusals come out in another order | `two_refusals_are_listed_in_one_order` |
+//! | `max_tokens` stops counting as a cap | `max_tokens_is_a_cap_as_much_as_length_is` |
+//! | the reply cap stops being applied | `a_reply_past_the_declared_cap_is_refused_rather_than_read_forever` |
+//! | an unspellable token count saturates instead of refusing | `a_token_count_no_record_can_spell_makes_the_reply_unreadable` |
+//! | the issued-versus-arrived gap stops being named | `a_request_that_never_reached_a_server_is_still_a_request_the_client_issued` |
 //!
-//! One mutation was tried and is NOT in the table: a `skip(1)` over the status
-//! line in [`transport`], which changed nothing anywhere. It was deleted
-//! rather than kept -- an injection that does not change the tree proves
-//! nothing, and a guard that cannot fire is not a guard.
+//! **Three mutations were tried and are NOT in the table, because the suite
+//! stayed green under each.** An injection that does not change the tree
+//! proves nothing, so in each case the guard went and its rule moved to
+//! something that can fire: a `skip(1)` over the status line in [`transport`]
+//! (deleted); a sort over `bank`'s refusals, which nothing could produce out
+//! of order (replaced by walking the vocabulary, so the order is the loop's);
+//! and reading the server's complaint rather than its whole reply, whose real
+//! case turned out to be narrower than the test written for it (the narrower
+//! case is now the test).
 
 pub mod echo;
 pub mod journal;
