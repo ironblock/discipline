@@ -121,15 +121,14 @@ scope_args() {
 # to recognise: a broken unit test in the library would hide every conformance
 # failure behind it, and the log would say the gate fired for the wrong reason.
 check_test() {
-  local -a args=(--workspace --no-fail-fast)
-  if [ -n "$VERIFY_TEST_SCOPE" ]; then
-    scope_args "$VERIFY_TEST_SCOPE" || {
-      echo "verify: --scope '${VERIFY_TEST_SCOPE}': want lib, bins, all or" \
-           "test:NAME, each optionally followed by /FILTER" >&2
-      return "$EXIT_MISUSE"
-    }
-    args+=("${SCOPE_ARGS[@]}")
-  fi
+  # SCOPE_ARGS and SCOPE_FILTER are set once, by the argument parser, and are
+  # empty when no scope was given. Deriving them again here would put a
+  # SECOND reader on the spelling -- and it also put the refusal in the wrong
+  # place: a check that returns EXIT_MISUSE still leaves the script exiting
+  # EXIT_FAIL, because a failed check is a failed check. A misused flag is not
+  # a failed gate, and this repository already seeds a fault for exactly that
+  # confusion one layer down, in the diet CLI.
+  local -a args=(--workspace --no-fail-fast ${SCOPE_ARGS+"${SCOPE_ARGS[@]}"})
 
   # THE SELECTED-COUNT CONTROL.
   #
@@ -4944,6 +4943,11 @@ while [ "$#" -gt 0 ]; do
     --selftest) mode="selftest"; shift ;;
     --scope)
       [ "$#" -ge 2 ] || { echo "verify: --scope needs a spec" >&2; exit "$EXIT_MISUSE"; }
+      scope_args "$2" || {
+        echo "verify: --scope '$2': want lib, bins, all or test:NAME, each" \
+             "optionally followed by /FILTER" >&2
+        exit "$EXIT_MISUSE"
+      }
       VERIFY_TEST_SCOPE="$2"
       shift 2
       ;;
