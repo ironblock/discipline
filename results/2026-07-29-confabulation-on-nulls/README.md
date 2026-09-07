@@ -76,5 +76,7 @@ there; the three headline figures were re-derived by the committed instrument
 on 2026-08-24 and again here. The artifact is byte-identical to the research
 program's except that 20 occurrences of a home-directory path inside
 tool-output strings were shortened to `~/` (180 bytes), which touches no
-graded field; the instrument differs only in the line that names its input
-path and in the two docstring phrases that pointed at that program's files.
+graded field; the instrument differs in four places, which is the whole diff
+against that program's copy -- the line that names its input path, two
+docstring phrases that pointed at that program's files, and a comment in
+`main()` that named its grader by a private filename.
