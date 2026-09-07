@@ -7,6 +7,8 @@
 #   verify.sh --only CHECK    run one check (repeatable)
 #   verify.sh --list          name the checks, in order
 #   verify.sh --selftest      prove the gate goes red on seeded faults
+#   verify.sh --selftest --shard K/N    run this job's share of the faults
+#   verify.sh --selftest --census PATH  write what this run ran, for the sum
 #
 # Three rules this script exists to keep:
 #
@@ -243,6 +245,43 @@ usage() {
 SELFTEST_SCRATCH=()
 SELFTEST_BROKEN=()
 SEEDED_CHECKS=()
+SELFTEST_CASES=0
+SELFTEST_LOGS=""
+
+# --- the shard ------------------------------------------------------------
+#
+# `--selftest --shard K/N` runs every Nth fault starting at the Kth, so N jobs
+# between them run each fault exactly once. Round-robin rather than blocks:
+# the Rust-class faults are the expensive ones and they are declared in runs,
+# so a block split would put nearly all of them in one shard.
+#
+# This is NOT fault selection. Nothing here decides that a fault need not run;
+# it decides which JOB runs it, and scripts/check-selftest-census.py proves
+# after the fact that the shards between them ran every one. Selecting faults
+# by what changed is the thing this repository refuses, and the difference is
+# that a shard's absence is a failure rather than a silence: a missing census
+# is a missing shard, and the aggregate refuses.
+#
+# 0 means unsharded -- one job runs the lot, which is what a contributor gets.
+SELFTEST_SHARD=0
+SELFTEST_SHARDS=1
+SELFTEST_UNITS=0
+SELFTEST_RAN=()
+SELFTEST_CENSUS=""
+
+# Whether the next counted fault belongs to this shard, counting it either
+# way. Every counted fault calls this exactly once, in declaration order, so
+# the ordinals are the same in every shard and the union of the shards is the
+# whole list -- which is the claim the census script checks rather than trusts.
+in_shard() {
+  SELFTEST_UNITS=$(( SELFTEST_UNITS + 1 ))
+  if [ "$SELFTEST_SHARD" -eq 0 ] ||
+     [ "$(( (SELFTEST_UNITS - 1) % SELFTEST_SHARDS + 1 ))" -eq "$SELFTEST_SHARD" ]; then
+    SELFTEST_RAN+=("$SELFTEST_UNITS")
+    return 0
+  fi
+  return 1
+}
 
 selftest_cleanup() {
   local path
@@ -279,6 +318,12 @@ scratch() {
 # how a seeded case ends up red for another case's fault.
 sandbox() {
   local dest="$1" path
+  # Cleared, not merely written into. The path is reused across cases (see
+  # SELFTEST_BOX), so anything a fault created -- a file, a directory, a
+  # committed ref -- would otherwise be part of the next case's tree, and a
+  # case that passes because its predecessor left something behind proves
+  # nothing about the gate.
+  rm -rf -- "$dest"
   mkdir -p "$dest"
   while IFS= read -r -d '' path; do
     # -f after dereference: a broken symlink, or one pointing at a directory,
@@ -312,6 +357,29 @@ sandbox_state() {
   git -C "$box" show-ref 2> /dev/null || true
 }
 
+# ONE sandbox path, reused by every case, created once by selftest().
+#
+# Deliberately NOT a fresh `mktemp -d` per case, which is what this was.
+# Cargo's incremental cache is keyed by the path the crate was compiled from,
+# so a fault compiled at /tmp/tmp.AAA and the next one at /tmp/tmp.BBB shared
+# a target directory in which neither could reuse the other's incremental
+# state: every Rust-class case paid a full recompile of the crate, and the
+# cases alternated paths, so no case ever benefited from the one before it.
+#
+# Measured on this tree, same shared target, same freshly copied source:
+#
+#   fresh path each case   14.8s  14.8s
+#   one path reused        15.5s   4.4s   4.7s      (the first primes it)
+#
+# 145 of the faults below are Rust-class, so that difference was most of the
+# selftest's wall clock and all of the reason it read fifty-two minutes in CI.
+#
+# Isolation is unchanged, because what is reused is the PATH and not the
+# CONTENT: sandbox() removes the tree and copies it again from ROOT for every
+# case. The fingerprint taken either side of the injection is what proves it,
+# and it is taken after the copy.
+SELFTEST_BOX=""
+
 # Run `verify.sh --only CHECK` inside a sandbox carrying one seeded fault.
 #
 # EXPECT is an extended regex the sandbox's log must carry. The exit code is
@@ -323,9 +391,17 @@ sandbox_state() {
 # certify a dead gate. Match the failure text instead.
 seeded_case() {
   local label="$1" check="$2" inject="$3" expect="$4"
-  local box
-  scratch; box="$SCRATCH"
+  local box="$SELFTEST_BOX"
+  local started="$SECONDS"
+  # Recorded before the shard is consulted. This list answers "has every check
+  # been seen red", which is a question about what the gate DECLARES, and the
+  # answer must not depend on which shard is asking.
   SEEDED_CHECKS+=("$check")
+  in_shard || return 0
+  SELFTEST_CASES=$(( SELFTEST_CASES + 1 ))
+  # One log per case, kept for the run, because the box itself is overwritten
+  # by the case after this one and a failure is read after the fact.
+  local log="${SELFTEST_LOGS}/$(printf '%03d' "$SELFTEST_CASES").log"
 
   # `cd ""` succeeds and stays put, so an empty box would run the injection in
   # the real working tree. Refuse rather than seed faults into the repository.
@@ -338,8 +414,8 @@ seeded_case() {
   # it calls, so a failed `sandbox` used to return 1 into a caller that carried
   # on regardless -- into a directory that was never even `git init`-ed.
   if ! sandbox "$box"; then
-    printf 'BROKEN verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE BUILT\n' \
-      "$check" "$label"
+    printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE BUILT\n' \
+      "$(( SECONDS - started ))" "$check" "$label"
     SELFTEST_BROKEN+=("${label}: the sandbox could not be built")
     return
   fi
@@ -356,21 +432,25 @@ seeded_case() {
   state_after="$(sandbox_state "$box")"
   case "${state_before}${state_after}" in
     *"${STATE_UNREADABLE}"*)
-      printf 'BROKEN verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE READ\n' \
-        "$check" "$label"
+      printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE READ\n' \
+        "$(( SECONDS - started ))" "$check" "$label"
       SELFTEST_BROKEN+=("${label}: the sandbox's state could not be read")
       return
       ;;
   esac
   # Every sandbox shares SELFTEST_TARGET, and a test binary bakes its
-  # CARGO_MANIFEST_DIR in at compile time. So a binary cargo judges fresh and
-  # reuses reads the FIXTURES OF THE BOX IT WAS BUILT IN -- a stale-artifact
-  # false receipt, one directory over from the one this selftest already
-  # carries a comment about. It is safe today only because every injection
-  # happens to edit Rust source and so forces a rebuild; one that touched only
-  # a fixture would silently test the wrong tree. Touching a source file after
-  # the fingerprint is taken removes the coincidence. `git write-tree` hashes
-  # content, so this does not disturb the comparison above.
+  # CARGO_MANIFEST_DIR in at compile time. When each case had a path of its
+  # own, a binary cargo judged fresh and reused read the FIXTURES OF THE BOX
+  # IT WAS BUILT IN -- a stale-artifact false receipt one directory over. One
+  # reused path retires that hazard outright: the baked-in directory is always
+  # this case's box, so a reused binary reads this case's fixtures.
+  #
+  # The line stays for the half that survives. sandbox() copies without -p, so
+  # every source in the box is newer than any artifact built from the case
+  # before it and cargo rebuilds regardless; this makes that invariant local
+  # to the one file whose staleness would be silent, rather than resting on
+  # the copy's mtimes alone. `git write-tree` hashes content, so it does not
+  # disturb the comparison above.
   #
   # IN THE BOX. The first version of this line was relative, and only the
   # injection above runs inside the box -- so it touched the repository's own
@@ -380,8 +460,8 @@ seeded_case() {
   touch "${box}/diet/src/lib.rs" 2> /dev/null || true
 
   if [ "$state_before" = "$state_after" ]; then
-    printf 'BROKEN verify.sh --only %-8s          %s  <-- THE INJECTION CHANGED NOTHING\n' \
-      "$check" "$label"
+    printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE INJECTION CHANGED NOTHING\n' \
+      "$(( SECONDS - started ))" "$check" "$label"
     SELFTEST_BROKEN+=("${label}: ${inject} changed nothing, so the case proves nothing")
     return
   fi
@@ -393,21 +473,22 @@ seeded_case() {
   local rc=0
   ( cd "$box" && bash "${ROOT}/scripts/hermetic.sh" \
       env CARGO_TARGET_DIR="${SELFTEST_TARGET}" bash ./verify.sh --only "$check" ) \
-    > "${box}.log" 2>&1 || rc=$?
+    > "$log" 2>&1 || rc=$?
 
   if [ "$rc" -eq 0 ]; then
-    printf 'GREEN verify.sh --only %-8s exit %-3d  %s  <-- THE GATE DID NOT FIRE\n' \
-      "$check" "$rc" "$label"
+    printf 'GREEN  %4ds verify.sh --only %-8s exit %-3d  %s  <-- THE GATE DID NOT FIRE\n' \
+      "$(( SECONDS - started ))" "$check" "$rc" "$label"
     SELFTEST_BROKEN+=("${label}: the gate did not fire")
-    sed -n '1,40p' "${box}.log" >&2
-  elif ! grep -qE -- "$expect" "${box}.log"; then
-    printf 'WRONG verify.sh --only %-8s exit %-3d  %s  <-- RED, BUT NOT FOR ITS OWN FAULT\n' \
-      "$check" "$rc" "$label"
+    sed -n '1,40p' "$log" >&2
+  elif ! grep -qE -- "$expect" "$log"; then
+    printf 'WRONG  %4ds verify.sh --only %-8s exit %-3d  %s  <-- RED, BUT NOT FOR ITS OWN FAULT\n' \
+      "$(( SECONDS - started ))" "$check" "$rc" "$label"
     printf '      the log carries no match for: %s\n' "$expect"
     SELFTEST_BROKEN+=("${label}: red for the wrong reason")
-    sed -n '1,40p' "${box}.log" >&2
+    sed -n '1,40p' "$log" >&2
   else
-    printf 'RED   verify.sh --only %-8s exit %-3d  %s\n' "$check" "$rc" "$label"
+    printf 'RED    %4ds verify.sh --only %-8s exit %-3d  %s\n' \
+      "$(( SECONDS - started ))" "$check" "$rc" "$label"
   fi
 }
 
@@ -3715,7 +3796,10 @@ prove_patterns() {
   while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
     case "$label" in ''|\#*) continue ;; esac
     [ -n "${regex:-}" ] || continue
+    # Before the shard: whether the brief's required classes are in the table
+    # is a question about the table, not about this job's share of it.
     defined+=("$label")
+    in_shard || continue
 
     dir="${seed}/${label}"
     if [ ! -d "$dir" ]; then
@@ -3925,6 +4009,15 @@ prove_mechanics() {
 selftest() {
   trap selftest_cleanup EXIT
   scratch; SELFTEST_TARGET="${SCRATCH}/target"
+  scratch; SELFTEST_LOGS="$SCRATCH"
+  # The one sandbox path every case is built into and torn down from. Made
+  # here rather than per case; see SELFTEST_BOX for the measurement that says
+  # why.
+  scratch; SELFTEST_BOX="${SCRATCH}/box"
+  # Made here, not by the first case, so that seeded_case's refusal to inject
+  # into a box that is not a directory keeps its meaning: an unset or removed
+  # box is a misuse, not a first run.
+  mkdir -p "$SELFTEST_BOX"
 
   # sandbox(), seed_commit and the fake-repository builder all run git in THIS
   # process, outside scripts/hermetic.sh, so they need the same protection from
@@ -4399,6 +4492,7 @@ selftest() {
     [ -n "$name" ] && WANT["$name"]="$want"
   done < <(cd "${ROOT}" && python3 scripts/check-fault-manifest.py --fixture-classes)
   for dir in "${ROOT}"/tests/fixtures/results-bad/*/; do
+    in_shard || continue
     rc=0; name="$(basename "$dir")"
     out="$(python3 "${ROOT}/scripts/check-results.py" "$dir" 2>&1)" || rc=$?
     want="${WANT[$name]-}"
@@ -4540,6 +4634,29 @@ EOF
   done
   [ "${#missing[@]}" -eq 0 ] || SELFTEST_BROKEN+=("checks with no seeded fault: ${missing[*]}")
 
+  # --- the census ---
+  #
+  # What this run RAN, by ordinal, so that N shards can be added up afterwards
+  # and the sum compared against the manifest. A shard that passes having run
+  # a subset of what it was assigned is the one way sharding could quietly
+  # become fault selection, and it is the reason this is emitted as data
+  # rather than asserted here: a shard cannot certify itself.
+  echo
+  printf 'selftest-census: shard %d of %d ran %d of %d fault(s)\n' \
+    "$(( SELFTEST_SHARD == 0 ? 1 : SELFTEST_SHARD ))" \
+    "$SELFTEST_SHARDS" "${#SELFTEST_RAN[@]}" "$SELFTEST_UNITS"
+  if [ -n "$SELFTEST_CENSUS" ]; then
+    {
+      printf 'shard\t%d\n' "$(( SELFTEST_SHARD == 0 ? 1 : SELFTEST_SHARD ))"
+      printf 'shards\t%d\n' "$SELFTEST_SHARDS"
+      printf 'total\t%d\n' "$SELFTEST_UNITS"
+      printf 'ordinal\t%s\n' ${SELFTEST_RAN+"${SELFTEST_RAN[@]}"}
+    } > "$SELFTEST_CENSUS" || {
+      echo "selftest: the census could not be written to ${SELFTEST_CENSUS}" >&2
+      SELFTEST_BROKEN+=("the census could not be written")
+    }
+  fi
+
   echo
   if [ "${#SELFTEST_BROKEN[@]}" -gt 0 ]; then
     printf 'selftest: %d gate(s) failed to fire, or fired for the wrong reason:\n' \
@@ -4556,6 +4673,7 @@ EOF
 
 selected=()
 mode="all"
+shard_arg=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -4569,6 +4687,36 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --selftest) mode="selftest"; shift ;;
+    --shard)
+      [ "$#" -ge 2 ] || { echo "verify: --shard needs K/N" >&2; exit "$EXIT_MISUSE"; }
+      shard_arg="$2"
+      case "$shard_arg" in
+        *[!0-9/]*|*/*/*|/*|*/) shard_arg="" ;;
+        */*) ;;
+        *) shard_arg="" ;;
+      esac
+      [ -n "$shard_arg" ] || {
+        echo "verify: --shard wants K/N in decimal, not '$2'" >&2
+        exit "$EXIT_MISUSE"
+      }
+      SELFTEST_SHARD="${shard_arg%%/*}"
+      SELFTEST_SHARDS="${shard_arg##*/}"
+      # 1 <= K <= N, and N >= 1. A K of 0 would run nothing while reporting a
+      # shard, and a K above N would run nothing while the sum still looked
+      # like N shards -- both are a job that passes having done nothing, which
+      # is the failure this whole issue is about not introducing.
+      if [ "$SELFTEST_SHARDS" -lt 1 ] || [ "$SELFTEST_SHARD" -lt 1 ] ||
+         [ "$SELFTEST_SHARD" -gt "$SELFTEST_SHARDS" ]; then
+        echo "verify: --shard ${2}: needs 1 <= K <= N and N >= 1" >&2
+        exit "$EXIT_MISUSE"
+      fi
+      shift 2
+      ;;
+    --census)
+      [ "$#" -ge 2 ] || { echo "verify: --census needs a path" >&2; exit "$EXIT_MISUSE"; }
+      SELFTEST_CENSUS="$2"
+      shift 2
+      ;;
     --list) printf '%s\n' "${CHECKS[@]}"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "verify: unknown argument '$1'" >&2; usage >&2; exit "$EXIT_MISUSE" ;;
@@ -4576,6 +4724,15 @@ while [ "$#" -gt 0 ]; do
 done
 
 cd "$ROOT"
+
+# `--shard` and `--census` describe a selftest run. Silently ignoring them on
+# an ordinary run would let a workflow think it had sharded a gate that in
+# fact ran whole, or ran nothing.
+if [ "$mode" != "selftest" ] &&
+   { [ "$SELFTEST_SHARD" -ne 0 ] || [ -n "$SELFTEST_CENSUS" ]; }; then
+  echo "verify: --shard and --census are for --selftest" >&2
+  exit "$EXIT_MISUSE"
+fi
 
 if [ "$mode" = "selftest" ]; then
   rc=0
