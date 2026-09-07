@@ -1,17 +1,24 @@
 # The test-equipment registry.
 #
-# One entry per piece of equipment the science runs on, and one entry per
-# SUBSTRATE -- a served model on a machine, which is not the same thing. Two of
-# this program's substrates are the same machine, so a registry keyed by
+# A manifest of the hardware available for testing, in detail, plus one entry
+# per SUBSTRATE -- a served model on a machine, which is not the same thing. Two
+# of this program's substrates are the same machine, so a registry keyed by
 # machine could not record the experiment that compares them.
 #
-# Read `substrates/README.md` for what an id means, what an instance means, and
-# why a replaced part mints a new instance instead of editing the old one.
+# FULL SPECIFICATIONS, NOT CLASS DESCRIPTIONS, per the ruling on #52. A class
+# description ("a 24 GiB Ampere-class card") erases exactly the facts diagnosis
+# needs, and platform-specific cannot be told from systemic without them. The
+# excluded set is IDENTITY, and only identity: serial numbers, MAC addresses,
+# hostnames, physical location. A product name is a specification.
 #
-# Every value here was measured on the machine or read out of a committed
-# substrate capture, and each block says which and when. A field that is an
-# inference carries `inferred = true` and states what it was inferred from. A
-# field nobody has measured is absent, not guessed.
+# Read `substrates/README.md` for what an id means, what an instance means, and
+# where this file departs from a ruling and why.
+#
+# PROVENANCE IS PER FIELD. Every value is measured on the machine or read out of
+# a committed record, and each block says which and when. An inference carries
+# `*_inferred = true` and states what it was inferred from. A specification the
+# amendment names and nobody has measured is listed as absent, by name, so the
+# gap is visible rather than merely empty.
 
 [registry]
 version = 1
@@ -22,7 +29,7 @@ version = 1
 
 [machine.linux-pc]
 display_name = "ironblock's Linux PC"
-role = "the accelerator host; every served substrate in this program runs here"
+role = "the accelerator host"
 measured = "2026-09-05"
 
 accelerator = "NVIDIA GeForce RTX 3090 (GA102, PCI 10de:2204, Founders Edition)"
@@ -33,18 +40,32 @@ accelerator_power_limit_w = 350
 accelerator_power_limit_ceiling_w = 400
 accelerator_max_sm_clock_mhz = 2100
 interconnect = "PCIe 4.0 x16"
-interconnect_note = """
-`pcie.link.gen.max` is 4 and `pcie.link.width.max` is 16. A link rate sampled \
-from an idle card understates this by three generations: at pstate P8 \
-`pcie.link.gen.current` reads 1, and the archived fingerprints of 2026-07-25 \
-and 2026-09-04 both caught the card mid-ramp at 8 GT/s. The class fact is the \
-maximum; the sampled rate is an artefact of when the sample was taken."""
+interconnect_measured_by = """
+`nvidia-smi --query-gpu=pcie.link.gen.max,pcie.link.gen.current,pcie.link.width.max,\
+pcie.link.width.current` returning `4, 1, 16, 16` at pstate P8, read on the \
+machine 2026-09-05. The maximum is the specification; `gen.current` reads 1 at \
+idle and ramps under load, so a rate sampled from an idle card understates the \
+bus by three generations.
+
+NOT measured by the archived fingerprints, and an earlier version of this entry \
+said it was. The capture instrument records six hard-coded PCI addresses, and \
+nothing in the archive identifies which -- if any -- is the accelerator, so the \
+`sta=8GT/s` those captures record cannot be attributed to this card either way."""
 
 cpu = "AMD Ryzen 7 5800X, 8 cores / 16 threads, max 3801 MHz"
-memory = "4 x 8 GiB DDR4-2666, dual channel (four slots populated) = 32 GB, 31 GiB usable"
+memory = "4 x 8 GiB DDR4-2666, dual channel, four slots populated = 32 GB, 31 GiB usable"
 board = "ASUSTeK TUF GAMING X570-PRO (WI-FI), Rev X.0x"
 firmware = "BIOS 5044 (2026-01-04)"
 storage = "2 x 1.8 TB NVMe (Corsair Force MP600)"
+os = "Bazzite, an immutable Fedora-derived image; the deployment and kernel of a given fire are instance fields, not machine fields"
+
+not_measured = """
+Two specifications the #52 amendment names are absent from this entry because \
+nobody has read them: the POWER SUPPLY (model and rating -- the amendment calls \
+out power-supply derating under heat-soaked drives as a diagnosis this manifest \
+should support) and the NVMe devices' FIRMWARE revisions. Listed by name so the \
+gap is visible; a reader diagnosing either will know the manifest cannot help \
+yet."""
 
 cooling = """
 Custom hardline water loop: three radiators (2 x 360 mm + 280 mm), six 120 mm \
@@ -56,16 +77,15 @@ cooling_matters_because = """
 A stock air-cooled 3090 Founders Edition throttles under sustained decode and \
 this card does not. Absolute decode rates measured on this machine are \
 therefore NOT portable to a stock card of the same model; only within-machine \
-comparisons are. This is the single most important class fact in this entry, \
-and it is the reason the cooling is described at all."""
+comparisons are. Any result citing a substrate on this machine inherits that \
+limit."""
 cooling_not_reproducible_because = """
 Two parts of the loop do not fit this board as sold. The monoblock is nominally \
 for a different manufacturer's X570 board and mounts here only with decorative \
 trim removed; the chipset block is nominally another vendor's part, mounted on \
 a custom 3D-printed (engineering resin) adapter for a hole pattern this board \
-does not have. A reader can reproduce the accelerator, the CPU, the memory and \
-the board from this entry. They cannot reproduce the loop from a parts list, \
-and the registry should not imply otherwise."""
+does not have. Everything else in this entry is orderable; the loop is not \
+reproducible from a parts list, and the manifest should not imply it is."""
 
 [machine.mac-pro-2019]
 display_name = "ironblock's 2019 Mac Pro"
@@ -74,41 +94,64 @@ measured = "2026-09-05"
 
 model_identifier = "MacPro7,1"
 cpu = "Intel Xeon W-3235, 12 cores / 24 threads, 3.30 GHz"
-memory = "12 x 8 GiB DDR4 R-DIMM @ 2933 MHz, all twelve slots populated (six channels, fully banked) = 96 GiB"
+memory = "12 x 8 GiB DDR4 R-DIMM @ 2933 MHz, all twelve slots populated, six channels fully banked = 96 GiB"
 gpu = "AMD Radeon Pro W5700X, 16 GB, Metal 3"
 architecture = "x86_64"
 os = "macOS 26.5.2 (build 25F84)"
+not_measured = "storage devices and firmware; power supply."
 no_substrate_because = """
 Nothing in this program serves a model on this machine: its GPU is not adept at \
 the workload. It is registered as a host with no substrate beneath it, which is \
-a more honest record than inventing one. It is worth stating that it is x86_64 \
-with an AMD GPU, because "runs on the Mac" is otherwise ambiguous between this \
-machine and the laptop, and the two share no acceleration path at all."""
+a truer record than inventing one. Worth stating that it is x86_64 with an AMD \
+GPU, because "runs on the Mac" is otherwise ambiguous between this machine and \
+the laptop, and the two share no acceleration path at all."""
 
 [machine.macbook-pro-2021]
 display_name = "ironblock's 2021 MacBook Pro 16-inch"
 role = "the Apple-silicon floor suite's host"
-measured = "not measured -- owner-supplied, see below"
+measured = "2026-07-23"
+measured_by = """
+The floor suite's own substrate manifest, recorded on the machine before its \
+first fire. An earlier version of this entry said "not measured -- \
+owner-supplied" and gave the operating system as unknown. That was wrong: the \
+readout exists and is committed. What is true is narrower -- no seat has read \
+this machine SINCE, and the fields below that the manifest does not cover are \
+marked."""
 
 chip = "Apple M1 Max"
 memory = "32 GB unified"
 storage = "1 TB"
 in_service = true
-os = "unknown"
+os = "macOS 26.5.1 (build 25F80)"
+gpu_wired_memory_limit_mb = 30720
+gpu_wired_low_watermark_mb = 0
 core_counts = "10-core CPU / 32-core GPU"
 core_counts_inferred = true
 core_counts_inferred_from = """
 The owner supplied "highest core count for that year", which resolves to this \
-across the two SKUs M1 Max shipped in. It is an inference from that phrase and \
-the public SKU list, not a reading off the machine, and it should be confirmed \
-before anything leans on it."""
-measured_floor_result = "non-viable for the 27B in the floor suite, which is itself the useful class fact"
-placeholder_note = """
-This entry is a placeholder in the sense #52 sanctioned: the machine is real \
-and in service, nobody with access has run a readout, and the fields that are \
-absent are absent rather than filled in. The 32 GB figure settles a \
-contradiction inside the private archive, where one document asserted it as \
-fact and another carried it as an open question."""
+across the two SKUs M1 Max shipped in. An inference from that phrase and the \
+public SKU list, not a reading off the machine, and the one field here that \
+still wants confirming. The manifest records the chip and the memory but not \
+the core counts."""
+not_measured = "core counts (inferred, above); storage device and firmware; battery and power state."
+
+[machine.macbook-pro-2021.floor_result]
+what_was_measured = """
+Qwen3.6 27B raw on this machine (`dflash_enabled=false`, `mtp_enabled=false` \
+confirmed before firing): a context-ceiling sweep from 4K to 32K, generation \
+17.2 -> 13.7 tokens/second, degrading gently across the range."""
+what_disqualified_it = """
+NOT the throughput. A hard memory-pressure eviction at the 32K cell's second \
+draw. The sweep's own record says the gentle degradation was "never the \
+disqualifying signal"."""
+a_number_not_to_cite = """
+An inherited "~80 tok/s prefill / ~15 tok/s decode from zero context" figure \
+circulates for this machine. The archive holds no raw measurement behind it, \
+and the session that surfaced it recorded that the decode half was taken with a \
+speculative decoding path enabled -- so it is not a raw baseline. An earlier \
+version of this registry entry stated "non-viable for the 27B" as a bare \
+measured class fact, which put the verdict in public without the evidence that \
+actually supports it and beside a number that does not."""
 
 # ---------------------------------------------------------------------------
 # substrates
@@ -121,7 +164,24 @@ pinned = true
 
 engine_name = "beellama"
 engine_identity = "980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4"
-engine_identity_is = "sha256 of the llama-server binary, measured 2026-09-05"
+engine_identity_is = "sha256 of the llama-server binary, hashed on the machine 2026-09-05"
+engine_identity_note = """
+NO SUBSTRATE CAPTURE RECORDS THE ENGINE. All four captures carry an empty \
+`source_commit`, the 2026-09-04 one included, and no capture has a binary-digest \
+field at all. This digest was produced by a separate act of measurement on \
+2026-09-05, on the deployment the `2026-09-04` instance describes -- so it \
+attaches to the substrate and to that instance, and NOT to the three earlier \
+ones, which per the ruling on #52 must carry their own engine digest rather \
+than inherit this one.
+
+An earlier version of this file gave the reason for that split as the earlier \
+captures having an empty `source_commit`. That does not distinguish them: all \
+four are empty. The distinguishing fact is the date of the hashing, which is \
+what this field now says.
+
+The recommendation the whole series supports: a substrate capture should record \
+the serving binary's digest. Nothing else in the capture identifies it -- the \
+binary appears there by modification time and size, if at all."""
 engine_label = "preview-v0.3.2"
 engine_label_is_not_identity = """
 Upstream re-pointed this release tag on 2026-07-10, from one commit to a \
@@ -141,10 +201,8 @@ why there is no git checkout at or above the serving directory, no \
 `b0`: there was never a build tree to find. Pin the BINARY and not its \
 directory -- the unpacked directory also holds unrelated files, so a \
 directory-level digest would drift for reasons that have nothing to do with the \
-engine.
-
-The engine is a declared factor of the science and not an identity to be \
-scrubbed, per the ruling on #52."""
+engine. The engine is a declared factor of the science and not an identity to \
+be scrubbed, per the ruling on #52."""
 
 weights_main = "ff6941ded525b34eb159496762c29dd0ec6e71dc31b74d57e75d871a03eec259"
 weights_main_file = "Qwen3.6-27B-UD-Q4_K_XL.gguf"
@@ -160,8 +218,16 @@ them, and its regime records what it sent; where the two differ the fire's \
 regime is what ran. The extraction bakeoff of 2026-08-10 is one such fire."""
 
 serving_context = 160000
-serving_flags = "--flash-attn on, --kv-unified, --cache-type-k q5_0, --cache-type-v q4_1, --spec-type dflash, --spec-dflash-cross-ctx 1024, --spec-draft-ngl all, -ngl all, -b 2048, -ub 512, --mlock, --no-mmap, --no-mmproj-offload, --reasoning on"
+serving_flags = "--flash-attn on, --kv-unified, --cache-type-k q5_0, --cache-type-v q4_1, --spec-type dflash, --spec-dflash-cross-ctx 1024, --spec-draft-ngl all, -ngl all, -b 2048, -ub 512, --mlock, --no-mmap, --no-host, --no-mmproj-offload, --jinja, --chat-template-kwargs {\"preserve_thinking\":true}, --image-min-tokens 1024, --reasoning on"
 serving_flags_constant_across_instances = true
+serving_flags_excludes = """
+The captured serving line's remaining flags are carried elsewhere rather than \
+dropped: `--ctx-size` is `serving_context`, the four sampler flags are the \
+`sampler_card`, `-np` is each instance's `serving_parallel_slots`, and `-m`, \
+`--mmproj` and `--spec-draft-model` are file paths, withheld as identity and \
+carried here as the three weights digests. Nothing else in the captures is \
+omitted; an earlier version of this field silently dropped the template and \
+image flags, which govern how the model is prompted."""
 
 # Instances, oldest first. Each is pinned by a committed substrate capture in
 # the private research archive; the capture's date is the instance id.
@@ -171,23 +237,18 @@ os_deployment_version = "44.20260721"
 os_deployment_digest = "ece1632fd68d2b17089db0b960fd182d1a9b10bbc2c999457597d24d1616acaa"
 kernel = "7.1.3-ogc5.1.fc44.x86_64"
 serving_parallel_slots = 1
-pinned_by = "substrate capture of 2026-07-25, frozen as the program's v1.0 baseline"
+pinned_by = "substrate capture of 2026-07-25, and the archive's frozen v1.0 baseline of the same configuration"
 engine_identity_measured = false
-engine_identity_note = """
-No engine digest was captured at this instance. The archive's frozen baseline \
-for it records why: its source-commit field is empty because the server was run \
-from the unpacked `preview-v0.3.2` release directory and not from a git \
-checkout, so there was no commit to record. That is provenance BY RECORD -- the \
-archive says which release directory served this instance -- against the \
-provenance BY MEASUREMENT the 2026-09-04 instance carries, where the binary \
-itself was hashed. Nothing in the archive ties this instance's bytes to that \
-digest. Treat this instance's engine as identified but not pinned."""
+engine_identified_by_record = """
+The frozen baseline's own note records that the server ran from the unpacked \
+`preview-v0.3.2` release directory rather than a git checkout. That is which \
+engine, by record. It is not the engine's bytes, by measurement."""
 weights_digest_note = """
 Two captures pin this instance. One records the three weights files by sha256, \
-the other by size and modification time only -- the fingerprint tool recorded \
-both forms in this era. The digests in the first agree with every capture from \
+the other by size and modification time only -- the capture tool recorded both \
+forms in this era. The digests in the first agree with every capture from \
 2026-08-13 onward, so the weights are the same files throughout; the size and \
-mtime form is noted because a reader comparing the two captures will find them \
+mtime form is noted because a reader diffing the two captures will find them \
 unlike and should know why."""
 
 [[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
@@ -208,11 +269,19 @@ serving_parallel_slots = 2
 pinned_by = "substrate capture of 2026-08-16"
 engine_identity_measured = false
 why_a_separate_instance = """
-Same operating system deployment, same kernel, same engine, same weights as \
-2026-08-13 -- and a different substrate. The server's parallel-slot count went \
-from 1 to 2, which changes how requests share the cache. An instance keyed only \
-on the operating system could not tell these two apart, and this pair is the \
-measured proof that it must not be."""
+Same operating system deployment, same kernel, same weights and same serving \
+flags as 2026-08-13. The server's parallel-slot count went from 1 to 2, which \
+changes how requests share the cache.
+
+The engine is NOT part of that list: it is unpinned at both instances, and \
+"same engine" would be an inference inside a sentence whose point is what was \
+measured.
+
+THIS INSTANCE DEPARTS FROM A RULING AND THE DEPARTURE IS ARGUED IN THE README. \
+The first comment on #52 placed the slot count in the regimen grammar as a \
+per-run declared field, "noted so the registry's substrate entries do not \
+absorb what is a per-run setting". This pair is the reason to look at that \
+again, and it is the maintainer's call, not this seat's."""
 
 [[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
 id = "2026-09-04"
@@ -222,15 +291,46 @@ kernel = "7.2.1-ogc4.1.fc44.x86_64"
 serving_parallel_slots = 2
 pinned_by = "substrate capture of 2026-09-04, taken after the operating system update of 2026-09-03"
 engine_identity_measured = true
+engine_identity_measured_on = "2026-09-05"
+engine_identity_measured_how = """
+The binary was hashed on the running deployment. The capture of 2026-09-05 taken \
+during that session records the same deployment digest, version and kernel as \
+this instance and no other, which is what ties the digest to this instance \
+rather than to the substrate at large."""
 current = true
 
 [substrate.apple32-omlx-gemma12b]
 machine = "macbook-pro-2021"
-description = "Gemma 4 12B served by oMLX on Apple silicon; the floor suite's substrate"
+description = "Gemma 4 12B, quantized, served by oMLX on Apple silicon; the floor suite's substrate"
 pinned = false
+measured = "2026-07-23"
+measured_by = "the floor suite's substrate manifest, recorded on the machine before its first fire"
+
+engine_name = "oMLX"
+engine_label = "0.5.3"
+weights_model_id = "gemma-4-12B-it-qat-OptiQ-4bit"
+weights_quantization = "affine, group size 64, mixed 4/8-bit -- embeddings, attention and some MLP at 8-bit, most MLP at 4-bit"
+weights_size_on_disk = "8.4 GB"
+draft_model_id = "gemma-4-12B-it-assistant"
+draft_model_note = "oMLX's VLM-MTP path: an 837 MB drafter proposing tokens for the 12B target. Not DFlash; the manifest confirms `dflash_enabled: false`, `mtp_enabled: false`, `vlm_mtp_enabled: true`."
+sampler_card = "temperature 1.0, top_k 64, top_p 0.95"
+sampler_card_is = "the model card's required values, confirmed live against the serving configuration at manifest time"
+prefix_cache_block_tokens = 1024
+prefix_cache_note = """
+Four times coarser than the accelerator substrate's 256-token blocks, and only 8 \
+of 48 layers keep a full growing cache. A conversation whose per-turn growth \
+stays under ~1024 tokens gets zero incremental cache credit turn to turn here \
+where it would get credit every 256 tokens there. A real difference in \
+warm-fork economics between the two substrates, and a reason not to compare \
+their cache numbers directly."""
+
 unpinned_because = """
-Named here because the regimen arms of the Apple floor suite reference this \
-substrate and had nothing to reference before. Nothing about it has been \
-measured by a seat with access: no engine digest, no weights digest, no sampler \
-card, no operating system version. It is a name with a machine behind it and \
-nothing else, and it is marked so rather than filled in."""
+No digests. The manifest records model ids, quantization and size on disk and \
+states plainly that file hashes were not computed, so this substrate cannot be \
+pinned for parity -- an id and a size do not distinguish two builds of the same \
+model. Everything else the shape asks for IS measured and is carried above.
+
+An earlier version of this entry said "nothing about it has been measured... a \
+name with a machine behind it and nothing else". That was false in three of its \
+four particulars, and the manifest it should have been read against was \
+committed before the fixtures that reference this substrate were written."""
