@@ -629,7 +629,8 @@ mod tests {
 
     use crate::client::Client;
     use crate::client::shape::{
-        Concurrency, Dialect, Limits, Message, RequestShape, Role, SamplerCard, Serving,
+        Concurrency, Dialect, Limits, Message, RequestShape, Role, SamplerCard, SamplerSetting,
+        Serving,
     };
     use crate::client::stub::{Act, Stub};
     use crate::client::transport::{Endpoint, Http};
@@ -723,6 +724,16 @@ mod tests {
 
     /// Run `script` against a canned server playing `acts`.
     fn against(script: &Script, acts: Vec<Act>, ground: &Ground) -> Result<Drive, Halt> {
+        shaped(script, acts, ground, shape())
+    }
+
+    /// The same, with a request shape the caller chose.
+    fn shaped(
+        script: &Script,
+        acts: Vec<Act>,
+        ground: &Ground,
+        shape: RequestShape,
+    ) -> Result<Drive, Halt> {
         let stub = Stub::serving(acts).expect("loopback binds");
         let client = Client::new(
             Http::new(Endpoint::parse(&stub.url()).expect("the stub's URL is an endpoint")),
@@ -736,7 +747,7 @@ mod tests {
             script,
             &Gym {
                 client: &client,
-                shape: shape(),
+                shape,
                 confinement: &Confinement::Unconfined,
                 isolation: &isolation,
                 worktree: &ground.tree,
@@ -915,6 +926,57 @@ mod tests {
         assert_eq!(
             responses, 1,
             "one answer per call, which is why the response side needs no id match"
+        );
+    }
+
+    #[test]
+    fn a_stripped_retry_archives_the_body_that_attempt_actually_sent() {
+        // The reason the request rows are matched by ID. A connection retry
+        // sends the same body twice, so it cannot tell "this attempt's body"
+        // from "the last attempt's body"; a 4xx-STRIP can, because the second
+        // attempt sends LESS. A record that gave both rows the second body
+        // would say the client never pinned the setting it pinned, which is
+        // the regime evidence the whole echo mechanism exists to keep.
+        let ground = Ground::make("stripped");
+        let mut script = three_turns();
+        script.turns.truncate(1);
+        script.turns[0].fork = None;
+        script.turns[0].commands = Vec::new();
+
+        let mut pinned = shape();
+        pinned.sampler = SamplerCard::empty()
+            .with_decimal(SamplerSetting::Temperature, "0.6")
+            .expect("a spelling the record can read back");
+
+        let acts = vec![
+            Act::Status(
+                400,
+                "{\"error\":{\"message\":\"unknown field: temperature\"}}".to_owned(),
+            ),
+            canned::acts().remove(0),
+        ];
+        let drive = shaped(&script, acts, &ground, pinned).expect("the drive ran after the strip");
+
+        let bodies: Vec<String> = drive
+            .record
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Request { text, .. } => text.clone(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(bodies.len(), 2, "the 4xx was retried with less: {bodies:?}");
+        assert!(
+            bodies[0].contains("temperature"),
+            "the first attempt pinned it: {}",
+            bodies[0]
+        );
+        assert!(
+            !bodies[1].contains("temperature"),
+            "the second did not, and the record has to show BOTH or it cannot \
+             say what the run was served under: {}",
+            bodies[1]
         );
     }
 

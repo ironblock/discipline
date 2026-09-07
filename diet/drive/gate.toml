@@ -46,6 +46,7 @@ catches = [
     "drive::digest::tests::the_published_vectors_are_what_comes_out",
     "drive::digest::tests::the_spelling_is_the_one_the_record_requires",
     "drive::digest::tests::the_system_agrees_with_it",
+    "drive::tests::a_two_turn_script_summarises_two_turns",
     "drive::tests::every_entry_names_the_turn_it_actually_came_from",
     "drive::tests::the_record_is_an_archive_and_not_a_ledger",
     "drive::tests::the_summary_totals_what_the_rows_say_and_the_digest_is_the_products",
@@ -137,12 +138,14 @@ catches = [
 id = "drive.the-turn-count-is-a-constant"
 failure_class = "drive.the-turn-count-is-a-constant"
 target = "diet/src/drive/mod.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
         turns: u32::try_from(script.turns.len()).unwrap_or(u32::MAX),'''
 becomes = '''
         turns: 3,'''
 catches = [
+    "drive::tests::a_retried_call_archives_each_attempt_with_what_that_attempt_sent",
+    "drive::tests::a_two_turn_script_summarises_two_turns",
 ]
 
 [[fault]]
@@ -195,24 +198,23 @@ becomes = '''
                 let _ = id;
             }'''
 catches = [
+    "drive::tests::a_retried_call_archives_each_attempt_with_what_that_attempt_sent",
     "drive::tests::the_record_is_an_archive_and_not_a_ledger",
 ]
 
 [[fault]]
-id = "drive.the-answer-is-attached-to-whichever-response-is-last"
-failure_class = "drive.the-answer-is-attached-to-whichever-response-is-last"
+id = "drive.the-request-body-is-whichever-attempt-was-last"
+failure_class = "drive.the-request-body-is-whichever-attempt-was-last"
 target = "diet/src/drive/mod.rs"
 expect_exit = 0
 anchor = '''
-                if let Some(answer) = answered
-                    && &answer.produced_by == to_request
-                {
-                    *text = Some(answer.text.clone());
+                if let Some(attempt) = call.attempts.iter().find(|a| &a.id == id) {
+                    *text = Some(wire::body(&attempt.sent));
                 }'''
 becomes = '''
-                let _ = to_request;
-                if let Some(answer) = answered {
-                    *text = Some(answer.text.clone());
+                let _ = id;
+                if let Some(attempt) = call.attempts.last() {
+                    *text = Some(wire::body(&attempt.sent));
                 }'''
 catches = [
 ]
@@ -263,7 +265,7 @@ catches = [
 id = "drive.the-record-is-never-parsed-back"
 failure_class = "drive.the-record-is-never-parsed-back"
 target = "diet/src/drive/mod.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
     let record =
         crate::formats::record::parse(&rendered).map_err(|why: ParseError| Halt::Unrecordable {
@@ -272,13 +274,14 @@ anchor = '''
 becomes = '''
     let record = built.clone();'''
 catches = [
+    "drive::tests::a_record_this_drive_cannot_write_is_a_halt_and_not_a_file",
 ]
 
 [[fault]]
 id = "drive.the-fold-keeps-untagged-prose-too"
 failure_class = "drive.the-fold-keeps-untagged-prose-too"
 target = "diet/src/drive/mod.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
         let (Some(tag), interview::Outcome::Value(content)) = (&field.tag, &field.outcome) else {
             continue;
@@ -289,6 +292,7 @@ becomes = '''
             continue;
         };'''
 catches = [
+    "drive::tests::what_the_fold_could_not_capture_is_counted_and_named",
 ]
 
 [[fault]]
@@ -342,6 +346,9 @@ becomes = '''
 catches = [
     "drive::tests::a_call_that_did_not_answer_stops_the_drive",
     "drive::tests::a_command_that_never_ran_stops_the_drive",
+    "drive::tests::a_record_this_drive_cannot_write_is_a_halt_and_not_a_file",
+    "drive::tests::a_retried_call_archives_each_attempt_with_what_that_attempt_sent",
+    "drive::tests::a_two_turn_script_summarises_two_turns",
     "drive::tests::every_entry_names_the_turn_it_actually_came_from",
     "drive::tests::the_record_is_an_archive_and_not_a_ledger",
     "drive::tests::the_summary_totals_what_the_rows_say_and_the_digest_is_the_products",
