@@ -93,15 +93,22 @@ Two consumers are needed, and both live in directories this seat does not own:
 Until then the two results directories on their way in do something weaker, and
 they do two *different* weaker things, which is worth stating exactly:
 
-- `results/2026-07-29-confabulation-on-nulls` names its instance in the record's
-  start row — the substrate's `hardware` string — and nothing in its front
-  matter marks that the reference is prose rather than schema.
-- `results/2026-08-10-extraction-acceptance-inverts` declares in its front
-  matter that its instance is **undetermined**, between `2026-07-25` and
-  `2026-08-13`, because no substrate capture was taken for that fire.
+Both name their instance in the record's start row — the substrate's `hardware`
+string — and both carry a `known_defects` entry saying the instance is an
+**inference**, because neither fire has a substrate capture of its own:
 
-Neither directory exists on this branch; both are open elsewhere and merge
-separately.
+- `results/2026-07-29-confabulation-on-nulls` is instance `2026-07-25`, inferred
+  from bracketing: two captures before the fire and three after it, on
+  2026-08-03, all on the same deployment and kernel.
+- `results/2026-08-10-extraction-acceptance-inverts` is instance `2026-08-13`,
+  inferred from that capture's uptime, which places its boot before the fire and
+  uninterrupted since, corroborated by the archive dating the deployment into
+  service on 2026-08-07.
+
+Both are the same shape of claim and both say so, which is the point: **a fire
+with no capture of its own gets an inferred instance with its basis stated, not
+a bare id and not a shrug.** Neither directory exists on this branch; both are
+open elsewhere and merge separately.
 
 ## What is measured, and what is not
 
