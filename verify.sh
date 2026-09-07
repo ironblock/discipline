@@ -1923,6 +1923,139 @@ path.write_text(
 EOF
 }
 
+# A tag the dogma writes and the vocabulary does not carry. The interview
+# parser reads it as prose, silently, on every answer that carries it -- the
+# continuation bug in a new dress, and the reason the table is checked against
+# the templates rather than trusted beside them.
+#
+# An INLINE row, deliberately, and the two obvious choices were tried first: a
+# tag added to a template also trips the dogma's digest pin, and a `line` row
+# removed from the table also trips the grammar/table agreement test. Both
+# would go red for two reasons at once, and a signature that fires for two
+# faults grades neither.
+inject_interview_tag_undeclared() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/interview/tags.tsv")
+source = path.read_text(encoding="utf-8")
+row = "IMPLICATION\tinline\t-\n"
+assert row in source, "the row this injection removes is not in the table"
+path.write_text(source.replace(row, "", 1), encoding="utf-8")
+EOF
+}
+
+# The operating points sorted. A table sorts, which is why this format projects
+# to an array -- and sorted, `qwen3` precedes `qwen3.6`, so the id `qwen3.6`
+# matches the entry whose `thinking_kwarg` is false, while the entry that
+# should have won says true and carries the receipt that the soft switch is
+# dead on that model. The wrong control, silently, and reachable.
+inject_operating_points_sorted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/operating_points.rs")
+source = path.read_text(encoding="utf-8")
+anchor = "    Ok(entries)\n"
+assert source.count(anchor) == 1, "the projection's return moved"
+path.write_text(
+    source.replace(anchor, "    entries.sort_by(|a, b| a.key.cmp(&b.key));\n" + anchor, 1),
+    encoding="utf-8",
+)
+EOF
+}
+
+# A grammar that grew its own integer terminal while the others go on sharing
+# one.
+#
+# The obvious injection is wrong and running it is how that was found:
+# re-inlining `integer` into the regimen grammar breaks the RECORD parser --
+# eighteen compile errors, and the guard never runs, so the case would prove
+# the compiler works. Leaving the shared copy in place as well is a duplicate
+# rule, which pest rejects: also a build error. The drift that actually
+# COMPILES is a third grammar growing a copy of its own, unused, which pest is
+# perfectly happy with and nothing but this guard would say a word about.
+inject_number_terminal_regrown() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/decline/grammar.pest")
+path.write_text(
+    path.read_text(encoding="utf-8")
+    + '\ninteger = @{ ("-" ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*) | "0" }\n',
+    encoding="utf-8",
+)
+EOF
+}
+
+# Declared unreproducible and recomputable at once. The way a red result would
+# escape gate 0 is by ACQUIRING the tag rather than by losing the script, so
+# the two together are a contradiction and not a skip.
+inject_recompute_historical_with_a_script() {
+  python3 - <<'EOF'
+import pathlib
+import shutil
+
+template = pathlib.Path("results/_template")
+seeded = pathlib.Path("results/2026-01-30-seeded-historical")
+shutil.copytree(template, seeded)
+readme = seeded / "README.md"
+text = readme.read_text(encoding="utf-8")
+text = text.replace(
+    'kind = "reproducible-by-config"',
+    'kind = "historical-observation"\nhistorical_reason = "the capture lane dropped substrate ids"',
+    1,
+)
+readme.write_text(text, encoding="utf-8")
+EOF
+}
+
+# A tag with no reason behind it, which is the opt-out every red result reaches
+# for. Which capture-side flaw, or why the inputs cannot exist.
+inject_recompute_historical_without_a_reason() {
+  python3 - <<'EOF'
+import pathlib
+import shutil
+
+template = pathlib.Path("results/_template")
+seeded = pathlib.Path("results/2026-01-30-seeded-unreasoned")
+shutil.copytree(template, seeded)
+(seeded / "recompute.sh").unlink()
+readme = seeded / "README.md"
+readme.write_text(
+    readme.read_text(encoding="utf-8").replace(
+        'kind = "reproducible-by-config"', 'kind = "historical-observation"', 1
+    ),
+    encoding="utf-8",
+)
+EOF
+}
+
+# Results present and none of them recomputed, with the template excluded from
+# the count. A check of nothing is not a pass, applied to results -- and the
+# directory this leaves behind is entirely LEGAL, which is the point: the
+# census goes red on the shape of the tree, not on a defect in the directory.
+inject_recompute_only_the_template_recomputes() {
+  python3 - <<'EOF'
+import pathlib
+import shutil
+
+template = pathlib.Path("results/_template")
+seeded = pathlib.Path("results/2026-01-30-seeded-only-historical")
+shutil.copytree(template, seeded)
+(seeded / "recompute.sh").unlink()
+readme = seeded / "README.md"
+readme.write_text(
+    readme.read_text(encoding="utf-8").replace(
+        'kind = "reproducible-by-config"',
+        'kind = "historical-observation"\nhistorical_reason = "the substrate no longer exists"',
+        1,
+    ),
+    encoding="utf-8",
+)
+EOF
+}
+
 inject_ci() {
   # Take a check's owner away: it then runs in no workflow, while CI is green.
   sed -i '/^hygiene\t/d' .github/check-owners.tsv
@@ -4417,6 +4550,18 @@ selftest() {
     'hygiene: internal-ticket-id:'
   seeded_case "external subresource on the site"      pages    inject_pages \
     'hygiene: external-subresource:'
+  seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
+    'dogma tag\(s\) absent from diet/formats/interview/tags\.tsv' 'lib/formats::interview'
+  seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \
+    "the projection lost the file's order" 'lib/formats::operating_points'
+  seeded_case "an integer terminal grown a second time" test     inject_number_terminal_regrown \
+    'it belongs in number\.pest and nowhere else' 'test:conformance/the_integer_terminal'
+  seeded_case "historical, and carrying a recompute"   recompute inject_recompute_historical_with_a_script \
+    'declares .historical-observation. and carries a recompute\.sh'
+  seeded_case "historical with no reason stated"       recompute inject_recompute_historical_without_a_reason \
+    'states no .historical_reason.'
+  seeded_case "only the template recomputes"           recompute inject_recompute_only_the_template_recomputes \
+    'results are present and none recomputed'
   seeded_case "a check no workflow runs"              ci       inject_ci \
     'has no owner in check-owners\.tsv'
   seeded_case "pull requests filtered by branch"      ci       inject_ci_pr_branch_filter \

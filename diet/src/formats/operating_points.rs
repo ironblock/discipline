@@ -429,7 +429,14 @@ mod tests {
     fn the_entries_come_back_in_the_order_the_file_wrote_them() {
         let entries = parse(FIXTURE).expect("the dogma's operating points parse");
         let order: Vec<&str> = entries.iter().map(|entry| entry.key.as_str()).collect();
-        assert_eq!(order, vec!["qwen3_6", "qwen3_5", "qwen3", "gemma"]);
+        assert_eq!(
+            order,
+            vec!["qwen3_6", "qwen3_5", "qwen3", "gemma"],
+            "the projection lost the file's order, which is the matching rule: \
+             `qwen3` is a substring of `qwen3.6` and is written after it for \
+             that reason, so any order but the file's hands `qwen3.6` to the \
+             wrong entry"
+        );
 
         let sorted = {
             let mut copy = order.clone();

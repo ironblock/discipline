@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 281
+red_faults = 287
 mechanics_assertions = 39
 migrated = 0
 
@@ -3030,4 +3030,55 @@ check = "injections"
 label = "a merged field an injection cannot see"
 failure_class = "gate.injection-literal-incomplete"
 legacy_signature = "builds a Provenance without cohort"
+migrated = false
+[[fault]]
+id = "test.interview_tag_undeclared"
+kind = "seeded-gate"
+check = "test"
+target = "lib/formats::interview"
+label = "a dogma tag in no vocabulary"
+failure_class = "interview.tag-undeclared"
+legacy_signature = "dogma tag\\(s\\) absent from diet/formats/interview/tags\\.tsv"
+migrated = false
+[[fault]]
+id = "test.operating_points_sorted"
+kind = "seeded-gate"
+check = "test"
+target = "lib/formats::operating_points"
+label = "operating points sorted, not in file order"
+failure_class = "operating-points.order-lost"
+legacy_signature = "the projection lost the file's order"
+migrated = false
+[[fault]]
+id = "test.number_terminal_regrown"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/the_integer_terminal"
+label = "an integer terminal grown a second time"
+failure_class = "grammar.terminal-defined-twice"
+legacy_signature = "it belongs in number\\.pest and nowhere else"
+migrated = false
+[[fault]]
+id = "recompute.recompute_historical_with_a_script"
+kind = "seeded-gate"
+check = "recompute"
+label = "historical, and carrying a recompute"
+failure_class = "gate-zero.historical-and-recomputable"
+legacy_signature = "declares .historical-observation. and carries a recompute\\.sh"
+migrated = false
+[[fault]]
+id = "recompute.recompute_historical_without_a_reason"
+kind = "seeded-gate"
+check = "recompute"
+label = "historical with no reason stated"
+failure_class = "gate-zero.historical-without-a-reason"
+legacy_signature = "states no .historical_reason."
+migrated = false
+[[fault]]
+id = "recompute.recompute_only_the_template_recomputes"
+kind = "seeded-gate"
+check = "recompute"
+label = "only the template recomputes"
+failure_class = "gate-zero.nothing-recomputed"
+legacy_signature = "results are present and none recomputed"
 migrated = false
