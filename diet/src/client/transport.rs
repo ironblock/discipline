@@ -367,13 +367,22 @@ enum Framing {
 
 /// The value of the first header named `name`.
 ///
-/// The status line is skipped. It used to be read like any other line, with a
-/// `?` that returned from the whole function the moment a line had no colon --
-/// so this answered `None` for every reply ever, and the client fell back to
-/// reading until the server closed. It worked, because the servers under test
-/// closed. It would have hung against one that did not.
+/// `find_map` with the `?` inside the CLOSURE, which is the whole point. This
+/// was a `for` loop with the same `?` in its body, where it returns from the
+/// function -- so the status line, which has no colon, ended the search on the
+/// first iteration and this answered `None` for every reply ever written. The
+/// client fell back to reading until the server closed. It worked, because the
+/// servers under test closed; against one that did not it would have sat there
+/// until its deadline and reported a timeout about a server that had already
+/// answered.
+///
+/// The status line is deliberately NOT skipped. A `skip(1)` was here and was
+/// removed: for it to change any answer, the text before a status line's first
+/// colon would have to trim to a header name, and it begins `HTTP/`. A guard
+/// that cannot fire is not a guard, and the rule it was standing for is the
+/// paragraph above.
 fn header<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
-    headers.split("\r\n").skip(1).find_map(|line| {
+    headers.split("\r\n").find_map(|line| {
         let (key, value) = line.split_once(':')?;
         key.trim().eq_ignore_ascii_case(name).then(|| value.trim())
     })
@@ -558,18 +567,15 @@ mod tests {
     fn the_framing_is_read_from_the_headers_and_chunked_wins() {
         assert_eq!(
             framing("HTTP/1.1 200 \r\nContent-Length: 12"),
-            Framing::Length(12)
+            Framing::Length(12),
+            "the status line carries no colon, and a reader that gives up on it \
+             reports no length for any reply ever sent"
         );
         assert_eq!(framing("HTTP/1.1 200 \r\nX: y"), Framing::ToClose);
         assert_eq!(
             framing("HTTP/1.1 200 \r\nContent-Length: 12\r\nTransfer-Encoding: chunked"),
             Framing::Chunked,
             "reading a chunked body as a flat one hands framing bytes to a parser"
-        );
-        assert_eq!(
-            framing("HTTP/1.1 200 OK: not a header\r\nContent-Length: 3"),
-            Framing::Length(3),
-            "the status line is not a header, whatever punctuation it carries"
         );
     }
 
