@@ -1019,10 +1019,14 @@ mod tests {
             );
             checked += 1;
         }
+        let declared: usize = between(manifest, "\nfaults = ", "\n")
+            .expect("the package block declares a count")
+            .parse()
+            .expect("the count is a number");
         assert_eq!(
-            checked, 12,
-            "the manifest declares its own count, and a scanner that found a \
-             different number found the wrong thing"
+            checked, declared,
+            "the manifest declares its own count and this reads it: hardcoding the \
+             number here let `faults = 9001` pass"
         );
     }
 
