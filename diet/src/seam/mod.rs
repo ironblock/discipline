@@ -671,6 +671,72 @@ mod tests {
         );
     }
 
+    /// The claim #27 exists for, and the one the test above could not make.
+    ///
+    /// Comparing prefixes across turns while the object sits still proves
+    /// nothing: re-rendering every turn from an unchanged object produces the
+    /// same bytes, and mutating the controller to do exactly that left the
+    /// whole suite green. The claim is not that the controller renders
+    /// rarely -- it is that **the prefix does not move while the object
+    /// does**. A capture lane writes on every turn; a controller that
+    /// rendered mid-phase would change the prefix under a warm cache and pay
+    /// a full re-prefill for each of those turns.
+    #[test]
+    fn the_prefix_does_not_move_while_the_object_does() {
+        let mut object = three_facts();
+        let mut controller = Controller::open(
+            policy("seam_every_turns = 3\n"),
+            &object,
+            Scripted::silent(),
+        );
+        let opening = controller.prefix().to_owned();
+        let mut prefixes = Vec::new();
+
+        for turn in 1..=5_u32 {
+            controller.begin_turn();
+            // A lane writes a fact, as one does every turn.
+            object
+                .apply_turn(&[add(
+                    &format!("lane-{turn}"),
+                    &format!("a fact captured on turn {turn}"),
+                    turn,
+                    0,
+                )])
+                .expect("the lane's patch applies");
+            controller.settle(&mut object).expect("the fold applies");
+            prefixes.push(controller.prefix().to_owned());
+        }
+
+        assert_eq!(
+            prefixes[0], opening,
+            "turn 1 wrote to the object and the prefix did not move"
+        );
+        assert_eq!(prefixes[1], opening, "nor on turn 2");
+        assert!(
+            !opening.contains("a fact captured on turn 1"),
+            "and the prefix genuinely lags the object: the lane's fact is in the \
+             object and not yet in the prompt"
+        );
+
+        assert_ne!(prefixes[2], opening, "the seam at turn 3 rebuilt it");
+        assert!(
+            prefixes[2].contains("a fact captured on turn 1")
+                && prefixes[2].contains("a fact captured on turn 3"),
+            "and picked up everything the lanes wrote in between: {}",
+            prefixes[2]
+        );
+
+        assert_eq!(
+            prefixes[3], prefixes[2],
+            "turn 4 wrote, and the prefix held"
+        );
+        assert_eq!(prefixes[4], prefixes[2], "and so did turn 5");
+        assert!(
+            !prefixes[4].contains("a fact captured on turn 4"),
+            "which is the whole claim: the object has moved on and the prompt has not"
+        );
+    }
+
     /// Row three: a proposal the graph forbids is recorded, and no seam fires.
     #[test]
     fn a_transition_the_graph_forbids_is_recorded_and_fires_nothing() {
@@ -1089,6 +1155,33 @@ mod tests {
         assert!(
             measured < render::render(&object, None).len() as u64,
             "the working set is the entries, not the whole prompt"
+        );
+    }
+
+    #[test]
+    fn the_working_set_measures_size_and_not_a_count_of_entries() {
+        // `measured > 0` and `measured < the whole render` are both true of a
+        // count of entries, so neither says what is being measured. What
+        // separates them: one long entry is a bigger prompt than three short
+        // ones, and a count says the opposite.
+        let mut three_short = WorkingObject::open(regime());
+        three_short
+            .apply_turn(&[
+                add("a", "x", 1, 0),
+                add("b", "y", 1, 1),
+                add("c", "z", 1, 2),
+            ])
+            .expect("three adds apply");
+        let mut one_long = WorkingObject::open(regime());
+        one_long
+            .apply_turn(&[add("a", &"x".repeat(500), 1, 0)])
+            .expect("one add applies");
+
+        assert!(
+            render::working_set_bytes(&one_long) > render::working_set_bytes(&three_short),
+            "one 500-byte entry against three of one byte: {} against {}",
+            render::working_set_bytes(&one_long),
+            render::working_set_bytes(&three_short)
         );
     }
 
