@@ -1,6 +1,10 @@
 # Level-2 calibration, Run 1, the bare arm ("l2-bare"): config-identical to Pi, main lane thinking OFF.
 #
-# [serving] itself is kept below with nothing in it, as the arm's only binding under it is the array above.
+# [serving] carries the arm's array binding, and [serving.flags] is opened empty
+# below it exactly as the arm writes it. An earlier revision of this fixture said
+# the header was kept with nothing in it; that was true while the grammar had no
+# array and no second level of table, and it stopped being true when the schema
+# batch gave it both.
 #
 # The control lane injects Pi's verbatim summaries and does no capture forks, so
 # interview_thinking is moot here; set false for explicit Run-1 consistency.
