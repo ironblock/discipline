@@ -231,6 +231,16 @@ image flags, which govern how the model is prompted."""
 
 # Instances, oldest first. Each is pinned by a committed substrate capture in
 # the private research archive; the capture's date is the instance id.
+#
+# `os_deployment_digest` IS THE BASE-CHECKSUM, not the deployment's own. The
+# capture tool reads `rpm-ostree status` and takes `base-checksum` where it
+# exists, which names the upstream base IMAGE and does not change when packages
+# are layered locally on top of it. Verified on the machine 2026-09-07: the
+# booted 44.20260902 deployment reports base-checksum `b7807f90a98c...` -- the
+# value every capture carries -- and its own checksum `48f798c562fe...`, which
+# no capture records. The deployment checksum is the more specific identity;
+# the base-checksum is what the archive has, and calling it the deployment's
+# digest without saying so would overstate what an instance pins.
 [[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
 id = "2026-07-25"
 os_deployment_version = "44.20260721"
@@ -290,8 +300,23 @@ os_deployment_digest = "b7807f90a98c33e911dc0ec008bc73b50561e89566cee2b85b18ff95
 kernel = "7.2.1-ogc4.1.fc44.x86_64"
 serving_parallel_slots = 2
 pinned_by = "substrate capture of 2026-09-04, taken after the operating system update of 2026-09-03"
+os_deployment_checksum = "48f798c562fe4a76ba311f638a6b543429d02bdfd01fe9dfa7e7063109ee6e19"
+os_deployment_checksum_note = """
+The booted deployment's own checksum, read on the machine 2026-09-07. Recorded \
+only for this instance because it is the only one still bootable to read; the \
+three earlier instances have the base-checksum their captures took and nothing \
+more."""
 engine_identity_measured = true
 engine_identity_measured_on = "2026-09-05"
+engine_identity_reconfirmed_on = "2026-09-07"
+engine_identity_reconfirmed_how = """
+The running server's binary was hashed again through `/proc/<pid>/exe`, without \
+using a remembered path, and returned the same digest. The serving slot count \
+read 2 from the same process's command line, matching this instance."""
+successor_staged = "44.20260907"
+successor_staged_note = """
+As of 2026-09-07 a newer image is staged and not booted. It will mint a new \
+instance on the next reboot; `current = true` here is a statement about today."""
 engine_identity_measured_how = """
 The binary was hashed on the running deployment. The capture of 2026-09-05 taken \
 during that session records the same deployment digest, version and kernel as \

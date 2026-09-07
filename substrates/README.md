@@ -53,6 +53,10 @@ current entry describes.
 
 The stable id is what a reader shops for. **The instance is what parity matches.**
 
+An instance is a statement about a moment, and `current = true` is a statement
+about today: as of 2026-09-07 the accelerator host has a newer image staged and
+unbooted, which will mint a new instance the next time it reboots.
+
 ### Where this departs from a ruling, and why it is the maintainer's call
 
 The first comment on #52 places the server's parallel-slot count in the regimen
@@ -136,6 +140,11 @@ carried in the file rather than left to be discovered:
   the power supply and the NVMe firmware revisions. Listed by name in the entry,
   so a reader diagnosing power derating or storage behaviour knows the manifest
   cannot help yet.
+- **`os_deployment_digest` is the base-checksum**, the upstream base image,
+  which does not change when packages are layered locally. The deployment's own
+  checksum is the more specific identity and no capture records it. Read on the
+  machine for the current instance and carried there; the earlier instances have
+  what their captures took, and the field says so rather than implying more.
 
 ## The interconnect, as a worked example of being wrong twice
 
