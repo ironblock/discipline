@@ -2339,7 +2339,7 @@ kind = "seeded-gate"
 check = "recompute"
 label = "a results directory declaring no kind"
 failure_class = "results.kind-undeclared"
-legacy_signature = "0 recomputed, 0 declared historical, 1 undeclared"
+legacy_signature = "front-matter .kind. is None"
 migrated = false
 
 [[fault]]
@@ -2417,12 +2417,12 @@ legacy_signature = "carries no recompute.sh"
 migrated = false
 
 [[fault]]
-id = "recompute.recompute_nothing_recomputable"
+id = "recompute.recompute_template_opts_out"
 kind = "seeded-gate"
 check = "recompute"
-label = "a gate 0 with nothing recomputable"
+label = "the template carrying the opt-out"
 failure_class = "results.recompute-over-nothing"
-legacy_signature = "nothing was recomputed"
+legacy_signature = "the template declares .historical-observation."
 migrated = false
 
 [[fault]]

@@ -1793,7 +1793,7 @@ inject_recompute_script_missing() {
 # Every directory declared historical, so gate 0 has nothing to run. A census
 # reading "0 recomputed, N historical, 0 undeclared" is a gate over nothing,
 # and the tripwire for it is the reason exit 2 exists.
-inject_recompute_nothing_recomputable() {
+inject_recompute_template_opts_out() {
   sed -i 's/^kind = "reproducible-by-config"$/kind = "historical-observation"/' \
     results/_template/README.md
 }
@@ -1801,12 +1801,19 @@ inject_recompute_nothing_recomputable() {
 inject_recompute_kind_undeclared() {
   python3 - <<'EOF'
 import pathlib
+import shutil
 
-path = pathlib.Path("results/_template/README.md")
-source = path.read_text(encoding="utf-8")
-old = 'kind = "reproducible-by-config"\n'
-assert old in source
-path.write_text(source.replace(old, "", 1), encoding="utf-8")
+# A RESULTS directory, not the template. The census counts the template
+# separately and it never satisfies the check, so emptying the template's kind
+# proves something about the template rather than about an undeclared result --
+# which is what this case's label has always said it was for.
+seeded = pathlib.Path("results/2026-01-30-seeded-undeclared")
+shutil.copytree(pathlib.Path("results/_template"), seeded)
+readme = seeded / "README.md"
+source = readme.read_text(encoding="utf-8")
+row = 'kind = "reproducible-by-config"\n'
+assert row in source
+readme.write_text(source.replace(row, "", 1), encoding="utf-8")
 EOF
 }
 
@@ -4499,7 +4506,7 @@ selftest() {
   seeded_case "a summary the rows do not carry"       recompute inject_recompute_summary_not_derived \
     'the report does not re-derive'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
-    '0 recomputed, 0 declared historical, 1 undeclared'
+    'front-matter .kind. is None'
   seeded_case "a recompute that cannot fail"          recompute inject_recompute_cannot_fail \
     'does not compare the report to the artefacts'
   seeded_case "a recompute that edits what it checks"  recompute inject_recompute_tampers \
@@ -4512,8 +4519,8 @@ selftest() {
     'which is not a file here'
   seeded_case "reproducible, with nothing to run"      recompute inject_recompute_script_missing \
     'carries no recompute.sh'
-  seeded_case "a gate 0 with nothing recomputable"     recompute inject_recompute_nothing_recomputable \
-    'nothing was recomputed'
+  seeded_case "the template carrying the opt-out"      recompute inject_recompute_template_opts_out \
+    'the template declares .historical-observation.'
   seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
     'but the committed file hashes to'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
