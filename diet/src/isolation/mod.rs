@@ -504,12 +504,12 @@ mod tests {
     use std::fs;
     use std::net::TcpListener;
     use std::os::unix::fs::PermissionsExt as _;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::process;
 
     use super::bwrap::{Bubblewrap, RUNNER};
-    use super::policy::{Isolation, Network, Policy, PolicyError};
-    use super::{Confinement, Denial, DenialKind, Platform, Ran, Unavailable, open_on};
+    use super::policy::{self, Isolation, Network, Policy, PolicyError};
+    use super::{Confinement, Denial, DenialKind, NotRun, Platform, Ran, Unavailable, open_on};
     use crate::formats::regimen;
 
     fn policy(text: &str) -> Policy {
@@ -897,6 +897,94 @@ mod tests {
     }
 
     #[test]
+    fn a_command_the_sandbox_could_not_execute_is_not_the_sandbox_failing() {
+        // The mirror of the fabrication above, and just as fabricated. The
+        // runner uses the same prefix and the same exit status for a command
+        // it could not execute -- AFTER building the sandbox perfectly well --
+        // and that happens constantly: the default policy binds `/usr` and
+        // `/etc`, so a toolchain in `/opt`, `/usr/local` or a home directory
+        // is simply not in there. Read as a setup failure it destroyed the
+        // exit status, the output and the real diagnosis, and told the caller
+        // the sandbox had not started about a sandbox that had.
+        let runner = Bubblewrap::at(PathBuf::from("bwrap"));
+        assert_eq!(
+            runner.setup_failure("bwrap: execvp cargo: No such file or directory\n", Some(1)),
+            None,
+            "the sandbox was built; `cargo` is what is missing, and that is the \
+             command's result to report"
+        );
+        assert_eq!(
+            runner.setup_failure("bwrap: Can't mkdir /dev: Read-only file system\n", Some(1)),
+            Some("bwrap: Can't mkdir /dev: Read-only file system".to_owned()),
+            "while a real setup failure is still one: the exclusion is the \
+             `execvp` prefix, not the whole discriminator"
+        );
+    }
+
+    #[test]
+    fn a_working_tree_that_cannot_mean_one_thing_is_refused_before_anything_runs() {
+        let ground = Ground::make("worktree");
+        let plain = Confinement::Unconfined;
+
+        // Resolved once by the harness and again inside the sandbox: a
+        // relative `repo` under `/w/repo` mounts `/w/repo/repo` OVER the tree
+        // it was meant to bind, and the command writes into a directory that
+        // is not the one the record names.
+        let relative = plain
+            .run(&Policy::unconfined(), Path::new("repo"), &argv(&["true"]))
+            .expect_err("a relative working tree is refused");
+        assert!(
+            matches!(relative, NotRun::Worktree { ref path, why } if path == "repo" && why.contains("absolute")),
+            "and refused for BEING relative, not for happening not to exist -- \
+             the two arrive at the same variant and mean different things: \
+             {relative:?}"
+        );
+        assert!(
+            relative.to_string().contains("repo"),
+            "and the refusal names it: {relative}"
+        );
+
+        let absent = plain
+            .run(
+                &Policy::unconfined(),
+                &ground.outside.join("not-there"),
+                &argv(&["true"]),
+            )
+            .expect_err("a working tree that is not a directory is refused");
+        assert!(matches!(absent, NotRun::Worktree { .. }), "{absent:?}");
+
+        assert!(
+            plain
+                .run(&Policy::unconfined(), &ground.tree, &argv(&["true"]))
+                .is_ok(),
+            "and an absolute directory that exists runs, or this is a refusal \
+             of everything rather than of the two shapes that cannot mean one \
+             thing"
+        );
+    }
+
+    #[test]
+    fn an_empty_command_is_refused_rather_than_running_the_runner_alone() {
+        // Under `Sandbox` the COMPOSED vector is never empty, so a guard on
+        // the composed one never fired here: the runner ran with no command
+        // at all, printed sixty lines of its usage text, exited 1, and that
+        // was banked as the command's own standard error and status.
+        let ground = Ground::make("empty");
+        let runner = Confinement::Sandbox(stand_in_runner(&ground.outside.join("stand-in")));
+        let refusal = runner
+            .run(&Policy::merged_usr(), &ground.tree, &[])
+            .expect_err("no command is not a command");
+        assert!(matches!(refusal, NotRun::Nothing), "{refusal:?}");
+
+        assert!(
+            Confinement::Unconfined
+                .run(&Policy::unconfined(), &ground.tree, &[])
+                .is_err(),
+            "and unconfined too, where the guard did fire"
+        );
+    }
+
+    #[test]
     fn the_record_is_read_from_the_run_and_not_written_down_as_a_constant() {
         let ground = Ground::make("record");
         let runner = Confinement::Sandbox(stand_in_runner(&ground.outside.join("stand-in")));
@@ -1109,6 +1197,27 @@ mod tests {
         assert!(DenialKind::ReadOnly.is_unambiguous());
         assert!(DenialKind::Network.is_unambiguous());
         assert!(DenialKind::PermissionDenied.is_unambiguous());
+
+        // And the distinction is USED at the one site where a false positive
+        // reaches the model. The module built it and then, for a while, did
+        // not use it: an ordinary missing file inside the working tree came
+        // back with a policy explanation attached, which the model believes.
+        assert!(
+            !missing
+                .as_the_model_sees_it()
+                .contains("ran under isolation"),
+            "an ambiguous denial gets no policy note: {}",
+            missing.as_the_model_sees_it()
+        );
+        let denied = ran("sh: 1: cannot create /etc/hosts: Read-only file system");
+        assert!(
+            denied
+                .as_the_model_sees_it()
+                .contains("ran under isolation"),
+            "and an unambiguous one still does, or the note is gone rather than \
+             narrowed: {}",
+            denied.as_the_model_sees_it()
+        );
     }
 
     #[test]
@@ -1209,6 +1318,24 @@ mod tests {
             Err(PolicyError::NotAbsolute("usr".to_owned())),
             "a relative path in a sandbox policy means whatever the harness's \
              working directory happened to be"
+        );
+
+        assert_eq!(
+            read("isolation = \"none\"\nnetwork = \"none\"\n"),
+            Err(PolicyError::Unenforceable {
+                key: policy::NETWORK,
+                under: Isolation::None,
+            }),
+            "recorded rather than refused, this is a drive that ran on the \
+             operator's network and banked a record saying it did not"
+        );
+        assert_eq!(
+            read("isolation = \"none\"\nnetwork = \"host\"\n")
+                .expect("a policy")
+                .network,
+            Network::Host,
+            "and the declaration that agrees with what unconfined means is read, \
+             not refused along with it"
         );
     }
 

@@ -26,7 +26,7 @@
 name = "diet-isolation"
 check = "test"
 command = "cargo test -p discipline-diet -- isolation --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 12
+faults = 19
 
 [[fault]]
 id = "isolation.vm-falls-back-to-the-sandbox"
@@ -74,6 +74,7 @@ becomes = '''
             None => Self::unconfined(),'''
 catches = [
     "isolation::tests::a_regimen_that_says_nothing_about_isolation_gets_the_sandbox",
+    "isolation::tests::the_network_is_shared_only_where_the_regimen_declares_it",
 ]
 
 [[fault]]
@@ -83,11 +84,10 @@ target = "diet/src/isolation/bwrap.rs"
 expect_exit = 101
 anchor = '''
         let tree = worktree.to_string_lossy().into_owned();
-        push(&["--bind", &tree, &tree]);
-        push(&["--remount-ro", "/"]);'''
+        push(&["--bind", &tree, &tree]);'''
 becomes = '''
-        push(&["--remount-ro", "/"]);
         let tree = worktree.to_string_lossy().into_owned();
+        push(&["--remount-ro", "/"]);
         push(&["--bind", &tree, &tree]);'''
 catches = [
     "isolation::tests::the_composition_is_exactly_what_the_policy_declares",
@@ -102,12 +102,30 @@ target = "diet/src/isolation/bwrap.rs"
 expect_exit = 101
 anchor = '''
         push(&["--remount-ro", "/"]);
+        push(&["--remount-ro", "/dev"]);
+        push(&["--remount-ro", "/dev/shm"]);
 '''
 becomes = '''
 '''
 catches = [
     "isolation::tests::the_composition_is_exactly_what_the_policy_declares",
     "isolation::tests::the_read_only_remount_comes_after_every_bind",
+    "isolation::tests::the_seeded_escapes_are_denied_where_the_mechanism_is_present",
+]
+
+[[fault]]
+id = "isolation.dev-and-shm-stay-writable"
+failure_class = "isolation.dev-and-shm-stay-writable"
+target = "diet/src/isolation/bwrap.rs"
+expect_exit = 101
+anchor = '''
+        push(&["--remount-ro", "/"]);
+        push(&["--remount-ro", "/dev"]);
+        push(&["--remount-ro", "/dev/shm"]);'''
+becomes = '''
+        push(&["--remount-ro", "/"]);'''
+catches = [
+    "isolation::tests::the_composition_is_exactly_what_the_policy_declares",
     "isolation::tests::the_seeded_escapes_are_denied_where_the_mechanism_is_present",
 ]
 
@@ -168,6 +186,7 @@ becomes = '''
             | Self::AbsentOrOutside => true,'''
 catches = [
     "isolation::tests::an_ambiguous_denial_is_named_as_one",
+    "isolation::tests::the_record_is_read_from_the_run_and_not_written_down_as_a_constant",
 ]
 
 [[fault]]
@@ -176,12 +195,110 @@ failure_class = "isolation.setup-failure-read-as-a-command-result"
 target = "diet/src/isolation/bwrap.rs"
 expect_exit = 101
 anchor = '''
-        (exit == Some(1) && first.starts_with("bwrap: ")).then(|| first.to_owned())'''
+        let is_runner = first.starts_with("bwrap: ") && !first.starts_with("bwrap: execvp ");
+        (exit == Some(1) && is_runner).then(|| first.to_owned())'''
 becomes = '''
         let _ = (first, exit);
         None'''
 catches = [
     "isolation::tests::a_runner_that_could_not_build_the_sandbox_is_not_a_command_result",
+]
+
+[[fault]]
+id = "isolation.execvp-read-as-a-setup-failure"
+failure_class = "isolation.execvp-read-as-a-setup-failure"
+target = "diet/src/isolation/bwrap.rs"
+expect_exit = 0
+anchor = '''
+        let is_runner = first.starts_with("bwrap: ") && !first.starts_with("bwrap: execvp ");'''
+becomes = '''
+        let is_runner = first.starts_with("bwrap: ");'''
+catches = [
+]
+
+[[fault]]
+id = "isolation.the-record-is-a-constant"
+failure_class = "isolation.the-record-is-a-constant"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 101
+anchor = '''
+            confined,
+            isolation: self.isolation(),
+            network: policy.network,'''
+becomes = '''
+            confined: argv.to_vec(),
+            isolation: Isolation::None,
+            network: Network::Host,'''
+catches = [
+    "isolation::tests::the_record_is_read_from_the_run_and_not_written_down_as_a_constant",
+]
+
+[[fault]]
+id = "isolation.network-under-none-is-recorded"
+failure_class = "isolation.network-under-none-is-recorded"
+target = "diet/src/isolation/policy.rs"
+expect_exit = 0
+anchor = '''
+            if policy.isolation == Isolation::None && network == Network::None {
+                return Err(PolicyError::Unenforceable {
+                    key: NETWORK,
+                    under: Isolation::None,
+                });
+            }
+'''
+becomes = '''
+'''
+catches = [
+]
+
+[[fault]]
+id = "isolation.a-relative-worktree-is-accepted"
+failure_class = "isolation.a-relative-worktree-is-accepted"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 0
+anchor = '''
+        if !worktree.is_absolute() {
+            return Err(NotRun::Worktree {
+                path: worktree.to_string_lossy().into_owned(),
+                why: "it is not absolute, and a relative working tree is resolved once by \
+                      the harness and again inside the sandbox",
+            });
+        }
+'''
+becomes = '''
+'''
+catches = [
+]
+
+[[fault]]
+id = "isolation.the-note-is-attached-to-every-denial"
+failure_class = "isolation.the-note-is-attached-to-every-denial"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 0
+anchor = '''
+        if self
+            .denials()
+            .iter()
+            .any(|denial| denial.kind.is_unambiguous())
+        {'''
+becomes = '''
+        if !self.denials().is_empty() {'''
+catches = [
+]
+
+[[fault]]
+id = "isolation.an-empty-command-runs-the-runner"
+failure_class = "isolation.an-empty-command-runs-the-runner"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 0
+anchor = '''
+        if argv.is_empty() {
+            return Err(NotRun::Nothing);
+        }
+'''
+becomes = '''
+'''
+catches = [
 ]
 
 [[fault]]
