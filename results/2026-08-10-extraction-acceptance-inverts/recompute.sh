@@ -42,8 +42,16 @@ PY
 python3 - "$here" "report.json" <<'PY' || exit 1
 import hashlib, json, pathlib, re, sys, tomllib
 
-# Third step: every number the README states, re-derived from the artefacts,
-# and every number the artefacts derive, stated.
+# Third step: every number the README's FRONT MATTER states, re-derived from the
+# artefacts, and every number the artefacts derive, stated.
+#
+# FRONT MATTER, AND NOT THE PROSE. This step reads the `+++` block and nothing
+# else, so the figures in the body -- which are the ones a reader actually takes
+# away -- are bound to the product by nobody. A review demonstrated it: altering
+# a headline rate in the prose leaves every gate green. Disclosed in the
+# directory's `known_defects` rather than papered over, because closing it needs
+# a declaration this schema does not have yet -- the directory saying which
+# product fields its prose cites -- and that is a ruling, not a patch.
 #
 # The first two steps prove the consumed artefacts are the ones the record
 # names and that the instrument reproduces the product. Neither reads the
@@ -82,12 +90,23 @@ if start is None:
 # prefill total are whatever the record's own turn rows come to. Counted, not
 # asserted: the zeroes are a measurement of this record and not a convention.
 turns = [row for row in rows if row.get("record") == "turn"]
+# `dogma_version` comes from the ARM, not from the record. Reading it out of
+# the record's own start row would be a restatement dressed as a derivation --
+# the record's self-agreement is the thing this step exists to distrust -- and
+# an earlier version of this script did exactly that, so a README and a record
+# altered together passed. The arm is the independent artefact, and the start
+# row is checked against it below.
+regimen = tomllib.loads((here / "regimen.toml").read_text(encoding="utf-8"))
 derived = {
     "turns": len(turns),
     "prefill_tokens_total": sum(int(row.get("prefill_tokens") or 0) for row in turns),
-    "regime.dogma_version": start["regime"]["dogma_version"],
+    "regime.dogma_version": regimen["dogma_version"],
     "product_sha256": hashlib.sha256((here / product_name).read_bytes()).hexdigest(),
 }
+if start["regime"]["dogma_version"] != regimen["dogma_version"]:
+    print(f"recompute: the record's start row says `dogma_version = "
+          f"{start['regime']['dogma_version']!r}`, the arm says "
+          f"{regimen['dogma_version']!r}"); sys.exit(1)
 
 
 def stated_values(obj, prefix=""):
