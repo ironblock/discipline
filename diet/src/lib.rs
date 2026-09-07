@@ -7,6 +7,7 @@
 pub mod capture;
 pub mod client;
 pub mod dogma;
+pub mod drive;
 pub mod formats;
 pub mod isolation;
 pub mod object;
