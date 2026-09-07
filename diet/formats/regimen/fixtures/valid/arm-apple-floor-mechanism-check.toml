@@ -1,7 +1,7 @@
-# Mac-floor-suite S5 capture-smoke experiment, mechanism-check arm: a preliminary
+# Apple-floor-suite S5 capture-smoke experiment (substrate apple32-omlx-gemma12b), mechanism-check arm: a preliminary
 # smoke drive (NOT the real A/B-3 script) that proves the native-capture
 # branch's fork/patch/gate/seam emission actually works end-to-end against
-# oMLX/Gemma before the authentic 13-turn A/B-3 script arrives from the Mac Pro.
+# oMLX/Gemma before the authentic 13-turn A/B-3 script arrives from the data seat.
 # Thresholds deliberately lowered from production defaults (evidence 3000/extract
 # 1500) so a short 4-turn smoke drive is virtually guaranteed to fire every lane
 # at least once — this is a mechanism check, not a capture-volume measurement.
