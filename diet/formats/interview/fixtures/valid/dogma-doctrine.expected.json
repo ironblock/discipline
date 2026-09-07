@@ -1,0 +1,25 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "a gate file's conflict is resolved from a pristine copy outside the tree"
+      },
+      "raw": "a gate file's conflict is resolved from a pristine copy outside the tree",
+      "tag": {
+        "as_written": "CONSTRAINT:",
+        "kind": "constraint"
+      }
+    },
+    {
+      "outcome": {
+        "value": "stage the resolver before the merge rather than during it"
+      },
+      "raw": "stage the resolver before the merge rather than during it",
+      "tag": {
+        "as_written": "PLAN_DELTA:",
+        "kind": "plan_impact"
+      }
+    }
+  ]
+}

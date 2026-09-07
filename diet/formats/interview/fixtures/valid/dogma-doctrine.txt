@@ -1,0 +1,2 @@
+CONSTRAINT: a gate file's conflict is resolved from a pristine copy outside the tree
+PLAN_DELTA: stage the resolver before the merge rather than during it

@@ -59,9 +59,6 @@ decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }
 negative_decimal = _{
     (nonzero ~ "." ~ ASCII_DIGIT+) | ("0" ~ "." ~ "0"* ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
 }
-integer = @{ ("-" ~ nonzero) | int_part }
-int_part = _{ "0" | nonzero }
-nonzero = _{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
 
 // Two rules rather than one with two spellings, so the reader matches on the
 // RULE. `as_str() == "true"` reads every other spelling as false, which is a

@@ -1,0 +1,14 @@
+[alpha]
+match       = "shared"
+nothink_ops = []
+[alpha.sampler]
+temperature = 0.3
+[alpha.gate]
+votes = 1
+[beta]
+match       = "shared"
+nothink_ops = []
+[beta.sampler]
+temperature = 0.9
+[beta.gate]
+votes = 5

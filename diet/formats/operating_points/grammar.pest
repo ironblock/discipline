@@ -1,0 +1,82 @@
+// The `operating-points` format, v1. A SCHEMA grammar, not a second TOML.
+//
+// The value terminals -- `string`, `boolean`, `float`, `integer`, `key`,
+// `comment`, `sp`, `nl` -- come from `regimen/grammar.pest`, which the parser
+// concatenates ahead of this file. One text says what a string is. A second
+// copy of the TOML subset here would be the two-readers class at the terminal
+// level, which this repository has already ruled on once.
+//
+// What this file adds is the shape the regimen grammar cannot say, and that
+// shape is the whole reason operating points is a format rather than a
+// regimen document:
+//
+//   * THE DOCUMENT IS ORDERED. The file's own rule is "matched by substring
+//     against the served model id, IN FILE ORDER: the first table whose
+//     `match` is a substring of the id wins", and it says why: `qwen3` is a
+//     substring of `qwen3.6` and `qwen3.5`, so it comes after both. The
+//     regimen projection is a table, and a table sorts. Run the real file
+//     through it and it hands back gemma, qwen3, qwen3_5, qwen3_6 for a file
+//     written qwen3_6, qwen3_5, qwen3, gemma -- inverted on the one axis the
+//     rule depends on. Match `qwen3.6` against that and the `qwen3` entry
+//     wins, with `thinking_kwarg = false`, while the entry that should have
+//     won says true and carries the receipt "the /no_think soft switch is
+//     DEAD on this model; the kwarg is the only working control". The wrong
+//     answer reachable that way is the control that does not work.
+//
+//   * `nothink_ops` IS CLOSED, here, in the grammar. A closed vocabulary
+//     checked after the parse is a vocabulary the parser accepted; checked
+//     here, an unknown operation is not a document. These are the operations
+//     measured safe to run with thinking suppressed, and everything not
+//     listed keeps thinking -- so a typo that widened the list would suppress
+//     thinking on an operation nobody measured.
+//
+//   * EVERY MODEL ENTRY CARRIES ITS SAMPLER AND ITS GATE. Both are required
+//     and both are tables, because an entry missing one is an operating point
+//     that does not say how the model was served, and the reason these are
+//     transcribed measurements rather than preferences is that they say
+//     exactly that.
+//
+// Not said here, and checked in Rust instead: that `[x.sampler]` belongs to
+// the `[x]` above it. A back-reference across a header is not what a PEG is
+// for, and the record format already puts its cross-row rules ("summary is
+// the last row") in a structure check with a name. The same precedent, the
+// same reason.
+
+points_file = { SOI ~ ignorable* ~ model+ ~ ignorable* ~ EOI }
+
+// Blank lines and whole-line comments, anywhere. The file opens with
+// twenty-one lines of them and they are dogma too: the pinned digest covers
+// the comments, so a grammar that could not read one could not read the file.
+ignorable = _{ blank | comment_line }
+comment_line = _{ sp* ~ comment ~ (nl | &EOI) }
+
+// One model entry, in the order it was written.
+model = { model_header ~ (ignorable | model_pair)* ~ sampler_table ~ ignorable* ~ gate_table ~ (ignorable | receipts_table)* }
+
+model_header = { sp* ~ "[" ~ sp* ~ key ~ sp* ~ "]" ~ sp* ~ comment? ~ (nl | &EOI) }
+sampler_table = { sp* ~ "[" ~ sp* ~ key ~ "." ~ sampler_name ~ sp* ~ "]" ~ sp* ~ comment? ~ (nl | &EOI) ~ (ignorable | plain_pair)* }
+gate_table = { sp* ~ "[" ~ sp* ~ key ~ "." ~ gate_name ~ sp* ~ "]" ~ sp* ~ comment? ~ (nl | &EOI) ~ (ignorable | plain_pair)* }
+receipts_table = { sp* ~ "[" ~ sp* ~ key ~ "." ~ receipts_name ~ sp* ~ "]" ~ sp* ~ comment? ~ (nl | &EOI) ~ (ignorable | plain_pair)* }
+sampler_name = { "sampler" }
+gate_name = { "gate" }
+receipts_name = { "receipts" }
+
+// The keys a model entry may carry, and nothing else. `match` and
+// `nothink_ops` are required; the two thinking flags are not, because a model
+// family that has no soft switch to describe should not have to say so.
+model_pair = _{ match_pair | nothink_pair | thinking_kwarg_pair | preserve_thinking_pair }
+match_pair = { sp* ~ "match" ~ sp* ~ "=" ~ sp* ~ string ~ sp* ~ comment? ~ (nl | &EOI) }
+nothink_pair = { sp* ~ "nothink_ops" ~ sp* ~ "=" ~ sp* ~ nothink_array ~ sp* ~ comment? ~ (nl | &EOI) }
+thinking_kwarg_pair = { sp* ~ "thinking_kwarg" ~ sp* ~ "=" ~ sp* ~ boolean ~ sp* ~ comment? ~ (nl | &EOI) }
+preserve_thinking_pair = { sp* ~ "preserve_thinking" ~ sp* ~ "=" ~ sp* ~ boolean ~ sp* ~ comment? ~ (nl | &EOI) }
+
+// The closed vocabulary. An empty list is admitted and means the same thing
+// the file says it means: everything keeps thinking.
+nothink_array = { "[" ~ sp* ~ (nothink_op ~ (sp* ~ "," ~ sp* ~ nothink_op)* ~ sp* ~ ","?)? ~ sp* ~ "]" }
+nothink_op = { "\"extraction\"" | "\"judgment\"" | "\"audit\"" }
+
+// Inside a sampler, a gate or a receipts table the keys are open -- a sampler
+// setting is whatever the serving stack calls it, and a receipt is prose
+// under a name the measurement chose. The VALUES are still the format's.
+plain_pair = { sp* ~ key ~ sp* ~ "=" ~ sp* ~ plain_value ~ sp* ~ comment? ~ (nl | &EOI) }
+plain_value = _{ string | boolean | float | integer }

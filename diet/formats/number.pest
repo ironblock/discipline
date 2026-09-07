@@ -1,0 +1,24 @@
+// The integer terminal, defined once.
+//
+// Two grammars need it -- `regimen` and `record` -- and for a while each
+// spelled it out for itself. The two spellings admitted the same strings and
+// a comment in one of them said so, which is the two-readers class at the
+// terminal level: nothing executed the claim, so nothing would notice the day
+// one of them was widened and the other was not. A regime is identified by
+// the settings that name it, so a number one reader accepts and the other
+// refuses is two regimes wearing one name.
+//
+// Included by both grammars through a second `#[grammar]` attribute rather
+// than copied into them, so there is one text to change and no second place
+// to forget.
+//
+// `-0` is not here, deliberately: it and `0` project to the same value, so two
+// byte-different documents would name one regime. Narrowing is the permitted
+// direction, and this is where the narrowing lives.
+integer  = @{ ("-" ~ nonzero) | int_part }
+
+// The parts travel with it. Sharing `integer` alone and leaving each grammar
+// its own `int_part` would move the divergence rather than remove it -- the
+// fractional rules are built out of these too.
+int_part = _{ "0" | nonzero }
+nonzero  = _{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }

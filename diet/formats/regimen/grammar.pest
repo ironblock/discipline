@@ -100,7 +100,6 @@ boolean_false = { "false" }
 // and it took the record's `decimal` rule to do it; integers do not go
 // through that constructor, so the same rule is written here by hand and is
 // character-for-character the record's `integer`: ("-" ~ nonzero) | int_part.
-integer   =  { ("-" ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*) | "0" | (ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*) }
 
 // A float is an exact DECIMAL: the digits as written, never a binary float.
 // This rule is character-for-character the `decimal` rule of the record's
@@ -123,8 +122,6 @@ float     = @{ ("-" ~ negative_float) | (int_part ~ "." ~ ASCII_DIGIT+) }
 negative_float = _{
     (nonzero ~ "." ~ ASCII_DIGIT+) | ("0" ~ "." ~ "0"* ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
 }
-int_part  = _{ "0" | nonzero }
-nonzero   = _{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
 
 comment   =  { "#" ~ (!(nl | control) ~ ANY)* }
 

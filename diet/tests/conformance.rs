@@ -372,7 +372,15 @@ mod formats {
     use super::FORMATS;
     use std::collections::BTreeSet;
 
-    per_format!(decline, interview, record, regimen, shell, verdict);
+    per_format!(
+        decline,
+        interview,
+        operating_points,
+        record,
+        regimen,
+        shell,
+        verdict
+    );
 
     /// A format in [`FORMATS`] with no module here is a format nobody can run
     /// on its own, and -- worse -- `cargo test -- formats::<name>` for it
@@ -402,6 +410,92 @@ fn the_harness_covers_at_least_one_format() {
         !FORMATS.is_empty(),
         "FORMATS is empty, so this harness covers nothing"
     );
+}
+
+/// The integer terminal is defined once, and both grammars that need one
+/// include that definition rather than spelling it again.
+///
+/// Two spellings admitting the same strings is the state `regimen` and
+/// `record` were in, with a comment in one of them asserting the agreement --
+/// and a comment is not a check. Sharing the text removes the divergence;
+/// this removes the way it could come back, which is somebody re-inlining
+/// the rule into one grammar and leaving the shared file sitting there
+/// unread. The parts travel with the terminal because the fractional rules
+/// are built out of them.
+#[test]
+fn the_integer_terminal_is_defined_once_and_shared() {
+    const SHARED: &str = "number.pest";
+    let root = formats_dir();
+    let mut grammars: Vec<PathBuf> = files_in_or_empty(&root)
+        .into_iter()
+        .filter(|path| path.is_dir())
+        .map(|dir| dir.join("grammar.pest"))
+        .filter(|path| path.is_file())
+        .collect();
+    let shared = root.join(SHARED);
+    assert!(
+        shared.is_file(),
+        "{} is missing, so there is nowhere for the terminal to be defined once",
+        shared.display()
+    );
+    grammars.push(shared.clone());
+    assert!(
+        grammars.len() > 1,
+        "only one grammar was found, so this compares nothing"
+    );
+
+    let mut failures = Vec::new();
+    let mut users = 0;
+    for rule in ["integer", "int_part", "nonzero"] {
+        let defined: Vec<&PathBuf> = grammars
+            .iter()
+            .filter(|path| {
+                std::fs::read_to_string(path)
+                    .unwrap_or_default()
+                    .lines()
+                    .any(|line| defines(line, rule))
+            })
+            .collect();
+        match defined.as_slice() {
+            [only] if **only == shared => {}
+            [] => failures.push(format!("`{rule}` is defined in no grammar at all")),
+            found => failures.push(format!(
+                "`{rule}` is defined in {}; it belongs in {SHARED} and nowhere else",
+                found
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        }
+    }
+    for path in &grammars {
+        if *path == shared {
+            continue;
+        }
+        let text = std::fs::read_to_string(path).unwrap_or_default();
+        if text.lines().any(|line| line.contains("integer")) {
+            users += 1;
+        }
+    }
+    assert!(
+        users >= 2,
+        "fewer than two grammars reference the shared terminal, so sharing it \
+         is a file nobody reads"
+    );
+    report(&failures);
+}
+
+/// Whether a grammar line is the DEFINITION of `rule`, rather than a use of
+/// it or a mention in a comment.
+fn defines(line: &str, rule: &str) -> bool {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("//") {
+        return false;
+    }
+    trimmed
+        .strip_prefix(rule)
+        .is_some_and(|rest| rest.trim_start().starts_with('='))
 }
 
 /// A format directory on disk that `FORMATS` does not name is a format with

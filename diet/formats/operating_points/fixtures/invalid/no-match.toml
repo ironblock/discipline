@@ -1,0 +1,6 @@
+[alpha]
+nothink_ops = ["extraction"]
+[alpha.sampler]
+temperature = 0.3
+[alpha.gate]
+votes = 1

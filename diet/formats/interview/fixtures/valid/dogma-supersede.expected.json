@@ -1,0 +1,35 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "red_faults is the merge base plus each side's delta"
+      },
+      "raw": "red_faults is the merge base plus each side's delta",
+      "tag": {
+        "as_written": "RECORDED:",
+        "kind": "recorded"
+      }
+    },
+    {
+      "outcome": {
+        "value": "\"red_faults is COUNTED from the assembled list\""
+      },
+      "raw": "\"red_faults is COUNTED from the assembled list\"",
+      "tag": {
+        "as_written": "LATEST:",
+        "kind": "latest"
+      }
+    },
+    {
+      "outcome": {
+        "value": "REPLACES \u2014 CORRECTED: red_faults is counted from the assembled list, never computed"
+      },
+      "raw": "REPLACES \u2014 CORRECTED: red_faults is counted from the assembled list, never computed",
+      "tag": {
+        "as_written": "VERDICT:",
+        "kind": "verdict"
+      }
+    }
+  ]
+}

@@ -97,9 +97,20 @@ dash = { "—" | "–" | "--" | "-" | "=" | "»" | ">" }
 // The closed vocabulary, ending at a word boundary. Longest alternative first
 // where one is a prefix of another, because PEG choice is ordered.
 tag_name = @{ tag_word ~ !tag_char }
+// Kept in step with `diet/formats/interview/tags.tsv` by
+// `the_table_and_the_grammar_admit_the_same_tags`: a spelling here and not
+// there, or there and not here, is a red test rather than a silent drift.
+// `plan_delta` and `plan_impact` come before `plan`, and `api_surface` before
+// anything that could shadow it: PEG choice is ordered and does not re-enter,
+// so a shorter alternative that matches first strands the rest of the word
+// against `!tag_char` and the whole tag line stops being a tag line.
 tag_word = _{
     ^"api_surface" | ^"api surface" | ^"api-surface"
-  | ^"decision" | ^"evidence" | ^"learned" | ^"stuck" | ^"plan"
+  | ^"plan_delta" | ^"plan_impact" | ^"plan"
+  | ^"constraint" | ^"dark" | ^"decision" | ^"evidence" | ^"excerpt"
+  | ^"fact" | ^"followup" | ^"gotcha" | ^"latest" | ^"learned" | ^"map"
+  | ^"next" | ^"note" | ^"open" | ^"pointer" | ^"rationale" | ^"recorded"
+  | ^"stuck" | ^"supersede" | ^"surface" | ^"verdict"
 }
 tag_char = _{ ASCII_ALPHANUMERIC | "_" }
 

@@ -50,6 +50,20 @@ REPRODUCIBLE = "reproducible-by-config"
 HISTORICAL = "historical-observation"
 KINDS = (REPRODUCIBLE, HISTORICAL)
 
+# `historical-observation` is a claim about the world, so it has to say which
+# part of the world: which capture-side flaw, or why the inputs cannot exist.
+# Without one it is a tag, and a tag that costs nothing to apply is the opt-out
+# every red result reaches for.
+HISTORICAL_REASON = "historical_reason"
+
+# The template is the thing every results directory is copied from, so it is
+# counted on its own line and never satisfies the check. It recomputes -- it
+# has to, or every copy starts from a script nobody ran -- but a tree whose
+# only recomputing directory is the one nobody drew a conclusion from has
+# checked no science, and reporting that as a pass is how a gate comes to run
+# over nothing while printing a number.
+TEMPLATE = "_template"
+
 EXIT_FAIL = 1
 EXIT_NOTHING = 2
 
@@ -146,23 +160,59 @@ def main(argv: list[str]) -> int:
     recomputed = 0
     historical = 0
     undeclared = 0
+    templates = 0
+    results_seen = 0
 
     for directory in sorted(p for p in root.iterdir() if p.is_dir()):
+        is_template = directory.name == TEMPLATE
+        if not is_template:
+            results_seen += 1
         front, err = front_matter(directory)
         if front is None:
-            undeclared += 1
+            undeclared += not is_template
             failures.append(f"{directory}: {err}")
             continue
         kind = front.get("kind")
         if kind not in KINDS:
-            undeclared += 1
+            undeclared += not is_template
             failures.append(
                 f"{directory}: front-matter `kind` is {kind!r}; it must be one of "
                 f"{' or '.join(KINDS)}, because a directory that declares nothing is "
                 f"neither checked nor knowingly skipped"
             )
             continue
+        if is_template and kind != REPRODUCIBLE:
+            failures.append(
+                f"{directory}: the template declares `{kind}`. Every results "
+                f"directory is copied from it, so a template carrying the "
+                f"opt-out hands it to every copy before anyone has run anything"
+            )
+            continue
         if kind == HISTORICAL:
+            # Not an unconditional opt-out any more. It has to say what makes
+            # the run unreproducible, and it has to have no script -- because
+            # "declared historical" and "carries a recompute" is a
+            # contradiction, and the way a red result would escape this gate
+            # is by acquiring the tag rather than by losing the script.
+            reason = front.get(HISTORICAL_REASON)
+            if not isinstance(reason, str) or not reason.strip():
+                failures.append(
+                    f"{directory}: declares `{HISTORICAL}` and states no "
+                    f"`{HISTORICAL_REASON}`. Which capture-side flaw, or why the "
+                    f"inputs cannot exist -- a tag with no reason behind it is "
+                    f"the opt-out every red result reaches for"
+                )
+                continue
+            if (directory / RECOMPUTE).is_file():
+                failures.append(
+                    f"{directory}: declares `{HISTORICAL}` and carries a "
+                    f"{RECOMPUTE}. Declared unreproducible and recomputable is a "
+                    f"contradiction; if the script runs, the result is checked, "
+                    f"and a script that exits 1 is a red result no tag can skip. "
+                    f"Becoming historical means removing the script and saying "
+                    f"why, in a change somebody reviews"
+                )
+                continue
             historical += 1
             continue
 
@@ -221,22 +271,33 @@ def main(argv: list[str]) -> int:
         if vacuous is not None:
             failures.append(f"{directory}: {vacuous}")
             continue
-        recomputed += 1
+        if is_template:
+            templates += 1
+        else:
+            recomputed += 1
 
     for message in failures:
         print(message, file=sys.stderr)
 
     census = (
-        f"check-recompute: {recomputed} recomputed, {historical} declared "
-        f"historical, {undeclared} undeclared"
+        f"check-recompute: template: {templates} · results: {recomputed} recomputed, "
+        f"{historical} declared historical, {undeclared} undeclared"
     )
     if failures:
         print(census, file=sys.stderr)
         return EXIT_FAIL
+    if results_seen == 0:
+        # A tree with no results directory in it has nothing to check, and
+        # says so. This is the one shape that is not a failure: it is a
+        # DECLARED empty rather than a pass, and it stops being available the
+        # moment a results directory lands, because the next branch is then
+        # the one that runs.
+        print(f"{census}\ncheck-recompute: no results directory yet; declared empty")
+        return 0
     if recomputed == 0:
         print(
-            f"{census}\ncheck-recompute: nothing was recomputed; a check of nothing "
-            f"is not a pass",
+            f"{census}\ncheck-recompute: results are present and none recomputed; a "
+            f"check of nothing is not a pass, and the template does not count",
             file=sys.stderr,
         )
         return EXIT_NOTHING

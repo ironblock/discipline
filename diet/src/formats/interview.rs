@@ -39,18 +39,189 @@ struct InterviewParser;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FieldKind {
     /// API names the turn touched. Structuring-class: it has a source, and
-    /// what it emits must be checkable against that source.
+    /// what it emits must be checkable against that source. The dogma writes
+    /// it `SURFACE`; the archived corpus writes it `API_SURFACE`.
     ApiSurface,
+    /// A rule the rest of the project must honour.
+    Constraint,
+    /// What the turn has not seen but expects to need.
+    Dark,
     /// What the turn decided.
     Decision,
-    /// Excerpts from tool output. Verbatim-class.
+    /// Excerpts from tool output. Verbatim-class. The dogma writes it
+    /// `EXCERPT`.
     Evidence,
+    /// A concrete, span-grounded fact extracted from material the turn read.
+    ///
+    /// Not [`Self::Learned`]: a fact is quoted or closely matched from a
+    /// source and is checkable against it, where what a turn learned is the
+    /// turn's own claim. Collapsing the two would make an extraction and an
+    /// assertion count as one thing.
+    Fact,
+    /// An API question left pending rather than settled.
+    Followup,
+    /// Something that behaved differently than expected, and what it implies.
+    Gotcha,
+    /// The new quote a supersede question is asked about.
+    Latest,
     /// What the turn learned.
     Learned,
-    /// What the turn intends next.
+    /// The structure as the turn now holds it.
+    Map,
+    /// A note about the working notes themselves, from an audit.
+    Note,
+    /// A question left open, unverified, or assumed but not checked.
+    Open,
+    /// What the turn intends next. The dogma writes it `NEXT`.
     Plan,
+    /// What a piece of material changes about the plan. The dogma writes it
+    /// `PLAN_IMPACT` after a document and `PLAN_DELTA` after doctrine.
+    ///
+    /// Separate from [`Self::Plan`]: one is the next actions, the other is
+    /// what moved. A turn can report either without the other.
+    PlanImpact,
+    /// Something noticed that is not needed now but might matter later.
+    Pointer,
+    /// A why that is not visible in the artifacts.
+    Rationale,
+    /// The earlier entry a supersede question is asked about.
+    Recorded,
     /// What the turn could not get past.
     Stuck,
+    /// An earlier record this turn changes or replaces.
+    Supersede,
+    /// The ruling on whether the latest information replaces the recorded one.
+    ///
+    /// The FIELD is here; its VALUE has a closed vocabulary of its own
+    /// (`REPLACES | RESOLVES | CONTRADICTS | UNRELATED`) that nothing yet
+    /// parses. That is a second vocabulary and it is named in neither the
+    /// ruling nor this type.
+    Verdict,
+}
+
+/// The verdict an audit returns on one working note.
+///
+/// Its own type rather than a [`FieldKind`]: an audit answer rules on a note
+/// somebody else wrote, where every field kind above is something the turn is
+/// reporting about itself. Both are closed vocabularies and they are not the
+/// same vocabulary, which a single enum would have hidden.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AuditVerdict {
+    /// A note that should be there and is not.
+    Add,
+    /// The note stands.
+    Keep,
+    /// The note stopped mattering, or duplicates another.
+    Remove,
+    /// The note is right in outline and wrong in detail.
+    Update,
+}
+
+impl AuditVerdict {
+    /// Every verdict, in declaration order.
+    pub const ALL: &'static [Self] = &[Self::Add, Self::Keep, Self::Remove, Self::Update];
+
+    /// The spelling an audit answer uses, lower case.
+    #[must_use]
+    pub fn canonical_tag(self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::Keep => "keep",
+            Self::Remove => "remove",
+            Self::Update => "update",
+        }
+    }
+}
+
+/// The surface-tag table, as data.
+///
+/// Compiled in rather than read at run time, so a binary cannot be shipped
+/// without it, and read here rather than transcribed into a `match`: three
+/// things have to agree about this vocabulary -- this file, the grammar's
+/// `tag_word`, and the dogma's templates -- and the way they stay in step is
+/// that two tests read all three and compare them.
+const TAG_TABLE: &str = include_str!("../../formats/interview/tags.tsv");
+
+/// Where a tag sits, which is the table's second column.
+///
+/// A type rather than the column's text. Seven places asked this question and
+/// every one of them asked it by comparing against a string literal -- one of
+/// them on the path that turns a written tag into a `FieldKind`, where a
+/// mistyped position would simply find nothing and report the tag unknown.
+/// The compiler cannot check a string; it can check this, and a fourth
+/// position added to the table now fails to compile everywhere that must care.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TagPosition {
+    /// A tag that opens a line of its own.
+    Line,
+    /// A second field on another tag's line, so it has no kind of its own.
+    Inline,
+    /// One of an audit's four verdicts.
+    Audit,
+}
+
+impl TagPosition {
+    /// Every position, in the order the table uses.
+    pub const ALL: &'static [Self] = &[Self::Line, Self::Inline, Self::Audit];
+
+    /// The spelling the table uses.
+    #[must_use]
+    pub fn canonical_tag(self) -> &'static str {
+        match self {
+            Self::Line => "line",
+            Self::Inline => "inline",
+            Self::Audit => "audit",
+        }
+    }
+
+    /// The position a column of the table names, if it names one.
+    ///
+    /// Iterating `ALL` rather than matching the text, so that a variant added
+    /// to the enum is covered here without anybody remembering to come back.
+    #[must_use]
+    pub fn from_tag(text: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|position| position.canonical_tag() == text)
+    }
+}
+
+/// Every row of the table: `(tag, position, kind)`.
+///
+/// A line that is not three tab-separated fields is skipped, and so is one
+/// whose position is not a `TagPosition`. Neither is silent:
+/// `every_table_row_is_three_fields` compares this count against the number of
+/// three-field lines, so a row this reader drops is a row that fails a test.
+fn tag_rows() -> impl Iterator<Item = (&'static str, TagPosition, &'static str)> {
+    TAG_TABLE
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .filter_map(|line| {
+            let mut fields = line.split('\t');
+            match (fields.next(), fields.next(), fields.next(), fields.next()) {
+                (Some(tag), Some(position), Some(kind), None) => {
+                    TagPosition::from_tag(position).map(|position| (tag, position, kind))
+                }
+                _ => None,
+            }
+        })
+}
+
+/// A tag as written, reduced to the one spelling the table is keyed by.
+fn normalise(written: &str) -> String {
+    written
+        .chars()
+        .map(|c| {
+            if c == '-' || c.is_whitespace() {
+                '_'
+            } else {
+                c
+            }
+        })
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 impl FieldKind {
@@ -60,11 +231,26 @@ impl FieldKind {
     /// fixture is required to exercise.
     pub const ALL: &'static [Self] = &[
         Self::ApiSurface,
+        Self::Constraint,
+        Self::Dark,
         Self::Decision,
         Self::Evidence,
+        Self::Fact,
+        Self::Followup,
+        Self::Gotcha,
+        Self::Latest,
         Self::Learned,
+        Self::Map,
+        Self::Note,
+        Self::Open,
         Self::Plan,
+        Self::PlanImpact,
+        Self::Pointer,
+        Self::Rationale,
+        Self::Recorded,
         Self::Stuck,
+        Self::Supersede,
+        Self::Verdict,
     ];
 
     /// The canonical tag for this kind, lower case and underscored.
@@ -72,11 +258,26 @@ impl FieldKind {
     pub fn canonical_tag(self) -> &'static str {
         match self {
             Self::ApiSurface => "api_surface",
+            Self::Constraint => "constraint",
+            Self::Dark => "dark",
             Self::Decision => "decision",
             Self::Evidence => "evidence",
+            Self::Fact => "fact",
+            Self::Followup => "followup",
+            Self::Gotcha => "gotcha",
+            Self::Latest => "latest",
             Self::Learned => "learned",
+            Self::Map => "map",
+            Self::Note => "note",
+            Self::Open => "open",
             Self::Plan => "plan",
+            Self::PlanImpact => "plan_impact",
+            Self::Pointer => "pointer",
+            Self::Rationale => "rationale",
+            Self::Recorded => "recorded",
             Self::Stuck => "stuck",
+            Self::Supersede => "supersede",
+            Self::Verdict => "verdict",
         }
     }
 
@@ -87,21 +288,18 @@ impl FieldKind {
     /// this function have drifted apart, which is why the caller treats it as
     /// a shape error rather than as an unknown field.
     fn from_tag(written: &str) -> Option<Self> {
-        let normalised: String = written
-            .chars()
-            .map(|c| {
-                if c == '-' || c.is_whitespace() {
-                    '_'
-                } else {
-                    c
-                }
-            })
-            .flat_map(char::to_lowercase)
-            .collect();
+        let normalised = normalise(written);
+        // Through the table, not through a match on the spelling: a tag has
+        // several registers and a kind has several tags, and the place that
+        // knows which is which is the data file the grammar is checked
+        // against.
+        let named = tag_rows().find(|(tag, position, _)| {
+            *position == TagPosition::Line && normalise(tag) == normalised
+        })?;
         Self::ALL
             .iter()
             .copied()
-            .find(|kind| kind.canonical_tag() == normalised)
+            .find(|kind| kind.canonical_tag() == named.2)
     }
 }
 
@@ -699,7 +897,11 @@ fn outcome_value(outcome: &Outcome) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{Completion, FieldKind, Outcome, TruncationSignal, parse};
+    use super::{
+        AuditVerdict, Completion, FieldKind, Outcome, TAG_TABLE, TagPosition, TruncationSignal,
+        parse, tag_rows,
+    };
+    use std::collections::BTreeSet;
 
     fn value(source: &str, kind: FieldKind) -> String {
         let answer = parse(source).expect("an interview answer");
@@ -1079,5 +1281,194 @@ mod tests {
                 kind.canonical_tag()
             );
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // the vocabulary's three readers, held against each other
+    // ---------------------------------------------------------------------
+    //
+    // The tag vocabulary is written down three times -- in tags.tsv, in the
+    // grammar's `tag_word`, and in the dogma's templates -- and it has to be,
+    // because a pest grammar cannot read a TSV and a template is prose a model
+    // is shown. Three copies is the two-readers hazard with a third reader
+    // added, so the copies are not trusted to agree: these tests read all
+    // three and compare them, and a tag added to any one of them turns the
+    // other two red until it is added there too.
+
+    /// The reader skips a line it cannot split into three, which would make a
+    /// mistyped row vanish instead of failing. Nothing else would notice.
+    #[test]
+    fn every_table_row_is_three_fields() {
+        let declared = TAG_TABLE
+            .lines()
+            .map(str::trim_end)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .count();
+        assert_eq!(
+            tag_rows().count(),
+            declared,
+            "a row of {} is not three tab-separated fields, or names a position \
+             that is not one, and the reader dropped it silently",
+            "tags.tsv"
+        );
+        assert!(
+            declared > 0,
+            "the table is empty, so every check over it passes"
+        );
+    }
+
+    /// Every kind named in the table is a real kind.
+    #[test]
+    fn every_table_kind_is_a_field_kind_or_an_audit_verdict() {
+        for (tag, position, kind) in tag_rows() {
+            match position {
+                TagPosition::Line => assert!(
+                    FieldKind::ALL.iter().any(|k| k.canonical_tag() == kind),
+                    "`{tag}` names the kind `{kind}`, which is not a FieldKind"
+                ),
+                TagPosition::Audit => assert!(
+                    AuditVerdict::ALL.iter().any(|v| v.canonical_tag() == kind),
+                    "`{tag}` names the verdict `{kind}`, which is not an AuditVerdict"
+                ),
+                TagPosition::Inline => assert_eq!(
+                    kind, "-",
+                    "`{tag}` is a second field on another tag's line, so it has \
+                     no kind of its own"
+                ),
+            }
+        }
+        for verdict in AuditVerdict::ALL {
+            assert!(
+                tag_rows().any(|(_, position, kind)| position == TagPosition::Audit
+                    && kind == verdict.canonical_tag()),
+                "the audit verdict `{}` is in the enum and not in the table",
+                verdict.canonical_tag()
+            );
+        }
+    }
+
+    /// The table's `line` rows and the grammar's `tag_word` are one list
+    /// written twice. A spelling in one and not the other is a tag the parser
+    /// admits and cannot name, or a tag named and never admitted.
+    #[test]
+    fn the_table_and_the_grammar_admit_the_same_tags() {
+        const GRAMMAR: &str = include_str!("../../formats/interview/grammar.pest");
+        let body = GRAMMAR
+            .split_once("tag_word = _{")
+            .expect("the grammar defines tag_word")
+            .1
+            .split_once("\n}")
+            .expect("tag_word is closed")
+            .0;
+        let admitted: BTreeSet<String> = body
+            .split('|')
+            .filter_map(|alt| alt.trim().strip_prefix("^\""))
+            .filter_map(|alt| alt.split('"').next())
+            .map(str::to_owned)
+            .collect();
+        let tabled: BTreeSet<String> = tag_rows()
+            .filter(|(_, position, _)| *position == TagPosition::Line)
+            .map(|(tag, _, _)| tag.to_lowercase())
+            .collect();
+        assert!(
+            !admitted.is_empty(),
+            "no alternative was read out of tag_word"
+        );
+        assert_eq!(
+            admitted, tabled,
+            "the grammar's tag_word and the table's `line` rows disagree"
+        );
+    }
+
+    /// The drift guard the batch asked for: a tag written in a dogma template
+    /// and absent from this vocabulary is a field the interview parser will
+    /// read as prose, silently, on every answer that carries it.
+    ///
+    /// Every capitalised run before a colon counts, down to a single letter --
+    /// `Q:` and `A:` are real sub-fields of an audit's UPDATE answer, and a
+    /// rule that only saw three-letter tags would have let them through while
+    /// reading exactly like a rule that found nothing.
+    #[test]
+    fn no_dogma_tag_is_missing_from_the_table() {
+        let known: BTreeSet<String> = tag_rows().map(|(tag, _, _)| tag.to_owned()).collect();
+        let mut missing: Vec<String> = Vec::new();
+        for template in crate::dogma::Template::ALL {
+            for tag in capitalised_tags(template.text()) {
+                if !known.contains(&tag) {
+                    missing.push(format!("{}: {tag}", template.name()));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "dogma tag(s) absent from diet/formats/interview/tags.tsv: {missing:?}"
+        );
+        assert!(
+            !crate::dogma::Template::ALL.is_empty(),
+            "no templates were scanned, so this found nothing by looking at nothing"
+        );
+    }
+
+    /// Every maximal run of `[A-Z_]` that a colon follows, provided the run
+    /// holds at least one letter and does not continue a longer word.
+    fn capitalised_tags(text: &str) -> BTreeSet<String> {
+        let chars: Vec<char> = text.chars().collect();
+        let mut found = BTreeSet::new();
+        for (at, c) in chars.iter().enumerate() {
+            if *c != ':' {
+                continue;
+            }
+            let mut start = at;
+            while start > 0 && (chars[start - 1].is_ascii_uppercase() || chars[start - 1] == '_') {
+                start -= 1;
+            }
+            let run: String = chars[start..at].iter().collect();
+            let opens =
+                start == 0 || !(chars[start - 1].is_alphanumeric() || chars[start - 1] == '_');
+            if opens && run.chars().any(|r| r.is_ascii_uppercase()) {
+                found.insert(run);
+            }
+        }
+        found
+    }
+
+    /// The corpus carries the dogma's tags, which is the acceptance this
+    /// batch names -- and which the coverage test above would satisfy with a
+    /// fixture per kind whatever the tags on it. This pins the SPELLINGS.
+    #[test]
+    fn the_corpus_carries_the_dogma_spellings() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("formats/interview/fixtures/valid");
+        let mut written: BTreeSet<String> = BTreeSet::new();
+        for entry in std::fs::read_dir(&dir).expect("the corpus is readable") {
+            let path = entry.expect("a readable entry").path();
+            if path.extension().is_none_or(|ext| ext != "txt") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("a valid case is UTF-8");
+            let answer = parse(&source).expect("a valid case parses");
+            for field in &answer.fields {
+                if let Some(tag) = field.tag.as_ref() {
+                    let spelling = tag
+                        .as_written
+                        .trim_end_matches([':', ' ', '\t'])
+                        .trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != ' ')
+                        .to_owned();
+                    written.insert(spelling.to_uppercase());
+                }
+            }
+        }
+        let dogma_line_tags: Vec<&str> = tag_rows()
+            .filter(|(_, position, _)| *position == TagPosition::Line)
+            .map(|(tag, _, _)| tag)
+            .collect();
+        let uncovered: Vec<&&str> = dogma_line_tags
+            .iter()
+            .filter(|tag| !written.contains(&tag.to_uppercase()))
+            .collect();
+        assert!(
+            uncovered.is_empty(),
+            "tag spelling(s) the corpus never exercises: {uncovered:?}"
+        );
     }
 }
