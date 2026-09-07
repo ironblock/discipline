@@ -27,6 +27,36 @@
 //! What this module does NOT do is choose or configure a server. It records
 //! what it is given: the concurrency is declared ([`shape::Concurrency`]),
 //! and where a server reports itself is declared ([`shape::Dialect`]).
+//!
+//! # What has been seen red
+//!
+//! A gate that has never been seen red is not a gate, and the twelve claims
+//! below were each proved by breaking the implementation and watching one
+//! named test fail. They are recorded here rather than as seeded cases in the
+//! gate because `verify.sh` and `tools/gate/faults.toml` are not this seat's
+//! files; that is disclosed on the pull request, and this table is what a
+//! reader can re-run in the meantime. Each is a plausible way to be wrong --
+//! not a deleted line.
+//!
+//! | break this | and this fails |
+//! | --- | --- |
+//! | `Echo::verdict` never returns `Mismatched` | `a_server_that_reports_a_temperature_it_was_not_sent_is_a_mismatch_that_refuses_to_bank` |
+//! | a pin nobody reported counts as agreement | `a_pin_the_server_never_mentions_is_unverified_rather_than_agreed` |
+//! | a retry stops naming its predecessor | `a_stripped_field_is_retried_and_the_answer_names_the_request_that_produced_it` |
+//! | the stripped pin is not recorded | `a_stripped_field_is_retried_and_the_answer_names_the_request_that_produced_it` |
+//! | a timeout becomes `Answered` with `""` | `a_stall_past_the_deadline_is_a_typed_timeout_and_never_an_empty_answer` |
+//! | the retry bound is not applied | `retries_are_bounded_by_the_limit_the_request_declares` |
+//! | a pinned decimal is rendered through an `f64` | `wire::…::a_pinned_decimal_is_sent_as_the_digits_that_were_pinned` |
+//! | cache telemetry is found by scanning rather than by declaration | `cache_telemetry_is_read_from_the_path_the_dialect_declares_and_nowhere_else` |
+//! | a timed-out request projects a response row | `a_stall_past_the_deadline_is_a_typed_timeout_and_never_an_empty_answer` |
+//! | `Content-Length` is ignored and the body read to close | `a_content_length_reply_is_answered_without_waiting_for_the_connection_to_close` |
+//! | a chunked body is not decoded | `a_chunked_reply_is_decoded_rather_than_handed_to_the_reader_with_its_framing` |
+//! | `header` gives up on the status line | the three framing tests above |
+//!
+//! One mutation was tried and is NOT in the table: a `skip(1)` over the status
+//! line in [`transport`], which changed nothing anywhere. It was deleted
+//! rather than kept -- an injection that does not change the tree proves
+//! nothing, and a guard that cannot fire is not a guard.
 
 pub mod echo;
 pub mod journal;
