@@ -35,6 +35,37 @@
 //! none because it is trusted. [`Platform::MacOs`] therefore refuses to start
 //! with [`Unavailable::NotImplemented`], and a test asserts it -- so the
 //! deferral is a fact of the tree rather than a comment.
+//!
+//! # What has been seen red
+//!
+//! Twelve mutations, each applied to the source and run. Recorded here rather
+//! than as seeded cases in the gate because `verify.sh` and
+//! `tools/gate/faults.toml` are not this seat's files; that is disclosed on
+//! the pull request.
+//!
+//! | break this | and this fails |
+//! | --- | --- |
+//! | a declared `vm` falls back to the sandbox | `a_declared_vm_refuses_to_start_rather_than_falling_back_to_the_sandbox` |
+//! | macOS quietly uses the Linux sandbox | `the_macos_half_is_not_built_and_says_so_from_here` |
+//! | a regimen that says nothing runs unconfined | `a_regimen_that_says_nothing_about_isolation_gets_the_sandbox` |
+//! | the root is never remounted read-only | `the_seeded_escapes_…` (+2) |
+//! | the remount comes before the binds | the same (+2) |
+//! | the network is always shared | `the_network_is_shared_only_where_the_regimen_declares_it` (+2) |
+//! | every line of standard error is a denial | `every_denial_line_is_kept_and_none_is_invented` (+2) |
+//! | `absent_or_outside` reads as unambiguous | `an_ambiguous_denial_is_named_as_one` |
+//! | a runner's setup failure is read as the command's exit | `a_runner_that_could_not_build_the_sandbox_is_not_a_command_result` |
+//! | the model is shown a paraphrase instead of the command's words | `the_model_is_shown_the_commands_own_words_and_nothing_instead_of_them` |
+//! | a mechanism outside the vocabulary reads as the default | `a_policy_is_read_from_the_regimen_or_refused_with_a_reason` |
+//! | a relative path is accepted in a sandbox policy | the same |
+//!
+//! Two of those touch the **real** mechanism rather than the composition, and
+//! they are the ones worth naming. With no `--remount-ro /` at all, `echo x >
+//! /tmp/outside` exits **0**: bubblewrap's root is a fresh writable tmpfs, so
+//! the write succeeds into a throwaway the caller never sees again. That is
+//! worse than a denial -- the model is told it wrote a file, and the file
+//! evaporates -- and it is why the remount is there. With the remount moved
+//! *before* the binds, the sandbox fails to set up instead, and
+//! [`SetupFailed`] is what comes back rather than a command result.
 
 pub mod bwrap;
 pub mod policy;
@@ -829,12 +860,12 @@ mod tests {
         // The honest half of the classification: a path the policy did not
         // bind and a path that genuinely does not exist say the same thing to
         // a command, and this module cannot tell them apart.
-        let missing = ran("cat: /home/someone/.ssh/id_rsa: No such file or directory");
+        let missing = ran("cat: /opt/keys/deploy.pem: No such file or directory");
         assert_eq!(
             missing.denials(),
             vec![Denial {
                 kind: DenialKind::AbsentOrOutside,
-                evidence: "cat: /home/someone/.ssh/id_rsa: No such file or directory".to_owned(),
+                evidence: "cat: /opt/keys/deploy.pem: No such file or directory".to_owned(),
             }]
         );
         assert!(
