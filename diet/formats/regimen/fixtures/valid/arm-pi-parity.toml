@@ -119,16 +119,11 @@ max_tokens = 4096
 # The arm states the two configs as the sub-tables [thinking.reference] (Run 1 —
 # config-identical to Pi) and [thinking.shipping] (Run 2 — the per-lane doctrine).
 # Both are carried: the schema batch gave the grammar a second level of table.
-# Run 1 — config-identical to Pi. (The arm writes this comment on the header
-# line; it is moved above because a two-segment header with a trailing comment
-# panics the reader — reported, not worked around silently.)
-[thinking.reference]
+[thinking.reference]   # Run 1 — config-identical to Pi
 main = false
 interview = false
 extraction = false
-# Run 2 — the per-lane doctrine. Comment moved off the header line for the
-# same reason as [thinking.reference] above.
-[thinking.shipping]
+[thinking.shipping]    # Run 2 — the per-lane doctrine
 main = true
 interview = true
 extraction = false
