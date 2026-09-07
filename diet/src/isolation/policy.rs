@@ -139,6 +139,19 @@ impl Policy {
         };
 
         if let Some(network) = named(regimen, NETWORK, Network::ALL, Network::tag)? {
+            // Refused rather than recorded. Unconfined means nothing enforces
+            // a network policy, so a drive declaring both ran on the
+            // operator's network and wrote `network = "none"` into its record
+            // -- a result mislabelled by exactly the mechanism this module
+            // exists to stop one layer up. The way to declare a run that makes
+            // no network calls is to say so where somebody can check it, not
+            // in a field nothing enforces.
+            if policy.isolation == Isolation::None && network == Network::None {
+                return Err(PolicyError::Unenforceable {
+                    key: NETWORK,
+                    under: Isolation::None,
+                });
+            }
             policy.network = network;
         }
 
@@ -190,6 +203,14 @@ pub enum PolicyError {
         /// What it could have been.
         allowed: Vec<&'static str>,
     },
+    /// A setting nothing under this mechanism can enforce, so a record
+    /// carrying it would be a claim about the drive that nothing made true.
+    Unenforceable {
+        /// The key.
+        key: &'static str,
+        /// The mechanism it cannot be enforced under.
+        under: Isolation,
+    },
     /// A key that must hold a list of absolute paths holds something else.
     NotAListOfPaths(&'static str),
     /// A path that is not absolute. A relative path in a sandbox policy is a
@@ -210,6 +231,13 @@ impl fmt::Display for PolicyError {
                 f,
                 "`{key} = {written}` is not one of {}",
                 allowed.join(", ")
+            ),
+            Self::Unenforceable { key, under } => write!(
+                f,
+                "`{key}` cannot be enforced under `isolation = \"{}\"`; a record \
+                 carrying it would say something about the drive that nothing made \
+                 true",
+                under.tag()
             ),
             Self::NotAListOfPaths(key) => {
                 write!(f, "`{key}` is not a list of absolute paths")

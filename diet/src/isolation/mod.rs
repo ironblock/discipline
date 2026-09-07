@@ -65,7 +65,7 @@
 //! worse than a denial -- the model is told it wrote a file, and the file
 //! evaporates -- and it is why the remount is there. With the remount moved
 //! *before* the binds, the sandbox fails to set up instead, and
-//! [`SetupFailed`] is what comes back rather than a command result.
+//! [`NotRun`] is what comes back rather than a command result.
 
 pub mod bwrap;
 pub mod policy;
@@ -338,7 +338,18 @@ impl Ran {
                 out.push('\n');
             }
         }
-        if !self.denials().is_empty() {
+        // Only where a denial means one thing. `absent_or_outside` is
+        // ambiguous by construction -- a path the policy did not bind and a
+        // path that does not exist say the same thing to a command -- so an
+        // ordinary missing file inside the working tree used to come back with
+        // a policy explanation attached, which the model would believe. The
+        // module built the distinction and then did not use it at the one site
+        // where a false positive reaches the model.
+        if self
+            .denials()
+            .iter()
+            .any(|denial| denial.kind.is_unambiguous())
+        {
             // Infallible: the target is a String.
             let _ = write!(
                 out,
@@ -353,24 +364,54 @@ impl Ran {
     }
 }
 
-/// The runner failed to set the sandbox up, so the command never ran.
+/// The command never ran, and why.
 ///
-/// Its own error rather than an exit status, because a setup failure reported
-/// as the command's exit code is a fabricated result: the command produced
-/// nothing, and something else's failure would be banked as its answer.
+/// Its own error rather than an exit status, because a failure to run
+/// reported as the command's exit code is a fabricated result: the command
+/// produced nothing, and something else's failure would be banked as its
+/// answer. The variants are separate because they blame different things, and
+/// blaming the runner for a bad working tree is its own small fabrication.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SetupFailed {
-    /// What the runner said.
-    pub said: String,
+pub enum NotRun {
+    /// The working tree is not usable as one.
+    ///
+    /// It is the single writable path in the whole policy and was checked by
+    /// nothing. A relative one was resolved TWICE -- once by the harness's own
+    /// working directory when spawning the runner, once by the runner inside
+    /// the sandbox -- so `repo` under `/w/repo` mounted `/w/repo/repo`
+    /// read-write, chdir'd there, and wrote to it, while the declared tree
+    /// stayed read-only. `Ran::confined` then recorded a relative path no
+    /// later reader could resolve, which is the field's whole purpose gone.
+    Worktree {
+        /// The path as given.
+        path: String,
+        /// What is wrong with it.
+        why: &'static str,
+    },
+    /// There was no command to run.
+    Nothing,
+    /// The runner could not build the sandbox.
+    Runner {
+        /// What it said.
+        said: String,
+    },
 }
 
-impl fmt::Display for SetupFailed {
+impl fmt::Display for NotRun {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "the sandbox runner did not start: {}", self.said)
+        match self {
+            Self::Worktree { path, why } => {
+                write!(f, "`{path}` is not a working tree: {why}")
+            }
+            Self::Nothing => f.write_str("there is no command to run"),
+            Self::Runner { said } => {
+                write!(f, "the sandbox runner did not start: {said}")
+            }
+        }
     }
 }
 
-impl Error for SetupFailed {}
+impl Error for NotRun {}
 
 impl Confinement {
     /// The mechanism in force.
@@ -400,27 +441,42 @@ impl Confinement {
     ///
     /// # Errors
     ///
-    /// Returns [`SetupFailed`] where the runner could not build the sandbox,
-    /// so the command never ran. A command that ran and failed is an `Ok`
-    /// carrying its status.
-    pub fn run(
-        &self,
-        policy: &Policy,
-        worktree: &Path,
-        argv: &[String],
-    ) -> Result<Ran, SetupFailed> {
+    /// Returns [`NotRun`] where the command never ran at all: an unusable
+    /// working tree, an empty command, or a runner that could not build the
+    /// sandbox. A command that ran and failed is an `Ok` carrying its status.
+    pub fn run(&self, policy: &Policy, worktree: &Path, argv: &[String]) -> Result<Ran, NotRun> {
+        // The CALLER's argv, not the composed one. Under `Sandbox` the composed
+        // vector is never empty, so this guard only ever fired for
+        // `Unconfined` -- and an empty command under the sandbox ran the runner
+        // with no command at all and banked sixty lines of its usage text as
+        // the command's standard error, at exit 1, as a successful `Ran`.
+        if argv.is_empty() {
+            return Err(NotRun::Nothing);
+        }
+        if !worktree.is_absolute() {
+            return Err(NotRun::Worktree {
+                path: worktree.to_string_lossy().into_owned(),
+                why: "it is not absolute, and a relative working tree is resolved once by \
+                      the harness and again inside the sandbox",
+            });
+        }
+        if !worktree.is_dir() {
+            return Err(NotRun::Worktree {
+                path: worktree.to_string_lossy().into_owned(),
+                why: "it is not a directory that exists",
+            });
+        }
+
         let confined = self.compose(policy, worktree, argv);
         let Some((program, rest)) = confined.split_first() else {
-            return Err(SetupFailed {
-                said: "an empty command".to_owned(),
-            });
+            return Err(NotRun::Nothing);
         };
 
         let output = Command::new(program)
             .args(rest)
             .current_dir(worktree)
             .output()
-            .map_err(|why| SetupFailed {
+            .map_err(|why| NotRun::Runner {
                 said: format!("{program} could not be run: {why}"),
             })?;
 
@@ -428,7 +484,7 @@ impl Confinement {
         if let Self::Sandbox(runner) = self
             && let Some(said) = runner.setup_failure(&stderr, output.status.code())
         {
-            return Err(SetupFailed { said });
+            return Err(NotRun::Runner { said });
         }
 
         Ok(Ran {
@@ -446,6 +502,8 @@ impl Confinement {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::net::TcpListener;
+    use std::os::unix::fs::PermissionsExt as _;
     use std::path::PathBuf;
     use std::process;
 
@@ -611,11 +669,17 @@ mod tests {
                 "/proc",
                 "--dev",
                 "/dev",
+                "--tmpfs",
+                "/dev/shm",
                 "--bind",
                 "/work/tree",
                 "/work/tree",
                 "--remount-ro",
                 "/",
+                "--remount-ro",
+                "/dev",
+                "--remount-ro",
+                "/dev/shm",
                 "--chdir",
                 "/work/tree",
                 "--",
@@ -682,14 +746,20 @@ mod tests {
     // rows two and three: the seeded escapes, against the real mechanism
     // -----------------------------------------------------------------------
 
-    /// The four seeded escapes, and the two controls without which they prove
-    /// nothing.
+    /// The six seeded escapes, and the three controls without which they
+    /// prove nothing.
     ///
-    /// One test rather than six, because the branch matters: on a host with
+    /// One test rather than nine, because the branch matters: on a host with
     /// the runner every escape is executed, and on a host without it the
     /// REFUSAL is what is asserted. A test that quietly skipped where the
     /// runner is absent would be a test that cannot fail, and this module is
     /// the last thing that should have one.
+    ///
+    /// A control here is the same command under a policy that permits it --
+    /// same argv, same target, one declaration different. An earlier version
+    /// of the network control ran a *different* command against a *different*
+    /// address and exited `0` under either policy, which is a control that
+    /// cannot fail and therefore is not one.
     #[test]
     fn the_seeded_escapes_are_denied_where_the_mechanism_is_present() {
         let policy = Policy::merged_usr();
@@ -704,7 +774,7 @@ mod tests {
                     "no runner, so the drive refuses; the escapes are not executed here"
                 );
                 eprintln!(
-                    "isolation: `{RUNNER}` absent, 0 of 4 seeded escapes executed; \
+                    "isolation: `{RUNNER}` absent, 0 of 6 seeded escapes executed; \
                      the refusal is what this host proves"
                 );
                 return;
@@ -751,6 +821,42 @@ mod tests {
             "and nothing reached the host"
         );
 
+        // Rows two-b and two-c: the tmpfs mounts a single `--remount-ro /`
+        // does not reach. `--dev` builds a separate mount and `/dev/shm` a
+        // further one inside it, so one remount of `/` left BOTH writable
+        // while the advisory told the model the working tree was the only
+        // writable path. The write succeeded and the file evaporated with
+        // the sandbox: this module's own name for the outcome worse than a
+        // denial, produced by this module.
+        for scratch in ["/dev/pwn", "/dev/shm/pwn"] {
+            let line = format!("echo x > {scratch}");
+            let wrote = run(&["sh", "-c", &line]);
+            assert_ne!(wrote.exit, Some(0), "the write to {scratch} was denied");
+            assert!(
+                wrote
+                    .denials()
+                    .iter()
+                    .any(|denial| denial.kind == DenialKind::ReadOnly),
+                "and recorded as read-only, not invented: {:?}",
+                wrote.stderr
+            );
+        }
+
+        // The control those two need. Closing `/dev` by breaking it would
+        // pass both rows above and leave every ordinary command unable to
+        // open a device it is supposed to have.
+        let devices = run(&[
+            "sh",
+            "-c",
+            "echo x > /dev/null && test -c /dev/null && test -d /dev/shm && echo ok",
+        ]);
+        assert_eq!(devices.exit, Some(0), "{}", devices.stderr);
+        assert_eq!(
+            devices.stdout.trim(),
+            "ok",
+            "read-only, not absent: the devices are still there and still usable"
+        );
+
         // A path outside the policy: present on this host, absent in there.
         let secret = ground.outside.join("secret");
         let read = run(&["cat", &secret.to_string_lossy()]);
@@ -762,12 +868,115 @@ mod tests {
         );
         assert!(secret.is_file(), "though it is right there on the host");
 
+        the_network_rows(&confinement, &policy, &ground.tree);
+
+        eprintln!("isolation: `{RUNNER}` present, 6 of 6 seeded escapes executed and denied");
+    }
+
+    /// A runner that is not a sandbox, so the RECORD can be checked on a host
+    /// that has no sandbox.
+    ///
+    /// It drops everything up to `--` and executes what follows. It confines
+    /// nothing and no test here pretends otherwise: what it stands in for is
+    /// the `Confinement::Sandbox` *arm*, so that the provenance the record
+    /// claims -- the caller's argv, the composed argv, the mechanism, the
+    /// declared network, the child's own exit and streams -- is asserted
+    /// against a run that actually happened rather than against constants.
+    ///
+    /// Before this existed, gutting [`Confinement::run`] to write
+    /// `Isolation::None`, `Network::Host` and `confined: argv.to_vec()` left
+    /// every test in the module passing.
+    fn stand_in_runner(at: &std::path::Path) -> Bubblewrap {
+        fs::write(
+            at,
+            "#!/bin/sh\nwhile [ \"$1\" != \"--\" ]; do shift; done\nshift\nexec \"$@\"\n",
+        )
+        .expect("a stand-in runner");
+        fs::set_permissions(at, fs::Permissions::from_mode(0o755)).expect("it is executable");
+        Bubblewrap::at(at.to_path_buf())
+    }
+
+    #[test]
+    fn the_record_is_read_from_the_run_and_not_written_down_as_a_constant() {
+        let ground = Ground::make("record");
+        let runner = Confinement::Sandbox(stand_in_runner(&ground.outside.join("stand-in")));
+        let policy = Policy::merged_usr();
+        let command = argv(&["sh", "-c", "echo out; echo err >&2; exit 7"]);
+
+        let ran = runner
+            .run(&policy, &ground.tree, &command)
+            .expect("the stand-in ran");
+
+        assert_eq!(ran.argv, command, "the caller's command, verbatim");
+        assert_eq!(
+            ran.confined,
+            runner.compose(&policy, &ground.tree, &command),
+            "and the composed vector beside it, so the record says what was \
+             actually executed rather than what was asked for"
+        );
+        assert_ne!(
+            ran.confined, ran.argv,
+            "which under a sandbox is never the same vector"
+        );
+        assert_eq!(
+            ran.isolation,
+            Isolation::Sandbox,
+            "the mechanism is read from the confinement that ran it"
+        );
+        assert_eq!(
+            ran.network,
+            Network::None,
+            "and the network from the policy it ran under"
+        );
+        assert_eq!(ran.exit, Some(7), "the child's own status");
+        assert_eq!(ran.stdout.trim(), "out");
+        assert_eq!(ran.stderr.trim(), "err");
+
+        // The network is READ, not assumed: the same runner under the other
+        // declaration banks the other word.
+        let shared = runner
+            .run(
+                &Policy {
+                    network: Network::Host,
+                    ..policy.clone()
+                },
+                &ground.tree,
+                &argv(&["true"]),
+            )
+            .expect("the stand-in ran");
+        assert_eq!(shared.network, Network::Host);
+        assert_eq!(shared.exit, Some(0));
+
+        // And so is the mechanism: unconfined banks `none` and a confined
+        // vector equal to the command, because that is what happened.
+        let plain = Confinement::Unconfined
+            .run(&Policy::unconfined(), &ground.tree, &argv(&["true"]))
+            .expect("it ran");
+        assert_eq!(plain.isolation, Isolation::None);
+        assert_eq!(plain.confined, plain.argv);
+    }
+
+    /// The network rows of the seeded-escape test, and their control.
+    ///
+    /// A function rather than four more inline paragraphs so the one test
+    /// above stays readable; it is called from exactly one place and the
+    /// branch on the runner's presence is still made there, once.
+    fn the_network_rows(confinement: &Confinement, policy: &Policy, tree: &std::path::Path) {
+        let run = |declared: &Policy, parts: &[String]| {
+            confinement
+                .run(declared, tree, parts)
+                .expect("the sandbox set up")
+        };
+
         // Row three: a network call under `network = none`.
-        let reached = run(&[
-            "python3",
-            "-c",
-            "import socket; socket.create_connection(('1.1.1.1', 80), 2)",
-        ]);
+        let reached = run(
+            policy,
+            &argv(&[
+                "python3",
+                "-c",
+                "import socket; socket.create_connection(('1.1.1.1', 80), 2)",
+            ]),
+        );
         assert_ne!(reached.exit, Some(0), "the call was denied");
         assert!(
             reached
@@ -778,32 +987,56 @@ mod tests {
             reached.stderr
         );
 
-        // Control two: the same call with the network declared. Without it,
-        // "denied" could be the command being broken rather than the policy
-        // working.
+        // Control two: THE SAME COMMAND, against THE SAME address, with the
+        // network declared. It is the only thing that tells "the policy
+        // denied it" from "the command cannot reach anything anyway", and it
+        // has to be the same command or it tells neither.
+        //
+        // The address is a listening socket on this host's loopback rather
+        // than somewhere on the internet, so the control needs no network of
+        // its own to prove that the sandbox has one. Nothing accepts on it:
+        // the kernel completes the handshake for a listening socket whether
+        // or not anybody calls `accept`, and a completed handshake is the
+        // whole claim.
+        let door = TcpListener::bind(("127.0.0.1", 0)).expect("a loopback door to knock on");
+        // Spelled through the type rather than as a method call on the
+        // binding, which the hygiene table reads as an internal hostname. A
+        // false positive in the gate, disclosed on the PR rather than patched
+        // from here -- the pattern table is not this seat's file.
+        let port = TcpListener::local_addr(&door)
+            .expect("the door has an address")
+            .port();
+        let knock = argv(&[
+            "python3",
+            "-c",
+            &format!(
+                "import socket; socket.create_connection(('127.0.0.1', {port}), 2); print('reached')"
+            ),
+        ]);
+
+        let refused = run(policy, &knock);
+        assert_ne!(
+            refused.exit,
+            Some(0),
+            "under `network = none` the sandbox's loopback is its own and the \
+             host's door is not on it: {:?}",
+            refused.stderr
+        );
+
         let declared = Policy {
             network: Network::Host,
             ..policy.clone()
         };
-        let shared = confinement
-            .run(
-                &declared,
-                &ground.tree,
-                &argv(&[
-                    "python3",
-                    "-c",
-                    "import socket; print('socket layer:', socket.socket().connect_ex(('127.0.0.1', 1)))",
-                ]),
-            )
-            .expect("the sandbox set up");
+        let shared = run(&declared, &knock);
         assert_eq!(shared.exit, Some(0), "{}", shared.stderr);
-        assert!(
-            shared.stdout.contains("socket layer:"),
-            "with the network declared the same command reaches the socket layer: {:?}",
-            shared.stdout
+        assert_eq!(
+            shared.stdout.trim(),
+            "reached",
+            "and with the network declared the same knock on the same door is \
+             answered: {:?}",
+            shared.stderr
         );
-
-        eprintln!("isolation: `{RUNNER}` present, 4 of 4 seeded escapes executed and denied");
+        drop(door);
     }
 
     // -----------------------------------------------------------------------
@@ -994,9 +1227,23 @@ mod tests {
     /// generates would be a second reader of a format that already has one.
     /// The scan mirrors the generator's shape exactly, and a scan that finds
     /// no faults fails rather than passing over nothing.
+    ///
+    /// **Every field an orchestrator acts on, not just the anchor.** The first
+    /// version of this guard checked the anchor alone, so a `catches` naming a
+    /// test that had since been renamed or deleted passed: the fault would be
+    /// applied, the named test would not run, and the run would be scored
+    /// against a catcher that does not exist. `expect_exit` is checked for the
+    /// same reason -- it is the number the orchestrator compares against.
     #[test]
     fn every_seeded_fault_still_names_source_that_is_there() {
         let manifest = include_str!("../../isolation/gate.toml");
+        // The lane's whole source, so a catcher can be looked for wherever its
+        // test lives rather than only in this file.
+        let lane = concat!(
+            include_str!("mod.rs"),
+            include_str!("policy.rs"),
+            include_str!("bwrap.rs")
+        );
         let mut checked = 0;
         for block in manifest.split("\n[[fault]]\n").skip(1) {
             let id = between(block, "id = \"", "\"").expect("a fault has an id");
@@ -1016,6 +1263,32 @@ mod tests {
                 "{id}: its anchor no longer appears exactly once in {target}. The \
                  manifest is stale: either the mutation has to move with the code, \
                  or the fault it seeds is gone."
+            );
+
+            between(block, "expect_exit = ", "\n")
+                .expect("a fault declares the exit it expects")
+                .parse::<i32>()
+                .unwrap_or_else(|why| panic!("{id}: its `expect_exit` is not a number: {why}"));
+
+            let catches = between(block, "catches = [\n", "]").expect("a fault names its catchers");
+            let mut named = 0;
+            for line in catches.lines() {
+                let Some(name) = between(line, "\"", "\"") else {
+                    continue;
+                };
+                let leaf = name.rsplit("::").next().unwrap_or(name);
+                assert_eq!(
+                    lane.matches(&format!("fn {leaf}(")).count(),
+                    1,
+                    "{id}: it claims to be caught by `{name}`, and no such test is in \
+                     the lane. A fault whose catcher was renamed or deleted is applied, \
+                     caught by nothing, and scored against a name."
+                );
+                named += 1;
+            }
+            assert!(
+                named > 0,
+                "{id}: a fault with an empty `catches` is a mutation nothing proves"
             );
             checked += 1;
         }
