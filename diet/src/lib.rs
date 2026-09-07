@@ -9,3 +9,4 @@ pub mod client;
 pub mod dogma;
 pub mod formats;
 pub mod object;
+pub mod seam;
