@@ -54,15 +54,52 @@ pub fn render(object: &WorkingObject, phase: Option<&str>) -> String {
     out.push_str(phase.unwrap_or("-"));
     out.push_str("\nframe_version: ");
     out.push_str(FRAME_VERSION);
-    out.push_str("\n\n# working set\n");
+    out.push_str("\n\n");
+    out.push_str(WORKING_SET_HEADER);
 
     for entry in object.live() {
-        out.push_str(entry.id.as_str());
+        out.push_str(&one_line(entry.id.as_str()));
         out.push('\t');
-        out.push_str(&entry.content);
+        out.push_str(&one_line(&entry.content));
         out.push('\n');
     }
 
+    out
+}
+
+/// `text` with everything that could forge a row escaped out of it.
+///
+/// **The render owns the grammar of the prompt it emits, and it used to have
+/// none.** A working-set row is `id \t content \n`, and entry content comes
+/// from model output through the capture lanes -- so a single note containing
+/// a newline, a tab and an identifier of the model's choosing wrote an extra
+/// row into the next prefix, with whatever id it liked. Two different objects
+/// rendered to the same bytes, which also means the object could move without
+/// the prefix moving: the byte-identity claim with a hole in the other
+/// direction.
+///
+/// It matters twice over, because the same text is numbered into the audit
+/// ask, and all three pinned templates say *"reply with EXACTLY one line,
+/// each starting with its number ... Output {n} lines and nothing else"*. An
+/// unescaped newline there put an unnumbered line in the middle of the list,
+/// and a ratifier folding answer line *k* onto item *k* then wrote a verdict
+/// onto the wrong entry.
+///
+/// Escaped rather than refused: the content is already in the object by the
+/// time it gets here, and a render that refused to draw an entry would be a
+/// prompt silently missing a fact.
+#[must_use]
+pub fn one_line(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            _ => out.push(ch),
+        }
+    }
     out
 }
 
@@ -77,14 +114,28 @@ pub fn render(object: &WorkingObject, phase: Option<&str>) -> String {
 pub fn working_set_bytes(object: &WorkingObject) -> u64 {
     let mut total: u64 = 0;
     for entry in object.live() {
+        // Measured through the same escaping the render uses, and counting
+        // the same separators, so the two cannot disagree. They used to
+        // differ by any proportional amount without a test noticing, because
+        // the only bounds asserted were "more than zero" and "less than the
+        // whole render" -- and the whole render carries a regime header worth
+        // a hundred bytes of slack.
+        //
         // A count that saturates is a count that stops being a measurement.
         // Nothing here can reach it -- an object of eighteen exabytes is not
         // a thing -- and saturating is still the right floor for a number
         // that decides a trigger.
         total = total
-            .saturating_add(entry.id.as_str().len() as u64)
-            .saturating_add(entry.content.len() as u64)
+            .saturating_add(one_line(entry.id.as_str()).len() as u64)
+            .saturating_add(one_line(&entry.content).len() as u64)
             .saturating_add(2);
     }
     total
 }
+
+/// Where the working set begins in a render.
+///
+/// Public so a caller -- and the test that pins
+/// [`working_set_bytes`] against what is actually emitted -- can find the
+/// section without re-deriving the header's shape.
+pub const WORKING_SET_HEADER: &str = "# working set\n";

@@ -15,16 +15,18 @@
 # lane's tests were run, and `catches` is what actually failed. No entry
 # claims a catch it does not have.
 #
-# `catches` excludes this lane's own drift guard
-# (`every_seeded_fault_still_names_source_that_is_there`), which fires for
-# every fault by construction because a mutation IS an anchor being
-# replaced. Listing it against all of them would make the field say nothing.
+# The drift guard (`every_seeded_fault_still_names_source_that_is_there`)
+# fires for EVERY fault by construction, because a mutation is an anchor
+# being replaced. So `command` skips it and `catches` excludes it. With it
+# in the run, `expect_exit` was 101 for every fault whether or not the
+# fault had a catcher of its own -- an orchestrator reading the exit code
+# would score a fault green with its only catcher deleted.
 
 [package]
 name = "diet-seam"
 check = "test"
-command = "cargo test -p discipline-diet -- seam"
-faults = 18
+command = "cargo test -p discipline-diet -- seam --skip every_seeded_fault_still_names_source_that_is_there"
+faults = 29
 
 [[fault]]
 id = "seam.cadence-fires-always"
@@ -36,7 +38,9 @@ anchor = '''
 becomes = '''
 .is_some_and(|_| self.turn > 0),'''
 catches = [
+    "seam::tests::a_regimen_with_no_phases_refuses_a_proposal_as_having_no_graph",
     "seam::tests::seams_fire_on_the_declared_cadence_and_nowhere_else",
+    "seam::tests::the_cadence_is_absolute_so_a_seam_can_land_beside_another",
     "seam::tests::the_prefix_does_not_move_while_the_object_does",
     "seam::tests::the_prefix_is_byte_identical_between_seams_and_changes_only_at_one",
 ]
@@ -72,6 +76,7 @@ becomes = '''
         self.pending = Some(to.to_owned());'''
 catches = [
     "seam::tests::a_name_that_is_not_a_phase_is_refused_differently_from_one_that_is",
+    "seam::tests::a_regimen_with_no_phases_refuses_a_proposal_as_having_no_graph",
     "seam::tests::a_transition_the_graph_forbids_is_recorded_and_fires_nothing",
 ]
 
@@ -108,6 +113,7 @@ becomes = '''
             .copied()'''
 catches = [
     "seam::tests::a_phase_transition_outranks_a_cadence_that_also_came_round",
+    "seam::tests::a_refused_fold_leaves_the_controller_exactly_where_it_was",
     "seam::tests::an_operator_declared_boundary_outranks_every_derived_trigger",
 ]
 
@@ -174,13 +180,14 @@ target = "diet/src/seam/render.rs"
 expect_exit = 101
 anchor = '''
         total = total
-            .saturating_add(entry.id.as_str().len() as u64)
-            .saturating_add(entry.content.len() as u64)
+            .saturating_add(one_line(entry.id.as_str()).len() as u64)
+            .saturating_add(one_line(&entry.content).len() as u64)
             .saturating_add(2);'''
 becomes = '''
         let _ = entry;
         total = total.saturating_add(1);'''
 catches = [
+    "seam::tests::the_working_set_measures_exactly_what_the_render_emits",
     "seam::tests::the_working_set_measures_size_and_not_a_count_of_entries",
 ]
 
@@ -255,6 +262,7 @@ becomes = '''
         /// The operator declared a boundary.
         Operator => "operator",'''
 catches = [
+    "seam::tests::a_refused_fold_leaves_the_controller_exactly_where_it_was",
     "seam::tests::an_operator_declared_boundary_outranks_every_derived_trigger",
     "seam::tests::the_seams_vocabularies_are_the_words_a_record_carries",
 ]
@@ -271,6 +279,7 @@ becomes = '''
 '''
 catches = [
     "seam::tests::an_operator_declared_boundary_fires_once",
+    "seam::tests::the_cadence_is_absolute_so_a_seam_can_land_beside_another",
 ]
 
 [[fault]]
@@ -307,11 +316,194 @@ failure_class = "seam.ratified-transition-discarded"
 target = "diet/src/seam/mod.rs"
 expect_exit = 101
 anchor = '''
-        if let Some(to) = self.pending.take() {'''
+        let taking = self.pending.clone();'''
 becomes = '''
-        if reason == Reason::Phase
-            && let Some(to) = self.pending.take()
-        {'''
+        let taking = if reason == Reason::Phase {
+            self.pending.clone()
+        } else {
+            None
+        };'''
 catches = [
+    "seam::tests::a_refused_fold_leaves_the_controller_exactly_where_it_was",
     "seam::tests::an_operator_declared_boundary_outranks_every_derived_trigger",
+]
+
+[[fault]]
+id = "seam.commit-before-the-fallible-steps"
+failure_class = "seam.commit-before-the-fallible-steps"
+target = "diet/src/seam/mod.rs"
+expect_exit = 101
+anchor = '''
+        // Past the last `?`. Commit.
+        if let Some(to) = taking {
+            self.phase = Some(to);
+        }
+        self.pending = None;
+        self.declared = false;
+        self.prefix = render::render(object, phase.as_deref());
+'''
+becomes = '''
+        self.prefix = render::render(object, phase.as_deref());
+'''
+catches = [
+    "seam::tests::a_refused_fold_leaves_the_controller_exactly_where_it_was",
+    "seam::tests::a_transition_the_graph_allows_fires_a_seam_whose_reason_is_the_phase",
+    "seam::tests::an_operator_declared_boundary_fires_once",
+    "seam::tests::an_operator_declared_boundary_outranks_every_derived_trigger",
+    "seam::tests::the_cadence_is_absolute_so_a_seam_can_land_beside_another",
+]
+
+[[fault]]
+id = "seam.diff-predicate-always-true"
+failure_class = "seam.diff-predicate-always-true"
+target = "diet/src/seam/mod.rs"
+expect_exit = 101
+anchor = '''
+        let touched: BTreeSet<EntryId> = self
+            .applied
+            .iter()
+            .flat_map(Applied::touched)
+            .filter(|id| self.before.get(id) != self.after.get(id))
+            .collect();
+        touched == self.moved'''
+becomes = '''
+        true'''
+catches = [
+    "seam::tests::a_seam_whose_dumps_moved_an_entry_no_patch_names_is_not_exactly_the_patches",
+]
+
+[[fault]]
+id = "seam.phase-borrows-the-cadence-ask"
+failure_class = "seam.phase-borrows-the-cadence-ask"
+target = "diet/src/seam/mod.rs"
+expect_exit = 101
+anchor = '''
+        Reason::Phase => Some(Template::AuditQ),'''
+becomes = '''
+        Reason::Phase => Some(Template::AuditQCadence),'''
+catches = [
+    "seam::tests::a_phase_boundary_gets_the_phase_boundarys_ask",
+]
+
+[[fault]]
+id = "seam.working-set-off-by-a-proportion"
+failure_class = "seam.working-set-off-by-a-proportion"
+target = "diet/src/seam/mod.rs"
+expect_exit = 101
+anchor = '''
+            working_set_bytes,
+        };'''
+becomes = '''
+            working_set_bytes: working_set_bytes.saturating_add(working_set_bytes / 4),
+        };'''
+catches = [
+    "seam::tests::a_budget_seam_renders_and_says_no_ask_is_pinned_for_it",
+]
+
+[[fault]]
+id = "seam.render-does-not-escape"
+failure_class = "seam.render-does-not-escape"
+target = "diet/src/seam/render.rs"
+expect_exit = 101
+anchor = '''
+        out.push_str(&one_line(entry.id.as_str()));
+        out.push('\t');
+        out.push_str(&one_line(&entry.content));'''
+becomes = '''
+        out.push_str(entry.id.as_str());
+        out.push('\t');
+        out.push_str(&entry.content);'''
+catches = [
+    "seam::tests::the_render_is_injective_so_one_entry_cannot_forge_a_row",
+]
+
+[[fault]]
+id = "seam.the-ask-does-not-escape"
+failure_class = "seam.the-ask-does-not-escape"
+target = "diet/src/seam/mod.rs"
+expect_exit = 101
+anchor = '''
+            .map(|(index, (_, content))| format!("{}. {}", index + 1, render::one_line(content)))'''
+becomes = '''
+            .map(|(index, (_, content))| format!("{}. {content}", index + 1))'''
+catches = [
+    "seam::tests::an_entry_with_a_newline_is_still_one_numbered_line_in_the_ask",
+]
+
+[[fault]]
+id = "seam.cadence-clamped-not-refused"
+failure_class = "seam.cadence-clamped-not-refused"
+target = "diet/src/seam/policy.rs"
+expect_exit = 101
+anchor = '''
+            Some(count) => Some(u32::try_from(count).map_err(|_| PolicyError::DoesNotFit {
+                key: SEAM_EVERY_TURNS,
+                value: count,
+            })?),'''
+becomes = '''
+            Some(count) => Some(u32::try_from(count).unwrap_or(u32::MAX)),'''
+catches = [
+    "seam::tests::a_cadence_too_large_for_the_field_is_refused_rather_than_clamped",
+]
+
+[[fault]]
+id = "seam.no-graph-collapses-to-not-a-phase"
+failure_class = "seam.no-graph-collapses-to-not-a-phase"
+target = "diet/src/seam/phase.rs"
+expect_exit = 101
+anchor = '''
+        if self.order.is_empty() {
+            return Decision::Refused(Refusal::NoGraph);
+        }
+'''
+becomes = '''
+'''
+catches = [
+    "seam::tests::a_regimen_with_no_phases_refuses_a_proposal_as_having_no_graph",
+]
+
+[[fault]]
+id = "seam.two-seams-in-one-turn"
+failure_class = "seam.two-seams-in-one-turn"
+target = "diet/src/seam/mod.rs"
+expect_exit = 101
+anchor = '''
+        if self
+            .seams
+            .last()
+            .is_some_and(|seam| seam.at_turn == self.turn)
+        {
+            return Ok(None);
+        }
+'''
+becomes = '''
+'''
+catches = [
+    "seam::tests::one_turn_gets_one_seam",
+]
+
+[[fault]]
+id = "seam.turn-zero-fires-a-seam"
+failure_class = "seam.turn-zero-fires-a-seam"
+target = "diet/src/seam/mod.rs"
+expect_exit = 101
+anchor = '''
+.is_some_and(|every| self.turn > 0 && self.turn.is_multiple_of(every)),'''
+becomes = '''
+.is_some_and(|every| self.turn.is_multiple_of(every)),'''
+catches = [
+    "seam::tests::a_controller_that_settles_before_its_first_turn_fires_nothing",
+]
+
+[[fault]]
+id = "seam.object-version-unrecorded"
+failure_class = "seam.object-version-unrecorded"
+target = "diet/src/seam/mod.rs"
+expect_exit = 101
+anchor = '''
+            object_version: object.version(),'''
+becomes = '''
+            object_version: 0,'''
+catches = [
+    "seam::tests::a_seam_records_the_object_version_its_dumps_are_of",
 ]
