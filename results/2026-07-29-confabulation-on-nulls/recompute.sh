@@ -27,7 +27,7 @@ if bad: sys.exit(1)
 print(f"recompute: {len(seen)} consumed artifact(s) hash as the record says")
 PY
 python3 "$here/recompute_headline.py" --out "$tmp" >/dev/null || { echo "recompute: the instrument failed"; exit 2; }
-python3 - "$tmp/headline.json" "$here/headline.json" <<'PY'
+python3 - "$tmp/headline.json" "$here/headline.json" <<'PY' || exit 1
 import json, sys
 got, want = (json.load(open(p)) for p in sys.argv[1:3])
 def flat(o, p=""):
