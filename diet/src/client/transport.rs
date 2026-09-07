@@ -143,6 +143,9 @@ pub enum TransportFailure {
     },
     /// The first line was not an HTTP status line.
     Malformed(String),
+    /// The reply's framing could not be read: a chunked body whose sizes are
+    /// not sizes, or one the server never finished.
+    Framing(String),
 }
 
 impl fmt::Display for TransportFailure {
@@ -164,6 +167,7 @@ impl fmt::Display for TransportFailure {
             Self::Malformed(line) => {
                 write!(f, "the reply's first line is not a status line: {line}")
             }
+            Self::Framing(why) => write!(f, "the reply's framing could not be read: {why}"),
         }
     }
 }
@@ -345,15 +349,98 @@ fn header_end(raw: &[u8]) -> Option<usize> {
     raw.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
-/// The announced body length, if the headers announce one.
-fn announced_length(headers: &str) -> Option<usize> {
-    for line in headers.split("\r\n") {
-        let (name, value) = line.split_once(':')?;
-        if name.trim().eq_ignore_ascii_case("content-length") {
-            return value.trim().parse().ok();
-        }
+/// How a reply says where its body ends.
+///
+/// Read from the headers rather than assumed. A client that only knew
+/// `Content-Length` would hand a chunked reply's framing bytes to the JSON
+/// reader and call the result unreadable -- a true statement about the wrong
+/// thing, and one that would send somebody looking at the model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Framing {
+    /// `Content-Length` announced this many bytes.
+    Length(usize),
+    /// `Transfer-Encoding: chunked`.
+    Chunked,
+    /// Neither: the body ends when the connection does.
+    ToClose,
+}
+
+/// The value of the first header named `name`.
+///
+/// The status line is skipped. It used to be read like any other line, with a
+/// `?` that returned from the whole function the moment a line had no colon --
+/// so this answered `None` for every reply ever, and the client fell back to
+/// reading until the server closed. It worked, because the servers under test
+/// closed. It would have hung against one that did not.
+fn header<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
+    headers.split("\r\n").skip(1).find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.trim().eq_ignore_ascii_case(name).then(|| value.trim())
+    })
+}
+
+/// How this reply's body is framed.
+///
+/// `Transfer-Encoding` wins over `Content-Length` where a server sends both,
+/// which is what RFC 9112 says and also the safe way round: reading a chunked
+/// body as a flat one hands framing bytes to a parser.
+fn framing(headers: &str) -> Framing {
+    if header(headers, "transfer-encoding")
+        .is_some_and(|value| value.to_ascii_lowercase().contains("chunked"))
+    {
+        return Framing::Chunked;
     }
-    None
+    match header(headers, "content-length").and_then(|value| value.parse().ok()) {
+        Some(length) => Framing::Length(length),
+        None => Framing::ToClose,
+    }
+}
+
+/// How far a chunked body has got.
+#[derive(Debug, PartialEq, Eq)]
+enum Chunked {
+    /// The terminal chunk arrived; this is the body.
+    Whole(Vec<u8>),
+    /// Well-formed so far, and not finished.
+    More,
+    /// Not chunked framing at all.
+    Broken(String),
+}
+
+/// Decode a chunked body.
+fn dechunk(raw: &[u8]) -> Chunked {
+    let mut out = Vec::new();
+    let mut rest = raw;
+    loop {
+        let Some(end) = rest.windows(2).position(|window| window == b"\r\n") else {
+            return Chunked::More;
+        };
+        let line = String::from_utf8_lossy(&rest[..end]);
+        // A chunk size may carry extensions after a `;`. They are not ours to
+        // interpret, but they are legal, so they are skipped rather than
+        // treated as part of the number.
+        let digits = line.split(';').next().unwrap_or_default().trim();
+        let Ok(size) = usize::from_str_radix(digits, 16) else {
+            return Chunked::Broken(format!("`{digits}` is not a chunk size"));
+        };
+        rest = &rest[end + 2..];
+        if size == 0 {
+            // Trailers, then the blank line. Waiting for that terminator is
+            // what keeps a trailer out of the body.
+            return match rest.windows(2).position(|window| window == b"\r\n") {
+                Some(_) => Chunked::Whole(out),
+                None => Chunked::More,
+            };
+        }
+        if rest.len() < size + 2 {
+            return Chunked::More;
+        }
+        out.extend_from_slice(&rest[..size]);
+        if &rest[size..size + 2] != b"\r\n" {
+            return Chunked::Broken("a chunk does not end where its size says".to_owned());
+        }
+        rest = &rest[size + 2..];
+    }
 }
 
 /// A reply, if `raw` already holds a whole one.
@@ -366,16 +453,21 @@ fn complete(raw: &[u8]) -> Result<Option<HttpReply>, TransportFailure> {
         return Ok(None);
     };
     let headers = String::from_utf8_lossy(&raw[..end]);
-    let Some(announced) = announced_length(&headers) else {
-        return Ok(None);
-    };
     let body = &raw[end + 4..];
-    if body.len() < announced {
-        return Ok(None);
-    }
+    let whole = match framing(&headers) {
+        Framing::Length(announced) if body.len() >= announced => {
+            String::from_utf8_lossy(&body[..announced]).into_owned()
+        }
+        Framing::Chunked => match dechunk(body) {
+            Chunked::Whole(decoded) => String::from_utf8_lossy(&decoded).into_owned(),
+            Chunked::More => return Ok(None),
+            Chunked::Broken(why) => return Err(TransportFailure::Framing(why)),
+        },
+        Framing::Length(_) | Framing::ToClose => return Ok(None),
+    };
     Ok(Some(HttpReply {
         status: status_of(&headers)?,
-        body: String::from_utf8_lossy(&body[..announced]).into_owned(),
+        body: whole,
     }))
 }
 
@@ -388,17 +480,30 @@ fn finish(raw: &[u8]) -> Result<HttpReply, TransportFailure> {
     };
     let headers = String::from_utf8_lossy(&raw[..end]);
     let body = &raw[end + 4..];
-    if let Some(announced) = announced_length(&headers)
-        && body.len() < announced
-    {
-        return Err(TransportFailure::Truncated {
-            announced,
-            received: body.len(),
-        });
-    }
+    let whole = match framing(&headers) {
+        Framing::Length(announced) => {
+            if body.len() < announced {
+                return Err(TransportFailure::Truncated {
+                    announced,
+                    received: body.len(),
+                });
+            }
+            String::from_utf8_lossy(&body[..announced]).into_owned()
+        }
+        Framing::Chunked => match dechunk(body) {
+            Chunked::Whole(decoded) => String::from_utf8_lossy(&decoded).into_owned(),
+            Chunked::More => {
+                return Err(TransportFailure::Framing(
+                    "the connection closed inside a chunked body".to_owned(),
+                ));
+            }
+            Chunked::Broken(why) => return Err(TransportFailure::Framing(why)),
+        },
+        Framing::ToClose => String::from_utf8_lossy(body).into_owned(),
+    };
     Ok(HttpReply {
         status: status_of(&headers)?,
-        body: String::from_utf8_lossy(body).into_owned(),
+        body: whole,
     })
 }
 
@@ -418,7 +523,55 @@ fn status_of(headers: &str) -> Result<u16, TransportFailure> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Endpoint, EndpointError};
+    use super::{Chunked, Endpoint, EndpointError, Framing, dechunk, framing};
+
+    #[test]
+    fn a_chunked_body_is_whole_only_when_its_terminator_has_arrived() {
+        assert_eq!(
+            dechunk(b"5\r\nhello\r\n5\r\nworld\r\n0\r\n\r\n"),
+            Chunked::Whole(b"helloworld".to_vec())
+        );
+        assert_eq!(
+            dechunk(b"5\r\nhello\r\n"),
+            Chunked::More,
+            "well-formed so far is not finished"
+        );
+        assert_eq!(
+            dechunk(b"5\r\nhello\r\n0\r\n"),
+            Chunked::More,
+            "the terminal chunk still needs its blank line, or a trailer joins the body"
+        );
+        assert_eq!(
+            dechunk(b"5;name=value\r\nhello\r\n0\r\n\r\n"),
+            Chunked::Whole(b"hello".to_vec()),
+            "a chunk extension is legal and is not part of the size"
+        );
+        assert!(matches!(dechunk(b"zz\r\nhello\r\n"), Chunked::Broken(_)));
+        assert!(
+            matches!(dechunk(b"5\r\nhelloXX0\r\n\r\n"), Chunked::Broken(_)),
+            "a chunk that does not end where its size says is broken framing, not a \
+             shorter body"
+        );
+    }
+
+    #[test]
+    fn the_framing_is_read_from_the_headers_and_chunked_wins() {
+        assert_eq!(
+            framing("HTTP/1.1 200 \r\nContent-Length: 12"),
+            Framing::Length(12)
+        );
+        assert_eq!(framing("HTTP/1.1 200 \r\nX: y"), Framing::ToClose);
+        assert_eq!(
+            framing("HTTP/1.1 200 \r\nContent-Length: 12\r\nTransfer-Encoding: chunked"),
+            Framing::Chunked,
+            "reading a chunked body as a flat one hands framing bytes to a parser"
+        );
+        assert_eq!(
+            framing("HTTP/1.1 200 OK: not a header\r\nContent-Length: 3"),
+            Framing::Length(3),
+            "the status line is not a header, whatever punctuation it carries"
+        );
+    }
 
     #[test]
     fn an_https_url_is_refused_rather_than_quietly_sent_in_the_clear() {

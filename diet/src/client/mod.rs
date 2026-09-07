@@ -1146,6 +1146,50 @@ mod tests {
         assert_eq!(call.bank(), Bank::Refused(vec![Refusal::Unreadable]));
     }
 
+    #[test]
+    fn a_chunked_reply_is_decoded_rather_than_handed_to_the_reader_with_its_framing() {
+        let body = answered("an answer", "stop", HONEST_ECHO);
+        let (head, tail) = body.split_at(30);
+        let (call, _) = honest(
+            vec![Act::Chunked(vec![head.to_owned(), tail.to_owned()])],
+            &shaped(card(), 5_000, 20_000, 0),
+        );
+
+        let answer = call
+            .outcome
+            .answer()
+            .unwrap_or_else(|| panic!("a chunked reply is a reply, not {:?}", call.outcome));
+        assert_eq!(answer.text, "an answer");
+        assert_eq!(
+            answer.echo.verdict(),
+            Verdict::Confirmed,
+            "and the whole body was reassembled, not just its first chunk"
+        );
+    }
+
+    #[test]
+    fn a_content_length_reply_is_answered_without_waiting_for_the_connection_to_close() {
+        // The server announces its length and then holds the socket open. A
+        // reader that only knows how to read to end-of-stream sits here until
+        // its deadline and reports a timeout -- against a server that answered
+        // immediately.
+        let (call, _) = honest(
+            vec![Act::AnswerAndHold(
+                answered("an answer", "stop", HONEST_ECHO),
+                Duration::from_millis(1_200),
+            )],
+            &shaped(card(), 300, 20_000, 0),
+        );
+
+        let answer = call.outcome.answer().unwrap_or_else(|| {
+            panic!(
+                "the length was announced and the bytes arrived: {:?}",
+                call.outcome
+            )
+        });
+        assert_eq!(answer.text, "an answer");
+    }
+
     // -----------------------------------------------------------------------
     // cache telemetry and the declared serving
     // -----------------------------------------------------------------------

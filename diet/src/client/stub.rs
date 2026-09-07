@@ -15,6 +15,7 @@
 //! answers are a script, so that a drive over the machinery is deterministic
 //! and needs no model.
 
+use std::fmt::Write as _;
 use std::io::{self, Read as _, Write as _};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
@@ -33,6 +34,15 @@ pub enum Act {
     /// Read the request, wait, then answer `200` with this body. The wait is
     /// what a deadline is measured against.
     Stall(Duration, String),
+    /// Answer `200` with this body, framed with `Transfer-Encoding: chunked`,
+    /// split at the given boundaries.
+    Chunked(Vec<String>),
+    /// Answer `200` with this body and then HOLD the connection open.
+    ///
+    /// The act that tells a `Content-Length` reader from one that waits for
+    /// the close: a client that only knows how to read to end-of-stream sits
+    /// here until its deadline, against a server that answered at once.
+    AnswerAndHold(String, Duration),
     /// Accept the connection and close it without answering.
     Hangup,
 }
@@ -161,14 +171,26 @@ fn accept(listener: &TcpListener, stop: &AtomicBool) -> Option<TcpStream> {
 
 fn act_on(stream: &mut TcpStream, act: &Act) {
     match act {
-        Act::Answer(body) => write_reply(stream, 200, body),
-        Act::Status(status, body) => write_reply(stream, *status, body),
+        Act::Answer(body) => write_reply(stream, 200, body, Closing::Yes),
+        Act::Status(status, body) => write_reply(stream, *status, body, Closing::Yes),
         Act::Stall(wait, body) => {
             thread::sleep(*wait);
-            write_reply(stream, 200, body);
+            write_reply(stream, 200, body, Closing::Yes);
+        }
+        Act::Chunked(pieces) => write_chunked(stream, pieces),
+        Act::AnswerAndHold(body, hold) => {
+            write_reply(stream, 200, body, Closing::No);
+            thread::sleep(*hold);
         }
         Act::Hangup => {}
     }
+}
+
+/// Whether a reply announces that the connection ends with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Closing {
+    Yes,
+    No,
 }
 
 /// Read one request and return its body.
@@ -215,10 +237,14 @@ fn content_length(headers: &str) -> Option<usize> {
     None
 }
 
-fn write_reply(stream: &mut TcpStream, status: u16, body: &str) {
+fn write_reply(stream: &mut TcpStream, status: u16, body: &str, closing: Closing) {
+    let connection = match closing {
+        Closing::Yes => "close",
+        Closing::No => "keep-alive",
+    };
     let head = format!(
         "HTTP/1.1 {status} \r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
-         Connection: close\r\n\r\n",
+         Connection: {connection}\r\n\r\n",
         body.len()
     );
     // Nothing here is worth failing over: the client's view is the subject of
@@ -226,6 +252,23 @@ fn write_reply(stream: &mut TcpStream, status: u16, body: &str) {
     // the case under test succeeding.
     let _ = stream.write_all(head.as_bytes());
     let _ = stream.write_all(body.as_bytes());
+    let _ = stream.flush();
+}
+
+/// Write a body as chunked transfer-encoding, split at the caller's
+/// boundaries. The framing itself is written correctly, so a test using this
+/// is about the client's reader and not about a broken server.
+fn write_chunked(stream: &mut TcpStream, pieces: &[String]) {
+    let mut out = String::from(
+        "HTTP/1.1 200 \r\nContent-Type: application/json\r\n\
+         Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+    );
+    for piece in pieces {
+        // Infallible: the target is a String.
+        let _ = write!(out, "{:x}\r\n{piece}\r\n", piece.len());
+    }
+    out.push_str("0\r\n\r\n");
+    let _ = stream.write_all(out.as_bytes());
     let _ = stream.flush();
 }
 
