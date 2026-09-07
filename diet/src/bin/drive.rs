@@ -29,6 +29,7 @@
 //! call, not this program's.** Until it is made, the key names here are this
 //! program's convention and are disclosed as one.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::process::ExitCode;
 
@@ -38,7 +39,7 @@ use diet::client::shape::{
 };
 use diet::client::stub::Stub;
 use diet::client::transport::{Endpoint, Http};
-use diet::drive::{Gym, canned, run};
+use diet::drive::{Gym, Halt, canned, run};
 use diet::formats::record::json::{self, Value};
 use diet::formats::record::{Reasoning, Regime, Substrate};
 use diet::formats::regimen::{self, Regimen};
@@ -47,15 +48,21 @@ use diet::seam::policy::Policy as SeamPolicy;
 
 /// Exit code for a usage error, kept distinct from a drive that did not run.
 const EXIT_USAGE: u8 = 2;
-/// Exit code for a drive that halted. Two, matching
-/// [`diet::drive::Halt::EXIT`] and [`isolation::Unavailable::EXIT`]: a
-/// session that could not start is not a session that failed, and a census
-/// that could not tell them apart would count a missing substrate as a
-/// failed run.
-const EXIT_HALT: u8 = 2;
+/// Exit code for a drive that halted.
+///
+/// Taken from [`Halt::EXIT`] rather than written again here: a session that
+/// could not start is not a session that failed, and the two files used to
+/// spell the same number twice with a comment asserting they matched.
+const EXIT_HALT: u8 = Halt::EXIT;
 /// Exit code for a regimen that is not one, or does not carry what a regime
 /// needs.
 const EXIT_INPUT: u8 = 1;
+/// Exit code for a record that could not be written where it was asked for.
+///
+/// Its own code, and not [`EXIT_HALT`]: a drive that ran and could not file
+/// its record is not a drive that could not start, and the two collapsed into
+/// one number would be counted together.
+const EXIT_OUTPUT: u8 = 3;
 
 /// The keys this program reads for the four regime facts a regimen v1 has no
 /// place for, named after the record's own field paths.
@@ -67,27 +74,34 @@ const SUBSTRATE_KEYS: &[&str] = &[
 ];
 
 fn usage() -> String {
-    let mut out = String::from("usage: diet-drive <regimen> <output.jsonl> [endpoint]\n\n");
-    out.push_str("Runs the pinned three-turn script through <regimen> and writes the\n");
-    out.push_str("record to <output.jsonl>. With no endpoint the canned server answers\n");
-    out.push_str("on loopback -- no model, no network out. With one, that server does.\n\n");
+    let mut out =
+        String::from("usage: diet-drive <regimen> <worktree> <output.jsonl> [endpoint]\n\n");
+    out.push_str("Runs the pinned three-turn script through <regimen> in <worktree>\n");
+    out.push_str("and writes the record to <output.jsonl>. With no endpoint the canned\n");
+    out.push_str("server answers on loopback -- no model, no network out.\n\n");
+    out.push_str("<worktree> is REQUIRED and is not defaulted to the current directory.\n");
+    out.push_str("The script's commands write into it, and defaulting meant the\n");
+    out.push_str("documented invocation dropped files into whatever checkout the\n");
+    out.push_str("operator happened to be standing in.\n\n");
     out.push_str("The regimen must carry `arm`, `dogma_version`, `substrate` and:\n");
     for key in SUBSTRATE_KEYS {
         let _ = writeln!(out, "  {key}");
     }
     out.push_str("\nA JSON result goes to stdout. Exit 0 when the drive ran and its\n");
-    out.push_str("record parses, 1 when the regimen is not usable, 2 on a usage error\n");
-    out.push_str("or a drive that could not run.\n");
+    out.push_str("record parses, 1 when the input is not usable, 2 on a usage error or\n");
+    out.push_str("a drive that could not run, 3 when the record could not be filed.\n");
     out
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (Some(regimen_path), Some(out_path)) = (args.first(), args.get(1)) else {
+    let (Some(regimen_path), Some(worktree), Some(out_path)) =
+        (args.first(), args.get(1), args.get(2))
+    else {
         eprint!("{}", usage());
         return ExitCode::from(EXIT_USAGE);
     };
-    if args.len() > 3 {
+    if args.len() > 4 {
         eprint!("{}", usage());
         return ExitCode::from(EXIT_USAGE);
     }
@@ -100,16 +114,37 @@ fn main() -> ExitCode {
         Ok(confinement) => confinement,
         Err(why) => return fail(EXIT_HALT, &why.to_string()),
     };
-    let worktree = match std::env::current_dir() {
-        Ok(here) => here,
-        Err(why) => return fail(EXIT_HALT, &format!("there is no working directory: {why}")),
+    // Absolute, because `Confinement::run` refuses a relative working tree --
+    // it is resolved once by the harness and again inside a sandbox -- and
+    // because the record should not depend on where the operator stood.
+    let worktree = match std::path::absolute(worktree) {
+        Ok(path) if path.is_dir() => path,
+        Ok(path) => {
+            return fail(
+                EXIT_INPUT,
+                &format!("{} is not a directory that exists", path.display()),
+            );
+        }
+        Err(why) => return fail(EXIT_INPUT, &format!("{worktree} is not a path: {why}")),
     };
+
+    // The output path is claimed BEFORE anything runs. Validated last, a
+    // drive against an unwritable path made six inference calls, ran both
+    // commands into the working tree, and then exited -- reporting a code
+    // whose documented meaning is "could not start" for a session that ran to
+    // completion, which a census keyed on it would miscount.
+    if let Err(why) = std::fs::write(out_path, "") {
+        return fail(
+            EXIT_OUTPUT,
+            &format!("{out_path} cannot be written, and nothing has run: {why}"),
+        );
+    }
 
     let script = canned::script(regime);
     // `held` is not an unused binding: dropping the stub stops its serving
     // thread, and a canned server that stopped mid-drive would reach the
     // client as a substrate that hung up. It lives as long as the run does.
-    let (held, endpoint) = match answering(args.get(2)) {
+    let (held, endpoint) = match answering(args.get(3)) {
         Ok(pair) => pair,
         Err((code, why)) => return fail(code, &why),
     };
@@ -208,14 +243,13 @@ fn written(drive: &diet::drive::Drive, out_path: &str) -> ExitCode {
                 ("unspellable".to_owned(), count(drive.unspellable.len())),
                 (
                     "uncaptured".to_owned(),
-                    Value::Array(
-                        drive
-                            .uncaptured
-                            .iter()
-                            .map(|census| count(census.regions - census.captured))
-                            .collect(),
-                    ),
+                    Value::Array(drive.uncaptured.iter().map(census).collect()),
                 ),
+                // Every audit, because none of them was folded: the verdict
+                // grammar is not built. Reported as a count rather than
+                // silently absent, so a reader of this line knows a seam's
+                // ask was put and its answer not read.
+                ("audits_unread".to_owned(), count(drive.audits.len())),
             ]
             .into_iter()
             .collect(),
@@ -224,6 +258,27 @@ fn written(drive: &diet::drive::Drive, out_path: &str) -> ExitCode {
     );
     println!("{out}");
     ExitCode::SUCCESS
+}
+
+/// One fork's census, in the record's value space.
+fn census(one: &diet::drive::Uncaptured) -> Value {
+    let count = |many: usize| Value::Integer(i64::try_from(many).unwrap_or(-1));
+    Value::Object(BTreeMap::from([
+        ("turn".to_owned(), Value::Integer(i64::from(one.turn))),
+        ("fork".to_owned(), Value::String(one.fork.clone())),
+        ("regions".to_owned(), count(one.regions)),
+        ("captured".to_owned(), count(one.captured)),
+        ("truncated".to_owned(), Value::Boolean(one.truncated)),
+        (
+            "passed_over".to_owned(),
+            Value::Array(
+                one.passed_over
+                    .iter()
+                    .map(|tag| Value::String(tag.clone()))
+                    .collect(),
+            ),
+        ),
+    ]))
 }
 
 /// Write `why` as a structured result and return `code`.
