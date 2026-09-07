@@ -1,0 +1,236 @@
+# The test-equipment registry.
+#
+# One entry per piece of equipment the science runs on, and one entry per
+# SUBSTRATE -- a served model on a machine, which is not the same thing. Two of
+# this program's substrates are the same machine, so a registry keyed by
+# machine could not record the experiment that compares them.
+#
+# Read `substrates/README.md` for what an id means, what an instance means, and
+# why a replaced part mints a new instance instead of editing the old one.
+#
+# Every value here was measured on the machine or read out of a committed
+# substrate capture, and each block says which and when. A field that is an
+# inference carries `inferred = true` and states what it was inferred from. A
+# field nobody has measured is absent, not guessed.
+
+[registry]
+version = 1
+
+# ---------------------------------------------------------------------------
+# machines
+# ---------------------------------------------------------------------------
+
+[machine.linux-pc]
+display_name = "ironblock's Linux PC"
+role = "the accelerator host; every served substrate in this program runs here"
+measured = "2026-09-05"
+
+accelerator = "NVIDIA GeForce RTX 3090 (GA102, PCI 10de:2204, Founders Edition)"
+accelerator_memory_mib = 24576
+accelerator_driver = "610.57.04"
+accelerator_vbios = "94.02.4B.00.0B"
+accelerator_power_limit_w = 350
+accelerator_power_limit_ceiling_w = 400
+accelerator_max_sm_clock_mhz = 2100
+interconnect = "PCIe 4.0 x16"
+interconnect_note = """
+`pcie.link.gen.max` is 4 and `pcie.link.width.max` is 16. A link rate sampled \
+from an idle card understates this by three generations: at pstate P8 \
+`pcie.link.gen.current` reads 1, and the archived fingerprints of 2026-07-25 \
+and 2026-09-04 both caught the card mid-ramp at 8 GT/s. The class fact is the \
+maximum; the sampled rate is an artefact of when the sample was taken."""
+
+cpu = "AMD Ryzen 7 5800X, 8 cores / 16 threads, max 3801 MHz"
+memory = "4 x 8 GiB DDR4-2666, dual channel (four slots populated) = 32 GB, 31 GiB usable"
+board = "ASUSTeK TUF GAMING X570-PRO (WI-FI), Rev X.0x"
+firmware = "BIOS 5044 (2026-01-04)"
+storage = "2 x 1.8 TB NVMe (Corsair Force MP600)"
+
+cooling = """
+Custom hardline water loop: three radiators (2 x 360 mm + 280 mm), six 120 mm \
+and four 140 mm fans, a full-cover block and an active backplate on the card, a \
+monoblock over CPU and VRMs, and a chipset block. Measured idle: GPU 28 C at 18 \
+W with the card's fan speed at 0% (there is no fan on the card), CPU Tctl 30.5 \
+C."""
+cooling_matters_because = """
+A stock air-cooled 3090 Founders Edition throttles under sustained decode and \
+this card does not. Absolute decode rates measured on this machine are \
+therefore NOT portable to a stock card of the same model; only within-machine \
+comparisons are. This is the single most important class fact in this entry, \
+and it is the reason the cooling is described at all."""
+cooling_not_reproducible_because = """
+Two parts of the loop do not fit this board as sold. The monoblock is nominally \
+for a different manufacturer's X570 board and mounts here only with decorative \
+trim removed; the chipset block is nominally another vendor's part, mounted on \
+a custom 3D-printed (engineering resin) adapter for a hole pattern this board \
+does not have. A reader can reproduce the accelerator, the CPU, the memory and \
+the board from this entry. They cannot reproduce the loop from a parts list, \
+and the registry should not imply otherwise."""
+
+[machine.mac-pro-2019]
+display_name = "ironblock's 2019 Mac Pro"
+role = "the data seat's workstation; a host, with no substrate beneath it"
+measured = "2026-09-05"
+
+model_identifier = "MacPro7,1"
+cpu = "Intel Xeon W-3235, 12 cores / 24 threads, 3.30 GHz"
+memory = "12 x 8 GiB DDR4 R-DIMM @ 2933 MHz, all twelve slots populated (six channels, fully banked) = 96 GiB"
+gpu = "AMD Radeon Pro W5700X, 16 GB, Metal 3"
+architecture = "x86_64"
+os = "macOS 26.5.2 (build 25F84)"
+no_substrate_because = """
+Nothing in this program serves a model on this machine: its GPU is not adept at \
+the workload. It is registered as a host with no substrate beneath it, which is \
+a more honest record than inventing one. It is worth stating that it is x86_64 \
+with an AMD GPU, because "runs on the Mac" is otherwise ambiguous between this \
+machine and the laptop, and the two share no acceleration path at all."""
+
+[machine.macbook-pro-2021]
+display_name = "ironblock's 2021 MacBook Pro 16-inch"
+role = "the Apple-silicon floor suite's host"
+measured = "not measured -- owner-supplied, see below"
+
+chip = "Apple M1 Max"
+memory = "32 GB unified"
+storage = "1 TB"
+in_service = true
+os = "unknown"
+core_counts = "10-core CPU / 32-core GPU"
+core_counts_inferred = true
+core_counts_inferred_from = """
+The owner supplied "highest core count for that year", which resolves to this \
+across the two SKUs M1 Max shipped in. It is an inference from that phrase and \
+the public SKU list, not a reading off the machine, and it should be confirmed \
+before anything leans on it."""
+measured_floor_result = "non-viable for the 27B in the floor suite, which is itself the useful class fact"
+placeholder_note = """
+This entry is a placeholder in the sense #52 sanctioned: the machine is real \
+and in service, nobody with access has run a readout, and the fields that are \
+absent are absent rather than filled in. The 32 GB figure settles a \
+contradiction inside the private archive, where one document asserted it as \
+fact and another carried it as an open question."""
+
+# ---------------------------------------------------------------------------
+# substrates
+# ---------------------------------------------------------------------------
+
+[substrate.accel24-beellama-qwen27b-q4kxl]
+machine = "linux-pc"
+description = "Qwen3.6 27B at UD-Q4_K_XL on the 24 GiB accelerator, served by the beellama engine with a DFlash speculative draft model"
+pinned = true
+
+engine_name = "beellama"
+engine_identity = "980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4"
+engine_identity_is = "sha256 of the llama-server binary, measured 2026-09-05"
+engine_label = "preview-v0.3.2"
+engine_label_is_not_identity = """
+Upstream re-pointed this release tag on 2026-07-10, from one commit to a \
+descendant, because the release was re-cut with extra fixes. The tarball here \
+was downloaded 2026-06-14 and is the original cut, so two machines can both \
+honestly report `preview-v0.3.2` and run different code. The label is for \
+readers; the binary digest is what parity matches."""
+engine_release_tarball_sha256 = "9da1f400e03925c797f1d699c5f275d6bd4616df5b9cdeb4c54f649850ced558"
+engine_release_downloaded = "2026-06-14"
+engine_build_toolchain = "GCC 13.3.0, CUDA 13.1, x86_64"
+engine_self_reported_version = "0 (unknown)"
+engine_self_reported_build_info = "b0-unknown-dirty"
+engine_provenance_note = """
+The engine is an unpacked prebuilt release tarball, not a local build. That is \
+why there is no git checkout at or above the serving directory, no \
+`CMakeCache.txt` recording a source tree, and `LLAMA_BUILD_NUMBER` resolving to \
+`b0`: there was never a build tree to find. Pin the BINARY and not its \
+directory -- the unpacked directory also holds unrelated files, so a \
+directory-level digest would drift for reasons that have nothing to do with the \
+engine.
+
+The engine is a declared factor of the science and not an identity to be \
+scrubbed, per the ruling on #52."""
+
+weights_main = "ff6941ded525b34eb159496762c29dd0ec6e71dc31b74d57e75d871a03eec259"
+weights_main_file = "Qwen3.6-27B-UD-Q4_K_XL.gguf"
+weights_draft = "08e4dffcd7893a4c15981ab2061afa128013731be60f1a6847785a3d630f7c8d"
+weights_draft_file = "Qwen3.6-27B-DFlash-IQ4_XS.gguf"
+weights_projector = "05353347512982ee62317b9d8c89372bc815f4b4043580e7ef3ad411ec1a1cd3"
+weights_projector_file = "mmproj-BF16.gguf"
+
+sampler_card = "temperature 0.6, top_k 20, top_p 1.0, min_p 0.0"
+sampler_card_is = """
+The server's own defaults, as the serving line sets them. A fire may override \
+them, and its regime records what it sent; where the two differ the fire's \
+regime is what ran. The extraction bakeoff of 2026-08-10 is one such fire."""
+
+serving_context = 160000
+serving_flags = "--flash-attn on, --kv-unified, --cache-type-k q5_0, --cache-type-v q4_1, --spec-type dflash, --spec-dflash-cross-ctx 1024, --spec-draft-ngl all, -ngl all, -b 2048, -ub 512, --mlock, --no-mmap, --no-mmproj-offload, --reasoning on"
+serving_flags_constant_across_instances = true
+
+# Instances, oldest first. Each is pinned by a committed substrate capture in
+# the private research archive; the capture's date is the instance id.
+[[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
+id = "2026-07-25"
+os_deployment_version = "44.20260721"
+os_deployment_digest = "ece1632fd68d2b17089db0b960fd182d1a9b10bbc2c999457597d24d1616acaa"
+kernel = "7.1.3-ogc5.1.fc44.x86_64"
+serving_parallel_slots = 1
+pinned_by = "substrate capture of 2026-07-25, frozen as the program's v1.0 baseline"
+engine_identity_measured = false
+engine_identity_note = """
+No engine digest was captured at this instance. The archive's frozen baseline \
+for it records why: its source-commit field is empty because the server was run \
+from the unpacked `preview-v0.3.2` release directory and not from a git \
+checkout, so there was no commit to record. That is provenance BY RECORD -- the \
+archive says which release directory served this instance -- against the \
+provenance BY MEASUREMENT the 2026-09-04 instance carries, where the binary \
+itself was hashed. Nothing in the archive ties this instance's bytes to that \
+digest. Treat this instance's engine as identified but not pinned."""
+weights_digest_note = """
+Two captures pin this instance. One records the three weights files by sha256, \
+the other by size and modification time only -- the fingerprint tool recorded \
+both forms in this era. The digests in the first agree with every capture from \
+2026-08-13 onward, so the weights are the same files throughout; the size and \
+mtime form is noted because a reader comparing the two captures will find them \
+unlike and should know why."""
+
+[[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
+id = "2026-08-13"
+os_deployment_version = "44.20260802"
+os_deployment_digest = "6b752810f32080830f3a294428b7851fb686fc298f54016152d78f4671f71f79"
+kernel = "7.1.5-ogc5.1.fc44.x86_64"
+serving_parallel_slots = 1
+pinned_by = "substrate capture of 2026-08-13, taken after a kernel update"
+engine_identity_measured = false
+
+[[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
+id = "2026-08-16"
+os_deployment_version = "44.20260802"
+os_deployment_digest = "6b752810f32080830f3a294428b7851fb686fc298f54016152d78f4671f71f79"
+kernel = "7.1.5-ogc5.1.fc44.x86_64"
+serving_parallel_slots = 2
+pinned_by = "substrate capture of 2026-08-16"
+engine_identity_measured = false
+why_a_separate_instance = """
+Same operating system deployment, same kernel, same engine, same weights as \
+2026-08-13 -- and a different substrate. The server's parallel-slot count went \
+from 1 to 2, which changes how requests share the cache. An instance keyed only \
+on the operating system could not tell these two apart, and this pair is the \
+measured proof that it must not be."""
+
+[[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
+id = "2026-09-04"
+os_deployment_version = "44.20260902"
+os_deployment_digest = "b7807f90a98c33e911dc0ec008bc73b50561e89566cee2b85b18ff950f47ec78"
+kernel = "7.2.1-ogc4.1.fc44.x86_64"
+serving_parallel_slots = 2
+pinned_by = "substrate capture of 2026-09-04, taken after the operating system update of 2026-09-03"
+engine_identity_measured = true
+current = true
+
+[substrate.apple32-omlx-gemma12b]
+machine = "macbook-pro-2021"
+description = "Gemma 4 12B served by oMLX on Apple silicon; the floor suite's substrate"
+pinned = false
+unpinned_because = """
+Named here because the regimen arms of the Apple floor suite reference this \
+substrate and had nothing to reference before. Nothing about it has been \
+measured by a seat with access: no engine digest, no weights digest, no sampler \
+card, no operating system version. It is a name with a machine behind it and \
+nothing else, and it is marked so rather than filled in."""
