@@ -1,0 +1,5 @@
+Pause. Settle your judgment for the work you've just done.
+MAP: the structure as you hold it now — what you've learned, including anything that surprised you. Write MAP: NONE if nothing changed.
+DARK: what you haven't seen but expect to need. Write DARK: NONE if there is nothing.
+NEXT: up to three concrete next actions, in order, each on its own line as NEXT: <step>. Write NEXT: NONE if the work is finished.
+SUPERSEDE: an earlier record this turn changes or replaces — cite it — or SUPERSEDE: NONE.

@@ -72,33 +72,6 @@ impl Decimal {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-
-    /// A decimal spelled the one way the grammar spells it: an optional sign,
-    /// no leading zero, a point, at least one digit on each side of it.
-    ///
-    /// The only door from a number a program computed to a number a record
-    /// holds. It takes text rather than an `f64` so that the caller has to
-    /// choose how many digits the record keeps, and so that the values with no
-    /// spelling here -- the infinities, and a result that is not a number --
-    /// are refused rather than written.
-    #[must_use]
-    pub fn parse(text: &str) -> Option<Self> {
-        let unsigned = text.strip_prefix('-').unwrap_or(text);
-        let (whole, fraction) = unsigned.split_once('.')?;
-        let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
-        if !digits(whole) || !digits(fraction) {
-            return None;
-        }
-        if whole != "0" && whole.starts_with('0') {
-            return None;
-        }
-        // `-0.0` is a second spelling of `0.0`, and one spelling per value is
-        // what makes two records of one run the same bytes.
-        if text.starts_with('-') && whole == "0" && fraction.bytes().all(|b| b == b'0') {
-            return None;
-        }
-        Some(Self(text.to_owned()))
-    }
 }
 
 impl fmt::Display for Decimal {

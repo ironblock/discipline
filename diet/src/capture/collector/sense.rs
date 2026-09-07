@@ -521,6 +521,7 @@ mod tests {
                         turn: 5,
                         lane: "interview".to_owned(),
                         fork: None,
+                        tangent: None,
                         index: 0,
                     },
                 })
@@ -939,6 +940,7 @@ mod tests {
                     turn: 18,
                     lane: "interview".to_owned(),
                     fork: None,
+                    tangent: None,
                     index: 0,
                 },
             })
@@ -979,6 +981,7 @@ mod tests {
                     turn: 10,
                     lane: "interview".to_owned(),
                     fork: None,
+                    tangent: None,
                     index: 0,
                 },
             })

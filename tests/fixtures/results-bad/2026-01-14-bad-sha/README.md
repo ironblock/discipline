@@ -1,6 +1,7 @@
 +++
 hypothesis = "State the claim being tested, in one sentence, so that it could be wrong."
 result = "supported"
+kind = "reproducible-by-config"
 product_sha256 = "not-a-sha"
 controls_run = ["null-regimen"]
 known_defects = []

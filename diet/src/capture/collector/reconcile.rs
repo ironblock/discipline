@@ -114,11 +114,16 @@ mod tests {
     /// Where a verdict came from. The confirm fork is an interview fork --
     /// a single ask with a constrained answer -- so it carries the lane that
     /// already exists rather than a name coined here for it.
+    ///
+    /// Trunk: `tangent` is written by `object::tangent::Tangent::provenance`
+    /// and by nothing else, and a collector that stamped a scope by hand
+    /// would put one in the record nothing checked.
     fn at(turn: u32) -> Provenance {
         Provenance {
             turn,
             lane: "interview".to_owned(),
             fork: Some("f1".to_owned()),
+            tangent: None,
             index: 0,
         }
     }
@@ -134,6 +139,7 @@ mod tests {
                     turn: 5,
                     lane: "interview".to_owned(),
                     fork: None,
+                    tangent: None,
                     index: 0,
                 },
             })

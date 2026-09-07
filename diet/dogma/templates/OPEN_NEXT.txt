@@ -1,0 +1,4 @@
+Pause. Two questions about where you are right now:
+1. What remains open, unverified, or assumed-but-not-checked that could affect later work? Each on its own line as OPEN: <question>.
+2. What do you concretely plan to do next, in order? Each on its own line as NEXT: <step>.
+If nothing is open, write OPEN: NONE. There must be at least one NEXT line unless the work is finished (then NEXT: NONE).
