@@ -179,6 +179,22 @@ def skeleton_of(text: str, patterns) -> str:
     return re.sub(r"\n{2,}", "\n\n", text)
 
 
+def merge_base(ours_ref: str, theirs_ref: str) -> str | None:
+    """The commit the two sides last shared, or None if they share none.
+
+    None is a real answer and not an error: two histories with no common
+    commit can be merged, and when they are, no block either of them carries
+    can be decided by looking backwards. The union says so and refuses the
+    contested blocks rather than picking.
+    """
+    run = subprocess.run(
+        ["git", "merge-base", ours_ref, theirs_ref], capture_output=True, text=True
+    )
+    if run.returncode != 0 or not run.stdout.strip():
+        return None
+    return run.stdout.strip().splitlines()[0]
+
+
 def union_file(path: Path, ours_ref: str, theirs_ref: str) -> bool:
     """Rebuild one gate file from the two sides, by name."""
     ours = show(ours_ref, str(path))
@@ -235,9 +251,73 @@ def union_file(path: Path, ours_ref: str, theirs_ref: str) -> bool:
         sys.stderr.writelines(diff[:80])
         return False
 
+    # THE BLOCKS BOTH SIDES CARRY.
+    #
+    # `built = ours` and append-what-ours-lacks says nothing about a block
+    # both sides have. Keeping ours is not neutral: when THEIRS is the side
+    # that corrected the block, keeping ours reverts the correction, and the
+    # union prints nothing because from its point of view nothing was added.
+    # That is not hypothetical -- it silently reverted twelve incumbent
+    # corrections across four lanes, and one of the three entries involved
+    # was graded by nothing at all, so it would have landed four times.
+    #
+    # The merge base is what tells the two cases apart. It is the same
+    # three-way comparison git does per hunk, done per NAMED BLOCK, which is
+    # the unit this tool works in:
+    #
+    #   ours == base, theirs != base   they corrected it     -> take theirs
+    #   theirs == base, ours != base   we changed it         -> ours stands
+    #   all three differ, or the base has no such block      -> a person's
+    #
+    # Refusing the third case rather than picking is the same rule the
+    # skeleton refusal above follows, for the same reason: a resolver that
+    # guesses between two authored versions is a resolver that can be wrong
+    # silently.
+    base_ref = merge_base(ours_ref, theirs_ref)
+    try:
+        base = show(base_ref, str(path)) if base_ref else ""
+    except Missing:
+        # The file is not in the base at all -- both sides added it. Then no
+        # block in it has an incumbent, and every disagreement is contested.
+        base = ""
+    if base_ref is None:
+        print(
+            f"merge-gate: {path.name}: {ours_ref} and {theirs_ref} share no "
+            f"commit, so no block both of them carry can be decided from the "
+            f"base; any that differ are yours",
+            file=sys.stderr,
+        )
+
+    contested: list[tuple[str, str, str]] = []
     built = ours
     for pattern in patterns:
-        mine = {name for name, _ in find_blocks(pattern, ours)}
+        key = key_of(pattern)
+        ours_blocks = dict(find_blocks(pattern, ours))
+        theirs_blocks = dict(find_blocks(pattern, theirs))
+        base_blocks = dict(find_blocks(pattern, base))
+        corrections: dict[str, str] = {}
+        for name in sorted(set(ours_blocks) & set(theirs_blocks)):
+            if ours_blocks[name] == theirs_blocks[name]:
+                continue
+            was = base_blocks.get(name)
+            if was is not None and ours_blocks[name] == was:
+                corrections[name] = theirs_blocks[name]
+            elif was is not None and theirs_blocks[name] == was:
+                continue
+            else:
+                contested.append((name, ours_blocks[name], theirs_blocks[name]))
+        if corrections:
+            def swap(m, key=key, corrections=corrections):
+                return corrections.get(key(m.group(0)), m.group(0))
+
+            built = pattern.sub(swap, built)
+            print(
+                f"merge-gate: {path.name}: took {len(corrections)} corrected "
+                f"{KIND.get(id(pattern), 'block')}(s) from {theirs_ref} "
+                f"(ours still matched the merge base): " + ", ".join(sorted(corrections))
+            )
+
+        mine = set(ours_blocks)
         added = [
             block for name, block in find_blocks(pattern, theirs) if name not in mine
         ]
@@ -253,6 +333,30 @@ def union_file(path: Path, ours_ref: str, theirs_ref: str) -> bool:
                 f"{KIND.get(id(pattern), 'block')}(s) from {theirs_ref}: "
                 + ", ".join(taken)
             )
+
+    if contested:
+        import difflib
+
+        print(
+            f"{path}: {len(contested)} block(s) were edited on BOTH sides and "
+            f"differ from the merge base on both. A union cannot choose between "
+            f"two authored versions; these are yours:",
+            file=sys.stderr,
+        )
+        for name, mine_text, their_text in contested:
+            print(f"\n  --- {name} ---", file=sys.stderr)
+            sys.stderr.writelines(
+                list(
+                    difflib.unified_diff(
+                        mine_text.splitlines(True),
+                        their_text.splitlines(True),
+                        fromfile=f"{ours_ref}:{name}",
+                        tofile=f"{theirs_ref}:{name}",
+                        n=2,
+                    )
+                )[:40]
+            )
+        return False
 
     # `red_faults` is COUNTED from the assembled list, not computed from the
     # two sides' deltas. The delta arithmetic is wrong whenever the branches

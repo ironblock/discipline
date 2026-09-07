@@ -1899,6 +1899,30 @@ inject_parity() {
   rm -rf tests/fixtures/results-bad/2026-01-14-bad-sha
 }
 
+# A merge that adds a field to a struct. Every injection that writes a WHOLE
+# literal of that struct is now invalid text -- and the tree still builds,
+# because an injection's replacement text is a string the compiler never sees.
+# This went red on CI once, as "red for the wrong reason", forty minutes in.
+inject_injections_struct_grew() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+opened = "pub struct Provenance {\n"
+assert source.count(opened) == 1
+path.write_text(
+    source.replace(
+        opened,
+        opened + "    /// Seeded fault: a field a merge added.\n"
+        "    pub cohort: Option<String>,\n",
+        1,
+    ),
+    encoding="utf-8",
+)
+EOF
+}
+
 inject_ci() {
   # Take a check's owner away: it then runs in no workflow, while CI is green.
   sed -i '/^hygiene\t/d' .github/check-owners.tsv
@@ -4365,6 +4389,8 @@ selftest() {
     'holds its own binding and the table below it' 'lib/formats::regimen::tests'
   seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
     'an array item was read by something other than the value reader' 'lib/formats::regimen::tests'
+  seeded_case "a merged field an injection cannot see" injections inject_injections_struct_grew \
+    'builds a Provenance without cohort'
   seeded_case "a case naming no injection"            injections inject_case_without_an_injection \
     'named by a seeded case, defined nowhere'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \

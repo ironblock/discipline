@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 280
+red_faults = 281
 mechanics_assertions = 39
 migrated = 0
 
@@ -3022,4 +3022,12 @@ check = "parity"
 label = "a shard outside 1..N is a misuse"
 failure_class = "shard.out-of-range"
 legacy_signature = ""
+migrated = false
+[[fault]]
+id = "injections.injections_struct_grew"
+kind = "seeded-gate"
+check = "injections"
+label = "a merged field an injection cannot see"
+failure_class = "gate.injection-literal-incomplete"
+legacy_signature = "builds a Provenance without cohort"
 migrated = false

@@ -51,6 +51,37 @@ RELOCATING = {"subset-fixture"}
 # both derive from this, and they used to be two lists that agreed by hand.
 SELFTEST_KINDS = ("seeded-gate", "results-fixture", "pattern-class")
 
+# A line git writes into a file it could not merge. `=======` alone is not
+# one: it is a plausible separator in ordinary prose, and a checker that
+# refused it would refuse files nobody is merging. The two arrow markers are
+# not plausible as anything else.
+CONFLICTED = re.compile(r"^(<{7} |>{7} )", re.M)
+
+
+def refuse_conflicted(path: pathlib.Path, text: str) -> None:
+    """Exit 2 if a file still carries conflict markers.
+
+    THE COUNT IS DERIVED FROM verify.sh. So a `--count-red` taken while
+    verify.sh is still half-merged counts the union of both sides' seeded
+    cases, or neither side's, depending on where the markers fell -- and
+    hands back a number that looks like an answer. The tool that asked is
+    mid-merge and about to write that number into the manifest, which is the
+    one moment nothing is watching.
+
+    Exit 2 rather than 1: this is "I was asked something I cannot answer",
+    the code every other refusal in this gate uses for that.
+    """
+    if CONFLICTED.search(text):
+        found = CONFLICTED.findall(text)
+        print(
+            f"{path}: still carries {len(found)} conflict marker(s). Nothing is "
+            f"counted from a half-merged file: resolve the gate script first, "
+            f"then ask again -- the count is derived from it.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+
 MECH = re.compile(r'expect_exit\s+"([^"]+)"\s+(\d+)')
 REQ = re.compile(r"REQUIRED_(HYGIENE|PAGES)_CLASSES=\(([^)]*)\)", re.DOTALL)
 
@@ -65,6 +96,7 @@ DETAILS: dict[str, dict[str, str]] = {}
 def observed() -> dict[str, set[str]]:
     """What verify.sh proves, read out of verify.sh rather than assumed."""
     s = VERIFY.read_text(encoding="utf-8")
+    refuse_conflicted(VERIFY, s)
     seen: dict[str, set[str]] = {k: set() for k in
                                  ("seeded-gate", "mechanics", "results-fixture",
                                   "pattern-class", "subset-fixture")}

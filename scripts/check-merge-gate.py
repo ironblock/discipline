@@ -517,6 +517,115 @@ def drive_union(ours_text: str, theirs_text: str):
         return took, err.getvalue(), (box / "verify.sh").read_text(encoding="utf-8")
 
 
+# A REAL merge shape, unlike two_commits above: a base, and two branches off
+# it. `two_commits` makes ours the PARENT of theirs, so their merge base is
+# ours -- which is a fine way to drive `union_file` but cannot exercise a rule
+# about what the base says, because the base and one side are the same commit.
+BASE_PAIR = """\
+inject_alpha() {
+  echo base > a.txt
+}
+
+inject_beta() {
+  echo base > b.txt
+}
+"""
+# No backslashes anywhere in these fixtures, deliberately: the first version
+# used `printf 'base\\n'`, and the assertions then compared a real newline
+# against the two characters on disk and reported a working union as broken.
+ALPHA_ONE = BASE_PAIR.replace("echo base > a.txt", "echo one > a.txt")
+ALPHA_TWO = BASE_PAIR.replace("echo base > a.txt", "echo two > a.txt")
+
+
+def drive_three_way(base_text: str, ours_text: str, theirs_text: str):
+    """Run `union_file` over a base and two branches off it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        box = Path(tmp)
+
+        def git(*args: str) -> str:
+            run = subprocess.run(("git",) + args, cwd=box, capture_output=True, text=True)
+            if run.returncode != 0:
+                raise RuntimeError(f"git {' '.join(args)}: {run.stderr.strip()}")
+            return run.stdout.strip()
+
+        git("init", "-q", "-b", "base")
+        git("config", "user.email", "gate@example.invalid")
+        git("config", "user.name", "gate")
+        (box / "verify.sh").write_text(base_text, encoding="utf-8")
+        git("add", "verify.sh")
+        git("commit", "-qm", "base")
+        git("checkout", "-q", "-b", "ours")
+        (box / "verify.sh").write_text(ours_text, encoding="utf-8")
+        # --allow-empty: a fixture in which OURS is the base is the whole
+        # point of one of the cases below, and git will not commit nothing.
+        git("commit", "-qam", "ours", "--allow-empty")
+        ours = git("rev-parse", "HEAD")
+        git("checkout", "-q", "base")
+        git("checkout", "-q", "-b", "theirs")
+        (box / "verify.sh").write_text(theirs_text, encoding="utf-8")
+        git("commit", "-qam", "theirs", "--allow-empty")
+        theirs = git("rev-parse", "HEAD")
+        # Standing on ours, merging theirs -- which is where a resolver runs,
+        # and which makes "a refused union rewrote nothing" a claim about the
+        # file the operator actually has.
+        git("checkout", "-q", "ours")
+
+        here = os.getcwd()
+        err = io.StringIO()
+        out = io.StringIO()
+        try:
+            os.chdir(box)
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+                took = MG.union_file(Path("verify.sh"), ours, theirs)
+        finally:
+            os.chdir(here)
+        return took, out.getvalue(), err.getvalue(), (box / "verify.sh").read_text(encoding="utf-8")
+
+
+@fixture("a block only theirs changed is taken from theirs, not kept as ours")
+def _union_takes_the_incumbents_correction():
+    # The defect this rule exists for. `built = ours` plus append-what-ours-
+    # lacks says nothing about a block BOTH sides carry, so keeping ours
+    # reverted whichever side had corrected it -- silently, because from the
+    # union's point of view nothing was added. Twelve reversions across four
+    # lanes, one of them graded by nothing at all.
+    took, out, err, on_disk = drive_three_way(BASE_PAIR, BASE_PAIR, ALPHA_ONE)
+    if took is not True:
+        return f"the union refused a block only one side changed: {err.strip()[:160]!r}"
+    if "echo one > a.txt" not in on_disk:
+        return "ours was kept over theirs, reverting the correction"
+    if "inject_alpha" not in out:
+        return "the correction was taken without saying so, which is how it went unnoticed"
+    return None
+
+
+@fixture("a block only ours changed stays ours")
+def _union_keeps_our_own_change():
+    # The other half, and the reason this is a three-way comparison rather
+    # than "prefer theirs": preferring theirs would revert our change with
+    # exactly the same silence, in the opposite direction.
+    took, _out, err, on_disk = drive_three_way(BASE_PAIR, ALPHA_ONE, BASE_PAIR)
+    if took is not True:
+        return f"the union refused a block only we changed: {err.strip()[:160]!r}"
+    if "echo one > a.txt" not in on_disk:
+        return "our own change was replaced by the base"
+    return None
+
+
+@fixture("a block both sides edited is refused and printed")
+def _union_refuses_a_contested_block():
+    took, _out, err, on_disk = drive_three_way(BASE_PAIR, ALPHA_ONE, ALPHA_TWO)
+    if took is not False:
+        return "the union chose between two authored versions of one block"
+    if on_disk != ALPHA_ONE:
+        return "a refused union rewrote the file anyway"
+    if "inject_alpha" not in err:
+        return "the refusal named no block, so the reader cannot act on it"
+    if "echo two > a.txt" not in err:
+        return "the refusal did not print the block, only its name"
+    return None
+
+
 @fixture("the union refuses an added mechanics assertion and rewrites nothing")
 def _union_refuses_and_does_not_write():
     # The refusal itself, not a proxy for it. No fixture reached `union_file`
