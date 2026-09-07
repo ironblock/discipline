@@ -1,0 +1,3 @@
+NOT-TOML: A table header whose name a top-level key already holds. TOML
+refuses the collision; so does this parser, for the same reason it refuses
+a duplicate key -- one of the two bindings would have to disappear.

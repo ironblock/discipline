@@ -34,8 +34,8 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 132
-mechanics_assertions = 27
+red_faults = 278
+mechanics_assertions = 29
 migrated = 0
 
 
@@ -779,7 +779,12 @@ id = "results.2026-01-12-two-summary-records"
 kind = "results-fixture"
 check = "results"
 label = "2026-01-12-two-summary-records"
-failure_class = "results.summary-record-count"
+# Was declared `results.summary-record-count`, which the linter cannot emit
+# for this fixture: diet refuses the record outright, so the linter's own
+# summary-row count is never reached. Telling the two refusals apart would
+# mean reading diet's error and reaching a verdict about the format, which
+# is the second reader this design removes. The relay has one class.
+failure_class = "results.record-refused"
 migrated = false
 
 [[fault]]
@@ -787,7 +792,8 @@ id = "results.2026-01-13-malformed-jsonl"
 kind = "results-fixture"
 check = "results"
 label = "2026-01-13-malformed-jsonl"
-failure_class = "results.jsonl-malformed"
+# Was `results.jsonl-malformed`; see the note on two-summary-records above.
+failure_class = "results.record-refused"
 migrated = false
 
 [[fault]]
@@ -1418,4 +1424,1325 @@ check = "regimen"
 label = "non-ascii-bare-key"
 failure_class = "format.subset-violated"
 migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+[[fault]]
+id = "test.tools_ungrounded"
+kind = "seeded-gate"
+check = "test"
+label = "self-capture exempt from grounding"
+failure_class = "capture.modality-exempt-from-grounding"
+legacy_signature = "modality does not exempt a lane from grounding"
+migrated = false
+
+[[fault]]
+id = "test.tools_reminder_silent"
+kind = "seeded-gate"
+check = "test"
+label = "a reminder cadence that never fires"
+failure_class = "capture.reminder-never-fires"
+legacy_signature = "ten silent turns must be reminded at every third turn"
+migrated = false
+
+[[fault]]
+id = "test.tools_foreign_call"
+kind = "seeded-gate"
+check = "test"
+label = "a harness tool call read as a capture"
+failure_class = "capture.foreign-tool-as-source"
+legacy_signature = "a harness tool call is not a capture tool and writes nothing"
+migrated = false
+
+[[fault]]
+id = "test.tools_proposal_writes"
+kind = "seeded-gate"
+check = "test"
+label = "a phase proposal that writes a fact"
+failure_class = "capture.proposal-writes-a-fact"
+legacy_signature = "a phase-transition proposal is advisory and writes nothing"
+migrated = false
+
+[[fault]]
+id = "test.tools_self_echo"
+kind = "seeded-gate"
+check = "test"
+label = "a capture grounded in its own echo"
+failure_class = "capture.grounded-in-its-own-echo"
+legacy_signature = "a harness that repeats a capture back grounded the capture in itself"
+migrated = false
+
+[[fault]]
+id = "test.tools_future_output"
+kind = "seeded-gate"
+check = "test"
+label = "a capture grounded in a later turn"
+failure_class = "capture.grounded-in-a-later-turn"
+legacy_signature = "a turn-1 capture was grounded in a turn-2 tool output"
+migrated = false
+
+[[fault]]
+id = "test.tools_supersede_minted"
+kind = "seeded-gate"
+check = "test"
+label = "a superseding entry with a minted id"
+failure_class = "capture.minted-entry-id"
+legacy_signature = "a superseding entry id must be derived from the row that carried it"
+migrated = false
+
+[[fault]]
+id = "test.tools_resolve_elsewhere"
+kind = "seeded-gate"
+check = "test"
+label = "a verdict that resolves elsewhere"
+failure_class = "capture.verdict-resolves-another-entry"
+legacy_signature = "a verdict resolved an entry the model never named"
+migrated = false
+
+[[fault]]
+id = "test.tools_ask_words"
+kind = "seeded-gate"
+check = "test"
+label = "the asks reworded to nothing"
+failure_class = "capture.ask-words-unpinned"
+legacy_signature = "the words this lane says out loud are the only product it has"
+migrated = false
+
+[[fault]]
+id = "test.tools_ask_question_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "an ask that drops its own question"
+failure_class = "capture.ask-drops-the-question"
+legacy_signature = "an ask carrying a deferral is the question and then the deferral"
+migrated = false
+
+[[fault]]
+id = "test.tools_sweep_kind"
+kind = "seeded-gate"
+check = "test"
+label = "the sweep asking as the cadence"
+failure_class = "capture.sweep-indistinguishable-from-cadence"
+legacy_signature = "the sweep and the cadence are one ask wearing two names"
+migrated = false
+
+[[fault]]
+id = "test.tools_choice_uncanonical"
+kind = "seeded-gate"
+check = "test"
+label = "a closed choice left in its own case"
+failure_class = "capture.choice-case-unsettled"
+legacy_signature = "a harness may shout a closed choice back at us"
+migrated = false
+
+[[fault]]
+id = "test.tools_proposal_reasonless"
+kind = "seeded-gate"
+check = "test"
+label = "a phase proposal with no reason"
+failure_class = "capture.proposal-with-no-reason"
+legacy_signature = "the reason is the whole of what it carries into one"
+migrated = false
+
+[[fault]]
+id = "test.tools_reminder_deferral_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "a reminder that drops the deferral"
+failure_class = "capture.reminder-drops-the-deferral"
+legacy_signature = "the cadence reminded without what the router put off in that turn"
+migrated = false
+
+[[fault]]
+id = "test.tools_description_thin"
+kind = "seeded-gate"
+check = "test"
+label = "tools described in one character"
+failure_class = "capture.tool-described-in-nothing"
+legacy_signature = "a foreign harness registers this text verbatim"
+migrated = false
+
+[[fault]]
+id = "test.tools_contract_undescribed"
+kind = "seeded-gate"
+check = "test"
+label = "an offered tool the contract omits"
+failure_class = "capture.offered-tool-undescribed"
+legacy_signature = "an offered tool with no row is refused before a harness ever sees it"
+migrated = false
+
+[[fault]]
+id = "test.tools_contract_duplicate"
+kind = "seeded-gate"
+check = "test"
+label = "one tool described twice"
+failure_class = "capture.tool-described-twice"
+legacy_signature = "one tool described twice leaves the harness to the order of the file"
+migrated = false
+
+[[fault]]
+id = "test.tools_verdict_list_open"
+kind = "seeded-gate"
+check = "test"
+label = "a verdict the lane cannot honour"
+failure_class = "capture.contract-admits-an-unhonoured-word"
+legacy_signature = "this lane refuses it at runtime: the model is invited to say a word"
+migrated = false
+
+[[fault]]
+id = "test.tools_silent_kept"
+kind = "seeded-gate"
+check = "test"
+label = "a turn swept after it recorded"
+failure_class = "capture.sweeps-a-turn-that-recorded"
+legacy_signature = "a turn the model did record in the end was swept anyway"
+migrated = false
+
+[[fault]]
+id = "test.record_objects_undepthed"
+kind = "seeded-gate"
+check = "test"
+label = "the object reader with no limit"
+failure_class = "record.objects-without-a-depth-limit"
+legacy_signature = "one level past the limit must be a verdict from `objects`"
+migrated = false
+
+[[fault]]
+id = "test.tools_corpus_one_tool"
+kind = "seeded-gate"
+check = "test"
+label = "a corpus that drives one tool"
+failure_class = "capture.corpus-covers-one-tool"
+legacy_signature = "is offered to the model and no corpus case ever calls it"
+
+[[fault]]
+id = "test.verdict_prefix_accepted"
+kind = "seeded-gate"
+check = "test"
+label = "a verdict read by prefix"
+failure_class = "format.invalid-fixture-accepted"
+legacy_signature = "verdict-as-a-prefix\\.txt: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.verdict_identifier_read_as_a_verdict"
+kind = "seeded-gate"
+check = "test"
+label = "an identifier in a reason read as a verdict"
+failure_class = "format.valid-fixture-rejected"
+legacy_signature = "reason-naming-an-identifier\\.txt: rejected"
+migrated = false
+
+[[fault]]
+id = "test.verdict_second_verdict_accepted"
+kind = "seeded-gate"
+check = "test"
+label = "a second verdict in a reason accepted"
+failure_class = "format.invalid-fixture-accepted"
+legacy_signature = "two-verdicts\\.txt: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.collector_substring_match"
+kind = "seeded-gate"
+check = "test"
+label = "an anchor matched inside a longer word"
+failure_class = "collector.substring-match"
+legacy_signature = "an anchor matched inside a longer word"
+migrated = false
+
+[[fault]]
+id = "test.collector_english_anchor"
+kind = "seeded-gate"
+check = "test"
+label = "an English word made an anchor"
+failure_class = "collector.over-firing"
+legacy_signature = "an English word became an anchor"
+migrated = false
+
+[[fault]]
+id = "test.collector_self_nomination"
+kind = "seeded-gate"
+check = "test"
+label = "an entry nominated by its own turn"
+failure_class = "collector.self-nomination"
+legacy_signature = "an entry nominated itself"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_supersede_without_voiding"
+kind = "seeded-gate"
+check = "test"
+label = "a supersession that adds without voiding"
+failure_class = "collector.supersede-without-void"
+legacy_signature = "the old entry was not voided"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_partial_applies_a_patch"
+kind = "seeded-gate"
+check = "test"
+label = "a verdict that settles nothing settling"
+failure_class = "collector.verdict-overapplied"
+legacy_signature = "PARTIAL produced a patch"
+migrated = false
+
+[[fault]]
+id = "test.collector_uncalibrated_policy"
+kind = "seeded-gate"
+check = "test"
+label = "an uncalibrated nomination policy accepted"
+failure_class = "collector.uncalibrated-policy"
+legacy_signature = "the fixture policy was accepted by the door that ships"
+migrated = false
+
+[[fault]]
+id = "test.collector_budget_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "a nomination budget ignored"
+failure_class = "collector.budget-ignored"
+legacy_signature = "the budget did not bind"
+migrated = false
+
+[[fault]]
+id = "test.collector_one_nomination_per_turn"
+kind = "seeded-gate"
+check = "test"
+label = "a turn that nominates only its first entry"
+failure_class = "collector.nomination-dropped"
+legacy_signature = "a turn that named two anchors nominated fewer than two entries"
+migrated = false
+
+[[fault]]
+id = "test.collector_voided_entry_renominated"
+kind = "seeded-gate"
+check = "test"
+label = "a voided entry nominated by tier 0"
+failure_class = "collector.retired-entry-renominated"
+legacy_signature = "a voided entry was nominated again by the literal tier"
+migrated = false
+
+[[fault]]
+id = "test.collector_hit_offset_lost"
+kind = "seeded-gate"
+check = "test"
+label = "a hit that says nothing about where"
+failure_class = "collector.evidence-without-a-place"
+legacy_signature = "the hits did not say where the anchor recurred"
+migrated = false
+
+[[fault]]
+id = "test.collector_overlapping_scan"
+kind = "seeded-gate"
+check = "test"
+label = "an overlapping anchor scan"
+failure_class = "collector.overlapping-match"
+legacy_signature = "an anchor that overlaps itself was counted at every shifted position"
+migrated = false
+
+[[fault]]
+id = "test.collector_quoted_anchor_delimiter"
+kind = "seeded-gate"
+check = "test"
+label = "a double-quoted span that is not an anchor"
+failure_class = "collector.anchor-class-lost"
+legacy_signature = "a double-quoted span was not anchored"
+migrated = false
+
+[[fault]]
+id = "test.collector_short_shape_anchored"
+kind = "seeded-gate"
+check = "test"
+label = "a two-byte shape read as an anchor"
+failure_class = "collector.over-firing"
+legacy_signature = "a two-byte shape was anchored"
+migrated = false
+
+[[fault]]
+id = "test.collector_module_path_shape"
+kind = "seeded-gate"
+check = "test"
+label = "a module path that is not an identifier"
+failure_class = "collector.anchor-class-lost"
+legacy_signature = "a path through the module tree was not anchored"
+migrated = false
+
+[[fault]]
+id = "test.collector_extension_window"
+kind = "seeded-gate"
+check = "test"
+label = "a sentence word read as a file extension"
+failure_class = "collector.anchor-kind-wrong"
+legacy_signature = "a dotted word whose tail is a word was read as a file name"
+migrated = false
+
+[[fault]]
+id = "test.collector_token_untrimmed"
+kind = "seeded-gate"
+check = "test"
+label = "an anchor with the sentence still on it"
+failure_class = "collector.anchor-missed"
+legacy_signature = "the punctuation prose hung on a token was kept as part of the anchor"
+migrated = false
+
+[[fault]]
+id = "test.collector_anchor_kind_permuted"
+kind = "seeded-gate"
+check = "test"
+label = "anchor kinds that swapped their names"
+failure_class = "collector.vocabulary-drift"
+legacy_signature = "the anchor kind vocabulary is not what it promises"
+migrated = false
+
+[[fault]]
+id = "test.collector_source_vocabulary_emptied"
+kind = "seeded-gate"
+check = "test"
+label = "a source vocabulary with no members"
+failure_class = "collector.vocabulary-drift"
+legacy_signature = "the source vocabulary is not what it promises"
+migrated = false
+
+[[fault]]
+id = "test.collector_tier_name_swapped"
+kind = "seeded-gate"
+check = "test"
+label = "a nomination that names the other tier"
+failure_class = "collector.vocabulary-drift"
+legacy_signature = "a nomination named the wrong tier"
+migrated = false
+
+[[fault]]
+id = "test.collector_register_permuted"
+kind = "seeded-gate"
+check = "test"
+label = "registers that swapped their names"
+failure_class = "collector.vocabulary-drift"
+legacy_signature = "the register vocabulary is not what it promises"
+migrated = false
+
+[[fault]]
+id = "test.collector_gate_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "a lexical pre-gate the tier ignores"
+failure_class = "collector.policy-setting-inert"
+legacy_signature = "a turn carrying no seed was scored by a gated policy anyway"
+migrated = false
+
+[[fault]]
+id = "test.collector_turn_threshold_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "a turn-level threshold never compared"
+failure_class = "collector.policy-setting-inert"
+legacy_signature = "an unremarkable turn nominated"
+migrated = false
+
+[[fault]]
+id = "test.collector_entry_threshold_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "a per-entry threshold never compared"
+failure_class = "collector.policy-setting-inert"
+legacy_signature = "the tier nominated an entry the turn was not about"
+migrated = false
+
+[[fault]]
+id = "test.collector_wrong_sense_set"
+kind = "seeded-gate"
+check = "test"
+label = "a turn scored against the wrong sense set"
+failure_class = "collector.wrong-register"
+legacy_signature = "a turn about a mistaken assumption was scored as a reversal"
+migrated = false
+
+[[fault]]
+id = "test.collector_intent_register_reads_the_prose"
+kind = "seeded-gate"
+check = "test"
+label = "an intent register that reads the prose"
+failure_class = "collector.wrong-register"
+legacy_signature = "the tier measured the prose of the turn where it should have measured the stated intent"
+migrated = false
+
+[[fault]]
+id = "test.collector_budget_takes_the_worst"
+kind = "seeded-gate"
+check = "test"
+label = "a budget spent on the worst candidates"
+failure_class = "collector.budget-misspent"
+legacy_signature = "the budget was spent on the entries that scored lowest"
+migrated = false
+
+[[fault]]
+id = "test.collector_score_not_measured"
+kind = "seeded-gate"
+check = "test"
+label = "a nomination score nothing measured"
+failure_class = "collector.unmeasured-number"
+legacy_signature = "a nomination carried a score nothing measured"
+migrated = false
+
+[[fault]]
+id = "test.collector_sense_self_nomination"
+kind = "seeded-gate"
+check = "test"
+label = "an entry nominated by its own turn at tier 1"
+failure_class = "collector.self-nomination"
+legacy_signature = "an entry born in this turn nominated itself"
+migrated = false
+
+[[fault]]
+id = "test.collector_sense_voided_entry_renominated"
+kind = "seeded-gate"
+check = "test"
+label = "a voided entry nominated by tier 1"
+failure_class = "collector.retired-entry-renominated"
+legacy_signature = "a voided entry was nominated again by the sense tier"
+migrated = false
+
+[[fault]]
+id = "test.collector_report_drops_the_policy"
+kind = "seeded-gate"
+check = "test"
+label = "a report that drops half its policy"
+failure_class = "collector.unreadable-report"
+legacy_signature = "the report did not say which scoring produced it"
+migrated = false
+
+[[fault]]
+id = "test.collector_policy_names_no_run"
+kind = "seeded-gate"
+check = "test"
+label = "a calibration that names no run"
+failure_class = "collector.uncalibrated-policy"
+legacy_signature = "was read as a calibration"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_supersede_writes_a_constant"
+kind = "seeded-gate"
+check = "test"
+label = "a supersession that writes a constant"
+failure_class = "collector.silent-loss"
+legacy_signature = "the superseding entry does not say what superseded the old one"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_supersede_loses_its_fork"
+kind = "seeded-gate"
+check = "test"
+label = "a supersession with no fork behind it"
+failure_class = "collector.unattributable-patch"
+legacy_signature = "the superseding entry does not say which fork produced it"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_patch_never_handed_back"
+kind = "seeded-gate"
+check = "test"
+label = "a patch the reconciler never hands back"
+failure_class = "collector.verdict-unapplied"
+legacy_signature = "a verdict that produced a patch did not hand it back"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_partial_read_as_a_false_nomination"
+kind = "seeded-gate"
+check = "test"
+label = "a PARTIAL counted as a false nomination"
+failure_class = "collector.verdict-overapplied"
+legacy_signature = "a fork that said the prose bears on the entry was read as a false nomination"
+migrated = false
+
+[[fault]]
+id = "test.reconcile_mention_superseded"
+kind = "seeded-gate"
+check = "test"
+label = "a mention applied as a supersession"
+failure_class = "collector.supersede-on-a-mention"
+legacy_signature = "NOT_THIS produced a patch"
+migrated = false
+[[fault]]
+id = "test.sense_cosine_unnormalised"
+kind = "seeded-gate"
+check = "test"
+label = "a cosine that forgot its second norm"
+failure_class = "sense.similarity-unnormalised"
+legacy_signature = "cosine of a vector with itself was not one"
+migrated = false
+
+[[fault]]
+id = "test.sense_contrastive_ignores_negative"
+kind = "seeded-gate"
+check = "test"
+label = "contrastive scoring that ignores the negative sense"
+failure_class = "sense.contrast-dropped"
+legacy_signature = "the contrastive score ignored the negative sense"
+migrated = false
+
+[[fault]]
+id = "test.sense_null_labels_unshuffled"
+kind = "seeded-gate"
+check = "test"
+label = "a null whose labels are never shuffled"
+failure_class = "sense.null-not-at-chance"
+legacy_signature = "d-prime on a shuffled-label null was far from zero"
+migrated = false
+
+[[fault]]
+id = "test.sense_p_without_floor"
+kind = "seeded-gate"
+check = "test"
+label = "a bootstrap p with no attainable floor"
+failure_class = "sense.p-without-floor"
+legacy_signature = "a bootstrap p-value came without its attainable floor"
+migrated = false
+
+[[fault]]
+id = "test.sense_metric_fixture_removed"
+kind = "seeded-gate"
+check = "test"
+label = "a metric whose failure fixture is gone"
+failure_class = "capture.instrument-never-failed"
+legacy_signature = "no failure fixture, so it can never be reported"
+migrated = false
+
+[[fault]]
+id = "test.record_data_line_two_lines"
+kind = "seeded-gate"
+check = "test"
+label = "two data lines read as one"
+failure_class = "record.line-silently-truncated"
+legacy_signature = "two lines were read as one, and the second was lost"
+migrated = false
+
+[[fault]]
+id = "test.tangent_drop_removes"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent drop that deletes"
+failure_class = "object.disposition-deletes"
+legacy_signature = "a drop evicts to the archive and never deletes"
+migrated = false
+
+[[fault]]
+id = "test.tangent_park_renders"
+kind = "seeded-gate"
+check = "test"
+label = "a parked entry that still renders"
+failure_class = "object.park-still-live"
+legacy_signature = "a parked entry still speaks for the object"
+migrated = false
+
+[[fault]]
+id = "test.tangent_scope_by_recency"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent scoped by recency"
+failure_class = "object.scope-by-recency"
+legacy_signature = "scope is by provenance, not by recency"
+migrated = false
+
+[[fault]]
+id = "test.tangent_undisposed_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent closed leaving an entry unruled"
+failure_class = "object.closure-partial"
+legacy_signature = "closure is total: a tangent-born entry was left undisposed"
+migrated = false
+
+[[fault]]
+id = "test.tangent_prefix_asserted"
+kind = "seeded-gate"
+check = "test"
+label = "a prefix claimed intact, not compared"
+failure_class = "object.prefix-unmeasured"
+legacy_signature = "the prefix was reported intact after the trunk moved"
+migrated = false
+
+[[fault]]
+id = "test.tangent_id_reused"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent id opened twice"
+failure_class = "object.scope-ambiguous"
+legacy_signature = "a tangent id the record already carries was opened again"
+migrated = false
+
+[[fault]]
+id = "test.tangent_provenance_ignores_turn"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent that dates a fact at the fork"
+failure_class = "object.provenance-undated"
+legacy_signature = "a tangent dated a patch at a turn other than the one it was made at"
+migrated = false
+
+[[fault]]
+id = "test.tangent_ruling_dated_at_fork"
+kind = "seeded-gate"
+check = "test"
+label = "a closure ruling dated at the fork"
+failure_class = "object.ruling-predates-fact"
+legacy_signature = "the closure filed its ruling at a turn it did not close at"
+migrated = false
+
+[[fault]]
+id = "test.tangent_closing_lane_coined"
+kind = "seeded-gate"
+check = "test"
+label = "a closure under a coined lane"
+failure_class = "object.lane-coined"
+legacy_signature = "the closure filed its ruling under a lane the record does not already have"
+migrated = false
+
+[[fault]]
+id = "test.tangent_disposition_missing_from_all"
+kind = "seeded-gate"
+check = "test"
+label = "a disposition missing from the list"
+failure_class = "object.vocabulary-incomplete"
+legacy_signature = "the dispositions a closure can rule with are not the three the record names"
+migrated = false
+
+[[fault]]
+id = "test.tangent_scope_offers_a_ruled_entry"
+kind = "seeded-gate"
+check = "test"
+label = "a tangent that offers a settled fact again"
+failure_class = "object.scope-reoffers-ruled"
+legacy_signature = "the tangent offered a fact the record had already ruled on for disposition a second time"
+migrated = false
+
+[[fault]]
+id = "test.tangent_prefix_counts_dead_rows"
+kind = "seeded-gate"
+check = "test"
+label = "a prefix that counts dead trunk rows"
+failure_class = "object.prefix-counts-dead"
+legacy_signature = "a trunk row that was already dead at the fork was counted into the prefix"
+migrated = false
+
+[[fault]]
+id = "test.tangent_prefix_only_grew"
+kind = "seeded-gate"
+check = "test"
+label = "a prefix called intact whenever it only grew"
+failure_class = "object.prefix-growth-only"
+legacy_signature = "the prefix was reported unmoved after the trunk wrote a fact of its own"
+migrated = false
+
+[[fault]]
+id = "test.object_park_renders_as_retired"
+kind = "seeded-gate"
+check = "test"
+label = "a parked entry that reads as retired"
+failure_class = "object.state-name-collapsed"
+legacy_signature = "a state renders under a name the dump does not promise"
+migrated = false
+
+[[fault]]
+id = "test.object_park_needs_no_tangent"
+kind = "seeded-gate"
+check = "test"
+label = "a park with no tangent behind it"
+failure_class = "object.park-untangented"
+legacy_signature = "an entry was parked under no tangent, so it left the live set"
+
+[[fault]]
+id = "test.regimen_float_as_a_string"
+kind = "seeded-gate"
+check = "test"
+label = "a regimen float rendered as a string"
+failure_class = "regimen.float-stringified"
+legacy_signature = "a float projected as something other than a decimal"
+migrated = false
+
+[[fault]]
+id = "test.regimen_table_scope_flattened"
+kind = "seeded-gate"
+check = "test"
+label = "a table header that opens nothing"
+failure_class = "regimen.table-scope-lost"
+legacy_signature = "its keys are not the document.s"
+migrated = false
+
+[[fault]]
+id = "test.regimen_table_collision_unchecked"
+kind = "seeded-gate"
+check = "test"
+label = "two tables of one name accepted"
+failure_class = "regimen.table-collision-unchecked"
+legacy_signature = "a table opened twice was not refused"
+migrated = false
+
+[[fault]]
+id = "test.regimen_float_rule_widened"
+kind = "seeded-gate"
+check = "test"
+label = "the float rule widened past the record"
+failure_class = "regimen.decimal-drift"
+legacy_signature = "the regimen grammar and the record.s decimal disagree"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_summary_not_derived"
+kind = "seeded-gate"
+check = "recompute"
+label = "a summary the rows do not carry"
+failure_class = "results.summary-not-derived"
+legacy_signature = "the report does not re-derive"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_kind_undeclared"
+kind = "seeded-gate"
+check = "recompute"
+label = "a results directory declaring no kind"
+failure_class = "results.kind-undeclared"
+legacy_signature = "0 recomputed, 0 declared historical, 1 undeclared"
+migrated = false
+
+[[fault]]
+id = "results.results_consumed_digest_stale"
+kind = "seeded-gate"
+check = "results"
+label = "a consumed digest gone stale"
+failure_class = "results.provenance-unchecked"
+legacy_signature = "but the committed file hashes to"
+migrated = false
+
+[[fault]]
+id = "test.regimen_nested_table_flattened"
+kind = "seeded-gate"
+check = "test"
+label = "a nested table flattened"
+failure_class = "regimen.table-depth-lost"
+legacy_signature = "holds its own binding and the table below it"
+migrated = false
+
+[[fault]]
+id = "test.regimen_array_second_reader"
+kind = "seeded-gate"
+check = "test"
+label = "an array read by a second reader"
+failure_class = "regimen.array-second-reader"
+legacy_signature = "an array item was read by something other than the value reader"
+migrated = false
+
+[[fault]]
+id = "injections.case_without_an_injection"
+kind = "seeded-gate"
+check = "injections"
+label = "a case naming no injection"
+failure_class = "gate.case-without-an-injection"
+legacy_signature = "named by a seeded case, defined nowhere"
+migrated = false
+
+[[fault]]
+id = "results.results_consumes_outside"
+kind = "seeded-gate"
+check = "results"
+label = "a claim consuming evidence outside"
+failure_class = "results.provenance-escapes-the-directory"
+legacy_signature = "outside the run directory"
+migrated = false
+
+[[fault]]
+id = "results.results_consumes_the_record"
+kind = "seeded-gate"
+check = "results"
+label = "a claim consuming its own record"
+failure_class = "results.provenance-self-hash"
+legacy_signature = "a record cannot state its own hash"
+migrated = false
+
+[[fault]]
+id = "results.results_consumes_a_missing_file"
+kind = "seeded-gate"
+check = "results"
+label = "a claim consuming a file not there"
+failure_class = "results.provenance-unchecked"
+legacy_signature = "which is not a file here"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_script_missing"
+kind = "seeded-gate"
+check = "recompute"
+label = "reproducible, with nothing to run"
+failure_class = "results.recompute-absent"
+legacy_signature = "carries no recompute.sh"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_nothing_recomputable"
+kind = "seeded-gate"
+check = "recompute"
+label = "a gate 0 with nothing recomputable"
+failure_class = "results.recompute-over-nothing"
+legacy_signature = "nothing was recomputed"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_cannot_fail"
+kind = "seeded-gate"
+check = "recompute"
+label = "a recompute that cannot fail"
+failure_class = "results.recompute-cannot-fail"
+legacy_signature = "does not compare the report to the artefacts"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_tampers"
+kind = "seeded-gate"
+check = "recompute"
+label = "a recompute that edits what it checks"
+failure_class = "results.recompute-tampers"
+legacy_signature = "tampering, not recomputation"
+migrated = false
+
+[[fault]]
+id = "results.results_nested_directory"
+kind = "seeded-gate"
+check = "results"
+label = "a run directory inside a run directory"
+failure_class = "results.nested-run-directory"
+legacy_signature = "a run directory inside a run directory"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-28-symlinked-evidence"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-28-symlinked-evidence"
+failure_class = "results.provenance-escapes-the-directory"
+migrated = false
+
+[[fault]]
+id = "mech.every-results-fixture-emits-the-class-its-fault-declares"
+kind = "mechanics"
+check = "results"
+label = "every results fixture emits the class its fault declares"
+failure_class = "results.class-not-emitted"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-fixture-red-for-another-fixture-s-reason-is-not-a-pass"
+kind = "mechanics"
+check = "results"
+label = "a fixture red for another fixture's reason is not a pass"
+failure_class = "results.graded-on-the-exit-code"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "subset.parent-is-not-a-table"
+kind = "subset-fixture"
+check = "regimen"
+label = "parent-is-not-a-table"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.duplicate-key-in-table"
+kind = "subset-fixture"
+check = "regimen"
+label = "duplicate-key-in-table"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.duplicate-table"
+kind = "subset-fixture"
+check = "regimen"
+label = "duplicate-table"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "subset.table-shadows-key"
+kind = "subset-fixture"
+check = "regimen"
+label = "table-shadows-key"
+failure_class = "format.subset-violated"
+migrated_to = "diet/tests/conformance.rs::invalid_fixtures_are_rejected"
+migrated = false
+[[fault]]
+id = "test.router_ask_class_untuned"
+kind = "seeded-gate"
+check = "test"
+label = "an ask wired to another class's question"
+failure_class = "router.ask-untuned"
+legacy_signature = "the ask does not ask its own question"
+migrated = false
+
+[[fault]]
+id = "test.router_ask_imperative_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "a template without the imperative"
+failure_class = "router.ask-imperative-missing"
+legacy_signature = "the ask does not carry the fork-local imperative"
+migrated = false
+
+[[fault]]
+id = "test.router_census_class_miscounted"
+kind = "seeded-gate"
+check = "test"
+label = "a census that miscounts which classes fired"
+failure_class = "router.census-per-class"
+legacy_signature = "the census does not say which classes fired"
+migrated = false
+
+[[fault]]
+id = "test.router_route_census_hollow"
+kind = "seeded-gate"
+check = "test"
+label = "a route verb answering with a hollow census"
+failure_class = "router.census-not-computed"
+legacy_signature = "where the drive spends"
+migrated = false
+
+[[fault]]
+id = "test.router_table_row_shadowed"
+kind = "seeded-gate"
+check = "test"
+label = "a table row that can never fire"
+failure_class = "router.table-row-dead"
+legacy_signature = "can never fire"
+migrated = false
+
+[[fault]]
+id = "test.router_corpus_class_uncovered"
+kind = "seeded-gate"
+check = "test"
+label = "a corpus that stops covering a class"
+failure_class = "router.corpus-incomplete"
+legacy_signature = "call\\(s\\) in the corpus, fewer than"
+migrated = false
+
+[[fault]]
+id = "test.router_table_row_skipped"
+kind = "seeded-gate"
+check = "test"
+label = "a table row skipped, not refused"
+failure_class = "router.table-row-skipped"
+legacy_signature = "was skipped rather than refused"
+migrated = false
+
+[[fault]]
+id = "test.router_intent_lane_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "an intent taken from any lane"
+failure_class = "router.intent-off-lane"
+legacy_signature = "did not quote back what the model said it was about to do"
+migrated = false
+
+[[fault]]
+id = "test.router_intent_first_not_last"
+kind = "seeded-gate"
+check = "test"
+label = "the first stated intent, not the last"
+failure_class = "router.intent-stale"
+legacy_signature = "quoted an intent the model had already moved past"
+migrated = false
+
+[[fault]]
+id = "test.router_intent_marker_lost"
+kind = "seeded-gate"
+check = "test"
+label = "an intent marker lost from the table"
+failure_class = "router.intent-marker-lost"
+legacy_signature = "a marker was added or lost without a sentence that reaches it"
+migrated = false
+
+[[fault]]
+id = "test.router_unclassified_unattributed"
+kind = "seeded-gate"
+check = "test"
+label = "an unclassified call nobody can look up"
+failure_class = "router.unclassified-unattributed"
+legacy_signature = "must name the call, its turn, its tool and its word"
+migrated = false
+
+[[fault]]
+id = "test.router_class_vocabulary_shortened"
+kind = "seeded-gate"
+check = "test"
+label = "the declared default out of the vocabulary"
+failure_class = "router.vocabulary-shortened"
+legacy_signature = "left the vocabulary without leaving the tests that walk it"
+migrated = false
+
+[[fault]]
+id = "test.router_unknown_silent"
+kind = "seeded-gate"
+check = "test"
+label = "the declared default replaced by silence"
+failure_class = "router.silent-default"
+legacy_signature = "an unknown pattern must route to the declared default, never to silence"
+migrated = false
+
+[[fault]]
+id = "test.router_judgment_mid_turn"
+kind = "seeded-gate"
+check = "test"
+label = "a judgment ask released mid-turn"
+failure_class = "router.judgment-mid-turn"
+legacy_signature = "a judgment ask fired in the middle of a turn"
+migrated = false
+
+[[fault]]
+id = "test.router_table_row_lost"
+kind = "seeded-gate"
+check = "test"
+label = "a row of the routing table lost"
+failure_class = "router.misrouted"
+legacy_signature = "misrouted call"
+migrated = false
+
+[[fault]]
+id = "test.router_unclassified_silent"
+kind = "seeded-gate"
+check = "test"
+label = "an unknown call routed but not recorded"
+failure_class = "router.unclassified-unrecorded"
+legacy_signature = "an unknown pattern must be a typed event"
+migrated = false
+
+[[fault]]
+id = "test.router_reduction_claimed"
+kind = "seeded-gate"
+check = "test"
+label = "a reduction claimed, not computed"
+failure_class = "router.reduction-claimed"
+legacy_signature = "the reduction is not the number its own counts give"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_subshell_leaks"
+kind = "seeded-gate"
+check = "test"
+label = "a subshell that shares the parent state"
+failure_class = "capture.subshell-state-leaks"
+legacy_signature = "the subshell cd leaked into the parent"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_failed_cd_applied"
+kind = "seeded-gate"
+check = "test"
+label = "a failed cd applied anyway"
+failure_class = "capture.failed-cd-applied"
+legacy_signature = "a failed cd moved the working directory"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_popd_empty_ignored"
+kind = "seeded-gate"
+check = "test"
+label = "popd on an empty stack ignored"
+failure_class = "capture.stack-underflow-ignored"
+legacy_signature = "popd on an empty stack was silently ignored"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_lint_table_emptied"
+kind = "seeded-gate"
+check = "test"
+label = "the mechanical-noun table emptied"
+failure_class = "capture.mechanical-noun-table-empty"
+legacy_signature = "a question about a mechanical fact went unflagged"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_entry_grounded"
+kind = "seeded-gate"
+check = "test"
+label = "a mechanical entry sent through the gate"
+failure_class = "capture.mechanical-entry-gated"
+legacy_signature = "a mechanical entry was dropped as if it needed grounding"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_quoted_substitution"
+kind = "seeded-gate"
+check = "test"
+label = "a quoted substitution descended into"
+failure_class = "capture.invented-read"
+legacy_signature = "a single-quoted substitution was descended into"
+migrated = false
+
+[[fault]]
+id = "test.sense_register_source_mislabelled"
+kind = "seeded-gate"
+check = "test"
+label = "a register mislabelled at its source"
+failure_class = "sense.register-source-mislabelled"
+legacy_signature = "and a row says otherwise"
+migrated = false
+
+[[fault]]
+id = "test.sense_register_unnamed_file"
+kind = "seeded-gate"
+check = "test"
+label = "a file in the register naming nothing"
+failure_class = "sense.register-unclassified-file"
+legacy_signature = "not a declared sidecar"
+migrated = false
+
+[[fault]]
+id = "test.sense_provenance_join_dropped"
+kind = "seeded-gate"
+check = "test"
+label = "a mined row nobody can trace"
+failure_class = "sense.provenance-untraced"
+legacy_signature = "a row nobody can trace was accepted"
+migrated = false
+
+[[fault]]
+id = "test.sense_controls_ignore_register"
+kind = "seeded-gate"
+check = "test"
+label = "controls that never look at the register"
+failure_class = "sense.controls-not-compared"
+legacy_signature = "a register row reached the top control and the controls passed"
+migrated = false
+
+[[fault]]
+id = "test.sense_bootstrap_never_resamples"
+kind = "seeded-gate"
+check = "test"
+label = "a bootstrap that never resamples"
+failure_class = "sense.bootstrap-not-resampled"
+legacy_signature = "every resample was the observed difference"
+migrated = false
+
+[[fault]]
+id = "test.sense_failure_reading_moved"
+kind = "seeded-gate"
+check = "test"
+label = "a failure reading off the worst reading"
+failure_class = "capture.instrument-never-failed"
+legacy_signature = "is the worst the metric can say"
+migrated = false
+
+[[fault]]
+id = "test.sense_pre_registration_emptied"
+kind = "seeded-gate"
+check = "test"
+label = "a pre-registration with nothing in it"
+failure_class = "sense.endpoint-unregistered"
+legacy_signature = "the primary endpoint is not the endpoint that was registered"
+migrated = false
+
+[[fault]]
+id = "test.sense_gate_reads_the_id"
+kind = "seeded-gate"
+check = "test"
+label = "a lexical gate asked about the id"
+failure_class = "sense.gate-on-the-wrong-field"
+legacy_signature = "the gate did not decide on the row"
+migrated = false
+
+[[fault]]
+id = "test.sense_d_prime_unpooled"
+kind = "seeded-gate"
+check = "test"
+label = "a separation over one class spread"
+failure_class = "sense.separation-unpooled"
+legacy_signature = "d-prime was standardised by one class"
+migrated = false
+
+[[fault]]
+id = "test.sense_null_band_widened"
+kind = "seeded-gate"
+check = "test"
+label = "a null band widened past a finding"
+failure_class = "sense.null-not-at-chance"
+legacy_signature = "bands are not the numbers they were registered as"
+migrated = false
+
+[[fault]]
+id = "test.sense_reported_value_constant"
+kind = "seeded-gate"
+check = "test"
+label = "a reported metric that reports a constant"
+failure_class = "sense.record-detached-from-measurement"
+legacy_signature = "the record of a metric is not the numbers the metric produced"
+
+[[fault]]
+id = "test.mechanical_lane_renamed"
+kind = "seeded-gate"
+check = "test"
+label = "the mechanical lane renamed"
+failure_class = "capture.lane-misnamed"
+legacy_signature = "the lane was renamed"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_option_is_a_directory"
+kind = "seeded-gate"
+check = "test"
+label = "an option word read as a directory"
+failure_class = "capture.invented-directory"
+legacy_signature = "an option word was read as the directory it names"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_flag_value_is_a_file"
+kind = "seeded-gate"
+check = "test"
+label = "a flag value read as a file"
+failure_class = "capture.invented-touch"
+legacy_signature = "the lane read a file out of a flag.s value"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_entry_verb_swapped"
+kind = "seeded-gate"
+check = "test"
+label = "an entry with the wrong verb"
+failure_class = "capture.entry-misstates-the-fact"
+legacy_signature = "the entry used the wrong verb for what happened to the file"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_pipeline_skipped"
+kind = "seeded-gate"
+check = "test"
+label = "a pipeline whose members never run"
+failure_class = "capture.command-not-read"
+legacy_signature = "nothing in the pipeline ran"
+migrated = false
+
+[[fault]]
+id = "test.mechanical_write_lost_to_a_read"
+kind = "seeded-gate"
+check = "test"
+label = "a write lost to a read of the same path"
+failure_class = "capture.fact-discarded"
+legacy_signature = "a write was lost to a read of the same path in the same call"
+
+migrated = false
+
+[[fault]]
+id = "test.regimen_header_comment_is_a_table"
+kind = "seeded-gate"
+check = "test"
+label = "a header comment read as a table"
+failure_class = "regimen.header-comment-as-table"
+legacy_signature = "a comment after a table header is not a table the header opened"
+migrated = false
+[[fault]]
+id = "resolver.keyed_by_a_comment"
+kind = "seeded-gate"
+check = "resolver"
+label = "the resolver keying on a comment"
+failure_class = "gate.resolver-keys-on-a-comment"
+legacy_signature = "keyed as .*inject_alpha"
 migrated = false

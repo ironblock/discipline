@@ -32,7 +32,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results regimen metadata hygiene pages ci history injections parity)
+readonly CHECKS=(fmt clippy test library results recompute regimen metadata hygiene pages ci history injections resolver parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -162,6 +162,13 @@ check_regimen() {
   return "$rc"
 }
 
+# Gate 0: every results directory's recorded numbers re-derive from the
+# artefacts committed beside it, or the directory declares itself historical
+# and is counted as skipped. `results` checks that the report agrees with the
+# record; both were written by the same run, so agreement between them is not
+# derivation. Zero recomputable directories is exit 2, not a pass.
+check_recompute() { python3 scripts/check-recompute.py; }
+
 check_metadata() { python3 scripts/check-repo-metadata.py; }
 
 check_hygiene() { bash scripts/hygiene.sh; }
@@ -189,6 +196,12 @@ check_history() { python3 scripts/check-history.py; }
 # invocation and not only in --selftest: an inert injection is introduced by
 # an edit, and the edit is what should fail.
 check_injections() { python3 scripts/check-injections.py; }
+
+# The merge resolver, exercised on fixtures before it is trusted to resolve a
+# merge. `merge-gate.py` rebuilds the gate files from both sides by name, and
+# for its first three hundred lines nothing ran it: five defects lived in it
+# at once, each in a behaviour no command had ever executed.
+check_resolver() { python3 scripts/check-merge-gate.py; }
 
 # The fault-migration manifest defines what parity means for the replacement
 # gate. A manifest that has drifted from this script defines the wrong parity.
@@ -820,19 +833,24 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
-# The control arm dropped from the power set. An ablation whose control is
-# missing can rank its clauses against each other and cannot say that any of
-# them beats an ask with no imperative in it -- which is the one thing the
-# original result it is checking itself against established.
-inject_ablation_no_control() {
+# A tangent that drops an entry by removing it. Evict to the archive, never
+# delete: a drop is a ruling about the trunk, and the entry it ruled on has to
+# still be there for anyone to see what was explored.
+inject_tangent_drop_removes() {
   python3 - <<'EOF'
 import pathlib
 
-path = pathlib.Path("diet/src/capture/ablation.rs")
+path = pathlib.Path("diet/src/object/tangent.rs")
 source = path.read_text(encoding="utf-8")
-old = "    (0..count).map(Arm).collect()\n"
-new = "    (1..count).map(Arm).collect()\n"
-assert source.count(old) == 1
+old = """                Disposition::Drop => Patch::Retire {
+                    target: id.clone(),
+                    provenance: self.provenance(at_turn, CLOSING_LANE, None, index),
+                },"""
+new = """                Disposition::Drop => {
+                    object.entries.remove(id);
+                    continue;
+                }"""
+assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
@@ -852,258 +870,236 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
-# Silence counted as engagement. The collapse case is an answer of nothing at
-# all, and a grader that reads it as engagement reports the worst outcome a
-# wording can buy as the best one.
-inject_ablation_silence_engages() {
+# A parked entry that goes on speaking for the object. Park is the disposition
+# for a fact that was true inside the tangent and is not the trunk's; a park
+# that renders is a keep with a different name, and the trunk silently
+# inherits what the branch was exploring.
+inject_tangent_park_renders() {
   python3 - <<'EOF'
 import pathlib
 
-path = pathlib.Path("diet/src/capture/ablation.rs")
+path = pathlib.Path("diet/src/object/tangent.rs")
 source = path.read_text(encoding="utf-8")
-old = "    matches!(grade(answer), Grade::Engaged)\n"
-new = "    matches!(grade(answer), Grade::Engaged | Grade::Silent)\n"
-assert source.count(old) == 1
+old = """                Disposition::Park => Patch::Park {
+                    target: id.clone(),
+                    provenance: self.provenance(at_turn, CLOSING_LANE, None, index),
+                },"""
+new = """                Disposition::Park => continue,"""
+assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
-# A p-value reported without its attainable floor. A sample size bounds the
-# smallest p it can produce; a p quoted at that bound with the bound stripped
-# off reads as a strength the run never had.
-inject_ablation_p_floor_dropped() {
+# Scope decided by recency instead of provenance. The trunk goes on writing
+# while a tangent runs, so every fact it records after the fork turn is swept
+# into the tangent and retired by a closure that never created it.
+inject_tangent_scope_by_recency() {
   python3 - <<'EOF'
 import pathlib
 
-path = pathlib.Path("diet/src/capture/ablation.rs")
+path = pathlib.Path("diet/src/object/tangent.rs")
 source = path.read_text(encoding="utf-8")
-old = """            "{}/{} against {}/{}: p {}, attainable floor {} over {} resamples",
-            self.successes_a,
-            self.pairs,
-            self.successes_b,
-            self.pairs,
-            self.p_value().fixed(P_DIGITS),
-            self.attainable_p_floor().fixed(P_DIGITS),
-            self.resamples,
+old = "            .filter(|entry| entry.state.is_live() && born_under(entry) == Some(self.id.as_str()))"
+new = """            .filter(|entry| {
+                entry.state.is_live()
+                    && entry
+                        .provenances
+                        .first()
+                        .is_some_and(|provenance| provenance.turn >= self.at_turn)
+            })"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A closure that is not total. An entry the tangent created and nobody ruled
+# on stays live, so the trunk inherits it and nothing in the record says who
+# decided that.
+inject_tangent_undisposed_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if let Some(id) = scope.iter().find(|id| !dispositions.contains_key(id)) {
+            return Err(TangentError::Undisposed { id: id.clone() });
+        }
 """
-new = """            "{}/{} against {}/{}: p {} over {} resamples",
-            self.successes_a,
-            self.pairs,
-            self.successes_b,
-            self.pairs,
-            self.p_value().fixed(P_DIGITS),
-            self.resamples,
+new = ""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The prefix reported intact rather than compared. Rollback is free only for a
+# tangent that left the trunk alone, and a claim asserted instead of measured
+# is a claim about the design rather than about the run.
+inject_tangent_prefix_asserted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = "            prefix_intact: trunk_prefix(object, &self.id) == self.prefix_at_open,"
+new = "            prefix_intact: true,"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A tangent opened under an id the record already carries. The earlier
+# tangent's entries fall into the new one's scope, and its closure rules on
+# facts it never created.
+inject_tangent_id_reused() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if object.entries().any(|entry| born_under(entry) == Some(id)) {
+            return Err(TangentError::IdInUse { id: id.to_owned() });
+        }
 """
-assert source.count(old) == 1
+new = ""
+assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
-# A resample that draws once instead of once for every fork. The report still
-# carries a p and still carries its floor, and the p is now a statement about a
-# sample of one. This is the failure a bootstrap actually has: not summing
-# nothing, which shows up at once, but resampling wrongly.
-inject_ablation_resample_single_draw() {
+# A tangent that dates every fact it finds at the turn it forked. The turn is
+# content, not bookkeeping: a tangent spans turns, and stamping the fork turn
+# onto each entry says the whole branch arrived the moment it started looking.
+inject_tangent_provenance_ignores_turn() {
   python3 - <<'EOF'
 import pathlib
 
-path = pathlib.Path("diet/src/capture/ablation.rs")
+path = pathlib.Path("diet/src/object/tangent.rs")
 source = path.read_text(encoding="utf-8")
-old = "        for _ in 0..pairs {\n"
-new = "        for _ in 0..1 {\n"
-assert source.count(old) == 1
+old = """    pub fn provenance(&self, turn: u32, lane: &str, fork: Option<&str>, index: u32) -> Provenance {
+        Provenance {
+            turn,"""
+new = """    pub fn provenance(&self, turn: u32, lane: &str, fork: Option<&str>, index: u32) -> Provenance {
+        let _ = turn;
+        Provenance {
+            turn: self.at_turn,"""
+assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
-# The generator frozen: every draw returns the same index, so a resample is one
-# fork counted over and over. Deterministic, reproducible, and not a sample.
-inject_ablation_frozen_generator() {
+# A closure that files its rulings at the fork turn. Closure happens later
+# than the fork, and a ruling dated before the fact it ruled on is a verdict
+# the record says was reached before there was anything to reach it about.
+inject_tangent_ruling_dated_at_fork() {
   python3 - <<'EOF'
 import pathlib
 
-path = pathlib.Path("diet/src/capture/ablation.rs")
+path = pathlib.Path("diet/src/object/tangent.rs")
 source = path.read_text(encoding="utf-8")
-old = """        self.0 = state;
-        state
-    }
+old = "provenance: self.provenance(at_turn, CLOSING_LANE, None, index),"
+new = "provenance: self.provenance(self.at_turn, CLOSING_LANE, None, index),"
+assert source.count(old) == 2
+source = source.replace(old, new)
+head = "        let mut patches = Vec::new();"
+assert head in source
+path.write_text(source.replace(head, "        let _ = at_turn;\n" + head, 1), encoding="utf-8")
+EOF
+}
+
+# A closure that coins a lane of its own. The lane is written into the dump
+# and orders the turn, so a name the record does not already have is a second
+# name for what the tangent in the provenance already says.
+inject_tangent_closing_lane_coined() {
+  sed -i 's|^const CLOSING_LANE: &str = "main";$|const CLOSING_LANE: \&str = "tangent-closure";|' \
+    diet/src/object/tangent.rs
+}
+
+# A disposition dropped from the list a closure rules with. The enumeration
+# test iterates that list, so emptying it does not fail the test -- it just
+# leaves the test covering less and still reporting ok.
+inject_tangent_disposition_missing_from_all() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = "pub const ALL: &'static [Self] = &[Self::Keep, Self::Drop, Self::Park];"
+new = "pub const ALL: &'static [Self] = &[Self::Keep, Self::Drop];"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A scope that offers an entry the record already ruled on. A tangent that
+# corrected its own fact would have to rule on the corrected one again, and
+# the object refuses to write through it -- so the closure cannot complete.
+inject_tangent_scope_offers_a_ruled_entry() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = "            .filter(|entry| entry.state.is_live() && born_under(entry) == Some(self.id.as_str()))"
+new = "            .filter(|entry| born_under(entry) == Some(self.id.as_str()))"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A prefix that counts the trunk's dead rows. The trunk goes on ruling on its
+# own facts while a tangent runs, and counting rows that had already stopped
+# speaking reports the trunk as moved by a change to something it put away.
+inject_tangent_prefix_counts_dead_rows() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = "        if !entry.state.is_live() || born_under(entry) == Some(tangent) {"
+new = "        if born_under(entry) == Some(tangent) {"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A prefix called intact whenever it only grew. That answers a different
+# question than the one the flag asks: the trunk writing while the tangent
+# ran moves the prefix, and a caller told otherwise never looks.
+inject_tangent_prefix_only_grew() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object/tangent.rs")
+source = path.read_text(encoding="utf-8")
+old = "            prefix_intact: trunk_prefix(object, &self.id) == self.prefix_at_open,"
+new = "            prefix_intact: trunk_prefix(object, &self.id).starts_with(&self.prefix_at_open),"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A parked entry that renders as a retired one. The dump is the durable half
+# of the object, and two states rendering the same word read as one to
+# everyone who arrives later.
+inject_object_park_renders_as_retired() {
+  sed -i 's|^            Self::Parked => "parked",$|            Self::Parked => "retired",|' \
+    diet/src/object.rs
+}
+
+# A park with no tangent behind it. Parked says the entry was the tangent's
+# rather than the trunk's, so a park nobody forked takes an entry out of the
+# live set and records nothing about whose fact it was.
+inject_object_park_needs_no_tangent() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+old = """                if provenance.tangent.is_none() {
+                    return Err(ObjectError::ParkOutsideTangent(target.clone()));
+                }
 """
-new = """        let _ = state;
-        self.0
-    }
-"""
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# Each arm credited with the other arm's outcomes. The p is untouched, so
-# nothing downstream of the counts can notice: the reported line states a real
-# p about a comparison that was never made.
-inject_ablation_rates_swapped() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/ablation.rs")
-source = path.read_text(encoding="utf-8")
-old = """        successes_a: count(a),
-        successes_b: count(b),
-"""
-new = """        successes_a: count(b),
-        successes_b: count(a),
-"""
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# The silence endpoint dropped from the pre-registration. What is left is the
-# single endpoint of the experiment this one exists to improve on, and a
-# wording that buys engagement with occasional silence reads as a win.
-inject_ablation_endpoint_dropped() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/ablation.rs")
-source = path.read_text(encoding="utf-8")
-old = "    pub const ALL: &'static [Self] = &[Self::Engagement, Self::Silence];"
-new = "    pub const ALL: &'static [Self] = &[Self::Engagement];"
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# Every arm of the plan printed with the control's imperative. The plan is the
-# one artefact this instrument produces before a run, and it would name eight
-# arms that all say the same thing.
-inject_ablation_plan_one_imperative() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/ablation.rs")
-source = path.read_text(encoding="utf-8")
-old = "                .map(|arm| (arm, self.render(arm)))\n"
-new = "                .map(|arm| (arm, self.render(Arm::CONTROL)))\n"
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# The control reported under a clause's name. Two arms then answer to one name
-# in the results table, and one of the two is the arm the design rests on.
-inject_ablation_arm_names_collide() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/ablation.rs")
-source = path.read_text(encoding="utf-8")
-old = 'pub const CONTROL_TAG: &str = "none";'
-new = 'pub const CONTROL_TAG: &str = "scope";'
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# The clause separator removed, so an arm's clauses run together. The sentence
-# handed to every fork of a run is the one variable this experiment
-# manipulates, and it would go out malformed.
-inject_ablation_clauses_run_together() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/ablation.rs")
-source = path.read_text(encoding="utf-8")
-old = """            if !out.is_empty() {
-                out.push(' ');
-            }
-"""
-assert source.count(old) == 1
-path.write_text(source.replace(old, "", 1), encoding="utf-8")
-EOF
-}
-
-# A row taken out of the placeholder table. A form handed back with TODO where
-# an answer goes then counts as engagement, which is the endpoint counting a
-# blank as a win.
-inject_ablation_placeholder_word_dropped() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/ablation.rs")
-source = path.read_text(encoding="utf-8")
-old = 'const PLACEHOLDER_WORDS: &[&str] = &["tbd", "todo", "...", "\\u{2026}"];'
-new = 'const PLACEHOLDER_WORDS: &[&str] = &["tbd", "...", "\\u{2026}"];'
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# A blank clause text admitted. The arm carrying that clause is then the
-# control wearing another name, and the ablation compares two arms that are
-# one arm.
-inject_ablation_blank_clause_allowed() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/ablation.rs")
-source = path.read_text(encoding="utf-8")
-old = """            if text.trim().is_empty() {
-                return Err(ClauseError::BlankText(clause));
-            }
-"""
-assert source.count(old) == 1
-path.write_text(source.replace(old, "", 1), encoding="utf-8")
-EOF
-}
-
-# A case removed from the grading corpus, its expectation left behind. A
-# corpus walked in one direction only reports a corpus somebody deleted a case
-# out of as a corpus that passed.
-inject_ablation_corpus_case_dropped() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path(
-    "diet/capture/ablation/corpus/the-form-handed-back-with-its-blanks.answer.txt"
-)
-assert path.is_file()
-path.unlink()
-EOF
-}
-
-# An untagged decline read as content. The same words then grade two ways
-# depending on whether a tag was written over them, and the arm most likely to
-# draw a reply with no tag on it is the brevity clause under test.
-inject_ablation_untagged_decline_engages() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/capture/ablation.rs")
-source = path.read_text(encoding="utf-8")
-old = "        Outcome::Unparseable => decline::classify(field.raw.trim()).is_decline(),\n"
-new = "        Outcome::Unparseable => false,\n"
-assert source.count(old) == 1
-path.write_text(source.replace(old, new, 1), encoding="utf-8")
-EOF
-}
-
-# The second reader of the record grammar left unbounded. One reader then
-# returns a verdict on deeply nested text and the other hands it the stack,
-# and which of the two a caller reaches depends on which module it imported.
-inject_json_objects_unbounded() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/formats/record/json.rs")
-source = path.read_text(encoding="utf-8")
-old = """    if let Some(depth) = too_deep(text) {
-        return Err(LineError::TooDeep {
-            depth,
-            limit: MAX_DEPTH,
-        });
-    }
-"""
-assert source.count(old) == 1
+assert old in source
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
@@ -1117,8 +1113,10 @@ import pathlib
 
 path = pathlib.Path("diet/src/bin/diet.rs")
 source = path.read_text(encoding="utf-8")
-old = '    ("parse-interview", "interview"),\n    ("check-record", "record"),'
-new = '    ("parse-interview", "record"),\n    ("check-record", "interview"),'
+old = '''    ("parse-interview", Operation::Format("interview")),
+    ("check-record", Operation::Format("record")),'''
+new = '''    ("parse-interview", Operation::Format("record")),
+    ("check-record", Operation::Format("interview")),'''
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -1290,6 +1288,20 @@ path.write_text("\n".join(lines), encoding="utf-8")
 EOF
 }
 
+# A run directory inside a run directory. Every walker is one level deep, so
+# the inner one is linted by nothing while carrying a claim record and a
+# product digest -- which is how two of them came to be committed here.
+inject_results_nested_directory() {
+  # Staged through a temporary directory: `cp -r x x/y` copies a directory
+  # into itself, which warns and leaves a partial tree. An injection whose
+  # own mechanism half-fails proves nothing about the gate.
+  local stage
+  stage="$(mktemp -d)"
+  cp -r results/_template "${stage}/_template"
+  mv "${stage}/_template" results/_template/_template
+  rmdir "${stage}"
+}
+
 # A DIET_BIN that the resolver quietly ignores. The documented way to pin a
 # run to a specific build being a silent no-op is how four instruments banked
 # numbers through a release binary seven days behind its source.
@@ -1298,8 +1310,18 @@ inject_diet_bin_ignored() {
     scripts/resolve-diet.py
 }
 
+# A results directory carrying a regimen.toml the format refuses.
+#
+# This wrote `arm = 1.5` until the grammar grew floats, at which point the
+# injection kept changing the tree and stopped changing the VERDICT -- the
+# gate went green and the seeded case reported "did not fire". An injection
+# is proven to change the tree by `check-injections`, which cannot see that
+# the change no longer means anything; only the selftest can. So the text
+# here is one both readers refuse permanently rather than one the current
+# subset happens to exclude: an unterminated string is not TOML and never
+# will be.
 inject_regimen() {
-  printf 'arm = 1.5\n' > results/_template/regimen.toml
+  printf 'arm = "unterminated\n' > results/_template/regimen.toml
 }
 
 inject_toml_subset() {
@@ -1344,6 +1366,283 @@ inject_history() {
 # file, or one a line-based merge spliced into silence, still reports its
 # seeded case RED -- because the gate it runs was already failing, or because
 # it was going to fail anyway -- and proves nothing about the guard it names.
+# A float rendered as its digits in quotes. `0.6` becomes `"0.6"` and a
+# consumer can no longer tell a temperature from a label that reads like one
+# -- the exact lie the ruling that added floats to the regimen refused.
+inject_regimen_float_as_a_string() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = '        Value::Float(number) => ("float", Json::Decimal(number.clone())),\n'
+new = '        Value::Float(number) => ("float", Json::String(number.as_str().to_owned())),\n'
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A comment after a table header read as part of the table. `comment` is a
+# non-silent rule, so the header yields it among its children, and taking
+# every child as a segment opens a table NAMED for the comment: the
+# projection disagrees with tomllib about the same bytes, a third segment
+# walks off the end of `scope_of` into `unreachable!`, and `[b]` twice stops
+# colliding when the second carries a comment -- which accepts a document
+# TOML refuses, the one direction this subset may never take.
+inject_regimen_header_comment_is_a_table() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "                    .filter(|part| part.as_rule() == Rule::key)\n"
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# A table header that opens nothing. Every key lands at the top level, so
+# `[sampler] seed` and a document-level `seed` become one binding and the arm
+# that named both is recorded as an arm that named one.
+inject_regimen_table_scope_flattened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "                    Some(segments) => scope_of(&mut entries, segments),\n"
+new = "                    Some(_) => &mut entries,\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Two tables of one name, unchecked. One of the two would have to disappear,
+# and a regimen that quietly drops a binding is not the regime that ran.
+inject_regimen_table_collision_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "        Some(Value::Table(_)) if rest.is_empty() => {\n            return Err(ParseError::DuplicateTable { name });\n        }\n"
+new = "        Some(Value::Table(_)) if rest.is_empty() => {}\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The regimen's float rule widened past the record's decimal. `-0.0` is then
+# a regimen float and not a record decimal, so the same digits are a value or
+# an error depending on which side of the format you ask.
+inject_regimen_float_rule_widened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/regimen/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = 'float     = @{ ("-" ~ negative_float) | (int_part ~ "." ~ ASCII_DIGIT+) }\n'
+new = 'float     = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }\n'
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A summary that states a turn count the rows do not carry. The report and
+# the record agree -- both say three -- so the results linter passes them, and
+# only a re-derivation from the rows themselves can see that the run held two.
+# This is the fault that separates gate 0 from the linter: a flipped digit in
+# the front-matter alone would have turned `results` red too, and a seeded
+# case another gate also catches proves nothing about this one.
+inject_recompute_summary_not_derived() {
+  python3 - <<'EOF'
+import pathlib
+
+report = pathlib.Path("results/_template/README.md")
+source = report.read_text(encoding="utf-8")
+assert "turns = 2\n" in source
+report.write_text(source.replace("turns = 2\n", "turns = 3\n", 1), encoding="utf-8")
+
+record = pathlib.Path("results/_template/run.jsonl")
+source = record.read_text(encoding="utf-8")
+old = '{"record":"summary","turns":2,'
+new = '{"record":"summary","turns":3,'
+assert old in source
+record.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A directory that declares no kind. It is then neither recomputed nor counted
+# as knowingly skipped, and the census that says so is the only thing standing
+# between "nothing to check here" and "nothing was checked".
+# A recompute.sh that cannot fail. It exits 0 whatever the report says, so
+# gate 0 counts it as "1 recomputed" while nothing was re-derived -- the
+# vacuous class inside the check whose entire meaning is re-derivation.
+inject_recompute_cannot_fail() {
+  cat > results/_template/recompute.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+echo "recompute: 3 recorded value(s) re-derived from the artefacts"
+exit 0
+SH
+}
+
+# A recompute.sh that makes the comparison true instead of finding it true.
+# Re-derivation reads; a script that rewrites the artefact and then restates
+# the report's digest has proved nothing and destroyed the evidence.
+inject_recompute_tampers() {
+  cat > results/_template/recompute.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+printf 'rewritten to match whatever the report claims\n' > product.txt
+python3 -c "
+import hashlib, pathlib, re
+d = hashlib.sha256(pathlib.Path('product.txt').read_bytes()).hexdigest()
+p = pathlib.Path('README.md')
+p.write_text(re.sub(r'product_sha256 = \"[0-9a-f]{64}\"', 'product_sha256 = \"' + d + '\"', p.read_text(), count=1))
+"
+exit 0
+SH
+}
+
+# A claim naming evidence outside its own directory. A results directory is
+# self-contained: a path that climbs out names something this repository does
+# not carry, and its digest would be of whatever sat there on the machine.
+inject_results_consumes_outside() {
+  python3 - <<'EOF'
+import json, pathlib
+path = pathlib.Path("results/_template/run.jsonl")
+rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+for row in rows:
+    if row.get("record") == "claim":
+        row["consumes"][0]["path"] = "../_template/product.txt"
+path.write_text("\n".join(json.dumps(r, separators=(",", ":")) for r in rows) + "\n",
+                encoding="utf-8")
+EOF
+}
+
+# A claim consuming the record that carries it. The digest would be of a file
+# the digest is part of, so it can never be stated correctly -- a record
+# cannot hash itself.
+inject_results_consumes_the_record() {
+  python3 - <<'EOF'
+import json, pathlib
+path = pathlib.Path("results/_template/run.jsonl")
+rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+for row in rows:
+    if row.get("record") == "claim":
+        row["consumes"][0]["path"] = "run.jsonl"
+path.write_text("\n".join(json.dumps(r, separators=(",", ":")) for r in rows) + "\n",
+                encoding="utf-8")
+EOF
+}
+
+# A claim naming evidence that is not there at all. Until the digests were
+# checked this was invisible: a claim could cite a file nobody committed.
+inject_results_consumes_a_missing_file() {
+  python3 - <<'EOF'
+import json, pathlib
+path = pathlib.Path("results/_template/run.jsonl")
+rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+for row in rows:
+    if row.get("record") == "claim":
+        row["consumes"][0]["path"] = "never-committed.txt"
+path.write_text("\n".join(json.dumps(r, separators=(",", ":")) for r in rows) + "\n",
+                encoding="utf-8")
+EOF
+}
+
+# A directory that declares itself reproducible and ships nothing to reproduce
+# it with. Gate 0 must not read the declaration as the deed.
+inject_recompute_script_missing() {
+  rm -f results/_template/recompute.sh
+}
+
+# Every directory declared historical, so gate 0 has nothing to run. A census
+# reading "0 recomputed, N historical, 0 undeclared" is a gate over nothing,
+# and the tripwire for it is the reason exit 2 exists.
+inject_recompute_nothing_recomputable() {
+  sed -i 's/^kind = "reproducible-by-config"$/kind = "historical-observation"/' \
+    results/_template/README.md
+}
+
+inject_recompute_kind_undeclared() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/_template/README.md")
+source = path.read_text(encoding="utf-8")
+old = 'kind = "reproducible-by-config"\n'
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# A consumed digest that no longer matches its file. The claim then cites
+# evidence it never read, which reads exactly like evidence it did.
+inject_results_consumed_digest_stale() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/_template/product.txt")
+path.write_text(path.read_text(encoding="utf-8") + "one more line\n", encoding="utf-8")
+EOF
+}
+
+# A seeded case naming an injection that does not exist. The pre-flight
+# enumerates DEFINITIONS, so a definition deleted outright leaves nothing to
+# run and nothing to report inert -- the case goes on claiming coverage over a
+# guard nothing exercises. Found on the dev-loop lane, where a merge dropped
+# one function whose anchor another injection shared, and only the selftest
+# noticed, seven hours later.
+inject_case_without_an_injection() {
+  python3 - <<'EOF'
+import pathlib
+import re
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+m = re.search(r"^inject_inert_injection\(\) \{\n.*?^\}\n", source, re.M | re.S)
+assert m
+path.write_text(source[: m.start()] + source[m.end() :], encoding="utf-8")
+EOF
+}
+
+# The second level of table flattened: `[serving.flags]` bindings land beside
+# `[serving]`'s own. The four cache-ram sweep arms then project identically to
+# their siblings except by name, which is a regimen that cannot tell two
+# regimes apart -- the exact hazard the level was grown for.
+inject_regimen_nested_table_flattened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "    let mut scope = entries;\n    for segment in segments {\n"
+new = "    let mut scope = entries;\n    for segment in segments.iter().take(1) {\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# An array read by a second reader instead of the one a binding uses. A
+# decimal inside brackets is then whatever that reader makes of the digits,
+# and `0.6` means one thing at the top level and another inside an array.
+inject_regimen_array_second_reader() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "                .map(|item| value_of(key, &item))\n"
+new = "                .map(|item| Ok(Value::String(item.as_str().to_owned())))\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_inert_injection() {
   python3 - <<'EOF'
 import pathlib
@@ -1373,6 +1672,2027 @@ inject_parity() {
 inject_ci() {
   # Take a check's owner away: it then runs in no workflow, while CI is green.
   sed -i '/^hygiene\t/d' .github/check-owners.tsv
+}
+# A subshell run against the shell's own state. `cd a; (cd b; ls); pwd` then
+# ends in `b`, and every relative path after it resolves against a directory
+# the session was never in.
+inject_mechanical_subshell_leaks() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Command::Subshell(inner) => {
+                let mut copy = state.clone();
+                self.run_list(inner, &mut copy, call);
+                false
+            }"""
+new = """            Command::Subshell(inner) => {
+                self.run_list(inner, state, call);
+                false
+            }"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A `cd` the shell reported failing, applied anyway. The tracked working
+# directory then names a directory that is not there, which is the mistake the
+# whole lane exists to stop being made by a model.
+inject_mechanical_failed_cd_applied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = "        let refused = call.refusal(builtin, written.as_deref(), simple);\n"
+new = """        let refused: Option<String> = {
+            let _ = call.refusal(builtin, written.as_deref(), simple);
+            None
+        };
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# `popd` with nothing on the stack passed over in silence. The cwd stays
+# right and the record stops saying the session tried to leave.
+inject_mechanical_popd_empty_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        self.record_failure(call, simple, EMPTY_STACK.to_owned());
+        true
+    }"""
+new = """        false
+    }"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The lint's table of mechanical nouns emptied. Every ask template then passes,
+# and the working directory can go back to being an interview question.
+inject_mechanical_lint_table_emptied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = "pub const MECHANICAL_NOUNS: &[&str] = &[\n"
+new = "pub const MECHANICAL_NOUNS: &[&str] = &[];\nconst RETIRED_NOUNS: &[&str] = &[\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# Mechanical entries routed through the groundedness gate. A derivation is not
+# a quotation, so "the working directory is /work/diet" is absent from the row
+# that says `cd diet` and the gate drops the lane's whole output as invention.
+inject_mechanical_entry_grounded() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        let patches = self.patches(turn);
+        object.apply_turn(&patches)
+"""
+new = """        let patches = self.patches(turn);
+        let texts: Vec<String> = patches
+            .iter()
+            .map(|patch| match patch {
+                Patch::Add { content, .. } => content.clone(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        let source = self
+            .commands
+            .iter()
+            .map(|run| run.line.as_str())
+            .collect::<Vec<_>>()
+            .join("\\n");
+        let floor = crate::capture::grounded::Floor::pre_registered(1, 2, "the seeded fault")
+            .expect("a floor");
+        let report = crate::capture::grounded::check(
+            &texts,
+            crate::formats::interview::FieldKind::ApiSurface,
+            crate::capture::grounded::ContractInput {
+                source: &source,
+                session_prefix: "",
+            },
+            &floor,
+        );
+        let kept = report.kept();
+        let patches: Vec<Patch> = patches
+            .into_iter()
+            .zip(texts.iter())
+            .filter(|(_, text)| kept.contains(&text.as_str()))
+            .map(|(patch, _)| patch)
+            .collect();
+        object.apply_turn(&patches)
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The declared default replaced by silence. A pattern nobody wrote a row for
+# is exactly the call nobody has looked at yet, and silence is how it stays
+# that way.
+inject_router_unknown_silent() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Self::Unknown => Routing::Fork(AskKind::Generic),\n"
+new = "            Self::Unknown => Routing::Silent,\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A judgment ask released in the middle of a turn: the question that needs
+# the model to have concluded something, asked before it has.
+inject_router_judgment_mid_turn() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """            class: classified.class,
+            routing,
+            ask: match routing {"""
+new = """            class: classified.class,
+            routing: if routing == Routing::Defer {
+                Routing::Fork(AskKind::Judgment)
+            } else {
+                routing
+            },
+            ask: match routing {"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A row of the table lost. A test run then routes as unknown, and the corpus
+# of real calls is what notices.
+inject_router_table_row_lost() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/classes.tsv")
+source = path.read_text(encoding="utf-8")
+old = "test-run\tshell\tword=cargo sub=test|bench\n"
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# An unknown call routed but not recorded. Misrouting is then a suspicion
+# again rather than a number.
+inject_router_unclassified_silent() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """            self.unclassified.push(Unclassified {
+                id: id.to_owned(),
+                turn,
+                tool: tool.to_owned(),
+                word: classified.word,
+            });
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# The reduction claimed rather than computed from the counts beside it.
+inject_router_reduction_claimed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "            let saved = naive.saturating_sub(self.forks());\n"
+new = "            let saved = naive;\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A word's command substitutions found by scanning the text the quoting has
+# already been taken out of, instead of by the grammar that read the quoting.
+# `echo '$(cat notes.txt)'` then records a file read that never happened,
+# which is the one thing this lane exists not to do.
+inject_mechanical_quoted_substitution() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/shell.rs")
+source = path.read_text(encoding="utf-8")
+old = """    Ok(Word {
+        text,
+        literal,
+        substitutions,
+    })"""
+new = """    let mut substitutions = Vec::new();
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index + 1 < bytes.len() {
+        if bytes[index] == b'$'
+            && bytes[index + 1] == b'('
+            && let Some(end) = text[index + 2..].find(')')
+        {
+            substitutions.push(text[index + 2..index + 2 + end].to_owned());
+            index = index + 2 + end + 1;
+            continue;
+        }
+        index += 1;
+    }
+    Ok(Word {
+        text,
+        literal,
+        substitutions,
+    })"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# An ask wired to another class's question. Both templates still carry the
+# imperative and both still render; what stops is the ask being about the
+# thing that was just done.
+inject_router_ask_class_untuned() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Self::ApiSurface => include_str!("asks/api_surface.txt"),
+            Self::Outcome => include_str!("asks/outcome.txt"),"""
+new = """            Self::ApiSurface => include_str!("asks/outcome.txt"),
+            Self::Outcome => include_str!("asks/api_surface.txt"),"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A template that lost the fork-local imperative. The ask still asks; what it
+# stops doing is telling the fork which turn it is answering from.
+inject_router_ask_imperative_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/asks/finding.txt")
+source = path.read_text(encoding="utf-8")
+old = "{imperative}\n"
+assert source.startswith(old)
+path.write_text(source[len(old) :], encoding="utf-8")
+EOF
+}
+# A census whose totals are right and whose per-class counts are not: the
+# drive is told a directory listing was forked.
+inject_router_census_class_miscounted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Routing::Silent => tally.silent += 1,\n"
+new = "            Routing::Silent => tally.forked += 1,\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# `diet route` answers with a census it did not compute: every count zero,
+# ok true, exit 0. The replay still runs, so nothing downstream complains.
+inject_router_route_census_hollow() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/bin/diet.rs")
+source = path.read_text(encoding="utf-8")
+old = """    let replayed = diet::capture::router::replay(&record).map_err(|err| err.to_string())?;
+    replayed.census.value().map_err(|err| err.to_string())"""
+new = """    diet::capture::router::replay(&record).map_err(|err| err.to_string())?;
+    diet::capture::router::Census::default()
+        .value()
+        .map_err(|err| err.to_string())"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A row moved below one that already claims every call it names. The row is
+# still in the table, still parses, and can never decide anything.
+inject_router_table_row_shadowed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/classes.tsv")
+source = path.read_text(encoding="utf-8")
+row = "directory-listing\tshell\tword=git sub=ls-files\n"
+below = "version-control\tshell\tword=git|hg|svn|jj\n"
+assert row in source and below in source
+source = source.replace(row, "", 1)
+path.write_text(source.replace(below, below + row, 1), encoding="utf-8")
+EOF
+}
+# The corpus stops covering a class. The calls that remain still route as
+# labelled, so only the coverage of the corpus itself says anything.
+inject_router_corpus_class_uncovered() {
+  python3 - <<'EOF'
+import pathlib
+
+corpus = pathlib.Path("diet/capture/router/corpus")
+for name in ("tool-families.jsonl", "tool-families.expected.json"):
+    path = corpus / name
+    assert path.exists(), path
+    path.unlink()
+EOF
+}
+# A table row that does not parse, skipped instead of refused. Every call in
+# the drive is then unknown, which is what a router with a perfect table
+# reports for a drive full of novel tools.
+inject_router_table_row_skipped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """        let [class, family, rule] = fields.as_slice() else {
+            return Err(TableError::Shape { line });
+        };"""
+new = """        let [class, family, rule] = fields.as_slice() else {
+            continue;
+        };"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The stated intent taken from whatever lane spoke last. An interview's own
+# answer is then quoted back to the drive as something the drive said.
+inject_router_intent_lane_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "                    .is_some_and(|lane| lane == CANONICAL_LANE)\n"
+new = "                    .is_some_and(|lane| lane != CANONICAL_LANE)\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The first stated intent instead of the last: the ask quotes back something
+# the model has already finished doing.
+inject_router_intent_first_not_last() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """    sentences
+        .iter()
+        .rev()
+        .map(|sentence| sentence.trim())"""
+new = """    sentences
+        .iter()
+        .map(|sentence| sentence.trim())"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A phrase the model states its intent with, dropped from the table. The
+# stated-intent hole then goes unfilled for every turn that used it.
+inject_router_intent_marker_lost() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '    "let me ",\n'
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# An unclassified call recorded without the tool and against the wrong turn.
+# The count is still right, and nothing it names can be looked up.
+inject_router_unclassified_unattributed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """                id: id.to_owned(),
+                turn,
+                tool: tool.to_owned(),
+                word: classified.word,"""
+new = """                id: id.to_owned(),
+                turn: turn + 1,
+                tool: String::new(),
+                word: classified.word,"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The declared default dropped out of the vocabulary. Every loop that walks
+# `Class::ALL` then walks past it rather than over it.
+inject_router_class_vocabulary_shortened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/router/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """        Self::VersionControl,
+        Self::Unknown,
+    ];"""
+new = """        Self::VersionControl,
+    ];"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A cosine that divides by one norm and the square of the other. Every
+# similarity becomes a function of how long the sentence is, so the seeded
+# control row -- the sense text verbatim -- no longer sits at one, and every
+# ranking in the bakeoff is a ranking by length.
+inject_sense_cosine_unnormalised() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "    let norm_a = a.iter().map(|x| x * x).sum::<f64>().sqrt();\n"
+new = "    let norm_a = a.iter().map(|x| x * x).sum::<f64>();\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# Contrastive scoring that never subtracts the authored negative sense. It
+# becomes raw cosine wearing another tag, and the one repair the bakeoff has
+# for an abstract description sitting near everything is reported as measured
+# and is not there.
+inject_sense_contrastive_ignores_negative() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "                Some(toward - away)\n"
+new = "                let _ = away;\n                Some(toward)\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A shuffled-label null that never shuffles. It reports the real separation as
+# what chance looks like, so every cell measured against it is measured
+# against itself and no metric can be caught finding structure in noise.
+inject_sense_null_labels_unshuffled() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            let j = rng.below(i + 1);\n            labels.swap(i, j);\n"
+new = "            let _ = rng.below(i + 1);\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A bootstrap p-value that travels without the floor its resample count
+# implies. A p of 0.001 from 999 resamples is the smallest number the
+# procedure can produce, and printed alone it reads as a finding.
+inject_sense_p_without_floor() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            floor: attainable_p_floor(resamples),\n"
+new = "            floor: 0.0,\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A metric whose demonstrated-failure fixture is deleted. The metric still
+# computes and still prints, and nothing has ever seen it report failure --
+# which is the shape a perfect grounding score of 1.000 had on a probe where
+# fabrication was structurally impossible.
+inject_sense_metric_fixture_removed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """    (
+        Metric::Auc,
+        &[
+            ("failing/positive/0.1", Label::Positive, 0.1),
+            ("failing/positive/0.2", Label::Positive, 0.2),
+            ("failing/negative/0.8", Label::Negative, 0.8),
+            ("failing/negative/0.9", Label::Negative, 0.9),
+        ],
+    ),
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# The one-object reader taking the first line of a file and dropping the rest.
+# Every data file this reader serves -- sense sets, registers, vector caches --
+# is read one line at a time, so a reader that silently accepts two returns a
+# row nobody wrote and loses one somebody did.
+inject_record_data_line_two_lines() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/json.rs")
+source = path.read_text(encoding="utf-8")
+old = """    if event_line.as_span().end() != text.len() {
+        return Err(LineError::NotOneLine);
+    }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# Controls that never look at the register. The two seeded control rows are
+# still scored and still compared with each other, so the run reports its
+# controls as being at their extremes -- while an embedder that cannot tell
+# the authored sense from a transcript sentence ties them and is not caught.
+inject_sense_controls_ignore_register() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """    let control_ids = [top.id(set.set()), bottom.id(set.set())];
+    for row in scored.iter().filter(|row| !control_ids.contains(&row.id)) {
+        if row.score >= top_score {
+            return Err(ControlFailure::NotAtTop {
+                control: top,
+                score: top_score,
+                row: row.id.clone(),
+                other: row.score,
+            });
+        }
+        if row.score < bottom_score {
+            return Err(ControlFailure::NotAtBottom {
+                control: bottom,
+                score: bottom_score,
+                row: row.id.clone(),
+                other: row.score,
+            });
+        }
+    }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# A paired bootstrap whose every resample is the observed sample. Nothing ever
+# crosses zero, so every p the bakeoff prints is the attainable floor -- the
+# smallest number the procedure can produce, reported for every comparison as
+# though it were a finding.
+inject_sense_bootstrap_never_resamples() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "    let total: f64 = (0..n).map(|_| differences[rng.below(n)]).sum();\n"
+new = "    let _ = rng;\n    let total: f64 = (0..n).map(|i| differences[i]).sum();\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The reading at which a metric counts as having failed, moved off the worst
+# the metric can say. An area under the curve of 0.9 is nearly perfect
+# separation, and a fixture that reaches it would then certify every number
+# the bakeoff goes on to report.
+inject_sense_failure_reading_moved() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Self::Auc => 0.5,\n"
+new = "            Self::Auc => 0.9,\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The lane renamed. Every derived entry then claims to have come from `main`,
+# the canonical lane, whose authority a mechanical derivation does not carry.
+inject_mechanical_lane_renamed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = 'pub const LANE: &str = "mechanical";'
+new = 'pub const LANE: &str = "main";'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A pre-registration whose primary endpoint says nothing. The plan is the one
+# artefact that has to be fixed before the data arrives; emptied, it can be
+# written once the numbers are in and read as though it never had been.
+inject_sense_pre_registration_emptied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """    primary: "precision at a fixed nomination budget, the top k of the register, per embedder, \\
+              scoring and gate",
+"""
+new = '    primary: "",\n'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# An option word to a builtin read as the directory it names. `cd -P /work/x`
+# then states the working directory as `/work/-P`: an absolute path, marked
+# resolved, that every later relative path resolves against.
+inject_mechanical_option_is_a_directory() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        let optioned = simple.operands().iter().any(is_option);
+        let argument = simple.operands().iter().find(|word| !is_option(word));"""
+new = """        let optioned = false;
+        let argument = simple.operands().first();"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The lexical pre-gate asked about the row's id instead of its text. The
+# shipped ids are slugs of their texts and mostly agree, so the with-gate arm
+# of every cell is computed from identifiers with a row silently dropped to
+# the scoring's floor -- and the gate is one of the two factors the bakeoff
+# exists to measure.
+inject_sense_gate_reads_the_id() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            let admitted = cell.gate.admits(set.set(), &row.text);\n"
+new = "            let admitted = cell.gate.admits(set.set(), &row.id);\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A flag's value read as a file operand. `touch -t 202401010000 f.txt` then
+# says the turn wrote a file named after the timestamp.
+inject_mechanical_flag_value_is_a_file() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """    FileCommand::plain("touch", Operands::Write, &["-d", "-r", "-t"]),
+    FileCommand::plain("mkdir", Operands::Write, &["-m"]),"""
+new = """    FileCommand::plain("touch", Operands::Write, &[]),
+    FileCommand::plain("mkdir", Operands::Write, &[]),"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A standardised separation divided by one class's spread rather than by both.
+# It is one of the two pre-registered separation endpoints, and a cell could
+# report a separation computed from the positives alone.
+inject_sense_d_prime_unpooled() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "    let pooled = f64::midpoint(positive.variance, negative.variance).sqrt();\n"
+new = "    let pooled = positive.variance.sqrt();\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The verb an entry uses to say what happened to a file, swapped. The lane
+# then writes, under capture authority, that a file it made was deleted.
+inject_mechanical_entry_verb_swapped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Self::Read => "read",
+            Self::Written => "wrote",
+            Self::Deleted => "deleted","""
+new = """            Self::Read => "read",
+            Self::Written => "deleted",
+            Self::Deleted => "wrote","""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The null's acceptance band widened until nothing is outside it. A
+# shuffled-label null separating the two classes by a whole standard deviation
+# is then reported as chance, and every cell measured against that null is
+# measured against itself.
+inject_sense_null_band_widened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "pub const NULL_D_PRIME_BAND: f64 = 0.25;\n"
+new = "pub const NULL_D_PRIME_BAND: f64 = 5.0;\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A pipeline's members never run. Nothing a pipeline reads is recorded, and a
+# pipeline is the ordinary shape of an agent's shell call.
+inject_mechanical_pipeline_skipped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if link.pipeline.len() > 1 {
+            for command in &link.pipeline {
+                let mut copy = state.clone();
+                self.run_command(command, &mut copy, call);
+            }
+            return false;
+        }"""
+new = """        if link.pipeline.len() > 1 {
+            return false;
+        }"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A reported metric whose record carries a constant instead of the number the
+# metric produced. The record is the one door from a computed number to a
+# result, and the assembly can be guarded while the content is not.
+inject_sense_reported_value_constant() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '            ("value".to_owned(), decimal(self.value, 4)),\n'
+new = '            ("value".to_owned(), decimal(0.0, 4)),\n'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A path written and then read by one call kept as one fact. The write is the
+# one discarded, so the lane tells a later reader the turn wrote nothing.
+inject_mechanical_write_lost_to_a_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/mechanical.rs")
+source = path.read_text(encoding="utf-8")
+old = """                && matches!(
+                    &fact.derived,
+                    Derived::Touch { path: held, touch: held_touch }
+                        if *held == path && held_touch.kind == kind
+                )"""
+new = """                && matches!(&fact.derived, Derived::Touch { path: held, .. } if *held == path)"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A register whose rows disagree with the name on the file. The directory
+# then lists an authored register that is in fact corpus, and a metric taken
+# over it reads as a statement about the world.
+inject_sense_register_source_mislabelled() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/capture/sense/register/authored-mistake.jsonl")
+source = path.read_text(encoding="utf-8")
+old = '"source":"authored"'
+assert old in source
+path.write_text(source.replace(old, '"source":"mined"', 1), encoding="utf-8")
+EOF
+}
+# A file in the register directory that names nothing. A walk that skipped it
+# would skip a register whose name was mistyped and call the directory clean.
+inject_sense_register_unnamed_file() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/capture/sense/register/notaregister.jsonl")
+assert not path.exists()
+path.write_text('{"id":"a/b","text":"x","label":"positive","source":"authored"}\n', encoding="utf-8")
+EOF
+}
+# The join between a mined row and its provenance made optional. A mined
+# register can then ship a row nobody can trace, which is evidence in name
+# and an assertion in fact.
+inject_sense_provenance_join_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """    if let Some(row) = register
+        .iter()
+        .find(|row| !traced.contains(row.id.as_str()))
+    {
+        return Err(JoinError::Untraced(row.id.clone()));
+    }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# The resolver keying a block on the first injection name anywhere inside it,
+# rationale comment included. A comment reading "the deliberate pair of
+# inject_alpha" then keys the block that introduces inject_beta as
+# inject_alpha, the union sees a name it already holds, and the genuinely new
+# body is skipped with no warning and exit 0. Silence is the whole hazard.
+inject_keyed_by_a_comment() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/merge-gate.py")
+source = path.read_text(encoding="utf-8")
+old = '        m := re.search(r"^(inject_[a-z0-9_]+)\\(\\) \\{", block, re.M)\n    ) and m.group(1)\n'
+new = '        m := re.search(r"inject_[a-z0-9_]+", block)\n    ) and m.group(0)\n'
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The answer's tail swallowed instead of anchored. `DONEISH` is then a
+# `DONE`, `PARTIALLY` a `PARTIAL`, and every word after the verdict is
+# discarded -- so the reconciler applies a judgment the fork did not give.
+inject_verdict_prefix_accepted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/verdict/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = "document = { SOI ~ ws* ~ verdict ~ reason? ~ ws* ~ EOI }"
+new = "document = { SOI ~ ws* ~ verdict ~ reason? ~ ANY* ~ EOI }"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The boundary check in `upper_verdict` removed. A reason that names
+# `DONE_MARKER` is then a second answer, and one answer the fork did give is
+# refused as two.
+inject_verdict_identifier_read_as_a_verdict() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/verdict/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = 'upper_verdict = _{ ("SUPERSEDED" | "NOT_THIS" | "NOT THIS" | "PARTIAL" | "DONE") ~ !word_char }'
+new = 'upper_verdict = _{ "SUPERSEDED" | "NOT_THIS" | "NOT THIS" | "PARTIAL" | "DONE" }'
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A second verdict inside a reason accepted. The reconciler branches on one
+# word; `DONE - or PARTIAL` hands it two.
+inject_verdict_second_verdict_accepted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/verdict/grammar.pest")
+source = path.read_text(encoding="utf-8")
+old = "reason_token = _{ !upper_verdict ~ (!sp ~ !nl ~ ANY)+ }"
+new = "reason_token = _{ (!sp ~ !nl ~ ANY)+ }"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# An anchor matched inside a longer word. `plan_a` then recurs in every
+# `plan_ab`, and the entry is nominated by every mention of the longer name.
+inject_collector_substring_match() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = "    !continues(before) && !continues(after)\n"
+new = "    let _ = (before, after, continues);\n    true\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# An English word made an anchor. `plan` is in every third sentence of a
+# drive, and an entry anchored on it is nominated by everything.
+inject_collector_english_anchor() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = "        .any(|(a, b)| a.is_lowercase() && b.is_uppercase())\n}\n"
+new = "        .any(|(a, b)| a.is_lowercase() && b.is_uppercase())\n        || has_alpha\n}\n"
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# An entry nominated by the turn that made it. Its own prose carries its own
+# anchors, so every new entry would go straight to a confirm fork.
+inject_collector_self_nomination() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if entry.provenances.iter().any(|p| p.turn >= new.turn) {
+            continue;
+        }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# A supersession that adds without voiding. Both facts are then live, the
+# object holds a contradiction, and the entry the archive was supposed to
+# make recoverable is instead one of two answers with nothing to choose
+# between them.
+inject_reconcile_supersede_without_voiding() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/reconcile.rs")
+source = path.read_text(encoding="utf-8")
+old = """        Verdict::Superseded => Outcome::Superseded(Patch::Supersede {
+            id: EntryId::new(&format!(
+                "{}/supersedes/{}",
+                replacement.event, nomination.entry
+            ))?,
+            content: replacement.content.to_owned(),
+            voids: nomination.entry.clone(),
+            provenance: replacement.provenance,
+        }),"""
+new = """        Verdict::Superseded => Outcome::Superseded(Patch::Add {
+            id: EntryId::new(&format!(
+                "{}/supersedes/{}",
+                replacement.event, nomination.entry
+            ))?,
+            content: replacement.content.to_owned(),
+            provenance: replacement.provenance,
+        }),"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A verdict that settles nothing made to settle something. `PARTIAL` says
+# the prose bears on the entry without replacing it; a reconciler that
+# resolves on it closes an entry the fork deliberately left open.
+inject_reconcile_partial_applies_a_patch() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/reconcile.rs")
+source = path.read_text(encoding="utf-8")
+old = "        Verdict::Partial => Outcome::Partial,\n"
+new = """        Verdict::Partial => Outcome::Resolved(Patch::Resolve {
+            target: nomination.entry.clone(),
+            provenance: replacement.provenance,
+        }),
+"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The fixture policy accepted by the door that ships. Its threshold was
+# chosen to make the fixtures readable, which is exactly the property a
+# shipped threshold must not have, so a tier running on it spends confirm
+# forks at a rate nobody measured. The neighbouring case takes the other
+# half of the same door: a `calibrated_on` that names no run at all.
+inject_collector_uncalibrated_policy() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Calibration::Fixture => Err(PolicyError::Fixture),\n"
+new = "            Calibration::Fixture => Ok(policy),\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The budget removed. One turn then nominates the whole object the first
+# time a threshold is set a little too low.
+inject_collector_budget_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "    scored.truncate(policy.budget as usize);\n"
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# Tier 0 stopped after the first entry it found. A turn that reverses two
+# facts loses one of them, silently: no budget to point at and no report
+# saying anything was left out.
+inject_collector_one_nomination_per_turn() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '        }\n    }\n    nominations\n}'
+new = '        }\n    }\n    nominations.truncate(1);\n    nominations\n}'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# Tier 0 read every entry rather than the live ones. An entry a verdict
+# already voided is nominated again on every later turn that names its
+# anchor, spending a confirm fork on an answer that is already on file.
+inject_collector_voided_entry_renominated() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '    for entry in object.live() {'
+new = '    for entry in object.entries() {'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# Every hit reported offset zero. The offset is half of what a literal
+# nomination hands the confirm fork -- this anchor recurred, and here.
+inject_collector_hit_offset_lost() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '            hits.push(Hit { offset: at });'
+new = '            hits.push(Hit { offset: 0 });'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The scan resumed one byte past the start of the match instead of past
+# the match, so an anchor that overlaps itself is counted once per
+# shifted position.
+inject_collector_overlapping_scan() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '        from = at + needle.len();'
+new = '        from = at + 1;'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# Only backticks set a span off. A double-quoted term is one of the three
+# anchor classes the tier claims, and it went untested for a whole branch.
+inject_collector_quoted_anchor_delimiter() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '    for delimiter in [\'`\', \'"\'] {'
+new = "    for delimiter in ['`'] {"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The minimum anchor length dropped to one byte, so two-character
+# coincidences become anchors and the tier fires on version numbers.
+inject_collector_short_shape_anchored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = 'const MIN_ANCHOR_LEN: usize = 3;'
+new = 'const MIN_ANCHOR_LEN: usize = 1;'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# `a::b` stopped being an identifier shape. A path through the module
+# tree is the one anchor class a Rust drive produces most.
+inject_collector_module_path_shape() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '    // a::b\n    if token.contains("::") && !token.starts_with(\':\') && !token.ends_with(\':\') {\n        return true;\n    }\n'
+new = ''
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The file-extension window widened, so a dotted word whose tail is an
+# English word is read as a file name and a record carries the wrong kind.
+inject_collector_extension_window() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '            && (1..=4).contains(&ext.len())'
+new = '            && (1..=12).contains(&ext.len())'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The anchor kinds swapped their spellings. A record then says `quoted`
+# for an identifier, and nothing reads it back.
+inject_collector_anchor_kind_permuted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Self::Identifier => "identifier",\n            Self::Path => "path",\n            Self::Quoted => "quoted",'
+new = '            Self::Identifier => "quoted",\n            Self::Path => "identifier",\n            Self::Quoted => "path",'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The source vocabulary lost its members, so a test that walked `ALL`
+# would walk nothing and pass.
+inject_collector_source_vocabulary_emptied() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = "    pub const ALL: &'static [Self] = &[Self::Prose, Self::ToolOutput];"
+new = "    pub const ALL: &'static [Self] = &[];"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A nomination named the other tier. The two cost different things to be
+# wrong about, and the name is how a reader tells them apart later.
+inject_collector_tier_name_swapped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Evidence::Literal { .. } => "literal",\n            Evidence::Sense { .. } => "sense",'
+new = '            Evidence::Literal { .. } => "sense",\n            Evidence::Sense { .. } => "literal",'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The two registers swapped their spellings, so a nomination measured
+# against the turn's stated intent says it came from the reversal senses.
+inject_collector_register_permuted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Self::Reversal => "reversal",\n            Self::Intent => "intent",'
+new = '            Self::Reversal => "intent",\n            Self::Intent => "reversal",'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The lexical pre-gate stopped being applied. It is one of the four
+# settings a calibration run fixes, and the policy this tree ships selects
+# it, so a tier that ignores it is running a cell nobody measured.
+inject_collector_gate_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if !policy.gate.admits(SenseSet::Reversal, new.prose) {\n        return Ok(Vec::new());\n    }\n'
+new = ''
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The turn-level threshold stopped being compared. Silence on a turn that
+# reverses nothing is this tier's main product, and it was masked by the
+# per-entry cut for a whole branch.
+inject_collector_turn_threshold_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if turn_score < policy.cut() {\n        return Ok(Vec::new());\n    }\n'
+new = '    let _ = turn_score;\n'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The per-entry threshold stopped being compared, so a turn that reverses
+# anything nominates every live entry up to the budget.
+inject_collector_entry_threshold_ignored() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if score >= policy.cut() {\n            scored.push((score, entry));\n        }\n'
+new = '        scored.push((score, entry));\n'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The turn was scored against the authored `mistake` senses instead of
+# `reversal`. Both are real event classes; only one retires a fact.
+inject_collector_wrong_sense_set() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = 'EmbeddedSet::embed(senses, SenseSet::Reversal, embedder)'
+new = 'EmbeddedSet::embed(senses, SenseSet::Mistake, embedder)'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The second register measured the turn's prose twice instead of its
+# stated intent, so whichever entry shares the reversal's words is
+# nominated rather than the entry the turn is about.
+inject_collector_intent_register_reads_the_prose() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '    let intent = embedder.embed(new.intent);'
+new = '    let intent = embedder.embed(new.prose);'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# Tier 1 nominated an entry born in the turn that is reading it. Tier 0
+# keeps the same rule and has its own case; this is the tier-1 copy, which
+# was pinned by a test that named an id the object never held.
+inject_collector_sense_self_nomination() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if entry.provenances.iter().any(|p| p.turn >= new.turn) {\n            continue;\n        }\n'
+new = ''
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# Tier 1 read every entry rather than the live ones -- the same fault as
+# tier 0's, on the tier that has a budget to spend.
+inject_collector_sense_voided_entry_renominated() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '    for entry in object.live() {'
+new = '    for entry in object.entries() {'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The tier's report lost the scoring and the gate. A nomination count and
+# a threshold cannot be matched to the cell that produced them without the
+# other two factors beside them.
+inject_collector_report_drops_the_policy() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '        (\n            "scoring".to_owned(),\n            Value::String(policy.scoring.tag().to_owned()),\n        ),\n        (\n            "gate".to_owned(),\n            Value::String(policy.gate.tag().to_owned()),\n        ),\n'
+new = ''
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The calibration door stopped asking whether `calibrated_on` names a run
+# and only refused the fixture by name, so any other word is a
+# calibration -- the fixture's own tag with a space on the end included.
+inject_collector_policy_names_no_run() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Calibration::Run(directory) if !names_a_run(directory) => {\n                Err(PolicyError::Uncalibrated)\n            }\n'
+new = ''
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The superseding entry carried a constant instead of the fact that
+# replaced the old one. The link is right, the states are right, and the
+# object accumulates entries whose text is a placeholder.
+inject_reconcile_supersede_writes_a_constant() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/reconcile.rs")
+source = path.read_text(encoding="utf-8")
+old = '            content: replacement.content.to_owned(),'
+new = '            content: "superseded".to_owned(),'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The accessor a caller applies answered `None` for every verdict. The
+# four outcomes stay distinct, every assertion about them stays true, and
+# the module applies nothing.
+inject_reconcile_patch_never_handed_back() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/reconcile.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Self::Superseded(patch) | Self::Resolved(patch) => Some(patch),\n            Self::Partial | Self::NotThis => None,'
+new = '            Self::Superseded(_) | Self::Resolved(_) | Self::Partial | Self::NotThis => None,'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# PARTIAL collapsed into NOT_THIS. NOT_THIS is the false nomination the
+# precision gate is calibrated against, so conflating the two inflates the
+# number the gate reads.
+inject_reconcile_partial_read_as_a_false_nomination() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/reconcile.rs")
+source = path.read_text(encoding="utf-8")
+old = '        Verdict::Partial => Outcome::Partial,\n        Verdict::NotThis => Outcome::NotThis,\n'
+new = '        Verdict::Partial | Verdict::NotThis => Outcome::NotThis,\n'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The punctuation prose hangs on a token stayed part of the token, so an
+# anchor at the end of a sentence is not found at all.
+inject_collector_token_untrimmed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/literal.rs")
+source = path.read_text(encoding="utf-8")
+old = "fn trim_token(token: &str) -> &str {\n"
+new = """fn trim_token(token: &str) -> &str {
+    if !token.is_empty() {
+        return token;
+    }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The ranking reversed, so the budget is spent on the entries least likely
+# to be the one. A precision-first tier with an anti-sorted budget is worse
+# than a tier with no budget at all.
+inject_collector_budget_takes_the_worst() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """        right
+            .partial_cmp(left)
+"""
+new = """        left
+            .partial_cmp(right)
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# Every nomination carried a constant instead of the score that was measured.
+# The number is the only thing that can be compared to the run that set the
+# threshold, which is the whole argument for the policy having one.
+inject_collector_score_not_measured() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = """        .filter_map(|(score, entry)| {"""
+new = """        .filter_map(|(_score, entry)| {"""
+assert source.count(old) == 1
+source = source.replace(old, new, 1)
+old = "                    score: written(score)?,"
+new = "                    score: written(0.0)?,"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The superseding entry lost the provenance of the fork that judged, so
+# nothing can attribute a wrong supersession to the turn that made it.
+inject_reconcile_supersede_loses_its_fork() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/reconcile.rs")
+source = path.read_text(encoding="utf-8")
+old = """            voids: nomination.entry.clone(),
+            provenance: replacement.provenance,"""
+new = """            voids: nomination.entry.clone(),
+            provenance: Provenance {
+                turn: 0,
+                ..replacement.provenance
+            },"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A fork that said the nomination was wrong superseded the entry anyway. A
+# mention is not a reversal, and the verdict is the only thing that tells
+# them apart.
+inject_reconcile_mention_superseded() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/collector/reconcile.rs")
+source = path.read_text(encoding="utf-8")
+old = "        Verdict::NotThis => Outcome::NotThis,\n"
+new = """        Verdict::NotThis => Outcome::Superseded(Patch::Supersede {
+            id: EntryId::new(&format!(
+                "{}/supersedes/{}",
+                replacement.event, nomination.entry
+            ))?,
+            content: replacement.content.to_owned(),
+            voids: nomination.entry.clone(),
+            provenance: replacement.provenance,
+        }),
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# Self-capture exempt from the groundedness gate. The modality is the whole
+# argument -- a tool call rides the harness's own parsing instead of the
+# content channel -- and none of that says anything about whether the content
+# is true. The 454-entry fabrication came through a lane that was also
+# confident, also well-formed, and also sure of itself.
+inject_tools_ungrounded() {
+  sed -i 's|^    let kept = !report.kept().is_empty();$|    let kept = true;|' \
+    diet/src/capture/tools.rs
+}
+# The reminder that never comes round. Every model eventually stops recording;
+# a cadence that cannot fire turns the forget rate this lane exists to survive
+# into a silence nobody counts.
+inject_tools_reminder_silent() {
+  sed -i 's|^        if self.since < self.cadence.interval() {$|        if true {|' \
+    diet/src/capture/tools.rs
+}
+# A harness tool call accepted as a capture. Another system's tool output then
+# becomes a fact about this session, written with capture authority, and the
+# provenance says the model recorded it.
+inject_tools_foreign_call() {
+  sed -i 's|^        return Err(ToolError::NotACaptureTool(tool.clone()));$|        return Ok(Effect::default());|' \
+    diet/src/capture/tools.rs
+}
+# A phase-transition proposal that writes. The tool was the most successful
+# capture-adjacent mechanism the program ever ran, and it was that because it
+# ASKED; a version that writes makes the model's wish for a phase change
+# indistinguishable from a phase change.
+inject_tools_proposal_writes() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """fn advisory(proposal: Proposal) -> Effect {
+    Effect {
+        proposal: Some(proposal),
+        ..Effect::default()
+    }
+}"""
+new = """fn advisory(proposal: Proposal) -> Effect {
+    let patches = vec![Patch::Add {
+        id: EntryId::new(&proposal.from_call).expect("a call id is not blank"),
+        content: proposal.reason.clone(),
+        provenance: Provenance {
+            turn: proposal.at_turn,
+            lane: LANE.to_owned(),
+            fork: None,
+            tangent: None,
+            index: 0,
+        },
+    }];
+    Effect {
+        patches,
+        proposal: Some(proposal),
+        ..Effect::default()
+    }
+}"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A capture grounded in the harness's echo of itself. A harness that answers
+# `update_record` with `recorded: <content>` is the ordinary shape, and reading
+# that line as evidence lets a fabrication certify itself by being repeated
+# back to the model that made it up.
+inject_tools_self_echo() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """                Event::ToolCall {
+                    at_turn,
+                    tool,
+                    output: Some(output),
+                    ..
+                } if CaptureTool::from_tag(tool).is_none() => seen.push(*at_turn, turn, output),"""
+new = """                Event::ToolCall {
+                    at_turn,
+                    output: Some(output),
+                    ..
+                } => seen.push(*at_turn, turn, output),"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A capture grounded in a turn the model had not reached. The whole record is
+# in front of the gate at replay time, so this one arm is what stops a turn-4
+# entry being certified against turn-9's output -- evidence that did not exist
+# when the model wrote.
+inject_tools_future_output() {
+  sed -i 's|^            Ordering::Greater => return,$|            Ordering::Greater => \&mut self.source,|' \
+    diet/src/capture/tools.rs
+}
+# A superseding entry whose id is minted from a counter. The entry that
+# replaces a live one is then unreachable from the row that carried it, and its
+# provenance is a claim rather than a walk back to the record.
+inject_tools_supersede_minted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Some(voids) => Patch::Supersede {
+                id,"""
+new = """            Some(voids) => Patch::Supersede {
+                id: EntryId::new(&format!("supersede/{}", id.as_str().len()))
+                    .map_err(ToolError::BadEntry)?,"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A verdict that resolves somebody else's entry. The one patch a verdict alone
+# is allowed to justify, pointed at an entry the model never named.
+inject_tools_resolve_elsewhere() {
+  sed -i 's|^            target: entry.clone(),$|            target: EntryId::new("somebody/else").map_err(ToolError::BadEntry)?,|' \
+    diet/src/capture/tools.rs
+}
+# The asks, reworded to nothing. What this lane says out loud is its whole
+# product, and a test that only asks whether two strings differ is happy with
+# "a" and "b".
+inject_tools_ask_words() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Self::Reminder => "Anything you meant to record?",
+            Self::Sweep => "What did this turn establish that a later turn would need?","""
+new = """            Self::Reminder => "a",
+            Self::Sweep => "b","""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# An ask that drops its own question whenever it carries a deferral. The
+# reminder then reads as the router's note alone, with nothing asked.
+inject_tools_ask_question_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """            Some(about) => format!(
+                "{} It went by without an answer: {about}.",
+                self.kind.opening()
+            ),"""
+new = """            Some(about) => about.clone(),"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The recovery sweep asking as the cadence. `AskKind::Sweep` is then produced
+# nowhere, and the enumeration over `ALL` certifies the enum rather than the
+# caller that was supposed to use it.
+inject_tools_sweep_kind() {
+  sed -i 's|^                kind: AskKind::Sweep,$|                kind: AskKind::Reminder,|' \
+    diet/src/capture/tools.rs
+}
+# The model's own spelling of a closed choice, kept. Case is then decided
+# wherever somebody thought of it next: `EVIDENCE` mints a second id for one
+# entry, or is refused outright as a field nothing knows.
+inject_tools_choice_uncanonical() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """            choice.clone()"""
+new = """            let _ = choice;
+            text.clone()"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A phase proposal with no reason. The tool is a request for a ruling, and the
+# why is the whole of what it carries into one.
+inject_tools_proposal_reasonless() {
+  sed -i 's|^            reason: text_argument(&args, "reason"),$|            reason: String::new(),|' \
+    diet/src/capture/tools.rs
+}
+# A reminder that drops what the router put off. The deferral then reaches only
+# the post-drive sweep, and the cadence half of the join with the router is
+# dead while every test stays green.
+inject_tools_reminder_deferral_dropped() {
+  sed -i 's|^            about: self.deferred.get(&turn).cloned(),$|            about: None,|' \
+    diet/src/capture/tools.rs
+}
+# Every tool description reduced to one character. These bytes are what a
+# foreign harness registers verbatim, and they are the advisory framing the
+# whole modality argument rests on.
+inject_tools_description_thin() {
+  python3 - <<'EOF'
+import json
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools/contract.jsonl")
+rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+assert rows
+for row in rows:
+    row["description"] = "x"
+path.write_text(
+    "\n".join(json.dumps(row, separators=(",", ":")) for row in rows) + "\n",
+    encoding="utf-8",
+)
+EOF
+}
+# The check that every offered tool is described, removed. A tool this lane
+# offers and the file omits is then registered with nothing said about it.
+inject_tools_contract_undescribed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """    for tool in CaptureTool::ALL {
+        if !specs.iter().any(|spec| spec.tool == *tool) {
+            return Err(ContractError::Undescribed(tool.tag()));
+        }
+    }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# The check against one tool described twice, removed. Which of the two rows a
+# harness registers is then decided by the order of the file.
+inject_tools_contract_duplicate() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/tools.rs")
+source = path.read_text(encoding="utf-8")
+old = """        if specs.iter().any(|spec| spec.tool == tool) {
+            return Err(ContractError::DuplicateTool(at));
+        }
+"""
+assert old in source
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# A word in the contract's closed list that the lane cannot honour. The model
+# is invited to say `abandoned`, the harness constrains its argument to it, and
+# `apply` then refuses the answer it asked for.
+inject_tools_verdict_list_open() {
+  sed -i 's|"of":\["done","not_this","partial","superseded"\]|"of":["abandoned","done","not_this","partial","superseded"]|' \
+    diet/src/capture/tools/contract.jsonl
+}
+# The depth limit on the record reader's other door. `objects` is a second
+# entry into the same recursive descent, and the lane contract and every lane
+# corpus expectation arrive through it.
+inject_record_objects_undepthed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """    let depth = nesting_depth(input);
+    if depth > MAX_DEPTH {
+        return Err(ParseError::TooDeep {
+            depth,
+            limit: MAX_DEPTH,
+        });
+    }
+    let mut parsed = RecordParser::parse(Rule::document, input)"""
+new = """    let mut parsed = RecordParser::parse(Rule::document, input)"""
+assert old in source
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A turn that recorded in the end, swept anyway. The sweep then asks about a
+# fact the model did record, which teaches that recording changes nothing.
+inject_tools_silent_kept() {
+  sed -i 's|^            self.silent.remove(&turn);$||' diet/src/capture/tools.rs
+}
+# The one corpus case that drives a tool other than `update_record`, cut back
+# to `update_record` alone. The corpus then covers the tool whose calls its
+# replay helper finds easiest to read, which is how two of the three tools this
+# lane offers sat outside it in the first place.
+inject_tools_corpus_one_tool() {
+  python3 - <<'EOF'
+import json
+import pathlib
+
+case = pathlib.Path("diet/capture/tools/corpus/a-verdict-and-a-proposal.jsonl")
+lines = [line for line in case.read_text(encoding="utf-8").splitlines() if line.strip()]
+kept = [line for line in lines if '"tool":"resolve_entry"' not in line
+        and '"tool":"propose_phase_transition"' not in line]
+assert len(kept) < len(lines)
+case.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+expected = pathlib.Path("diet/capture/tools/corpus/a-verdict-and-a-proposal.expected.json")
+row = json.loads(expected.read_text(encoding="utf-8"))
+row["captures"] = [c for c in row["captures"] if c["call"] == "c1"]
+expected.write_text(json.dumps(row, separators=(",", ":")) + "\n", encoding="utf-8")
+EOF
+}
+# The control arm dropped from the power set. An ablation whose control is
+# missing can rank its clauses against each other and cannot say that any of
+# them beats an ask with no imperative in it -- which is the one thing the
+# original result it is checking itself against established.
+inject_ablation_no_control() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = "    (0..count).map(Arm).collect()\n"
+new = "    (1..count).map(Arm).collect()\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# Silence counted as engagement. The collapse case is an answer of nothing at
+# all, and a grader that reads it as engagement reports the worst outcome a
+# wording can buy as the best one.
+inject_ablation_silence_engages() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = "    matches!(grade(answer), Grade::Engaged)\n"
+new = "    matches!(grade(answer), Grade::Engaged | Grade::Silent)\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A p-value reported without its attainable floor. A sample size bounds the
+# smallest p it can produce; a p quoted at that bound with the bound stripped
+# off reads as a strength the run never had.
+inject_ablation_p_floor_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = """            "{}/{} against {}/{}: p {}, attainable floor {} over {} resamples",
+            self.successes_a,
+            self.pairs,
+            self.successes_b,
+            self.pairs,
+            self.p_value().fixed(P_DIGITS),
+            self.attainable_p_floor().fixed(P_DIGITS),
+            self.resamples,
+"""
+new = """            "{}/{} against {}/{}: p {} over {} resamples",
+            self.successes_a,
+            self.pairs,
+            self.successes_b,
+            self.pairs,
+            self.p_value().fixed(P_DIGITS),
+            self.resamples,
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A resample that draws once instead of once for every fork. The report still
+# carries a p and still carries its floor, and the p is now a statement about a
+# sample of one. This is the failure a bootstrap actually has: not summing
+# nothing, which shows up at once, but resampling wrongly.
+inject_ablation_resample_single_draw() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = "        for _ in 0..pairs {\n"
+new = "        for _ in 0..1 {\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The generator frozen: every draw returns the same index, so a resample is one
+# fork counted over and over. Deterministic, reproducible, and not a sample.
+inject_ablation_frozen_generator() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = """        self.0 = state;
+        state
+    }
+"""
+new = """        let _ = state;
+        self.0
+    }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# Each arm credited with the other arm's outcomes. The p is untouched, so
+# nothing downstream of the counts can notice: the reported line states a real
+# p about a comparison that was never made.
+inject_ablation_rates_swapped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = """        successes_a: count(a),
+        successes_b: count(b),
+"""
+new = """        successes_a: count(b),
+        successes_b: count(a),
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The silence endpoint dropped from the pre-registration. What is left is the
+# single endpoint of the experiment this one exists to improve on, and a
+# wording that buys engagement with occasional silence reads as a win.
+inject_ablation_endpoint_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = "    pub const ALL: &'static [Self] = &[Self::Engagement, Self::Silence];"
+new = "    pub const ALL: &'static [Self] = &[Self::Engagement];"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# Every arm of the plan printed with the control's imperative. The plan is the
+# one artefact this instrument produces before a run, and it would name eight
+# arms that all say the same thing.
+inject_ablation_plan_one_imperative() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = "                .map(|arm| (arm, self.render(arm)))\n"
+new = "                .map(|arm| (arm, self.render(Arm::CONTROL)))\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The control reported under a clause's name. Two arms then answer to one name
+# in the results table, and one of the two is the arm the design rests on.
+inject_ablation_arm_names_collide() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = 'pub const CONTROL_TAG: &str = "none";'
+new = 'pub const CONTROL_TAG: &str = "scope";'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The clause separator removed, so an arm's clauses run together. The sentence
+# handed to every fork of a run is the one variable this experiment
+# manipulates, and it would go out malformed.
+inject_ablation_clauses_run_together() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = """            if !out.is_empty() {
+                out.push(' ');
+            }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# A row taken out of the placeholder table. A form handed back with TODO where
+# an answer goes then counts as engagement, which is the endpoint counting a
+# blank as a win.
+inject_ablation_placeholder_word_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = 'const PLACEHOLDER_WORDS: &[&str] = &["tbd", "todo", "...", "\\u{2026}"];'
+new = 'const PLACEHOLDER_WORDS: &[&str] = &["tbd", "...", "\\u{2026}"];'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# A blank clause text admitted. The arm carrying that clause is then the
+# control wearing another name, and the ablation compares two arms that are
+# one arm.
+inject_ablation_blank_clause_allowed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = """            if text.trim().is_empty() {
+                return Err(ClauseError::BlankText(clause));
+            }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# A case removed from the grading corpus, its expectation left behind. A
+# corpus walked in one direction only reports a corpus somebody deleted a case
+# out of as a corpus that passed.
+inject_ablation_corpus_case_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(
+    "diet/capture/ablation/corpus/the-form-handed-back-with-its-blanks.answer.txt"
+)
+assert path.is_file()
+path.unlink()
+EOF
+}
+# An untagged decline read as content. The same words then grade two ways
+# depending on whether a tag was written over them, and the arm most likely to
+# draw a reply with no tag on it is the brevity clause under test.
+inject_ablation_untagged_decline_engages() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/ablation.rs")
+source = path.read_text(encoding="utf-8")
+old = "        Outcome::Unparseable => decline::classify(field.raw.trim()).is_decline(),\n"
+new = "        Outcome::Unparseable => false,\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The second reader of the record grammar left unbounded. One reader then
+# returns a verdict on deeply nested text and the other hands it the stack,
+# and which of the two a caller reaches depends on which module it imported.
+inject_json_objects_unbounded() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/json.rs")
+source = path.read_text(encoding="utf-8")
+old = """    if let Some(depth) = too_deep(text) {
+        return Err(LineError::TooDeep {
+            depth,
+            limit: MAX_DEPTH,
+        });
+    }
+"""
+assert source.count(old) == 1
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
 }
 
 # Every pattern in a table, shown catching its own class. A pattern that has
@@ -1583,6 +3903,23 @@ prove_mechanics() {
   expect_exit "an unscannable page is rejected, not called clean" 1 \
     bash "${ROOT}/scripts/hygiene.sh" --patterns "${ROOT}/scripts/pages-patterns.tsv" \
       --tree "${box}/utf16"
+
+  # The results-fixture loop grades on the class the manifest declares, so the
+  # emission is load-bearing: a `failure_class` nothing prints is a field the
+  # grader cannot read, and the loop silently falls back to "exited 1" -- which
+  # is the state this branch was in while twenty-four declared defects went
+  # unexercised. Pinned in both directions.
+  expect_exit "every results fixture emits the class its fault declares" 0 \
+    bash -c "cd '${ROOT}' && python3 scripts/check-fault-manifest.py --fixture-classes \
+      | while IFS=\$'\\t' read -r name want; do \
+          out=\$(python3 scripts/check-results.py \"tests/fixtures/results-bad/\${name}\" 2>&1) \
+            && exit 1; \
+          grep -qF \"[\${want}]\" <<<\"\${out}\" || { echo \"\${name}: no \${want}\"; exit 1; }; \
+        done"
+  expect_exit "a fixture red for another fixture's reason is not a pass" 1 \
+    bash -c "cd '${ROOT}' \
+      && out=\$(python3 scripts/check-results.py tests/fixtures/results-bad/2026-01-27-UPPERCASE-slug 2>&1); \
+      grep -qF '[results.sections-wrong]' <<<\"\${out}\""
 }
 
 selftest() {
@@ -1670,50 +4007,50 @@ selftest() {
     'a word the shell would expand was reported literal'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
     'an empty answer is a recorded answer, not a missing one'
-  seeded_case "the ablation's control arm dropped"     test     inject_ablation_no_control \
-    'the control arm is missing: an ablation with no sentence-removed arm'
+  seeded_case "a tangent drop that deletes"           test     inject_tangent_drop_removes \
+    'a drop evicts to the archive and never deletes'
 
-  seeded_case "silence counted as engagement"          test     inject_ablation_silence_engages \
-    'counted as engagement and as silence at once'
+  seeded_case "a parked entry that still renders"     test     inject_tangent_park_renders \
+    'a parked entry still speaks for the object'
 
-  seeded_case "a p reported without its floor"         test     inject_ablation_p_floor_dropped \
-    'a p reported without its attainable floor'
+  seeded_case "a tangent scoped by recency"           test     inject_tangent_scope_by_recency \
+    'scope is by provenance, not by recency'
 
-  seeded_case "a resample that draws once"            test     inject_ablation_resample_single_draw \
-    'the resamples no longer draw one outcome for every fork'
+  seeded_case "a tangent closed leaving an entry unruled" test  inject_tangent_undisposed_ignored \
+    'closure is total: a tangent-born entry was left undisposed'
 
-  seeded_case "a generator that never advances"       test     inject_ablation_frozen_generator \
-    'a seeded draw did not reach every fork in 64 tries'
+  seeded_case "a prefix claimed intact, not compared" test     inject_tangent_prefix_asserted \
+    'the prefix was reported intact after the trunk moved'
 
-  seeded_case "each arm credited with the other's"    test     inject_ablation_rates_swapped \
-    'the first arm held on 5 of these 6 forks and the bootstrap counted'
+  seeded_case "a tangent id opened twice"             test     inject_tangent_id_reused \
+    'a tangent id the record already carries was opened again'
 
-  seeded_case "the silence endpoint unregistered"     test     inject_ablation_endpoint_dropped \
-    'the pre-registration no longer carries two endpoints'
+  seeded_case "a tangent that dates a fact at the fork" test   inject_tangent_provenance_ignores_turn \
+    'a tangent dated a patch at a turn other than the one it was made at'
 
-  seeded_case "one imperative for every arm"          test     inject_ablation_plan_one_imperative \
-    'the plan does not pair the arm'
+  seeded_case "a closure ruling dated at the fork"    test     inject_tangent_ruling_dated_at_fork \
+    'the closure filed its ruling at a turn it did not close at'
 
-  seeded_case "two arms under one name"               test     inject_ablation_arm_names_collide \
-    'two arms of the ablation are reported under one name'
+  seeded_case "a closure under a coined lane"         test     inject_tangent_closing_lane_coined \
+    'the closure filed its ruling under a lane the record does not already have'
 
-  seeded_case "an arm's clauses run together"         test     inject_ablation_clauses_run_together \
-    'the imperative an arm puts in the fork is not its clauses separated by one'
+  seeded_case "a disposition missing from the list"   test     inject_tangent_disposition_missing_from_all \
+    'the dispositions a closure can rule with are not the three the record names'
 
-  seeded_case "a placeholder nobody counts"           test     inject_ablation_placeholder_word_dropped \
-    'the-placeholder-words-nobody-replaced: graded .engaged. where the corpus says .inert.'
+  seeded_case "a tangent that offers a settled fact again" test inject_tangent_scope_offers_a_ruled_entry \
+    'the tangent offered a fact the record had already ruled on for disposition a second time'
 
-  seeded_case "a blank clause text admitted"          test     inject_ablation_blank_clause_allowed \
-    'a clause table with a blank clause text was not refused for that reason'
+  seeded_case "a prefix that counts dead trunk rows"  test     inject_tangent_prefix_counts_dead_rows \
+    'a trunk row that was already dead at the fork was counted into the prefix'
 
-  seeded_case "a grading case quietly dropped"        test     inject_ablation_corpus_case_dropped \
-    'the corpus holds a case with no expectation or an expectation with no case'
+  seeded_case "a prefix called intact whenever it only grew" test inject_tangent_prefix_only_grew \
+    'the prefix was reported unmoved after the trunk wrote a fact of its own'
 
-  seeded_case "an untagged decline read as content"   test     inject_ablation_untagged_decline_engages \
-    'an-untagged-decline: graded .engaged. where the corpus says .inert.'
+  seeded_case "a parked entry that reads as retired"  test     inject_object_park_renders_as_retired \
+    'a state renders under a name the dump does not promise'
 
-  seeded_case "the second reader left unbounded"      test     inject_json_objects_unbounded \
-    'a JSON Lines reader that does not bound its nesting'
+  seeded_case "a park with no tangent behind it"      test     inject_object_park_needs_no_tangent \
+    'an entry was parked under no tangent, so it left the live set'
 
   seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
     'was constructed, and the grammar would not read it back'
@@ -1725,8 +4062,44 @@ selftest() {
     'did not strip the tabs the shell strips'
   seeded_case "the command word read as an operand"   test     inject_shell_command_word_is_an_operand \
     'the command word is not one of its own operands'
+  seeded_case "a regimen float rendered as a string"  test     inject_regimen_float_as_a_string \
+    'a float projected as something other than a decimal'
+  seeded_case "a table header that opens nothing"     test     inject_regimen_table_scope_flattened \
+    'its keys are not the document.s'
+  seeded_case "a header comment read as a table"      test     inject_regimen_header_comment_is_a_table \
+    'a comment after a table header is not a table the header opened'
+  seeded_case "two tables of one name accepted"       test     inject_regimen_table_collision_unchecked \
+    'a table opened twice was not refused'
+  seeded_case "the float rule widened past the record" test    inject_regimen_float_rule_widened \
+    'the regimen grammar and the record.s decimal disagree'
+  seeded_case "a summary the rows do not carry"       recompute inject_recompute_summary_not_derived \
+    'the report does not re-derive'
+  seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
+    '0 recomputed, 0 declared historical, 1 undeclared'
+  seeded_case "a recompute that cannot fail"          recompute inject_recompute_cannot_fail \
+    'does not compare the report to the artefacts'
+  seeded_case "a recompute that edits what it checks"  recompute inject_recompute_tampers \
+    'tampering, not recomputation'
+  seeded_case "a claim consuming evidence outside"     results   inject_results_consumes_outside \
+    'outside the run directory'
+  seeded_case "a claim consuming its own record"       results   inject_results_consumes_the_record \
+    'a record cannot state its own hash'
+  seeded_case "a claim consuming a file not there"     results   inject_results_consumes_a_missing_file \
+    'which is not a file here'
+  seeded_case "reproducible, with nothing to run"      recompute inject_recompute_script_missing \
+    'carries no recompute.sh'
+  seeded_case "a gate 0 with nothing recomputable"     recompute inject_recompute_nothing_recomputable \
+    'nothing was recomputed'
+  seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
+    'but the committed file hashes to'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing'
+  seeded_case "a nested table flattened"              test     inject_regimen_nested_table_flattened \
+    'holds its own binding and the table below it'
+  seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
+    'an array item was read by something other than the value reader'
+  seeded_case "a case naming no injection"            injections inject_case_without_an_injection \
+    'named by a seeded case, defined nowhere'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
     'a match arm on a string literal'
   seeded_case "a module nothing compiles"             library  inject_orphaned_module \
@@ -1759,6 +4132,252 @@ selftest() {
     'hygiene: internal-ticket-id:'
   seeded_case "history with an undeterminable base"   history  inject_history_no_base \
     'an undeterminable base is a failure, not an empty scan'
+  seeded_case "an ask wired to another class's question" test inject_router_ask_class_untuned \
+    'the ask does not ask its own question'
+  seeded_case "a template without the imperative"     test     inject_router_ask_imperative_dropped \
+    'the ask does not carry the fork-local imperative'
+  seeded_case "a census that miscounts which classes fired" test inject_router_census_class_miscounted \
+    'the census does not say which classes fired'
+  seeded_case "a route verb answering with a hollow census" test inject_router_route_census_hollow \
+    'where the drive spends'
+  seeded_case "a table row that can never fire"       test     inject_router_table_row_shadowed \
+    'can never fire'
+  seeded_case "a corpus that stops covering a class"  test     inject_router_corpus_class_uncovered \
+    'call\(s\) in the corpus, fewer than'
+  seeded_case "a table row skipped, not refused"      test     inject_router_table_row_skipped \
+    'was skipped rather than refused'
+  seeded_case "an intent taken from any lane"         test     inject_router_intent_lane_ignored \
+    'did not quote back what the model said it was about to do'
+  seeded_case "the first stated intent, not the last" test     inject_router_intent_first_not_last \
+    'quoted an intent the model had already moved past'
+  seeded_case "an intent marker lost from the table"  test     inject_router_intent_marker_lost \
+    'a marker was added or lost without a sentence that reaches it'
+  seeded_case "an unclassified call nobody can look up" test   inject_router_unclassified_unattributed \
+    'must name the call, its turn, its tool and its word'
+  seeded_case "the declared default out of the vocabulary" test inject_router_class_vocabulary_shortened \
+    'left the vocabulary without leaving the tests that walk it'
+  seeded_case "a quoted substitution descended into"  test     inject_mechanical_quoted_substitution \
+    'a single-quoted substitution was descended into'
+  seeded_case "the declared default replaced by silence" test   inject_router_unknown_silent \
+    'an unknown pattern must route to the declared default, never to silence'
+  seeded_case "a judgment ask released mid-turn"      test     inject_router_judgment_mid_turn \
+    'a judgment ask fired in the middle of a turn'
+  seeded_case "a row of the routing table lost"       test     inject_router_table_row_lost \
+    'misrouted call'
+  seeded_case "an unknown call routed but not recorded" test   inject_router_unclassified_silent \
+    'an unknown pattern must be a typed event'
+  seeded_case "a reduction claimed, not computed"     test     inject_router_reduction_claimed \
+    'the reduction is not the number its own counts give'
+  seeded_case "a subshell that shares the parent state" test   inject_mechanical_subshell_leaks \
+    'the subshell cd leaked into the parent'
+  seeded_case "a failed cd applied anyway"            test     inject_mechanical_failed_cd_applied \
+    'a failed cd moved the working directory'
+  seeded_case "popd on an empty stack ignored"        test     inject_mechanical_popd_empty_ignored \
+    'popd on an empty stack was silently ignored'
+  seeded_case "the mechanical-noun table emptied"     test     inject_mechanical_lint_table_emptied \
+    'a question about a mechanical fact went unflagged'
+  seeded_case "a mechanical entry sent through the gate" test  inject_mechanical_entry_grounded \
+    'a mechanical entry was dropped as if it needed grounding'
+  seeded_case "a cosine that forgot its second norm"  test     inject_sense_cosine_unnormalised \
+    'cosine of a vector with itself was not one'
+  seeded_case "contrastive scoring that ignores the negative sense" test inject_sense_contrastive_ignores_negative \
+    'the contrastive score ignored the negative sense'
+  seeded_case "a null whose labels are never shuffled" test   inject_sense_null_labels_unshuffled \
+    'd-prime on a shuffled-label null was far from zero'
+  seeded_case "a bootstrap p with no attainable floor" test   inject_sense_p_without_floor \
+    'a bootstrap p-value came without its attainable floor'
+  seeded_case "a metric whose failure fixture is gone" test   inject_sense_metric_fixture_removed \
+    'no failure fixture, so it can never be reported'
+  seeded_case "a register mislabelled at its source" test     inject_sense_register_source_mislabelled \
+    'and a row says otherwise'
+  seeded_case "a file in the register naming nothing"  test     inject_sense_register_unnamed_file \
+    'not a declared sidecar'
+  seeded_case "a mined row nobody can trace"          test     inject_sense_provenance_join_dropped \
+    'a row nobody can trace was accepted'
+  seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
+    'two lines were read as one, and the second was lost'
+  seeded_case "controls that never look at the register" test inject_sense_controls_ignore_register \
+    'a register row reached the top control and the controls passed'
+  seeded_case "a bootstrap that never resamples"      test     inject_sense_bootstrap_never_resamples \
+    'every resample was the observed difference'
+  seeded_case "a failure reading off the worst reading" test   inject_sense_failure_reading_moved \
+    'is the worst the metric can say'
+  seeded_case "a pre-registration with nothing in it" test     inject_sense_pre_registration_emptied \
+    'the primary endpoint is not the endpoint that was registered'
+  seeded_case "a lexical gate asked about the id"     test     inject_sense_gate_reads_the_id \
+    'the gate did not decide on the row'
+  seeded_case "a separation over one class spread"    test     inject_sense_d_prime_unpooled \
+    'd-prime was standardised by one class'
+  seeded_case "a null band widened past a finding"    test     inject_sense_null_band_widened \
+    'bands are not the numbers they were registered as'
+  seeded_case "a reported metric that reports a constant" test inject_sense_reported_value_constant \
+    'the record of a metric is not the numbers the metric produced'
+  seeded_case "the mechanical lane renamed"           test     inject_mechanical_lane_renamed \
+    'the lane was renamed'
+  seeded_case "an option word read as a directory"    test     inject_mechanical_option_is_a_directory \
+    'an option word was read as the directory it names'
+  seeded_case "a flag value read as a file"           test     inject_mechanical_flag_value_is_a_file \
+    'the lane read a file out of a flag.s value'
+  seeded_case "an entry with the wrong verb"          test     inject_mechanical_entry_verb_swapped \
+    'the entry used the wrong verb for what happened to the file'
+  seeded_case "a pipeline whose members never run"    test     inject_mechanical_pipeline_skipped \
+    'nothing in the pipeline ran'
+  seeded_case "a write lost to a read of the same path" test   inject_mechanical_write_lost_to_a_read \
+    'a write was lost to a read of the same path in the same call'
+  seeded_case "the resolver keying on a comment"       resolver inject_keyed_by_a_comment \
+    'keyed as .*inject_alpha'
+  seeded_case "a run directory inside a run directory" results inject_results_nested_directory \
+    'a run directory inside a run directory'
+  seeded_case "a verdict read by prefix"               test     inject_verdict_prefix_accepted \
+    'verdict-as-a-prefix\.txt: accepted as'
+  seeded_case "an identifier in a reason read as a verdict" test inject_verdict_identifier_read_as_a_verdict \
+    'reason-naming-an-identifier\.txt: rejected'
+  seeded_case "a second verdict in a reason accepted"  test     inject_verdict_second_verdict_accepted \
+    'two-verdicts\.txt: accepted as'
+  seeded_case "an anchor matched inside a longer word"  test     inject_collector_substring_match \
+    'an anchor matched inside a longer word'
+  seeded_case "an English word made an anchor"         test     inject_collector_english_anchor \
+    'an English word became an anchor'
+  seeded_case "an entry nominated by its own turn"     test     inject_collector_self_nomination \
+    'an entry nominated itself'
+  seeded_case "a supersession that adds without voiding" test   inject_reconcile_supersede_without_voiding \
+    'the old entry was not voided'
+  seeded_case "a verdict that settles nothing settling"  test   inject_reconcile_partial_applies_a_patch \
+    'PARTIAL produced a patch'
+  seeded_case "an uncalibrated nomination policy accepted" test inject_collector_uncalibrated_policy \
+    'the fixture policy was accepted by the door that ships'
+  seeded_case "a nomination budget ignored"           test     inject_collector_budget_ignored \
+    'the budget did not bind'
+  seeded_case "a turn that nominates only its first entry" test inject_collector_one_nomination_per_turn \
+    'a turn that named two anchors nominated fewer than two entries'
+  seeded_case "a voided entry nominated by tier 0" test inject_collector_voided_entry_renominated \
+    'a voided entry was nominated again by the literal tier'
+  seeded_case "a hit that says nothing about where" test inject_collector_hit_offset_lost \
+    'the hits did not say where the anchor recurred'
+  seeded_case "an overlapping anchor scan" test inject_collector_overlapping_scan \
+    'an anchor that overlaps itself was counted at every shifted position'
+  seeded_case "a double-quoted span that is not an anchor" test inject_collector_quoted_anchor_delimiter \
+    'a double-quoted span was not anchored'
+  seeded_case "a two-byte shape read as an anchor" test inject_collector_short_shape_anchored \
+    'a two-byte shape was anchored'
+  seeded_case "a module path that is not an identifier" test inject_collector_module_path_shape \
+    'a path through the module tree was not anchored'
+  seeded_case "a sentence word read as a file extension" test inject_collector_extension_window \
+    'a dotted word whose tail is a word was read as a file name'
+  seeded_case "an anchor with the sentence still on it" test inject_collector_token_untrimmed \
+    'the punctuation prose hung on a token was kept as part of the anchor'
+  seeded_case "anchor kinds that swapped their names" test inject_collector_anchor_kind_permuted \
+    'the anchor kind vocabulary is not what it promises'
+  seeded_case "a source vocabulary with no members" test inject_collector_source_vocabulary_emptied \
+    'the source vocabulary is not what it promises'
+  seeded_case "a nomination that names the other tier" test inject_collector_tier_name_swapped \
+    'a nomination named the wrong tier'
+  seeded_case "registers that swapped their names" test inject_collector_register_permuted \
+    'the register vocabulary is not what it promises'
+  seeded_case "a lexical pre-gate the tier ignores" test inject_collector_gate_ignored \
+    'a turn carrying no seed was scored by a gated policy anyway'
+  seeded_case "a turn-level threshold never compared" test inject_collector_turn_threshold_ignored \
+    'an unremarkable turn nominated'
+  seeded_case "a per-entry threshold never compared" test inject_collector_entry_threshold_ignored \
+    'the tier nominated an entry the turn was not about'
+  seeded_case "a turn scored against the wrong sense set" test inject_collector_wrong_sense_set \
+    'a turn about a mistaken assumption was scored as a reversal'
+  seeded_case "an intent register that reads the prose" test inject_collector_intent_register_reads_the_prose \
+    'the tier measured the prose of the turn where it should have measured the stated intent'
+  seeded_case "a budget spent on the worst candidates" test inject_collector_budget_takes_the_worst \
+    'the budget was spent on the entries that scored lowest'
+  seeded_case "a nomination score nothing measured" test inject_collector_score_not_measured \
+    'a nomination carried a score nothing measured'
+  seeded_case "an entry nominated by its own turn at tier 1" test inject_collector_sense_self_nomination \
+    'an entry born in this turn nominated itself'
+  seeded_case "a voided entry nominated by tier 1" test inject_collector_sense_voided_entry_renominated \
+    'a voided entry was nominated again by the sense tier'
+  seeded_case "a report that drops half its policy" test inject_collector_report_drops_the_policy \
+    'the report did not say which scoring produced it'
+  seeded_case "a calibration that names no run" test inject_collector_policy_names_no_run \
+    'was read as a calibration'
+  seeded_case "a supersession that writes a constant" test inject_reconcile_supersede_writes_a_constant \
+    'the superseding entry does not say what superseded the old one'
+  seeded_case "a supersession with no fork behind it" test inject_reconcile_supersede_loses_its_fork \
+    'the superseding entry does not say which fork produced it'
+  seeded_case "a patch the reconciler never hands back" test inject_reconcile_patch_never_handed_back \
+    'a verdict that produced a patch did not hand it back'
+  seeded_case "a PARTIAL counted as a false nomination" test inject_reconcile_partial_read_as_a_false_nomination \
+    'a fork that said the prose bears on the entry was read as a false nomination'
+  seeded_case "a mention applied as a supersession" test inject_reconcile_mention_superseded \
+    'NOT_THIS produced a patch'
+  seeded_case "self-capture exempt from grounding"    test     inject_tools_ungrounded \
+    'modality does not exempt a lane from grounding'
+  seeded_case "a reminder cadence that never fires"   test     inject_tools_reminder_silent \
+    'ten silent turns must be reminded at every third turn'
+  seeded_case "a harness tool call read as a capture" test     inject_tools_foreign_call \
+    'a harness tool call is not a capture tool and writes nothing'
+  seeded_case "a phase proposal that writes a fact"   test     inject_tools_proposal_writes \
+    'a phase-transition proposal is advisory and writes nothing'
+  seeded_case "a capture grounded in its own echo"   test     inject_tools_self_echo \
+    'a harness that repeats a capture back grounded the capture in itself'
+  seeded_case "a capture grounded in a later turn"   test     inject_tools_future_output \
+    'a turn-1 capture was grounded in a turn-2 tool output'
+  seeded_case "a superseding entry with a minted id" test     inject_tools_supersede_minted \
+    'a superseding entry id must be derived from the row that carried it'
+  seeded_case "a verdict that resolves elsewhere"    test     inject_tools_resolve_elsewhere \
+    'a verdict resolved an entry the model never named'
+  seeded_case "the asks reworded to nothing"         test     inject_tools_ask_words \
+    'the words this lane says out loud are the only product it has'
+  seeded_case "an ask that drops its own question"   test     inject_tools_ask_question_dropped \
+    'an ask carrying a deferral is the question and then the deferral'
+  seeded_case "the sweep asking as the cadence"      test     inject_tools_sweep_kind \
+    'the sweep and the cadence are one ask wearing two names'
+  seeded_case "a closed choice left in its own case" test     inject_tools_choice_uncanonical \
+    'a harness may shout a closed choice back at us'
+  seeded_case "a phase proposal with no reason"      test     inject_tools_proposal_reasonless \
+    'the reason is the whole of what it carries into one'
+  seeded_case "a reminder that drops the deferral"   test     inject_tools_reminder_deferral_dropped \
+    'the cadence reminded without what the router put off in that turn'
+  seeded_case "tools described in one character"     test     inject_tools_description_thin \
+    'a foreign harness registers this text verbatim'
+  seeded_case "an offered tool the contract omits"   test     inject_tools_contract_undescribed \
+    'an offered tool with no row is refused before a harness ever sees it'
+  seeded_case "one tool described twice"             test     inject_tools_contract_duplicate \
+    'one tool described twice leaves the harness to the order of the file'
+  seeded_case "a verdict the lane cannot honour"     test     inject_tools_verdict_list_open \
+    'this lane refuses it at runtime: the model is invited to say a word'
+  seeded_case "a turn swept after it recorded"       test     inject_tools_silent_kept \
+    'a turn the model did record in the end was swept anyway'
+  seeded_case "the object reader with no limit"      test     inject_record_objects_undepthed \
+    'one level past the limit must be a verdict from `objects`'
+  seeded_case "a corpus that drives one tool"       test     inject_tools_corpus_one_tool \
+    'is offered to the model and no corpus case ever calls it'
+  seeded_case "the ablation's control arm dropped"     test     inject_ablation_no_control \
+    'the control arm is missing: an ablation with no sentence-removed arm'
+  seeded_case "silence counted as engagement"          test     inject_ablation_silence_engages \
+    'counted as engagement and as silence at once'
+  seeded_case "a p reported without its floor"         test     inject_ablation_p_floor_dropped \
+    'a p reported without its attainable floor'
+  seeded_case "a resample that draws once"            test     inject_ablation_resample_single_draw \
+    'the resamples no longer draw one outcome for every fork'
+  seeded_case "a generator that never advances"       test     inject_ablation_frozen_generator \
+    'a seeded draw did not reach every fork in 64 tries'
+  seeded_case "each arm credited with the other's"    test     inject_ablation_rates_swapped \
+    'the first arm held on 5 of these 6 forks and the bootstrap counted'
+  seeded_case "the silence endpoint unregistered"     test     inject_ablation_endpoint_dropped \
+    'the pre-registration no longer carries two endpoints'
+  seeded_case "one imperative for every arm"          test     inject_ablation_plan_one_imperative \
+    'the plan does not pair the arm'
+  seeded_case "two arms under one name"               test     inject_ablation_arm_names_collide \
+    'two arms of the ablation are reported under one name'
+  seeded_case "an arm's clauses run together"         test     inject_ablation_clauses_run_together \
+    'the imperative an arm puts in the fork is not its clauses separated by one'
+  seeded_case "a placeholder nobody counts"           test     inject_ablation_placeholder_word_dropped \
+    'the-placeholder-words-nobody-replaced: graded .engaged. where the corpus says .inert.'
+  seeded_case "a blank clause text admitted"          test     inject_ablation_blank_clause_allowed \
+    'a clause table with a blank clause text was not refused for that reason'
+  seeded_case "a grading case quietly dropped"        test     inject_ablation_corpus_case_dropped \
+    'the corpus holds a case with no expectation or an expectation with no case'
+  seeded_case "an untagged decline read as content"   test     inject_ablation_untagged_decline_engages \
+    'an-untagged-decline: graded .engaged. where the corpus says .inert.'
+  seeded_case "the second reader left unbounded"      test     inject_json_objects_unbounded \
+    'a JSON Lines reader that does not bound its nesting'
 
   echo
   echo "--- results fixtures, checked directly ---"
@@ -1766,16 +4385,35 @@ selftest() {
   # it needs exactly one fresh build where the resolver will look -- the same
   # thing check_results does before it runs the linter for real.
   ( cd "${ROOT}" && build_diet ) || SELFTEST_BROKEN+=("results fixtures: diet did not build")
-  local dir rc
+  # Graded on the failure class the manifest DECLARES for each fixture, not on
+  # "exited 1". Every one of these fixtures carries exactly one defect and the
+  # manifest names the class it must produce; grading on the exit code alone
+  # cannot tell a fixture that failed for its own reason from one that failed
+  # for a reason nobody checked. That is not a hypothetical -- adding `kind` to
+  # REQUIRED_KEYS made all thirty go red on a missing key while twenty-four of
+  # their declared defects went unexercised, and this loop reported thirty REDs
+  # throughout. Red for the wrong reason is the WRONG verdict in a green shirt.
+  local dir rc name want out
+  local -A WANT=()
+  while IFS=$'\t' read -r name want; do
+    [ -n "$name" ] && WANT["$name"]="$want"
+  done < <(cd "${ROOT}" && python3 scripts/check-fault-manifest.py --fixture-classes)
   for dir in "${ROOT}"/tests/fixtures/results-bad/*/; do
-    rc=0
-    python3 "${ROOT}/scripts/check-results.py" "$dir" > /dev/null 2>&1 || rc=$?
-    if [ "$rc" -eq 1 ]; then
-      printf 'RED   check-results.py exit %-3d  %s\n' "$rc" "$(basename "$dir")"
+    rc=0; name="$(basename "$dir")"
+    out="$(python3 "${ROOT}/scripts/check-results.py" "$dir" 2>&1)" || rc=$?
+    want="${WANT[$name]-}"
+    if [ -z "$want" ]; then
+      printf 'GREEN %-52s <-- NO FAULT DECLARED FOR THIS FIXTURE\n' "$name"
+      SELFTEST_BROKEN+=("results fixture $name: declared by no fault")
+    elif [ "$rc" -ne 1 ]; then
+      printf 'GREEN exit %-3d %-46s <-- FIXTURE DID NOT FAIL\n' "$rc" "$name"
+      SELFTEST_BROKEN+=("results fixture $name")
+    elif ! grep -qF "[$want]" <<<"$out"; then
+      printf 'GREEN exit %-3d %-46s <-- RED FOR THE WRONG REASON, wanted %s\n' \
+        "$rc" "$name" "$want"
+      SELFTEST_BROKEN+=("results fixture $name: red, but not $want")
     else
-      printf 'GREEN check-results.py exit %-3d  %s  <-- FIXTURE DID NOT FAIL\n' \
-        "$rc" "$(basename "$dir")"
-      SELFTEST_BROKEN+=("results fixture $(basename "$dir")")
+      printf 'RED   exit %-3d %-46s %s\n' "$rc" "$name" "$want"
     fi
   done
 

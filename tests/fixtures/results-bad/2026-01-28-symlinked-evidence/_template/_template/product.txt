@@ -1,0 +1,6 @@
+The artefact this run produced, committed beside the claim that cites it.
+
+A claim's `consumes` entry names a file in this directory and the SHA-256 it
+had when the claim was made; check-results.py hashes the file and compares.
+Replace this with whatever your run actually produced -- a table of counts, a
+diff, a rendered report -- and put its digest in the record.

@@ -1,0 +1,6 @@
+Pause. You just read {path} ({depth}). Before it you said: '{intent}'.
+SURFACE: exports you'll code against (names).
+GOTCHA: what bites a naive port, or NONE.
+FOLLOWUP: PENDING «why» | SETTLED.
+
+Answer only this question, then end your turn. Do not run a command — the main session continues in parallel.

@@ -180,7 +180,15 @@ pub fn object(pair: &Pair<'_, Rule>) -> Result<BTreeMap<String, Value>, ValueErr
 }
 
 /// Why a JSON Lines text could not be read as objects.
-#[derive(Debug)]
+///
+/// ONE type, because two lanes each wrote one into this file and the merge put
+/// both here. Two answers to "why is this not a line" is the same defect as
+/// two answers to what a number is, which is the law this module opens with.
+///
+/// `Clone`, `PartialEq` and `Eq` because `capture::sense::DataError` embeds
+/// this and derives them; the boxed pest error carries all three, since pest
+/// derives `Clone, Debug, Eq, Hash, PartialEq` on `Error<R>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LineError {
     /// The text nests deeper than [`MAX_DEPTH`].
     ///
@@ -197,19 +205,34 @@ pub enum LineError {
     Syntax(Box<pest::error::Error<Rule>>),
     /// A line parsed, and its value space could not be read.
     Value(ValueError),
+    /// A reader of ONE object was handed a text holding some other number of
+    /// them. Silently taking the first would lose the rest.
+    ///
+    /// Reachable today only from this module's own tests. Its only caller,
+    /// [`line`], is reached from `capture::sense::rows`, which hands it
+    /// `str::lines()` output -- and a piece of `str::lines()` cannot hold a
+    /// newline, so a second line cannot arrive there. That is a fact about
+    /// `rows` rather than about this variant, and it arrived with the reader
+    /// rather than with this merge. Reported on the pull request instead of
+    /// resolved here: deleting a public function belongs to whoever owns it.
+    NotOneLine,
 }
 
 impl fmt::Display for LineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            // Both sides worded these. Theirs is kept verbatim because it is
+            // pinned from OUTSIDE this file: `capture::sense`'s data-error
+            // tests assert `line 1: not an object line`. Ours' longer
+            // sentence, the one carrying "a crash is not a verdict", is on
+            // `TooDeep`'s doc comment, where it is a reason and not a string.
             Self::TooDeep { depth, limit } => write!(
                 f,
-                "nested {depth} deep, and the limit is {limit}; deeper than \
-                 that the parser runs out of stack, and a crash is not a \
-                 verdict"
+                "nested {depth} deep where {limit} is the most a record allows"
             ),
-            Self::Syntax(err) => write!(f, "{err}"),
+            Self::Syntax(err) => write!(f, "not an object line: {err}"),
             Self::Value(err) => write!(f, "{err}"),
+            Self::NotOneLine => write!(f, "more than one line where one object was expected"),
         }
     }
 }
@@ -336,6 +359,41 @@ fn hex4(chars: &mut std::str::Chars<'_>) -> Result<u32, ValueError> {
     u32::from_str_radix(&digits, 16).map_err(|_| ValueError::BadEscape(format!("\\u{digits}")))
 }
 
+/// Decode one line of JSON Lines data -- one object -- through the record
+/// grammar.
+///
+/// The one reader for data files that are not records: sense sets, registers,
+/// vector caches. They share the record's value space on purpose, so that a
+/// number in any of them is a [`Decimal`] and not a float, and they share its
+/// grammar so that there is one parser to be wrong about what a line means.
+///
+/// # Errors
+///
+/// Returns [`LineError`] when the text is not exactly one object line of the
+/// record grammar, or when its value space is rejected.
+pub fn line(text: &str) -> Result<BTreeMap<String, Value>, LineError> {
+    let depth = super::nesting_depth(text);
+    if depth > super::MAX_DEPTH {
+        return Err(LineError::TooDeep {
+            depth,
+            limit: super::MAX_DEPTH,
+        });
+    }
+    let mut parsed = super::RecordParser::parse(Rule::event_line, text)
+        .map_err(|err| LineError::Syntax(Box::new(err)))?;
+    let event_line = parsed.next().ok_or(LineError::Value(ValueError::Shape(
+        "a line with no content",
+    )))?;
+    if event_line.as_span().end() != text.len() {
+        return Err(LineError::NotOneLine);
+    }
+    let object_pair = event_line
+        .into_inner()
+        .find(|pair| pair.as_rule() == Rule::object)
+        .ok_or(LineError::Value(ValueError::Shape("a line with no object")))?;
+    object(&object_pair).map_err(LineError::Value)
+}
+
 /// Render a value back to the record's own spelling.
 ///
 /// One spelling per value, so that a record read and written back is the same
@@ -398,7 +456,7 @@ fn render_string(text: &str, out: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Decimal, LineError, MAX_DEPTH, Value, objects};
+    use super::{Decimal, LineError, MAX_DEPTH, Value, ValueError, line, objects};
     use crate::formats::record::{Event, parse};
 
     // A crash is not a verdict, and this is the second public reader of the
@@ -453,6 +511,72 @@ mod tests {
         assert_eq!(read[0].get("a"), Some(&Value::Integer(1)));
         assert_eq!(read[1].get("b"), Some(&Value::String("two".to_owned())));
         assert!(objects("").expect("no objects").is_empty());
+    }
+
+    // One reader for every data file that is not a record. A second reader is
+    // a second opinion about what a number is.
+    #[test]
+    fn a_data_line_is_one_object_of_the_record_grammar() {
+        let members = line(r#"{"text":"a b","vector":[0.5000,-0.2500]}"#).expect("one object");
+        assert_eq!(members.len(), 2);
+        assert_eq!(
+            members.get("vector"),
+            Some(&Value::Array(vec![
+                Value::Decimal(Decimal::new("0.5000").expect("a decimal")),
+                Value::Decimal(Decimal::new("-0.2500").expect("a decimal")),
+            ]))
+        );
+        assert!(
+            line("  {\"a\":1}  \n").is_ok(),
+            "surrounding space and a newline are not content"
+        );
+        assert!(
+            matches!(line("[1]"), Err(LineError::Syntax(_))),
+            "a line that is not an object"
+        );
+        assert!(
+            matches!(line("{\"a\":1} x"), Err(LineError::Syntax(_))),
+            "trailing text"
+        );
+        assert_eq!(
+            line("{\"a\":1}\n{\"b\":2}\n"),
+            Err(LineError::NotOneLine),
+            "two lines were read as one, and the second was lost"
+        );
+        assert_eq!(
+            line(r#"{"a":1,"a":2}"#),
+            Err(LineError::Value(ValueError::DuplicateKey("a".to_owned())))
+        );
+        let deep = format!("{}{}", "[".repeat(40), "]".repeat(40));
+        assert!(matches!(
+            line(&format!("{{\"a\":{deep}}}")),
+            Err(LineError::TooDeep { .. })
+        ));
+        assert!(
+            matches!(line("{\"a\":1.5e3}"), Err(LineError::Syntax(_))),
+            "no exponents"
+        );
+    }
+
+    // One spelling per value. A number that can be written two ways is a
+    // record that can differ from itself.
+    #[test]
+    fn a_decimal_is_spelled_one_way() {
+        for good in ["0.142", "-3.25", "10.0", "0.000100"] {
+            assert_eq!(
+                Decimal::new(good).map(|number| number.as_str().to_owned()),
+                Some(good.to_owned()),
+                "{good} is how the grammar spells a decimal"
+            );
+        }
+        for bad in [
+            "1", "01.5", "-0.0", "-0.00", ".5", "1.", "NaN", "inf", "1e3", "+1.0", "", "1.5 ",
+        ] {
+            assert!(
+                Decimal::new(bad).is_none(),
+                "{bad:?} was accepted as a decimal"
+            );
+        }
     }
 
     /// A record whose sampler carries `text` as a setting, so the grammar
@@ -511,6 +635,39 @@ mod tests {
                 "{text:?} was refused by the constructor but read by the grammar: the two disagree"
             );
         }
+    }
+
+    // Every `Display` here was unexecuted, so a reason could say the opposite
+    // of what happened with the gate still green.
+    #[test]
+    fn a_rejected_line_says_which_layer_rejected_it() {
+        assert_eq!(
+            LineError::NotOneLine.to_string(),
+            "more than one line where one object was expected"
+        );
+        assert_eq!(
+            LineError::TooDeep {
+                depth: 40,
+                limit: 32
+            }
+            .to_string(),
+            "nested 40 deep where 32 is the most a record allows"
+        );
+        // Against a REAL syntax error. The merged variant carries the pest
+        // error rather than its rendering -- it holds the line, the column and
+        // the caret, where a `String` can only be reprinted -- so it is not
+        // conjurable from a literal. Asserting on a hand-built payload would
+        // have pinned this prefix against a value no reader ever produces.
+        assert!(
+            line("{\"a\":null}")
+                .expect_err("`null` is not in the record's value space")
+                .to_string()
+                .starts_with("not an object line")
+        );
+        assert_eq!(
+            LineError::Value(ValueError::DuplicateKey("a".to_owned())).to_string(),
+            ValueError::DuplicateKey("a".to_owned()).to_string()
+        );
     }
 
     // A negative zero is refused, and a negative number that merely looks
