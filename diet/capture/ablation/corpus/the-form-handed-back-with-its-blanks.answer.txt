@@ -1,0 +1,3 @@
+DECISION: <what you decided this turn>
+LEARNED: [the lesson]
+PLAN: {next step}

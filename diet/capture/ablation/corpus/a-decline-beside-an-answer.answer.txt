@@ -1,0 +1,2 @@
+DECISION: NONE
+LEARNED: the shell grammar reads 2>&1 as a duplication, not a file.

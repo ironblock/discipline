@@ -5,6 +5,7 @@
 //! different from `formats/` -- a format says what a text means, and capture
 //! says what may be believed.
 
+pub mod ablation;
 pub mod collector;
 pub mod grounded;
 pub mod mechanical;
