@@ -35,8 +35,12 @@ vocabulary! {
     EntryKind {
         /// How the server was declared to be serving.
         Serving => "serving.declared",
-        /// A request went out.
-        Sent => "request.sent",
+        /// The client issued a request. NOT "bytes reached the server": a
+        /// connection refused is an issued request that never arrived, and
+        /// which of those happened is what the outcome entry says. The record
+        /// spells only the first meaning, and that difference is itself
+        /// unspellable -- see [`project`].
+        Issued => "request.issued",
         /// An answer came back.
         Received => "response.received",
         /// The server contradicted a pin.
@@ -75,8 +79,8 @@ pub enum Entry {
         /// Where the request went.
         endpoint: String,
     },
-    /// A request went out.
-    Sent {
+    /// The client issued a request.
+    Issued {
         /// Its identifier.
         id: String,
         /// Which lane sent it.
@@ -178,7 +182,7 @@ impl Entry {
     pub fn kind(&self) -> EntryKind {
         match self {
             Self::Serving { .. } => EntryKind::Serving,
-            Self::Sent { .. } => EntryKind::Sent,
+            Self::Issued { .. } => EntryKind::Issued,
             Self::Received { .. } => EntryKind::Received,
             Self::Mismatch { .. } => EntryKind::Mismatch,
             Self::Unverified { .. } => EntryKind::Unverified,
@@ -309,7 +313,7 @@ fn lost(entry: &Entry) -> Option<&'static str> {
         // `retry_of`; only its reason is not, and that is noted on `Sent`
         // where the reason travels. `Sent` and `Received` are projected, and
         // what they lose is decided per-row inside the projection.
-        Entry::Retried { .. } | Entry::Sent { .. } | Entry::Received { .. } => None,
+        Entry::Retried { .. } | Entry::Issued { .. } | Entry::Received { .. } => None,
     }
 }
 
@@ -337,7 +341,7 @@ pub fn project(journal: &Journal) -> Projection {
 
     for entry in &journal.entries {
         match entry {
-            Entry::Sent {
+            Entry::Issued {
                 id,
                 lane,
                 retry_of,
@@ -352,17 +356,23 @@ pub fn project(journal: &Journal) -> Projection {
                 });
                 if !sampler.is_empty() {
                     note(
-                        EntryKind::Sent,
+                        EntryKind::Issued,
                         "the sampler card a request pinned: `request.sampler`",
                     );
                 }
                 if because.is_some() {
                     note(
-                        EntryKind::Sent,
+                        EntryKind::Issued,
                         "why a retry exists: `request.retry_reason`, one of 4xx-strip, \
                          timeout, connection",
                     );
                 }
+                note(
+                    EntryKind::Issued,
+                    "the difference between a request the client ISSUED and one that \
+                     reached the substrate: the record's `request` means the second, \
+                     and a connection refused produces the first",
+                );
             }
             Entry::Received {
                 to_request,

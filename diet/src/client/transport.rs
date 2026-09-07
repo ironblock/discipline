@@ -202,21 +202,39 @@ pub trait Transport {
 #[derive(Debug, Clone)]
 pub struct Http {
     endpoint: Endpoint,
+    reply_cap: usize,
 }
 
 impl Http {
-    /// A transport pointed at `endpoint`.
+    /// A transport pointed at `endpoint`, reading at most
+    /// [`MAX_REPLY_BYTES`].
     #[must_use]
     pub fn new(endpoint: Endpoint) -> Self {
-        Self { endpoint }
+        Self {
+            endpoint,
+            reply_cap: MAX_REPLY_BYTES,
+        }
+    }
+
+    /// The same, with a smaller cap.
+    ///
+    /// A cap of 64 MiB is a guard nothing can afford to fire in a test, and a
+    /// guard nobody has seen fire is not a guard. This is how it is seen.
+    #[must_use]
+    pub fn with_reply_cap(endpoint: Endpoint, reply_cap: usize) -> Self {
+        Self {
+            endpoint,
+            reply_cap,
+        }
     }
 }
 
-/// How much reply this client will read before it stops.
+/// How much reply this client will read before it stops, unless a caller
+/// says otherwise.
 ///
 /// A server that streams forever is a server that fills memory. The cap is
 /// generous against any single completion and finite against a broken one.
-const MAX_REPLY_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_REPLY_BYTES: usize = 64 * 1024 * 1024;
 
 /// Whether an I/O error is the deadline arriving.
 fn is_timeout(error: &io::Error) -> bool {
@@ -314,9 +332,10 @@ impl Transport for Http {
                 Ok(0) => break,
                 Ok(count) => {
                     raw.extend_from_slice(&buffer[..count]);
-                    if raw.len() > MAX_REPLY_BYTES {
+                    if raw.len() > self.reply_cap {
+                        let cap = self.reply_cap;
                         return Err(TransportFailure::Read(format!(
-                            "the reply passed {MAX_REPLY_BYTES} bytes and was not finished"
+                            "the reply passed {cap} bytes and was not finished"
                         )));
                     }
                     if let Some(reply) = complete(&raw)? {
@@ -441,7 +460,12 @@ fn dechunk(raw: &[u8]) -> Chunked {
                 None => Chunked::More,
             };
         }
-        if rest.len() < size + 2 {
+        // `rest.len() < size + 2` is what this was, and `size` comes off the
+        // wire: `ffffffffffffffff` is a legal hex chunk size, the add
+        // overflows, and the client panics -- which is the one outcome a
+        // record cannot spell. Subtracting from a length we hold cannot
+        // overflow.
+        if rest.len().saturating_sub(2) < size {
             return Chunked::More;
         }
         out.extend_from_slice(&rest[..size]);
@@ -556,6 +580,13 @@ mod tests {
             "a chunk extension is legal and is not part of the size"
         );
         assert!(matches!(dechunk(b"zz\r\nhello\r\n"), Chunked::Broken(_)));
+        assert_eq!(
+            dechunk(b"ffffffffffffffff\r\nhello\r\n0\r\n\r\n"),
+            Chunked::More,
+            "a chunk size is a number a SERVER chose. `usize::MAX` is legal hex, and \
+             `size + 2` on it overflows -- a panic, which is the one outcome a record \
+             cannot spell"
+        );
         assert!(
             matches!(dechunk(b"5\r\nhelloXX0\r\n\r\n"), Chunked::Broken(_)),
             "a chunk that does not end where its size says is broken framing, not a \

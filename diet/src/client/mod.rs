@@ -260,7 +260,11 @@ pub enum Outcome {
     Timeout {
         /// The attempt that ran out of time.
         by: String,
-        /// How long the call had run when it did.
+        /// How long THIS ATTEMPT had run when it did -- not the call. Three
+        /// 200 ms attempts under one call report about 200 ms each and not
+        /// 600 ms; the call's own elapsed time is the caller's to keep, and a
+        /// field that reported it from inside one attempt would be reporting
+        /// a number this layer does not measure.
         after: Duration,
     },
     /// The server answered with an error status and this client did not know
@@ -430,7 +434,7 @@ impl<T: Transport> Client<T> {
                 sent: sending.clone(),
                 stripped: stripped.clone(),
             });
-            journal.push(Entry::Sent {
+            journal.push(Entry::Issued {
                 id: id.clone(),
                 lane: lane.to_owned(),
                 retry_of: retry_of.clone(),
@@ -671,18 +675,51 @@ enum Step {
     },
 }
 
-/// The pinned setting a 4xx body names, if it names one this request sent.
+/// The pinned setting a 4xx body names, if it names exactly one this request
+/// sent.
 ///
-/// Bounded twice: to the closed sampler vocabulary, and to what this request
-/// actually carries. A server complaining about a field nobody sent is a
-/// server complaining about something else, and stripping in response to it
-/// would be a client editing its own regime on a coincidence.
+/// Bounded three times, and the third was bought by review. To the closed
+/// sampler vocabulary; to what this request actually carries; and to the
+/// server's COMPLAINT rather than its whole reply.
+///
+/// The third bound is not fussiness. OpenAI-compatible stacks routinely quote
+/// the offending request back inside the error object, so a body objecting to
+/// `max_tokens` carries `"temperature":0.6` a few bytes later -- and a search
+/// over the whole body found `temperature` first every time, because it is
+/// first in the vocabulary. The client would then strip a pin nobody
+/// complained about and retry under a regime the regimen does not declare.
+///
+/// And where the complaint names two pinned settings, this strips NEITHER. A
+/// server that mentions two is a server this client cannot read; guessing
+/// which one it meant is the same coincidence one bound further out.
 fn names_a_pin(body: &str, card: &shape::SamplerCard) -> Option<SamplerSetting> {
-    let lowered = body.to_ascii_lowercase();
-    SamplerSetting::ALL
+    let lowered = complaint(body).to_ascii_lowercase();
+    let mut named = SamplerSetting::ALL
         .iter()
         .copied()
-        .find(|setting| card.get(*setting).is_some() && lowered.contains(setting.tag()))
+        .filter(|setting| card.get(*setting).is_some() && lowered.contains(setting.tag()));
+    let first = named.next()?;
+    named.next().is_none().then_some(first)
+}
+
+/// What the server said was wrong.
+///
+/// `error.message` where the body is a JSON object carrying one -- which is
+/// the shape every server on this surface uses -- and the whole body
+/// otherwise, because a server that answers in prose is still answering.
+fn complaint(body: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .as_ref()
+        .and_then(|root| root.get("error"))
+        .and_then(|error| match error {
+            serde_json::Value::String(text) => Some(text.clone()),
+            _ => error
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+        })
+        .unwrap_or_else(|| body.to_owned())
 }
 
 #[cfg(test)]
@@ -1304,6 +1341,277 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // the claims review found nothing would notice the loss of
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn a_reply_that_announces_more_than_it_sends_is_truncated_not_a_shorter_answer() {
+        // The dangerous shape: the bytes that DID arrive are valid JSON with a
+        // shorter answer in them. A reader that clamped to what arrived would
+        // return `Answered` with a truncated answer and no marker at all --
+        // a failure becoming a WRONG answer rather than an empty one.
+        let (call, _) = honest(
+            vec![Act::Undercount(
+                answered("an answer", "stop", HONEST_ECHO),
+                900,
+            )],
+            &shaped(card(), 5_000, 20_000, 0),
+        );
+
+        let Outcome::Failed { failure, .. } = &call.outcome else {
+            panic!("a short reply is not an answer: {:?}", call.outcome);
+        };
+        assert!(
+            matches!(failure, transport::TransportFailure::Truncated { .. }),
+            "{failure:?}"
+        );
+        assert!(call.outcome.answer().is_none());
+    }
+
+    #[test]
+    fn the_whole_call_budget_binds_even_where_each_attempt_is_inside_its_own() {
+        // Every other test gives the call twenty seconds and each attempt a
+        // fraction of a second, so `Limits::call` never binds and could be
+        // deleted with the suite green. Here it is the only thing that stops
+        // the drive: the attempt is allowed five seconds, the call four
+        // hundred milliseconds, and the server answers after one second.
+        let (call, _) = honest(
+            vec![
+                Act::Stall(
+                    Duration::from_millis(1_000),
+                    answered("too late", "stop", HONEST_ECHO),
+                ),
+                Act::Stall(
+                    Duration::from_millis(1_000),
+                    answered("later still", "stop", HONEST_ECHO),
+                ),
+            ],
+            &shaped(card(), 5_000, 400, 2),
+        );
+
+        let Outcome::Timeout { after, .. } = &call.outcome else {
+            panic!(
+                "the call's budget ran out before the attempt's: {:?}",
+                call.outcome
+            );
+        };
+        assert!(
+            *after < Duration::from_millis(2_000),
+            "the attempt was cut to the call's remaining budget, not its own: {after:?}"
+        );
+        assert_eq!(
+            call.attempts.len(),
+            1,
+            "two retries were allowed and none had any budget to run in"
+        );
+    }
+
+    #[test]
+    fn a_4xx_that_quotes_the_request_back_strips_nothing() {
+        // What these servers actually send. The complaint is about
+        // `max_tokens`; the request echoed beside it names every pin. A search
+        // over the whole body finds `temperature` first -- it is first in the
+        // vocabulary -- and the client would retry under a regime nobody
+        // declared.
+        let (call, asked) = honest(
+            vec![
+                Act::Status(
+                    400,
+                    "{\"error\":{\"message\":\"max_tokens is above the model's limit\",\
+                     \"request\":{\"temperature\":0.6,\"top_p\":0.95,\"top_k\":40}}}"
+                        .to_owned(),
+                ),
+                Act::Answer(answered("never reached", "stop", HONEST_ECHO)),
+            ],
+            &shaped(card(), 5_000, 20_000, 2),
+        );
+
+        assert_eq!(
+            asked.len(),
+            1,
+            "nothing was stripped and nothing was retried"
+        );
+        assert!(matches!(call.outcome, Outcome::Refused { .. }));
+        assert!(call.attempts[0].stripped.is_empty());
+    }
+
+    #[test]
+    fn a_complaint_naming_two_pinned_settings_strips_neither() {
+        let (call, asked) = honest(
+            vec![
+                Act::Status(
+                    400,
+                    "{\"error\":{\"message\":\"top_k and top_p may not both be set\"}}".to_owned(),
+                ),
+                Act::Answer(answered("never reached", "stop", HONEST_ECHO)),
+            ],
+            &shaped(card(), 5_000, 20_000, 2),
+        );
+
+        assert_eq!(asked.len(), 1);
+        assert!(
+            matches!(call.outcome, Outcome::Refused { .. }),
+            "guessing which of two the server meant is the coincidence one bound out"
+        );
+    }
+
+    #[test]
+    fn a_complaint_naming_a_setting_this_request_did_not_pin_strips_nothing() {
+        // The second bound, which had no test: the vocabulary knows `min_p`,
+        // and this request did not send it. Without the `card.get(..)` half,
+        // the client would strip a pin it never had and retry identically
+        // forever, up to the bound.
+        let card = SamplerCard::empty()
+            .with_decimal(SamplerSetting::Temperature, "0.6")
+            .expect("0.6 is a decimal");
+        let (call, asked) = honest(
+            vec![
+                Act::Status(
+                    400,
+                    "{\"error\":{\"message\":\"min_p is not supported\"}}".to_owned(),
+                ),
+                Act::Answer(answered("never reached", "stop", "\"temperature\":0.6")),
+            ],
+            &shaped(card, 5_000, 20_000, 2),
+        );
+
+        assert_eq!(asked.len(), 1);
+        assert!(matches!(call.outcome, Outcome::Refused { .. }));
+    }
+
+    #[test]
+    fn a_request_that_never_reached_a_server_is_still_a_request_the_client_issued() {
+        // A stub with no acts stops at once and drops its listener, so the
+        // port is closed by the time the client dials it.
+        let stub = Stub::serving(Vec::new()).expect("loopback binds");
+        let url = stub.url();
+        assert!(stub.received().is_empty());
+
+        let client = Client::new(
+            Http::new(Endpoint::parse(&url).expect("an endpoint")),
+            Serving {
+                concurrency: Concurrency::Declared(1),
+                dialect: Dialect::llama_cpp(),
+            },
+        );
+        let mut ids = IdSource::new("turn-1/main");
+        let call = client.call(&shaped(card(), 500, 5_000, 0), "main", &mut ids);
+
+        assert_eq!(call.attempts.len(), 1, "the client issued one request");
+        assert!(
+            matches!(
+                call.outcome,
+                Outcome::Failed { .. } | Outcome::Timeout { .. }
+            ),
+            "and it did not arrive: {:?}",
+            call.outcome
+        );
+        assert!(call.journal.carries(EntryKind::Issued));
+
+        // The record gets a `request` row for it, and the record's `request`
+        // means "a request went to the substrate" -- which this did not. The
+        // projection names that gap rather than papering over it.
+        let projected = journal::project(&call.journal);
+        assert!(
+            projected.unspellable.iter().any(|entry| entry
+                .what
+                .contains("the difference between a request the client ISSUED")),
+            "the gap is named: {:?}",
+            projected.unspellable
+        );
+    }
+
+    #[test]
+    fn max_tokens_is_a_cap_as_much_as_length_is() {
+        let (call, _) = honest(
+            vec![Act::Answer(answered("cut off", "max_tokens", HONEST_ECHO))],
+            &shaped(card(), 5_000, 20_000, 0),
+        );
+        assert!(
+            matches!(call.outcome, Outcome::Capped(_)),
+            "both spellings are the servers' words, and both are in the list: {:?}",
+            call.outcome
+        );
+    }
+
+    #[test]
+    fn two_refusals_are_listed_in_one_order() {
+        // A strip AND a contradicted pin, so `bank()` has two things to say
+        // and the order it says them in is pinned rather than incidental.
+        let (call, _) = honest(
+            vec![
+                Act::Status(
+                    400,
+                    "{\"error\":{\"message\":\"unknown field: top_k\"}}".to_owned(),
+                ),
+                Act::Answer(answered(
+                    "an answer",
+                    "stop",
+                    "\"temperature\":0.9,\"top_p\":0.95",
+                )),
+            ],
+            &shaped(card(), 5_000, 20_000, 1),
+        );
+
+        assert_eq!(
+            call.bank(),
+            Bank::Refused(vec![Refusal::RegimeMismatch, Refusal::RegimeStripped]),
+            "declaration order of `Refusal::ALL`, not the order they were noticed in"
+        );
+    }
+
+    #[test]
+    fn a_reply_past_the_declared_cap_is_refused_rather_than_read_forever() {
+        let stub = Stub::serving(vec![Act::Answer(answered(
+            "an answer",
+            "stop",
+            HONEST_ECHO,
+        ))])
+        .expect("loopback binds");
+        let client = Client::new(
+            Http::with_reply_cap(Endpoint::parse(&stub.url()).expect("an endpoint"), 16),
+            Serving {
+                concurrency: Concurrency::Declared(1),
+                dialect: Dialect::llama_cpp(),
+            },
+        );
+        let mut ids = IdSource::new("turn-1/main");
+        let call = client.call(&shaped(card(), 5_000, 20_000, 0), "main", &mut ids);
+        let _ = stub.received();
+
+        let Outcome::Failed { failure, .. } = &call.outcome else {
+            panic!("past the cap is a failure: {:?}", call.outcome);
+        };
+        assert!(
+            matches!(failure, transport::TransportFailure::Read(_)),
+            "{failure:?}"
+        );
+    }
+
+    #[test]
+    fn a_token_count_no_record_can_spell_makes_the_reply_unreadable() {
+        let (call, _) = honest(
+            vec![Act::Answer(
+                "{\"choices\":[{\"message\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}],\
+                 \"usage\":{\"completion_tokens\":9223372036854775808}}"
+                    .to_owned(),
+            )],
+            &shaped(card(), 5_000, 20_000, 0),
+        );
+
+        let Outcome::Unreadable { why, .. } = &call.outcome else {
+            panic!(
+                "a count with no spelling is not an answer: {:?}",
+                call.outcome
+            );
+        };
+        assert_eq!(
+            *why,
+            wire::WireError::CountTooLarge(9_223_372_036_854_775_808)
+        );
+    }
+
+    // -----------------------------------------------------------------------
     // what the record cannot carry
     // -----------------------------------------------------------------------
 
@@ -1335,18 +1643,20 @@ mod tests {
             kinds,
             vec![
                 EntryKind::Serving,
-                EntryKind::Sent,
+                EntryKind::Issued,
+                EntryKind::Issued,
                 EntryKind::Refused,
                 EntryKind::Stripped,
-                EntryKind::Sent,
+                EntryKind::Issued,
                 EntryKind::Cache,
                 EntryKind::Mismatch,
                 EntryKind::Received,
                 EntryKind::Capped,
             ],
-            "the schema request, in the order the drive produced it. Two `Sent` rows \
-             because one request loses its sampler card and the retry also loses its \
-             reason -- deduplicated by what is lost, not by which kind lost it"
+            "the schema request, in the order the drive produced it. Three \
+             `request.issued` rows because one request loses its sampler card, every \
+             request loses the issued-versus-arrived distinction, and the retry also \
+             loses its reason -- deduplicated by WHAT is lost, not by which kind lost it"
         );
 
         // And the part that IS carried, so the projection is not vacuously
@@ -1409,7 +1719,7 @@ mod tests {
         // decides which column it is in.
         let expected = [
             (EntryKind::Serving, Decision::Named),
-            (EntryKind::Sent, Decision::Carried),
+            (EntryKind::Issued, Decision::Carried),
             (EntryKind::Received, Decision::Carried),
             (EntryKind::Mismatch, Decision::Named),
             (EntryKind::Unverified, Decision::Named),
@@ -1444,7 +1754,7 @@ mod tests {
                 dialect: "d".to_owned(),
                 endpoint: "http://127.0.0.1:1/v1".to_owned(),
             },
-            EntryKind::Sent => Entry::Sent {
+            EntryKind::Issued => Entry::Issued {
                 id,
                 lane: "main".to_owned(),
                 retry_of: None,
@@ -1535,7 +1845,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 "serving.declared",
-                "request.sent",
+                "request.issued",
                 "response.received",
                 "regime.mismatch",
                 "regime.unverified",

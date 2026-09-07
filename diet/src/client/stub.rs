@@ -43,6 +43,9 @@ pub enum Act {
     /// the close: a client that only knows how to read to end-of-stream sits
     /// here until its deadline, against a server that answered at once.
     AnswerAndHold(String, Duration),
+    /// Announce `Content-Length` for MORE than is sent, then close. What a
+    /// server that died mid-write looks like from the outside.
+    Undercount(String, usize),
     /// Accept the connection and close it without answering.
     Hangup,
 }
@@ -184,6 +187,7 @@ fn act_on(stream: &mut TcpStream, act: &Act) {
             write_reply(stream, 200, body, Closing::Yes);
         }
         Act::Chunked(pieces) => write_chunked(stream, pieces),
+        Act::Undercount(body, short_by) => write_undercount(stream, body, *short_by),
         Act::AnswerAndHold(body, hold) => {
             write_reply(stream, 200, body, Closing::No);
             thread::sleep(*hold);
@@ -278,17 +282,14 @@ fn write_chunked(stream: &mut TcpStream, pieces: &[String]) {
     let _ = stream.flush();
 }
 
-/// A plausible OpenAI-compatible answer, for tests that do not care what the
-/// body looks like.
-///
-/// Anything an acceptance row is ABOUT is written out by the row, not built
-/// here -- a helper that produced the mismatching temperature would be the
-/// test and the fixture agreeing with each other.
-#[must_use]
-pub fn plain_answer(text: &str) -> String {
-    format!(
-        "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":\"{text}\"}},\
-         \"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":11,\
-         \"completion_tokens\":3}}}}"
-    )
+/// Announce more body than is sent.
+fn write_undercount(stream: &mut TcpStream, body: &str, short_by: usize) {
+    let head = format!(
+        "HTTP/1.1 200 \r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
+         Connection: close\r\n\r\n",
+        body.len() + short_by
+    );
+    let _ = stream.write_all(head.as_bytes());
+    let _ = stream.write_all(body.as_bytes());
+    let _ = stream.flush();
 }
