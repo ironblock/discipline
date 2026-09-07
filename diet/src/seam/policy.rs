@@ -53,6 +53,15 @@ pub enum PolicyError {
     /// depending on how it is read, and the way to declare no cadence is to
     /// leave the key out.
     NotPositive(&'static str),
+    /// A count too large for the field it names. Refused rather than
+    /// clamped: a cadence silently becoming `u32::MAX` is a cadence that
+    /// never fires, declared by somebody who thought it would.
+    DoesNotFit {
+        /// The key.
+        key: &'static str,
+        /// What was written.
+        value: u64,
+    },
     /// A key that must hold a list of names holds something else.
     NotAListOfNames(String),
     /// A transition table names a phase the phase list does not.
@@ -76,6 +85,11 @@ impl fmt::Display for PolicyError {
                 f,
                 "`{key}` must be positive; leave the key out to declare none"
             ),
+            Self::DoesNotFit { key, value } => write!(
+                f,
+                "`{key} = {value}` is larger than the field can hold; it would have \
+                 become a cadence that never fires"
+            ),
             Self::NotAListOfNames(key) => {
                 write!(f, "`{key}` is not a list of names")
             }
@@ -97,20 +111,6 @@ impl fmt::Display for PolicyError {
 impl Error for PolicyError {}
 
 impl Policy {
-    /// A policy that fires nothing.
-    ///
-    /// The one-line-change case, and the default a regimen gets by declaring
-    /// nothing. It is spelled here rather than derived from an empty regimen
-    /// so that a caller can say it on purpose.
-    #[must_use]
-    pub fn silent() -> Self {
-        Self {
-            every_turns: None,
-            at_working_set_bytes: None,
-            phases: PhaseGraph::none(),
-        }
-    }
-
     /// Read the policy `regimen` declares.
     ///
     /// # Errors
@@ -118,11 +118,19 @@ impl Policy {
     /// Returns [`PolicyError`] for a key of the wrong shape, a non-positive
     /// count, or a transition naming a phase that was never declared.
     pub fn from_regimen(regimen: &Regimen) -> Result<Self, PolicyError> {
-        let every_turns = positive(regimen, SEAM_EVERY_TURNS)?.map(|count| {
-            // The cast is safe: `positive` has already refused anything that
-            // does not fit, and a turn index is a u32 everywhere else.
-            u32::try_from(count).unwrap_or(u32::MAX)
-        });
+        let every_turns = match positive(regimen, SEAM_EVERY_TURNS)? {
+            // The comment here used to say the cast was safe because
+            // `positive` had refused anything that did not fit. It had not:
+            // `positive` refuses non-positive numbers and the regimen carries
+            // an `i64`, so `seam_every_turns = 5000000000` clamped silently to
+            // `u32::MAX` -- a declared cadence turning into a different,
+            // effectively-never one with no error anywhere.
+            Some(count) => Some(u32::try_from(count).map_err(|_| PolicyError::DoesNotFit {
+                key: SEAM_EVERY_TURNS,
+                value: count,
+            })?),
+            None => None,
+        };
         let at_working_set_bytes = positive(regimen, SEAM_AT_WORKING_SET_BYTES)?;
 
         let phases = names(regimen, PHASES)?.unwrap_or_default();
