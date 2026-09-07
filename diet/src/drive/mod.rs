@@ -53,9 +53,11 @@
 //! field that was not that is counted and reported rather than dropped --
 //! see [`Drive::uncaptured`].
 
+pub mod canned;
 pub mod digest;
 pub mod script;
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
@@ -233,6 +235,13 @@ pub struct Drive {
     pub record: Record,
     /// The record's own spelling, which is what a caller writes to a file.
     pub rendered: String,
+    /// The product the session produced: the working object, dumped.
+    ///
+    /// Carried rather than only hashed, because `summary.product_sha256` is a
+    /// digest OF something and a digest of a file nobody wrote is one nobody
+    /// can check. A caller writes this beside the record and `sha256sum` is
+    /// the audit.
+    pub product: String,
     /// Every seam that fired, with its dumps either side.
     pub seams: Vec<Seam>,
     /// What the client learned that record v0 has no spelling for.
@@ -251,9 +260,15 @@ struct Interviewer<'a, T: Transport> {
     client: &'a Client<T>,
     shape: RequestShape,
     ids: IdSource,
-    turn: u32,
+    /// The turn the seam is settling, for the provenance its patches carry.
+    ///
+    /// A [`Cell`] because the controller owns this and lends it back as `&R`,
+    /// while the turn is only known outside. It is not a shortcut around the
+    /// borrow: without it every ratified entry claimed provenance from
+    /// **turn 0**, which is not a turn, and the object banked that as a fact
+    /// about where the entry came from.
+    turn: Cell<u32>,
     calls: Vec<crate::client::Call>,
-    folds: Vec<Vec<Patch>>,
 }
 
 impl<T: Transport> Ratifier for Interviewer<'_, T> {
@@ -272,9 +287,8 @@ impl<T: Transport> Ratifier for Interviewer<'_, T> {
         let patches = call
             .outcome
             .answer()
-            .map(|answer| fold(&answer.text, self.turn, RATIFY, None, ask.items.len()))
+            .map(|answer| fold(&answer.text, self.turn.get(), RATIFY, None))
             .unwrap_or_default();
-        self.folds.push(patches.clone());
         self.calls.push(call);
         patches
     }
@@ -288,7 +302,7 @@ impl<T: Transport> Ratifier for Interviewer<'_, T> {
 /// function is one call into it. Written out rather than left as a `todo!`
 /// because a drive that cannot capture anything cannot show a capture in its
 /// record, and showing one is the whole milestone.
-fn fold(text: &str, turn: u32, lane: &str, fork: Option<&str>, offset: usize) -> Vec<Patch> {
+fn fold(text: &str, turn: u32, lane: &str, fork: Option<&str>) -> Vec<Patch> {
     let Ok(answer) = interview::parse(text) else {
         return Vec::new();
     };
@@ -297,7 +311,10 @@ fn fold(text: &str, turn: u32, lane: &str, fork: Option<&str>, offset: usize) ->
         let (Some(tag), interview::Outcome::Value(content)) = (&field.tag, &field.outcome) else {
             continue;
         };
-        let index = u32::try_from(offset + position).unwrap_or(u32::MAX);
+        // The region's own position, with no offset per lane: `(lane, fork,
+        // index)` already orders a turn totally, so an offset would only make
+        // two lanes' indices look like a sequence they are not part of.
+        let index = u32::try_from(position).unwrap_or(u32::MAX);
         let Ok(id) = EntryId::new(&format!("{lane}-t{turn}-{index}")) else {
             continue;
         };
@@ -333,9 +350,8 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             client: gym.client,
             shape: gym.shape.clone(),
             ids: IdSource::new("r"),
-            turn: 0,
+            turn: Cell::new(0),
             calls: Vec::new(),
-            folds: Vec::new(),
         },
     );
 
@@ -438,7 +454,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             });
             archive(&forked, &mut events, &mut unspellable);
 
-            let patches = fold(&text, index, INTERVIEW, Some(&fork_id), 0);
+            let patches = fold(&text, index, INTERVIEW, Some(&fork_id));
             let applied = object
                 .apply_turn(&patches)
                 .map_err(|why| Halt::ObjectRefused { turn: index, why })?;
@@ -460,6 +476,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         // The seam, if this turn is one. The ratifier's call happens inside
         // `settle`, so its rows are drained afterwards -- and they are the
         // reason the ratification is a real exchange rather than a fixture.
+        controller.ratifier().turn.set(index);
         let before = controller.ratifier().calls.len();
         let settled = controller
             .settle(&mut object)
@@ -501,6 +518,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
     Ok(Drive {
         record,
         rendered,
+        product,
         seams,
         unspellable,
         uncaptured,
@@ -612,7 +630,8 @@ mod tests {
     use crate::isolation::{Confinement, Policy as IsolationPolicy};
     use crate::seam::policy::Policy as SeamPolicy;
 
-    use super::script::{Command, Script, Turn};
+    use super::canned;
+    use super::script::{Command, Script};
     use super::{Drive, Gym, Halt, run};
 
     /// A working tree the drive's commands run in.
@@ -677,19 +696,6 @@ mod tests {
         }
     }
 
-    /// A reply in the shape the canned server sends, with `text` as the
-    /// answer and a usage block, because a server that reports no usage is a
-    /// server this module refuses to write a record from.
-    fn answered(text: &str) -> String {
-        let escaped = text.replace('\\', "\\\\").replace('\n', "\\n");
-        format!(
-            "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":\"{escaped}\"}},\
-             \"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":600,\
-             \"completion_tokens\":7}},\"generation_settings\":{{}},\
-             \"timings\":{{\"prompt_n_cached\":512}}}}"
-        )
-    }
-
     /// A reply with no `usage` at all: a server that answered and measured
     /// nothing.
     fn unmeasured(text: &str) -> String {
@@ -699,59 +705,8 @@ mod tests {
         )
     }
 
-    /// The answer a fork gives: prose with no tag at all, two tagged regions
-    /// with values, and one decline -- so the census has something to count
-    /// on both sides. An answer this fold keeps entirely would make the
-    /// census a number that cannot be wrong.
-    const FORKED: &str = "some prose nobody tagged\n\
-                          DECISION: keep the reconciler\n\
-                          LEARNED: the seam refills from the object\n\
-                          EVIDENCE: (none)";
-
-    /// The three-turn script the milestone names.
     fn three_turns() -> Script {
-        Script {
-            regime: regime(),
-            turns: vec![
-                Turn {
-                    ask: "read the module and say what it exports".to_owned(),
-                    commands: vec![Command::new("shell", &["sh", "-c", "echo one > one.txt"])],
-                    fork: Some("what did that establish?".to_owned()),
-                    boundary: false,
-                    phase: None,
-                },
-                Turn {
-                    ask: "now change it".to_owned(),
-                    commands: Vec::new(),
-                    fork: Some("what did that establish?".to_owned()),
-                    boundary: true,
-                    phase: None,
-                },
-                Turn {
-                    ask: "and run the tests".to_owned(),
-                    commands: vec![Command::new(
-                        "shell",
-                        &["sh", "-c", "echo three > three.txt"],
-                    )],
-                    fork: None,
-                    boundary: false,
-                    phase: None,
-                },
-            ],
-        }
-    }
-
-    /// The acts the canned server plays for [`three_turns`], in call order:
-    /// main, fork; main, fork, the seam's ratification ask; main.
-    fn six_acts() -> Vec<Act> {
-        vec![
-            Act::Answer(answered("turn one")),
-            Act::Answer(answered(FORKED)),
-            Act::Answer(answered("turn two")),
-            Act::Answer(answered(FORKED)),
-            Act::Answer(answered("DECISION: fold them")),
-            Act::Answer(answered("turn three")),
-        ]
+        canned::script(regime())
     }
 
     /// Run `script` against a canned server playing `acts`.
@@ -793,7 +748,7 @@ mod tests {
     #[test]
     fn three_turns_produce_a_record_the_format_accepts_with_a_seam_and_a_capture_in_it() {
         let ground = Ground::make("milestone");
-        let drive = against(&three_turns(), six_acts(), &ground).expect("the drive ran");
+        let drive = against(&three_turns(), canned::acts(), &ground).expect("the drive ran");
 
         // What `diet check-record` does, on the bytes the drive wrote. Not a
         // paraphrase of it: the same `project` the CLI calls.
@@ -850,7 +805,7 @@ mod tests {
     #[test]
     fn the_record_is_an_archive_and_not_a_ledger() {
         let ground = Ground::make("archive");
-        let drive = against(&three_turns(), six_acts(), &ground).expect("the drive ran");
+        let drive = against(&three_turns(), canned::acts(), &ground).expect("the drive ran");
 
         let mut asked = 0;
         let mut answers = Vec::new();
@@ -933,7 +888,7 @@ mod tests {
     #[test]
     fn the_summary_totals_what_the_rows_say_and_the_digest_is_the_products() {
         let ground = Ground::make("summary");
-        let drive = against(&three_turns(), six_acts(), &ground).expect("the drive ran");
+        let drive = against(&three_turns(), canned::acts(), &ground).expect("the drive ran");
 
         let Some(Event::Summary {
             turns,
@@ -954,11 +909,23 @@ mod tests {
              parser refuses a summary that disagrees with its rows, so this is \
              asserting the number rather than the agreement"
         );
-        assert_eq!(product_sha256.len(), 64);
+        assert_eq!(
+            *product_sha256,
+            super::digest::sha256_hex(drive.product.as_bytes()),
+            "the digest is OF the product, and the product is carried so a \
+             reader can recompute it: a digest of a file nobody wrote is a \
+             digest nobody can check"
+        );
         assert_ne!(
             *product_sha256,
             super::digest::sha256_hex(b""),
-            "a digest of nothing would satisfy the schema and mean nothing"
+            "and the product is not empty, or the row would satisfy the schema \
+             and say nothing"
+        );
+        assert!(
+            drive.product.contains("keep the reconciler"),
+            "the product is the object the session built: {}",
+            drive.product
         );
     }
 
@@ -981,7 +948,7 @@ mod tests {
         // fork and the first test would not notice.
         let forked = against(
             &three_turns(),
-            vec![Act::Answer(answered("turn one")), Act::Hangup],
+            vec![Act::Answer(canned::reply("turn one")), Act::Hangup],
             &ground,
         )
         .expect_err("a fork that did not answer is not a fork that captured nothing");
@@ -996,7 +963,7 @@ mod tests {
         let ground = Ground::make("no-command");
         let mut script = three_turns();
         script.turns[0].commands = vec![Command::new("shell", &[])];
-        let halt = against(&script, six_acts(), &ground)
+        let halt = against(&script, canned::acts(), &ground)
             .expect_err("a command that never ran has no exit status to record");
         assert!(
             matches!(&halt, Halt::CommandNotRun { turn: 1, .. }),
@@ -1011,7 +978,7 @@ mod tests {
     #[test]
     fn what_the_fold_could_not_capture_is_counted_and_named() {
         let ground = Ground::make("uncaptured");
-        let drive = against(&three_turns(), six_acts(), &ground).expect("the drive ran");
+        let drive = against(&three_turns(), canned::acts(), &ground).expect("the drive ran");
 
         assert_eq!(drive.uncaptured.len(), 2, "two forks, two censuses");
         let first = &drive.uncaptured[0];
@@ -1034,9 +1001,126 @@ mod tests {
     }
 
     #[test]
+    fn every_entry_names_the_turn_it_actually_came_from() {
+        // The ratifier is owned by the controller and lent back as `&R`, so
+        // the turn it is settling reaches it through a `Cell`. Without that
+        // it read a field nobody wrote and every ratified entry claimed
+        // provenance from turn 0 -- not a turn, and banked in the object as a
+        // fact about where the entry came from. A record can carry a lie its
+        // own parser accepts, so the object is where this has to be checked.
+        let ground = Ground::make("provenance");
+        let drive = against(&three_turns(), canned::acts(), &ground).expect("the drive ran");
+
+        let seam = &drive.seams[0];
+        let ratified: Vec<_> = seam
+            .patches
+            .iter()
+            .map(|patch| match patch {
+                crate::object::Patch::Add { provenance, .. }
+                | crate::object::Patch::Supersede { provenance, .. }
+                | crate::object::Patch::Resolve { provenance, .. }
+                | crate::object::Patch::Retire { provenance, .. }
+                | crate::object::Patch::Park { provenance, .. } => provenance.clone(),
+            })
+            .collect();
+        assert!(
+            !ratified.is_empty(),
+            "the seam ratified something, or this asserts about an empty list"
+        );
+        for provenance in &ratified {
+            assert_eq!(
+                provenance.turn, 2,
+                "the seam fired after turn 2, so its entries came from turn 2: {provenance:?}"
+            );
+            assert_eq!(provenance.lane, super::RATIFY);
+        }
+
+        // And the fork's entries name their own turn and their own fork,
+        // which is the half that was already right and would otherwise carry
+        // this test on its own.
+        assert!(
+            drive.product.contains("\"turn\":1"),
+            "an entry from turn one is in the object: {}",
+            drive.product
+        );
+        assert!(
+            !drive.product.contains("\"turn\":0"),
+            "and nothing claims turn zero: {}",
+            drive.product
+        );
+    }
+
+    #[test]
+    fn the_regimen_this_lane_ships_is_one_a_drive_can_run() {
+        // The lane runs `diet-drive` against this file. A fixture nothing
+        // reads is a fixture that rots, and it would rot as a red lane on
+        // somebody else's branch rather than here.
+        let regimen = crate::formats::regimen::parse(canned::DEV_LOOP)
+            .expect("the shipped regimen is a regimen");
+
+        let isolation = IsolationPolicy::from_regimen(&regimen).expect("its isolation policy");
+        assert_eq!(
+            isolation.isolation,
+            crate::isolation::Isolation::None,
+            "declared unconfined on purpose: the lane's runner has no sandbox \
+             runner, and a sandbox that refuses to start is the correct \
+             behaviour and the wrong thing to gate a round trip on"
+        );
+        SeamPolicy::from_regimen(&regimen).expect("its seam policy");
+
+        // The four keys `diet-drive` reads for the regime facts regimen v1
+        // has no place for. Named here so that a rename in the binary that
+        // did not reach the fixture fails in this crate rather than in CI.
+        for key in [
+            "arm",
+            "dogma_version",
+            "substrate",
+            "substrate_model",
+            "substrate_quantization",
+            "substrate_reasoning",
+            "substrate_hardware",
+        ] {
+            assert!(
+                regimen.get(key).is_some(),
+                "the shipped regimen carries `{key}`"
+            );
+        }
+        assert!(
+            matches!(
+                regimen.get("sampler"),
+                Some(crate::formats::regimen::Value::Table(table)) if !table.is_empty()
+            ),
+            "and a sampler, which the record refuses to leave blank"
+        );
+    }
+
+    #[test]
+    fn the_acts_are_exactly_what_the_script_asks_for() {
+        // The canned server plays its replies in order and stops listening
+        // when they run out, so an act too few hangs the drive on a refused
+        // connection and an act too many is a call the script never makes.
+        // Neither is visible from a passing drive, which is why the count is
+        // derived from the script and asserted rather than written down.
+        let script = three_turns();
+        assert_eq!(
+            canned::calls(&script),
+            canned::acts().len(),
+            "the script makes one call per turn, one per fork and one per \
+             declared boundary; the acts have to be that many, in that order"
+        );
+        assert_eq!(canned::acts().len(), 6);
+
+        // And the count is derived, not a constant that happens to agree: a
+        // script with a turn removed asks for fewer.
+        let mut shorter = script.clone();
+        shorter.turns.pop();
+        assert_eq!(canned::calls(&shorter), 5);
+    }
+
+    #[test]
     fn what_the_record_cannot_spell_is_named_rather_than_dropped() {
         let ground = Ground::make("unspellable");
-        let drive = against(&three_turns(), six_acts(), &ground).expect("the drive ran");
+        let drive = against(&three_turns(), canned::acts(), &ground).expect("the drive ran");
         assert!(
             !drive.unspellable.is_empty(),
             "record v0 cannot spell everything the client learns, and a drive \
