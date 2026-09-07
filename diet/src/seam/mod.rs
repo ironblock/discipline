@@ -1220,6 +1220,60 @@ mod tests {
         );
     }
 
+    /// Every fault in this lane's `gate.toml` still names source that exists.
+    ///
+    /// The manifest carries each mutation's exact source text so the
+    /// orchestrator (#46) can apply it. That only works while the text is
+    /// still in the file it names, and nothing else checks: the orchestrator
+    /// is not built, and `check-fault-manifest.py` reads the gate's own
+    /// manifest rather than a package's. A manifest nobody checks is a
+    /// manifest that goes stale, and a stale seeded fault is one that
+    /// silently stops testing what it says it tests.
+    ///
+    /// Scanned rather than parsed as TOML: this crate has no TOML reader for
+    /// multi-line strings, and writing one to check a file this repository
+    /// generates would be a second reader of a format that already has one.
+    /// The scan mirrors the generator's shape exactly, and a scan that finds
+    /// no faults fails rather than passing over nothing.
+    #[test]
+    fn every_seeded_fault_still_names_source_that_is_there() {
+        let manifest = include_str!("../../seam/gate.toml");
+        let mut checked = 0;
+        for block in manifest.split("\n[[fault]]\n").skip(1) {
+            let id = between(block, "id = \"", "\"").expect("a fault has an id");
+            let target = between(block, "target = \"", "\"").expect("a fault has a target");
+            let anchor =
+                between(block, "anchor = '''\n", "'''\nbecomes = ").expect("a fault has an anchor");
+
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .expect("the workspace root")
+                .join(target);
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|why| panic!("{id}: {} could not be read: {why}", path.display()));
+            assert_eq!(
+                source.matches(anchor).count(),
+                1,
+                "{id}: its anchor no longer appears exactly once in {target}. The \
+                 manifest is stale: either the mutation has to move with the code, \
+                 or the fault it seeds is gone."
+            );
+            checked += 1;
+        }
+        assert_eq!(
+            checked, 18,
+            "the manifest declares its own count, and a scanner that found a \
+             different number found the wrong thing"
+        );
+    }
+
+    /// The text between `open` and the next `close` after it.
+    fn between<'a>(haystack: &'a str, open: &str, close: &str) -> Option<&'a str> {
+        let start = haystack.find(open)? + open.len();
+        let end = haystack[start..].find(close)? + start;
+        Some(&haystack[start..end])
+    }
+
     #[test]
     fn the_seams_vocabularies_are_the_words_a_record_carries() {
         assert_eq!(
