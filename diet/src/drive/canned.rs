@@ -39,6 +39,35 @@ pub const FORK_ANSWER: &str = "some prose nobody tagged\n\
                                LEARNED: the seam refills from the object\n\
                                EVIDENCE: (none)";
 
+/// A reply that counts the prompt and not the answer.
+///
+/// Legal, and some serving stacks do it under some flags. A record's
+/// `response.output_tokens` is required and zero is a measurement, so this is
+/// the input that has to reach a [`super::Halt`] rather than six fabricated
+/// zeroes -- and until it existed, nothing in the lane could tell the
+/// difference.
+#[must_use]
+pub fn reply_counting_only_the_prompt(text: &str) -> String {
+    let escaped = text
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n");
+    format!(
+        "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":\"{escaped}\"}},\
+         \"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":{PROMPT_TOKENS}}},\
+         \"generation_settings\":{{}},\"timings\":{{\"prompt_n_cached\":512}}}}"
+    )
+}
+
+/// A fork answer whose two regions say the SAME thing.
+///
+/// Two patches, one entry: the second dedupes onto the first. It is the only
+/// shape that tells `capture.entries` counted from `Applied::touched` apart
+/// from one counted from the patch list, and without it both readings agreed
+/// on every fixture in the lane.
+pub const FORK_REPEATS_ITSELF: &str = "DECISION: keep the reconciler\n\
+                                       DECISION: keep the reconciler";
+
 /// How many prompt tokens the canned server reports for every call.
 ///
 /// A number rather than a silence, because a server that reports no usage

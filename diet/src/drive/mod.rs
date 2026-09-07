@@ -1646,6 +1646,30 @@ mod tests {
     }
 
     #[test]
+    fn a_server_that_counted_the_prompt_and_not_the_answer_halts_too() {
+        // The module header claims `turn.prefill_tokens` AND
+        // `response.output_tokens`, and only the first was checked: the
+        // response row goes through `journal::project`, which writes
+        // `output_tokens.unwrap_or_default()` -- correctly, because a journal
+        // cannot refuse. So a server reporting the prompt and not the answer
+        // put a fabricated `0` on every response row of the record, at exit
+        // 0, with `check-record` accepting it.
+        let ground = Ground::make("half-measured");
+        let halt = against(
+            &three_turns(),
+            vec![Act::Answer(canned::reply_counting_only_the_prompt(
+                "turn one",
+            ))],
+            &ground,
+        )
+        .expect_err("a response row cannot be written from a count nobody made");
+        assert!(
+            matches!(&halt, Halt::Unmeasured { turn: 1, what } if *what == "response.output_tokens"),
+            "{halt:?}"
+        );
+    }
+
+    #[test]
     fn a_capture_counts_entries_and_not_patches() {
         // The schema says `entries: How many entries it wrote`. `apply_turn`
         // returns one `Applied` per patch whatever it did, so `applied.len()`
@@ -1685,6 +1709,35 @@ mod tests {
             entries, 2,
             "two captures of two patches each, and the object holds two \
              entries: {}",
+            drive.product
+        );
+
+        // And the shape that tells the two readings apart. One fork, two
+        // regions saying the same thing: two patches, and the second dedupes
+        // onto the first, so ONE entry was touched. Counted from the patch
+        // list this row says two. Every other fixture in this lane agrees
+        // under both readings, which is why this one exists.
+        let ground = Ground::make("entries-deduped");
+        let mut script = three_turns();
+        script.turns.truncate(1);
+        script.turns[0].commands = Vec::new();
+        let acts = vec![
+            Act::Answer(canned::reply("turn one")),
+            Act::Answer(canned::reply(canned::FORK_REPEATS_ITSELF)),
+        ];
+        let drive = against(&script, acts, &ground).expect("the drive ran");
+        assert_eq!(drive.uncaptured[0].captured, 2, "two patches were folded");
+        let Some(Event::Capture { entries, .. }) = drive
+            .record
+            .events
+            .iter()
+            .find(|event| matches!(event, Event::Capture { .. }))
+        else {
+            panic!("a capture row")
+        };
+        assert_eq!(
+            *entries, 1,
+            "and they touched one entry between them: {}",
             drive.product
         );
     }
@@ -1796,7 +1849,12 @@ mod tests {
             include_str!("mod.rs"),
             include_str!("canned.rs"),
             include_str!("digest.rs"),
-            include_str!("script.rs")
+            include_str!("script.rs"),
+            // The binary's own tests, which live outside `src/` and are the
+            // only thing that runs the program. A `catches` naming one of
+            // them has to be checkable here too, or the half of this lane
+            // that is a second process is the half the guard does not see.
+            include_str!("../../tests/drive_cli.rs")
         );
         let mut checked = 0;
         for block in manifest.split("\n[[fault]]\n").skip(1) {
@@ -1835,13 +1893,24 @@ mod tests {
                 // and `cargo test` on that path runs nothing -- so the fault
                 // would be applied, no test would run, and the orchestrator
                 // would score it against a name that resolves to no test.
-                let mut segments = name.split("::");
-                assert_eq!(
-                    (segments.next(), segments.next(), segments.clone().count()),
-                    (Some("drive"), Some("tests"), 1),
-                    "{id}: `{name}` is not a path into this lane's test module"
-                );
-                let leaf = segments.next().unwrap_or_default();
+                //
+                // Two shapes are legal and both are checked. A unit test is
+                // `drive::…::tests::<leaf>` -- rooted in this lane, with
+                // `tests` immediately above the leaf, which admits
+                // `drive::digest::tests::…` without admitting a path this
+                // lane does not contain. An integration test has no module
+                // path at all, because `cargo test` names it by the function
+                // alone.
+                let path: Vec<&str> = name.split("::").collect();
+                let (Some(leaf), true) = (
+                    path.last().copied(),
+                    path.len() == 1
+                        || (path.len() >= 3
+                            && path[0] == "drive"
+                            && path[path.len() - 2] == "tests"),
+                ) else {
+                    panic!("{id}: `{name}` is not a test this lane contains");
+                };
                 assert_eq!(
                     lane.matches(&format!("fn {leaf}(")).count(),
                     1,

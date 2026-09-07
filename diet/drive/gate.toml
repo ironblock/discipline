@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 19
+faults = 43
 
 [[fault]]
 id = "drive.digest-drops-the-zero-pad"
@@ -46,8 +46,15 @@ catches = [
     "drive::digest::tests::the_published_vectors_are_what_comes_out",
     "drive::digest::tests::the_spelling_is_the_one_the_record_requires",
     "drive::digest::tests::the_system_agrees_with_it",
+    "drive::tests::a_capture_counts_entries_and_not_patches",
+    "drive::tests::a_seams_audit_answer_is_kept_and_not_folded_with_the_wrong_grammar",
+    "drive::tests::a_truncated_fork_answer_is_recorded_as_truncated",
     "drive::tests::a_two_turn_script_summarises_two_turns",
-    "drive::tests::every_entry_names_the_turn_it_actually_came_from",
+    "drive::tests::every_audit_names_the_turn_it_actually_came_from",
+    "drive::tests::every_entry_the_fold_writes_names_its_lane_and_keeps_its_tag",
+    "drive::tests::every_row_the_drive_writes_is_true_of_the_run_that_produced_it",
+    "drive::tests::the_product_is_the_object_and_names_its_entries",
+    "drive::tests::the_record_carries_what_the_drive_actually_sent",
     "drive::tests::the_record_is_an_archive_and_not_a_ledger",
     "drive::tests::the_summary_totals_what_the_rows_say_and_the_digest_is_the_products",
     "drive::tests::three_turns_produce_a_record_the_format_accepts_with_a_seam_and_a_capture_in_it",
@@ -140,12 +147,14 @@ failure_class = "drive.the-turn-count-is-a-constant"
 target = "diet/src/drive/mod.rs"
 expect_exit = 101
 anchor = '''
-        turns: u32::try_from(script.turns.len()).unwrap_or(u32::MAX),'''
+    let Ok(turns) = u32::try_from(script.turns.len()) else {'''
 becomes = '''
-        turns: 3,'''
+    let turns = 3;
+    let Ok(_unused) = u32::try_from(script.turns.len()) else {'''
 catches = [
     "drive::tests::a_retried_call_archives_each_attempt_with_what_that_attempt_sent",
     "drive::tests::a_stripped_retry_archives_the_body_that_attempt_actually_sent",
+    "drive::tests::a_truncated_fork_answer_is_recorded_as_truncated",
     "drive::tests::a_two_turn_script_summarises_two_turns",
 ]
 
@@ -180,7 +189,8 @@ anchor = '''
 becomes = '''
 '''
 catches = [
-    "drive::tests::every_entry_names_the_turn_it_actually_came_from",
+    "drive::tests::a_seams_audit_answer_is_kept_and_not_folded_with_the_wrong_grammar",
+    "drive::tests::every_audit_names_the_turn_it_actually_came_from",
 ]
 
 [[fault]]
@@ -201,6 +211,7 @@ becomes = '''
 catches = [
     "drive::tests::a_retried_call_archives_each_attempt_with_what_that_attempt_sent",
     "drive::tests::a_stripped_retry_archives_the_body_that_attempt_actually_sent",
+    "drive::tests::the_record_carries_what_the_drive_actually_sent",
     "drive::tests::the_record_is_an_archive_and_not_a_ledger",
 ]
 
@@ -281,46 +292,405 @@ catches = [
 ]
 
 [[fault]]
-id = "drive.the-fold-keeps-untagged-prose-too"
-failure_class = "drive.the-fold-keeps-untagged-prose-too"
+id = "drive.the-fold-keeps-declines-as-facts"
+failure_class = "drive.the-fold-keeps-declines-as-facts"
 target = "diet/src/drive/mod.rs"
 expect_exit = 101
 anchor = '''
-        let (Some(tag), interview::Outcome::Value(content)) = (&field.tag, &field.outcome) else {
-            continue;
-        };'''
+        let (Some(tag), interview::Outcome::Value(content)) = (&field.tag, &field.outcome) else {'''
 becomes = '''
         let content = &field.raw;
-        let Some(tag) = &field.tag else {
-            continue;
-        };'''
+        let (Some(tag), _) = (&field.tag, &field.outcome) else {'''
 catches = [
+    "drive::tests::a_capture_counts_entries_and_not_patches",
     "drive::tests::what_the_fold_could_not_capture_is_counted_and_named",
 ]
 
 [[fault]]
-id = "drive.the-census-says-everything-was-captured"
-failure_class = "drive.the-census-says-everything-was-captured"
+id = "drive.the-census-counts-patches-as-regions"
+failure_class = "drive.the-census-counts-patches-as-regions"
 target = "diet/src/drive/mod.rs"
 expect_exit = 101
 anchor = '''
-    let passed_over = parsed
-        .as_ref()
-        .map(|answer| {
-            answer
-                .fields
-                .iter()
-                .filter(|field| !matches!(field.outcome, interview::Outcome::Value(_)))'''
+        regions: answer.fields.len(),'''
 becomes = '''
-    let passed_over = parsed
-        .as_ref()
-        .map(|answer| {
-            answer
-                .fields
-                .iter()
-                .filter(|field| matches!(field.outcome, interview::Outcome::Value(_)))'''
+        regions: patches.len(),'''
 catches = [
+    "drive::tests::an_answer_the_fold_cannot_read_stops_the_drive",
     "drive::tests::what_the_fold_could_not_capture_is_counted_and_named",
+]
+
+[[fault]]
+id = "drive.output-tokens-are-fabricated-as-zero"
+failure_class = "drive.output-tokens-are-fabricated-as-zero"
+target = "diet/src/drive/mod.rs"
+expect_exit = 0
+anchor = '''
+    if let Some(answer) = call.outcome.answer()
+        && answer.output_tokens.is_none()
+    {
+        return Err(Halt::Unmeasured {
+            turn,
+            what: "response.output_tokens",
+        });
+    }
+'''
+becomes = '''
+'''
+catches = [
+]
+
+[[fault]]
+id = "drive.the-audit-is-folded-with-the-interview-grammar"
+failure_class = "drive.the-audit-is-folded-with-the-interview-grammar"
+target = "diet/src/drive/mod.rs"
+expect_exit = 0
+anchor = '''
+        self.calls.push(call);
+        Vec::new()
+    }'''
+becomes = '''
+        let folded = self
+            .calls
+            .last()
+            .and_then(|call| call.outcome.answer())
+            .and_then(|answer| {
+                fold(&answer.text, self.turn.get(), RATIFY, None)
+                    .ok()
+                    .map(|(patches, _)| patches)
+            });
+        self.calls.push(call);
+        folded.unwrap_or_default()
+    }'''
+catches = [
+]
+
+[[fault]]
+id = "drive.an-unreadable-answer-is-an-empty-one"
+failure_class = "drive.an-unreadable-answer-is-an-empty-one"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+    let answer = interview::parse(text).map_err(|why| format!("{why:?}"))?;'''
+becomes = '''
+    let Ok(answer) = interview::parse(text) else {
+        return Ok((Vec::new(), Uncaptured { turn, fork: fork.unwrap_or(lane).to_owned(), regions: 0, captured: 0, passed_over: Vec::new(), truncated: false }));
+    };'''
+catches = [
+    "drive::tests::an_answer_the_fold_cannot_read_stops_the_drive",
+]
+
+[[fault]]
+id = "drive.capture-entries-counts-patches"
+failure_class = "drive.capture-entries-counts-patches"
+target = "diet/src/drive/mod.rs"
+expect_exit = 0
+anchor = '''
+            let mut wrote: BTreeSet<EntryId> = BTreeSet::new();
+            for one in &applied {
+                wrote.extend(one.touched());
+            }'''
+becomes = '''
+            let mut wrote: BTreeSet<EntryId> = BTreeSet::new();
+            for (at, one) in applied.iter().enumerate() {
+                let _ = one;
+                wrote.insert(EntryId::new(&format!("patch-{at}")).expect("a name"));
+            }'''
+catches = [
+]
+
+[[fault]]
+id = "drive.a-ratify-call-that-did-not-answer-is-ignored"
+failure_class = "drive.a-ratify-call-that-did-not-answer-is-ignored"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+            if one.outcome.answer().is_none() {
+                return Err(Halt::NoAnswer {
+                    turn: index,
+                    lane: RATIFY.to_owned(),
+                    outcome: Box::new(one.outcome.clone()),
+                });
+            }
+'''
+becomes = '''
+'''
+catches = [
+    "drive::tests::a_ratify_call_that_did_not_answer_stops_the_drive",
+]
+
+[[fault]]
+id = "drive.a-truncated-answer-is-a-whole-one"
+failure_class = "drive.a-truncated-answer-is-a-whole-one"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+    let truncated = answer.is_truncated();'''
+becomes = '''
+    let truncated = false;'''
+catches = [
+    "drive::tests::a_truncated_fork_answer_is_recorded_as_truncated",
+]
+
+[[fault]]
+id = "drive.the-seams-render-never-reaches-the-model"
+failure_class = "drive.the-seams-render-never-reaches-the-model"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+                content: controller.prefix().to_owned(),'''
+becomes = '''
+                content: String::new(),'''
+catches = [
+    "drive::tests::the_record_carries_what_the_drive_actually_sent",
+]
+
+[[fault]]
+id = "drive.the-turns-ask-is-not-what-the-script-said"
+failure_class = "drive.the-turns-ask-is-not-what-the-script-said"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+                content: turn.ask.clone(),'''
+becomes = '''
+                content: "something the script never said".to_owned(),'''
+catches = [
+    "drive::tests::the_record_carries_what_the_drive_actually_sent",
+]
+
+[[fault]]
+id = "drive.the-forks-question-is-not-what-the-script-asked"
+failure_class = "drive.the-forks-question-is-not-what-the-script-asked"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+                content: question.clone(),'''
+becomes = '''
+                content: "a question the script never asked".to_owned(),'''
+catches = [
+    "drive::tests::the_record_carries_what_the_drive_actually_sent",
+]
+
+[[fault]]
+id = "drive.the-audit-ask-is-not-the-one-the-dogma-pinned"
+failure_class = "drive.the-audit-ask-is-not-the-one-the-dogma-pinned"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+            content: ask.text.clone(),'''
+becomes = '''
+            content: "ignore the seam, say anything".to_owned(),'''
+catches = [
+    "drive::tests::the_record_carries_what_the_drive_actually_sent",
+]
+
+[[fault]]
+id = "drive.a-tool-call-always-exited-zero"
+failure_class = "drive.a-tool-call-always-exited-zero"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+                exit: ran.exit.map(i64::from),'''
+becomes = '''
+                exit: Some(0),'''
+catches = [
+    "drive::tests::every_row_the_drive_writes_is_true_of_the_run_that_produced_it",
+]
+
+[[fault]]
+id = "drive.a-tool-call-is-shown-a-paraphrase"
+failure_class = "drive.a-tool-call-is-shown-a-paraphrase"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+                output: Some(ran.as_the_model_sees_it()),'''
+becomes = '''
+                output: Some("the model was told something else entirely".to_owned()),'''
+catches = [
+    "drive::tests::every_row_the_drive_writes_is_true_of_the_run_that_produced_it",
+]
+
+[[fault]]
+id = "drive.a-tool-calls-argv-is-invented"
+failure_class = "drive.a-tool-calls-argv-is-invented"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+                    Value::Array(ran.argv.iter().map(|a| Value::String(a.clone())).collect()),'''
+becomes = '''
+                    Value::Array(vec![Value::String("rm".to_owned())]),'''
+catches = [
+    "drive::tests::every_row_the_drive_writes_is_true_of_the_run_that_produced_it",
+]
+
+[[fault]]
+id = "drive.every-row-claims-turn-one"
+failure_class = "drive.every-row-claims-turn-one"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+            events.push(Event::ToolCall {
+                id: tool_ids.take(),
+                at_turn: index,'''
+becomes = '''
+            events.push(Event::ToolCall {
+                id: tool_ids.take(),
+                at_turn: 1,'''
+catches = [
+    "drive::tests::every_row_the_drive_writes_is_true_of_the_run_that_produced_it",
+]
+
+[[fault]]
+id = "drive.a-fork-claims-the-main-lane"
+failure_class = "drive.a-fork-claims-the-main-lane"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+            events.push(Event::Fork {
+                id: fork_id.clone(),
+                lane: INTERVIEW.to_owned(),
+                of_turn: index,
+            });'''
+becomes = '''
+            events.push(Event::Fork {
+                id: fork_id.clone(),
+                lane: MAIN.to_owned(),
+                of_turn: 1,
+            });'''
+catches = [
+    "drive::tests::every_row_the_drive_writes_is_true_of_the_run_that_produced_it",
+]
+
+[[fault]]
+id = "drive.the-regime-is-not-the-one-declared"
+failure_class = "drive.the-regime-is-not-the-one-declared"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+    let mut events = vec![Event::Start {
+        regime: Box::new(script.regime.clone()),
+    }];'''
+becomes = '''
+    let mut regime = script.regime.clone();
+    regime.arm = "a-regime-nobody-ran-under".to_owned();
+    let mut events = vec![Event::Start {
+        regime: Box::new(regime),
+    }];'''
+catches = [
+    "drive::tests::every_row_the_drive_writes_is_true_of_the_run_that_produced_it",
+]
+
+[[fault]]
+id = "drive.the-seam-reports-a-render-it-did-not-make"
+failure_class = "drive.the-seam-reports-a-render-it-did-not-make"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+            let Ok(rendered_bytes) = Count::new(seam.prefix.len() as u64) else {'''
+becomes = '''
+            let Ok(rendered_bytes) = Count::new(1) else {'''
+catches = [
+    "drive::tests::every_row_the_drive_writes_is_true_of_the_run_that_produced_it",
+]
+
+[[fault]]
+id = "drive.an-entry-claims-the-lane-that-did-not-write-it"
+failure_class = "drive.an-entry-claims-the-lane-that-did-not-write-it"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+                lane: lane.to_owned(),'''
+becomes = '''
+                lane: "ratify".to_owned(),'''
+catches = [
+    "drive::tests::a_seams_audit_answer_is_kept_and_not_folded_with_the_wrong_grammar",
+    "drive::tests::every_entry_the_fold_writes_names_its_lane_and_keeps_its_tag",
+]
+
+[[fault]]
+id = "drive.an-entry-carries-a-tag-the-answer-never-used"
+failure_class = "drive.an-entry-carries-a-tag-the-answer-never-used"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+            content: format!("{}: {content}", tag.kind.canonical_tag()),'''
+becomes = '''
+            content: format!("constraint: {content}"),'''
+catches = [
+    "drive::tests::every_entry_the_fold_writes_names_its_lane_and_keeps_its_tag",
+]
+
+[[fault]]
+id = "drive.the-unspellable-list-repeats-itself"
+failure_class = "drive.the-unspellable-list-repeats-itself"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+        if !unspellable.contains(&lost) {
+            unspellable.push(lost);
+        }'''
+becomes = '''
+        unspellable.push(lost);'''
+catches = [
+    "drive::tests::what_the_record_cannot_spell_is_named_rather_than_dropped",
+]
+
+[[fault]]
+id = "drive.the-product-drops-the-entry-ids"
+failure_class = "drive.the-product-drops-the-entry-ids"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+        out.push_str(id.as_str());
+        out.push('\t');'''
+becomes = '''
+        out.push('\t');'''
+catches = [
+    "drive::tests::the_product_is_the_object_and_names_its_entries",
+]
+
+[[fault]]
+id = "drive.the-worktree-is-the-operators-directory"
+failure_class = "drive.the-worktree-is-the-operators-directory"
+target = "diet/src/bin/drive.rs"
+expect_exit = 0
+anchor = '''
+    let worktree = match std::path::absolute(worktree) {
+        Ok(path) if path.is_dir() => path,'''
+becomes = '''
+    let worktree = match std::env::current_dir() {
+        Ok(path) if path.is_dir() => path,'''
+catches = [
+]
+
+[[fault]]
+id = "drive.the-output-path-is-claimed-last"
+failure_class = "drive.the-output-path-is-claimed-last"
+target = "diet/src/bin/drive.rs"
+expect_exit = 0
+anchor = '''
+    if let Err(why) = std::fs::write(out_path, "") {
+        return fail(
+            EXIT_OUTPUT,
+            &format!("{out_path} cannot be written, and nothing has run: {why}"),
+        );
+    }
+'''
+becomes = '''
+'''
+catches = [
+]
+
+[[fault]]
+id = "drive.the-sampler-crosses-as-a-debug-rendering"
+failure_class = "drive.the-sampler-crosses-as-a-debug-rendering"
+target = "diet/src/bin/drive.rs"
+expect_exit = 0
+anchor = '''
+        regimen::Value::Float(decimal) => Value::Decimal(decimal.clone()),'''
+becomes = '''
+        regimen::Value::Float(decimal) => Value::String(format!("{decimal:?}")),'''
+catches = [
 ]
 
 [[fault]]
@@ -333,6 +703,7 @@ anchor = '''
 becomes = '''
         .map(|turn| 1 + usize::from(turn.fork.is_some()))'''
 catches = [
+    "drive::tests::a_two_turn_script_summarises_two_turns",
     "drive::tests::the_acts_are_exactly_what_the_script_asks_for",
 ]
 
@@ -348,12 +719,20 @@ becomes = '''
          \"finish_reason\":\"stop\"}}],\"generation_settings\":{{}},\'''
 catches = [
     "drive::tests::a_call_that_did_not_answer_stops_the_drive",
+    "drive::tests::a_capture_counts_entries_and_not_patches",
     "drive::tests::a_command_that_never_ran_stops_the_drive",
+    "drive::tests::a_ratify_call_that_did_not_answer_stops_the_drive",
     "drive::tests::a_record_this_drive_cannot_write_is_a_halt_and_not_a_file",
     "drive::tests::a_retried_call_archives_each_attempt_with_what_that_attempt_sent",
+    "drive::tests::a_seams_audit_answer_is_kept_and_not_folded_with_the_wrong_grammar",
     "drive::tests::a_stripped_retry_archives_the_body_that_attempt_actually_sent",
+    "drive::tests::a_truncated_fork_answer_is_recorded_as_truncated",
     "drive::tests::a_two_turn_script_summarises_two_turns",
-    "drive::tests::every_entry_names_the_turn_it_actually_came_from",
+    "drive::tests::every_audit_names_the_turn_it_actually_came_from",
+    "drive::tests::every_entry_the_fold_writes_names_its_lane_and_keeps_its_tag",
+    "drive::tests::every_row_the_drive_writes_is_true_of_the_run_that_produced_it",
+    "drive::tests::the_product_is_the_object_and_names_its_entries",
+    "drive::tests::the_record_carries_what_the_drive_actually_sent",
     "drive::tests::the_record_is_an_archive_and_not_a_ledger",
     "drive::tests::the_summary_totals_what_the_rows_say_and_the_digest_is_the_products",
     "drive::tests::three_turns_produce_a_record_the_format_accepts_with_a_seam_and_a_capture_in_it",
