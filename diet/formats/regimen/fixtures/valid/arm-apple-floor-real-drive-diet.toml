@@ -1,4 +1,6 @@
-# M1 floor suite (MacBook Pro M1 Max / oMLX), stage S5 capture smoke, the real drive: the diet arm ("s5-ab3-diet-gemma") of the A/B-3 diet-vs-bare capture smoke, Gemma 4 12B on oMLX; no date is stated in the arm
+# Apple floor suite (substrate apple32-omlx-gemma12b on machine macbook-pro-2021,
+# both in the test-equipment registry under substrates/), stage S5 capture smoke,
+# the real drive: the diet arm ("s5-ab3-diet-gemma") of the A/B-3 diet-vs-bare capture smoke, Gemma 4 12B on oMLX; no date is stated in the arm
 # Every binding the arm declares is expressible in regimen v1; nothing is omitted.
 #
 # S5, diet arm — Gemma 4 12B / oMLX. Trigger thresholds are Pi's RAW
