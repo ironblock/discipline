@@ -17,6 +17,18 @@
 
 use crate::object::WorkingObject;
 
+/// Which frame this module renders with.
+///
+/// **A placeholder, and it says so in the render itself.** The frame is
+/// prompt text the model reads, and prompt text in this program is
+/// judgment-as-data: it is authored by the maintainer, pinned, and
+/// byte-guarded like every other template. This one is not. Naming it in the
+/// prompt means a drive under the placeholder is distinguishable from a drive
+/// under the authored frame -- which matters because they are different
+/// regimes, and a comparison across them that could not tell would be the
+/// incomparable-regime class again.
+pub const FRAME_VERSION: &str = "placeholder";
+
 /// The working object rendered as the prompt's prefix.
 ///
 /// The regime is carried at the top, because a prompt whose record cannot say
@@ -40,6 +52,8 @@ pub fn render(object: &WorkingObject, phase: Option<&str>) -> String {
     // in shape as well as in content, and the byte-identity claim is about
     // shape as much as anything.
     out.push_str(phase.unwrap_or("-"));
+    out.push_str("\nframe_version: ");
+    out.push_str(FRAME_VERSION);
     out.push_str("\n\n# working set\n");
 
     for entry in object.live() {

@@ -89,10 +89,16 @@ vocabulary! {
     /// to a cadence that would have fired on the budget anyway is a seam
     /// whose record answers the wrong question.
     ///
-    /// A phase transition outranks a budget because it changes what the
-    /// prompt is FOR; a budget outranks a cadence because it is a limit and a
-    /// cadence is a schedule.
+    /// An explicit act outranks every derived one, so the operator comes
+    /// first. A phase transition outranks a budget because it changes what
+    /// the prompt is FOR; a budget outranks a cadence because it is a limit
+    /// and a cadence is a schedule.
     Reason {
+        /// The operator declared a boundary. #27's vocabulary named three
+        /// triggers and the dogma pins an ask for a fourth
+        /// (`AUDIT_Q_HUMAN`); the issue was amended rather than the ask left
+        /// unreachable.
+        Operator => "operator",
         /// The phase graph ratified a transition.
         Phase => "phase",
         /// The working set reached the declared byte count.
@@ -196,6 +202,10 @@ pub struct Seam {
     pub ratified: Ratification,
     /// The prefix the session continues from.
     pub prefix: String,
+    /// Which frame the prefix was built with. Until the maintainer authors
+    /// the frame as dogma, this is [`render::FRAME_VERSION`] and a reader can
+    /// tell these renders from renders under the authored one.
+    pub frame_version: &'static str,
     /// What the working set measured when the seam fired.
     pub working_set_bytes: u64,
 }
@@ -263,6 +273,11 @@ pub struct Controller<R: Ratifier> {
     prefix: String,
     seams: Vec<Seam>,
     proposals: Vec<Proposal>,
+    /// An operator-declared boundary, waiting for the turn to settle.
+    ///
+    /// Held rather than acted on for the same reason a ratified transition
+    /// is: the turn it was declared in is still running.
+    declared: bool,
     /// A transition the graph ratified, waiting for the turn to settle.
     ///
     /// A proposal does not fire a seam the instant it is made: the turn it
@@ -290,6 +305,7 @@ impl<R: Ratifier> Controller<R> {
             prefix,
             seams: Vec::new(),
             proposals: Vec::new(),
+            declared: false,
             pending: None,
         }
     }
@@ -346,6 +362,17 @@ impl<R: Ratifier> Controller<R> {
         self.turn
     }
 
+    /// Declare a boundary. The operator's own act, not the model's.
+    ///
+    /// No graph rules on it and nothing may refuse it: an operator saying
+    /// "we are done with that part" is a fact, and a controller that asked a
+    /// phase graph for permission would be treating a person as a proposal.
+    /// It fires at the end of the turn it was declared in, like every other
+    /// trigger.
+    pub fn operator_declares_a_boundary(&mut self) {
+        self.declared = true;
+    }
+
     /// Record a phase transition the model proposed, and rule on it.
     ///
     /// The decision is returned AND recorded. A refused proposal fires
@@ -379,12 +406,19 @@ impl<R: Ratifier> Controller<R> {
             return Ok(None);
         };
 
-        if reason == Reason::Phase
-            && let Some(to) = self.pending.take()
-        {
+        // A ratified transition is taken whichever trigger won the race. It
+        // used to be taken only when `phase` was the REASON, so an operator
+        // declaring a boundary in the same turn silently discarded a
+        // transition the graph had already allowed -- the model would have
+        // been told the work moved on and then rendered for the old phase.
+        if let Some(to) = self.pending.take() {
             self.phase = Some(to);
         }
+        // Every pending trigger is spent by the seam that fired, whichever
+        // one won: a declaration left standing would fire again next turn,
+        // and an operator who said "now" did not say "and again".
         self.pending = None;
+        self.declared = false;
 
         let before = object.dump_lines();
         let (ratified, patches) = self.audit(object, reason)?;
@@ -407,6 +441,7 @@ impl<R: Ratifier> Controller<R> {
             applied,
             ratified,
             prefix: self.prefix.clone(),
+            frame_version: render::FRAME_VERSION,
             working_set_bytes,
         };
         self.seams.push(seam.clone());
@@ -419,6 +454,7 @@ impl<R: Ratifier> Controller<R> {
             .iter()
             .copied()
             .filter(|reason| match reason {
+                Reason::Operator => self.declared,
                 Reason::Phase => self.pending.is_some(),
                 Reason::Budget => self
                     .policy
@@ -493,6 +529,7 @@ impl<R: Ratifier> Controller<R> {
 #[must_use]
 pub fn pinned_ask(reason: Reason) -> Option<Template> {
     match reason {
+        Reason::Operator => Some(Template::AuditQHuman),
         Reason::Phase => Some(Template::AuditQ),
         Reason::Cadence => Some(Template::AuditQCadence),
         Reason::Budget => None,
@@ -1003,6 +1040,126 @@ mod tests {
     }
 
     #[test]
+    fn an_operator_declared_boundary_outranks_every_derived_trigger() {
+        // All four true at once. An operator saying "we are done with that
+        // part" is a fact, not a proposal: no graph rules on it and nothing
+        // may refuse it.
+        let declared = "seam_every_turns = 1\n\
+                        seam_at_working_set_bytes = 1\n\
+                        phases = [\"plan\", \"implement\"]\n\
+                        [phase_transitions]\n\
+                        plan = [\"implement\"]\n";
+        let mut object = three_facts();
+        let mut controller = Controller::open(policy(declared), &object, Scripted::silent());
+
+        controller.begin_turn();
+        assert_eq!(controller.propose("implement"), Decision::Ratified);
+        controller.operator_declares_a_boundary();
+        let seam = controller
+            .settle(&mut object)
+            .expect("the fold applies")
+            .expect("four triggers, one seam");
+
+        assert_eq!(seam.reason, Reason::Operator);
+        assert_eq!(
+            seam.also,
+            vec![Reason::Phase, Reason::Budget, Reason::Cadence],
+            "and the three it outranked are beside it, in precedence order"
+        );
+        assert_eq!(
+            controller.phase(),
+            Some("implement"),
+            "a transition the graph already allowed is not discarded because a \
+             stronger trigger fired in the same turn"
+        );
+        assert_eq!(
+            seam.ratified,
+            Ratification::Folded { patches: 0 },
+            "and the operator's boundary has a pinned ask of its own"
+        );
+    }
+
+    #[test]
+    fn an_operator_declared_boundary_fires_once() {
+        let mut object = three_facts();
+        let mut controller =
+            Controller::open(policy("model = \"a-model\"\n"), &object, Scripted::silent());
+
+        controller.begin_turn();
+        controller.operator_declares_a_boundary();
+        assert!(
+            controller
+                .settle(&mut object)
+                .expect("nothing folds")
+                .is_some(),
+            "a declaration fires a seam even where the regimen declares no trigger"
+        );
+
+        controller.begin_turn();
+        assert!(
+            controller
+                .settle(&mut object)
+                .expect("nothing folds")
+                .is_none(),
+            "an operator who said `now` did not say `and again`"
+        );
+        assert_eq!(controller.seams().len(), 1);
+    }
+
+    #[test]
+    fn an_operator_seam_puts_the_ask_the_dogma_pins_for_one() {
+        let mut object = three_facts();
+        let mut controller =
+            Controller::open(policy("model = \"a-model\"\n"), &object, Scripted::silent());
+        controller.begin_turn();
+        controller.operator_declares_a_boundary();
+        controller.settle(&mut object).expect("nothing folds");
+
+        let seen = &controller.ratifier().seen;
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].template, crate::dogma::Template::AuditQHuman);
+        assert_eq!(
+            pinned_ask(Reason::Operator),
+            Some(crate::dogma::Template::AuditQHuman)
+        );
+        assert!(
+            seen[0].text.contains("the operator declared one"),
+            "the dogma's own words for this boundary, not the cadence's: {}",
+            seen[0].text
+        );
+    }
+
+    #[test]
+    fn the_render_names_the_frame_it_was_built_with() {
+        // The frame is prompt text and prompt text is judgment-as-data, so it
+        // belongs to the maintainer. Until it is authored, a drive under this
+        // one has to be distinguishable from a drive under that one, or the
+        // two get compared as though they were the same regime.
+        let object = three_facts();
+        assert!(
+            render::render(&object, None).contains("frame_version: placeholder"),
+            "the prompt says which frame built it"
+        );
+        assert_eq!(render::FRAME_VERSION, "placeholder");
+
+        let mut object = object;
+        let mut controller = Controller::open(
+            policy("seam_every_turns = 1\n"),
+            &object,
+            Scripted::silent(),
+        );
+        controller.begin_turn();
+        let seam = controller
+            .settle(&mut object)
+            .expect("nothing folds")
+            .expect("a seam");
+        assert_eq!(
+            seam.frame_version, "placeholder",
+            "and so does the record of it"
+        );
+    }
+
+    #[test]
     fn an_empty_working_set_is_not_audited() {
         let mut object = WorkingObject::open(regime());
         let mut controller = Controller::open(
@@ -1063,12 +1220,66 @@ mod tests {
         );
     }
 
+    /// Every fault in this lane's `gate.toml` still names source that exists.
+    ///
+    /// The manifest carries each mutation's exact source text so the
+    /// orchestrator (#46) can apply it. That only works while the text is
+    /// still in the file it names, and nothing else checks: the orchestrator
+    /// is not built, and `check-fault-manifest.py` reads the gate's own
+    /// manifest rather than a package's. A manifest nobody checks is a
+    /// manifest that goes stale, and a stale seeded fault is one that
+    /// silently stops testing what it says it tests.
+    ///
+    /// Scanned rather than parsed as TOML: this crate has no TOML reader for
+    /// multi-line strings, and writing one to check a file this repository
+    /// generates would be a second reader of a format that already has one.
+    /// The scan mirrors the generator's shape exactly, and a scan that finds
+    /// no faults fails rather than passing over nothing.
+    #[test]
+    fn every_seeded_fault_still_names_source_that_is_there() {
+        let manifest = include_str!("../../seam/gate.toml");
+        let mut checked = 0;
+        for block in manifest.split("\n[[fault]]\n").skip(1) {
+            let id = between(block, "id = \"", "\"").expect("a fault has an id");
+            let target = between(block, "target = \"", "\"").expect("a fault has a target");
+            let anchor =
+                between(block, "anchor = '''\n", "'''\nbecomes = ").expect("a fault has an anchor");
+
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .expect("the workspace root")
+                .join(target);
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|why| panic!("{id}: {} could not be read: {why}", path.display()));
+            assert_eq!(
+                source.matches(anchor).count(),
+                1,
+                "{id}: its anchor no longer appears exactly once in {target}. The \
+                 manifest is stale: either the mutation has to move with the code, \
+                 or the fault it seeds is gone."
+            );
+            checked += 1;
+        }
+        assert_eq!(
+            checked, 18,
+            "the manifest declares its own count, and a scanner that found a \
+             different number found the wrong thing"
+        );
+    }
+
+    /// The text between `open` and the next `close` after it.
+    fn between<'a>(haystack: &'a str, open: &str, close: &str) -> Option<&'a str> {
+        let start = haystack.find(open)? + open.len();
+        let end = haystack[start..].find(close)? + start;
+        Some(&haystack[start..end])
+    }
+
     #[test]
     fn the_seams_vocabularies_are_the_words_a_record_carries() {
         assert_eq!(
             Reason::ALL.iter().map(|r| r.tag()).collect::<Vec<_>>(),
-            ["phase", "budget", "cadence"],
-            "declaration order is precedence, and the record's words are the issue's"
+            ["operator", "phase", "budget", "cadence"],
+            "declaration order is precedence: an explicit act outranks every derived one"
         );
         assert_eq!(
             Blocked::ALL.iter().map(|b| b.tag()).collect::<Vec<_>>(),
