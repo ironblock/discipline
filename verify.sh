@@ -43,7 +43,8 @@ readonly CHECKS=(fmt clippy test library results recompute regimen metadata hygi
 # Every class, not only the ones the brief names: otherwise a pattern and its
 # seeded class can be deleted together and the selftest still reports success.
 readonly REQUIRED_HYGIENE_CLASSES=(
-  private-ipv4 internal-hostname personal-home-path windows-user-path
+  private-ipv4 internal-hostname personal-home-path session-scratchpad-path
+  ssh-user-at-host windows-user-path
   internal-ticket-id aws-access-key-id github-token slack-token
   private-key-block anthropic-api-key openai-api-key assigned-secret
 )
@@ -1876,6 +1877,27 @@ inject_history() {
   printf 'x\n' >> pages/index.html
   git add --all
   seed_commit --message "carries $(printf '%s%s' 'DIE' '-9001') forward"
+}
+
+# Content that enters a diff and leaves again in the next commit. The tree is
+# clean at the end and every commit message is clean throughout, so the file
+# gate and the message gate both pass -- and `git log -p` still hands the
+# token to anyone. Measured on merged `main` before this was gated: 32
+# occurrences in patch text, zero in the tree, both checks green.
+inject_history_added_then_removed() {
+  git add --all
+  seed_commit --message 'a base commit'
+  git update-ref refs/remotes/origin/main HEAD
+  # The copy lives under .git/, which git never tracks: a scratch file beside
+  # the source would be committed by the `git add --all` below and then
+  # deleted, putting a second file in the very patches this case reads.
+  cp pages/index.html .git/index.html.before
+  printf 'host = %s%s\n' '192.168' '.4.9' >> pages/index.html
+  git add --all
+  seed_commit --message 'add a line'
+  cp .git/index.html.before pages/index.html
+  git add --all
+  seed_commit --message 'and take it out again'
 }
 
 # An injection that changes nothing. This is the whole failure the
@@ -4513,6 +4535,9 @@ prove_patterns() {
   scratch; seed="$SCRATCH"
   bash "${ROOT}/${seeder}" "$seed" > /dev/null
 
+  local escaped=false
+  if find "$seed" -name '*.jsonl' -print -quit | grep -q .; then escaped=true; fi
+
   while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
     case "$label" in ''|\#*) continue ;; esac
     [ -n "${regex:-}" ] || continue
@@ -4528,10 +4553,35 @@ prove_patterns() {
       continue
     fi
 
+    # A corpus that carries escaped twins requires one for EVERY class, and
+    # requires each class to fire on it. A class that guards prose and not
+    # logs is a guard over the half of the surface where the artefacts are
+    # not -- and the twin reaches the pattern only through the decoded view,
+    # so this is also what keeps that view load-bearing. Derived from the
+    # corpus rather than passed in: a table whose seeder stops writing twins
+    # loses the requirement, and a table that never had them (the published
+    # surface is HTML and CSS, never a JSON string) is not asked for one.
+    if [ "$escaped" = true ] && [ ! -f "${dir}/${label}.jsonl" ]; then
+      printf 'UNSEEDED %s pattern %s  <-- NO ESCAPED TWIN TO PROVE IT AGAINST\n' "$kind" "$label"
+      SELFTEST_BROKEN+=("${kind} pattern ${label} has no escaped twin")
+      continue
+    fi
+
     rc=0
     out="$(bash "${ROOT}/scripts/hygiene.sh" --patterns "${ROOT}/${table}" --tree "$dir" 2>&1)" || rc=$?
-    if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "hygiene: ${label}:"; then
+    local plain=false twin=false
+    printf '%s\n' "$out" | grep "hygiene: ${label}:" | grep -qv "${label}\.jsonl" && plain=true
+    if [ "$escaped" = true ]; then
+      printf '%s\n' "$out" | grep -q "hygiene: ${label}:.*${label}\.jsonl" && twin=true
+    else
+      twin=true
+    fi
+
+    if [ "$rc" -eq 1 ] && [ "$plain" = true ] && [ "$twin" = true ]; then
       printf 'RED   hygiene.sh exit %-3d  %s\n' "$rc" "$label"
+    elif [ "$rc" -eq 1 ] && { [ "$plain" = true ] || [ "$twin" = true ]; }; then
+      printf 'GREEN hygiene.sh exit %-3d  %s  <-- FIRED ON ONE FORM, NOT BOTH\n' "$rc" "$label"
+      SELFTEST_BROKEN+=("${kind} pattern ${label}: one form, not both")
     else
       printf 'GREEN hygiene.sh exit %-3d  %s  <-- PATTERN DID NOT FIRE\n' "$rc" "$label"
       SELFTEST_BROKEN+=("${kind} pattern ${label}")
@@ -4602,6 +4652,114 @@ prove_mechanics() {
   expect_exit "the last pattern in an unterminated table still fires" 1 \
     bash "${ROOT}/scripts/hygiene.sh" --patterns "${box}/unterminated-patterns.tsv" \
       --tree "${box}/last-line"
+
+  # --- content as a reader would see it -------------------------------------
+  #
+  # An address that exists ONLY inside a JSON string, immediately after an
+  # escaped newline. `private-ipv4` requires a non-alphanumeric to its left;
+  # in the bytes on disk the character to its left is the `n` of `\n`, so the
+  # raw scan reads the escaping and calls the content clean. This is how a
+  # private path reached a replay log unflagged.
+  mkdir -p "${box}/escaped"
+  printf '{"stdout":"up\\n%s%s ok\\n"}\n' '192.168' '.4.9' \
+    > "${box}/escaped/run.jsonl"
+  expect_exit "an address only a decoded view can see is caught" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/escaped"
+  # The control. Without it the assertion above passes on a file whose bytes
+  # match anyway, and proves nothing about the decoding.
+  expect_exit "the same address, unread, is not a hit" 1 \
+    grep -qE "(^|[^0-9A-Za-z.-])192\\.168\\.[0-9]{1,3}\\.[0-9]{1,3}" \
+      "${box}/escaped/run.jsonl"
+
+  # THE WELDED CASE, which is the one the boundary misses rather than the one
+  # the escaping hides. `\n` puts a literal `n` immediately left of the token,
+  # so `(^|[^A-Za-z0-9])` does not match there -- the raw bytes are searched
+  # and found clean while the content is not. This is the defect the data seat
+  # reported: a pattern that guards prose does not guard logs.
+  mkdir -p "${box}/welded"
+  printf '{"stdout":"ran\\n%s%s regressed\\n"}\n' 'die' '45' \
+    > "${box}/welded/run.jsonl"
+  expect_exit "an escape-welded token is caught through the decoding" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/welded"
+  # ...and the control that makes the assertion above mean something: the same
+  # bytes, matched directly, are NOT a hit. If this ever exits 0 the case
+  # above has stopped testing the decoding and started testing the pattern.
+  expect_exit "the same bytes, unread, are not a hit" 1 \
+    grep -qiE "(^|[^A-Za-z0-9])DIE-?[0-9]+" "${box}/welded/run.jsonl"
+
+  # A pattern beginning with `-`. grep would read it as an OPTION and report
+  # every row after it absent -- a whole class silently unguarded, printing
+  # the same green. The scanner passes each regex with `-e`.
+  mkdir -p "${box}/dash-lead"
+  printf 'value = %s%s\n' '-forbid' 'den-shape' > "${box}/dash-lead/hit.txt"
+  printf 'dash-leading\t-\t-forbidden-shape\n' > "${box}/dash-patterns.tsv"
+  expect_exit "a pattern beginning with a dash is a pattern, not an option" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --patterns "${box}/dash-patterns.tsv" \
+      --tree "${box}/dash-lead"
+
+  # --- literals that have no shape ------------------------------------------
+  #
+  # A digest row cannot be seeded the way a pattern row is: assembling the
+  # literal from fragments would still BE the literal, in a public repository,
+  # which is what the row exists to avoid. A DECOY token and a scratch table
+  # prove the mechanism end to end without the real value ever being written.
+  local decoy table
+  decoy="$(printf '%s%s%s' 'zz' 'subject' 'zz')"
+  table="${box}/decoy-hashes.txt"
+  printf '# Salt: discipline-hygiene-v1\n' > "$table"
+  python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+    --emit "$decoy" decoy-username >> "$table"
+
+  mkdir -p "${box}/decoy-hit"
+  printf 'drwx 3 %s staff\n' "$decoy" > "${box}/decoy-hit/ls.txt"
+  expect_exit "a digest row catches its literal" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" --tree "${box}/decoy-hit"
+
+  # The same token welded to an escape. A regex can be given a looser
+  # boundary to reach through one; a digest cannot be given a looser hash, so
+  # this half needs the decoding more than the other half does.
+  mkdir -p "${box}/decoy-welded"
+  printf '{"stdout":"total 4\\n%s ok\\n"}\n' "$decoy" \
+    > "${box}/decoy-welded/run.jsonl"
+  expect_exit "a digest row catches an escape-welded literal" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" --tree "${box}/decoy-welded"
+
+  # A SUBSTRING IS NOT THE TOKEN. Without this the row would fire on every
+  # word that contains the literal, and a gate that cries wolf gets switched
+  # off -- the same failure mode as an over-loose pattern, arrived at by
+  # hashing instead of by matching.
+  mkdir -p "${box}/decoy-miss"
+  printf '%sx and x%s and someone-else\n' "$decoy" "$decoy" \
+    > "${box}/decoy-miss/near.txt"
+  expect_exit "a substring of the literal is not the literal" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" --tree "${box}/decoy-miss"
+
+  # THE REPORT NAMES THE LABEL AND NEVER THE TOKEN. A scanner that printed
+  # what it found would publish the value on every CI log that caught one.
+  expect_exit "a hit names its label, not what it matched" 0 \
+    bash -c "out=\$(python3 '${ROOT}/scripts/check-hashes.py' --table '$table' \
+      --tree '${box}/decoy-hit' 2>&1; true) \
+      && grep -q 'decoy-username' <<<\"\$out\" \
+      && ! grep -q '$decoy' <<<\"\$out\""
+
+  # THE WIRING, not just the scanner. Every assertion above runs
+  # `check-hashes.py` directly, so all of them would still pass with the call
+  # removed from `hygiene.sh` -- and then `--only hygiene` would be a pattern
+  # scan wearing a digest scan's green.
+  expect_exit "the hygiene gate runs the digest half" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --hashes "$table" --tree "${box}/decoy-hit"
+
+  # A table with no salt cannot be computed against, and a table with no rows
+  # checks nothing. Neither is a pass.
+  printf 'c3cfd25a52f47a385452ff4098ace911eb0c4b44e7eebfc39c29fb38dcee408a  x\n' \
+    > "${box}/no-salt.txt"
+  expect_exit "a digest table naming no salt is refused" 2 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "${box}/no-salt.txt" \
+      --tree "${box}/decoy-hit"
+  printf '# Salt: discipline-hygiene-v1\n' > "${box}/no-rows.txt"
+  expect_exit "a digest table with no rows is not a pass" 2 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "${box}/no-rows.txt" \
+      --tree "${box}/decoy-hit"
 
   # A dot-prefixed directory under a results root is linted, not skipped.
   #
@@ -4987,6 +5145,8 @@ selftest() {
     'matches the line naming its own scope'
   seeded_case "a forbidden id in a commit message"    history  inject_history \
     'hygiene: internal-ticket-id:'
+  seeded_case "content added and then removed"        history  inject_history_added_then_removed \
+    'hygiene: private-ipv4: .*patch-'
   seeded_case "history with an undeterminable base"   history  inject_history_no_base \
     'an undeterminable base is a failure, not an empty scan'
   seeded_case "an ask wired to another class's question" test inject_router_ask_class_untuned \

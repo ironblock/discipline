@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
-"""Scan commit messages -- and a pull request's title and body -- for the
-shapes scripts/hygiene-patterns.tsv forbids.
+"""Scan a range's commit messages AND ITS PATCH TEXT -- and a pull request's
+title and body -- for the shapes scripts/hygiene-patterns.tsv forbids.
 
-`hygiene.sh` scans files. A file carrying a private hostname or an internal
-ticket identifier can be fixed with a commit; a commit MESSAGE carrying one is
-permanent, so the ungated path is the more damaging of the two.
+`hygiene.sh` scans files: the tree as it stands. This scanned messages. Between
+them was a hole neither could see: **content added in one commit and removed in
+a later one is scanned by nothing, ever**, and stays recoverable from history
+for as long as the repository exists. Measured on merged `main` -- 32
+occurrences of a private tracker token in patch text, zero in the tree, the
+gate green over both. `git log -p` hands them to anyone.
+
+So the patch text of the range is scanned with the same table. A token that
+enters a diff fails before it enters history. Ruled 2026-09-08 on #54: history
+is the write a fix cannot reach.
+
+A file carrying a private hostname or an internal ticket identifier can be
+fixed with a commit; a commit MESSAGE, or a diff, carrying one is permanent,
+so the ungated path is the more damaging of the two.
 
 There is exactly one pattern definition and exactly one scanner. This script
 determines what to read and materialises it, then hands the result to
@@ -194,14 +205,25 @@ def main(argv: list[str]) -> int:
 
     with tempfile.TemporaryDirectory() as work:
         out = pathlib.Path(work)
+        patches = 0
         for sha in shas:
             body = git("log", "-1", "--format=%B%n%an <%ae>", sha)
             (out / f"commit-{sha[:12]}.txt").write_text(body + "\n", encoding="utf-8")
+            # `--format=` so the message is not scanned twice, and no `-m`, so
+            # a merge commit contributes no patch: whatever it brings in is
+            # already in the commits it merges, and every one of those is in
+            # this range. A merge shown against each parent would double the
+            # text and report each hit twice.
+            patch = git("show", "--format=", "--patch", sha, check=False)
+            if patch:
+                (out / f"patch-{sha[:12]}.txt").write_text(patch + "\n", encoding="utf-8")
+                patches += 1
         for label, text in extra:
             (out / f"{label}.txt").write_text(text + "\n", encoding="utf-8")
 
         print(f"check-history: {how}")
         print(f"check-history: {len(shas)} commit message(s)"
+              f" and {patches} patch(es)"
               f"{' + ' + ', '.join(l for l, _ in extra) if extra else ''}"
               f", scanned with the same table as the file gate")
 
@@ -211,7 +233,11 @@ def main(argv: list[str]) -> int:
         return 0
     if done.returncode == EXIT_DIRTY:
         print("check-history: history cannot be edited after it is pushed; "
-              "rewrite the offending commits before merging", file=sys.stderr)
+              "rewrite the offending commits before merging. A hit in a "
+              "`patch-*` file is content the diff ADDS OR REMOVES: removing it "
+              "in a later commit does not remove it from history, so the "
+              "commit that introduced it is the one to rewrite.",
+              file=sys.stderr)
         return EXIT_DIRTY
     return EXIT_BROKEN
 

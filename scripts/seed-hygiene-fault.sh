@@ -9,6 +9,11 @@
 # Every forbidden string is assembled here from fragments at run time. No file
 # in this repository contains a complete one, which is why this script does not
 # itself trip the gate it exists to test.
+#
+# EACH CLASS GETS TWO FILES: the prose form, and the same lines inside a JSON
+# string, escaped as a captured log carries them. A pattern that guards prose
+# and not logs passes half its own test and is a guard over the half where the
+# artefacts are not.
 
 set -euo pipefail
 
@@ -20,6 +25,15 @@ seed() {
   local label="$1"; shift
   mkdir -p "${DEST}/${label}"
   printf '%s\n' "$@" > "${DEST}/${label}/${label}.txt"
+  # The escaped twin. Written by python3 rather than by hand because two of
+  # these lines carry a backslash and one carries a quote, and a JSON string
+  # that escapes them wrongly is a fixture that proves the escaping is broken
+  # rather than that the pattern reaches through it.
+  printf '%s\n' "$@" | python3 -c '
+import json, sys
+for line in sys.stdin.read().splitlines():
+    print(json.dumps({"stdout": line + "\n"}))
+' > "${DEST}/${label}/${label}.jsonl"
 }
 
 seed private-ipv4 \
@@ -33,13 +47,23 @@ seed internal-hostname \
 
 seed personal-home-path \
   "$(printf 'cargo run --manifest-path %s%s' '/home' '/someone/scratch/Cargo.toml')" \
-  "$(printf 'log: %s%s' '/Users' '/someone/Library/Logs/run.log')"
+  "$(printf 'log: %s%s' '/Users' '/someone/Library/Logs/run.log')" \
+  "$(printf 'the build ran under %s%s and failed' '/home' '/someone')"
+
+seed session-scratchpad-path \
+  "$(printf 'scratch = %s%s' '/private/tmp/claude-' '501/notes.md')" \
+  "$(printf 'cd %s%s' '/private/tmp/claude-' '77/x/')"
+
+seed ssh-user-at-host \
+  "$(printf 'scp %s%s:/var/log/run.log .' 'someone@' 'box.example.net')" \
+  "$(printf '%s %s%s' 'ssh' 'someone@' 'box.example.net')"
 
 seed windows-user-path \
   "$(printf 'path = %s%s' 'C:' '\Users\someone\AppData')"
 
 seed internal-ticket-id \
-  "$(printf 'see %s%s for the rollout plan' 'DIE' '-4172')"
+  "$(printf 'see %s%s for the rollout plan' 'DIE' '-4172')" \
+  "$(printf 'arm %s%s was the one that regressed' 'die' '45')"
 
 seed aws-access-key-id \
   "$(printf 'aws_access_key_id = %s%s' 'AKIA' 'EXAMPLEKEYID1234')"

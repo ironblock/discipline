@@ -1,0 +1,27 @@
+# Salted digests of literals this repository must not carry.
+#
+# Format: <sha256-hex>  <label>
+# Salt:   discipline-hygiene-v1
+#
+# A pattern says what a forbidden string LOOKS like. Some forbidden strings
+# have no shape: an account name, a person's address. Writing those in a
+# pattern table would put them in a public repository, which is the thing the
+# table exists to prevent -- so they are here as salted digests instead, and a
+# hit names the LABEL and never the token.
+#
+# THE SALT IS PUBLISHED AND HAS TO BE. The public side computes with it, so it
+# cannot be a secret; a salted hash of a low-entropy string is a DETECTOR, not
+# a vault. It raises the cost of a dictionary sweep and nothing more. Do not
+# put anything here whose disclosure would matter on its own.
+#
+# `scripts/check-hashes.py` reads this. It tokenises content -- and the
+# decoded view of it -- by splitting on every non-alphanumeric character, so
+# `owner.example.net` is three tokens and a digest of the bare name matches.
+# The obvious token class, the one that keeps `.` and `-`, does not, and that
+# was measured rather than assumed.
+#
+# Add a row with `--emit`, never by hand:
+#   python3 scripts/check-hashes.py --emit '<literal>' '<label>'
+
+c3cfd25a52f47a385452ff4098ace911eb0c4b44e7eebfc39c29fb38dcee408a  owner-username
+ebdb5bf7c8c1dc15d709660fe801a3a075d931429ced8e477edd2a3b5a173175  third-party-address

@@ -18,14 +18,21 @@
 # `scripts/seed-hygiene-fault.sh` at the same time, so that every pattern
 # has been seen catch something.
 
+# A row's regex is passed to grep with `-e`. A pattern beginning with `-`
+# would otherwise be read as an OPTION, and grep would report every row after
+# it as absent -- a whole class silently unguarded while the scan prints the
+# same green. Seeded, so the hazard has been seen.
+
 # --- environments that are not this repository ---
 private-ipv4	-	(^|[^0-9A-Za-z.-])(10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3})([^0-9A-Za-z.-]|$)
 internal-hostname	i	[A-Za-z0-9][A-Za-z0-9-]*\.(local|internal|lan|corp|intranet)([^A-Za-z0-9.-]|$)
-personal-home-path	-	(/Users/|/home/)[A-Za-z0-9._-]+/
+personal-home-path	-	(/Users/|/home/)[A-Za-z0-9._-]+
+session-scratchpad-path	-	/private/tmp/claude-[0-9]+/
+ssh-user-at-host	i	(^|[^A-Za-z0-9._-])([A-Za-z0-9._-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+:|(ssh|scp|rsync)[[:space:]]+[A-Za-z0-9._-]+@[A-Za-z0-9-]+)
 windows-user-path	i	[a-z]:\\+Users\\+
 
 # --- identifiers from a tracker this repository does not use ---
-internal-ticket-id	b	(^|[^A-Za-z0-9])DIE-[0-9]+
+internal-ticket-id	ib	(^|[^A-Za-z0-9])DIE-?[0-9]+
 
 # --- credentials ---
 aws-access-key-id	b	(^|[^A-Z0-9])(A(KIA|SIA|GPA|IDA|ROA|NPA|NVA|BIA|CCA))[A-Z0-9]{16}([^A-Z0-9]|$)

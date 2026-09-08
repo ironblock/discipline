@@ -34,8 +34,8 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 302
-mechanics_assertions = 44
+red_faults = 305
+mechanics_assertions = 56
 migrated = 0
 
 
@@ -1108,6 +1108,24 @@ check = "hygiene"
 label = "windows-user-path"
 failure_class = "hygiene.forbidden-pattern"
 pattern = "windows-user-path"
+migrated = false
+
+[[fault]]
+id = "hygiene.session-scratchpad-path"
+kind = "pattern-class"
+check = "hygiene"
+label = "session-scratchpad-path"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "session-scratchpad-path"
+migrated = false
+
+[[fault]]
+id = "hygiene.ssh-user-at-host"
+kind = "pattern-class"
+check = "hygiene"
+label = "ssh-user-at-host"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "ssh-user-at-host"
 migrated = false
 
 [[fault]]
@@ -2547,6 +2565,124 @@ kind = "results-fixture"
 check = "results"
 label = "2026-01-28-symlinked-evidence"
 failure_class = "results.provenance-escapes-the-directory"
+migrated = false
+
+[[fault]]
+id = "mech.an-address-only-a-decoded-view-can-see-is-caught"
+kind = "mechanics"
+check = "hygiene"
+label = "an address only a decoded view can see is caught"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.the-same-address-unread-is-not-a-hit"
+kind = "mechanics"
+check = "hygiene"
+label = "the same address, unread, is not a hit"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.an-escape-welded-token-is-caught-through-the-decoding"
+kind = "mechanics"
+check = "hygiene"
+label = "an escape-welded token is caught through the decoding"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.the-same-bytes-unread-are-not-a-hit"
+kind = "mechanics"
+check = "hygiene"
+label = "the same bytes, unread, are not a hit"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-pattern-beginning-with-a-dash-is-a-pattern-not-an-option"
+kind = "mechanics"
+check = "hygiene"
+label = "a pattern beginning with a dash is a pattern, not an option"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-digest-row-catches-its-literal"
+kind = "mechanics"
+check = "hygiene"
+label = "a digest row catches its literal"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-digest-row-catches-an-escape-welded-literal"
+kind = "mechanics"
+check = "hygiene"
+label = "a digest row catches an escape-welded literal"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-substring-of-the-literal-is-not-the-literal"
+kind = "mechanics"
+check = "hygiene"
+label = "a substring of the literal is not the literal"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-hit-names-its-label-not-what-it-matched"
+kind = "mechanics"
+check = "hygiene"
+label = "a hit names its label, not what it matched"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.the-hygiene-gate-runs-the-digest-half"
+kind = "mechanics"
+check = "hygiene"
+label = "the hygiene gate runs the digest half"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-digest-table-naming-no-salt-is-refused"
+kind = "mechanics"
+check = "hygiene"
+label = "a digest table naming no salt is refused"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-digest-table-with-no-rows-is-not-a-pass"
+kind = "mechanics"
+check = "hygiene"
+label = "a digest table with no rows is not a pass"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "history.history_added_then_removed"
+kind = "seeded-gate"
+check = "history"
+target = "history"
+label = "content added and then removed"
+failure_class = "hygiene.forbidden-pattern"
+legacy_signature = "hygiene: private-ipv4: .*patch-"
 migrated = false
 
 [[fault]]
