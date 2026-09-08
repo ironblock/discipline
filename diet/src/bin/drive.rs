@@ -216,7 +216,7 @@ fn answering(given: Option<&String>) -> Result<(Option<Stub>, Endpoint), (u8, St
 fn written(drive: &diet::drive::Drive, out_path: &str) -> ExitCode {
     if let Err(why) = std::fs::write(out_path, &drive.rendered) {
         return fail(
-            EXIT_HALT,
+            EXIT_OUTPUT,
             &format!("{out_path} could not be written: {why}"),
         );
     }
@@ -226,7 +226,7 @@ fn written(drive: &diet::drive::Drive, out_path: &str) -> ExitCode {
     let product_path = format!("{out_path}.product");
     if let Err(why) = std::fs::write(&product_path, &drive.product) {
         return fail(
-            EXIT_HALT,
+            EXIT_OUTPUT,
             &format!("{product_path} could not be written: {why}"),
         );
     }

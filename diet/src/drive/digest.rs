@@ -116,6 +116,30 @@ mod tests {
         assert_eq!(sha256_hex(b"5040").len(), 64);
     }
 
+    /// An independent SHA-256, for the differential below to compare against.
+    ///
+    /// `sha256sum` on a GNU host, `shasum -a 256` on a Mac -- this repository
+    /// has seats on both. Both print `<digest>  <path>`, so the caller reads
+    /// them the same way.
+    ///
+    /// Returns the program and the arguments that precede the paths.
+    fn an_independent_sha256() -> Option<(&'static str, &'static [&'static str])> {
+        for (program, args) in [
+            ("sha256sum", &[] as &[&str]),
+            ("shasum", &["-a", "256"] as &[&str]),
+        ] {
+            let answered = std::process::Command::new(program)
+                .args(args)
+                .arg("--version")
+                .output()
+                .is_ok_and(|probe| probe.status.success());
+            if answered {
+                return Some((program, args));
+            }
+        }
+        None
+    }
+
     /// The differential, against the dependency rather than against us.
     ///
     /// A fresh instance ran this by hand while the algorithm was hand-rolled,
@@ -132,6 +156,25 @@ mod tests {
     /// named for that number -- which would have meant padding the set until
     /// it reached 221, fitting the evidence to the label. What each group is
     /// for is written beside it instead.
+    ///
+    /// # It has no skip, and that is the whole point
+    ///
+    /// The first version had THREE early returns -- no temp directory, a
+    /// staging write that failed, no `sha256sum` -- each returning a
+    /// **passing** test. A review closed one of them and left two, under a
+    /// comment claiming the class was handled; `TMPDIR` pointed anywhere
+    /// unwritable then retired the entire check, took its own seeded fault
+    /// green with it, and let a deliberately corrupted digest through. And
+    /// the `eprintln!` those paths announced themselves with is swallowed by
+    /// libtest on a passing test, so the log could not tell a run that
+    /// differentiated from one that did not.
+    ///
+    /// So there is no skip at all. **This test declares a host requirement:
+    /// an independent SHA-256 must be on `PATH`.** A conformance check that
+    /// cannot reach its reference implementation has not been performed, and
+    /// a green test that did not perform its check is the failure this whole
+    /// module is about. Every seat this repository has -- GNU and Mac -- ships
+    /// one of the two programs above.
     #[test]
     fn the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256() {
         let mut inputs: Vec<Vec<u8>> = Vec::new();
@@ -155,65 +198,51 @@ mod tests {
         // Bigger than any block count the loops above reach.
         inputs.push(vec![b'q'; 100_003]);
 
-        // Through FILES rather than a pipe. The first version fed hex on
+        let (program, prefix) = an_independent_sha256().expect(
+            "this test needs an independent SHA-256 on PATH -- `sha256sum` or \
+             `shasum` -- to compare `sha2` against. It does not skip when one is \
+             absent: a conformance check that cannot reach its reference \
+             implementation has not been performed, and a green test that did \
+             not perform its check is the defect this module exists to prevent.",
+        );
+
+        // Through FILES rather than a pipe. An earlier version fed hex on
         // stdin and decoded it with `xxd`, which is not on every host -- and
         // its absence did not surface as "the tool is missing", it surfaced
         // as a DIGEST MISMATCH on input 1, which is a red that is not about
-        // its own fault. Files need no decoder, and a missing `sha256sum` is
-        // then unambiguous.
+        // its own fault.
         let ours: Vec<String> = inputs.iter().map(|bytes| sha256_hex(bytes)).collect();
-        let base =
-            std::env::temp_dir().join(format!("diet-digest-differential-{}", std::process::id()));
-        if std::fs::create_dir_all(&base).is_err() {
-            eprintln!("drive::digest: no writable temp directory; the differential did not run");
-            return;
-        }
+        // Unique per run, and `create_dir` rather than `create_dir_all` so an
+        // existing directory is an error rather than something to write into:
+        // a predictable name a local process can pre-create, plus writes that
+        // follow symlinks, is CWE-377 even in a test.
+        let base = std::env::temp_dir().join(format!(
+            "diet-digest-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|since| since.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir(&base).expect("a temp directory to stage the inputs in");
         let mut paths = Vec::with_capacity(inputs.len());
         for (at, bytes) in inputs.iter().enumerate() {
             let path = base.join(format!("{at:04}.bin"));
-            if std::fs::write(&path, bytes).is_err() {
-                let _ = std::fs::remove_dir_all(&base);
-                eprintln!(
-                    "drive::digest: could not stage the inputs; the differential did not run"
-                );
-                return;
-            }
+            std::fs::write(&path, bytes).expect("the inputs stage");
             paths.push(path);
         }
 
-        // Whether the system's own tool is here AT ALL, probed separately.
-        // The escape hatch below has to let a host without `sha256sum` past,
-        // and an escape hatch that also swallows a failure to run a tool that
-        // IS present is how a differential quietly stops differentiating --
-        // the test goes green for ever and nothing says it stopped checking.
-        let present = std::process::Command::new("sha256sum")
-            .arg("--version")
-            .output()
-            .is_ok_and(|probe| probe.status.success());
-
-        let spawned = std::process::Command::new("sha256sum")
+        let spawned = std::process::Command::new(program)
+            .args(prefix)
             .args(&paths)
             .output();
         let _ = std::fs::remove_dir_all(&base);
-        let Ok(output) = spawned else {
-            assert!(
-                !present,
-                "`sha256sum` answered a probe on this host and then could not be \
-                 run over the inputs. That is not a host without the tool, and \
-                 skipping here would retire the differential silently."
-            );
-            // A host genuinely without `sha256sum` proves nothing here, and the
-            // published vectors stand on their own. Said out loud rather than
-            // skipped quietly.
-            eprintln!(
-                "drive::digest: no `sha256sum` on this host; the differential did \
-                 not run and the vectors stand alone"
-            );
-            return;
-        };
+        let output = spawned.unwrap_or_else(|why| {
+            panic!("`{program}` answered a probe and then could not be run: {why}")
+        });
         assert!(
             output.status.success(),
-            "`sha256sum` itself failed, which is not a disagreement about a \
+            "`{program}` itself failed, which is not a disagreement about a \
              digest: {}",
             String::from_utf8_lossy(&output.stderr)
         );
@@ -226,7 +255,7 @@ mod tests {
         assert_eq!(
             theirs.len(),
             inputs.len(),
-            "the system answered for every one of the {} inputs, or this \
+            "`{program}` answered for every one of the {} inputs, or this \
              compares two lists that are not aligned",
             inputs.len()
         );
@@ -234,7 +263,7 @@ mod tests {
             assert_eq!(
                 ours,
                 theirs,
-                "input {at} ({} bytes) disagrees with the system's digest",
+                "input {at} ({} bytes) disagrees with `{program}`'s digest",
                 inputs[at].len()
             );
         }
