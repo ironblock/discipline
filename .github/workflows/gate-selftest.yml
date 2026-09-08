@@ -3,8 +3,12 @@ name: gate-selftest
 # The gate's own test, composed by verify.yml. Every line of its output must
 # read RED: a gate that has never been seen red is not a gate.
 #
-# Sharded, because the fault list is 266 long and 181 of those rebuild the
-# crate in a sandbox. Sharding is a division of labour and NOT a selection of
+# Sharded, because the fault list is long -- `check-fault-manifest.py
+# --count-selftest-red` says how long, and is the one reader that knows -- and
+# most of it rebuilds the crate in a sandbox. This line used to carry the
+# number itself and was two short from the commit that wrote it.
+#
+# Sharding is a division of labour and NOT a selection of
 # faults: `--shard K/N` decides which job runs a fault, never whether it runs.
 # The two are told apart after the fact -- each shard writes down the ordinals
 # it ran, and verify.yml's gate job adds them up and refuses unless they are
