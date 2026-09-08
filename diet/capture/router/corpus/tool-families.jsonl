@@ -32,4 +32,4 @@
 {"record":"tool_call","id":"f23","at_turn":3,"tool":"run_command","args":{"command":"df -h ."}}
 {"record":"tool_call","id":"f24","at_turn":3,"tool":"execute","args":{"command":"rm -rf target/debug/incremental"}}
 {"record":"response","id":"p3","to_request":"r3","output_tokens":19,"text":"The table now names one row per rule and the router's tests pass over both drives."}
-{"record":"summary","turns":3,"prefill_tokens_total":3500,"product_sha256":"3c0b6988ca8b9cf01f678a21eebb835d24e289051bb3762f9407acbe57f51f37"}
+{"record":"summary","kind":"drive","turns":3,"prefill_tokens_total":3500,"product_sha256":"3c0b6988ca8b9cf01f678a21eebb835d24e289051bb3762f9407acbe57f51f37"}

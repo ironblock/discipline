@@ -4,4 +4,4 @@
 {"record":"tool_call","id":"t1","at_turn":1,"tool":"bash","args":{"command":"cargo test --workspace"},"exit":137,"output":"error: process didn't exit successfully (signal: 9, SIGKILL: kill)"}
 {"record":"tool_call","id":"t2","at_turn":1,"tool":"bash","args":{"command":"./verify.sh --selftest"},"exit":-1,"output":""}
 {"record":"response","id":"a1","to_request":"q1","output_tokens":30,"text":"The suite was killed at 137 and the gate never started."}
-{"record":"summary","turns":1,"prefill_tokens_total":900,"product_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}
+{"record":"summary","kind":"drive","turns":1,"prefill_tokens_total":900,"product_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}

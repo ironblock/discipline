@@ -8,4 +8,4 @@
 {"record":"request","id":"q2","lane":"interview","text":"What did this turn establish that a later turn would need?"}
 {"record":"response","id":"a2","to_request":"q2","output_tokens":0,"text":""}
 {"record":"tool_call","id":"t3","at_turn":2,"tool":"xyzzy","args":{},"exit":127,"output":"xyzzy: command not found"}
-{"record":"summary","turns":2,"prefill_tokens_total":2000,"product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+{"record":"summary","kind":"drive","turns":2,"prefill_tokens_total":2000,"product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}

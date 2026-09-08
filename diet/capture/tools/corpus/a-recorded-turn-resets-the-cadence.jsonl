@@ -40,4 +40,4 @@
 {"record":"request","id":"q10","lane":"main","text":"Keep going on the reconciler, step 10."}
 {"record":"tool_call","id":"t10","at_turn":10,"tool":"bash","args":{"command":"ls diet/src/capture"},"exit":0,"output":"grounded.rs\nmod.rs\ntools.rs"}
 {"record":"response","id":"a10","to_request":"q10","output_tokens":20,"text":"Step 10 is done; the capture directory holds three files."}
-{"record":"summary","turns":10,"prefill_tokens_total":13500,"product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+{"record":"summary","kind":"drive","turns":10,"prefill_tokens_total":13500,"product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}

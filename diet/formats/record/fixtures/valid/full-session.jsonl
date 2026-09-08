@@ -7,4 +7,4 @@
 {"record":"capture","id":"p1","from_fork":"f1","entries":3}
 {"record":"seam","id":"s1","at_turn":1,"rendered_bytes":2048}
 {"record":"claim","id":"c1","hypothesis":"the reconciler drops nothing","result":"supported","consumes":[{"path":"run.jsonl","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}
-{"record":"summary","turns":1,"prefill_tokens_total":1024,"product_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+{"record":"summary","kind":"drive","turns":1,"prefill_tokens_total":1024,"product_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}

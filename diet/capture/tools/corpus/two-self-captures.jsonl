@@ -10,4 +10,4 @@
 {"record":"tool_call","id":"t4","at_turn":2,"tool":"bash","args":{"command":"grep -n Retired diet/src/object.rs"},"exit":0,"output":"diet/src/object.rs:168:    Retired,"}
 {"record":"response","id":"a2","to_request":"q2","output_tokens":30,"text":"Retire marks the entry and keeps it."}
 {"record":"tool_call","id":"t5","at_turn":2,"tool":"update_record","args":{"content":"diet/src/object.rs:412: fn supersede","field":"evidence"},"exit":0,"output":"recorded"}
-{"record":"summary","turns":2,"prefill_tokens_total":2000,"product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+{"record":"summary","kind":"drive","turns":2,"prefill_tokens_total":2000,"product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}

@@ -394,8 +394,51 @@ pub enum Event {
         /// The claim this one supersedes, if it is a correction.
         supersedes: Option<String>,
     },
-    /// The session's totals.
+    /// What the run amounted to, in the terms its own kind is measured in.
     Summary {
+        /// Which kind of run this was, and the totals that kind has.
+        summary: Summary,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// summaries
+// ---------------------------------------------------------------------------
+
+vocabulary! {
+    /// What a run was, which decides what its summary can say.
+    ///
+    /// `replay` is named by #47 and is deliberately NOT here: the issue says
+    /// its fields are "to be stated", and a variant with no stated fields is
+    /// either a guess about what a replay measures or a variant nothing can
+    /// construct. Both are worse than refusing the word until it means
+    /// something, and refusing is the direction this format is allowed to
+    /// grow in.
+    SummaryKind {
+        /// A session that drove a model: turns, prefill, and a product.
+        Drive => "drive",
+        /// A re-derivation: how many targets were checked, how many matched,
+        /// and the digests that say so.
+        Recompute => "recompute",
+    }
+}
+
+/// A run's totals, in the terms of the kind of run it was.
+///
+/// An enum with per-kind fields rather than one struct with optionals, for
+/// the reason `Patch` gives one module over: a summary that could be any of
+/// these depending on which fields happen to be set is a summary whose
+/// meaning is decided at the call site rather than by the schema.
+///
+/// This is also what refuses a sentinel. #47 asks for "sentinel numbers
+/// meaning 'not applicable'" to be refused, and the way to refuse them is not
+/// to check for -1: it is to leave nowhere to put one. A recompute summary
+/// has no `turns` field, so `turns: -1` is an unknown key and the schema
+/// already refuses those by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Summary {
+    /// A session that drove a model.
+    Drive {
         /// How many turns.
         turns: u32,
         /// Prefill tokens across the session.
@@ -403,6 +446,26 @@ pub enum Event {
         /// The digest of the product the session produced.
         product_sha256: String,
     },
+    /// A re-derivation of a result that already exists.
+    Recompute {
+        /// How many targets the recompute set out to check.
+        targets_checked: u32,
+        /// How many of them matched. Never more than were checked.
+        targets_matched: u32,
+        /// The digests it compared, in the order it compared them.
+        digests: Vec<String>,
+    },
+}
+
+impl Summary {
+    /// Which kind this summary is.
+    #[must_use]
+    pub fn kind(&self) -> SummaryKind {
+        match self {
+            Self::Drive { .. } => SummaryKind::Drive,
+            Self::Recompute { .. } => SummaryKind::Recompute,
+        }
+    }
 }
 
 impl Event {
@@ -973,11 +1036,32 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             consumes: take_artifacts(&mut members, of)?,
             supersedes: take_optional_string(&mut members, of, "supersedes")?,
         },
-        Kind::Summary => Event::Summary {
-            turns: take_u32(&mut members, of, "turns")?,
-            prefill_tokens_total: take_u64(&mut members, of, "prefill_tokens_total")?,
-            product_sha256: take_string(&mut members, of, "product_sha256")?,
-        },
+        // `kind` first, then only that kind's fields. Anything else is left in
+        // `members` and refused below as an unknown key -- which is what makes
+        // `turns` on a recompute summary an error rather than a number nobody
+        // reads.
+        Kind::Summary => {
+            let tag = take_string(&mut members, of, "kind")?;
+            let kind = SummaryKind::from_tag(&tag).ok_or(SchemaError::BadValue {
+                of,
+                field: "kind",
+                found: tag,
+            })?;
+            Event::Summary {
+                summary: match kind {
+                    SummaryKind::Drive => Summary::Drive {
+                        turns: take_u32(&mut members, of, "turns")?,
+                        prefill_tokens_total: take_u64(&mut members, of, "prefill_tokens_total")?,
+                        product_sha256: take_string(&mut members, of, "product_sha256")?,
+                    },
+                    SummaryKind::Recompute => Summary::Recompute {
+                        targets_checked: take_u32(&mut members, of, "targets_checked")?,
+                        targets_matched: take_u32(&mut members, of, "targets_matched")?,
+                        digests: take_digests(&mut members, of)?,
+                    },
+                },
+            }
+        }
     };
 
     // Anything left is a key this schema does not define. A typo'd key that is
@@ -1090,6 +1174,54 @@ fn take_artifacts(
         artifacts.push(artifact);
     }
     Ok(artifacts)
+}
+
+/// A `digests` list, with every entry checked to be one.
+///
+/// Modelled on `take_artifacts`. The per-entry check is here rather than in
+/// the structural pass because a digest that is not a digest is a SHAPE
+/// error: nothing downstream can compare it, and reporting it as a
+/// disagreement about a number would name the wrong defect.
+fn take_digests(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Vec<String>, ParseError> {
+    let Some(value) = members.remove("digests") else {
+        return Err(SchemaError::MissingField {
+            of,
+            field: "digests",
+        }
+        .into());
+    };
+    let Value::Array(items) = value else {
+        return Err(SchemaError::WrongType {
+            of,
+            field: "digests".to_owned(),
+            want: "a list of sha256 digests",
+        }
+        .into());
+    };
+    let mut digests = Vec::with_capacity(items.len());
+    for item in items {
+        let Value::String(text) = item else {
+            return Err(SchemaError::WrongType {
+                of,
+                field: "digests[]".to_owned(),
+                want: "a sha256 digest",
+            }
+            .into());
+        };
+        if !digest_ok(&text) {
+            return Err(SchemaError::BadValue {
+                of,
+                field: "digests",
+                found: text,
+            }
+            .into());
+        }
+        digests.push(text);
+    }
+    Ok(digests)
 }
 
 fn take_string(
@@ -1361,11 +1493,7 @@ impl<'a> Seen<'a> {
                 supersedes,
                 ..
             } => self.admit_claim(id, consumes, supersedes.as_deref())?,
-            Event::Summary {
-                turns,
-                prefill_tokens_total,
-                product_sha256,
-            } => self.admit_summary(*turns, *prefill_tokens_total, product_sha256)?,
+            Event::Summary { summary } => self.admit_summary(summary)?,
             Event::Start { .. } => {}
         }
         Ok(())
@@ -1407,31 +1535,61 @@ impl<'a> Seen<'a> {
     /// because a report's front-matter numbers are verified against THIS row
     /// rather than against the rows themselves. An inconsistent summary would
     /// launder a wrong number into a green results gate.
-    fn admit_summary(
-        &self,
-        turns: u32,
-        prefill_tokens_total: Count,
-        product_sha256: &str,
-    ) -> Result<(), ParseError> {
-        if !digest_ok(product_sha256) {
-            return Err(StructureError::BadDigest(product_sha256.to_owned()).into());
-        }
-        let counted = self.next_turn - 1;
-        if turns != counted {
-            return Err(StructureError::SummaryDisagrees {
-                field: "turns",
-                says: u64::from(turns),
-                counted: u64::from(counted),
+    /// What a summary must agree with, in the terms of its own kind.
+    ///
+    /// The cross-checks were written when there was one kind of summary and
+    /// they are about a DRIVE: `turns` against the turns this reader counted,
+    /// `prefill_tokens_total` against the prefill it added up. A recompute
+    /// counted no turns and consumed no prefill, so running those checks
+    /// against it would compare a number to nothing and call the answer a
+    /// disagreement. Splitting the summary into kinds is what makes that
+    /// impossible to write rather than merely wrong.
+    fn admit_summary(&self, summary: &Summary) -> Result<(), ParseError> {
+        match summary {
+            Summary::Drive {
+                turns,
+                prefill_tokens_total,
+                product_sha256,
+            } => {
+                if !digest_ok(product_sha256) {
+                    return Err(StructureError::BadDigest(product_sha256.clone()).into());
+                }
+                let counted = self.next_turn - 1;
+                if *turns != counted {
+                    return Err(StructureError::SummaryDisagrees {
+                        field: "turns",
+                        says: u64::from(*turns),
+                        counted: u64::from(counted),
+                    }
+                    .into());
+                }
+                if *prefill_tokens_total != self.prefill_tokens {
+                    return Err(StructureError::SummaryDisagrees {
+                        field: "prefill_tokens_total",
+                        says: prefill_tokens_total.get(),
+                        counted: self.prefill_tokens.get(),
+                    }
+                    .into());
+                }
             }
-            .into());
-        }
-        if prefill_tokens_total != self.prefill_tokens {
-            return Err(StructureError::SummaryDisagrees {
-                field: "prefill_tokens_total",
-                says: prefill_tokens_total.get(),
-                counted: self.prefill_tokens.get(),
+            Summary::Recompute {
+                targets_checked,
+                targets_matched,
+                ..
+            } => {
+                // More matched than were checked is not a disagreement with
+                // something this reader counted -- it is a claim that cannot
+                // be true of itself, and it is the shape a "not applicable"
+                // sentinel would arrive in if one were still possible here.
+                if targets_matched > targets_checked {
+                    return Err(StructureError::SummaryDisagrees {
+                        field: "targets_matched",
+                        says: u64::from(*targets_matched),
+                        counted: u64::from(*targets_checked),
+                    }
+                    .into());
+                }
             }
-            .into());
         }
         Ok(())
     }
@@ -1668,14 +1826,35 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put("consumes", artifacts_value(consumes));
             members.put_optional("supersedes", supersedes.clone().map(Value::String));
         }
-        Event::Summary {
-            turns,
-            prefill_tokens_total,
-            product_sha256,
-        } => {
-            members.put_u32("turns", *turns);
-            members.put_count("prefill_tokens_total", *prefill_tokens_total);
-            members.put_text("product_sha256", product_sha256);
+        Event::Summary { summary } => {
+            // `kind` always, then that kind's own fields and no others -- so
+            // what comes back out is what the schema would accept going in.
+            members.put_text("kind", summary.kind().tag());
+            match summary {
+                Summary::Drive {
+                    turns,
+                    prefill_tokens_total,
+                    product_sha256,
+                } => {
+                    members.put_u32("turns", *turns);
+                    members.put_count("prefill_tokens_total", *prefill_tokens_total);
+                    members.put_text("product_sha256", product_sha256);
+                }
+                Summary::Recompute {
+                    targets_checked,
+                    targets_matched,
+                    digests,
+                } => {
+                    members.put_u32("targets_checked", *targets_checked);
+                    members.put_u32("targets_matched", *targets_matched);
+                    members.put(
+                        "digests",
+                        Value::Array(
+                            digests.iter().cloned().map(Value::String).collect::<Vec<_>>(),
+                        ),
+                    );
+                }
+            }
         }
     }
     members.0
@@ -2067,7 +2246,7 @@ mod tests {
             "{{\"record\":\"turn\",\"index\":1,\"prefill_tokens\":1024}}\n\
              {{\"record\":\"fork\",\"id\":\"f1\",\"lane\":\"interview\",\"of_turn\":1}}\n\
              {{\"record\":\"capture\",\"id\":\"p1\",\"from_fork\":\"f1\",\"entries\":3}}\n\
-             {{\"record\":\"summary\",\"turns\":1,\"prefill_tokens_total\":1024,\
+             {{\"record\":\"summary\",\"kind\":\"drive\",\"turns\":1,\"prefill_tokens_total\":1024,\
              \"product_sha256\":\"{digest}\"}}\n"
         ));
         let once = parse(&source).expect("a record");
@@ -2330,7 +2509,7 @@ mod tests {
         let digest = "b".repeat(64);
         let source = record(&format!(
             "{{\"record\":\"turn\",\"index\":1,\"prefill_tokens\":10}}\n\
-             {{\"record\":\"summary\",\"turns\":99,\"prefill_tokens_total\":10,\
+             {{\"record\":\"summary\",\"kind\":\"drive\",\"turns\":99,\"prefill_tokens_total\":10,\
              \"product_sha256\":\"{digest}\"}}\n"
         ));
         assert!(matches!(

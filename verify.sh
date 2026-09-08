@@ -1695,8 +1695,8 @@ report.write_text(source.replace("turns = 2\n", "turns = 3\n", 1), encoding="utf
 
 record = pathlib.Path("results/_template/run.jsonl")
 source = record.read_text(encoding="utf-8")
-old = '{"record":"summary","turns":2,'
-new = '{"record":"summary","turns":3,'
+old = '{"record":"summary","kind":"drive","turns":2,'
+new = '{"record":"summary","kind":"drive","turns":3,'
 assert old in source
 record.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF

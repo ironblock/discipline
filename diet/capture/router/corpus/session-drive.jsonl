@@ -36,4 +36,4 @@
 {"record":"tool_call","id":"t21","at_turn":5,"tool":"bash","args":{"command":"git add -A && git commit -q -F - <<'EOF'\nfeat(record,shell): the record keeps a drive's payloads, and a shell grammar reads a tool call as the shell does\nEOF"},"exit":0,"output":""}
 {"record":"tool_call","id":"t22","at_turn":5,"tool":"bash","args":{"command":"./verify.sh 2>&1 | tail -20"},"exit":0,"output":"--- parity: PASS (exit 0)\n\nverify: 12 check(s) passed."}
 {"record":"response","id":"a5","to_request":"q5","output_tokens":17,"text":"The gate passes with the four new faults registered. The foundation is committed; the selftest runs next."}
-{"record":"summary","turns":5,"prefill_tokens_total":10000,"product_sha256":"2bd8b7b0d83e0ec92abdf6f714ca199a7874d08636965471035c4dcd1b38b6fb"}
+{"record":"summary","kind":"drive","turns":5,"prefill_tokens_total":10000,"product_sha256":"2bd8b7b0d83e0ec92abdf6f714ca199a7874d08636965471035c4dcd1b38b6fb"}

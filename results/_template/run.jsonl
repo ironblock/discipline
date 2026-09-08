@@ -2,4 +2,4 @@
 {"record":"turn","index":1,"prefill_tokens":1024}
 {"record":"turn","index":2,"prefill_tokens":1024}
 {"record":"claim","id":"c1","hypothesis":"the recorded turn count re-derives from the committed artefacts","result":"supported","consumes":[{"path":"product.txt","sha256":"b491f615ad737993319517a59c5d450c320ea7d20358e4787e41526baae05182"}]}
-{"record":"summary","turns":2,"prefill_tokens_total":2048,"product_sha256":"b491f615ad737993319517a59c5d450c320ea7d20358e4787e41526baae05182"}
+{"record":"summary","kind":"drive","turns":2,"prefill_tokens_total":2048,"product_sha256":"b491f615ad737993319517a59c5d450c320ea7d20358e4787e41526baae05182"}
