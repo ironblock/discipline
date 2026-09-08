@@ -3,7 +3,7 @@
 Public prose in this repository names hardware by a **registry id**, never by a
 hostname or a household phrase. This directory is where those ids resolve.
 `registry.toml` is the machine-readable copy; this file says what the ids mean,
-how to use them, and where the file departs from a ruling.
+how to use them, and where a line runs that this file once crossed.
 
 It is a **manifest of the hardware available for testing, in detail** — exact
 parts, memory configuration and channels, interconnect, storage, cooling,
@@ -57,28 +57,23 @@ An instance is a statement about a moment, and `current = true` is a statement
 about today: as of 2026-09-07 the accelerator host has a newer image staged and
 unbooted, which will mint a new instance the next time it reboots.
 
-### Where this departs from a ruling, and why it is the maintainer's call
+### What an instance is not
 
-The first comment on #52 places the server's parallel-slot count in the regimen
-grammar as a per-run declared field, and adds: *"noted so the registry's
-substrate entries do not absorb what is a per-run setting."*
+The line, ruled on #52: **the registry records what the machine *is* — deployment
+checksum, kernel, engine and weights digests, hardware. The regimen records how
+it was *run*.**
 
-**This file absorbs it.** Instances `2026-08-13` and `2026-08-16` are the same
-deployment, the same kernel, the same weights and the same serving flags, and
-differ only in that count — so under the ruling they are one instance, and under
-this file they are two.
+An earlier version of this file crossed it. The archive holds two captures,
+2026-08-13 and 2026-08-16, that agree on every field an instance carries and
+differ in the server's parallel-slot count, and this file made them two
+instances and called the pair "the measured proof" that an instance must key on
+serving configuration. The slot count is how the machine was run. They are one
+instance, keyed on the deployment, and the file says so where the second one
+used to be.
 
-The case for looking again: the count is not only declared per run, it is a
-property of *how the server was started*, and it changed under a fixed
-deployment with no other trace. A record that says "instance 2026-08-13" and
-means "whichever slot count the server happened to have" pins less than it
-appears to. The case against is the ruling's own: a per-run setting recorded in
-two places will eventually disagree in two places.
-
-Either resolution is buildable. **Do not read the pair as settled** — it is
-disclosed here, argued in the instance's own `why_a_separate_instance`, and
-waiting on a ruling. If the ruling stands, drop the `2026-08-16` instance and
-let the regimen carry the count.
+The measurement was not wrong, only mis-filed: the archive does record the slot
+count changing under a fixed deployment. That is a fact about a run, and it
+belongs to the regimen that declares it.
 
 ## How a record references equipment
 

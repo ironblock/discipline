@@ -223,7 +223,7 @@ serving_flags_constant_across_instances = true
 serving_flags_excludes = """
 The captured serving line's remaining flags are carried elsewhere rather than \
 dropped: `--ctx-size` is `serving_context`, the four sampler flags are the \
-`sampler_card`, `-np` is each instance's `serving_parallel_slots`, and `-m`, \
+`sampler_card`, `-np` is a regimen field and not this file's, and `-m`, \
 `--mmproj` and `--spec-draft-model` are file paths, withheld as identity and \
 carried here as the three weights digests. Nothing else in the captures is \
 omitted; an earlier version of this field silently dropped the template and \
@@ -246,7 +246,6 @@ id = "2026-07-25"
 os_deployment_version = "44.20260721"
 os_deployment_digest = "ece1632fd68d2b17089db0b960fd182d1a9b10bbc2c999457597d24d1616acaa"
 kernel = "7.1.3-ogc5.1.fc44.x86_64"
-serving_parallel_slots = 1
 pinned_by = "substrate capture of 2026-07-25, and the archive's frozen v1.0 baseline of the same configuration"
 engine_identity_measured = false
 engine_identified_by_record = """
@@ -266,39 +265,26 @@ id = "2026-08-13"
 os_deployment_version = "44.20260802"
 os_deployment_digest = "6b752810f32080830f3a294428b7851fb686fc298f54016152d78f4671f71f79"
 kernel = "7.1.5-ogc5.1.fc44.x86_64"
-serving_parallel_slots = 1
-pinned_by = "substrate capture of 2026-08-13, taken after a kernel update"
+pinned_by = "substrate captures of 2026-08-13 and 2026-08-16, taken after a kernel update"
 engine_identity_measured = false
+one_instance_two_captures = """
+An earlier version of this file made these two captures two instances, because \
+the server's parallel-slot count went from 1 to 2 between them under an \
+otherwise fixed deployment. Ruled otherwise, and the ruling is the cleaner \
+line: the registry records what the machine IS -- deployment, kernel, engine \
+and weights digests, hardware -- and the regimen records how it was RUN. A slot \
+count is how it was run. The two captures agree on every field this entry \
+carries, so they are one instance, keyed on the deployment.
 
-[[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
-id = "2026-08-16"
-os_deployment_version = "44.20260802"
-os_deployment_digest = "6b752810f32080830f3a294428b7851fb686fc298f54016152d78f4671f71f79"
-kernel = "7.1.5-ogc5.1.fc44.x86_64"
-serving_parallel_slots = 2
-pinned_by = "substrate capture of 2026-08-16"
-engine_identity_measured = false
-why_a_separate_instance = """
-Same operating system deployment, same kernel, same weights and same serving \
-flags as 2026-08-13. The server's parallel-slot count went from 1 to 2, which \
-changes how requests share the cache.
-
-The engine is NOT part of that list: it is unpinned at both instances, and \
-"same engine" would be an inference inside a sentence whose point is what was \
-measured.
-
-THIS INSTANCE DEPARTS FROM A RULING AND THE DEPARTURE IS ARGUED IN THE README. \
-The first comment on #52 placed the slot count in the regimen grammar as a \
-per-run declared field, "noted so the registry's substrate entries do not \
-absorb what is a per-run setting". This pair is the reason to look at that \
-again, and it is the maintainer's call, not this seat's."""
+The measurement is not lost, only rehomed: the archive does record the slot \
+count changing under a fixed deployment, which is a fact about a run and \
+belongs in the regimen that declares it."""
 
 [[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
 id = "2026-09-04"
 os_deployment_version = "44.20260902"
 os_deployment_digest = "b7807f90a98c33e911dc0ec008bc73b50561e89566cee2b85b18ff950f47ec78"
 kernel = "7.2.1-ogc4.1.fc44.x86_64"
-serving_parallel_slots = 2
 pinned_by = "substrate capture of 2026-09-04, taken after the operating system update of 2026-09-03"
 os_deployment_checksum = "48f798c562fe4a76ba311f638a6b543429d02bdfd01fe9dfa7e7063109ee6e19"
 os_deployment_checksum_note = """
