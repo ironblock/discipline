@@ -22,6 +22,13 @@ pest_derive = "2.9"
 # inference server's reply carries all three; pointing the record's reader at
 # the wire would be one format with two implementations.
 serde_json = { version = "1", features = ["arbitrary_precision"] }
+# SHA-256, because `summary.product_sha256` is the record's IDENTITY
+# primitive -- binary provenance, consumed digests, engine identity. Ruling 7:
+# a cryptographic primitive is the canonical buy, and this is the one place a
+# subtle bug is both catastrophic and silent. The hand-rolled implementation
+# this replaces passed every published vector and a 221-input differential;
+# that is not the argument. The argument is that nobody should have to check.
+sha2 = "0.11"
 
 [lints]
 workspace = true

@@ -71,7 +71,7 @@ use crate::formats::interview;
 use crate::formats::record::json::Value;
 use crate::formats::record::{Count, Event, ParseError, Record, render};
 use crate::isolation::{Confinement, NotRun, Policy as IsolationPolicy, Unavailable};
-use crate::object::{EntryId, ObjectError, Patch, Provenance, WorkingObject};
+use crate::object::{Applied, EntryId, ObjectError, Patch, Provenance, WorkingObject};
 use crate::seam::policy::Policy as SeamPolicy;
 use crate::seam::{Ask, Controller, Ratifier, Seam, SeamError};
 
@@ -259,6 +259,29 @@ pub struct Uncaptured {
     /// the fact that there were more is carried here. Dropped, it made a
     /// cut-off answer indistinguishable from a whole one.
     pub truncated: bool,
+    /// How many entries this capture MOVED.
+    ///
+    /// `Applied::touched` is the object's own answer to which entries a patch
+    /// moved: a `Deduped` patch counts, because a provenance was recorded on
+    /// the entry that already held the content, and only `Unchanged` returns
+    /// none. This answers *did the fork produce signal*.
+    pub entries_touched: u32,
+    /// How many entries this capture BROUGHT INTO EXISTENCE.
+    ///
+    /// `Created`, plus the `added` half of a `Supersede`. This answers *did
+    /// the fork produce NEW signal*, which is the collector's dedup
+    /// economics and a different question from the one above.
+    ///
+    /// **Ruling 6: two fields, not one reading.** A single number named
+    /// `entries` is the qualifier-loss class waiting to happen -- it reads as
+    /// whichever of the two questions its reader had in mind, and the two
+    /// diverge exactly where the interesting case is. Record v0 has one
+    /// field; `capture.entries` in a v0 record means `entries_touched`, which
+    /// is what it has always been counting, and record v1 splits it by a
+    /// superseding row rather than an edit. Both numbers are computed here so
+    /// that the day the schema has somewhere to put them, nothing has to be
+    /// recomputed from an archive that never carried the second.
+    pub entries_created: u32,
 }
 
 /// What became of one seam's ratification.
@@ -432,6 +455,11 @@ fn fold(
         captured: patches.len(),
         passed_over,
         truncated,
+        // Filled by the caller: what the object made of these patches is not
+        // known until they are applied, and a fold that guessed would be
+        // guessing at the one number this census exists to be right about.
+        entries_touched: 0,
+        entries_created: 0,
     };
     Ok((patches, census))
 }
@@ -567,29 +595,49 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             let applied = object
                 .apply_turn(&patches)
                 .map_err(|why| Halt::ObjectRefused { turn: index, why })?;
-            uncaptured.push(census);
-            // ENTRIES, not patches. `apply_turn` returns one `Applied` per
-            // patch whatever it did, so `applied.len()` is the patch count
-            // wearing the schema's word for something else -- and the shipped
-            // fixture was already wrong: turn two's fork repeats turn one's
-            // answer, both patches came back `Deduped`, no entry was written,
-            // and the record claimed two. `Applied::touched` is the object's
-            // own answer to "which entries did this move", and `Unchanged`
-            // returns none from it.
-            let mut wrote: BTreeSet<EntryId> = BTreeSet::new();
+
+            // TWO counts, because they answer two questions -- ruling 6.
+            // `apply_turn` returns one `Applied` per patch whatever it did,
+            // so `applied.len()` is the patch count wearing the schema's word
+            // for something else, and neither of these is that.
+            let mut touched: BTreeSet<EntryId> = BTreeSet::new();
+            let mut created: BTreeSet<EntryId> = BTreeSet::new();
             for one in &applied {
-                wrote.extend(one.touched());
+                touched.extend(one.touched());
+                match one {
+                    Applied::Created(id) => {
+                        created.insert(id.clone());
+                    }
+                    Applied::Superseded { added, .. } => {
+                        created.insert(added.clone());
+                    }
+                    Applied::Deduped(_) | Applied::StateChanged(_) | Applied::Unchanged(_) => {}
+                }
             }
-            let Ok(entries) = u32::try_from(wrote.len()) else {
+            let (Ok(entries_touched), Ok(entries_created)) =
+                (u32::try_from(touched.len()), u32::try_from(created.len()))
+            else {
                 return Err(Halt::Unmeasured {
                     turn: index,
                     what: "capture.entries",
                 });
             };
+            uncaptured.push(Uncaptured {
+                entries_touched,
+                entries_created,
+                ..census
+            });
+
+            // Record v0 has ONE field, and what it has always been counting
+            // is the touched set -- so that is what goes in it, under its
+            // true meaning. Record v1 splits it by a superseding row rather
+            // than an edit, which is why nothing here writes `created` into
+            // a v0 record: a field that meant one thing in old records and
+            // another in new ones is unreadable across the archive.
             events.push(Event::Capture {
                 id: capture_ids.take(),
                 from_fork: fork_id,
-                entries,
+                entries: entries_touched,
             });
         }
 
@@ -1694,39 +1742,65 @@ mod tests {
             vec![2, 2],
             "each capture wrote to two entries. `Applied::touched` is the \
              object's own answer to which entries a patch moved, and it is what \
-             this counts -- `applied.len()` was the PATCH count wearing the \
-             schema's word for something else, and would say two here for a \
-             fold that produced two patches and moved nothing."
+             record v0's one field counts -- `applied.len()` was the PATCH count \
+             wearing the schema's word for something else, and would say two \
+             here for a fold that produced two patches and moved nothing."
         );
 
-        // The fact the count alone cannot carry, and the reason the
-        // created-or-touched question is disclosed on the PR rather than
-        // decided here: turn two's fork repeats turn one's answer word for
-        // word, both patches came back `Deduped`, and the object grew by
-        // nothing. Four patches, four touches, two entries.
-        let entries = drive.product.lines().count();
+        // Ruling 6: the two questions, and the run where they diverge. Turn
+        // two's fork repeats turn one's answer word for word -- so it TOUCHED
+        // two entries and CREATED none, and a single number cannot say both.
         assert_eq!(
-            entries, 2,
-            "two captures of two patches each, and the object holds two \
-             entries: {}",
-            drive.product
+            drive
+                .uncaptured
+                .iter()
+                .map(|census| (census.entries_touched, census.entries_created))
+                .collect::<Vec<_>>(),
+            vec![(2, 2), (2, 0)],
+            "the first fork created what it touched; the second created \
+             nothing and touched the same two. A reader summing `entries` \
+             across captures to size the object would double it: {:?}",
+            drive.uncaptured
         );
+        assert_eq!(
+            drive.product.lines().count(),
+            2,
+            "and the object holds two entries, which is the created total and \
+             not the touched one"
+        );
+    }
 
-        // And the shape that tells the two readings apart. One fork, two
-        // regions saying the same thing: two patches, and the second dedupes
-        // onto the first, so ONE entry was touched. Counted from the patch
-        // list this row says two. Every other fixture in this lane agrees
-        // under both readings, which is why this one exists.
-        let ground = Ground::make("entries-deduped");
+    #[test]
+    fn the_two_entry_counts_answer_two_questions_and_the_record_carries_one() {
+        // The whole of ruling 6 in one test. `entries_touched` asks *did the
+        // fork produce signal*; `entries_created` asks *did it produce NEW
+        // signal*, which is the collector's dedup economics. A single field
+        // named `entries` reads as whichever its reader had in mind, and the
+        // two diverge exactly where the interesting case is.
+        let ground = Ground::make("two-counts");
         let mut script = three_turns();
         script.turns.truncate(1);
         script.turns[0].commands = Vec::new();
+
+        // One fork, two regions saying the same thing: two patches, one entry,
+        // and the second patch dedupes onto the first.
         let acts = vec![
             Act::Answer(canned::reply("turn one")),
             Act::Answer(canned::reply(canned::FORK_REPEATS_ITSELF)),
         ];
         let drive = against(&script, acts, &ground).expect("the drive ran");
-        assert_eq!(drive.uncaptured[0].captured, 2, "two patches were folded");
+
+        let census = &drive.uncaptured[0];
+        assert_eq!(census.captured, 2, "two patches were folded");
+        assert_eq!(census.entries_touched, 1, "onto one entry");
+        assert_eq!(census.entries_created, 1, "which it brought into existence");
+        assert_eq!(drive.product.lines().count(), 1);
+
+        // Record v0 carries the TOUCHED count under its one field, because
+        // that is what it has always been counting. A v1 row will carry both;
+        // nothing here writes `created` into a v0 record, because a field that
+        // meant one thing in old records and another in new ones is
+        // unreadable across the archive.
         let Some(Event::Capture { entries, .. }) = drive
             .record
             .events
@@ -1735,11 +1809,7 @@ mod tests {
         else {
             panic!("a capture row")
         };
-        assert_eq!(
-            *entries, 1,
-            "and they touched one entry between them: {}",
-            drive.product
-        );
+        assert_eq!(*entries, census.entries_touched);
     }
 
     #[test]
