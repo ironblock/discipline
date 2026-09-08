@@ -15,15 +15,17 @@
 # lane's tests were run, and `catches` is what actually failed. No entry
 # claims a catch it does not have.
 #
-# `catches` excludes this lane's own drift guard
-# (`every_seeded_fault_still_names_source_that_is_there`), which fires for
-# every fault by construction because a mutation IS an anchor being
-# replaced. Listing it against all of them would make the field say nothing.
+# The drift guard (`every_seeded_fault_still_names_source_that_is_there`)
+# fires for EVERY fault by construction, because a mutation is an anchor
+# being replaced. So `command` skips it and `catches` excludes it. With it
+# in the run, `expect_exit` was 101 for every fault whether or not the
+# fault had a catcher of its own -- an orchestrator reading the exit code
+# would score a fault green with its only catcher deleted.
 
 [package]
 name = "diet-client"
 check = "test"
-command = "cargo test -p discipline-diet -- client"
+command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
 faults = 24
 
 [[fault]]

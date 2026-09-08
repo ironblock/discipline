@@ -1891,9 +1891,27 @@ mod tests {
     /// generates would be a second reader of a format that already has one.
     /// The scan mirrors the generator's shape exactly, and a scan that finds
     /// no faults fails rather than passing over nothing.
+    ///
+    /// **Every field an orchestrator acts on, not just the anchor.** A
+    /// `catches` naming a test that had been renamed or deleted used to pass:
+    /// the fault would be applied, the named test would not run, and the run
+    /// would be scored against a catcher that does not exist. `expect_exit`
+    /// is checked for the same reason -- it is the number the orchestrator
+    /// compares against.
     #[test]
     fn every_seeded_fault_still_names_source_that_is_there() {
         let manifest = include_str!("../../client/gate.toml");
+        // The lane's whole source, so a catcher can be looked for wherever
+        // its test lives rather than only in this file.
+        let lane = concat!(
+            include_str!("mod.rs"),
+            include_str!("echo.rs"),
+            include_str!("journal.rs"),
+            include_str!("shape.rs"),
+            include_str!("stub.rs"),
+            include_str!("transport.rs"),
+            include_str!("wire.rs")
+        );
         let mut checked = 0;
         for block in manifest.split("\n[[fault]]\n").skip(1) {
             let id = between(block, "id = \"", "\"").expect("a fault has an id");
@@ -1914,12 +1932,51 @@ mod tests {
                  manifest is stale: either the mutation has to move with the code, \
                  or the fault it seeds is gone."
             );
+            between(block, "expect_exit = ", "\n")
+                .expect("a fault declares the exit it expects")
+                .parse::<i32>()
+                .unwrap_or_else(|why| panic!("{id}: its `expect_exit` is not a number: {why}"));
+
+            let catches = between(block, "catches = [\n", "]").expect("a fault names its catchers");
+            let mut named = 0;
+            for line in catches.lines() {
+                let Some(name) = between(line, "\"", "\"") else {
+                    continue;
+                };
+                let path: Vec<&str> = name.split("::").collect();
+                let (Some(leaf), true) = (
+                    path.last().copied(),
+                    path.len() == 1
+                        || (path.len() >= 3
+                            && path[0] == "client"
+                            && path[path.len() - 2] == "tests"),
+                ) else {
+                    panic!("{id}: `{name}` is not a test this lane contains");
+                };
+                assert_eq!(
+                    lane.matches(&format!("fn {leaf}(")).count(),
+                    1,
+                    "{id}: it claims to be caught by `{name}`, and no such test is in \
+                     the lane. A fault whose catcher was renamed or deleted is applied, \
+                     caught by nothing, and scored against a name."
+                );
+                named += 1;
+            }
+            assert!(
+                named > 0,
+                "{id}: a fault with an empty `catches` is a mutation nothing proves"
+            );
             checked += 1;
         }
+        let declared: usize = between(manifest, "\nfaults = ", "\n")
+            .expect("the package block declares a count")
+            .parse()
+            .expect("the count is a number");
         assert_eq!(
-            checked, 24,
-            "the manifest declares its own count, and a scanner that found a \
-             different number found the wrong thing"
+            checked, declared,
+            "the manifest declares its own count and this READS it. Hardcoded, it \
+             said 24 beside a doc comment claiming the manifest declared it, and \
+             `faults = 9001` passed."
         );
     }
 
