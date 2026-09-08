@@ -1,0 +1,25 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "keep the guard — EVIDENCE: the selftest went red"
+      },
+      "raw": "keep the guard — EVIDENCE: the selftest went red",
+      "tag": {
+        "as_written": "DECISION —",
+        "kind": "decision"
+      }
+    },
+    {
+      "outcome": {
+        "value": "land it"
+      },
+      "raw": "land it",
+      "tag": {
+        "as_written": "PLAN:",
+        "kind": "plan"
+      }
+    }
+  ]
+}
