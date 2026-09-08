@@ -78,6 +78,7 @@ fn run(program: &str, args: &[&str]) -> (i32, String, String) {
 #[test]
 fn the_drive_writes_a_record_a_second_process_accepts() {
     let ground = Ground::make("round-trip");
+    let started = std::time::SystemTime::now();
     let regimen = regimen();
     let (code, out, err) = run(
         DRIVE,
@@ -109,12 +110,27 @@ fn the_drive_writes_a_record_a_second_process_accepts() {
         ground.base.join("tree/one.txt").is_file() && ground.base.join("tree/three.txt").is_file(),
         "the script's commands wrote into the working tree"
     );
-    assert!(
-        !Path::new("one.txt").exists() && !Path::new("three.txt").exists(),
-        "and not into whatever directory the test happened to run from -- the \
-         first version defaulted the worktree to the current directory and \
-         dropped these two files into the checkout"
-    );
+    // And NOT into whatever directory the test happened to run from. The
+    // first version defaulted the worktree to the current directory and
+    // dropped these two files into the checkout.
+    //
+    // Asserted on mtime rather than existence, because a previous run of the
+    // seeded fault for this defect leaves them behind -- and a test that a
+    // leftover file can hold red is a test that reports the last run instead
+    // of this one.
+    for stray in ["one.txt", "three.txt"] {
+        let Ok(meta) = std::fs::metadata(stray) else {
+            continue;
+        };
+        let age = meta
+            .modified()
+            .ok()
+            .and_then(|at| started.duration_since(at).ok());
+        assert!(
+            age.is_some(),
+            "{stray} was written into the current directory by THIS run"
+        );
+    }
 }
 
 #[test]

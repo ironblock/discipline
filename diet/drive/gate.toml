@@ -152,6 +152,7 @@ becomes = '''
     let turns = 3;
     let Ok(_unused) = u32::try_from(script.turns.len()) else {'''
 catches = [
+    "drive::tests::a_capture_counts_entries_and_not_patches",
     "drive::tests::a_retried_call_archives_each_attempt_with_what_that_attempt_sent",
     "drive::tests::a_stripped_retry_archives_the_body_that_attempt_actually_sent",
     "drive::tests::a_truncated_fork_answer_is_recorded_as_truncated",
@@ -324,7 +325,7 @@ catches = [
 id = "drive.output-tokens-are-fabricated-as-zero"
 failure_class = "drive.output-tokens-are-fabricated-as-zero"
 target = "diet/src/drive/mod.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
     if let Some(answer) = call.outcome.answer()
         && answer.output_tokens.is_none()
@@ -338,31 +339,30 @@ anchor = '''
 becomes = '''
 '''
 catches = [
+    "drive::tests::a_server_that_counted_the_prompt_and_not_the_answer_halts_too",
 ]
 
 [[fault]]
 id = "drive.the-audit-is-folded-with-the-interview-grammar"
 failure_class = "drive.the-audit-is-folded-with-the-interview-grammar"
 target = "diet/src/drive/mod.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
         self.calls.push(call);
         Vec::new()
     }'''
 becomes = '''
-        let folded = self
-            .calls
-            .last()
-            .and_then(|call| call.outcome.answer())
-            .and_then(|answer| {
-                fold(&answer.text, self.turn.get(), RATIFY, None)
-                    .ok()
-                    .map(|(patches, _)| patches)
-            });
+        let folded = call.outcome.answer().and_then(|answer| {
+            fold(&answer.text, self.turn.get(), RATIFY, None)
+                .ok()
+                .map(|(patches, _)| patches)
+        });
         self.calls.push(call);
         folded.unwrap_or_default()
     }'''
 catches = [
+    "drive::tests::a_capture_counts_entries_and_not_patches",
+    "drive::tests::every_entry_the_fold_writes_names_its_lane_and_keeps_its_tag",
 ]
 
 [[fault]]
@@ -384,7 +384,7 @@ catches = [
 id = "drive.capture-entries-counts-patches"
 failure_class = "drive.capture-entries-counts-patches"
 target = "diet/src/drive/mod.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
             let mut wrote: BTreeSet<EntryId> = BTreeSet::new();
             for one in &applied {
@@ -397,6 +397,7 @@ becomes = '''
                 wrote.insert(EntryId::new(&format!("patch-{at}")).expect("a name"));
             }'''
 catches = [
+    "drive::tests::a_capture_counts_entries_and_not_patches",
 ]
 
 [[fault]]
@@ -653,7 +654,7 @@ catches = [
 id = "drive.the-worktree-is-the-operators-directory"
 failure_class = "drive.the-worktree-is-the-operators-directory"
 target = "diet/src/bin/drive.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
     let worktree = match std::path::absolute(worktree) {
         Ok(path) if path.is_dir() => path,'''
@@ -667,7 +668,7 @@ catches = [
 id = "drive.the-output-path-is-claimed-last"
 failure_class = "drive.the-output-path-is-claimed-last"
 target = "diet/src/bin/drive.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
     if let Err(why) = std::fs::write(out_path, "") {
         return fail(
@@ -685,7 +686,7 @@ catches = [
 id = "drive.the-sampler-crosses-as-a-debug-rendering"
 failure_class = "drive.the-sampler-crosses-as-a-debug-rendering"
 target = "diet/src/bin/drive.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
         regimen::Value::Float(decimal) => Value::Decimal(decimal.clone()),'''
 becomes = '''
