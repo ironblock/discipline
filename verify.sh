@@ -5322,13 +5322,22 @@ selftest() {
   # whole of `diet/` counted, so editing a fixture made `--only regimen` exit
   # 2 until the binary was relinked -- and `cargo build` did not clear it,
   # because cargo correctly rebuilds nothing.
+  #
+  # EACH PUTS THE TREE BACK. These two touch a real file and then ask about
+  # the real binary, so an assertion that left the binary stale would hand
+  # every assertion after it a tree it did not make -- which is what happened:
+  # `a pin spelled with ./ is the same pin` read exit 2 from a grammar this
+  # block had touched three lines earlier.
   expect_exit "a grammar makes the binary stale" 2 \
     bash -c "cd '${ROOT}' && touch diet/src/lib.rs && cargo build --quiet --bin diet \
-      && touch diet/formats/record/grammar.pest && python3 scripts/resolve-diet.py"
+      && touch diet/formats/record/grammar.pest \
+      ; python3 scripts/resolve-diet.py > /dev/null 2>&1; rc=\$? \
+      ; touch diet/src/lib.rs && cargo build --quiet --bin diet; exit \$rc"
   expect_exit "a conformance fixture does not" 0 \
     bash -c "cd '${ROOT}' && touch diet/src/lib.rs && cargo build --quiet --bin diet \
       && touch diet/formats/record/fixtures/valid/minimal.expected.json \
-      && python3 scripts/resolve-diet.py"
+      ; python3 scripts/resolve-diet.py > /dev/null 2>&1; rc=\$? \
+      ; touch diet/src/lib.rs && cargo build --quiet --bin diet; exit \$rc"
 
   # --- binary provenance at the boundary ---
   #
@@ -5399,9 +5408,24 @@ selftest() {
       python3 '${ROOT}/scripts/resolve-diet.py'"
 
   # A pin honoured is not a pin ignored, whatever spelling it arrived in.
+  #
+  # WITH A SOURCE TO CHECK IT AGAINST. This used to run in a directory whose
+  # only content was a file named `diet`, and the staleness check took THAT as
+  # the crate -- `diet/` was a source root, `is_file()` matched, and the binary
+  # was compared against itself. The assertion passed for a reason that had
+  # nothing to do with pins, and it passed right beside a sibling asserting
+  # that a directory with no sources is a REFUSAL. It surfaced when `diet/`
+  # stopped being a source root (#50); it was resting on the coincidence the
+  # whole time.
+  local spelled; scratch; spelled="$SCRATCH"
+  mkdir -p "${spelled}/diet/src" "${spelled}/build"
+  : > "${spelled}/diet/src/lib.rs"
+  : > "${spelled}/Cargo.toml"
+  printf '#!/bin/sh\nexit 0\n' > "${spelled}/build/diet"
+  chmod +x "${spelled}/build/diet"
   expect_exit "a pin spelled with ./ is the same pin" 0 \
-    bash -c "cd '${pin}' && CARGO_TARGET_DIR= DIET_BIN=./diet \
-      python3 '${ROOT}/scripts/resolve-diet.py' --expect ./diet"
+    bash -c "cd '${spelled}' && CARGO_TARGET_DIR= DIET_BIN=./build/diet \
+      python3 '${ROOT}/scripts/resolve-diet.py' --expect ./build/diet"
 
   expect_exit "a file that cannot be run is not a build" 2 \
     bash -c "cd '${builds}' && CARGO_TARGET_DIR= DIET_BIN='${builds}/diet/src/main.rs' \
