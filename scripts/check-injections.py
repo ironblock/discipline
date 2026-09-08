@@ -47,7 +47,9 @@ FUNC_BODY = re.compile(r"^(inject_[a-z0-9_]+)\(\) \{\n(.*?)^\}\n", re.M | re.S)
 # "changed nothing"; that is forty minutes away and this is not.
 # Every helper an injection may call, sourced alongside it. Extracted by name
 # rather than by sourcing verify.sh, which would run the gate.
-HELPERS = re.compile(r"^(?:seed_commit)\(\) \{\n.*?^\}\n", re.M | re.S)
+HELPERS = re.compile(
+    r"^(?:seed_commit|strip_substrates)\(\) \{\n.*?^\}\n", re.M | re.S
+)
 
 GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
 

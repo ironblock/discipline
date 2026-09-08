@@ -1645,19 +1645,31 @@ inject_results() {
 # A run.jsonl whose start row has lost its substrate. The report is fine; the
 # record is not a session record, and only diet says so -- the linter must
 # relay that verdict and reach none of its own.
-inject_results_no_substrate() {
-  cp -r results/_template results/2026-01-30-no-substrate
-  python3 - <<'EOF'
-import json, pathlib
+# Take the declared substrates out of a record's `start` row.
+#
+# ONE READER, because there were two and they went stale one at a time. The
+# seeded case and the mechanics assertion below both need this exact edit --
+# the case makes it inside a sandbox, the assertion inside a scratch relay --
+# and each carried its own copy of the four lines. Item 3 renamed the field,
+# the copies were fixed one run apart, and the second cost a whole selftest to
+# find. The edit is spelled here now and both call it.
+strip_substrates() {
+  python3 - "$1" <<'EOF'
+import json, pathlib, sys
 
-path = pathlib.Path("results/2026-01-30-no-substrate/run.jsonl")
+path = pathlib.Path(sys.argv[1])
 lines = path.read_text(encoding="utf-8").split("\n")
 row = json.loads(lines[0])
-assert row["record"] == "start"
+assert row["record"] == "start", "the first row of a record is its start"
 del row["regime"]["substrates"]
 lines[0] = json.dumps(row, separators=(",", ":"))
 path.write_text("\n".join(lines), encoding="utf-8")
 EOF
+}
+
+inject_results_no_substrate() {
+  cp -r results/_template results/2026-01-30-no-substrate
+  strip_substrates results/2026-01-30-no-substrate/run.jsonl
 }
 
 # A run directory inside a run directory. Every walker is one level deep, so
@@ -5117,16 +5129,7 @@ selftest() {
   # remove.
   local relay; scratch; relay="$SCRATCH"
   cp -r "${ROOT}/results/_template" "${relay}/2026-01-30-no-substrate"
-  python3 - "${relay}/2026-01-30-no-substrate/run.jsonl" <<'EOF'
-import json, pathlib, sys
-
-path = pathlib.Path(sys.argv[1])
-lines = path.read_text(encoding="utf-8").split("\n")
-row = json.loads(lines[0])
-del row["regime"]["substrate"]
-lines[0] = json.dumps(row, separators=(",", ":"))
-path.write_text("\n".join(lines), encoding="utf-8")
-EOF
+  strip_substrates "${relay}/2026-01-30-no-substrate/run.jsonl"
   expect_exit "a record diet refuses gets no verdict from the linter" 0 \
     bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
       && out=\$(python3 scripts/check-results.py '${relay}/2026-01-30-no-substrate' 2>&1; true) \
