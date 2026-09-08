@@ -35,6 +35,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import sys
 import tomllib
 
@@ -82,12 +83,59 @@ def candidates() -> tuple[pathlib.Path, ...]:
 
 # What the binary is supposed to reflect. A change to any of these that the
 # binary predates means the binary is not the code.
+# The roots that are unambiguously sources of the binary.
+#
+# `diet/` AS A WHOLE IS NOT ONE, and used to be. It holds the conformance
+# fixtures and the capture corpora, which the binary READS AT TEST TIME and
+# never compiles in -- so editing a fixture made `--only regimen` and
+# `--only results` exit 2 until the binary was relinked, and `cargo build` did
+# not clear it, because cargo correctly rebuilds nothing when no source
+# changed. The workaround was `touch diet/src/lib.rs && cargo build`, which is
+# a strange thing to have to know and was reported as such (#50).
 SOURCES = (
-    pathlib.Path("diet"),
+    pathlib.Path("diet/src"),
+    pathlib.Path("diet/Cargo.toml"),
     pathlib.Path("Cargo.toml"),
     pathlib.Path("Cargo.lock"),
     pathlib.Path("rust-toolchain.toml"),
 )
+
+# What the crate embeds, asked of the crate rather than listed here.
+#
+# A grammar and a dogma template ARE compiled in, so a change to one really
+# does make the binary stale -- and they live under `diet/` beside the
+# fixtures that are not. The difference is not visible from the path, so it is
+# read from the source that does the embedding: `include_str!`, its bytes
+# twin, and pest's `#[grammar]`, each resolved relative to the file that names
+# it. One reader, and it is the compiler's own list.
+EMBEDS = re.compile(
+    r"""include_(?:str|bytes)!\(\s*"([^"]+)"|#\[grammar\s*=\s*"([^"]+)"\]"""
+)
+
+
+def embedded() -> list[pathlib.Path]:
+    """Every file compiled into the binary, by the source that embeds it."""
+    found: set[pathlib.Path] = set()
+    source = pathlib.Path("diet/src")
+    if not source.is_dir():
+        return []
+    for rust in source.rglob("*.rs"):
+        for match in EMBEDS.finditer(rust.read_text(encoding="utf-8", errors="replace")):
+            # THE TWO RESOLVE AGAINST DIFFERENT DIRECTORIES, and getting that
+            # wrong is silent: a path that resolves to nothing simply never
+            # makes the binary look stale. `include_str!` is relative to the
+            # file that writes it; pest's `#[grammar]` is relative to `src/`,
+            # which is why every one of them starts `../` and why they all
+            # still start `../` from files several directories down.
+            included, grammar = match.group(1), match.group(2)
+            named = included or grammar
+            against = rust.parent if included else source
+            resolved = (against / named).resolve()
+            try:
+                found.add(resolved.relative_to(pathlib.Path.cwd()))
+            except ValueError:
+                continue
+    return sorted(found)
 
 EXIT_REFUSED = 2
 
@@ -108,7 +156,7 @@ def digest(path: pathlib.Path) -> str:
 def newest_source() -> tuple[float, str] | None:
     """The most recently modified source file, and its path."""
     newest: tuple[float, str] | None = None
-    for root in SOURCES:
+    for root in (*SOURCES, *embedded()):
         if root.is_file():
             paths = [root]
         elif root.is_dir():

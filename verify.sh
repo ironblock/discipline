@@ -879,6 +879,39 @@ EOF
 # sixty-four hex characters and every one of them is wrong, which is the worst
 # shape a digest bug has: the comparison still runs, still looks like a
 # comparison, and agrees with nothing else on earth.
+# An injection written in a form only GNU sed accepts. It applies here and is
+# inert on a Mac, so the tree's verdict depends on the machine -- twenty-eight
+# of them did, and CI was green the whole time (#50).
+#
+# The flag is ASSEMBLED rather than written: the lint this seeds scans
+# verify.sh line by line, so a literal in this body would make the clean tree
+# fail the check it exists to prove fires on a dirty one.
+inject_injection_needs_gnu_sed() {
+  python3 - <<'EOF'
+import pathlib
+import re
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+# The injection is found by NAME and its helper call swapped for the GNU form.
+# Neither the anchor nor the flag is written literally: the lint this seeds
+# scans verify.sh line by line, so a literal in this body would make the clean
+# tree fail the check it exists to prove fires on a dirty one -- and an anchor
+# written literally would appear twice, here and there, which is how the first
+# version of this refused to run.
+body = re.search(
+    r"^inject_record_depth_unbounded\(\) \{\n.*?^\}\n", source, re.M | re.S
+)
+if body is None:
+    raise SystemExit("inject_record_depth_unbounded is not there to make unportable")
+was = body.group(0)
+if "edit_in_place" not in was:
+    raise SystemExit("that injection no longer uses the portable helper")
+now = was.replace("edit_in_place", "sed" + " -" + "i", 1)
+path.write_text(source.replace(was, now, 1), encoding="utf-8")
+EOF
+}
+
 inject_digest_padding_dropped() {
   python3 - <<'EOF'
 import pathlib
@@ -4730,6 +4763,8 @@ selftest() {
     'request-with-no-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "weights identified by name"            test     inject_record_weights_named_not_digested \
     'weights-named-not-digested\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "an injection only GNU sed accepts"     injections inject_injection_needs_gnu_sed \
+    'sed forms only GNU accepts'
   seeded_case "a digest that agrees with nothing"     test     inject_digest_padding_dropped \
     'digest::tests::the_standards_vectors' 'lib/digest'
   seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \
@@ -5239,6 +5274,61 @@ selftest() {
       && grep -q 'says diet check-record: a .start. row is missing its required .substrates.' <<<\"\$out\" \
       && ! grep -qE 'front-matter|summary row|product_sha256' <<<\"\$out\" \
       && grep -q 'record verdicts from .* sha256=' <<<\"\$out\""
+
+  # --- #50: the three defects a Mac seat found, each asserted here ---
+  #
+  # Every one of them was a verdict that depended on the machine or on the
+  # operation, and every one was invisible on the machine that had the
+  # forgiving behaviour. That is the class these assertions exist for.
+
+  # A force-push orphans the sha the push payload names as `before`, so it is
+  # absent from CI's fresh checkout. That is the EXPECTED shape of a
+  # legitimate operation -- this repository's own rules mandate rebases, so
+  # the check was guaranteed to redden the lane that gates the merge on a
+  # branch whose content is fine.
+  local pushes; scratch; pushes="$SCRATCH"
+  printf '{"before":"0123456789012345678901234567890123456789","after":"%s"}' \
+    "$(git -C "$ROOT" rev-parse HEAD)" > "${pushes}/force.json"
+  printf '{"before":"%s","after":"%s"}' \
+    "$(git -C "$ROOT" rev-parse HEAD~1)" "$(git -C "$ROOT" rev-parse HEAD)" \
+    > "${pushes}/ordinary.json"
+  expect_exit "a force-push is scanned, not refused" 0 \
+    bash -c "cd '${ROOT}' && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
+      GITHUB_EVENT_PATH='${pushes}/force.json' python3 scripts/check-history.py \
+      | grep -q 'push, force-push: merge-base..after'"
+  expect_exit "an ordinary push still scans before..after" 0 \
+    bash -c "cd '${ROOT}' && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
+      GITHUB_EVENT_PATH='${pushes}/ordinary.json' python3 scripts/check-history.py \
+      | grep -q 'push before..after'"
+
+  # A base that is genuinely undeterminable is still a failure. The fallback
+  # above must not have turned "I cannot tell what to scan" into "scan the
+  # trunk", which would be an empty scan wearing a verdict.
+  local lonely; scratch; lonely="$SCRATCH"
+  ( cd "$lonely" && git init -q . \
+    && git -c user.email=gate@example.invalid -c user.name=gate \
+         commit -q --allow-empty -m "only commit" ) > /dev/null 2>&1
+  cp -r "${ROOT}/scripts" "${lonely}/scripts"
+  printf '{"before":"0123456789012345678901234567890123456789","after":"HEAD"}' \
+    > "${lonely}/event.json"
+  expect_exit "no trunk to fall back to is still undeterminable" 2 \
+    bash -c "cd '${lonely}' && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
+      GITHUB_EVENT_PATH='${lonely}/event.json' \
+      GITHUB_SHA=\$(git rev-parse HEAD) python3 scripts/check-history.py"
+
+  # `resolve-diet` decides staleness by asking the source what it EMBEDS. A
+  # grammar and a dogma template are compiled in; a conformance fixture and a
+  # register corpus are data the binary reads at test time. Before this, the
+  # whole of `diet/` counted, so editing a fixture made `--only regimen` exit
+  # 2 until the binary was relinked -- and `cargo build` did not clear it,
+  # because cargo correctly rebuilds nothing.
+  expect_exit "a grammar makes the binary stale" 2 \
+    bash -c "cd '${ROOT}' && touch diet/src/lib.rs && cargo build --quiet --bin diet \
+      && touch diet/formats/record/grammar.pest && python3 scripts/resolve-diet.py"
+  expect_exit "a conformance fixture does not" 0 \
+    bash -c "cd '${ROOT}' && touch diet/src/lib.rs && cargo build --quiet --bin diet \
+      && touch diet/formats/record/fixtures/valid/minimal.expected.json \
+      && python3 scripts/resolve-diet.py"
 
   # --- binary provenance at the boundary ---
   #
