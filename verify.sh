@@ -1922,6 +1922,74 @@ path.write_text(
 EOF
 }
 
+# A signature loosened until the line naming its own scope satisfies it.
+#
+# check_test announces `test scope: lib/capture::router::tests (18 test(s)
+# selected)` before it runs anything, and the selftest greps the whole log for
+# the case's signature. A signature that is only the module path is therefore
+# in the log whether the gate fired or not: the case can still read RED or
+# GREEN, because the exit code is the verdict, but it can no longer read
+# WRONG -- and WRONG is the verdict a signature exists to make reachable.
+#
+# Both files are staled together, because a signature that moved in only one
+# of them is a different fault with a different refusal, and a seeded case
+# that fires for the neighbouring reason proves the neighbour.
+inject_parity_scope_signature() {
+  python3 - <<'EOF'
+import pathlib
+import tomllib
+
+# The signature to stale is LOOKED UP, not spelled. Spelling it here would put
+# a second copy of it in verify.sh, and the replacement below -- which insists
+# on finding exactly one -- would refuse on the copy this injection had just
+# added. An injection that cannot run is an injection that proves nothing.
+TARGET = "test.router_ask_class_untuned"
+NEW = "capture::router::tests"
+
+manifest = pathlib.Path("tools/gate/faults.toml")
+doc = tomllib.loads(manifest.read_text(encoding="utf-8"))
+entry = next((f for f in doc.get("fault", []) if f.get("id") == TARGET), None)
+if entry is None or not entry.get("legacy_signature"):
+    raise SystemExit(f"{TARGET}: no such fault, or it carries no signature to stale")
+old = entry["legacy_signature"]
+
+for path in (pathlib.Path("verify.sh"), manifest):
+    source = path.read_text(encoding="utf-8")
+    if source.count(old) != 1:
+        raise SystemExit(f"{path}: the signature to stale appears {source.count(old)} times")
+    path.write_text(source.replace(old, NEW), encoding="utf-8")
+EOF
+}
+
+# The push trigger deleted. Every pull request still runs the whole gate and
+# still goes green, so nothing looks different -- and `pull_request` grades
+# `refs/pull/N/merge`, a preview commit computed at run time. Under a squash
+# or a rebase merge the sha that lands on the trunk is one no pull-request run
+# ever saw. Delete this trigger and the tree that actually ships is graded by
+# nothing, which is the failure this whole file exists to make impossible.
+inject_ci_push_ungated() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/verify.yml")
+source = path.read_text(encoding="utf-8")
+old = "  push:\n    branches: [main]\n"
+if source.count(old) != 1:
+    raise SystemExit("verify.yml: no single `push:` trigger to remove")
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# One character of the trunk's name, in the gating workflow only. `mian` is a
+# branch nobody pushes to, so the push trigger fires for nothing and the gate
+# watches a branch that does not exist -- and every pull request is still
+# green, because the pull-request trigger is untouched. Nothing in this file
+# knows what the trunk is called; the other workflows that name it do, and
+# they are what catches this.
+inject_ci_trunk_typo() {
+  sed -i 's|^    branches: \[main\]$|    branches: [mian]|' .github/workflows/verify.yml
+}
+
 # A gating workflow that narrows the test check to part of the suite. The job
 # is green, the run is faster, and most of the tests did not happen.
 inject_ci_scoped_test() {
@@ -4397,8 +4465,14 @@ selftest() {
     'carries .branches: \[main\]. and is reached'
   seeded_case "CI narrowing the test check"           ci       inject_ci_scoped_test \
     'passes .--scope. to verify\.sh'
+  seeded_case "the trunk gated by no push run"        ci       inject_ci_push_ungated \
+    'and has no .push:. trigger'
+  seeded_case "one workflow renaming the trunk"       ci       inject_ci_trunk_typo \
+    'disagree about which branch is the trunk'
   seeded_case "parity drifts from what is proven"     parity   inject_parity \
     'which verify\.sh does not prove'
+  seeded_case "a signature its own scope line matches" parity  inject_parity_scope_signature \
+    'matches the line naming its own scope'
   seeded_case "a forbidden id in a commit message"    history  inject_history \
     'hygiene: internal-ticket-id:'
   seeded_case "history with an undeterminable base"   history  inject_history_no_base \

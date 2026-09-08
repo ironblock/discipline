@@ -52,6 +52,10 @@ RELOCATING = {"subset-fixture"}
 SELFTEST_KINDS = ("seeded-gate", "results-fixture", "pattern-class")
 
 MECH = re.compile(r'expect_exit\s+"([^"]+)"\s+(\d+)')
+# The line check_test prints before it runs anything, taken from verify.sh so
+# that this file holds no second copy of it. Captured with its `%s` and `%d`
+# still in place; the guard below substitutes the scope and every count.
+ANNOUNCE = re.compile(r"printf '(test scope: %s \(%d test\(s\) selected\))")
 REQ = re.compile(r"REQUIRED_(HYGIENE|PAGES)_CLASSES=\(([^)]*)\)", re.DOTALL)
 
 
@@ -216,20 +220,51 @@ def main() -> int:
     # happened. It cannot manufacture a false RED, because the exit code is
     # still the verdict; it can hide a WRONG, which is the verdict this gate
     # was given a signature to be able to reach.
+    #
+    # THE FIRST VERSION OF THIS GUARD COULD NOT FIRE, and it is worth saying
+    # exactly how, because the mistake is the one this repository names most
+    # often. It reconstructed the line by hand as `... (1 test(s) selected)`.
+    # No scope in the tree selects exactly one test -- the counts run 0, 2, 4,
+    # 5, 9, 12 ... 235, 420 -- so for all 181 scoped faults it compared the
+    # signature against a string that appears in no log the selftest has ever
+    # produced. It passed for every input, which reads exactly like a guard
+    # with nothing to complain about.
+    #
+    # Two things follow, and both are here. The template is READ OUT OF
+    # verify.sh rather than copied, so there is one text; and the count is
+    # tried across every value a run could print, because the count is the
+    # part that varies and the part the hand-written copy froze.
+    announce = ANNOUNCE.search(VERIFY.read_text(encoding="utf-8"))
+    if not announce:
+        failures.append(
+            f"{VERIFY.name}: no `test scope:` line to grade signatures against. "
+            f"Either check_test stopped announcing its scope -- in which case "
+            f"this guard has nothing to do and should go -- or the wording moved "
+            f"and this reader is now guarding a line nobody prints"
+        )
     for ident, detail in sorted(DETAILS.items()):
         signature, scope = detail.get("legacy_signature"), detail.get("target")
-        if not signature or not scope:
+        if not signature or not scope or not announce:
             continue
-        announced = f"test scope: {scope} (1 test(s) selected)"
         try:
-            if re.search(signature, announced):
-                failures.append(
-                    f"`{ident}`: its signature /{signature}/ matches the line naming "
-                    f"its own scope, so the log carries the signature whether or not "
-                    f"the gate fired"
-                )
+            pattern = re.compile(signature)
         except re.error as err:
             failures.append(f"`{ident}`: its signature is not a regex: {err}")
+            continue
+        # Every count a scope could announce. The largest in the tree today is
+        # 420 -- the whole library -- so this range covers it with room, and a
+        # signature that matches at ANY count is one the scope line can satisfy.
+        hit = next(
+            (n for n in range(0, 1000)
+             if pattern.search(announce.group(1).replace("%s", scope).replace("%d", str(n)))),
+            None,
+        )
+        if hit is not None:
+            failures.append(
+                f"`{ident}`: its signature /{signature}/ matches the line naming "
+                f"its own scope when {hit} test(s) are selected, so the log carries "
+                f"the signature whether or not the gate fired"
+            )
 
     meta = doc.get("meta") or {}
     red = sum(len(seen[k]) for k in seen if k != "mechanics")

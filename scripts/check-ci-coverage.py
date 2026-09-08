@@ -55,6 +55,10 @@ NEEDS = re.compile(r"^\s*needs:\s*\[([^\]]*)\]\s*$", re.MULTILINE)
 PATH_FILTER = re.compile(r"^\s*paths(-ignore)?:\s*$", re.MULTILINE)
 WORKFLOW_CALL = re.compile(r"^\s*workflow_call:\s*$", re.MULTILINE)
 SCOPE_FLAG = re.compile(r"--scope\b")
+BRANCH_KEY = re.compile(r"^ {4,}branches:\s*(.*)$")
+BRANCH_IGNORE = re.compile(r"^ {4,}branches-ignore:")
+INLINE_LIST = re.compile(r"^\[([^\]]*)\]$")
+LIST_ITEM = re.compile(r"^ {6,}-\s*(.+?)\s*$")
 ON_BLOCK = re.compile(r"^on:\s*$", re.MULTILINE)
 EVENT = re.compile(r"^  ([A-Za-z_][A-Za-z0-9_]*):")
 BRANCH_FILTER = re.compile(r"^ {4,}branches(-ignore)?:")
@@ -120,6 +124,60 @@ def pull_request_branch_filter(text: str) -> str | None:
         if event == "pull_request" and BRANCH_FILTER.match(line):
             return line.strip()
     return None
+
+
+def push_filter(text: str) -> tuple[str, list[str]]:
+    """How a workflow's `push:` trigger is scoped, and to what.
+
+    Four states, because they are four different things and a rule that
+    collapsed them would report the wrong one:
+
+      "none"    no `push:` trigger at all -- the workflow never runs on a push
+      "all"     a `push:` with no `branches:` key -- it runs on EVERY branch
+      "named"   a `branches:` key; the list is what it names, possibly empty
+      "ignore"  a `branches-ignore:` key, which names what is NOT gated
+
+    Read line-wise like the rest of this script and scoped to the `on:` block,
+    so a `branches:` key belonging to a job cannot be mistaken for one
+    belonging to an event. Both spellings of a list are read -- inline
+    `[a, b]` and the block form -- because a rule that saw only one of them
+    would pass a workflow it had not actually read.
+    """
+    block = ON_BLOCK.search(text)
+    if not block:
+        return ("none", [])
+    event = None
+    state = "none"
+    names: list[str] = []
+    listing = False
+    for line in text[block.end():].split("\n"):
+        if line and not line[0].isspace():
+            break                      # out of `on:` and into the next key
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        named = EVENT.match(line)
+        if named:
+            event = named.group(1)
+            listing = False
+            if event == "push" and state == "none":
+                state = "all"          # present; a `branches:` key may follow
+            continue
+        if event != "push":
+            continue
+        if BRANCH_IGNORE.match(line):
+            return ("ignore", [])
+        key = BRANCH_KEY.match(line)
+        if key:
+            state, listing = "named", True
+            inline = INLINE_LIST.match(key.group(1).strip())
+            if inline:
+                names = [b.strip().strip("\"'") for b in inline.group(1).split(",") if b.strip()]
+                listing = False
+            continue
+        item = LIST_ITEM.match(line)
+        if listing and item:
+            names.append(item.group(1).strip().strip("\"'"))
+    return (state, names)
 
 
 def main() -> int:
@@ -218,7 +276,73 @@ def main() -> int:
                 f"have no run at all, and its required checks would stay pending"
             )
 
-    # 6. every pkg-* workflow is callable and is actually called
+    # 6. the branch a gating workflow gates on PUSH is the one the repository
+    #    agrees is its trunk
+    #
+    #    This filter is load-bearing in a way the pull-request one is not: the
+    #    sha that lands on the default branch is not a sha a pull request
+    #    covers. `pull_request` grades `refs/pull/N/merge`, a preview computed
+    #    at run time, and under a squash or rebase merge the commit that lands
+    #    has no pull-request run at all. So the push-to-trunk run is what gates
+    #    the tree that actually ships, and its trigger deciding nothing --
+    #    deleted, or naming a branch that is not the trunk -- is a merged tree
+    #    gated by nothing.
+    #
+    #    The trunk is not named here. It is named in the workflows, more than
+    #    once, and this makes those copies hold each other: they must agree.
+    #    A rename that changes all of them together is a deliberate reviewed
+    #    act; a rename or a typo that changes one is what this catches. Same
+    #    standard the tag vocabulary is held to, and stated rather than left
+    #    to be discovered.
+    #
+    #    A bare `push:` is NOT a failure here. It fires on every branch, so it
+    #    gates the trunk along with everything else; what it costs is a second
+    #    run per sha, which is a different complaint than this rule's and not
+    #    one it is entitled to make.
+    named: dict[str, list[str]] = {}
+    for wf in sorted(WORKFLOWS.glob("*.yml")):
+        state, branches = push_filter(wf.read_text(encoding="utf-8"))
+        if state == "named" and branches:
+            named[wf.name] = branches
+    for name in sorted(gating):
+        wf = WORKFLOWS / name
+        if not wf.is_file():
+            continue
+        body = wf.read_text(encoding="utf-8")
+        state, branches = push_filter(body)
+        if state == "none":
+            if WORKFLOW_CALL.search(body):
+                continue               # called; it runs on its caller's trigger
+            failures.append(
+                f"{name}: is reached from the gate's `needs` and has no `push:` "
+                f"trigger. The commit that lands on the trunk is not one a pull "
+                f"request covers -- a squash or rebase merge writes a sha no "
+                f"pull-request run ever graded -- so nothing would gate the "
+                f"tree that ships"
+            )
+        elif state == "ignore":
+            failures.append(
+                f"{name}: scopes its `push:` trigger with `branches-ignore:`, "
+                f"which says what is not gated and leaves what is to be "
+                f"inferred from the branches that happen to exist. Name the "
+                f"trunk positively with `branches:` so this rule can check it"
+            )
+        elif state == "named" and not branches:
+            failures.append(
+                f"{name}: has a `push:` trigger whose `branches:` names nothing, "
+                f"so it fires for no branch and the trunk is gated by no push run"
+            )
+    if len(named) > 1:
+        agreed = {tuple(sorted(v)) for v in named.values()}
+        if len(agreed) != 1:
+            failures.append(
+                "the workflows disagree about which branch is the trunk: "
+                + "; ".join(f"{k} says {v}" for k, v in sorted(named.items()))
+                + ". They hold each other precisely so that a rename or a typo in "
+                "one of them cannot quietly leave the trunk ungated"
+            )
+
+    # 7. every pkg-* workflow is callable and is actually called
     for wf in sorted(WORKFLOWS.glob("pkg-*.yml")) + sorted(WORKFLOWS.glob("gate-*.yml")):
         text = wf.read_text(encoding="utf-8")
         if not WORKFLOW_CALL.search(text):
