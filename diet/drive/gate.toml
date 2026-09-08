@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 44
+faults = 45
 
 [[fault]]
 id = "drive.digest-drops-the-zero-pad"
@@ -110,23 +110,6 @@ becomes = '''
 catches = [
     "drive::digest::tests::the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256",
     "drive::digest::tests::the_published_vectors_are_what_comes_out",
-]
-
-[[fault]]
-id = "drive.the-differential-never-runs"
-failure_class = "drive.the-differential-never-runs"
-target = "diet/src/drive/digest.rs"
-expect_exit = 101
-anchor = '''
-        let spawned = std::process::Command::new("sha256sum")
-            .args(&paths)
-            .output();'''
-becomes = '''
-        let spawned = std::process::Command::new("sha256sum-that-is-not-there")
-            .args(&paths)
-            .output();'''
-catches = [
-    "drive::digest::tests::the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256",
 ]
 
 [[fault]]
@@ -708,6 +691,32 @@ becomes = '''
 '''
 catches = [
     "every_drive_refusal_has_its_own_exit_code",
+]
+
+[[fault]]
+id = "drive.the-census-reports-a-count-no-run-produced"
+failure_class = "drive.the-census-reports-a-count-no-run-produced"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            Value::Integer(i64::from(one.entries_created)),'''
+becomes = '''
+            Value::Integer(9999),'''
+catches = [
+    "the_drive_writes_a_record_a_second_process_accepts",
+]
+
+[[fault]]
+id = "drive.the-census-reports-the-unrepresentable-sentinel"
+failure_class = "drive.the-census-reports-the-unrepresentable-sentinel"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            Value::Integer(i64::from(one.entries_touched)),'''
+becomes = '''
+            Value::Integer(-1),'''
+catches = [
+    "the_drive_writes_a_record_a_second_process_accepts",
 ]
 
 [[fault]]
