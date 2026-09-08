@@ -8,5 +8,6 @@ pub mod capture;
 pub mod client;
 pub mod dogma;
 pub mod formats;
+pub mod isolation;
 pub mod object;
 pub mod seam;
