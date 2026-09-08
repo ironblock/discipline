@@ -3,8 +3,8 @@ replaced: two runs can spell the same weights differently and a third can
 spell different weights the same, and then a regime comparison compares
 strings.
 
-The known cost, recorded on #47 rather than papered over: a run served by
-weights nobody can digest -- a hosted model behind an API -- cannot be spelled
-here at all. Every run this repository records today is local. If that stops
-being true the field needs a shape that can say "served, not digested", and
-that is a ruling rather than a widening of this one.
+A run served by weights nobody can digest has a shape of its own now --
+`{"kind":"hosted",...}`, ruled 2026-09-08 and pinned by `weights-hosted` --
+so this is not the case of a substrate that cannot be spelled. It is the case
+of a substrate spelled as `digest` and then handed a name, which is the one
+thing the digest variant exists to refuse.

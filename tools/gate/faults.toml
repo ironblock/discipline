@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 299
+red_faults = 301
 mechanics_assertions = 39
 migrated = 0
 
@@ -3194,3 +3194,21 @@ label = "only the template recomputes"
 failure_class = "gate-zero.nothing-recomputed"
 legacy_signature = "results are present and none recomputed"
 migrated = false
+[[fault]]
+id = "test.record_lane_may_change_substrate"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a lane free to change substrate"
+failure_class = "schema.lane-changed-substrate"
+legacy_signature = "lane-changes-substrate\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-29-hosted-weights-called-reproducible"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-29-hosted-weights-called-reproducible"
+failure_class = "results.hosted-cannot-be-reproducible"
+migrated = false
+

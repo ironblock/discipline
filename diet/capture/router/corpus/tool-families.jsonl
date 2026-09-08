@@ -1,4 +1,4 @@
-{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"harness","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sampler_card":{"seed":0},"reasoning":"on","hardware_fingerprint":"cloud-container"}]}}
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"harness","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"sampler_card":{"seed":0},"reasoning":"on","hardware_fingerprint":"cloud-container"}]}}
 {"record":"turn","index":1,"prefill_tokens":800}
 {"record":"request","id":"r1","lane":"main","substrate":"harness","text":"Read the owner's rules and the object, under a harness that names its tools differently."}
 {"record":"tool_call","id":"f1","at_turn":1,"tool":"LS","args":{"path":"diet/src/capture"}}

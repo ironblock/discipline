@@ -492,7 +492,7 @@ mod tests {
     use crate::capture::collector::{Evidence, Nomination};
     use crate::capture::sense::{Fixture, Gate, Scoring, shipped_senses};
     use crate::formats::record::json::Value;
-    use crate::formats::record::{Engine, Reasoning, Regime, Substrate};
+    use crate::formats::record::{Engine, Reasoning, Regime, Substrate, Weights};
     use crate::object::{EntryId, Patch, Provenance, WorkingObject};
 
     fn regime() -> Regime {
@@ -505,7 +505,7 @@ mod tests {
                     name: "a-runtime".to_owned(),
                     version_or_digest: "1.0".to_owned(),
                 },
-                weights_digest: "a".repeat(64),
+                weights: Weights::Digest("a".repeat(64)),
                 hardware_fingerprint: "one-gpu".to_owned(),
                 sampler_card: BTreeMap::from([("seed".to_owned(), Value::Integer(7))]),
                 reasoning: Reasoning::On,

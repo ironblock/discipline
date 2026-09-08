@@ -1,0 +1,6 @@
+The kind is `digest` and there is no `sha256`. The digest variant exists to say
+what the weights ARE; without one it says only that somebody meant to.
+
+`provider` is present and does not stand in for it. It belongs to the other
+variant, and a reader that accepted it here would be inferring the kind from
+what happens to be in the object rather than from the field that declares it.

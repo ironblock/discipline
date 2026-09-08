@@ -605,8 +605,8 @@ mod tests {
 
     const START: &str = concat!(
         r#"{"record":"start","regime":{"arm":"bakeoff","dogma_version":0,"substrates":[{"id":"#,
-        r#""processor","engine":{"name":"none","version_or_digest":"0"},"weights_digest":"#,
-        r#""aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","#,
+        r#""processor","engine":{"name":"none","version_or_digest":"0"},"weights":{"kind":"#,
+        r#""digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"#,
         r#""hardware_fingerprint":"one-cpu","sampler_card":{"seed":0},"reasoning":"off"}]}}"#
     );
 

@@ -95,6 +95,7 @@ SECTIONS = ["Observation", "Hypothesis", "Test", "Results", "Conclusion"]
 # decides what to run; a directory whose kind neither reader knows would
 # otherwise be caught by neither.
 KINDS = ("reproducible-by-config", "historical-observation")
+REPRODUCIBLE = KINDS[0]
 
 REQUIRED_FILES = ["run.jsonl", "regimen.toml", "README.md"]
 
@@ -460,6 +461,27 @@ def check_run(directory: pathlib.Path) -> list[str]:
     kind = front.get("kind")
     if isinstance(kind, str) and kind not in KINDS:
         fail("results.kind-undeclared", f"front-matter `kind` is {kind!r}, which is neither {' nor '.join(KINDS)}")
+
+    # A hosted substrate is one whose weights can change under you: the
+    # provider re-points a tag and the same config serves different weights.
+    # Gate 0 does not care -- re-deriving numbers from committed artefacts is
+    # indifferent to what produced them -- but a directory declaring
+    # `reproducible-by-config` is promising a RE-FIRING, and that is the
+    # promise nobody can keep here. Such a run is a real result and its kind is
+    # `historical-observation`. Ruled 2026-09-08.
+    #
+    # The list comes from diet, which is the only reader of the record; this
+    # script asking `canonical` which weights each substrate carries would be
+    # a second opinion about the format.
+    if kind == REPRODUCIBLE and recorded_regime is not None:
+        hosted = recorded_regime.get("hosted_substrates") or []
+        if hosted:
+            fail(
+                "results.hosted-cannot-be-reproducible",
+                f"front-matter `kind` is {REPRODUCIBLE!r} but the record is "
+                f"served by hosted weights ({', '.join(sorted(hosted))}), which "
+                f"can change under a re-firing; this is {KINDS[1]!r}",
+            )
 
     sha = front.get("product_sha256")
     if isinstance(sha, str):
