@@ -1,5 +1,5 @@
 {
-  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"one-gpu\",\"id\":\"local\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]}}\n{\"consumes\":[{\"path\":\"a\\\\b.jsonl\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"hypothesis\":\"a tab\\tand a newline\\nand a quote \\\" and a snowman \u2603 and an astral \ud83d\ude00\",\"id\":\"c1\",\"record\":\"claim\",\"result\":\"inconclusive\"}\n",
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"one-gpu\",\"id\":\"local\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]}}\n{\"consumes\":[{\"path\":\"a\\\\b.jsonl\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"hypothesis\":\"a tab\\tand a newline\\nand a quote \\\" and a snowman ☃ and an astral 😀\",\"id\":\"c1\",\"record\":\"claim\",\"result\":\"inconclusive\"}\n",
   "kinds": [
     "start",
     "claim"
@@ -7,6 +7,7 @@
   "regime": {
     "arm": "baseline",
     "dogma_version": 0,
+    "hosted_substrates": [],
     "substrates": [
       "local"
     ]

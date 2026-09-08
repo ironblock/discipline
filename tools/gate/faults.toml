@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 296
+red_faults = 298
 mechanics_assertions = 39
 migrated = 0
 
@@ -185,6 +185,16 @@ target = "test:conformance/formats::record"
 label = "weights identified by name"
 failure_class = "schema.weights-not-digested"
 legacy_signature = "weights-named-not-digested\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_lane_may_change_substrate"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a lane free to change substrate"
+failure_class = "schema.lane-changed-substrate"
+legacy_signature = "lane-changes-substrate\\.jsonl: accepted as"
 migrated = false
 
 [[fault]]
@@ -2508,6 +2518,14 @@ kind = "results-fixture"
 check = "results"
 label = "2026-01-28-symlinked-evidence"
 failure_class = "results.provenance-escapes-the-directory"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-29-hosted-weights-called-reproducible"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-29-hosted-weights-called-reproducible"
+failure_class = "results.hosted-cannot-be-reproducible"
 migrated = false
 
 [[fault]]

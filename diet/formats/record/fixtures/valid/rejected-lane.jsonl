@@ -1,4 +1,4 @@
-{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on","hardware_fingerprint":"one-gpu"}]}}
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on","hardware_fingerprint":"one-gpu"}]}}
 {"record":"turn","index":1,"prefill_tokens":10}
 {"record":"fork","id":"f1","lane":"reformat","substrate":"local","of_turn":1}
 {"record":"rejected","id":"x1","lane":"reformat","at_turn":1,"grounded":3,"of":30}

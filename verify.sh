@@ -890,10 +890,27 @@ import pathlib
 
 path = pathlib.Path("diet/src/formats/record/mod.rs")
 source = path.read_text(encoding="utf-8")
-old = '            let text = take_string(fields, of, "weights_digest")?;\n            if !digest_ok(&text) {'
-new = '            let text = take_string(fields, of, "weights_digest")?;\n            if false && !digest_ok(&text) {'
+old = '            let text = take_string(&mut members, of, "sha256")?;\n            if !digest_ok(&text) {'
+new = '            let text = take_string(&mut members, of, "sha256")?;\n            if false && !digest_ok(&text) {'
 if source.count(old) != 1:
     raise SystemExit(f"the weights check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# A lane free to change substrate mid-run. Then a `rejected` row, which
+# carries a lane and no substrate, has two answers to inherit from -- and the
+# one that answers is whichever the lookup happens to find first.
+inject_record_lane_may_change_substrate() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            if let Some(was) = lanes.insert(lane.as_str(), id.as_str())\n                && was != id\n'
+new = '            if let Some(was) = lanes.insert(lane.as_str(), id.as_str())\n                && false\n                && was != id\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the lane check appears {source.count(old)} times")
 path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
@@ -925,8 +942,11 @@ new = """    let value = members.remove("substrates").unwrap_or_else(|| {
                 ])),
             ),
             (
-                "weights_digest".to_owned(),
-                Value::String("0".repeat(64)),
+                "weights".to_owned(),
+                Value::Object(BTreeMap::from([
+                    ("kind".to_owned(), Value::String("digest".to_owned())),
+                    ("sha256".to_owned(), Value::String("0".repeat(64))),
+                ])),
             ),
             (
                 "hardware_fingerprint".to_owned(),
@@ -4633,6 +4653,8 @@ selftest() {
     'request-with-no-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "weights identified by name"            test     inject_record_weights_named_not_digested \
     'weights-named-not-digested\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a lane free to change substrate"       test     inject_record_lane_may_change_substrate \
+    'lane-changes-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
     'retry-of-itself\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "record nesting left unbounded"         test     inject_record_depth_unbounded \

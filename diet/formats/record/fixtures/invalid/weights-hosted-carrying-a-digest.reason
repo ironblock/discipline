@@ -1,0 +1,8 @@
+The kind is `hosted` and the object also carries `sha256`. Hosted weights are
+the ones nobody can digest; a digest beside them is either a lie or a leftover,
+and the reader cannot tell which.
+
+`kind` is read first and then only that kind's fields, so a field belonging to
+the other variant is left over and refused as one this schema does not define.
+That is the same rule `summary` runs on, and it is why `turns` on a recompute
+summary is an error rather than a number nobody reads.

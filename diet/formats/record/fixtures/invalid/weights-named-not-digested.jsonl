@@ -1,1 +1,1 @@
-{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"qwen3-30b-a3b-q4","hardware_fingerprint":"one-gpu","sampler_card":{"seed":7},"reasoning":"on"}]}}
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"qwen3-30b-a3b-q4"},"hardware_fingerprint":"one-gpu","sampler_card":{"seed":7},"reasoning":"on"}]}}

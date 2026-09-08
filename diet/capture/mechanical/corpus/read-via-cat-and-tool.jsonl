@@ -1,4 +1,4 @@
-{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sampler_card":{"seed":7},"reasoning":"on","hardware_fingerprint":"one-gpu"}]}}
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"sampler_card":{"seed":7},"reasoning":"on","hardware_fingerprint":"one-gpu"}]}}
 {"record":"turn","index":1,"prefill_tokens":100}
 {"record":"tool_call","id":"t1","at_turn":1,"tool":"bash","args":{"cwd":"/work","command":"cat notes.txt"},"exit":0,"output":""}
 {"record":"tool_call","id":"t2","at_turn":1,"tool":"read_file","args":{"path":"diet/src/lib.rs"}}

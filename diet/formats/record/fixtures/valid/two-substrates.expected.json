@@ -1,5 +1,5 @@
 {
-  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"two-gpu\",\"id\":\"big\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"one-gpu\",\"id\":\"small\",\"reasoning\":\"off\",\"sampler_card\":{\"seed\":7,\"temperature\":0.0},\"weights_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}]}}\n{\"index\":1,\"prefill_tokens\":1024,\"record\":\"turn\"}\n{\"id\":\"q1\",\"lane\":\"main\",\"record\":\"request\",\"substrate\":\"big\",\"text\":\"Find where the parser drops a line.\"}\n{\"id\":\"a1\",\"output_tokens\":40,\"record\":\"response\",\"text\":\"In the caller.\",\"to_request\":\"q1\"}\n{\"id\":\"f1\",\"lane\":\"interview\",\"of_turn\":1,\"record\":\"fork\",\"substrate\":\"small\"}\n{\"entries\":2,\"from_fork\":\"f1\",\"id\":\"p1\",\"record\":\"capture\"}\n{\"kind\":\"drive\",\"prefill_tokens_total\":1024,\"product_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"record\":\"summary\",\"turns\":1}\n",
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"two-gpu\",\"id\":\"big\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}},{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"one-gpu\",\"id\":\"small\",\"reasoning\":\"off\",\"sampler_card\":{\"seed\":7,\"temperature\":0.0},\"weights\":{\"kind\":\"digest\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}}]}}\n{\"index\":1,\"prefill_tokens\":1024,\"record\":\"turn\"}\n{\"id\":\"q1\",\"lane\":\"main\",\"record\":\"request\",\"substrate\":\"big\",\"text\":\"Find where the parser drops a line.\"}\n{\"id\":\"a1\",\"output_tokens\":40,\"record\":\"response\",\"text\":\"In the caller.\",\"to_request\":\"q1\"}\n{\"id\":\"f1\",\"lane\":\"interview\",\"of_turn\":1,\"record\":\"fork\",\"substrate\":\"small\"}\n{\"entries\":2,\"from_fork\":\"f1\",\"id\":\"p1\",\"record\":\"capture\"}\n{\"kind\":\"drive\",\"prefill_tokens_total\":1024,\"product_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"record\":\"summary\",\"turns\":1}\n",
   "kinds": [
     "start",
     "turn",
@@ -12,6 +12,7 @@
   "regime": {
     "arm": "baseline",
     "dogma_version": 0,
+    "hosted_substrates": [],
     "substrates": [
       "big",
       "small"

@@ -85,6 +85,76 @@ macro_rules! vocabulary {
 // the regime
 // ---------------------------------------------------------------------------
 
+vocabulary! {
+    /// How a substrate's weights are identified.
+    ///
+    /// TWO WAYS, TYPED, because there are two and the difference decides what
+    /// a result may claim. Never one field that is sometimes a digest and
+    /// sometimes a name: that is identity spelled two ways in one place, and
+    /// the reader cannot tell which it got.
+    WeightsKind {
+        /// Weights on disk, identified by what they are.
+        Digest => "digest",
+        /// Weights behind an endpoint, identified by who serves them and what
+        /// they are called.
+        Hosted => "hosted",
+    }
+}
+
+/// Which weights a substrate ran, and how they are identified.
+///
+/// A HOSTED MODEL IS A SUBSTRATE WHOSE WEIGHTS CAN CHANGE UNDER YOU -- the
+/// engine's re-pointed tag, at scale -- so the two variants are not two
+/// spellings of one thing. Gate 0 re-derives a result from committed
+/// artifacts and is indifferent to which this is; gate 1 re-fires it on a
+/// declared substrate and cannot, so [`Weights::is_reproducible`] is what
+/// `check-results.py` asks before letting a directory call itself
+/// `reproducible-by-config`.
+///
+/// Ruled 2026-09-08. The alternative considered and refused was a
+/// `weights_digest` that also accepts a name: that is a field whose meaning
+/// depends on what happens to be in it, and the reason for a digest was that
+/// there should be one meaning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Weights {
+    /// Weights on disk, by sha256.
+    Digest(String),
+    /// Weights behind an endpoint.
+    Hosted {
+        /// Who serves them.
+        provider: String,
+        /// What they call the model.
+        model_id: String,
+        /// The version if the provider publishes one, else the date the run
+        /// observed. Either way it is what a later reader compares against;
+        /// neither is a guarantee, which is the point.
+        version_or_date_observed: String,
+    },
+}
+
+impl Weights {
+    /// Which kind these are.
+    #[must_use]
+    pub fn kind(&self) -> WeightsKind {
+        match self {
+            Self::Digest(_) => WeightsKind::Digest,
+            Self::Hosted { .. } => WeightsKind::Hosted,
+        }
+    }
+
+    /// Whether a run on these weights can be re-fired and expected to match.
+    ///
+    /// False for hosted weights, and that is the whole reason this type is a
+    /// vocabulary rather than a string. A provider can re-point a tag without
+    /// telling anyone, so parity on a hosted substrate is a claim nobody can
+    /// keep -- a result under one may be `historical-observation` and never
+    /// `reproducible-by-config`.
+    #[must_use]
+    pub fn is_reproducible(&self) -> bool {
+        matches!(self, Self::Digest(_))
+    }
+}
+
 /// The stack that served a substrate's weights.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Engine {
@@ -103,10 +173,12 @@ pub struct Engine {
 /// local model while the main lane is served by a large one is the case this
 /// repository is built to measure, and a single substrate could not say it.
 ///
-/// Identity is the WEIGHTS DIGEST, not a name. A name is prose: two runs can
+/// Identity is the WEIGHTS, typed, not a name. A name is prose: two runs can
 /// spell the same weights differently and a third can spell different weights
-/// the same, and then a regime comparison compares strings. The digest cannot
-/// do either.
+/// the same, and then a regime comparison compares strings. A digest cannot do
+/// either, and the hosted variant does not pretend to -- it says who served
+/// them and declines to claim more, which is why nothing under it may claim
+/// parity. See [`Weights`].
 ///
 /// Every field is required. An optional substrate field is a substrate field
 /// that will be absent exactly when it matters -- the run whose result
@@ -117,8 +189,8 @@ pub struct Substrate {
     pub id: String,
     /// What served the weights.
     pub engine: Engine,
-    /// The weights, by digest.
-    pub weights_digest: String,
+    /// Which weights, and how they are identified.
+    pub weights: Weights,
     /// A fingerprint for the hardware it was served from.
     pub hardware_fingerprint: String,
     /// Sampler settings, exactly as they were set.
@@ -177,6 +249,23 @@ impl Regime {
     #[must_use]
     pub fn substrate_ids(&self) -> Vec<&str> {
         self.substrates.iter().map(|s| s.id.as_str()).collect()
+    }
+
+    /// The declared substrates nothing can re-fire, by id.
+    ///
+    /// Empty for a run served entirely by weights on disk. Non-empty is what
+    /// stops a results directory calling itself `reproducible-by-config`: the
+    /// provider can re-point a tag without telling anyone, so parity under
+    /// one of these is a claim nobody can keep. Gate 0 does not read this --
+    /// re-deriving numbers from committed artifacts is indifferent to what
+    /// served them. Ruled 2026-09-08.
+    #[must_use]
+    pub fn hosted_substrate_ids(&self) -> Vec<&str> {
+        self.substrates
+            .iter()
+            .filter(|s| !s.weights.is_reproducible())
+            .map(|s| s.id.as_str())
+            .collect()
     }
 }
 
@@ -422,6 +511,12 @@ pub enum Event {
         /// This rejection's identifier.
         id: String,
         /// Which lane was rejected.
+        ///
+        /// And, by reference, which substrate: a lane is a role on a
+        /// substrate and cannot change it mid-run, so [`Record::substrate_of`]
+        /// answers for this row. No `substrate` field here on purpose -- it
+        /// would be the lane's fact written a second time, in the one place
+        /// that could contradict it. Ruled 2026-09-08.
         lane: String,
         /// The turn it happened in. Every id-bearing row links to something
         /// already seen, and this is the anchor for a lane that need not
@@ -585,6 +680,34 @@ impl Record {
     #[must_use]
     pub fn kinds(&self) -> BTreeSet<Kind> {
         self.events.iter().map(Event::kind).collect()
+    }
+
+    /// Which substrate served `lane`, if any row named one.
+    ///
+    /// A LANE IS A ROLE ON A SUBSTRATE, and [`validate`] refuses a record
+    /// whose rows say otherwise, so there is at most one answer and this
+    /// cannot pick. It is what a `rejected` row's substrate IS: the row does
+    /// not carry the field, it inherits it from its lane, and the inheritance
+    /// is this function rather than a sentence each reader implements again.
+    ///
+    /// Ruled 2026-09-08. The alternative was a `substrate` on `rejected`,
+    /// which is the same fact written twice and therefore a fact that can
+    /// disagree with itself.
+    #[must_use]
+    pub fn substrate_of(&self, lane: &str) -> Option<&str> {
+        self.events.iter().find_map(|event| match event {
+            Event::Request {
+                lane: on,
+                substrate,
+                ..
+            }
+            | Event::Fork {
+                lane: on,
+                substrate,
+                ..
+            } if on == lane => Some(substrate.as_str()),
+            _ => None,
+        })
     }
 }
 
@@ -754,6 +877,15 @@ pub enum StructureError {
     },
     /// Two substrates declared under one id.
     SubstrateDeclaredTwice(String),
+    /// A lane whose rows name two different substrates.
+    LaneChangedSubstrate {
+        /// The lane that changed.
+        lane: String,
+        /// What its first row named.
+        was: String,
+        /// What this row names.
+        now: String,
+    },
     /// A row naming a substrate the run never declared.
     UndeclaredSubstrate {
         /// The row that names it.
@@ -884,6 +1016,13 @@ impl fmt::Display for StructureError {
                 f,
                 "two substrates are declared as `{id}`, so every row naming it \
                  would have to be read as one of them"
+            ),
+            Self::LaneChangedSubstrate { lane, was, now } => write!(
+                f,
+                "the `{lane}` lane is served by `{was}` and then by `{now}`, \
+                 and a lane is a role on a substrate: a lane that changes \
+                 substrate is two lanes, and a row that inherits its lane's \
+                 substrate would have two answers"
             ),
             Self::UndeclaredSubstrate { row, id, declared } => write!(
                 f,
@@ -1268,6 +1407,51 @@ fn substrates(
     Ok(declared)
 }
 
+/// Which weights a substrate ran, from its `weights` object.
+///
+/// KIND FIRST, then only that kind's fields -- the shape [`summary`] uses,
+/// and for the same reason: a field that belongs to the other variant is left
+/// in `fields` and refused by the caller as unknown, so a hosted substrate
+/// carrying a `sha256` is an error rather than a digest nobody reads.
+fn weights(fields: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Weights, ParseError> {
+    let mut members = take_object(fields, of, "weights")?;
+    let tag = take_string(&mut members, of, "kind")?;
+    let kind = WeightsKind::from_tag(&tag).ok_or(SchemaError::BadValue {
+        of,
+        field: "weights.kind",
+        found: tag,
+    })?;
+    let built = match kind {
+        WeightsKind::Digest => {
+            // Identity, so it is checked as a digest rather than accepted as
+            // a name. This is the variant that says what the weights ARE, and
+            // a string that is not a digest cannot say it.
+            let text = take_string(&mut members, of, "sha256")?;
+            if !digest_ok(&text) {
+                return Err(StructureError::BadDigest(text).into());
+            }
+            Weights::Digest(text)
+        }
+        // Not checked as a digest, because there is nothing to digest. Three
+        // required strings and no identity claim: what a later reader has is
+        // who served it and what they called it, which is why nothing under
+        // these weights may claim parity.
+        WeightsKind::Hosted => Weights::Hosted {
+            provider: take_string(&mut members, of, "provider")?,
+            model_id: take_string(&mut members, of, "model_id")?,
+            version_or_date_observed: take_string(&mut members, of, "version_or_date_observed")?,
+        },
+    };
+    if let Some(field) = members.keys().next() {
+        return Err(SchemaError::UnknownField {
+            of,
+            field: format!("substrates[].weights.{field}"),
+        }
+        .into());
+    }
+    Ok(built)
+}
+
 /// One substrate, from its object.
 fn substrate(
     fields: &mut BTreeMap<String, Value>,
@@ -1296,17 +1480,7 @@ fn substrate(
     let built = Substrate {
         id,
         engine,
-        weights_digest: {
-            // Identity, so it is checked as a digest rather than accepted as
-            // a name. A run served by weights nobody can digest -- a hosted
-            // model -- cannot be spelled here, and that is recorded on #47
-            // rather than papered over with a field that takes prose.
-            let text = take_string(fields, of, "weights_digest")?;
-            if !digest_ok(&text) {
-                return Err(StructureError::BadDigest(text).into());
-            }
-            text
-        },
+        weights: weights(fields, of)?,
         hardware_fingerprint: take_string(fields, of, "hardware_fingerprint")?,
         sampler_card: {
             // A substrate whose sampler card is the empty object records that
@@ -1817,6 +1991,10 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
     let mut regime = None;
     let mut seen = Seen::new();
     let mut summary_seen = false;
+    // Which substrate each lane has been served by, so far. Not on `Seen`:
+    // that one holds what LINKS resolve against, and this is not a link -- it
+    // is the lane's own identity accumulating.
+    let mut lanes: BTreeMap<&str, &str> = BTreeMap::new();
 
     for (position, event) in events.iter().enumerate() {
         if summary_seen {
@@ -1838,13 +2016,17 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
         // `start` is first or the loop has already refused the record, so the
         // declarations are in hand by the time any row can name one, and a
         // record can be walked as it is written.
-        if let Some(known) = regime.as_ref() {
-            let named = match event {
-                Event::Request { substrate, .. } => Some(("request", substrate)),
-                Event::Fork { substrate, .. } => Some(("fork", substrate)),
-                _ => None,
-            };
-            if let Some((row, id)) = named
+        let named = match event {
+            Event::Request {
+                lane, substrate, ..
+            } => Some(("request", lane, substrate)),
+            Event::Fork {
+                lane, substrate, ..
+            } => Some(("fork", lane, substrate)),
+            _ => None,
+        };
+        if let Some((row, lane, id)) = named {
+            if let Some(known) = regime.as_ref()
                 && !known.declares(id)
             {
                 return Err(StructureError::UndeclaredSubstrate {
@@ -1855,6 +2037,20 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
                         .into_iter()
                         .map(ToOwned::to_owned)
                         .collect(),
+                }
+                .into());
+            }
+            // A LANE IS A ROLE ON A SUBSTRATE. Fixed for the run, so a lane
+            // that changes substrate is two lanes and should be spelled as
+            // two -- and so a `rejected` row, which carries no substrate of
+            // its own, has exactly one to inherit. Ruled 2026-09-08.
+            if let Some(was) = lanes.insert(lane.as_str(), id.as_str())
+                && was != id
+            {
+                return Err(StructureError::LaneChangedSubstrate {
+                    lane: lane.clone(),
+                    was: was.to_owned(),
+                    now: id.clone(),
                 }
                 .into());
             }
@@ -2129,6 +2325,36 @@ fn artifacts_value(consumes: &[Artifact]) -> Value {
     )
 }
 
+/// A substrate's weights as a record value.
+///
+/// Kind first and then only that kind's fields, so what the writer emits is
+/// what [`weights`] accepts. A round trip through the other spelling would be
+/// a second reader for the same bytes.
+fn weights_value(weights: &Weights) -> Value {
+    let mut members = BTreeMap::from([(
+        "kind".to_owned(),
+        Value::String(weights.kind().tag().to_owned()),
+    )]);
+    match weights {
+        Weights::Digest(sha256) => {
+            members.insert("sha256".to_owned(), Value::String(sha256.clone()));
+        }
+        Weights::Hosted {
+            provider,
+            model_id,
+            version_or_date_observed,
+        } => {
+            members.insert("provider".to_owned(), Value::String(provider.clone()));
+            members.insert("model_id".to_owned(), Value::String(model_id.clone()));
+            members.insert(
+                "version_or_date_observed".to_owned(),
+                Value::String(version_or_date_observed.clone()),
+            );
+        }
+    }
+    Value::Object(members)
+}
+
 /// The regime as a record value.
 ///
 /// Crate-visible because the object's dump carries it: the dump is the only
@@ -2151,10 +2377,7 @@ pub(crate) fn regime_value(regime: &Regime) -> Value {
                         ),
                     ])),
                 ),
-                (
-                    "weights_digest".to_owned(),
-                    Value::String(s.weights_digest.clone()),
-                ),
+                ("weights".to_owned(), weights_value(&s.weights)),
                 (
                     "hardware_fingerprint".to_owned(),
                     Value::String(s.hardware_fingerprint.clone()),
@@ -2217,6 +2440,24 @@ pub fn project(source: &str) -> Result<Value, String> {
                             ),
                         ),
                         (
+                            // The subset of those ids served by weights that
+                            // can change under you. A gate that certifies
+                            // parity refuses a directory whose run names any
+                            // of these; gate 0 ignores the key entirely.
+                            // Carried here rather than derived by each reader
+                            // from `canonical`, because a second reader of the
+                            // record is a second opinion about it.
+                            "hosted_substrates".to_owned(),
+                            Value::Array(
+                                parsed
+                                    .regime()
+                                    .hosted_substrate_ids()
+                                    .into_iter()
+                                    .map(|id| Value::String(id.to_owned()))
+                                    .collect(),
+                            ),
+                        ),
+                        (
                             "dogma_version".to_owned(),
                             Value::Integer(i64::from(parsed.regime().dogma_version)),
                         ),
@@ -2243,11 +2484,11 @@ mod tests {
     use super::json::Value;
     use super::{
         Count, Event, Kind, MAX_DEPTH, ParseError, Reasoning, Regime, SchemaError, StructureError,
-        Verdict, objects, parse, regime_value, render,
+        Verdict, Weights, WeightsKind, objects, parse, regime_value, render,
     };
 
     /// A `start` line whose regime is complete, as every record needs one.
-    const START: &str = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","hardware_fingerprint":"one-gpu","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on"}]}}"#;
+    const START: &str = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"one-gpu","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on"}]}}"#;
 
     fn record(rest: &str) -> String {
         format!("{START}\n{rest}")
@@ -2535,13 +2776,99 @@ mod tests {
             let source = format!(
                 "{{\"record\":\"start\",\"regime\":{{\"arm\":\"a\",\"dogma_version\":0,\
                  \"substrates\":[{{\"id\":\"n\",\"engine\":{{\"name\":\"a-runtime\",\
-                 \"version_or_digest\":\"1.0\"}},\"weights_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\
+                 \"version_or_digest\":\"1.0\"}},\"weights\":{{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\
                  \"hardware_fingerprint\":\"h\",\"sampler_card\":{{\"seed\":0}},\
                  \"reasoning\":\"{}\"}}]}}}}\n",
                 state.tag()
             );
             let parsed = parse(&source).expect("a record");
             assert_eq!(parsed.regime().substrates[0].reasoning, *state);
+        }
+    }
+
+    // Both weights kinds have to survive a rendering, because the writer is
+    // the only thing that puts a record back on disk and a variant it cannot
+    // spell is a variant that silently becomes the other one.
+    #[test]
+    fn every_weights_kind_round_trips() {
+        for weights in [
+            r#"{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#,
+            r#"{"kind":"hosted","provider":"a-provider","model_id":"a-model-4","version_or_date_observed":"2026-09-08"}"#,
+        ] {
+            let source = format!(
+                "{{\"record\":\"start\",\"regime\":{{\"arm\":\"a\",\"dogma_version\":0,\
+                 \"substrates\":[{{\"id\":\"n\",\"engine\":{{\"name\":\"a-runtime\",\
+                 \"version_or_digest\":\"1.0\"}},\"weights\":{weights},\
+                 \"hardware_fingerprint\":\"h\",\"sampler_card\":{{\"seed\":0}},\
+                 \"reasoning\":\"on\"}}]}}}}\n"
+            );
+            let once = parse(&source).unwrap_or_else(|err| panic!("{weights}: {err}"));
+            let twice = parse(&render(&once)).expect("a rendering is itself a record");
+            assert_eq!(once, twice, "{weights} did not survive a rendering");
+        }
+    }
+
+    // A rejected lane has a substrate, and it is the lane's. The rule that
+    // makes the lookup total is the one `validate` enforces; this is the half
+    // that shows a reader getting an answer out of it.
+    #[test]
+    fn a_rejected_lanes_substrate_is_its_lanes() {
+        let source = record(concat!(
+            r#"{"record":"turn","index":1,"prefill_tokens":10}"#,
+            "\n",
+            r#"{"record":"fork","id":"f1","lane":"reformat","substrate":"local","of_turn":1}"#,
+            "\n",
+            r#"{"record":"rejected","id":"x1","lane":"reformat","at_turn":1,"grounded":3,"of":30}"#,
+            "\n",
+        ));
+        let parsed = parse(&source).expect("a record");
+        assert_eq!(parsed.substrate_of("reformat"), Some("local"));
+        assert_eq!(parsed.substrate_of("a-lane-nothing-ran"), None);
+    }
+
+    // A lane that changes substrate is two lanes. Without this the reference
+    // above has two answers and `substrate_of` picks one.
+    #[test]
+    fn a_lane_cannot_change_substrate() {
+        let source = format!(
+            "{}\n{}\n{}\n{}\n",
+            r#"{"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"big","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"},{"id":"small","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#,
+            r#"{"record":"turn","index":1,"prefill_tokens":10}"#,
+            r#"{"record":"request","id":"q1","lane":"main","substrate":"big"}"#,
+            r#"{"record":"request","id":"q2","lane":"main","substrate":"small"}"#,
+        );
+        assert!(matches!(
+            parse(&source),
+            Err(ParseError::Structure(
+                StructureError::LaneChangedSubstrate { .. }
+            ))
+        ));
+        // The same two requests on two lanes are two lanes, and fine.
+        let two_lanes = source.replace(r#""id":"q2","lane":"main""#, r#""id":"q2","lane":"aside""#);
+        parse(&two_lanes).expect("two lanes, two substrates");
+    }
+
+    // The whole reason the identity is typed: gate 1 asks this question, and a
+    // kind added later that nobody classified would answer it by accident.
+    // Enumerating the vocabulary means a new kind fails to compile here.
+    #[test]
+    fn only_digested_weights_can_be_re_fired() {
+        for kind in WeightsKind::ALL {
+            let weights = match kind {
+                WeightsKind::Digest => Weights::Digest("a".repeat(64)),
+                WeightsKind::Hosted => Weights::Hosted {
+                    provider: "a-provider".to_owned(),
+                    model_id: "a-model-4".to_owned(),
+                    version_or_date_observed: "2026-09-08".to_owned(),
+                },
+            };
+            assert_eq!(weights.kind(), *kind, "{} mislabels itself", kind.tag());
+            assert_eq!(
+                weights.is_reproducible(),
+                *kind == WeightsKind::Digest,
+                "{} answers gate 1 wrongly",
+                kind.tag()
+            );
         }
     }
 
@@ -2762,12 +3089,12 @@ mod tests {
     // typing two quotes buys presence rather than provenance.
     #[test]
     fn a_required_string_that_says_nothing_is_absent() {
-        let blank = r#"{"record":"start","regime":{"arm":"","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
+        let blank = r#"{"record":"start","regime":{"arm":"","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
         assert!(matches!(
             parse(blank),
             Err(ParseError::Schema(SchemaError::BlankField { .. }))
         ));
-        let no_settings = r#"{"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","hardware_fingerprint":"h","sampler_card":{},"reasoning":"on"}]}}"#;
+        let no_settings = r#"{"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{},"reasoning":"on"}]}}"#;
         assert!(
             matches!(
                 parse(no_settings),

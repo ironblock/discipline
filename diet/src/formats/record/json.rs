@@ -583,7 +583,7 @@ mod tests {
     /// itself is the judge of the spelling.
     fn record_with(text: &str) -> String {
         format!(
-            r#"{{"record":"start","regime":{{"arm":"baseline","dogma_version":0,"substrates":[{{"id":"local","engine":{{"name":"a-runtime","version_or_digest":"1.0"}},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","hardware_fingerprint":"one-gpu","sampler_card":{{"temperature":{text}}},"reasoning":"on"}}]}}}}"#
+            r#"{{"record":"start","regime":{{"arm":"baseline","dogma_version":0,"substrates":[{{"id":"local","engine":{{"name":"a-runtime","version_or_digest":"1.0"}},"weights":{{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"hardware_fingerprint":"one-gpu","sampler_card":{{"temperature":{text}}},"reasoning":"on"}}]}}}}"#
         )
     }
 

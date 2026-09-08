@@ -1,0 +1,5 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"served","engine":{"name":"an-endpoint","version_or_digest":"2026-08-01"},"weights":{"kind":"hosted","provider":"a-provider","model_id":"a-model-4","version_or_date_observed":"2026-09-08"},"sampler_card":{"seed":0},"reasoning":"on","hardware_fingerprint":"one-gpu"}]}}
+{"record":"turn","index":1,"prefill_tokens":1024}
+{"record":"turn","index":2,"prefill_tokens":1024}
+{"record":"claim","id":"c1","hypothesis":"the recorded turn count re-derives from the committed artefacts","result":"supported","consumes":[{"path":"product.txt","sha256":"b491f615ad737993319517a59c5d450c320ea7d20358e4787e41526baae05182"}]}
+{"record":"summary","kind":"drive","turns":2,"prefill_tokens_total":2048,"product_sha256":"b491f615ad737993319517a59c5d450c320ea7d20358e4787e41526baae05182"}
