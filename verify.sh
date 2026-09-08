@@ -577,9 +577,18 @@ seeded_case() {
   # reported as a gate that did not fire. That is the right verdict for the
   # wrong reason, and it costs a debugging session every time. Fingerprint the
   # sandbox instead, and say which of the two actually happened.
-  local state_before state_after
+  #
+  # AND THE INJECTION'S OWN EXIT STATUS IS EVIDENCE. It used to be discarded,
+  # and then an injection that did half its work -- `cp -r` a directory, then
+  # raise KeyError on a field the schema had renamed -- was graded on the tree
+  # it left behind. The tree HAD changed, so the fingerprint was satisfied;
+  # the check then passed on a copy of a valid directory and the case read
+  # GREEN, THE GATE DID NOT FIRE. It is not the gate that did not fire. Found
+  # by running it: item 3 renamed `substrate` to `substrates` and this case
+  # accused the gate of a fault that was in the injection.
+  local state_before state_after injected=0
   state_before="$(sandbox_state "$box")"
-  ( cd "$box" && "$inject" )
+  ( cd "$box" && "$inject" ) || injected=$?
   state_after="$(sandbox_state "$box")"
   case "${state_before}${state_after}" in
     *"${STATE_UNREADABLE}"*)
@@ -609,6 +618,16 @@ seeded_case() {
   # repository's binary older than its source for anything that resolved it
   # afterwards. The results-fixture loop below found that out.
   touch "${box}/diet/src/lib.rs" 2> /dev/null || true
+
+  # Before the fingerprint, because "the injection exited 1" says more than
+  # "the injection changed nothing" and a half-applied injection can satisfy
+  # the fingerprint while proving nothing.
+  if [ "$injected" -ne 0 ]; then
+    printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE INJECTION EXITED %d\n' \
+      "$(( SECONDS - started ))" "$check" "$label" "$injected"
+    SELFTEST_BROKEN+=("${label}: ${inject} exited ${injected}, so whatever it left is not the fault")
+    return
+  fi
 
   if [ "$state_before" = "$state_after" ]; then
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE INJECTION CHANGED NOTHING\n' \
@@ -1635,7 +1654,7 @@ path = pathlib.Path("results/2026-01-30-no-substrate/run.jsonl")
 lines = path.read_text(encoding="utf-8").split("\n")
 row = json.loads(lines[0])
 assert row["record"] == "start"
-del row["regime"]["substrate"]
+del row["regime"]["substrates"]
 lines[0] = json.dumps(row, separators=(",", ":"))
 path.write_text("\n".join(lines), encoding="utf-8")
 EOF
@@ -4753,8 +4772,8 @@ selftest() {
     'object.rs: no .mod. declaration reaches it'
   seeded_case "a stringly predicate cargo fmt wrapped" library inject_stringly_or_pattern \
     'a_decision_tag_that_is_quite_long_indeed'
-  seeded_case "a record missing its substrate"        results  inject_results_no_substrate \
-    'says diet check-record: a .start. row is missing its required .substrate.'
+  seeded_case "a record missing its substrates"       results  inject_results_no_substrate \
+    'says diet check-record: a .start. row is missing its required .substrates.'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
     'front-matter `turns` states 3 but the summary record binds'
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \
@@ -5111,7 +5130,7 @@ EOF
   expect_exit "a record diet refuses gets no verdict from the linter" 0 \
     bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
       && out=\$(python3 scripts/check-results.py '${relay}/2026-01-30-no-substrate' 2>&1; true) \
-      && grep -q 'says diet check-record: a .start. row is missing its required .substrate.' <<<\"\$out\" \
+      && grep -q 'says diet check-record: a .start. row is missing its required .substrates.' <<<\"\$out\" \
       && ! grep -qE 'front-matter|summary row|product_sha256' <<<\"\$out\" \
       && grep -q 'record verdicts from .* sha256=' <<<\"\$out\""
 

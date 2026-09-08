@@ -391,9 +391,9 @@ migrated = false
 id = "results.results_no_substrate"
 kind = "seeded-gate"
 check = "results"
-label = "a record missing its substrate"
+label = "a record missing its substrates"
 failure_class = "results.record-not-a-record"
-legacy_signature = "says diet check-record: a .start. row is missing its required .substrate."
+legacy_signature = "says diet check-record: a .start. row is missing its required .substrates."
 migrated = false
 
 [[fault]]
