@@ -10,6 +10,13 @@
 //! `Float(Decimal("0.6"))`), the four exit codes, the refusal paths, and the
 //! files it writes.
 //!
+//! **Every test here has `drive` in its name, and that is load-bearing.**
+//! `cargo test -- drive` -- which is what this lane's `gate.toml` declares --
+//! is a substring filter over test names, and an integration test is named by
+//! its function alone with no module path. Two tests here were called
+//! `the_regime_crosses_…` and `every_refusal_…`, and the seeded faults they
+//! catch were recorded as catching nothing: the filter never reached them.
+//!
 //! What this file does not do is stand in for the integration lane #23 asks
 //! for. That lane runs `diet-drive` and then `diet check-record` from
 //! `verify.sh`, which is not this seat's file; this runs both binaries from a
@@ -134,7 +141,7 @@ fn the_drive_writes_a_record_a_second_process_accepts() {
 }
 
 #[test]
-fn the_regime_crosses_from_the_regimen_without_being_paraphrased() {
+fn a_drives_regime_crosses_from_the_regimen_without_being_paraphrased() {
     // The crossing this program shipped a defect in once: a regimen's
     // `temperature = 0.6` reached the record as the string
     // `Float(Decimal("0.6"))`, a regime tag that compares equal to nothing.
@@ -165,7 +172,7 @@ fn the_regime_crosses_from_the_regimen_without_being_paraphrased() {
 }
 
 #[test]
-fn every_refusal_has_its_own_exit_code() {
+fn every_drive_refusal_has_its_own_exit_code() {
     let ground = Ground::make("refusals");
     let regimen = regimen().to_string_lossy().into_owned();
 
