@@ -1,0 +1,13 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrate\":{\"hardware\":\"one-gpu\",\"model\":\"a-model\",\"name\":\"local\",\"quantization\":\"q4\",\"reasoning\":\"on\",\"sampler\":{\"seed\":7}}}}\n{\"consumes\":[{\"path\":\"run.jsonl\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},{\"path\":\"regrade.jsonl\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"hypothesis\":\"the reported rate re-derives from the run\",\"id\":\"c1\",\"record\":\"claim\",\"result\":\"supported\"}\n{\"digests\":[\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"kind\":\"recompute\",\"record\":\"summary\",\"targets_checked\":2,\"targets_matched\":2}\n",
+  "kinds": [
+    "start",
+    "claim",
+    "summary"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "substrate": "local"
+  }
+}

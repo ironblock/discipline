@@ -683,6 +683,24 @@ pub enum StructureError {
         /// What the rows add up to.
         counted: u64,
     },
+    /// A summary whose two totals cannot both be true of each other.
+    ///
+    /// Deliberately not [`Self::SummaryDisagrees`], which means "you said X
+    /// and I counted Y". Nothing counts a recompute's targets -- the reader
+    /// sees no target rows -- so borrowing that variant would print "the rows
+    /// above it add up to 1" about a 1 that came from the same row, and a
+    /// message that names the wrong evidence sends the next reader to the
+    /// wrong place.
+    SummaryImpossible {
+        /// The total that cannot be that large.
+        field: &'static str,
+        /// What it claims.
+        says: u64,
+        /// The field that bounds it.
+        bound: &'static str,
+        /// What that field claims.
+        limit: u64,
+    },
     /// A turn index a link names that no turn ever had.
     UnknownTurn(u32),
     /// Turn indices that do not run 1, 2, 3.
@@ -789,6 +807,16 @@ impl fmt::Display for StructureError {
                 f,
                 "the summary's `{field}` says {says}, but the rows above it add \
                  up to {counted}"
+            ),
+            Self::SummaryImpossible {
+                field,
+                says,
+                bound,
+                limit,
+            } => write!(
+                f,
+                "the summary's `{field}` says {says} of the {limit} its \
+                 `{bound}` says were looked at"
             ),
             Self::UnknownTurn(index) => write!(f, "a row names turn {index}, which never happened"),
             Self::TurnOutOfOrder { want, found } => {
@@ -1036,32 +1064,9 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             consumes: take_artifacts(&mut members, of)?,
             supersedes: take_optional_string(&mut members, of, "supersedes")?,
         },
-        // `kind` first, then only that kind's fields. Anything else is left in
-        // `members` and refused below as an unknown key -- which is what makes
-        // `turns` on a recompute summary an error rather than a number nobody
-        // reads.
-        Kind::Summary => {
-            let tag = take_string(&mut members, of, "kind")?;
-            let kind = SummaryKind::from_tag(&tag).ok_or(SchemaError::BadValue {
-                of,
-                field: "kind",
-                found: tag,
-            })?;
-            Event::Summary {
-                summary: match kind {
-                    SummaryKind::Drive => Summary::Drive {
-                        turns: take_u32(&mut members, of, "turns")?,
-                        prefill_tokens_total: take_u64(&mut members, of, "prefill_tokens_total")?,
-                        product_sha256: take_string(&mut members, of, "product_sha256")?,
-                    },
-                    SummaryKind::Recompute => Summary::Recompute {
-                        targets_checked: take_u32(&mut members, of, "targets_checked")?,
-                        targets_matched: take_u32(&mut members, of, "targets_matched")?,
-                        digests: take_digests(&mut members, of)?,
-                    },
-                },
-            }
-        }
+        Kind::Summary => Event::Summary {
+            summary: summary(&mut members, of)?,
+        },
     };
 
     // Anything left is a key this schema does not define. A typo'd key that is
@@ -1074,6 +1079,35 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
         .into());
     }
     Ok(built)
+}
+
+/// A summary, from a `summary` row's members.
+///
+/// `kind` first, then only that kind's fields. Anything else is left in
+/// `members` and refused by the caller as an unknown key -- which is what
+/// makes `turns` on a recompute summary an error rather than a number nobody
+/// reads. Its own function rather than an arm of [`event`] because the arm is
+/// the only one that dispatches on a second vocabulary, and a reader looking
+/// for what a summary may say should not have to read ten other kinds first.
+fn summary(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Summary, ParseError> {
+    let tag = take_string(members, of, "kind")?;
+    let kind = SummaryKind::from_tag(&tag).ok_or(SchemaError::BadValue {
+        of,
+        field: "kind",
+        found: tag,
+    })?;
+    Ok(match kind {
+        SummaryKind::Drive => Summary::Drive {
+            turns: take_u32(members, of, "turns")?,
+            prefill_tokens_total: take_u64(members, of, "prefill_tokens_total")?,
+            product_sha256: take_string(members, of, "product_sha256")?,
+        },
+        SummaryKind::Recompute => Summary::Recompute {
+            targets_checked: take_u32(members, of, "targets_checked")?,
+            targets_matched: take_u32(members, of, "targets_matched")?,
+            digests: take_digests(members, of)?,
+        },
+    })
 }
 
 /// The regime, from a `start` row's `regime` object.
@@ -1582,10 +1616,11 @@ impl<'a> Seen<'a> {
                 // be true of itself, and it is the shape a "not applicable"
                 // sentinel would arrive in if one were still possible here.
                 if targets_matched > targets_checked {
-                    return Err(StructureError::SummaryDisagrees {
+                    return Err(StructureError::SummaryImpossible {
                         field: "targets_matched",
                         says: u64::from(*targets_matched),
-                        counted: u64::from(*targets_checked),
+                        bound: "targets_checked",
+                        limit: u64::from(*targets_checked),
                     }
                     .into());
                 }
@@ -1826,38 +1861,47 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put("consumes", artifacts_value(consumes));
             members.put_optional("supersedes", supersedes.clone().map(Value::String));
         }
-        Event::Summary { summary } => {
-            // `kind` always, then that kind's own fields and no others -- so
-            // what comes back out is what the schema would accept going in.
-            members.put_text("kind", summary.kind().tag());
-            match summary {
-                Summary::Drive {
-                    turns,
-                    prefill_tokens_total,
-                    product_sha256,
-                } => {
-                    members.put_u32("turns", *turns);
-                    members.put_count("prefill_tokens_total", *prefill_tokens_total);
-                    members.put_text("product_sha256", product_sha256);
-                }
-                Summary::Recompute {
-                    targets_checked,
-                    targets_matched,
-                    digests,
-                } => {
-                    members.put_u32("targets_checked", *targets_checked);
-                    members.put_u32("targets_matched", *targets_matched);
-                    members.put(
-                        "digests",
-                        Value::Array(
-                            digests.iter().cloned().map(Value::String).collect::<Vec<_>>(),
-                        ),
-                    );
-                }
-            }
-        }
+        Event::Summary { summary } => summary_value(summary, &mut members),
     }
     members.0
+}
+
+/// A summary into the value space, in the terms of its own kind.
+///
+/// `kind` always, then that kind's own fields and no others -- so what comes
+/// back out is what the schema would accept going in. Paired with [`summary`]
+/// on the reading side, and split out for the same reason.
+fn summary_value(summary: &Summary, members: &mut Members) {
+    members.put_text("kind", summary.kind().tag());
+    match summary {
+        Summary::Drive {
+            turns,
+            prefill_tokens_total,
+            product_sha256,
+        } => {
+            members.put_u32("turns", *turns);
+            members.put_count("prefill_tokens_total", *prefill_tokens_total);
+            members.put_text("product_sha256", product_sha256);
+        }
+        Summary::Recompute {
+            targets_checked,
+            targets_matched,
+            digests,
+        } => {
+            members.put_u32("targets_checked", *targets_checked);
+            members.put_u32("targets_matched", *targets_matched);
+            members.put(
+                "digests",
+                Value::Array(
+                    digests
+                        .iter()
+                        .cloned()
+                        .map(Value::String)
+                        .collect::<Vec<_>>(),
+                ),
+            );
+        }
+    }
 }
 
 /// The artifacts a claim consumes, as the value space.

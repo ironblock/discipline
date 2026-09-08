@@ -781,6 +781,47 @@ inject_record_depth_unbounded() {
   sed -i 's|^    if depth > MAX_DEPTH {$|    if false {|' diet/src/formats/record/mod.rs
 }
 
+# The kind's own fields made advisory. `turns` is drained and thrown away on a
+# recompute summary, so the row is accepted and the number nobody can compute
+# is simply not there afterwards -- which is exactly the "tolerate the stray
+# field" change somebody makes when a producer emits one, and exactly what
+# #47's acceptance row exists to refuse.
+inject_record_summary_kind_fields_advisory() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """        SummaryKind::Recompute => Summary::Recompute {
+            targets_checked: take_u32(members, of, "targets_checked")?,"""
+new = """        SummaryKind::Recompute => Summary::Recompute {
+            targets_checked: {
+                members.remove("turns");
+                take_u32(members, of, "targets_checked")?
+            },"""
+if source.count(old) != 1:
+    raise SystemExit(f"the recompute arm appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# The one total a recompute summary can contradict on its own, left unchecked.
+# Nothing counts a recompute's targets, so this is the only rule that can tell
+# a summary that cannot be true of itself from one that merely surprises you.
+inject_record_summary_impossible_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """                if targets_matched > targets_checked {"""
+new = """                if false && targets_matched > targets_checked {"""
+if source.count(old) != 1:
+    raise SystemExit(f"the impossible-total check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
 inject_record_substrate_optional() {
   python3 - <<'EOF'
 import pathlib
@@ -4472,6 +4513,10 @@ selftest() {
     'no fixture.*spurious' 'lib/formats::record::tests'
   seeded_case "record substrate made optional"        test     inject_record_substrate_optional \
     'regime-missing-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a summary kind's fields made advisory" test     inject_record_summary_kind_fields_advisory \
+    'recompute-summary-carries-turns\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a summary that cannot be true of itself" test   inject_record_summary_impossible_unchecked \
+    'recompute-matched-exceeds-checked\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
     'retry-of-itself\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "record nesting left unbounded"         test     inject_record_depth_unbounded \

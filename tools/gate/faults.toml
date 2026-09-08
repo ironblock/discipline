@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 291
+red_faults = 293
 mechanics_assertions = 39
 migrated = 0
 
@@ -135,6 +135,26 @@ target = "lib/formats::record::tests"
 label = "an event kind with no fixture"
 failure_class = "format.kind-without-fixture"
 legacy_signature = "no fixture.*spurious"
+migrated = false
+
+[[fault]]
+id = "test.record_summary_kind_fields_advisory"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a summary kind's fields made advisory"
+failure_class = "schema.kind-field-not-refused"
+legacy_signature = "recompute-summary-carries-turns\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_summary_impossible_unchecked"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a summary that cannot be true of itself"
+failure_class = "schema.summary-impossible-accepted"
+legacy_signature = "recompute-matched-exceeds-checked\\.jsonl: accepted as"
 migrated = false
 
 [[fault]]
