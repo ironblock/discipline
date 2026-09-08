@@ -846,6 +846,62 @@ EOF
 # row served by one it did -- and the regime the result is attributed to is a
 # regime nothing in the file describes. The reference is the whole mechanism:
 # without the check it is a string somebody typed.
+# The length dropped from the padding. Every digest still comes out as
+# sixty-four hex characters and every one of them is wrong, which is the worst
+# shape a digest bug has: the comparison still runs, still looks like a
+# comparison, and agrees with nothing else on earth.
+inject_digest_padding_dropped() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/digest.rs")
+source = path.read_text(encoding="utf-8")
+old = "    tail[blocks * 64 - 8..blocks * 64].copy_from_slice(&bits.to_be_bytes());"
+new = "    let _ = bits;"
+if source.count(old) != 1:
+    raise SystemExit(f"the padding line appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# The runner's digest comparison made advisory. The cache is still read, the
+# scores are still computed, and they are the scores of whatever bytes happen
+# to be on disk rather than of the bytes the record consumed -- which is a
+# recompute that recomputes something else.
+inject_bakeoff_digest_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/bakeoff.rs")
+source = path.read_text(encoding="utf-8")
+old = "    if found != artifact.sha256 {"
+new = "    if false && found != artifact.sha256 {"
+if source.count(old) != 1:
+    raise SystemExit(f"the digest comparison appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# The budget raised past what the instrument can demonstrate failing at. The
+# precision fixture holds eight non-positives above its positives, so at nine
+# a positive enters its own top-k, the fixture stops reading as failure, and
+# `Reported::take` refuses -- which is the guard working. Seeded because the
+# ceiling is a property of a fixture rather than of the arithmetic, and a
+# ceiling nothing tests is a ceiling somebody raises.
+inject_bakeoff_budget_unfixtured() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/bakeoff.rs")
+source = path.read_text(encoding="utf-8")
+old = "pub const BUDGET: usize = 8;"
+new = "pub const BUDGET: usize = 9;"
+if source.count(old) != 1:
+    raise SystemExit(f"the budget appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
 inject_record_substrate_reference_unchecked() {
   python3 - <<'EOF'
 import pathlib
@@ -4633,6 +4689,12 @@ selftest() {
     'request-with-no-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "weights identified by name"            test     inject_record_weights_named_not_digested \
     'weights-named-not-digested\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a digest that agrees with nothing"     test     inject_digest_padding_dropped \
+    'digest::tests::the_standards_vectors' 'lib/digest'
+  seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \
+    'an edited cache was not refused' 'lib/capture::bakeoff'
+  seeded_case "a budget no fixture demonstrates"      test     inject_bakeoff_budget_unfixtured \
+    'rows built to fail' 'lib/capture::bakeoff'
   seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
     'retry-of-itself\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "record nesting left unbounded"         test     inject_record_depth_unbounded \

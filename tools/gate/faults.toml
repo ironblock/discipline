@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 296
+red_faults = 299
 mechanics_assertions = 39
 migrated = 0
 
@@ -155,6 +155,36 @@ target = "test:conformance/formats::record"
 label = "a summary that cannot be true of itself"
 failure_class = "schema.summary-impossible-accepted"
 legacy_signature = "recompute-matched-exceeds-checked\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.digest_padding_dropped"
+kind = "seeded-gate"
+check = "test"
+target = "lib/digest"
+label = "a digest that agrees with nothing"
+failure_class = "tool.digest-wrong"
+legacy_signature = "digest::tests::the_standards_vectors"
+migrated = false
+
+[[fault]]
+id = "test.bakeoff_digest_unchecked"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "the runner's digest made advisory"
+failure_class = "results.recompute-input-unchecked"
+legacy_signature = "an edited cache was not refused"
+migrated = false
+
+[[fault]]
+id = "test.bakeoff_budget_unfixtured"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "a budget no fixture demonstrates"
+failure_class = "results.metric-never-failed"
+legacy_signature = "rows built to fail"
 migrated = false
 
 [[fault]]

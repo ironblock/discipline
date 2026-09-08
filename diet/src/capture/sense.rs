@@ -2640,7 +2640,12 @@ impl PreRegistration {
 /// The one place a number a program computed becomes a number a record holds.
 /// A value with no spelling -- not finite -- comes back as the string
 /// `undefined` rather than as a number that is not one.
-fn decimal(value: f64, digits: usize) -> Value {
+/// A float as an exact decimal of `digits` places.
+///
+/// Crate-visible because the bakeoff runner spells numbers too, and a
+/// second copy of this would be a second place that has to remember
+/// `-0.0000` is a second spelling of zero.
+pub(crate) fn decimal(value: f64, digits: usize) -> Value {
     let spelled = format!("{value:.digits$}");
     // `-0.0000` is a second spelling of zero, which the record refuses; the
     // sign carries no information once every digit is a zero.
