@@ -84,7 +84,7 @@ REQUIRED_KEYS: dict[str, type | tuple[type, ...]] = {
 
 REQUIRED_REGIME_KEYS: dict[str, type | tuple[type, ...]] = {
     "arm": str,
-    "substrate": str,
+    "substrates": list,
     "dogma_version": int,
 }
 

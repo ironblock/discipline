@@ -1016,7 +1016,7 @@ mod tests {
     /// A regime for the tests, parsed through the record schema so that the
     /// object cannot be opened under a regime the record would reject.
     fn regime() -> Regime {
-        let source = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"m","quantization":"q","sampler":{"seed":0},"reasoning":"on","hardware":"h"}}}"#;
+        let source = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
         record::parse(source).expect("a record").regime().clone()
     }
 
@@ -1366,8 +1366,10 @@ mod tests {
         let mut other = WorkingObject::open(
             record::parse(
                 "{\"record\":\"start\",\"regime\":{\"arm\":\"treatment\",\"dogma_version\":0,\
-                 \"substrate\":{\"name\":\"local\",\"model\":\"m\",\"quantization\":\"q\",\
-                 \"sampler\":{\"seed\":0},\"reasoning\":\"on\",\"hardware\":\"h\"}}}",
+                 \"substrates\":[{\"id\":\"local\",\"engine\":{\"name\":\"a-runtime\",\
+                 \"version_or_digest\":\"1.0\"},\"weights_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\
+                 \"hardware_fingerprint\":\"h\",\"sampler_card\":{\"seed\":0},\
+                 \"reasoning\":\"on\"}]}}",
             )
             .expect("a record")
             .regime()

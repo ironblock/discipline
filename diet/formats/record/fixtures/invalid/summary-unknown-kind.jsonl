@@ -1,2 +1,2 @@
-{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"a-model","quantization":"q4","sampler":{"seed":7},"reasoning":"on","hardware":"one-gpu"}}}
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sampler_card":{"seed":7},"reasoning":"on","hardware_fingerprint":"one-gpu"}]}}
 {"record":"summary","kind":"replay","turns":1,"prefill_tokens_total":900,"product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}

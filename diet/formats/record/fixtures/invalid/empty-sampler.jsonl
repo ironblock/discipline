@@ -1,1 +1,1 @@
-{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"m","quantization":"q","sampler":{},"reasoning":"on","hardware":"h"}}}
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sampler_card":{},"reasoning":"on","hardware_fingerprint":"h"}]}}

@@ -1,1 +1,1 @@
-{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"n","model":"m","quantization":"q","sampler":{"temperature":7e-1},"reasoning":"on","hardware":"h"}}}
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sampler_card":{"temperature":7e-1},"reasoning":"on","hardware_fingerprint":"h"}]}}

@@ -85,26 +85,50 @@ macro_rules! vocabulary {
 // the regime
 // ---------------------------------------------------------------------------
 
-/// Which substrate produced a session.
+/// The stack that served a substrate's weights.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Engine {
+    /// The serving stack, as it calls itself.
+    pub name: String,
+    /// Which build of it. A version when the stack publishes one, a digest
+    /// when it does not -- #47's own spelling, and the reason the field is
+    /// named for both rather than for the one that happened to be available.
+    pub version_or_digest: String,
+}
+
+/// One thing a run was served by, declared once and referenced by id.
+///
+/// Was a single `substrate` on the regime. It is a list now because a run can
+/// have more than one -- a drive whose interview fork is served by a small
+/// local model while the main lane is served by a large one is the case this
+/// repository is built to measure, and a single substrate could not say it.
+///
+/// Identity is the WEIGHTS DIGEST, not a name. A name is prose: two runs can
+/// spell the same weights differently and a third can spell different weights
+/// the same, and then a regime comparison compares strings. The digest cannot
+/// do either.
 ///
 /// Every field is required. An optional substrate field is a substrate field
 /// that will be absent exactly when it matters -- the run whose result
 /// surprises someone is the run nobody thought to tag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Substrate {
-    /// The short name the substrate is known by. This is the string a report's
-    /// front-matter carries as `regime.substrate`.
-    pub name: String,
-    /// The model, as the serving stack names it.
-    pub model: String,
-    /// The quantization, as the serving stack names it.
-    pub quantization: String,
+    /// What rows reference. Unique within a run; nothing outside it.
+    pub id: String,
+    /// What served the weights.
+    pub engine: Engine,
+    /// The weights, by digest.
+    pub weights_digest: String,
+    /// A fingerprint for the hardware it was served from.
+    pub hardware_fingerprint: String,
     /// Sampler settings, exactly as they were set.
-    pub sampler: BTreeMap<String, Value>,
+    pub sampler_card: BTreeMap<String, Value>,
     /// Whether reasoning was on, and whether it came back.
+    ///
+    /// Not in #47's list of substrate fields and kept anyway: it is a property
+    /// of how these weights were run, two valid fixtures pin it, and dropping
+    /// it would be a distinction the schema stopped being able to make.
     pub reasoning: Reasoning,
-    /// A fingerprint for the hardware the run was served from.
-    pub hardware: String,
 }
 
 vocabulary! {
@@ -129,8 +153,8 @@ vocabulary! {
 pub struct Regime {
     /// Which arm of the experiment.
     pub arm: String,
-    /// What served it.
-    pub substrate: Substrate,
+    /// What served it, declared once. At least one, ids unique.
+    pub substrates: Vec<Substrate>,
     /// Which version of the dogma was in force.
     pub dogma_version: u32,
 }
@@ -141,7 +165,19 @@ impl Regime {
     /// Named here rather than in the report linter so that the schema is the
     /// definition and the report is the mirror, which is the direction the
     /// two are supposed to run in.
-    pub const TAGS: &'static [&'static str] = &["arm", "substrate", "dogma_version"];
+    pub const TAGS: &'static [&'static str] = &["arm", "substrates", "dogma_version"];
+
+    /// Whether this run declared a substrate under that id.
+    #[must_use]
+    pub fn declares(&self, id: &str) -> bool {
+        self.substrates.iter().any(|s| s.id == id)
+    }
+
+    /// Every declared id, in declaration order.
+    #[must_use]
+    pub fn substrate_ids(&self) -> Vec<&str> {
+        self.substrates.iter().map(|s| s.id.as_str()).collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +322,15 @@ pub enum Event {
         id: String,
         /// Which lane sent it.
         lane: String,
+        /// Which declared substrate it was put to, by id.
+        ///
+        /// Required, and required even when the run declares exactly one:
+        /// a row that may omit it is a row whose substrate was decided
+        /// somewhere else, which is the thing declaring them exists to end.
+        /// A `response` inherits this through its `to_request`, and a retry
+        /// is a new request row, so a retry served by a different substrate
+        /// is already expressible without a second place to say so.
+        substrate: String,
         /// The request this one retries, if it is a retry. A retry is a new
         /// request that names its predecessor; it is not an annotation on the
         /// old one, because the old one already happened.
@@ -321,6 +366,12 @@ pub enum Event {
         id: String,
         /// Which lane it belongs to.
         lane: String,
+        /// Which declared substrate the fork was served by, by id.
+        ///
+        /// The field that makes the point of declaring substrates: a fork
+        /// served by a small local model while the main lane runs a large one
+        /// is the arrangement this repository is built to measure.
+        substrate: String,
         /// The turn it forked from.
         of_turn: u32,
     },
@@ -543,13 +594,13 @@ impl Record {
 
 /// The deepest nesting a record may carry.
 ///
-/// A record's own deepest legitimate shape is four -- `regime.substrate.
-/// sampler.<setting>` -- so this is generous by an order of magnitude and
+/// A record's own deepest legitimate shape is five -- `regime.substrates[].
+/// sampler_card.<setting>` -- so this is generous by an order of magnitude and
 /// still far below where recursive descent runs out of stack. Without it a
 /// 2 KB file of nested objects ABORTS the process, and this format's own
 /// corpus says, in `invalid/not-utf8.reason`, that a format must return a
-/// verdict on arbitrary bytes rather than crash on them. `Substrate.sampler`
-/// is the arrival vector: the one untyped, arbitrarily-nested field here.
+/// verdict on arbitrary bytes rather than crash on them. The sampler card is
+/// the arrival vector: the one untyped, arbitrarily-nested field here.
 pub const MAX_DEPTH: usize = 32;
 
 /// Why a text is not a session record.
@@ -701,6 +752,17 @@ pub enum StructureError {
         /// What that field claims.
         limit: u64,
     },
+    /// Two substrates declared under one id.
+    SubstrateDeclaredTwice(String),
+    /// A row naming a substrate the run never declared.
+    UndeclaredSubstrate {
+        /// The row that names it.
+        row: &'static str,
+        /// The id it names.
+        id: String,
+        /// What the run did declare, so the reader can see the typo.
+        declared: Vec<String>,
+    },
     /// A turn index a link names that no turn ever had.
     UnknownTurn(u32),
     /// Turn indices that do not run 1, 2, 3.
@@ -817,6 +879,25 @@ impl fmt::Display for StructureError {
                 f,
                 "the summary's `{field}` says {says} of the {limit} its \
                  `{bound}` says were looked at"
+            ),
+            Self::SubstrateDeclaredTwice(id) => write!(
+                f,
+                "two substrates are declared as `{id}`, so every row naming it \
+                 would have to be read as one of them"
+            ),
+            Self::UndeclaredSubstrate { row, id, declared } => write!(
+                f,
+                "a `{row}` row is served by `{id}`, which this run does not \
+                 declare; it declares {}",
+                if declared.is_empty() {
+                    "none".to_owned()
+                } else {
+                    declared
+                        .iter()
+                        .map(|d| format!("`{d}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
             ),
             Self::UnknownTurn(index) => write!(f, "a row names turn {index}, which never happened"),
             Self::TurnOutOfOrder { want, found } => {
@@ -1011,6 +1092,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
         Kind::Request => Event::Request {
             id: take_string(&mut members, of, "id")?,
             lane: take_string(&mut members, of, "lane")?,
+            substrate: take_string(&mut members, of, "substrate")?,
             retry_of: take_optional_string(&mut members, of, "retry_of")?,
             text: take_optional_text(&mut members, of, "text")?,
         },
@@ -1023,6 +1105,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
         Kind::Fork => Event::Fork {
             id: take_string(&mut members, of, "id")?,
             lane: take_string(&mut members, of, "lane")?,
+            substrate: take_string(&mut members, of, "substrate")?,
             of_turn: take_u32(&mut members, of, "of_turn")?,
         },
         Kind::Capture => Event::Capture {
@@ -1114,43 +1197,7 @@ fn summary(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Su
 fn regime(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Regime, ParseError> {
     let arm = take_string(members, of, "arm")?;
     let dogma_version = take_u32(members, of, "dogma_version")?;
-    let mut substrate_members = take_object(members, of, "substrate")?;
-    let substrate = Substrate {
-        name: take_string(&mut substrate_members, of, "name")?,
-        model: take_string(&mut substrate_members, of, "model")?,
-        quantization: take_string(&mut substrate_members, of, "quantization")?,
-        sampler: {
-            // A substrate whose sampler settings are the empty object records
-            // that the run had settings and declines to say which. The issue
-            // names sampler settings as one of the substrate's facets, and an
-            // empty map satisfies the type while satisfying nothing else.
-            let settings = take_object(&mut substrate_members, of, "sampler")?;
-            if settings.is_empty() {
-                return Err(SchemaError::BlankField {
-                    of,
-                    field: "substrate.sampler",
-                }
-                .into());
-            }
-            settings
-        },
-        reasoning: {
-            let text = take_string(&mut substrate_members, of, "reasoning")?;
-            Reasoning::from_tag(&text).ok_or(SchemaError::BadValue {
-                of,
-                field: "reasoning",
-                found: text,
-            })?
-        },
-        hardware: take_string(&mut substrate_members, of, "hardware")?,
-    };
-    if let Some(field) = substrate_members.keys().next() {
-        return Err(SchemaError::UnknownField {
-            of,
-            field: format!("substrate.{field}"),
-        }
-        .into());
-    }
+    let substrates = substrates(members, of)?;
     if let Some(field) = members.keys().next() {
         return Err(SchemaError::UnknownField {
             of,
@@ -1160,9 +1207,139 @@ fn regime(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Reg
     }
     Ok(Regime {
         arm,
-        substrate,
+        substrates,
         dogma_version,
     })
+}
+
+/// The substrates a run declares, from the regime's `substrates` list.
+///
+/// A single-substrate run declares a list of one. Not a shorthand for it: a
+/// run whose rows may omit the reference when there is only one is a run
+/// whose rows mean different things depending on a count elsewhere in the
+/// file, and the reference is what this whole item exists to make explicit.
+fn substrates(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Vec<Substrate>, ParseError> {
+    let Some(value) = members.remove("substrates") else {
+        return Err(SchemaError::MissingField {
+            of,
+            field: "substrates",
+        }
+        .into());
+    };
+    let Value::Array(items) = value else {
+        return Err(SchemaError::WrongType {
+            of,
+            field: "substrates".to_owned(),
+            want: "a list of substrates",
+        }
+        .into());
+    };
+    // A run served by nothing is not a run. The empty list satisfies the type
+    // and says nothing, which is the shape the empty sampler card was refused
+    // for one field down.
+    if items.is_empty() {
+        return Err(SchemaError::BlankField {
+            of,
+            field: "regime.substrates",
+        }
+        .into());
+    }
+    let mut declared: Vec<Substrate> = Vec::with_capacity(items.len());
+    for item in items {
+        let Value::Object(mut fields) = item else {
+            return Err(SchemaError::WrongType {
+                of,
+                field: "substrates[]".to_owned(),
+                want: "a substrate",
+            }
+            .into());
+        };
+        let one = substrate(&mut fields, of)?;
+        // Two substrates under one id would make every reference to it
+        // ambiguous, and the reader would have to pick. It refuses instead.
+        if declared.iter().any(|s| s.id == one.id) {
+            return Err(StructureError::SubstrateDeclaredTwice(one.id).into());
+        }
+        declared.push(one);
+    }
+    Ok(declared)
+}
+
+/// One substrate, from its object.
+fn substrate(
+    fields: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Substrate, ParseError> {
+    let id = take_string(fields, of, "id")?;
+    if id.trim().is_empty() {
+        return Err(SchemaError::BlankField {
+            of,
+            field: "substrates[].id",
+        }
+        .into());
+    }
+    let mut engine_fields = take_object(fields, of, "engine")?;
+    let engine = Engine {
+        name: take_string(&mut engine_fields, of, "name")?,
+        version_or_digest: take_string(&mut engine_fields, of, "version_or_digest")?,
+    };
+    if let Some(field) = engine_fields.keys().next() {
+        return Err(SchemaError::UnknownField {
+            of,
+            field: format!("substrates[].engine.{field}"),
+        }
+        .into());
+    }
+    let built = Substrate {
+        id,
+        engine,
+        weights_digest: {
+            // Identity, so it is checked as a digest rather than accepted as
+            // a name. A run served by weights nobody can digest -- a hosted
+            // model -- cannot be spelled here, and that is recorded on #47
+            // rather than papered over with a field that takes prose.
+            let text = take_string(fields, of, "weights_digest")?;
+            if !digest_ok(&text) {
+                return Err(StructureError::BadDigest(text).into());
+            }
+            text
+        },
+        hardware_fingerprint: take_string(fields, of, "hardware_fingerprint")?,
+        sampler_card: {
+            // A substrate whose sampler card is the empty object records that
+            // the run had settings and declines to say which. The issue names
+            // the card as one of the substrate's facets, and an empty map
+            // satisfies the type while satisfying nothing else.
+            let settings = take_object(fields, of, "sampler_card")?;
+            if settings.is_empty() {
+                return Err(SchemaError::BlankField {
+                    of,
+                    field: "substrates[].sampler_card",
+                }
+                .into());
+            }
+            settings
+        },
+        reasoning: {
+            let text = take_string(fields, of, "reasoning")?;
+            Reasoning::from_tag(&text).ok_or(SchemaError::BadValue {
+                of,
+                field: "reasoning",
+                found: text,
+            })?
+        },
+    };
+    if let Some(field) = fields.keys().next() {
+        return Err(SchemaError::UnknownField {
+            of,
+            field: format!("substrates[].{field}"),
+        }
+        .into());
+    }
+    Ok(built)
 }
 
 fn take_artifacts(
@@ -1657,6 +1834,31 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
             _ if position == 0 => return Err(StructureError::StartNotFirst.into()),
             _ => {}
         }
+        // Checked against the regime ALREADY SEEN, like every other link here.
+        // `start` is first or the loop has already refused the record, so the
+        // declarations are in hand by the time any row can name one, and a
+        // record can be walked as it is written.
+        if let Some(known) = regime.as_ref() {
+            let named = match event {
+                Event::Request { substrate, .. } => Some(("request", substrate)),
+                Event::Fork { substrate, .. } => Some(("fork", substrate)),
+                _ => None,
+            };
+            if let Some((row, id)) = named
+                && !known.declares(id)
+            {
+                return Err(StructureError::UndeclaredSubstrate {
+                    row,
+                    id: id.clone(),
+                    declared: known
+                        .substrate_ids()
+                        .into_iter()
+                        .map(ToOwned::to_owned)
+                        .collect(),
+                }
+                .into());
+            }
+        }
         seen.admit(event)?;
         seen.claim_id(event)?;
         summary_seen |= matches!(event, Event::Summary { .. });
@@ -1787,11 +1989,13 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
         }
         Event::Request {
             lane,
+            substrate,
             retry_of,
             text,
             ..
         } => {
             members.put_text("lane", lane);
+            members.put_text("substrate", substrate);
             members.put_optional("retry_of", retry_of.clone().map(Value::String));
             members.put_optional("text", text.clone().map(Value::String));
         }
@@ -1805,8 +2009,14 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put_count("output_tokens", *output_tokens);
             members.put_optional("text", text.clone().map(Value::String));
         }
-        Event::Fork { lane, of_turn, .. } => {
+        Event::Fork {
+            lane,
+            substrate,
+            of_turn,
+            ..
+        } => {
             members.put_text("lane", lane);
+            members.put_text("substrate", substrate);
             members.put_u32("of_turn", *of_turn);
         }
         Event::Capture {
@@ -1925,35 +2135,44 @@ fn artifacts_value(consumes: &[Artifact]) -> Value {
 /// durable half of a working object, and a dump that does not say which
 /// regime produced it cannot be compared with one from another arm.
 pub(crate) fn regime_value(regime: &Regime) -> Value {
-    let substrate = BTreeMap::from([
-        (
-            "name".to_owned(),
-            Value::String(regime.substrate.name.clone()),
-        ),
-        (
-            "model".to_owned(),
-            Value::String(regime.substrate.model.clone()),
-        ),
-        (
-            "quantization".to_owned(),
-            Value::String(regime.substrate.quantization.clone()),
-        ),
-        (
-            "sampler".to_owned(),
-            Value::Object(regime.substrate.sampler.clone()),
-        ),
-        (
-            "reasoning".to_owned(),
-            Value::String(regime.substrate.reasoning.tag().to_owned()),
-        ),
-        (
-            "hardware".to_owned(),
-            Value::String(regime.substrate.hardware.clone()),
-        ),
-    ]);
+    let substrates = regime
+        .substrates
+        .iter()
+        .map(|s| {
+            Value::Object(BTreeMap::from([
+                ("id".to_owned(), Value::String(s.id.clone())),
+                (
+                    "engine".to_owned(),
+                    Value::Object(BTreeMap::from([
+                        ("name".to_owned(), Value::String(s.engine.name.clone())),
+                        (
+                            "version_or_digest".to_owned(),
+                            Value::String(s.engine.version_or_digest.clone()),
+                        ),
+                    ])),
+                ),
+                (
+                    "weights_digest".to_owned(),
+                    Value::String(s.weights_digest.clone()),
+                ),
+                (
+                    "hardware_fingerprint".to_owned(),
+                    Value::String(s.hardware_fingerprint.clone()),
+                ),
+                (
+                    "sampler_card".to_owned(),
+                    Value::Object(s.sampler_card.clone()),
+                ),
+                (
+                    "reasoning".to_owned(),
+                    Value::String(s.reasoning.tag().to_owned()),
+                ),
+            ]))
+        })
+        .collect();
     Value::Object(BTreeMap::from([
         ("arm".to_owned(), Value::String(regime.arm.clone())),
-        ("substrate".to_owned(), Value::Object(substrate)),
+        ("substrates".to_owned(), Value::Array(substrates)),
         (
             "dogma_version".to_owned(),
             Value::Integer(i64::from(regime.dogma_version)),
@@ -1983,8 +2202,19 @@ pub fn project(source: &str) -> Result<Value, String> {
                     Value::Object(BTreeMap::from([
                         ("arm".to_owned(), Value::String(parsed.regime().arm.clone())),
                         (
-                            "substrate".to_owned(),
-                            Value::String(parsed.regime().substrate.name.clone()),
+                            // The declared ids, in declaration order. What a
+                            // report's front-matter mirrors, and what a row's
+                            // `substrate` must be one of -- so the mirror and
+                            // the references are the same list of names.
+                            "substrates".to_owned(),
+                            Value::Array(
+                                parsed
+                                    .regime()
+                                    .substrate_ids()
+                                    .into_iter()
+                                    .map(|id| Value::String(id.to_owned()))
+                                    .collect(),
+                            ),
                         ),
                         (
                             "dogma_version".to_owned(),
@@ -2017,7 +2247,7 @@ mod tests {
     };
 
     /// A `start` line whose regime is complete, as every record needs one.
-    const START: &str = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"a-model","quantization":"q4","sampler":{"seed":7,"temperature":0.7},"reasoning":"on","hardware":"one-gpu"}}}"#;
+    const START: &str = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","hardware_fingerprint":"one-gpu","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on"}]}}"#;
 
     fn record(rest: &str) -> String {
         format!("{START}\n{rest}")
@@ -2027,8 +2257,8 @@ mod tests {
     fn the_regime_comes_from_the_required_start() {
         let parsed = parse(&record("")).expect("a record");
         assert_eq!(parsed.regime().arm, "baseline");
-        assert_eq!(parsed.regime().substrate.name, "local");
-        assert_eq!(parsed.regime().substrate.reasoning, Reasoning::On);
+        assert_eq!(parsed.regime().substrates[0].id, "local");
+        assert_eq!(parsed.regime().substrates[0].reasoning, Reasoning::On);
     }
 
     // The acceptance case: provenance is not optional, and a record that omits
@@ -2065,9 +2295,9 @@ mod tests {
     #[test]
     fn a_retry_names_the_request_it_replaces() {
         let source = record(concat!(
-            r#"{"record":"request","id":"r1","lane":"main"}"#,
+            r#"{"record":"request","id":"r1","lane":"main","substrate":"local"}"#,
             "\n",
-            r#"{"record":"request","id":"r2","lane":"main","retry_of":"r1"}"#,
+            r#"{"record":"request","id":"r2","lane":"main","substrate":"local","retry_of":"r1"}"#,
             "\n",
             r#"{"record":"response","id":"a1","to_request":"r2","output_tokens":12}"#,
             "\n",
@@ -2096,7 +2326,7 @@ mod tests {
         let source = record(concat!(
             r#"{"record":"turn","index":1,"prefill_tokens":10}"#,
             "\n",
-            r#"{"record":"fork","id":"f1","lane":"interview","of_turn":1}"#,
+            r#"{"record":"fork","id":"f1","lane":"interview","substrate":"local","of_turn":1}"#,
             "\n",
             r#"{"record":"response","id":"a1","to_request":"f1","output_tokens":3}"#,
             "\n",
@@ -2207,7 +2437,7 @@ mod tests {
         let source = record(concat!(
             r#"{"record":"turn","index":1,"prefill_tokens":10}"#,
             "\n",
-            r#"{"record":"request","id":"q1","lane":"main","text":"list the tree"}"#,
+            r#"{"record":"request","id":"q1","lane":"main","substrate":"local","text":"list the tree"}"#,
             "\n",
             r#"{"record":"response","id":"a1","to_request":"q1","output_tokens":0,"text":""}"#,
             "\n",
@@ -2271,7 +2501,7 @@ mod tests {
         ] {
             let source = record(&format!(
                 "{{\"record\":\"turn\",\"index\":1,\"prefill_tokens\":10}}\n\
-                 {{\"record\":\"request\",\"id\":\"q1\",\"lane\":\"main\"}}\n{row}\n"
+                 {{\"record\":\"request\",\"id\":\"q1\",\"lane\":\"main\",\"substrate\":\"local\"}}\n{row}\n"
             ));
             assert!(
                 matches!(
@@ -2288,7 +2518,7 @@ mod tests {
         let digest = "b".repeat(64);
         let source = record(&format!(
             "{{\"record\":\"turn\",\"index\":1,\"prefill_tokens\":1024}}\n\
-             {{\"record\":\"fork\",\"id\":\"f1\",\"lane\":\"interview\",\"of_turn\":1}}\n\
+             {{\"record\":\"fork\",\"id\":\"f1\",\"lane\":\"interview\",\"substrate\":\"local\",\"of_turn\":1}}\n\
              {{\"record\":\"capture\",\"id\":\"p1\",\"from_fork\":\"f1\",\"entries\":3}}\n\
              {{\"record\":\"summary\",\"kind\":\"drive\",\"turns\":1,\"prefill_tokens_total\":1024,\
              \"product_sha256\":\"{digest}\"}}\n"
@@ -2304,12 +2534,14 @@ mod tests {
         for state in Reasoning::ALL {
             let source = format!(
                 "{{\"record\":\"start\",\"regime\":{{\"arm\":\"a\",\"dogma_version\":0,\
-                 \"substrate\":{{\"name\":\"n\",\"model\":\"m\",\"quantization\":\"q\",\
-                 \"sampler\":{{\"seed\":0}},\"reasoning\":\"{}\",\"hardware\":\"h\"}}}}}}\n",
+                 \"substrates\":[{{\"id\":\"n\",\"engine\":{{\"name\":\"a-runtime\",\
+                 \"version_or_digest\":\"1.0\"}},\"weights_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\
+                 \"hardware_fingerprint\":\"h\",\"sampler_card\":{{\"seed\":0}},\
+                 \"reasoning\":\"{}\"}}]}}}}\n",
                 state.tag()
             );
             let parsed = parse(&source).expect("a record");
-            assert_eq!(parsed.regime().substrate.reasoning, *state);
+            assert_eq!(parsed.regime().substrates[0].reasoning, *state);
         }
     }
 
@@ -2455,7 +2687,7 @@ mod tests {
     #[test]
     fn nothing_can_link_to_itself() {
         let retry = record(concat!(
-            r#"{"record":"request","id":"q1","lane":"main","retry_of":"q1"}"#,
+            r#"{"record":"request","id":"q1","lane":"main","substrate":"local","retry_of":"q1"}"#,
             "\n"
         ));
         assert!(matches!(
@@ -2530,12 +2762,12 @@ mod tests {
     // typing two quotes buys presence rather than provenance.
     #[test]
     fn a_required_string_that_says_nothing_is_absent() {
-        let blank = r#"{"record":"start","regime":{"arm":"","dogma_version":0,"substrate":{"name":"n","model":"m","quantization":"q","sampler":{"seed":0},"reasoning":"on","hardware":"h"}}}"#;
+        let blank = r#"{"record":"start","regime":{"arm":"","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
         assert!(matches!(
             parse(blank),
             Err(ParseError::Schema(SchemaError::BlankField { .. }))
         ));
-        let no_settings = r#"{"record":"start","regime":{"arm":"a","dogma_version":0,"substrate":{"name":"n","model":"m","quantization":"q","sampler":{},"reasoning":"on","hardware":"h"}}}"#;
+        let no_settings = r#"{"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","hardware_fingerprint":"h","sampler_card":{},"reasoning":"on"}]}}"#;
         assert!(
             matches!(
                 parse(no_settings),

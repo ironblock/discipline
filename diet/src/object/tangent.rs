@@ -409,7 +409,7 @@ mod tests {
     /// A regime parsed through the record schema, so the object cannot be
     /// opened under one the record would reject.
     fn regime() -> Regime {
-        let source = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"m","quantization":"q","sampler":{"seed":0},"reasoning":"on","hardware":"h"}}}"#;
+        let source = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
         record::parse(source).expect("a record").regime().clone()
     }
 
