@@ -498,8 +498,11 @@ sandbox_state() {
 #   fresh path each case   14.8s  14.8s
 #   one path reused        15.5s   4.4s   4.7s      (the first primes it)
 #
-# 145 of the faults below are Rust-class, so that difference was most of the
+# Most of the faults below are Rust-class -- every `test` case, and the fmt,
+# clippy and library cases besides -- so that difference was most of the
 # selftest's wall clock and all of the reason it read fifty-two minutes in CI.
+# No count is written here on purpose: this line carried one, it was wrong the
+# day it was written, and nothing reads a comment closely enough to notice.
 #
 # Isolation is unchanged, because what is reused is the PATH and not the
 # CONTENT: sandbox() removes the tree and copies it again from ROOT for every
