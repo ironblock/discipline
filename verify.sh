@@ -822,30 +822,109 @@ path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
 
+# A reference that resolves to whatever it names. `declares` answers yes for
+# every id, so a row served by a substrate the run never declared reads as a
+# row served by one it did -- and the regime the result is attributed to is a
+# regime nothing in the file describes. The reference is the whole mechanism:
+# without the check it is a string somebody typed.
+inject_record_substrate_reference_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "        self.substrates.iter().any(|s| s.id == id)"
+new = "        let _ = id;\n        true"
+if source.count(old) != 1:
+    raise SystemExit(f"`declares` body appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# The reference made optional, resolved to the only declared substrate. Every
+# record in the corpus still parses -- they all declare one -- which is what
+# makes it the tempting change and what makes it worth a seeded fault: the
+# same three lines then mean something different in a two-substrate run, and
+# nothing in the row says so.
+inject_record_substrate_defaults_when_alone() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            substrate: take_string(&mut members, of, "substrate")?,\n            retry_of:'
+new = ('            substrate: take_optional_string(&mut members, of, "substrate")?\n'
+       '                .unwrap_or_else(|| "local".to_owned()),\n'
+       '            retry_of:')
+if source.count(old) != 1:
+    raise SystemExit(f"the request arm appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# Weights identified by whatever string is there. A name is prose: two runs
+# can spell the same weights differently and a third can spell different
+# weights the same, and then a regime comparison compares strings.
+inject_record_weights_named_not_digested() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            let text = take_string(fields, of, "weights_digest")?;\n            if !digest_ok(&text) {'
+new = '            let text = take_string(fields, of, "weights_digest")?;\n            if false && !digest_ok(&text) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the weights check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
 inject_record_substrate_optional() {
   python3 - <<'EOF'
 import pathlib
 
 path = pathlib.Path("diet/src/formats/record/mod.rs")
 source = path.read_text(encoding="utf-8")
-old = '    let mut substrate_members = take_object(members, of, "substrate")?;'
-new = """    let mut substrate_members = take_object(members, of, "substrate").unwrap_or_else(|_| {
-        BTreeMap::from([
-            ("name".to_owned(), Value::String("unknown".to_owned())),
-            ("model".to_owned(), Value::String("unknown".to_owned())),
-            ("quantization".to_owned(), Value::String("unknown".to_owned())),
+old = """    let Some(value) = members.remove("substrates") else {
+        return Err(SchemaError::MissingField {
+            of,
+            field: "substrates",
+        }
+        .into());
+    };"""
+new = """    let value = members.remove("substrates").unwrap_or_else(|| {
+        Value::Array(vec![Value::Object(BTreeMap::from([
+            ("id".to_owned(), Value::String("unknown".to_owned())),
             (
-                "sampler".to_owned(),
+                "engine".to_owned(),
+                Value::Object(BTreeMap::from([
+                    ("name".to_owned(), Value::String("unknown".to_owned())),
+                    (
+                        "version_or_digest".to_owned(),
+                        Value::String("unknown".to_owned()),
+                    ),
+                ])),
+            ),
+            (
+                "weights_digest".to_owned(),
+                Value::String("0".repeat(64)),
+            ),
+            (
+                "hardware_fingerprint".to_owned(),
+                Value::String("unknown".to_owned()),
+            ),
+            (
+                "sampler_card".to_owned(),
                 Value::Object(BTreeMap::from([(
                     "seed".to_owned(),
                     Value::Integer(0),
                 )])),
             ),
             ("reasoning".to_owned(), Value::String("off".to_owned())),
-            ("hardware".to_owned(), Value::String("unknown".to_owned())),
-        ])
+        ]))])
     });"""
-assert old in source
+if source.count(old) != 1:
+    raise SystemExit(f"the substrates guard appears {source.count(old)} times")
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
@@ -4517,6 +4596,12 @@ selftest() {
     'recompute-summary-carries-turns\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "a summary that cannot be true of itself" test   inject_record_summary_impossible_unchecked \
     'recompute-matched-exceeds-checked\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a substrate reference that resolves to anything" test inject_record_substrate_reference_unchecked \
+    'lane-names-an-undeclared-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a substrate reference defaulted when alone" test inject_record_substrate_defaults_when_alone \
+    'request-with-no-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "weights identified by name"            test     inject_record_weights_named_not_digested \
+    'weights-named-not-digested\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
     'retry-of-itself\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "record nesting left unbounded"         test     inject_record_depth_unbounded \

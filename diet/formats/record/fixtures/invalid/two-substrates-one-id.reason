@@ -1,0 +1,3 @@
+Two declarations under `big`, with different weights. Every row naming it
+would have to be read as one of them, and the reader would have to pick.
+It refuses instead.

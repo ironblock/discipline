@@ -1,0 +1,10 @@
+`qwen3-30b-a3b-q4` is a name, and identity by name is the thing the digest
+replaced: two runs can spell the same weights differently and a third can
+spell different weights the same, and then a regime comparison compares
+strings.
+
+The known cost, recorded on #47 rather than papered over: a run served by
+weights nobody can digest -- a hosted model behind an API -- cannot be spelled
+here at all. Every run this repository records today is local. If that stops
+being true the field needs a shape that can say "served, not digested", and
+that is a ruling rather than a widening of this one.

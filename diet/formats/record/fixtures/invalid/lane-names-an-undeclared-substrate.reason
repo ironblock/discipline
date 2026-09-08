@@ -1,0 +1,7 @@
+#47 item 3's acceptance row. The run declares `big` and `small`; the request
+is served by `medium`, which nothing declares.
+
+Refused rather than treated as a third substrate the run forgot to declare:
+a reference that can invent its own referent is a reference to nothing, and
+the whole point of declaring substrates once is that every row's regime is
+resolvable from the declaration rather than from the row.

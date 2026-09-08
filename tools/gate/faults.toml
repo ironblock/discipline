@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 293
+red_faults = 296
 mechanics_assertions = 39
 migrated = 0
 
@@ -155,6 +155,36 @@ target = "test:conformance/formats::record"
 label = "a summary that cannot be true of itself"
 failure_class = "schema.summary-impossible-accepted"
 legacy_signature = "recompute-matched-exceeds-checked\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_substrate_reference_unchecked"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a substrate reference that resolves to anything"
+failure_class = "schema.substrate-reference-unchecked"
+legacy_signature = "lane-names-an-undeclared-substrate\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_substrate_defaults_when_alone"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a substrate reference defaulted when alone"
+failure_class = "schema.substrate-reference-defaulted"
+legacy_signature = "request-with-no-substrate\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_weights_named_not_digested"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "weights identified by name"
+failure_class = "schema.weights-not-digested"
+legacy_signature = "weights-named-not-digested\\.jsonl: accepted as"
 migrated = false
 
 [[fault]]
