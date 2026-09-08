@@ -48,10 +48,28 @@ FUNC_BODY = re.compile(r"^(inject_[a-z0-9_]+)\(\) \{\n(.*?)^\}\n", re.M | re.S)
 # Every helper an injection may call, sourced alongside it. Extracted by name
 # rather than by sourcing verify.sh, which would run the gate.
 HELPERS = re.compile(
-    r"^(?:seed_commit|strip_substrates)\(\) \{\n.*?^\}\n", re.M | re.S
+    r"^(?:seed_commit|strip_substrates|edit_in_place)\(\) \{\n.*?^\}\n", re.M | re.S
 )
 
 GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
+
+# `sed -i` with the suffix attached to the flag, and a `\n` in a replacement.
+# Both are GNU extensions, and both are silent on the platform that has them.
+#
+# BSD sed takes `-i`'s suffix as the NEXT ARGUMENT, so `sed -i 's/a/b/' f`
+# there means suffix `s/a/b/` with `f` as the script; the error is about the
+# script and reads as nonsense. Twenty-eight injections were inert on a Mac
+# and passing in CI for that reason (#50) -- the tree's verdict depended on
+# the machine, and an inert injection is a case that proves nothing while
+# reporting the same green.
+#
+# Checked by pattern here, cheaply, over every injection; PROVEN by execution
+# in `scripts/bsd-sed/`, which is a sed that reproduces the one difference so
+# that the whole corpus can be run against it on a Linux runner.
+GNU_SED = re.compile(r"\bsed +-i(?![A-Za-z0-9._])")
+GNU_REPLACEMENT = re.compile(
+    r"s(?P<d>[|/#])(?:(?!(?P=d))[^\n])*(?P=d)(?:(?!(?P=d))[^\n])*\\n"
+)
 
 # A field line inside a struct body or a struct-like enum variant: an optional
 # visibility, a name, a colon, a type. Attributes, doc comments and blank
@@ -413,6 +431,32 @@ def main() -> int:
         )
         for line in stale:
             print(f"  {line}", file=sys.stderr)
+        return 1
+
+    # The portability lint, before anything is run: a body that only one
+    # platform's sed accepts is a body whose verdict depends on the machine,
+    # and that is worth saying before spending a minute finding out.
+    unportable = []
+    for number, line in enumerate(text.split("\n"), start=1):
+        if line.lstrip().startswith("#"):
+            continue
+        if GNU_SED.search(line):
+            unportable.append((number, "`sed -i` with the suffix on the flag", line.strip()))
+        elif GNU_REPLACEMENT.search(line):
+            unportable.append((number, "a `\\n` in a sed replacement", line.strip()))
+    if unportable:
+        print(
+            f"check-injections: verify.sh uses sed forms only GNU accepts, so its "
+            f"verdict depends on the machine it runs on:",
+            file=sys.stderr,
+        )
+        for number, what, line in unportable:
+            print(f"  verify.sh:{number}: {what}: {line[:90]}", file=sys.stderr)
+        print(
+            "  the portable form is `edit_in_place EXPRESSION FILE...`, defined in "
+            f"verify.sh, which writes a temporary and moves it over",
+            file=sys.stderr,
+        )
         return 1
 
     tracked = tracked_files(root)

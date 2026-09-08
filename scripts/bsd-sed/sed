@@ -1,0 +1,37 @@
+#!/bin/sh
+# A BSD `sed` for the one difference that matters, so that portability is
+# PROVEN BY EXECUTION on a Linux runner rather than asserted by a pattern.
+#
+# The difference: GNU sed takes `-i`'s optional suffix attached to the flag
+# (`-i.bak`), and BSD sed takes it as the NEXT ARGUMENT (`-i .bak`, or `-i ''`
+# for none). So GNU's `sed -i 's/a/b/' f` means, to BSD, suffix `s/a/b/` and
+# script `f` -- and the error that comes back is about the script, which is
+# why it reads as nonsense and why twenty-eight injections were inert on a Mac
+# while CI was green (#50).
+#
+# Everything else is delegated to the real sed. This is not an implementation
+# of BSD sed and does not pretend to be: it reproduces the one incompatibility
+# the gate tripped over, which is what a shim is for.
+real=/usr/bin/sed
+[ -x "$real" ] || real=/bin/sed
+
+if [ "$1" = "-i" ]; then
+  shift
+  # The suffix, BSD-style.
+  [ $# -gt 0 ] && shift
+  # Whatever is left, the first of it is the script. With no files after it,
+  # read /dev/null rather than the terminal: a shim that hangs is worse than
+  # the incompatibility it is demonstrating.
+  if [ $# -eq 0 ]; then
+    echo "sed: no script" >&2
+    exit 1
+  fi
+  script="$1"
+  shift
+  if [ $# -eq 0 ]; then
+    exec "$real" "$script" < /dev/null
+  fi
+  exec "$real" "$script" "$@"
+fi
+
+exec "$real" "$@"
