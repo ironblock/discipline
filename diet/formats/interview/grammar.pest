@@ -67,6 +67,14 @@ line = { tag_line | fence_line | text_line }
 //   ## DECISION: value           heading and separator together
 //   Decision — value             cousin register, any of the separators
 //   decision: value              any case
+// A TAG OPENS A LINE. Nothing else does. Text after a separator on the same
+// line is that field's value, all of it, including something that looks like
+// a second tag -- which is exactly the continuation the corpus already pins.
+// Admitting a second field after an em-dash would be the 71-of-630 bug with a
+// different delimiter: a value silently cut in two at a character the writer
+// used as punctuation. Ruled 2026-09-08. If a dogma template genuinely
+// intends two fields on one line, the template is what is wrong; the grammar
+// does not get an exception for it. `a-tag-after-a-dash-is-value` pins it.
 tag_line = { hspace* ~ bullet? ~ (heading_tag | inline_tag) ~ hspace* ~ value_head ~ line_end }
 
 bullet = { (("-" | "*" | "+") ~ hspace+) | (ASCII_DIGIT+ ~ ("." | ")") ~ hspace+) }
