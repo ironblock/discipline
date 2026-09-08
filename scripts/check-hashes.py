@@ -50,6 +50,17 @@ DEFAULT_TABLE = HERE / "hygiene-hashes.txt"
 EXIT_DIRTY = 1
 EXIT_BROKEN = 2
 
+
+class Unusable(Exception):
+    """A table this cannot be run against.
+
+    Its own exception rather than `raise SystemExit(message)`: that form exits
+    ONE, which is this script's code for "the scan ran and found something".
+    A table nobody can compute against is a scan that did not run, and the two
+    have to be different numbers or a caller cannot tell "clean" from "broken"
+    apart from "dirty".
+    """
+
 # The salt is read from the table it salts, so the two cannot drift: a table
 # copied without its salt line is a table nothing can be checked against, and
 # that is an error rather than a scan of nothing.
@@ -67,13 +78,12 @@ def table(path: pathlib.Path) -> tuple[str, dict[str, str]]:
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as err:
-        raise SystemExit(f"check-hashes: cannot read {path}: {err}")
+        raise Unusable(f"cannot read {path}: {err}") from err
     found = SALT_LINE.search(text)
     if not found:
-        raise SystemExit(
-            f"check-hashes: {path} names no salt; a digest table without its "
-            f"salt cannot be computed against, and scanning anyway would be a "
-            f"scan of nothing"
+        raise Unusable(
+            f"{path} names no salt; a digest table without its salt cannot be "
+            f"computed against, and scanning anyway would be a scan of nothing"
         )
     rows: dict[str, str] = {}
     for number, line in enumerate(text.splitlines(), start=1):
@@ -81,9 +91,9 @@ def table(path: pathlib.Path) -> tuple[str, dict[str, str]]:
             continue
         match = ROW.match(line)
         if not match:
-            raise SystemExit(
-                f"check-hashes: {path}:{number} is neither blank, a comment, "
-                f"nor `<sha256-hex>  <label>`"
+            raise Unusable(
+                f"{path}:{number} is neither blank, a comment, nor "
+                f"`<sha256-hex>  <label>`"
             )
         rows[match.group(1)] = match.group(2)
     return found.group(1), rows
@@ -120,7 +130,11 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    salt, rows = table(pathlib.Path(args.table))
+    try:
+        salt, rows = table(pathlib.Path(args.table))
+    except Unusable as err:
+        print(f"check-hashes: {err}", file=sys.stderr)
+        return EXIT_BROKEN
 
     if args.emit:
         literal, label = args.emit
