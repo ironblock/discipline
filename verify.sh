@@ -5307,18 +5307,36 @@ selftest() {
   # legitimate operation -- this repository's own rules mandate rebases, so
   # the check was guaranteed to redden the lane that gates the merge on a
   # branch whose content is fine.
+  # IN A REPOSITORY OF THEIR OWN, not in this one. These ran against `$ROOT`
+  # and passed on every full clone; `actions/checkout` takes a SHALLOW one, so
+  # in CI `HEAD~1` did not resolve and `origin/main` did not exist, and both
+  # assertions failed for reasons that had nothing to do with what they test.
+  # An assertion whose subject is "the checkout you happen to have" is the
+  # same defect as the one it was written for -- a verdict that depends on the
+  # machine -- so it builds the shape it needs instead.
   local pushes; scratch; pushes="$SCRATCH"
+  (
+    cd "$pushes" && git init -q .
+    git -c user.email=gate@example.invalid -c user.name=gate \
+      commit -q --allow-empty -m "a trunk commit"
+    git update-ref refs/remotes/origin/main HEAD
+    git -c user.email=gate@example.invalid -c user.name=gate \
+      commit -q --allow-empty -m "one"
+    git -c user.email=gate@example.invalid -c user.name=gate \
+      commit -q --allow-empty -m "two"
+  ) > /dev/null 2>&1
+  cp -r "${ROOT}/scripts" "${pushes}/scripts"
   printf '{"before":"0123456789012345678901234567890123456789","after":"%s"}' \
-    "$(git -C "$ROOT" rev-parse HEAD)" > "${pushes}/force.json"
+    "$(git -C "$pushes" rev-parse HEAD)" > "${pushes}/force.json"
   printf '{"before":"%s","after":"%s"}' \
-    "$(git -C "$ROOT" rev-parse HEAD~1)" "$(git -C "$ROOT" rev-parse HEAD)" \
+    "$(git -C "$pushes" rev-parse HEAD~1)" "$(git -C "$pushes" rev-parse HEAD)" \
     > "${pushes}/ordinary.json"
   expect_exit "a force-push is scanned, not refused" 0 \
-    bash -c "cd '${ROOT}' && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
+    bash -c "cd '${pushes}' && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
       GITHUB_EVENT_PATH='${pushes}/force.json' python3 scripts/check-history.py \
       | grep -q 'push, force-push: merge-base..after'"
   expect_exit "an ordinary push still scans before..after" 0 \
-    bash -c "cd '${ROOT}' && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
+    bash -c "cd '${pushes}' && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
       GITHUB_EVENT_PATH='${pushes}/ordinary.json' python3 scripts/check-history.py \
       | grep -q 'push before..after'"
 
