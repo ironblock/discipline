@@ -662,6 +662,7 @@ becomes = '''
     let worktree = match std::env::current_dir() {
         Ok(path) if path.is_dir() => path,'''
 catches = [
+    "every_drive_refusal_has_its_own_exit_code",
     "the_drive_writes_a_record_a_second_process_accepts",
 ]
 
@@ -669,7 +670,7 @@ catches = [
 id = "drive.the-output-path-is-claimed-last"
 failure_class = "drive.the-output-path-is-claimed-last"
 target = "diet/src/bin/drive.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
     if let Err(why) = std::fs::write(out_path, "") {
         return fail(
@@ -681,18 +682,20 @@ anchor = '''
 becomes = '''
 '''
 catches = [
+    "every_drive_refusal_has_its_own_exit_code",
 ]
 
 [[fault]]
 id = "drive.the-sampler-crosses-as-a-debug-rendering"
 failure_class = "drive.the-sampler-crosses-as-a-debug-rendering"
 target = "diet/src/bin/drive.rs"
-expect_exit = 0
+expect_exit = 101
 anchor = '''
         regimen::Value::Float(decimal) => Value::Decimal(decimal.clone()),'''
 becomes = '''
         regimen::Value::Float(decimal) => Value::String(format!("{decimal:?}")),'''
 catches = [
+    "a_drives_regime_crosses_from_the_regimen_without_being_paraphrased",
 ]
 
 [[fault]]
