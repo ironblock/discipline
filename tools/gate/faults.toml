@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 281
+red_faults = 285
 mechanics_assertions = 39
 migrated = 0
 
@@ -2942,6 +2942,38 @@ check = "ci"
 label = "CI narrowing the test check"
 failure_class = "wiring.gate-runs-a-subset"
 legacy_signature = "passes .--scope. to verify\\.sh"
+migrated = false
+[[fault]]
+id = "ci.ci_push_ungated"
+kind = "seeded-gate"
+check = "ci"
+label = "the trunk gated by no push run"
+failure_class = "wiring.trunk-unpushed"
+legacy_signature = "and has no .push:. trigger"
+migrated = false
+[[fault]]
+id = "ci.ci_trunk_uncorroborated"
+kind = "seeded-gate"
+check = "ci"
+label = "the trunk's name left uncorroborated"
+failure_class = "wiring.trunk-uncorroborated"
+legacy_signature = "is the only workflow naming the trunk"
+migrated = false
+[[fault]]
+id = "ci.ci_trunk_typo"
+kind = "seeded-gate"
+check = "ci"
+label = "one workflow renaming the trunk"
+failure_class = "wiring.trunk-disagreed"
+legacy_signature = "disagree about which branch is the trunk"
+migrated = false
+[[fault]]
+id = "parity.parity_scope_signature"
+kind = "seeded-gate"
+check = "parity"
+label = "a signature its own scope line matches"
+failure_class = "parity.signature-matches-its-scope"
+legacy_signature = "matches the line naming its own scope"
 migrated = false
 [[fault]]
 id = "mech.shards-that-between-them-ran-every-fault-are-a-whole"
