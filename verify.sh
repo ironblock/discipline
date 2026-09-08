@@ -1983,6 +1983,17 @@ path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
 
+# Both corroborating namers stripped of their branch filter. Nothing is
+# broken today: verify.yml still says `branches: [main]`, the gate still runs
+# on the trunk, and every check passes. What is gone is the second opinion. The
+# rule that grades the NAME has only corroboration to grade it with, so with
+# one namer left it quietly stops grading anything while still reporting a
+# pass -- which is the shape of both defects this whole file was extended for.
+inject_ci_trunk_uncorroborated() {
+  sed -i '/^    branches: \[main\]$/d' \
+    .github/workflows/pages.yml .github/workflows/repo-metadata.yml
+}
+
 # One character of the trunk's name, in the gating workflow only. `mian` is a
 # branch nobody pushes to, so the push trigger fires for nothing and the gate
 # watches a branch that does not exist -- and every pull request is still
@@ -4472,6 +4483,8 @@ selftest() {
     'and has no .push:. trigger'
   seeded_case "one workflow renaming the trunk"       ci       inject_ci_trunk_typo \
     'disagree about which branch is the trunk'
+  seeded_case "the trunk's name left uncorroborated"  ci       inject_ci_trunk_uncorroborated \
+    'is the only workflow naming the trunk'
   seeded_case "parity drifts from what is proven"     parity   inject_parity \
     'which verify\.sh does not prove'
   seeded_case "a signature its own scope line matches" parity  inject_parity_scope_signature \

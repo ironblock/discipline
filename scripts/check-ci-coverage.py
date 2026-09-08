@@ -332,7 +332,20 @@ def main() -> int:
                 f"{name}: has a `push:` trigger whose `branches:` names nothing, "
                 f"so it fires for no branch and the trunk is gated by no push run"
             )
-    if len(named) > 1:
+    #    Corroboration is the only thing grading the NAME, and a check whose
+    #    evidence can disappear without a word is the shape of the two defects
+    #    this rule was written for. So the disappearance is refused rather than
+    #    passed: with one namer left there is no second opinion about the
+    #    trunk, and a typo in it reads exactly like a rename.
+    if len(named) == 1 and set(named) & set(gating):
+        failures.append(
+            f"{sorted(named)[0]} is the only workflow naming the trunk, so nothing "
+            f"corroborates the name it gates on and a typo in it is indistinguishable "
+            f"from a rename. Name the trunk in a second workflow, or decide here that "
+            f"one is enough and say why -- but not by deleting the other namers and "
+            f"leaving this rule looking like it still grades something"
+        )
+    elif len(named) > 1:
         agreed = {tuple(sorted(v)) for v in named.values()}
         if len(agreed) != 1:
             failures.append(

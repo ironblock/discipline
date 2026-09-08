@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 283
+red_faults = 284
 mechanics_assertions = 39
 migrated = 0
 
@@ -2950,6 +2950,14 @@ check = "ci"
 label = "the trunk gated by no push run"
 failure_class = "wiring.trunk-unpushed"
 legacy_signature = "and has no .push:. trigger"
+migrated = false
+[[fault]]
+id = "ci.ci_trunk_uncorroborated"
+kind = "seeded-gate"
+check = "ci"
+label = "the trunk's name left uncorroborated"
+failure_class = "wiring.trunk-uncorroborated"
+legacy_signature = "is the only workflow naming the trunk"
 migrated = false
 [[fault]]
 id = "ci.ci_trunk_typo"
