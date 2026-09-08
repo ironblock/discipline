@@ -1,4 +1,4 @@
-{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sampler_card":{"seed":7},"reasoning":"on","hardware_fingerprint":"one-gpu"}]}}
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"sampler_card":{"seed":7},"reasoning":"on","hardware_fingerprint":"one-gpu"}]}}
 {"record":"turn","index":1,"prefill_tokens":900}
 {"record":"request","id":"q1","lane":"main","substrate":"local","text":"Find where the parser drops a line, then fix it."}
 {"record":"tool_call","id":"t1","at_turn":1,"tool":"bash","args":{"command":"grep -n 'fn parse' diet/src/formats/interview.rs"},"exit":0,"output":"365:pub fn parse(input: &str) -> Result<Answer, ParseError> {"}

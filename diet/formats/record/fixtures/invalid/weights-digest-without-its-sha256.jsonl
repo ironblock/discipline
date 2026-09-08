@@ -1,0 +1,1 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","provider":"a-provider"},"hardware_fingerprint":"one-gpu","sampler_card":{"seed":7},"reasoning":"on"}]}}

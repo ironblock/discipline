@@ -1,0 +1,7 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"served","engine":{"name":"an-endpoint","version_or_digest":"2026-08-01"},"weights":{"kind":"hosted","provider":"a-provider","model_id":"a-model-4","version_or_date_observed":"2026-09-08"},"hardware_fingerprint":"not-ours","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on"},{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"one-gpu","sampler_card":{"seed":7,"temperature":0.0},"reasoning":"off"}]}}
+{"record":"turn","index":1,"prefill_tokens":1024}
+{"record":"request","id":"q1","lane":"main","substrate":"served","text":"Find where the parser drops a line."}
+{"record":"response","id":"a1","to_request":"q1","output_tokens":40,"text":"In the caller."}
+{"record":"fork","id":"f1","lane":"interview","substrate":"local","of_turn":1}
+{"record":"capture","id":"p1","from_fork":"f1","entries":2}
+{"record":"summary","kind":"drive","turns":1,"prefill_tokens_total":1024,"product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}

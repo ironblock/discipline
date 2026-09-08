@@ -93,7 +93,7 @@ mod tests {
     use super::{Outcome, Replacement, reconcile};
     use crate::capture::collector::literal::{NewText, nominate};
     use crate::formats::record::json::Value;
-    use crate::formats::record::{Engine, Reasoning, Regime, Substrate};
+    use crate::formats::record::{Engine, Reasoning, Regime, Substrate, Weights};
     use crate::formats::verdict;
     use crate::object::{EntryId, EntryState, Patch, Provenance, WorkingObject};
 
@@ -107,7 +107,7 @@ mod tests {
                     name: "a-runtime".to_owned(),
                     version_or_digest: "1.0".to_owned(),
                 },
-                weights_digest: "a".repeat(64),
+                weights: Weights::Digest("a".repeat(64)),
                 hardware_fingerprint: "one-gpu".to_owned(),
                 sampler_card: BTreeMap::from([("seed".to_owned(), Value::Integer(7))]),
                 reasoning: Reasoning::On,

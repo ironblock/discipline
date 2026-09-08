@@ -1,0 +1,7 @@
+`local` is not a weights kind. There are two -- `digest` and `hosted` -- and
+they are two because the difference decides what a result may claim, not
+because two spellings were convenient.
+
+A third kind read as "close enough to a digest" would be identity by guess.
+The vocabulary is closed, so a reader that meets one it does not know says so
+instead of picking.
