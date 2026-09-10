@@ -26,7 +26,7 @@
 name = "diet-digest"
 check = "test"
 command = "cargo test -p discipline-diet -- digest:: --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 6
+faults = 8
 
 [[fault]]
 id = "digest.drops-the-zero-pad"
@@ -113,6 +113,33 @@ catches = [
 ]
 
 [[fault]]
+id = "digest.a-distinctive-vector-is-swapped-out"
+failure_class = "digest.a-distinctive-vector-is-swapped-out"
+target = "diet/digest/vectors.tsv"
+expect_exit = 101
+anchor = '''
+rep:7a:119	de05957e72aca438f9b0c770cb2ee7fa0e58e08eb54536478db136d54c097abb'''
+becomes = '''
+rep:61:201	de05957e72aca438f9b0c770cb2ee7fa0e58e08eb54536478db136d54c097abb'''
+catches = [
+    "digest::tests::the_committed_vectors_are_what_comes_out",
+    "digest::tests::the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256",
+]
+
+[[fault]]
+id = "digest.the-case-set-drops-a-group"
+failure_class = "digest.the-case-set-drops-a-group"
+target = "diet/src/digest.rs"
+expect_exit = 101
+anchor = '''
+        cases.extend((119..=121_usize).map(|n| (format!("rep:7a:{n}"), vec![b'z'; n])));'''
+becomes = '''
+        // the second block's own padding boundary, no longer covered'''
+catches = [
+    "digest::tests::the_committed_vectors_are_what_comes_out",
+]
+
+[[fault]]
 id = "digest.the-repeat-count-is-off-by-one"
 failure_class = "digest.the-repeat-count-is-off-by-one"
 target = "diet/src/digest.rs"
@@ -124,5 +151,4 @@ becomes = '''
 catches = [
     "digest::tests::a_spec_decodes_to_the_bytes_it_names",
     "digest::tests::the_committed_vectors_are_what_comes_out",
-    "digest::tests::the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256",
 ]

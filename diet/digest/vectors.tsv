@@ -19,14 +19,20 @@
 # hundred thousand of the same byte is one short line rather than a
 # megabyte of hex. `diet::digest`'s `decode` is the only reader.
 #
-# To regenerate: the differential proves this file still agrees with an
-# independent implementation on every line, so a stale one is caught
-# rather than trusted.
+# To regenerate: run `diet/digest/generate-vectors.py` from the workspace
+# root. It is committed beside this file on purpose -- a header claiming a
+# provenance the repository cannot reproduce is a claim nobody can check,
+# and the obvious way to hand-add a vector is `sha2`, which is the one
+# implementation these answers must not come from.
 #
-# The count is DECLARED and the reader reads it, the way a `gate.toml`
-# declares its faults: hardcoded in the test, a line deleted from this
-# file would take the assertion with it and pass.
-# vectors = 212
+# The SPECS are not authoritative here. `diet::digest`'s `cases` builds the
+# input set in code, because a claim about which inputs are covered cannot
+# live in the file the check reads for its inputs -- a review demonstrated
+# that swapping the distinctive groups for more `rep:61:n` lines with
+# correct digests left every test green. This file freezes the ANSWERS,
+# which are the part that cannot be derived without an independent
+# implementation. The test refuses a spec no case names, and a case with
+# no answer here.
 
 # Every length to 200. Spans the one-block and two-block padding cases
 # many times over, and includes 55/56 and 63/64/65, where the length
