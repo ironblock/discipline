@@ -766,6 +766,25 @@ mod tests {
     // rows two and three: the seeded escapes, against the real mechanism
     // -----------------------------------------------------------------------
 
+    /// The number of seeded escapes executed where the mechanism is present.
+    ///
+    /// CHECKED rather than printed. libtest discards a passing test's output,
+    /// so a census in an `eprintln!` is invisible by construction -- this
+    /// seat claimed twice on #62 that the census was visible in CI, measured
+    /// it, and found it was not. A row deleted from the test below would
+    /// leave the count unspoken; asserted, it does not.
+    const SEEDED_ESCAPES: usize = 6;
+
+    /// Set on a host where the sandbox is REQUIRED rather than merely welcome.
+    ///
+    /// Without it the no-runner branch is a correct refusal and nothing more:
+    /// on a machine with no `bwrap` the escapes cannot run and the refusal is
+    /// the whole result. That is also the "0 of 6 executed" case, and on a
+    /// host that installs the runner it is a regression that would otherwise
+    /// pass green and silent. Where this is set, a run that proves nothing
+    /// about confinement fails instead.
+    const REQUIRED: &str = "DIET_REQUIRE_SANDBOX";
+
     /// The six seeded escapes, and the three controls without which they
     /// prove nothing.
     ///
@@ -793,9 +812,13 @@ mod tests {
                     },
                     "no runner, so the drive refuses; the escapes are not executed here"
                 );
-                eprintln!(
-                    "isolation: `{RUNNER}` absent, 0 of 6 seeded escapes executed; \
-                     the refusal is what this host proves"
+                assert!(
+                    std::env::var_os(REQUIRED).is_none(),
+                    "`{REQUIRED}` is set, so this is a host where the sandbox is \
+                     required, and `{RUNNER}` is not on it: 0 of {SEEDED_ESCAPES} \
+                     seeded escapes were executed. The refusal asserted above is \
+                     correct and is not the point -- a run that proves nothing \
+                     about confinement must not be a green run here."
                 );
                 return;
             }
@@ -824,6 +847,8 @@ mod tests {
             "and the write reached the real tree, not a throwaway the caller never sees"
         );
 
+        let mut denied = 0_usize;
+
         // Row two: a write outside the tree.
         let outside = run(&["sh", "-c", "echo x > /tmp/outside"]);
         assert_ne!(outside.exit, Some(0), "the write was denied");
@@ -840,6 +865,7 @@ mod tests {
             !std::path::Path::new("/tmp/outside").exists(),
             "and nothing reached the host"
         );
+        denied += 1;
 
         // Rows two-b and two-c: the tmpfs mounts a single `--remount-ro /`
         // does not reach. `--dev` builds a separate mount and `/dev/shm` a
@@ -860,6 +886,7 @@ mod tests {
                 "and recorded as read-only, not invented: {:?}",
                 wrote.stderr
             );
+            denied += 1;
         }
 
         // The control those two need. Closing `/dev` by breaking it would
@@ -887,10 +914,16 @@ mod tests {
             read.stdout
         );
         assert!(secret.is_file(), "though it is right there on the host");
+        denied += 1;
 
-        the_network_rows(&confinement, &policy, &ground.tree);
+        denied += the_network_rows(&confinement, &policy, &ground.tree);
 
-        eprintln!("isolation: `{RUNNER}` present, 6 of 6 seeded escapes executed and denied");
+        assert_eq!(
+            denied, SEEDED_ESCAPES,
+            "every seeded escape ran against the real mechanism and was denied. \
+             This is the census, and it is an assertion because a printed one is \
+             discarded by libtest on the passing run that is the whole point."
+        );
     }
 
     /// A runner that is not a sandbox, so the RECORD can be checked on a host
@@ -1069,7 +1102,11 @@ mod tests {
     /// A function rather than four more inline paragraphs so the one test
     /// above stays readable; it is called from exactly one place and the
     /// branch on the runner's presence is still made there, once.
-    fn the_network_rows(confinement: &Confinement, policy: &Policy, tree: &std::path::Path) {
+    fn the_network_rows(
+        confinement: &Confinement,
+        policy: &Policy,
+        tree: &std::path::Path,
+    ) -> usize {
         let run = |declared: &Policy, parts: &[String]| {
             confinement
                 .run(declared, tree, parts)
@@ -1145,6 +1182,13 @@ mod tests {
             shared.stderr
         );
         drop(door);
+
+        // The two escapes this function executed and saw denied: the call to
+        // an address off this host, and the knock on the host's own loopback
+        // door. The control immediately above is not one of them -- it is
+        // the row that had to SUCCEED, and counting it would inflate the
+        // census with a case that proves the opposite thing.
+        2
     }
 
     // -----------------------------------------------------------------------
