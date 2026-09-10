@@ -1,0 +1,50 @@
+# The dev-loop regimen: the smallest thing a drive can be run under.
+#
+# #23's argument is that iterating on the machinery -- routers, reconcilers,
+# seams -- needs a PROTOCOL-COMPLIANT substrate rather than a capable one. The
+# floor below that is a substrate whose every answer is written down in
+# advance, which is what `diet-drive` serves when it is given no endpoint. So
+# this regimen names a canned server, and the name is what a later reader
+# needs to know that no capability claim can be made from any result under it.
+#
+# `substrate` here is `canned`, and it is a fixture rather than a chosen
+# model. Choosing one is #23's own acceptance row and it cannot be done from a
+# seat with no GPU: the battery has to be run against candidates and the first
+# that passes becomes `dev-loop`. Until then this regimen exercises the
+# machinery and claims nothing about a model.
+
+arm = "dev-loop"
+dogma_version = 0
+
+# The substrate. `substrate` is the id every row references; the two
+# `substrate_*` keys are the rest of what a `regime` needs and regimen v1 has
+# no place for. Their names are `diet-drive`'s convention, disclosed as one --
+# whether they belong in the regimen format is the format owner's call.
+#
+# `substrate_model = "a-model"` and `substrate_quantization = "none"` used to
+# be here. They were a placeholder and a "none", which is what naming a model
+# looks like when there is no model: this regimen's whole point is that the
+# canned server serves no weights. Item 3 made the identity typed and this
+# program now COMPUTES it -- the sha256 of the acts the canned server plays,
+# which is the artifact that decides every reply -- so there is nothing left
+# for a prose model name to say, and a placeholder that reached a record as an
+# identity would say something false.
+substrate = "canned"
+substrate_reasoning = "off"
+substrate_hardware = "canned-loopback"
+
+# Unconfined, and declared. The drive's own commands are two `echo`s into the
+# working tree and the lane runs on a runner with no `bubblewrap`, so the
+# sandbox would refuse to start rather than run -- which is the correct
+# behaviour and the wrong thing to gate a round-trip test on. A drive of a
+# real session declares `isolation = "sandbox"` and gets it.
+isolation = "none"
+
+# Nothing but the operator's own declaration fires a seam: no cadence, no byte
+# budget, no phases. The script declares a boundary on turn two, so the seam
+# lands where the script chose rather than where a cadence happened to put it.
+
+[sampler]
+temperature = 0.6
+top_p = 0.95
+seed = 7
