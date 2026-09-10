@@ -2041,6 +2041,37 @@ readme.write_text(
 EOF
 }
 
+# The reason present and EMPTY. `historical-observation` is the opt-out from
+# gate 0, so what it costs is a sentence saying which part of the world made
+# the run unreproducible. Two quotes is not that sentence -- it is the tag
+# acquired for free, which is what every red result reaches for.
+#
+# Its own case because the sibling above deletes the KEY, and the two are
+# different code paths: one is `reason is None`, this one is a string that is
+# there and says nothing. A fresh instance found that removing `.strip()`
+# from the check left the absent-key case still red and this one green, so
+# the sibling was never testing this line.
+inject_recompute_historical_reason_blank() {
+  python3 - <<'EOF'
+import pathlib
+import shutil
+
+template = pathlib.Path("results/_template")
+seeded = pathlib.Path("results/2026-01-31-seeded-blank-reason")
+shutil.copytree(template, seeded)
+(seeded / "recompute.sh").unlink()
+readme = seeded / "README.md"
+readme.write_text(
+    readme.read_text(encoding="utf-8").replace(
+        'kind = "reproducible-by-config"',
+        'kind = "historical-observation"\nhistorical_reason = "   "',
+        1,
+    ),
+    encoding="utf-8",
+)
+EOF
+}
+
 # Results present and none of them recomputed, with the template excluded from
 # the count. A check of nothing is not a pass, applied to results -- and the
 # directory this leaves behind is entirely LEGAL, which is the point: the
@@ -4648,6 +4679,8 @@ selftest() {
   seeded_case "historical, and carrying a recompute"   recompute inject_recompute_historical_with_a_script \
     'declares .historical-observation. and carries a recompute\.sh'
   seeded_case "historical with no reason stated"       recompute inject_recompute_historical_without_a_reason \
+    'states no .historical_reason.'
+  seeded_case "historical with a reason that says nothing" recompute inject_recompute_historical_reason_blank \
     'states no .historical_reason.'
   seeded_case "only the template recomputes"           recompute inject_recompute_only_the_template_recomputes \
     'results are present and none recomputed'

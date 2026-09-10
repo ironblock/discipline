@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 291
+red_faults = 292
 mechanics_assertions = 39
 migrated = 0
 
@@ -3106,6 +3106,16 @@ label = "historical with no reason stated"
 failure_class = "gate-zero.historical-without-a-reason"
 legacy_signature = "states no .historical_reason."
 migrated = false
+[[fault]]
+id = "recompute.recompute_historical_reason_blank"
+kind = "seeded-gate"
+check = "recompute"
+target = "recompute"
+label = "historical with a reason that says nothing"
+failure_class = "recompute.historical-without-a-reason"
+legacy_signature = "states no .historical_reason."
+migrated = false
+
 [[fault]]
 id = "recompute.recompute_only_the_template_recomputes"
 kind = "seeded-gate"
