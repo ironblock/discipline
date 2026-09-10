@@ -5,6 +5,10 @@
 //! replayed. This crate owns the regimen and the formats it is expressed in.
 
 pub mod capture;
+pub mod client;
 pub mod dogma;
+pub mod drive;
 pub mod formats;
+pub mod isolation;
 pub mod object;
+pub mod seam;
