@@ -141,6 +141,42 @@ carried in the file rather than left to be discovered:
   machine for the current instance and carried there; the earlier instances have
   what their captures took, and the field says so rather than implying more.
 
+## The hardware fingerprint
+
+`substrate.hardware_fingerprint` is required by the record schema. This registry
+supplies it as **a digest over the entry's declared hardware fields** — not a
+captured value, so any reader recomputes it from published data and it means
+exactly *this machine, as specified*.
+
+The declaration lives per **entry type**, in `[entry_type.*]`, so an Apple
+entry's `chip` and an accelerator host's `board` are both covered by name. Two
+exclusions are rules rather than habits, and both were found by computing the
+thing rather than designing it:
+
+- **`os` and anything naming a deployment are excluded.** They are the instance.
+  A hardware fingerprint that changes on an operating-system update is not one.
+- **Any field marked `_inferred = true` is excluded.** The laptop's core counts
+  are the live case. An unverified claim baked into an identifier is one nobody
+  can correct later without changing the identity of every record citing it.
+
+**The coverage rule has a check, because a convention would not have caught the
+thing that made it necessary.** The first version used one fixed field list for
+every entry and silently covered *two of twelve* fields on the Apple machines —
+producing a sixty-four-character digest that looked exactly like a working one.
+So: every field a type declares must be present, the digest is over exactly
+those, and a fingerprint covering fewer fields than declared **fails**.
+
+    python3 substrates/check-fingerprints.py
+
+Seen catching each of its four rules — a declared field removed, a digit flipped
+in a digest, an inferred field added to a type's list, an instance field added
+to one — plus an undeclared type, an empty declaration, and an unreadable
+registry at exit 2.
+
+**It is not wired into `verify.sh` yet**, because that file and `scripts/` are
+the clean room's. Until it is, this is a check that exists and does not run,
+which is the state the rule was written to avoid; the ask is on #68.
+
 ## The interconnect, as a worked example of being wrong twice
 
 The accelerator's link is **PCIe 4.0 x16**. That is measured, by
