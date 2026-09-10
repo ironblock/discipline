@@ -26,6 +26,24 @@ jobs:
           cargo clippy --version
           cargo fmt --version
 
+      # The isolation lane's six seeded escapes need a sandbox to execute
+      # against. Without `bwrap` the lane asserts a correct REFUSAL and
+      # passes -- the "0 of 6 executed" case -- so a confinement gate that
+      # never confined anything looks exactly like one that did.
+      #
+      # Ruling on #57 (2026-09-10): add it now, from track three, disclosed,
+      # since it is the isolation lane's own requirement. "Green means it was
+      # there all along; red means a confinement gate that never confined,
+      # which is the one outcome worth two lines of YAML to rule out."
+      - name: Install the sandbox the isolation lane confines with
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
+      # And say so, which is what makes the refusal branch a failure HERE and
+      # nowhere else. On a contributor's machine with no `bwrap` this stays
+      # unset and the refusal passes, exactly as it does today.
+      - name: Declare this a host where the sandbox is required
+        run: echo "DIET_REQUIRE_SANDBOX=1" >> "$GITHUB_ENV"
+
       - name: Run the checks this package owns
         run: |
           set -euo pipefail
