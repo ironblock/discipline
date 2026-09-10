@@ -44,6 +44,33 @@ jobs:
       - name: Declare this a host where the sandbox is required
         run: echo "DIET_REQUIRE_SANDBOX=1" >> "$GITHUB_ENV"
 
+      # Diagnostic, never fatal. The first run of this workflow found that
+      # `bwrap` installs and then cannot start: `--unshare-all` fails with
+      # `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`,
+      # because bringing `lo` up inside a new network namespace is denied
+      # here. That is a fact about the runner, and what to do about it
+      # depends on WHICH unshares are permitted -- so this asks, rather than
+      # leaving it to be guessed at from one error message.
+      - name: What the runner's kernel lets the sandbox do
+        run: |
+          set +e
+          echo "bwrap:           $(command -v bwrap) -- $(bwrap --version 2>&1)"
+          echo "userns_clone:    $(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo 'n/a')"
+          echo "userns_apparmor: $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 'n/a')"
+          echo "max_user_ns:     $(cat /proc/sys/user/max_user_namespaces 2>/dev/null || echo 'n/a')"
+          while IFS= read -r flags; do
+            [ -z "$flags" ] && continue
+            out=$(bwrap $flags --ro-bind / / --proc /proc --dev /dev true 2>&1)
+            printf '%-40s exit %-4s %s\n' "$flags" "$?" "$out"
+          done <<'PROBES'
+          --unshare-all
+          --unshare-all --share-net
+          --unshare-net
+          --unshare-user
+          --unshare-user --unshare-pid --unshare-ipc --unshare-uts --unshare-cgroup
+          PROBES
+          exit 0
+
       - name: Run the checks this package owns
         run: |
           set -euo pipefail
