@@ -26,7 +26,7 @@
 name = "diet-digest"
 check = "test"
 command = "cargo test -p discipline-diet -- digest:: --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 3
+faults = 6
 
 [[fault]]
 id = "digest.drops-the-zero-pad"
@@ -42,6 +42,7 @@ becomes = '''
         }
         out.push(nibble(byte & 0x0f));'''
 catches = [
+    "digest::tests::the_committed_vectors_are_what_comes_out",
     "digest::tests::the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256",
     "digest::tests::the_published_vectors_are_what_comes_out",
     "digest::tests::the_spelling_is_the_one_the_record_requires",
@@ -59,6 +60,7 @@ becomes = '''
         .expect("a nibble is below sixteen")
         .to_ascii_uppercase()'''
 catches = [
+    "digest::tests::the_committed_vectors_are_what_comes_out",
     "digest::tests::the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256",
     "digest::tests::the_published_vectors_are_what_comes_out",
     "digest::tests::the_spelling_is_the_one_the_record_requires",
@@ -76,6 +78,51 @@ becomes = '''
     out[31] ^= 1;
     out'''
 catches = [
+    "digest::tests::the_committed_vectors_are_what_comes_out",
     "digest::tests::the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256",
     "digest::tests::the_published_vectors_are_what_comes_out",
+]
+
+[[fault]]
+id = "digest.the-high-bit-is-dropped"
+failure_class = "digest.the-high-bit-is-dropped"
+target = "diet/src/digest.rs"
+expect_exit = 101
+anchor = '''
+    Sha256::digest(bytes).into()'''
+becomes = '''
+    let ascii: Vec<u8> = bytes.iter().map(|byte| byte & 0x7f).collect();
+    Sha256::digest(&ascii).into()'''
+catches = [
+    "digest::tests::the_committed_vectors_are_what_comes_out",
+    "digest::tests::the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256",
+]
+
+[[fault]]
+id = "digest.a-committed-answer-is-wrong"
+failure_class = "digest.a-committed-answer-is-wrong"
+target = "diet/digest/vectors.tsv"
+expect_exit = 101
+anchor = '''
+hex:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff	40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880'''
+becomes = '''
+hex:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff	40aff2e9d2d8922e47afd4648e6967407158785fbd1da870e7110266bf944880'''
+catches = [
+    "digest::tests::the_committed_vectors_are_what_comes_out",
+    "digest::tests::the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256",
+]
+
+[[fault]]
+id = "digest.the-repeat-count-is-off-by-one"
+failure_class = "digest.the-repeat-count-is-off-by-one"
+target = "diet/src/digest.rs"
+expect_exit = 101
+anchor = '''
+        vec![byte; count]'''
+becomes = '''
+        vec![byte; count + 1]'''
+catches = [
+    "digest::tests::a_spec_decodes_to_the_bytes_it_names",
+    "digest::tests::the_committed_vectors_are_what_comes_out",
+    "digest::tests::the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256",
 ]
