@@ -449,12 +449,7 @@ fn the_integer_terminal_is_defined_once_and_shared() {
     for rule in ["integer", "int_part", "nonzero"] {
         let defined: Vec<&PathBuf> = grammars
             .iter()
-            .filter(|path| {
-                std::fs::read_to_string(path)
-                    .unwrap_or_default()
-                    .lines()
-                    .any(|line| defines(line, rule))
-            })
+            .filter(|path| defines(&std::fs::read_to_string(path).unwrap_or_default(), rule))
             .collect();
         match defined.as_slice() {
             [only] if **only == shared => {}
@@ -488,14 +483,50 @@ fn the_integer_terminal_is_defined_once_and_shared() {
 
 /// Whether a grammar line is the DEFINITION of `rule`, rather than a use of
 /// it or a mention in a comment.
-fn defines(line: &str, rule: &str) -> bool {
-    let trimmed = line.trim_start();
-    if trimmed.starts_with("//") {
-        return false;
+/// Whether `grammar` defines `rule`, anywhere in it.
+///
+/// OVER THE WHOLE TEXT, NOT LINE BY LINE. This read one line at a time and
+/// asked whether the name and the `=` were both on it -- so
+///
+///     integer
+///       = @{ ("-" ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*) | "0" }
+///
+/// was a definition pest compiles and this guard could not see. A fresh
+/// instance found it by writing exactly that and watching all fifteen checks
+/// pass over a tree carrying a second, independently-compiling copy of the
+/// terminal this test exists to keep single-sourced. Pest does not care where
+/// the newlines are, so neither may the thing that polices it.
+///
+/// Comments are removed first rather than skipped per line, for the same
+/// reason: `// integer` on one line and `= @{ ... }` on the next must not
+/// join up into a definition that is not there.
+fn defines(grammar: &str, rule: &str) -> bool {
+    let mut source = String::with_capacity(grammar.len());
+    for line in grammar.lines() {
+        source.push_str(line.split("//").next().unwrap_or(""));
+        source.push('\n');
     }
-    trimmed
-        .strip_prefix(rule)
-        .is_some_and(|rest| rest.trim_start().starts_with('='))
+    let mut rest = source.as_str();
+    while let Some(at) = rest.find(rule) {
+        let (before, after) = rest.split_at(at);
+        let after = &after[rule.len()..];
+        // A rule name is a whole token: `int_part` must not be found inside
+        // `signed_int_part`, and `integer` must not be found inside
+        // `integers`.
+        let boundary_left = before
+            .chars()
+            .next_back()
+            .is_none_or(|c| !c.is_alphanumeric() && c != '_');
+        let boundary_right = after
+            .chars()
+            .next()
+            .is_none_or(|c| !c.is_alphanumeric() && c != '_');
+        if boundary_left && boundary_right && after.trim_start().starts_with('=') {
+            return true;
+        }
+        rest = &rest[at + rule.len()..];
+    }
+    false
 }
 
 /// A format directory on disk that `FORMATS` does not name is a format with
