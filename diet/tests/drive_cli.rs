@@ -150,7 +150,7 @@ fn the_drive_writes_a_record_a_second_process_accepts() {
     let product = format!("{}.product", ground.out());
     let bytes = std::fs::read(&product).expect("the product is beside the record");
     let claimed = std::fs::read_to_string(ground.out()).expect("the record");
-    let digest = diet::drive::digest::sha256_hex(&bytes);
+    let digest = diet::digest::sha256_hex(&bytes);
     assert!(
         claimed.contains(&format!("\"product_sha256\":\"{digest}\"")),
         "the summary's digest is of the product on disk: {digest}"

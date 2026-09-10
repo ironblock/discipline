@@ -1,34 +1,47 @@
-//! SHA-256, because a record's `product_sha256` is not optional.
+//! SHA-256: the crate's one digest, and the record's identity primitive.
 //!
 //! A summary row requires a digest of the product the session produced, and
 //! the schema requires it to be sixty-four lowercase hex characters. A drive
 //! that could not compute one could not write a summary, and a record without
-//! a summary is not a record. So this is on the critical path rather than a
-//! convenience.
+//! a summary is not a record. The bakeoff runner needs the same primitive to
+//! hold its inputs to the digests they declare. So this is on the critical
+//! path rather than a convenience -- and it is at the CRATE ROOT because two
+//! lanes consume it. A bakeoff reaching into `drive::` for its hashing is the
+//! shape the root placement was ruled to prevent.
 //!
-//! # The dependency is the ruling, and the reason is worth keeping
+//! # One implementation, and it is not ours
 //!
-//! This module hand-rolled the algorithm once, and it was correct: every
-//! FIPS 180-4 vector, the padding boundaries, and a fresh instance's
-//! independent 221-input differential against the system's `sha256sum`, all
-//! clean. **That was never the argument.** Ruling 7: a cryptographic
-//! primitive is the canonical buy, and the digest is the record's IDENTITY
-//! primitive -- binary provenance, consumed digests, engine identity -- which
-//! makes it the one place a subtle bug is both catastrophic and silent. A
-//! hash somebody wrote in an afternoon is a hash somebody has to keep
-//! checking, and the cost of being wrong here is every claim ever banked
-//! against a digest.
+//! This module hand-rolled the algorithm once. So did the runner verb's lane,
+//! independently, in the same week -- two SHA-256s in one crate, each argued
+//! for in the same words: *one function of eighty lines is a smaller thing to
+//! own than a supply chain.* Both were correct. **That was never the
+//! argument.** Ruling 7: a cryptographic primitive is the canonical buy, and
+//! the digest is the record's IDENTITY primitive -- binary provenance,
+//! consumed digests, engine identity -- which makes it the one place a subtle
+//! bug is both catastrophic and silent. A hash somebody wrote in an afternoon
+//! is a hash somebody has to keep checking, and the cost of being wrong here
+//! is every claim ever banked against a digest.
 //!
-//! # What survives from the hand-rolled version, and why
+//! # Two checks on the dependency, and they are not interchangeable
 //!
-//! The differential. It now runs against `sha2`'s output rather than this
-//! crate's, which turns it from a proof of our own arithmetic into a **cheap
-//! conformance check on the dependency** -- the thing that catches a version
-//! bump that changes behaviour, a feature flag that swaps an implementation,
-//! or a build where the crate is not what the lockfile says. That check costs
-//! one `sha256sum` invocation over a directory of staged inputs, and it is the
-//! reason the vectors did not simply get deleted with the code they were
-//! written for.
+//! A bought primitive still has to be shown to be that primitive. The two
+//! tests below divide that job, per the ruling on this lane's second
+//! disclosure -- and the division is the point, because each is blind to what
+//! the other catches:
+//!
+//! * `the_published_vectors_are_what_comes_out` is the PORTABLE one.
+//!   Committed FIPS 180-4 vectors, no host binary, so it runs everywhere
+//!   `cargo test` runs. It is what says the crate is computing SHA-256 and
+//!   not something else that also returns thirty-two bytes.
+//! * `the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256`
+//!   is the ADDITIONAL one. A differential against the host's own
+//!   `sha256sum`, over the shapes a four-vector set is blind to: it catches a
+//!   version bump that changes behaviour, a feature flag that swaps an
+//!   implementation, or a build where the crate is not what the lockfile
+//!   says. It DECLARES a host requirement and fails loudly where that
+//!   requirement is absent -- it does not skip, for the reasons written on it.
+//!
+//! Only the hex encoding is ours, and it is tested like it is ours.
 
 use sha2::{Digest as _, Sha256};
 
@@ -69,10 +82,17 @@ mod tests {
 
     /// The vectors FIPS 180-4 publishes, and the empty message.
     ///
+    /// **This is the portable check**, and the ruling on disclosure 2 made it
+    /// so deliberately: committed vectors, no host binary, no environment it
+    /// can fail to find. The differential below is stronger and is allowed to
+    /// depend on the host precisely because this one does not.
+    ///
     /// Kept from the hand-rolled version. They no longer prove this module's
     /// arithmetic -- there is none -- but they are what says the dependency
     /// is computing SHA-256 and not something else that also returns 32
-    /// bytes.
+    /// bytes. B.3 is a million bytes and worth its cost: it is the only
+    /// vector here that drives the compression function through more than
+    /// two blocks.
     #[test]
     fn the_published_vectors_are_what_comes_out() {
         assert_eq!(
@@ -140,7 +160,7 @@ mod tests {
         None
     }
 
-    /// The differential, against the dependency rather than against us.
+    /// The differential: the ADDITIONAL check, not the portable one.
     ///
     /// A fresh instance ran this by hand while the algorithm was hand-rolled,
     /// as a proof of our arithmetic. Ruling 7 kept it and changed what it is
@@ -149,7 +169,8 @@ mod tests {
     /// implementation, or a build where the crate is not what the lockfile
     /// says. The published vectors above cannot catch those on their own,
     /// because a wrong implementation that still gets `abc` right is exactly
-    /// what a vector set is blind to.
+    /// what a vector set is blind to. That is why both tests exist and why
+    /// neither replaces the other.
     ///
     /// **The set is built from named groups and its size is whatever they
     /// come to.** The reviewer's run was 221 inputs and this was very nearly
@@ -267,5 +288,20 @@ mod tests {
                 inputs[at].len()
             );
         }
+    }
+
+    /// Every fault in this lane's `gate.toml` still names source that is there.
+    ///
+    /// The digest is its own lane now that it is at the crate root: its
+    /// mutations are not the drive's, and a manifest that claimed them would
+    /// be naming a file its lane does not own.
+    #[test]
+    fn every_seeded_fault_still_names_source_that_is_there() {
+        crate::gate::every_seeded_fault_still_names_source(
+            include_str!("../digest/gate.toml"),
+            // One file, because that is the whole lane.
+            include_str!("digest.rs"),
+            "digest",
+        );
     }
 }

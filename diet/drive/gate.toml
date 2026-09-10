@@ -26,91 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 45
-
-[[fault]]
-id = "drive.digest-drops-the-zero-pad"
-failure_class = "drive.digest-drops-the-zero-pad"
-target = "diet/src/drive/digest.rs"
-expect_exit = 101
-anchor = '''
-        out.push(nibble(byte >> 4));
-        out.push(nibble(byte & 0x0f));'''
-becomes = '''
-        if byte >= 0x10 {
-            out.push(nibble(byte >> 4));
-        }
-        out.push(nibble(byte & 0x0f));'''
-catches = [
-    "drive::digest::tests::the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256",
-    "drive::digest::tests::the_published_vectors_are_what_comes_out",
-    "drive::digest::tests::the_spelling_is_the_one_the_record_requires",
-    "drive::tests::a_capture_counts_entries_and_not_patches",
-    "drive::tests::a_seams_audit_answer_is_kept_and_not_folded_with_the_wrong_grammar",
-    "drive::tests::a_truncated_fork_answer_is_recorded_as_truncated",
-    "drive::tests::a_two_turn_script_summarises_two_turns",
-    "drive::tests::every_audit_names_the_turn_it_actually_came_from",
-    "drive::tests::every_entry_the_fold_writes_names_its_lane_and_keeps_its_tag",
-    "drive::tests::every_row_the_drive_writes_is_true_of_the_run_that_produced_it",
-    "drive::tests::the_product_is_the_object_and_names_its_entries",
-    "drive::tests::the_record_carries_what_the_drive_actually_sent",
-    "drive::tests::the_record_is_an_archive_and_not_a_ledger",
-    "drive::tests::the_summary_totals_what_the_rows_say_and_the_digest_is_the_products",
-    "drive::tests::the_two_entry_counts_answer_two_questions_and_the_record_carries_one",
-    "drive::tests::three_turns_produce_a_record_the_format_accepts_with_a_seam_and_a_capture_in_it",
-    "drive::tests::what_the_fold_could_not_capture_is_counted_and_named",
-    "drive::tests::what_the_record_cannot_spell_is_named_rather_than_dropped",
-]
-
-[[fault]]
-id = "drive.digest-uppercases-the-hex"
-failure_class = "drive.digest-uppercases-the-hex"
-target = "diet/src/drive/digest.rs"
-expect_exit = 101
-anchor = '''
-    char::from_digit(u32::from(value), 16).expect("a nibble is below sixteen")'''
-becomes = '''
-    char::from_digit(u32::from(value), 16)
-        .expect("a nibble is below sixteen")
-        .to_ascii_uppercase()'''
-catches = [
-    "drive::digest::tests::the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256",
-    "drive::digest::tests::the_published_vectors_are_what_comes_out",
-    "drive::digest::tests::the_spelling_is_the_one_the_record_requires",
-    "drive::tests::a_capture_counts_entries_and_not_patches",
-    "drive::tests::a_retried_call_archives_each_attempt_with_what_that_attempt_sent",
-    "drive::tests::a_seams_audit_answer_is_kept_and_not_folded_with_the_wrong_grammar",
-    "drive::tests::a_stripped_retry_archives_the_body_that_attempt_actually_sent",
-    "drive::tests::a_truncated_fork_answer_is_recorded_as_truncated",
-    "drive::tests::a_two_turn_script_summarises_two_turns",
-    "drive::tests::every_audit_names_the_turn_it_actually_came_from",
-    "drive::tests::every_entry_the_fold_writes_names_its_lane_and_keeps_its_tag",
-    "drive::tests::every_row_the_drive_writes_is_true_of_the_run_that_produced_it",
-    "drive::tests::the_product_is_the_object_and_names_its_entries",
-    "drive::tests::the_record_carries_what_the_drive_actually_sent",
-    "drive::tests::the_record_is_an_archive_and_not_a_ledger",
-    "drive::tests::the_summary_totals_what_the_rows_say_and_the_digest_is_the_products",
-    "drive::tests::the_two_entry_counts_answer_two_questions_and_the_record_carries_one",
-    "drive::tests::three_turns_produce_a_record_the_format_accepts_with_a_seam_and_a_capture_in_it",
-    "drive::tests::what_the_fold_could_not_capture_is_counted_and_named",
-    "drive::tests::what_the_record_cannot_spell_is_named_rather_than_dropped",
-]
-
-[[fault]]
-id = "drive.the-dependency-returns-something-else"
-failure_class = "drive.the-dependency-returns-something-else"
-target = "diet/src/drive/digest.rs"
-expect_exit = 101
-anchor = '''
-    Sha256::digest(bytes).into()'''
-becomes = '''
-    let mut out: [u8; 32] = Sha256::digest(bytes).into();
-    out[31] ^= 1;
-    out'''
-catches = [
-    "drive::digest::tests::the_dependency_agrees_with_the_system_on_every_shape_that_breaks_a_sha256",
-    "drive::digest::tests::the_published_vectors_are_what_comes_out",
-]
+faults = 42
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -118,9 +34,9 @@ failure_class = "drive.the-product-digest-is-of-nothing"
 target = "diet/src/drive/mod.rs"
 expect_exit = 101
 anchor = '''
-        product_sha256: digest::sha256_hex(product.as_bytes()),'''
+        product_sha256: crate::digest::sha256_hex(product.as_bytes()),'''
 becomes = '''
-        product_sha256: digest::sha256_hex(b""),'''
+        product_sha256: crate::digest::sha256_hex(b""),'''
 catches = [
     "drive::tests::the_summary_totals_what_the_rows_say_and_the_digest_is_the_products",
 ]

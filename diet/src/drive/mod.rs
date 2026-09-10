@@ -54,7 +54,6 @@
 //! see [`Drive::uncaptured`].
 
 pub mod canned;
-pub mod digest;
 pub mod script;
 
 use std::cell::Cell;
@@ -708,7 +707,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
     events.push(Event::Summary {
         turns,
         prefill_tokens_total: prefill_total,
-        product_sha256: digest::sha256_hex(product.as_bytes()),
+        product_sha256: crate::digest::sha256_hex(product.as_bytes()),
     });
 
     let built = Record { events };
@@ -1271,14 +1270,14 @@ mod tests {
         );
         assert_eq!(
             *product_sha256,
-            super::digest::sha256_hex(drive.product.as_bytes()),
+            crate::digest::sha256_hex(drive.product.as_bytes()),
             "the digest is OF the product, and the product is carried so a \
              reader can recompute it: a digest of a file nobody wrote is a \
              digest nobody can check"
         );
         assert_ne!(
             *product_sha256,
-            super::digest::sha256_hex(b""),
+            crate::digest::sha256_hex(b""),
             "and the product is not empty, or the row would satisfy the schema \
              and say nothing"
         );
@@ -1912,106 +1911,22 @@ mod tests {
 
     #[test]
     fn every_seeded_fault_still_names_source_that_is_there() {
-        let manifest = include_str!("../../drive/gate.toml");
-        // The lane's whole source, so a catcher can be looked for wherever
-        // its test lives rather than only in this file.
-        let lane = concat!(
-            include_str!("mod.rs"),
-            include_str!("canned.rs"),
-            include_str!("digest.rs"),
-            include_str!("script.rs"),
-            // The binary's own tests, which live outside `src/` and are the
-            // only thing that runs the program. A `catches` naming one of
-            // them has to be checkable here too, or the half of this lane
-            // that is a second process is the half the guard does not see.
-            include_str!("../../tests/drive_cli.rs")
+        crate::gate::every_seeded_fault_still_names_source(
+            include_str!("../../drive/gate.toml"),
+            // The lane's whole source, so a catcher can be looked for
+            // wherever its test lives rather than only in this file.
+            concat!(
+                include_str!("mod.rs"),
+                include_str!("canned.rs"),
+                include_str!("script.rs"),
+                // The binary's own tests, which live outside `src/` and are the
+                // only thing that runs the program. A `catches` naming one of
+                // them has to be checkable here too, or the half of this lane
+                // that is a second process is the half the guard does not see.
+                include_str!("../../tests/drive_cli.rs")
+            ),
+            "drive",
         );
-        let mut checked = 0;
-        for block in manifest.split("\n[[fault]]\n").skip(1) {
-            let id = between(block, "id = \"", "\"").expect("a fault has an id");
-            let target = between(block, "target = \"", "\"").expect("a fault has a target");
-            let anchor =
-                between(block, "anchor = '''\n", "'''\nbecomes = ").expect("a fault has an anchor");
-
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .expect("the workspace root")
-                .join(target);
-            let source = std::fs::read_to_string(&path)
-                .unwrap_or_else(|why| panic!("{id}: {} could not be read: {why}", path.display()));
-            assert_eq!(
-                source.matches(anchor).count(),
-                1,
-                "{id}: its anchor no longer appears exactly once in {target}. The \
-                 manifest is stale: either the mutation has to move with the code, \
-                 or the fault it seeds is gone."
-            );
-
-            between(block, "expect_exit = ", "\n")
-                .expect("a fault declares the exit it expects")
-                .parse::<i32>()
-                .unwrap_or_else(|why| panic!("{id}: its `expect_exit` is not a number: {why}"));
-
-            let catches = between(block, "catches = [\n", "]").expect("a fault names its catchers");
-            let mut named = 0;
-            for line in catches.lines() {
-                let Some(name) = between(line, "\"", "\"") else {
-                    continue;
-                };
-                // The WHOLE path, not just the leaf. Matching the leaf alone
-                // let `totally::made::up::a_call_that_did_not_answer_…` pass,
-                // and `cargo test` on that path runs nothing -- so the fault
-                // would be applied, no test would run, and the orchestrator
-                // would score it against a name that resolves to no test.
-                //
-                // Two shapes are legal and both are checked. A unit test is
-                // `drive::…::tests::<leaf>` -- rooted in this lane, with
-                // `tests` immediately above the leaf, which admits
-                // `drive::digest::tests::…` without admitting a path this
-                // lane does not contain. An integration test has no module
-                // path at all, because `cargo test` names it by the function
-                // alone.
-                let path: Vec<&str> = name.split("::").collect();
-                let (Some(leaf), true) = (
-                    path.last().copied(),
-                    path.len() == 1
-                        || (path.len() >= 3
-                            && path[0] == "drive"
-                            && path[path.len() - 2] == "tests"),
-                ) else {
-                    panic!("{id}: `{name}` is not a test this lane contains");
-                };
-                assert_eq!(
-                    lane.matches(&format!("fn {leaf}(")).count(),
-                    1,
-                    "{id}: it claims to be caught by `{name}`, and no such test is in \
-                     the lane. A fault whose catcher was renamed or deleted is applied, \
-                     caught by nothing, and scored against a name."
-                );
-                named += 1;
-            }
-            assert!(
-                named > 0,
-                "{id}: a fault with an empty `catches` is a mutation nothing proves"
-            );
-            checked += 1;
-        }
-        let declared: usize = between(manifest, "\nfaults = ", "\n")
-            .expect("the package block declares a count")
-            .parse()
-            .expect("the count is a number");
-        assert_eq!(
-            checked, declared,
-            "the manifest declares its own count and this reads it: hardcoding the \
-             number here let `faults = 9001` pass"
-        );
-    }
-
-    /// The text between `open` and the next `close` after it.
-    fn between<'a>(haystack: &'a str, open: &str, close: &str) -> Option<&'a str> {
-        let start = haystack.find(open)? + open.len();
-        let end = haystack[start..].find(close)? + start;
-        Some(&haystack[start..end])
     }
 
     #[test]

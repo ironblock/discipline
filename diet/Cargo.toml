@@ -28,7 +28,15 @@ serde_json = { version = "1", features = ["arbitrary_precision"] }
 # subtle bug is both catastrophic and silent. The hand-rolled implementation
 # this replaces passed every published vector and a 221-input differential;
 # that is not the argument. The argument is that nobody should have to check.
-sha2 = "0.11"
+#
+# `default-features = false`, per the ruling on disclosure 1: the dependency
+# was accepted for the primitive, not for its feature set. Its default is
+# `["alloc", "oid"]` and `diet::digest` needs neither -- `Digest::digest`
+# returns a fixed-size array, and nothing here speaks ASN.1 object
+# identifiers. Dropping them takes `const-oid` out of the tree entirely:
+# nine transitive crates rather than ten. No feature is added back, because
+# the empty set is what compiles.
+sha2 = { version = "0.11", default-features = false }
 
 [lints]
 workspace = true
