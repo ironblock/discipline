@@ -306,6 +306,56 @@ def _case_carries_its_fields():
     return None
 
 
+@fixture("a case the reader cannot name is refused, never dropped")
+def _unkeyable_case_refused():
+    # THE SHAPE: valid bash, a real `seeded_case` call, and missing an
+    # argument the field reader needs. `CASE` matches it, `key_of(CASE)`
+    # returns nothing -- and the same pattern strips it before the skeleton
+    # comparison, so the "differ outside the named blocks" refusal cannot see
+    # it either. Dropped, it is a block a union writes a file without, at
+    # exit 0. That is the failure this whole script exists to prevent.
+    text = (
+        "  seeded_case inject_only_one_argument \\\n"
+        "    'a signature'\n"
+    )
+    try:
+        found = MG.find_blocks(MG.CASE, text)
+    except MG.Unkeyable:
+        return None
+    return (
+        f"a case the reader cannot name came back as {found!r} instead of a "
+        f"refusal, so a union would drop it and report success"
+    )
+
+
+@fixture("a refusal exits 2, not the code for a finding")
+def _refusal_exit_code():
+    # `sys.exit(f"...")` prints and exits ONE. One is this gate's code for
+    # "the scan ran and found something", so every refusal reported itself as
+    # a finding. The two have to be different numbers or a caller cannot tell
+    # "clean" from "broken" apart from "dirty".
+    import subprocess
+
+    done = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "merge-gate.py"),
+            "--union",
+            "a-ref-this-repository-does-not-have",
+            "HEAD",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    if done.returncode != 2:
+        return (
+            f"pointing the union at a ref that is not there exited "
+            f"{done.returncode}, and a refusal is 2: {done.stderr.strip()[:120]}"
+        )
+    return None
+
+
 @fixture("the resolver's case blocks and the shared reader name the same cases")
 def _span_and_reader_agree():
     # merge-gate keeps a pattern of its own for seeded cases, and must: it

@@ -35,7 +35,7 @@
 [meta]
 source = "verify.sh"
 red_faults = 292
-mechanics_assertions = 39
+mechanics_assertions = 42
 migrated = 0
 
 
@@ -2458,6 +2458,33 @@ kind = "results-fixture"
 check = "results"
 label = "2026-01-28-symlinked-evidence"
 failure_class = "results.provenance-escapes-the-directory"
+migrated = false
+
+[[fault]]
+id = "mech.shards-that-disagree-about-how-many-there-are"
+kind = "mechanics"
+check = "parity"
+label = "shards that disagree about how many there are"
+failure_class = "selftest.census-not-a-whole"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.an-ordinal-outside-the-manifest-s-range"
+kind = "mechanics"
+check = "parity"
+label = "an ordinal outside the manifest's range"
+failure_class = "selftest.census-not-a-whole"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-census-claiming-to-be-a-shard-that-cannot-exist"
+kind = "mechanics"
+check = "parity"
+label = "a census claiming to be a shard that cannot exist"
+failure_class = "selftest.census-not-a-whole"
+legacy_signature = ""
 migrated = false
 
 [[fault]]

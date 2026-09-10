@@ -5117,13 +5117,15 @@ def share(shard, n=None, of=SHARDS):
     return [i for i in range(1, n + 1) if (i - 1) % of + 1 == shard]
 
 
-def write(case, shard, ordinals, said_total=None):
+def write(case, shard, ordinals, said_total=None, said_shards=None):
     # Each shard's artifact arrives in a directory of its own, as
     # download-artifact leaves them.
     where = root / case / f"shard-{shard}"
     where.mkdir(parents=True, exist_ok=True)
     (where / "census.tsv").write_text(
-        f"shard\t{shard}\nshards\t{SHARDS}\ntotal\t{total if said_total is None else said_total}\n"
+        f"shard\t{shard}\n"
+        f"shards\t{SHARDS if said_shards is None else said_shards}\n"
+        f"total\t{total if said_total is None else said_total}\n"
         + "".join(f"ordinal\t{n}\n" for n in ordinals),
         encoding="utf-8",
     )
@@ -5139,6 +5141,27 @@ for k in range(1, SHARDS + 1):
         write("missing", k, share(k))
     write("wrong-total", k, share(k, n=total - 1), said_total=total - 1)
     write("twice", k, share(k) + ([share(2)[0]] if k == 1 else []))
+    # HOW MANY SHARDS THERE ARE is the shards' own claim, so they must agree
+    # on it. One shard believing it is one of five while the rest believe four
+    # means they partitioned against different divisors -- the ordinals can
+    # still add up, and the run still proved less than it says.
+    write("disagree-count", k, share(k), said_shards=(SHARDS + 1 if k == 2 else SHARDS))
+    # A COMPLETE PARTITION PLUS A FAULT THAT DOES NOT EXIST. Every ordinal in
+    # 1..total is accounted for, so every count is right; one shard also
+    # reports running something outside the list. A census that can report an
+    # ordinal nobody assigned is a census whose numbers are not about the
+    # manifest.
+    write("stray-ordinal", k, share(k) + ([total + 9999] if k == 1 else []))
+    write("impossible-shard", k, share(k))
+
+# A CENSUS CLAIMING AN ORDINAL NO SHARD COULD HAVE. The four real shards
+# partition the list correctly; a fifth file says it is shard nine of four.
+# Written after the loop because it is an extra file rather than a variant of
+# one, and `shard-9` is not in `range(1, SHARDS + 1)`.
+(root / "impossible-shard" / "shard-9").mkdir(parents=True, exist_ok=True)
+(root / "impossible-shard" / "shard-9" / "census.tsv").write_text(
+    f"shard\t9\nshards\t{SHARDS}\ntotal\t{total}\n", encoding="utf-8"
+)
 EOF
   expect_exit "shards that between them ran every fault are a whole" 0 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/whole"
@@ -5152,6 +5175,12 @@ EOF
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/twice"
   expect_exit "no shard reporting at all is not a pass" 1 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/none"
+  expect_exit "shards that disagree about how many there are" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/disagree-count"
+  expect_exit "an ordinal outside the manifest's range" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/stray-ordinal"
+  expect_exit "a census claiming to be a shard that cannot exist" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/impossible-shard"
 
   # --- the scope's own control ---
   #
