@@ -128,7 +128,17 @@ def find_blocks(pattern, text):
     claim that the text is nothing but blocks -- it is a finder, and `blocks`
     is a parser for one conflict hunk."""
     key = key_of(pattern)
-    return [(key(m.group(0)), m.group(0)) for m in pattern.finditer(text) if key(m.group(0))]
+    found = []
+    for match in pattern.finditer(text):
+        name = key(match.group(0))
+        if not name:
+            raise Unkeyable(
+                f"a {KIND.get(id(pattern), 'block')} matched and could not be "
+                f"named, so a union would drop it silently:\n"
+                + "".join(f"  {line}\n" for line in match.group(0).splitlines()[:12])
+            )
+        found.append((name, match.group(0)))
+    return found
 
 
 def strip_blocks(text: str, patterns) -> str:
@@ -417,6 +427,26 @@ def union_file(path: Path, ours_ref: str, theirs_ref: str) -> bool:
     return True
 
 
+class Unkeyable(Exception):
+    """A block the finder MATCHED and cannot name.
+
+    `find_blocks` used to drop these. That is the worst available behaviour
+    for this tool: the block is invisible to the union, so it is not carried
+    over -- and it is stripped by the same pattern before the skeleton
+    comparison, so the "differ outside the named blocks" refusal does not see
+    it either. The result is a union that reports success and writes a file
+    with a side's block silently absent, which is the fourteen-injections
+    failure this whole script exists to prevent, committed by the script.
+
+    A seeded case that is valid bash and that `gatelib.seeded_cases` cannot
+    read is the reachable shape: `CASE` matches the call, `key_of(CASE)`
+    returns nothing, and both readers agree to say nothing about it. So a
+    block that cannot be named is a REFUSAL, and the operator resolves it by
+    hand -- the same answer this tool gives every other question it cannot
+    answer safely.
+    """
+
+
 class Missing(Exception):
     """A ref or a path this tool was pointed at is not there."""
 
@@ -619,8 +649,13 @@ def main(argv: list[str]) -> int:
 if __name__ == "__main__":
     try:
         sys.exit(main(sys.argv[1:]))
-    except Missing as gone:
-        # An operator pointed this at a ref or a file that is not there.
-        # Exit 2, the same code every other refusal in this gate uses for
-        # "I was asked something I cannot answer", and say what is missing.
-        sys.exit(f"merge-gate: {gone}")
+    except (Missing, Unkeyable) as refused:
+        # An operator pointed this at a ref or a file that is not there, or a
+        # side carries a block this tool cannot name.
+        #
+        # `sys.exit(f"...")` prints the string and exits ONE, which is this
+        # gate's code for "the scan ran and found something" -- so every
+        # refusal here reported itself as a finding for as long as that line
+        # stood. Print, then exit the number the comment always claimed.
+        print(f"merge-gate: {refused}", file=sys.stderr)
+        sys.exit(2)
