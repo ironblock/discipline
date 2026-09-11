@@ -2314,6 +2314,47 @@ inject_parity() {
   rm -rf tests/fixtures/results-bad/2026-01-14-bad-sha
 }
 
+# An injection that writes a literal of an AMBIGUOUS type while editing a file
+# that knows none of its declarations. Twenty-three names in this crate are
+# declared in more than one place -- measured on 2026-09-11, after a disclosure
+# claimed five and had never been re-asked -- and the scan places a literal by
+# the file the injection edits, then that file's imports, then a tree-wide
+# answer only if there is exactly one. None of the three applies here.
+#
+# RULED 2026-09-11: that turns the injections lane RED rather than being
+# skipped, because a scan that guesses places a literal against the wrong
+# declaration, and one that skips reports a pass over something it never read.
+# This is the case that proves the branch fires; before it, the branch had
+# never been seen red, which is the condition this repository refuses.
+#
+# `Ground` is the literal because it is declared THREE times -- twice under
+# diet/src and once in diet/tests/drive_cli.rs -- so it also proves the scan
+# now reads the tests root. `diet/src/lib.rs` names Ground nowhere, which is
+# what makes the edited file no help in placing it.
+inject_injections_literal_unplaceable() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+anchor = "inject_injections_struct_grew() {\n"
+assert source.count(anchor) == 1, "the anchor is not where this fault expects it"
+seeded = (
+    "inject_seeded_unplaceable_ground() {\n"
+    "  edit_in_place 's/^/ /' diet/src/lib.rs\n"
+    # ASSEMBLED FROM PIECES, and it has to be. The scan looks for the two
+    # tokens written together, and this fault's own body is scanned like any
+    # other: written whole, it made the CLEAN tree fail the check this fault
+    # exists to prove fires on a dirty one. Caught by running it -- the fault
+    # fired, and named itself alongside the injection it plants. The same
+    # trap `inject_injection_needs_gnu_sed` documents, one lint along.
+    "  # " + "Ground" + " { tree: PathBuf::new() }\n"
+    "}\n\n"
+)
+path.write_text(source.replace(anchor, seeded + anchor, 1), encoding="utf-8")
+EOF
+}
+
 # A merge that adds a field to a struct. Every injection that writes a WHOLE
 # literal of that struct is now invalid text -- and the tree still builds,
 # because an injection's replacement text is a string the compiler never sees.
@@ -5201,6 +5242,8 @@ selftest() {
     'an array item was read by something other than the value reader' 'lib/formats::regimen::tests'
   seeded_case "a merged field an injection cannot see" injections inject_injections_struct_grew \
     'builds a Provenance without cohort'
+  seeded_case "a literal the scan cannot place"       injections inject_injections_literal_unplaceable \
+    'builds a Ground: declared in 3 places'
   seeded_case "a case naming no injection"            injections inject_case_without_an_injection \
     'named by a seeded case, defined nowhere'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
