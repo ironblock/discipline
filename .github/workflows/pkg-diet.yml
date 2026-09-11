@@ -38,20 +38,13 @@ jobs:
       - name: Install the sandbox the isolation lane confines with
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
 
-      # And say so, which is what makes the refusal branch a failure HERE and
-      # nowhere else. On a contributor's machine with no `bwrap` this stays
-      # unset and the refusal passes, exactly as it does today.
-      - name: Declare this a host where the sandbox is required
-        run: echo "DIET_REQUIRE_SANDBOX=1" >> "$GITHUB_ENV"
-
-      # Diagnostic, never fatal. The first run of this workflow found that
-      # `bwrap` installs and then cannot start: `--unshare-all` fails with
-      # `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`,
-      # because bringing `lo` up inside a new network namespace is denied
-      # here. That is a fact about the runner, and what to do about it
-      # depends on WHICH unshares are permitted -- so this asks, rather than
-      # leaving it to be guessed at from one error message.
-      - name: What the runner's kernel lets the sandbox do
+      # Diagnostic, never fatal, and run BEFORE the sysctl below so the log
+      # carries a before-and-after rather than an assertion that something
+      # changed. The first runs of this workflow found `bwrap` installing and
+      # then failing to start, and this probe found EVERY composition failing
+      # -- `--unshare-user` alone included -- with
+      # `apparmor_restrict_unprivileged_userns = 1`.
+      - name: What the runner's kernel lets the sandbox do (before)
         run: |
           set +e
           echo "bwrap:           $(command -v bwrap) -- $(bwrap --version 2>&1)"
@@ -70,6 +63,47 @@ jobs:
           --unshare-user --unshare-pid --unshare-ipc --unshare-uts --unshare-cgroup
           PROBES
           exit 0
+
+      # THE ONE RELAXED CONTROL, NAMED. Ubuntu 24.04 refuses unprivileged user
+      # namespaces, which is what `bwrap` builds every sandbox out of, so
+      # without this no composition starts and `diet::isolation`'s six seeded
+      # escapes cannot execute here at all.
+      #
+      # Ruled on #74 (2026-09-11), both sides weighed. For: this runner is an
+      # ephemeral single-tenant VM that builds one commit and is destroyed,
+      # and the control exists to stop untrusted local processes using user
+      # namespaces as an attack surface on a SHARED host -- which this is
+      # not. Against, honoured by scope: someone chose that default, so the
+      # change is not global. It is a named step in the one job that runs
+      # these tests, declared here, so anyone reading the workflow sees which
+      # control was relaxed and for which tests. Least privilege, declared.
+      #
+      # NOT a pattern for any host that outlives its job.
+      #
+      # Tolerant rather than fatal on purpose: if the sysctl cannot be set,
+      # the honest signal is the isolation tests failing with their own
+      # message about the mechanism, not a YAML step erroring first and
+      # hiding it.
+      - name: Permit the user namespaces the sandbox is built from
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 \
+            || echo "::warning::the userns restriction could not be relaxed; the isolation tests will say so"
+          # What the runner actually ships, per the same ruling. A setuid
+          # `bwrap` behaves differently under `--unshare-user`, and the probe
+          # above showed `--unshare-all` reaching loopback setup while
+          # `--unshare-user` alone died earlier at the uid map -- which a
+          # blanket denial does not explain. Record it rather than theorise.
+          ls -l "$(command -v bwrap)"
+          echo "userns_apparmor now: $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 'n/a')"
+          bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true \
+            && echo "--unshare-all: starts" \
+            || echo "--unshare-all: still refused"
+
+      # And say so, which is what makes the refusal branch a failure HERE and
+      # nowhere else. On a contributor's machine with no `bwrap` this stays
+      # unset and the refusal passes, exactly as it does today.
+      - name: Declare this a host where the sandbox is required
+        run: echo "DIET_REQUIRE_SANDBOX=1" >> "$GITHUB_ENV"
 
       - name: Run the checks this package owns
         run: |
