@@ -43,9 +43,15 @@
       `./verify.sh --only injections` exits 0. A merge resolved line by line
       splices injection bodies into each other and empties them silently; the
       resolution is by NAME, and that check is what proves the result.
-- [ ] **Every decision this PR disclosed has been ruled on this thread.** A
-      question asked in a PR body and never answered is a decision made by
-      whoever merges, silently.
+- [ ] **Every decision this PR disclosed has been ruled on this thread, AND
+      the body's disclosure section names the outcome of each.** A question
+      asked in a PR body and never answered is a decision made by whoever
+      merges, silently. A question that HAS been answered and is still listed
+      as open is worse: it reads as waiting when it is late, and a fresh
+      reviewer correctly leaves it alone. #69 lost a day to exactly that --
+      two rulings sat unimplemented through two review rounds because the body
+      still called them open. So a ruled disclosure is EDITED to say where it
+      ended up, not left as it was asked.
 
 ## Known defects
 

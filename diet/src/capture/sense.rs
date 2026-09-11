@@ -2134,10 +2134,17 @@ type FixtureRow = (&'static str, Label, f64);
 /// nomination, through the range a rolling summary would actually surface, to
 /// fifty over a register of a few hundred rows.
 ///
+/// THE RUNGS ARE WHERE THE CURVE IS, not where a round number is. The
+/// budgets are nomination counts per session at deployment, and a confirm slot
+/// costs the operator's attention -- so production sits between one and five
+/// nominations, which is where the precision-at-budget curve's knee most
+/// likely is. Three is the rung that resolves that knee; twenty-five and fifty
+/// characterise the tail. Ruled 2026-09-10, amended 2026-09-11 on #69.
+///
 /// Changing it changes both fixtures, and
 /// `every_pre_registered_budget_is_one_its_fixture_demonstrates` is what says
 /// so rather than leaving it to be discovered at the first refusal.
-pub const BUDGETS: &[usize] = &[1, 5, 10, 25, 50];
+pub const BUDGETS: &[usize] = &[1, 3, 5, 10, 25, 50];
 
 /// The widest pre-registered budget: how far down the precision fixture must
 /// keep the positives.
