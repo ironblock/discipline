@@ -1063,6 +1063,31 @@ if source.count(tail_now) != 1:
 path.write_text(source.replace(tail_now, tail_then, 1), encoding="utf-8")
 EOF
 }
+# The evidence left where it was instead of copied in. The assembled directory
+# then names inputs that are not beside it, and a results directory is a claim
+# with its evidence ATTACHED -- evidence that lives somewhere else is a link,
+# and a link is what a reader cannot check. `check-results.py` says so:
+# "claim `c1` consumes X, which is not a file here". Seeded because the verb
+# is the only writer of these directories now, so a verb that writes a
+# directory the gates reject is a verb producing a shape nobody can land.
+inject_bakeoff_evidence_not_attached() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/bakeoff.rs")
+source = path.read_text(encoding="utf-8")
+# ANCHORED ON THE LOOP HEADER ALONE, not on the body beneath it. The first cut
+# of this injection carried two lines, and `cargo fmt` rewrapped the second one
+# the moment the function around it changed -- so the anchor matched nothing and
+# the injection went INERT, which `check-injections.py` caught on the next run.
+# A one-line anchor is a smaller thing for a formatter to move.
+old = "    for artifact in &artifacts {"
+new = "    for artifact in artifacts.iter().take(0) {"
+if source.count(old) != 1:
+    raise SystemExit(f"the copy loop appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
 inject_record_substrate_reference_unchecked() {
   python3 - <<'EOF'
 import pathlib
@@ -5031,6 +5056,8 @@ selftest() {
     'sed forms only GNU accepts'
   seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \
     'an edited cache was not refused' 'lib/capture::bakeoff'
+  seeded_case "the assembled directory's evidence is elsewhere" test inject_bakeoff_evidence_not_attached \
+    'a cache the record consumed was not committed beside it' 'lib/capture::bakeoff'
   seeded_case "a budget no fixture demonstrates"      test     inject_bakeoff_budget_unfixtured \
     'its fixture does not demonstrate failure there' 'lib/capture::sense'
   seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \

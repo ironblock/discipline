@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 308
+red_faults = 309
 mechanics_assertions = 47
 migrated = 0
 
@@ -184,6 +184,16 @@ target = "lib/capture::bakeoff"
 label = "the runner's digest made advisory"
 failure_class = "results.recompute-input-unchecked"
 legacy_signature = "an edited cache was not refused"
+migrated = false
+
+[[fault]]
+id = "test.bakeoff_evidence_not_attached"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "the assembled directory's evidence is elsewhere"
+failure_class = "results.evidence-not-attached"
+legacy_signature = "a cache the record consumed was not committed beside it"
 migrated = false
 
 [[fault]]

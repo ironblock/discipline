@@ -85,7 +85,9 @@ fn usage() -> String {
             ),
             Operation::Bakeoff => writeln!(
                 out,
-                "  {command:<18} run the sense bakeoff a run record describes"
+                "  {command:<18} run the sense bakeoff a run record describes\n\
+                 {:<20} ...and with `--into DIR`, assemble the results directory",
+                ""
             ),
         };
     }
@@ -97,9 +99,16 @@ fn usage() -> String {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let [command, path] = args.as_slice() else {
-        eprint!("{}", usage());
-        return ExitCode::from(EXIT_USAGE);
+    // `bakeoff` takes a second argument and nothing else does, so the shape is
+    // read here rather than by a flag parser: two forms, both exact, and
+    // anything else is the usage text.
+    let (command, path, into) = match args.as_slice() {
+        [command, path] => (command, path, None),
+        [command, path, flag, into] if flag == "--into" => (command, path, Some(into)),
+        _ => {
+            eprint!("{}", usage());
+            return ExitCode::from(EXIT_USAGE);
+        }
     };
 
     let Some((_, operation)) = COMMANDS.iter().find(|(verb, _)| verb == command) else {
@@ -129,7 +138,18 @@ fn main() -> ExitCode {
         Operation::Route => ("route", text.and_then(route)),
         Operation::Bakeoff => (
             "bakeoff",
-            diet::capture::bakeoff::run(std::path::Path::new(path)).map_err(|err| err.to_string()),
+            match into {
+                // ASSEMBLE, DON'T PRINT. Ruled 2026-09-10 on #69: the numbers
+                // are a results directory, and printing them leaves the
+                // assembly of one to a person.
+                Some(into) => diet::capture::bakeoff::assemble(
+                    std::path::Path::new(path),
+                    std::path::Path::new(into),
+                )
+                .map_err(|err| err.to_string()),
+                None => diet::capture::bakeoff::run(std::path::Path::new(path))
+                    .map_err(|err| err.to_string()),
+            },
         ),
     };
 
