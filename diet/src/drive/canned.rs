@@ -202,7 +202,7 @@ pub fn digest_of(acts: &[Act]) -> String {
         }
         canonical.push('\n');
     }
-    super::digest::sha256_hex(canonical.as_bytes())
+    crate::digest::sha256_hex(canonical.as_bytes())
 }
 
 /// One reply in the shape a llama.cpp-dialect server sends.

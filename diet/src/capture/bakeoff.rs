@@ -13,7 +13,7 @@
 //! inherited rather than re-implemented -- a record whose regime cannot be
 //! spelled does not parse at all, and a cache whose bytes are not the bytes
 //! the record consumed fails a comparison this module makes against
-//! [`digest::sha256`](crate::digest::sha256).
+//! [`digest::sha256_hex`](crate::digest::sha256_hex).
 //!
 //! It computes and reports. It writes no files: every other verb of this CLI
 //! answers with a value on stdout, and a verb that edited a results directory
@@ -28,7 +28,7 @@ use crate::capture::sense::{
     self, Blocker, Cached, Cell, ControlFailure, DataError, EmbeddedSet, Embedder, Gate, Metric,
     PRE_REGISTRATION, Reported, Row, ScoreError, Scoring, SenseSet, SetError, decimal,
 };
-use crate::digest::sha256;
+use crate::digest::sha256_hex;
 use crate::formats::record::json::Value;
 use crate::formats::record::{Artifact, Event, Regime};
 
@@ -176,7 +176,7 @@ fn read_consumed(dir: &Path, artifact: &Artifact) -> Result<String, RunError> {
     let bytes = std::fs::read(&path).map_err(|_| RunError::Missing {
         path: artifact.path.clone(),
     })?;
-    let found = sha256(&bytes);
+    let found = sha256_hex(&bytes);
     if found != artifact.sha256 {
         return Err(RunError::Digest {
             path: artifact.path.clone(),
@@ -496,7 +496,7 @@ mod tests {
 
     use super::{BUDGET, RunError, run};
     use crate::capture::sense::{self, Embedder, Fixture};
-    use crate::digest::sha256;
+    use crate::digest::sha256_hex;
     use crate::formats::record::json::Value;
 
     /// The register this crate ships, used as the fixture's corpus.
@@ -594,7 +594,7 @@ mod tests {
             std::fs::write(dir.join(name), body).expect("a written input");
             consumes.push(format!(
                 "{{\"path\":\"{name}\",\"sha256\":\"{}\"}}",
-                sha256(body.as_bytes())
+                sha256_hex(body.as_bytes())
             ));
         }
 
@@ -761,7 +761,7 @@ mod tests {
             "{START}\n{{\"record\":\"claim\",\"id\":\"c1\",\"hypothesis\":\"nothing to \
              compare\",\"result\":\"supported\",\"consumes\":[{{\"path\":\"authored-mistake.\
              jsonl\",\"sha256\":\"{}\"}}]}}\n{SUMMARY}\n",
-            sha256(register_source().as_bytes())
+            sha256_hex(register_source().as_bytes())
         );
         let path = dir.join("run.jsonl");
         std::fs::write(&path, record).expect("a record");

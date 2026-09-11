@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Regenerate `diet/digest/vectors.tsv`: the committed known-answer set.
+
+The digests here are produced by an INDEPENDENT implementation -- the host's
+`sha256sum` -- and never by the crate under test. A vector file generated
+from `sha2` would agree with `sha2` by construction and prove nothing.
+
+Provenance is checked before anything is written: the generating program is
+made to reproduce the four vectors FIPS 180-4 publishes. A program that gets
+those wrong is not one to freeze 212 answers from.
+"""
+import pathlib, shutil, subprocess, sys, tempfile
+
+PRODUCT = b"the product a drive produced\nline two\n"
+
+# (spec, bytes, group comment or None) -- the spec is what the Rust decoder
+# reads, so the two encodings are written down once, here and in `decode`.
+def rep(byte: int, n: int) -> tuple[str, bytes]:
+    return (f"rep:{byte:02x}:{n}", bytes([byte]) * n)
+
+def hexlit(raw: bytes) -> tuple[str, bytes]:
+    return ("hex:" + raw.hex(), raw)
+
+GROUPS: list[tuple[str, list[tuple[str, bytes]]]] = [
+    ("Every length to 200. Spans the one-block and two-block padding cases\n"
+     "# many times over, and includes 55/56 and 63/64/65, where the length\n"
+     "# field crosses a block boundary.",
+     [rep(0x61, n) for n in range(0, 201)]),
+    ("119/120/121, which the published vectors miss: the SECOND block's own\n"
+     "# padding boundary.",
+     [rep(0x7a, n) for n in range(119, 122)]),
+    ("Every byte value, so a byte-oriented bug that only shows on non-ASCII\n"
+     "# input cannot hide behind the length cases above.",
+     [hexlit(bytes(range(256)))]),
+    ("Embedded NULs, at a block boundary and across one.",
+     [rep(0x00, 64), rep(0x00, 65)]),
+    ("High bytes with no ASCII at all, at three lengths.",
+     [rep(0xff, n) for n in (60, 64, 200)]),
+    ("A real product, which is what this function is actually called on.",
+     [hexlit(PRODUCT)]),
+    ("Bigger than any block count the loops above reach.",
+     [rep(0x71, 100_003)]),
+]
+
+# The published vectors, used to VET the generating program rather than to
+# populate the file -- they stay inline in the test as the floor.
+FIPS = [
+    (b"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+    (b"abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
+    (b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+     "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"),
+    (b"a" * 1_000_000,
+     "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"),
+]
+
+
+def reference() -> tuple[str, list[str]]:
+    for program, args in (("sha256sum", []), ("shasum", ["-a", "256"])):
+        if shutil.which(program):
+            return program, args
+    sys.exit("no independent SHA-256 on PATH; refusing to generate from the crate")
+
+
+def digests(program: str, args: list[str], blobs: list[bytes]) -> list[str]:
+    out = []
+    with tempfile.TemporaryDirectory() as base:
+        paths = []
+        for at, blob in enumerate(blobs):
+            path = pathlib.Path(base) / f"{at:05d}.bin"
+            path.write_bytes(blob)
+            paths.append(str(path))
+        # In batches, so the argument list stays under the exec limit.
+        for start in range(0, len(paths), 400):
+            done = subprocess.run([program, *args, *paths[start:start + 400]],
+                                  capture_output=True, text=True, check=True)
+            lines = [l for l in done.stdout.splitlines() if l.strip()]
+            if len(lines) != len(paths[start:start + 400]):
+                sys.exit(f"{program} answered for {len(lines)} of "
+                         f"{len(paths[start:start+400])} inputs")
+            out += [l.split()[0] for l in lines]
+    return out
+
+
+def main() -> int:
+    program, args = reference()
+    # Vet the generator before trusting it with anything.
+    got = digests(program, args, [blob for blob, _ in FIPS])
+    for (blob, want), have in zip(FIPS, got):
+        if have != want:
+            sys.exit(f"{program} does not reproduce FIPS 180-4 for a "
+                     f"{len(blob)}-byte input: {have} != {want}")
+    print(f"{program}: reproduces all four published FIPS 180-4 vectors",
+          file=sys.stderr)
+
+    flat = [pair for _, pairs in GROUPS for pair in pairs]
+    answers = digests(program, args, [blob for _, blob in flat])
+
+    lines = [
+        "# The portable known-answer set: the differential's inputs, frozen.",
+        "#",
+        "# Ruling on #71's fourth disclosure. The `sha256sum` differential is a",
+        "# strong check and it needs a host binary; a check whose whole job is to",
+        "# run where the strong one cannot should not be four vectors. So the",
+        "# differential's input set is committed here with its answers, and the",
+        "# known-answer test reads this file. No host binary, no environment it",
+        "# can fail to find.",
+        "#",
+        f"# GENERATED BY `{program}` -- an implementation that is not the one under",
+        "# test. A vector file produced from `sha2` would agree with `sha2` by",
+        "# construction and prove nothing. Before writing a line of this, the",
+        "# generating program was made to reproduce all four vectors FIPS 180-4",
+        "# publishes; those four stay inline in the test as the floor, and are not",
+        "# repeated here.",
+        "#",
+        "# Format: <spec>\\t<digest>. A spec is `hex:<lowercase hex>` for literal",
+        "# bytes, or `rep:<hex byte>:<count>` for one byte repeated -- so a",
+        "# hundred thousand of the same byte is one short line rather than a",
+        "# megabyte of hex. `diet::digest`'s `decode` is the only reader.",
+        "#",
+        "# To regenerate: run `diet/digest/generate-vectors.py` from the workspace",
+        "# root. It is committed beside this file on purpose -- a header claiming a",
+        "# provenance the repository cannot reproduce is a claim nobody can check,",
+        "# and the obvious way to hand-add a vector is `sha2`, which is the one",
+        "# implementation these answers must not come from.",
+        "#",
+        "# The SPECS are not authoritative here. `diet::digest`'s `cases` builds the",
+        "# input set in code, because a claim about which inputs are covered cannot",
+        "# live in the file the check reads for its inputs -- a review demonstrated",
+        "# that swapping the distinctive groups for more `rep:61:n` lines with",
+        "# correct digests left every test green. This file freezes the ANSWERS,",
+        "# which are the part that cannot be derived without an independent",
+        "# implementation. The test refuses a spec no case names, and a case with",
+        "# no answer here.",
+    ]
+    at = 0
+    for comment, pairs in GROUPS:
+        lines.append("")
+        lines.append("# " + comment)
+        for spec, _ in pairs:
+            lines.append(f"{spec}\t{answers[at]}")
+            at += 1
+
+    path = pathlib.Path("diet/digest/vectors.tsv")
+    path.write_text("\n".join(lines) + "\n")
+    print(f"wrote {path}: {len(flat)} vectors", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

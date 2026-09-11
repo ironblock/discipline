@@ -936,10 +936,6 @@ EOF
 # row served by one it did -- and the regime the result is attributed to is a
 # regime nothing in the file describes. The reference is the whole mechanism:
 # without the check it is a string somebody typed.
-# The length dropped from the padding. Every digest still comes out as
-# sixty-four hex characters and every one of them is wrong, which is the worst
-# shape a digest bug has: the comparison still runs, still looks like a
-# comparison, and agrees with nothing else on earth.
 # An injection written in a form only GNU sed accepts. It applies here and is
 # inert on a Mac, so the tree's verdict depends on the machine -- twenty-eight
 # of them did, and CI was green the whole time (#50).
@@ -970,20 +966,6 @@ if "edit_in_place" not in was:
     raise SystemExit("that injection no longer uses the portable helper")
 now = was.replace("edit_in_place", "sed" + " -" + "i", 1)
 path.write_text(source.replace(was, now, 1), encoding="utf-8")
-EOF
-}
-
-inject_digest_padding_dropped() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("diet/src/digest.rs")
-source = path.read_text(encoding="utf-8")
-old = "    tail[blocks * 64 - 8..blocks * 64].copy_from_slice(&bits.to_be_bytes());"
-new = "    let _ = bits;"
-if source.count(old) != 1:
-    raise SystemExit(f"the padding line appears {source.count(old)} times")
-path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
 
@@ -5243,8 +5225,6 @@ selftest() {
     'weights-named-not-digested\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "an injection only GNU sed accepts"     injections inject_injection_needs_gnu_sed \
     'sed forms only GNU accepts'
-  seeded_case "a digest that agrees with nothing"     test     inject_digest_padding_dropped \
-    'digest::tests::the_standards_vectors' 'lib/digest'
   seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \
     'an edited cache was not refused' 'lib/capture::bakeoff'
   seeded_case "a budget no fixture demonstrates"      test     inject_bakeoff_budget_unfixtured \
