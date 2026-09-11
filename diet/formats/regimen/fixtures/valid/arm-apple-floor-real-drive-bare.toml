@@ -1,0 +1,29 @@
+# Apple floor suite, S5 capture smoke, real-drive lane: the bare control arm (Gemma 4 12B on oMLX), replaying Pi's archived A/B-3 bare-arm summaries verbatim.
+#
+# Rendered as a regimen v1 conformance fixture of the arm as written. Every binding
+# the arm carries is expressible in the grammar, so nothing is omitted.
+#
+# S5, bare arm — Gemma 4 12B / oMLX, replaying Pi's archived A/B-3 bare-arm
+# summaries verbatim (PIN 4's control mechanism). No diet lane: this arm
+# carries no [triggers] table, matching the arm loader's own doc note that
+# native_compaction is "the opposite pole of [triggers] enabled."
+name = "s5-ab3-bare-gemma"
+
+[sampler]
+temperature = 1.0
+top_k = 64
+top_p = 0.95
+max_tokens = 4096
+preserve_thinking = false
+enable_thinking = true
+interview_thinking = true
+
+[limits]
+turn_timeout_s = 2400
+tool_timeout_s = 120
+max_steps = 30
+
+[native_compaction]
+every_turns = 2
+first_at = 1
+summaries_file = "summaries.json"

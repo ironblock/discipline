@@ -1,0 +1,193 @@
+{
+  "reference": {
+    "table": {
+      "arm_tokens": {
+        "integer": 0
+      },
+      "diet_ctx": {
+        "integer": 30000
+      },
+      "model_extract": {
+        "string": "Qwen3-1.7B"
+      },
+      "model_main": {
+        "string": "Qwen3.6-27B"
+      },
+      "profile": {
+        "table": {
+          "entries_per_turn": {
+            "float": 12.5
+          },
+          "forks_per_step": {
+            "float": 2.1
+          },
+          "object_entries": {
+            "integer": 162
+          },
+          "seam_turns_bare": {
+            "array": [
+              {
+                "integer": 1
+              },
+              {
+                "integer": 3
+              },
+              {
+                "integer": 5
+              },
+              {
+                "integer": 7
+              },
+              {
+                "integer": 9
+              },
+              {
+                "integer": 11
+              }
+            ]
+          },
+          "seam_turns_diet": {
+            "array": [
+              {
+                "integer": 1
+              },
+              {
+                "integer": 3
+              },
+              {
+                "integer": 4
+              },
+              {
+                "integer": 6
+              },
+              {
+                "integer": 8
+              },
+              {
+                "integer": 10
+              },
+              {
+                "integer": 11
+              },
+              {
+                "integer": 12
+              },
+              {
+                "integer": 13
+              }
+            ]
+          },
+          "total_forks": {
+            "integer": 192
+          },
+          "total_steps": {
+            "integer": 91
+          }
+        }
+      },
+      "run": {
+        "string": "A/B-3 diet (cut2 production, 2026-07-08)"
+      },
+      "thinking_level": {
+        "string": "off"
+      }
+    }
+  },
+  "sampler": {
+    "table": {
+      "max_tokens": {
+        "integer": 4096
+      },
+      "min_p": {
+        "float": 0.0
+      },
+      "temperature": {
+        "float": 0.6
+      },
+      "top_k": {
+        "integer": 20
+      },
+      "top_p": {
+        "float": 1.0
+      }
+    }
+  },
+  "serving": {
+    "table": {
+      "expected_absent": {
+        "array": [
+          {
+            "string": "--cache-ram"
+          },
+          {
+            "string": "-cram"
+          }
+        ]
+      },
+      "flags": {
+        "table": {}
+      }
+    }
+  },
+  "thinking": {
+    "table": {
+      "reference": {
+        "table": {
+          "extraction": {
+            "boolean": false
+          },
+          "interview": {
+            "boolean": false
+          },
+          "main": {
+            "boolean": false
+          }
+        }
+      },
+      "shipping": {
+        "table": {
+          "extraction": {
+            "boolean": false
+          },
+          "interview": {
+            "boolean": true
+          },
+          "main": {
+            "boolean": true
+          }
+        }
+      }
+    }
+  },
+  "triggers": {
+    "table": {
+      "audit_legacy_wording": {
+        "boolean": true
+      },
+      "evidence_threshold": {
+        "integer": 3000
+      },
+      "extract_threshold": {
+        "integer": 1500
+      },
+      "extraction": {
+        "boolean": true
+      },
+      "extraction_minimal_prefix": {
+        "boolean": false
+      },
+      "open_next_every": {
+        "integer": 10
+      },
+      "ratify": {
+        "boolean": true
+      },
+      "supersede": {
+        "boolean": true
+      },
+      "trio_cooldown": {
+        "integer": 3
+      }
+    }
+  }
+}
