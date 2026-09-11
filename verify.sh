@@ -10,6 +10,36 @@
 #   verify.sh --selftest      prove the gate goes red on seeded faults
 #   verify.sh --selftest --shard K/N    run this job's share of the faults
 #   verify.sh --selftest --census PATH  write what this run ran, for the sum
+#   verify.sh --selftest --derive-scopes DIR   re-harvest the test cases' scopes
+#
+# THE SCOPES ARE A HARVEST, NOT A LIST. Every `test` case declares which tests
+# it needs, and there are 181 of them; a flag that makes the gate run LESS is a
+# hazard, and 181 hand-maintained declarations are 181 chances at a scope that
+# was right when it was written and wrong after a rename. So they are derived
+# rather than kept, and the derivation is re-runnable:
+#
+#   ./verify.sh --selftest --derive-scopes /tmp/harvest
+#   python3 scripts/derive-scopes.py --index /tmp/harvest/derive-scopes.tsv
+#   python3 scripts/derive-scopes.py --index /tmp/harvest/... --emit
+#
+# The run is UNSCOPED on purpose -- every test case runs the whole workspace,
+# which is the cost the scopes exist to avoid -- so that what each seeded fault
+# breaks is read from a run the declarations did not already narrow. It takes
+# as long as the scopes save, which is the point of not doing it in CI.
+#
+# What the check asks of a declaration is that it SELECT SOMETHING THE FAULT
+# BREAKS -- not everything. One failing test fails a run, so a scope naming one
+# of thirty-three failures is as red as one naming all of them; it is more
+# fragile, and the check says so, but a narrow blast radius is the entire
+# reason `--scope` exists and calling it a defect would be calling the feature
+# a defect. Selecting NOTHING is the defect: those tests all pass, the run
+# exits 0, and a seeded fault reports green. Ruled 2026-09-11 as the condition
+# on keeping `--scope`.
+#
+# The reader itself is not trusted on its own word. `verify.sh --only derive`
+# runs its fixture suite in a second, because a tool whose only input is a
+# forty-minute harvest is a tool nobody runs, and the first defect in it was
+# exactly that kind.
 #
 # Three rules this script exists to keep:
 #
@@ -35,7 +65,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results recompute regimen metadata hygiene pages ci history injections resolver parity)
+readonly CHECKS=(fmt clippy test library results recompute regimen metadata hygiene pages ci history injections resolver derive parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -305,6 +335,15 @@ check_injections() { python3 scripts/check-injections.py; }
 # at once, each in a behaviour no command had ever executed.
 check_resolver() { python3 scripts/check-merge-gate.py; }
 
+# The scope derivation, exercised on fixtures before it is trusted to grade a
+# declaration. `derive-scopes.py` reads a forty-minute unscoped harvest, which
+# is exactly the shape of tool that is never run against a case it has not
+# already seen: its first defect -- a compile-failure pattern anchored without
+# re.MULTILINE, so every build-breaking fault came back as "the derivation
+# broke" -- survived being written, reviewed and read, and was found only by a
+# harvest. The fixtures cost a second and the harvest does not.
+check_derive() { python3 scripts/derive-scopes.py --selftest; }
+
 # The fault-migration manifest defines what parity means for the replacement
 # gate. A manifest that has drifted from this script defines the wrong parity.
 check_parity() { python3 scripts/check-fault-manifest.py; }
@@ -347,6 +386,14 @@ SELFTEST_BROKEN=()
 SEEDED_CHECKS=()
 SELFTEST_CASES=0
 SELFTEST_LOGS=""
+
+# Where `--derive-scopes` writes its index, and empty when that mode is off.
+#
+# The mode runs every `test` case with NO scope, so that what the seeded fault
+# breaks is read from a run that was not already narrowed by the answer. A
+# derivation that ran under the declaration it is checking would confirm
+# whatever the declaration said.
+SELFTEST_DERIVE=""
 
 # --- the shard ------------------------------------------------------------
 #
@@ -536,7 +583,13 @@ seeded_case() {
   # confusing exit 2 from inside the box, and scripts/check-fault-manifest.py
   # refuses the same two states before a run ever starts.
   local -a scoped=()
-  if [ "$check" = "test" ]; then
+  # UNSCOPED ON PURPOSE in derive mode: the point is to see everything this
+  # fault breaks, including whatever the declaration currently excludes. A
+  # derivation run under the declaration it is checking would confirm whatever
+  # that declaration said.
+  if [ "$check" = "test" ] && [ -n "$SELFTEST_DERIVE" ]; then
+    :
+  elif [ "$check" = "test" ]; then
     if [ -z "$scope" ]; then
       printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- NO TEST SCOPE DECLARED\n' \
         "$(( SECONDS - started ))" "$check" "$label"
@@ -553,6 +606,13 @@ seeded_case() {
   # One log per case, kept for the run, because the box itself is overwritten
   # by the case after this one and a failure is read after the fact.
   local log="${SELFTEST_LOGS}/$(printf '%03d' "$SELFTEST_CASES").log"
+  # The index the derivation reads: which log, which case, and what that case
+  # currently declares. Written here rather than beside the scope decision
+  # above, where `log` does not exist yet -- `set -u` caught that on the first
+  # run, which is the reason this file has `set -u`.
+  if [ "$check" = "test" ] && [ -n "$SELFTEST_DERIVE" ]; then
+    printf '%s\t%s\t%s\n' "$log" "$label" "$scope" >> "${SELFTEST_LOGS}/derive-scopes.tsv"
+  fi
 
   # `cd ""` succeeds and stays put, so an empty box would run the injection in
   # the real working tree. Refuse rather than seed faults into the repository.
@@ -3039,6 +3099,40 @@ assert old in source
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
+# The compile-failure pattern anchored `^` with no re.MULTILINE. It then
+# matches only a log that BEGINS with the error, and every real log begins
+# with `Compiling`, so a fault that breaks the BUILD reads as "no failing test
+# and no build failure" -- exit 2, the derivation refusing to run over a case
+# that is perfectly readable. This is the defect the file actually had.
+inject_derive_build_failure_unread() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/derive-scopes.py")
+source = path.read_text(encoding="utf-8")
+old = ', re.MULTILINE\n)'
+new = '\n)'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The selection forgetting which target ran a failure. Every declared scope
+# then "selects" every failure in the log, whichever harness produced it, and
+# the one thing this check exists to refuse -- a case scoped past its own
+# failure, which runs tests that all pass and reports GREEN over a seeded
+# fault -- is accepted by the grader written to catch it.
+inject_derive_accepts_a_fast_green() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/derive-scopes.py")
+source = path.read_text(encoding="utf-8")
+old = '        if target not in ("all", ran_in):\n            continue\n        hit |='
+new = '        hit |='
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
 # The resolver keying a block on the first injection name anywhere inside it,
 # rationale comment included. A comment reading "the deliberate pair of
 # inject_alpha" then keys the block that introduces inject_beta as
@@ -4461,6 +4555,20 @@ selftest() {
   trap selftest_cleanup EXIT
   scratch; SELFTEST_TARGET="${SCRATCH}/target"
   scratch; SELFTEST_LOGS="$SCRATCH"
+  # DERIVE MODE KEEPS ITS LOGS. `selftest_cleanup` removes every scratch it
+  # registered, so an index written there would name files that no longer
+  # exist by the time anybody read it. The operator names a directory instead
+  # and it is not registered for cleanup.
+  if [ -n "$SELFTEST_DERIVE" ]; then
+    mkdir -p "$SELFTEST_DERIVE" || {
+      echo "selftest: --derive-scopes ${SELFTEST_DERIVE} could not be made" >&2
+      exit "$EXIT_MISUSE"
+    }
+    SELFTEST_LOGS="$SELFTEST_DERIVE"
+    # Truncated, never appended to. An index carrying rows from two runs is a
+    # derivation over a tree that never existed.
+    : > "${SELFTEST_LOGS}/derive-scopes.tsv"
+  fi
   # The one sandbox path every case is built into and torn down from. Made
   # here rather than per case; see SELFTEST_BOX for the measurement that says
   # why.
@@ -4798,6 +4906,10 @@ selftest() {
     'a write was lost to a read of the same path in the same call' 'lib/capture::mechanical::tests'
   seeded_case "the resolver keying on a comment"       resolver inject_keyed_by_a_comment \
     'keyed as .*inject_alpha'
+  seeded_case "a build failure read as a broken derivation" derive inject_derive_build_failure_unread \
+    'the wrecked target read as'
+  seeded_case "a scope past its own failure accepted"  derive   inject_derive_accepts_a_fast_green \
+    'a scope naming another target selected something'
   seeded_case "a run directory inside a run directory" results inject_results_nested_directory \
     'a run directory inside a run directory'
   seeded_case "a verdict read by prefix"               test     inject_verdict_prefix_accepted \
@@ -5271,6 +5383,11 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --selftest) mode="selftest"; shift ;;
+    --derive-scopes)
+      [ "$#" -ge 2 ] || { echo "verify: --derive-scopes needs a directory" >&2; exit "$EXIT_MISUSE"; }
+      SELFTEST_DERIVE="$2"
+      shift 2
+      ;;
     --scope)
       [ "$#" -ge 2 ] || { echo "verify: --scope needs a spec" >&2; exit "$EXIT_MISUSE"; }
       scope_args "$2" || {
@@ -5345,9 +5462,23 @@ if [ -n "$VERIFY_TEST_SCOPE" ] &&
   exit "$EXIT_MISUSE"
 fi
 
+# `--derive-scopes` re-runs the selftest's test cases unscoped and is nothing
+# on its own: without --selftest there is no run to derive from, and
+# SELFTEST_LOGS is unset, so the index would be written to the filesystem root.
+if [ -n "$SELFTEST_DERIVE" ] && [ "$mode" != "selftest" ]; then
+  echo "verify: --derive-scopes derives from a selftest run, so it needs --selftest" >&2
+  exit "$EXIT_MISUSE"
+fi
+
 if [ "$mode" = "selftest" ]; then
   rc=0
   selftest || rc=$?
+  if [ -n "$SELFTEST_DERIVE" ]; then
+    printf '\nderive-scopes: the index is %s\n' "${SELFTEST_LOGS}/derive-scopes.tsv"
+    printf 'derive-scopes: read it with\n'
+    printf '  python3 scripts/derive-scopes.py --index %s\n' \
+      "${SELFTEST_LOGS}/derive-scopes.tsv"
+  fi
   exit "$rc"
 fi
 
