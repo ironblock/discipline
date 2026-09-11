@@ -15,9 +15,13 @@
 //! the record consumed fails a comparison this module makes against
 //! [`digest::sha256_hex`](crate::digest::sha256_hex).
 //!
-//! It computes and reports. It writes no files: every other verb of this CLI
-//! answers with a value on stdout, and a verb that edited a results directory
-//! would be a second writer for `check-results.py` to agree with.
+//! THE BUDGET IS NOT ONE NUMBER. It was a `const` here set to eight, and
+//! eight was not chosen -- it was the widest budget the precision failure
+//! fixture happened to demonstrate. A fixture's shape is not the instrument's
+//! parameter space, so the ladder is pre-registered in
+//! [`sense::BUDGETS`](super::sense::BUDGETS), the fixtures are built from it,
+//! and every cell reports every metric at every budget on it. Ruled
+//! 2026-09-10 on #69.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -31,22 +35,6 @@ use crate::capture::sense::{
 use crate::digest::sha256_hex;
 use crate::formats::record::json::Value;
 use crate::formats::record::{Artifact, Event, Regime};
-
-/// The nomination budget, fixed here rather than swept.
-///
-/// EIGHT, AND EIGHT IS THE CEILING THE INSTRUMENT ALLOWS. [`Reported::take`]
-/// refuses a metric it cannot first demonstrate failing, and the precision
-/// fixture holds exactly eight non-positives above its positives -- so at any
-/// budget above eight a positive enters the fixture's own top-k, the fixture
-/// stops reading as failure, and the metric is refused. The over-firing
-/// fixture puts two hard negatives on top, so it needs a budget of at least
-/// two. The reportable range is therefore 2..=8 and this takes the top of it.
-///
-/// That is a bound set by a fixture rather than by the science, and it is
-/// worth saying out loud: a budget of eight over a register of a few hundred
-/// rows is a narrow endpoint. Widening it means widening the precision
-/// fixture, which is a change to the instrument and a ruling.
-pub const BUDGET: usize = 8;
 
 /// The seed every resampling in a run is drawn from.
 ///
@@ -340,10 +328,22 @@ pub fn run(path: &Path) -> Result<Value, RunError> {
                     let cell = Cell { scoring, gate };
                     let scored = sense::score_rows(rows, &embedded, cached, cell)
                         .map_err(RunError::Score)?;
-                    let reported = Metric::ALL
+                    // EVERY PRE-REGISTERED BUDGET, not one. The budget was a
+                    // `const` here set to eight, and eight was not chosen: it
+                    // was the widest the precision fixture happened to
+                    // demonstrate. A cell now carries the ladder, because a
+                    // single number is a sweep nobody can do afterwards --
+                    // rerunning at another budget means rerunning the bakeoff.
+                    let reported = sense::BUDGETS
                         .iter()
                         .copied()
-                        .map(|metric| Reported::take(metric, BUDGET, &scored))
+                        .flat_map(|budget| {
+                            Metric::ALL
+                                .iter()
+                                .copied()
+                                .map(move |metric| (metric, budget))
+                        })
+                        .map(|(metric, budget)| Reported::take(metric, budget, &scored))
                         .collect::<Result<Vec<_>, _>>()
                         .map_err(RunError::Metric)?;
                     cells.push(CellReport {
@@ -365,10 +365,6 @@ pub fn run(path: &Path) -> Result<Value, RunError> {
 
     Ok(Value::Object(BTreeMap::from([
         ("pre_registration".to_owned(), PRE_REGISTRATION.value()),
-        (
-            "budget".to_owned(),
-            Value::Integer(i64::try_from(BUDGET).unwrap_or(i64::MAX)),
-        ),
         ("regime".to_owned(), regime_ids(record.regime())),
         (
             "embedders".to_owned(),
@@ -494,7 +490,7 @@ mod tests {
     use std::fmt::Write as _;
     use std::path::{Path, PathBuf};
 
-    use super::{BUDGET, RunError, run};
+    use super::{RunError, run};
     use crate::capture::sense::{self, Embedder, Fixture};
     use crate::digest::sha256_hex;
     use crate::formats::record::json::Value;
@@ -662,18 +658,63 @@ mod tests {
             };
             assert_eq!(
                 metrics.len(),
-                sense::Metric::ALL.len(),
-                "every metric is reported, or none is"
+                sense::Metric::ALL.len() * sense::BUDGETS.len(),
+                "every metric at every pre-registered budget, or none"
             );
+            // AND THE LADDER IS THE PRE-REGISTERED ONE, not a count that
+            // happens to match. A runner that reported one metric five times
+            // at one budget would satisfy the length above and would be
+            // reporting a sweep it never did.
+            let mut taken: Vec<(String, i64)> = metrics
+                .iter()
+                .map(|reported| {
+                    let (Value::String(metric), Value::Integer(budget)) =
+                        (field(reported, "metric"), field(reported, "budget"))
+                    else {
+                        panic!("a reported metric names itself and its budget")
+                    };
+                    (metric.clone(), *budget)
+                })
+                .collect();
+            taken.sort();
+            let mut want: Vec<(String, i64)> = sense::BUDGETS
+                .iter()
+                .flat_map(|budget| {
+                    sense::Metric::ALL.iter().map(move |metric| {
+                        (
+                            metric.tag().to_owned(),
+                            i64::try_from(*budget).expect("a budget"),
+                        )
+                    })
+                })
+                .collect();
+            want.sort();
+            assert_eq!(taken, want, "the cell's budgets are not the ladder's");
         }
         // One comparison per cell key: two embedders is one pair.
         let Value::Array(comparisons) = field(&report, "comparisons") else {
             panic!("comparisons is not a list")
         };
         assert_eq!(comparisons.len(), 4 * 2, "one pair per cell");
+        // The ladder is in the pre-registration and nowhere else. A `budget`
+        // key beside it would be a second place to read the same fact, and the
+        // one that went stale would be the one somebody believed.
+        let Value::Object(report_keys) = &report else {
+            panic!("a report is an object")
+        };
+        assert!(
+            !report_keys.contains_key("budget"),
+            "the report still carries a single budget beside the pre-registered ladder"
+        );
+        let Value::Array(budgets) = field(field(&report, "pre_registration"), "budgets") else {
+            panic!("the pre-registration names its budgets")
+        };
         assert_eq!(
-            field(&report, "budget"),
-            &Value::Integer(i64::try_from(BUDGET).expect("a budget")),
+            budgets,
+            &sense::BUDGETS
+                .iter()
+                .map(|budget| Value::Integer(i64::try_from(*budget).expect("a budget")))
+                .collect::<Vec<_>>(),
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
