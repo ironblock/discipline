@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 305
+red_faults = 307
 mechanics_assertions = 42
 migrated = 0
 
@@ -3006,6 +3006,22 @@ check = "resolver"
 label = "the resolver keying on a comment"
 failure_class = "gate.resolver-keys-on-a-comment"
 legacy_signature = "keyed as .*inject_alpha"
+migrated = false
+[[fault]]
+id = "derive.derive_build_failure_unread"
+kind = "seeded-gate"
+check = "derive"
+label = "a build failure read as a broken derivation"
+failure_class = "gate.derive-cannot-read-a-build-failure"
+legacy_signature = "the wrecked target read as"
+migrated = false
+[[fault]]
+id = "derive.derive_accepts_a_fast_green"
+kind = "seeded-gate"
+check = "derive"
+label = "a scope past its own failure accepted"
+failure_class = "gate.derive-accepts-a-fast-green"
+legacy_signature = "a scope naming another target selected something"
 migrated = false
 [[fault]]
 id = "ci.ci_pr_branch_filter"
