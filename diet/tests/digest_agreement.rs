@@ -42,7 +42,18 @@ fn the_two_sha256_implementations_in_this_crate_agree() {
 
 #[test]
 fn and_they_agree_with_the_published_vector() {
-    // Both being wrong the same way is the failure the test above cannot see.
+    // Both being wrong the same way is a failure the test above cannot see,
+    // and this narrows that gap RATHER THAN CLOSING IT. The merge that added
+    // this file said it caught agreeing wrongly; a review priced that claim
+    // and it is broader than the test. Casting the bit length through `u32`
+    // in BOTH implementations -- a shared bug for inputs of four gibibytes and
+    // up -- leaves every assertion here green, because nothing in this
+    // repository hashes an input anywhere near that size and no vector below
+    // pins one.
+    //
+    // What is checked is a published answer at a small size. That is worth
+    // having and it is not the same as "agreeing wrongly is caught".
+    //
     // FIPS 180-4's own "abc".
     const ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
     assert_eq!(diet::digest::sha256(b"abc"), ABC);
