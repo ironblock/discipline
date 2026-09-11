@@ -4452,6 +4452,44 @@ if source.count(old) != 1:
 path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
+inject_record_substrate_reference_inferred_from_a_count() {
+  python3 - <<'EOF'
+import pathlib
+
+# THE REFERENCE, RESOLVED BY COUNTING. Enforcing it only when the run declares
+# more than one substrate is the plausible edit -- with one declared there is
+# nothing to choose between, so the check looks like a formality. It is not:
+# the field exists so that a row's substrate is never inferred from how many
+# there are, and this is the shape that inference takes.
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            if let Some(known) = regime.as_ref()\n                && !known.declares(id)\n'
+new = (
+    '            if let Some(known) = regime.as_ref()\n'
+    '                && known.substrate_ids().len() > 1\n'
+    '                && !known.declares(id)\n'
+)
+if source.count(old) != 1:
+    raise SystemExit(f"the declares check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+inject_record_a_fork_names_no_substrate() {
+  python3 - <<'EOF'
+import pathlib
+
+# THE FORK ARM, DROPPED. A fork is how a run reaches a second substrate, so it
+# is the row most able to name one nothing declared -- and both substrate
+# rules read request and fork rows through the same match. Removing the fork
+# arm leaves every request-shaped fixture passing.
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Event::Fork {\n                lane, substrate, ..\n            } => Some(("fork", lane, substrate)),\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the fork arm appears {source.count(old)} times")
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
 
 # Every pattern in a table, shown catching its own class. A pattern that has
 # never caught anything is a guess.
@@ -5194,6 +5232,10 @@ selftest() {
     'a JSON Lines reader that does not bound its nesting' 'lib/formats::record::json::tests'
   seeded_case "a lane free to change substrate"       test     inject_record_lane_may_change_substrate \
     'lane-changes-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a substrate reference inferred from a count" test inject_record_substrate_reference_inferred_from_a_count \
+    'one-substrate-and-a-request-elsewhere\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a fork that names no substrate"         test     inject_record_a_fork_names_no_substrate \
+    'fork-names-an-undeclared-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
 
   echo
   echo "--- results fixtures, checked directly ---"

@@ -221,20 +221,6 @@ fn every_drive_refusal_has_its_own_exit_code() {
             ],
             "substrate_reasoning",
         ),
-        // An endpoint this program CAN parse, and still will not drive: the
-        // refusal is about the substrate's identity, not about the URL. Until
-        // this case existed the identity guard could only be reached by a
-        // malformed endpoint, which is the guard being tested by the wrong
-        // thing entirely.
-        (
-            vec![
-                regimen.clone(),
-                ground.tree(),
-                ground.out(),
-                "http://127.0.0.1:1/v1/chat/completions".to_owned(),
-            ],
-            "regimen v1 cannot say",
-        ),
         (
             vec![
                 regimen.clone(),
@@ -278,5 +264,54 @@ fn every_drive_refusal_has_its_own_exit_code() {
     assert!(
         !ground.base.join("tree/one.txt").exists(),
         "and nothing ran: the output path is claimed before the first call"
+    );
+}
+
+#[test]
+fn a_drive_against_an_endpoint_that_answers_is_still_refused() {
+    // THE REFUSAL IS ABOUT IDENTITY, NOT REACHABILITY, and the first version
+    // of this test could not tell the two apart. It pointed the program at
+    // `127.0.0.1:1`, where nothing listens, so deleting the refusal made the
+    // test fail with `the main call did not answer` and exit 2 -- red, for a
+    // reason the test had not checked. A review found that by deleting the
+    // refusal and watching the test "catch" it through a connection error.
+    //
+    // So: a real server, on loopback, playing the same acts the canned one
+    // plays, which will answer every call this drive makes. Everything works
+    // except the one thing that must not.
+    //
+    // WHAT THE REFUSAL PREVENTS, and why it is worth a server to test: with it
+    // gone, this run exits 0 and writes a record whose `weights` is the
+    // sha256 of the LOCAL canned acts, while an external endpoint answered
+    // every call. That record is schema-legal, `diet check-record` accepts it,
+    // and gate 1 reads `Weights::Digest` as reproducible -- so a hosted
+    // substrate arrives in the results as a local one that anybody can
+    // reproduce. Laundering a substrate's identity is the exact thing the
+    // typed-weights ruling exists to refuse.
+    let stub = diet::client::stub::Stub::serving(diet::drive::canned::acts())
+        .expect("a loopback server to answer the drive");
+    let ground = Ground::make("answering-endpoint");
+    let (code, out, err) = run(
+        DRIVE,
+        &[
+            &regimen().to_string_lossy(),
+            &ground.tree(),
+            &ground.out(),
+            &stub.url(),
+        ],
+    );
+
+    assert_eq!(code, 1, "an input this program will not run: {out}{err}");
+    assert!(
+        out.contains("regimen v1 cannot say"),
+        "and it refuses over the substrate's identity, not over reaching the \
+         server it just declined to use: {out}"
+    );
+    // The other half of "not reachability": the stub is still bound and would
+    // have answered. A refusal that only happened because nothing was
+    // listening would leave this failing.
+    assert!(
+        !out.contains("did not answer") && !out.contains("could not"),
+        "nothing here is a connection failure: {out}"
     );
 }
