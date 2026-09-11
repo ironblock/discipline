@@ -54,9 +54,13 @@ const BAKEOFF_START: &str = concat!(
 );
 
 /// Its `summary` row.
+// Every summary row carries `product_sha256`, a recompute's included: ruled
+// (a) on #68, 2026-09-11, because binary provenance is a fact about the row
+// rather than about the kind.
 const BAKEOFF_SUMMARY: &str = concat!(
     r#"{"record":"summary","kind":"recompute","targets_checked":1,"targets_matched":1,"#,
-    r#""digests":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}"#
+    r#""digests":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"#,
+    r#""product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}"#
 );
 
 /// Run the binary and report what it did: exit code, stdout, stderr.

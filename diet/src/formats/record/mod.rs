@@ -587,6 +587,21 @@ pub enum Event {
     Summary {
         /// Which kind of run this was, and the totals that kind has.
         summary: Summary,
+        /// The digest of the product the run produced.
+        ///
+        /// HERE AND NOT IN A KIND, because binary provenance is universal: a
+        /// recompute record was produced by a `diet` binary exactly as a drive
+        /// record was, and the ruling that made the digest mandatory at the
+        /// boundary did not exempt one of them. It lived inside
+        /// [`Summary::Drive`] until 2026-09-11, which made every results
+        /// directory whose record was a recompute impossible to lint --
+        /// `check-results.py` requires `product_sha256` in every front-matter
+        /// and requires it to equal the summary's, and a recompute summary had
+        /// nowhere to put one. Duplicating the field across variants would
+        /// have been one name meaning a thing in two places; teaching the
+        /// linter which kinds carry it would have been a second reader of this
+        /// schema. Ruled (a) on #68.
+        product_sha256: String,
     },
 }
 
@@ -632,8 +647,6 @@ pub enum Summary {
         turns: u32,
         /// Prefill tokens across the session.
         prefill_tokens_total: Count,
-        /// The digest of the product the session produced.
-        product_sha256: String,
     },
     /// A re-derivation of a result that already exists.
     Recompute {
@@ -1331,6 +1344,10 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
         },
         Kind::Summary => Event::Summary {
             summary: summary(&mut members, of)?,
+            // Read here rather than inside `summary`, because it belongs to
+            // the row and not to the kind: every summary carries it, and a
+            // reader that took it per-kind would have to be told twice.
+            product_sha256: take_string(&mut members, of, "product_sha256")?,
         },
     };
 
@@ -1365,7 +1382,6 @@ fn summary(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Su
         SummaryKind::Drive => Summary::Drive {
             turns: take_u32(members, of, "turns")?,
             prefill_tokens_total: take_u64(members, of, "prefill_tokens_total")?,
-            product_sha256: take_string(members, of, "product_sha256")?,
         },
         SummaryKind::Recompute => Summary::Recompute {
             targets_checked: take_u32(members, of, "targets_checked")?,
@@ -1934,7 +1950,10 @@ impl<'a> Seen<'a> {
                 supersedes,
                 ..
             } => self.admit_claim(id, consumes, supersedes.as_deref())?,
-            Event::Summary { summary } => self.admit_summary(summary)?,
+            Event::Summary {
+                summary,
+                product_sha256,
+            } => self.admit_summary(summary, product_sha256)?,
             Event::Start { .. } => {}
         }
         Ok(())
@@ -1985,16 +2004,18 @@ impl<'a> Seen<'a> {
     /// against it would compare a number to nothing and call the answer a
     /// disagreement. Splitting the summary into kinds is what makes that
     /// impossible to write rather than merely wrong.
-    fn admit_summary(&self, summary: &Summary) -> Result<(), ParseError> {
+    fn admit_summary(&self, summary: &Summary, product_sha256: &str) -> Result<(), ParseError> {
+        // The digest is checked once, before the kinds, because every kind
+        // carries it. It was checked inside the drive arm until 2026-09-11,
+        // which is how a recompute summary came to have no digest to check.
+        if !digest_ok(product_sha256) {
+            return Err(StructureError::BadDigest(product_sha256.to_owned()).into());
+        }
         match summary {
             Summary::Drive {
                 turns,
                 prefill_tokens_total,
-                product_sha256,
             } => {
-                if !digest_ok(product_sha256) {
-                    return Err(StructureError::BadDigest(product_sha256.clone()).into());
-                }
                 let counted = self.next_turn - 1;
                 if *turns != counted {
                     return Err(StructureError::SummaryDisagrees {
@@ -2226,6 +2247,13 @@ impl Members {
 /// The identifier is written once, from [`Event::id`], rather than in every
 /// arm that has one: that method is already the single statement of which
 /// kinds carry an id, and a second copy here could disagree with it.
+///
+/// Long because the vocabulary is, and kept whole for that reason: this is a
+/// FLAT DISPATCH over a closed set of kinds, and every arm is here so that
+/// adding a kind fails to compile until someone says how it is written.
+/// Splitting it to satisfy a line count would put a kind's writer somewhere a
+/// reader has to go looking for, and would buy nothing back.
+#[allow(clippy::too_many_lines)]
 fn event_value(event: &Event) -> BTreeMap<String, Value> {
     let mut members = Members(BTreeMap::new());
     members.put_text("record", event.kind().tag());
@@ -2323,27 +2351,37 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put("consumes", artifacts_value(consumes));
             members.put_optional("supersedes", supersedes.clone().map(Value::String));
         }
-        Event::Summary { summary } => summary_value(summary, &mut members),
+        Event::Summary {
+            summary,
+            product_sha256,
+        } => summary_value(summary, product_sha256, &mut members),
     }
     members.0
 }
 
-/// A summary into the value space, in the terms of its own kind.
+/// A summary ROW into the value space: the fields every kind carries, and then
+/// the fields of the kind this one is.
 ///
-/// `kind` always, then that kind's own fields and no others -- so what comes
-/// back out is what the schema would accept going in. Paired with [`summary`]
-/// on the reading side, and split out for the same reason.
-fn summary_value(summary: &Summary, members: &mut Members) {
+/// `kind` always, then the product digest every kind carries, then that kind's
+/// own fields and no others -- so what comes back out is what the schema would
+/// accept going in.
+///
+/// The digest is passed in rather than reached for, because [`Summary`] has no
+/// field for it: it sits on [`Event::Summary`], where a fact about the row
+/// rather than about the kind belongs. The reading side is the same shape --
+/// [`summary`] returns the kind's part and the digest is taken beside it --
+/// and the two are paired deliberately, so that a field added to one of them
+/// has an obvious home in the other.
+fn summary_value(summary: &Summary, product_sha256: &str, members: &mut Members) {
     members.put_text("kind", summary.kind().tag());
+    members.put_text("product_sha256", product_sha256);
     match summary {
         Summary::Drive {
             turns,
             prefill_tokens_total,
-            product_sha256,
         } => {
             members.put_u32("turns", *turns);
             members.put_count("prefill_tokens_total", *prefill_tokens_total);
-            members.put_text("product_sha256", product_sha256);
         }
         Summary::Recompute {
             targets_checked,

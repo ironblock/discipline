@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 306
+red_faults = 307
 mechanics_assertions = 42
 migrated = 0
 
@@ -145,6 +145,16 @@ target = "test:conformance/formats::record"
 label = "a summary kind's fields made advisory"
 failure_class = "schema.kind-field-not-refused"
 legacy_signature = "recompute-summary-carries-turns\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_recompute_digest_optional"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a recompute summary with no product digest"
+failure_class = "schema.summary-product-digest-optional"
+legacy_signature = "recompute-summary-without-its-product-digest\\.jsonl: accepted as"
 migrated = false
 
 [[fault]]
