@@ -564,23 +564,37 @@ import tomllib
 
 FENCE = "+++"
 
-text = pathlib.Path("README.md").read_text(encoding="utf-8")
+def read(path):
+    # A FILE THAT IS NOT HERE IS A SENTENCE, NOT A TRACEBACK. This script is
+    # read by whoever is holding a directory that will not re-derive, and a
+    # stack trace tells them which line of Python raised rather than which
+    # artefact is missing. Every read goes through here so that no path out of
+    # this script is an exception nobody wrote.
+    try:
+        return pathlib.Path(path).read_text(encoding="utf-8")
+    except OSError as err:
+        sys.exit(f"{path} cannot be read: {err.strerror}")
+
+
+text = read("README.md")
 if not text.startswith(FENCE + "\n"):
     sys.exit("README.md does not open with +++ front-matter")
 front = tomllib.loads(text.split(FENCE + "\n", 2)[1])
 
-rows = [
-    json.loads(line)
-    for line in pathlib.Path("run.jsonl").read_text(encoding="utf-8").splitlines()
-    if line.strip()
-]
+rows = [json.loads(line) for line in read("run.jsonl").splitlines() if line.strip()]
 summary = next((row for row in rows if row.get("record") == "summary"), None)
 if summary is None:
     sys.exit("run.jsonl has no summary row")
 
 
 def digest(path):
-    return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+    try:
+        return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+    except OSError as err:
+        # An artefact the record consumed and that is not committed beside it
+        # means the numbers cannot be re-derived. That is a refusal, and it
+        # names the file, because the reader's next move is to go and find it.
+        sys.exit(f"{path} is consumed by the record and is not here: {err.strerror}")
 
 
 # The product, against the digest the report and the summary both state.
@@ -1163,6 +1177,48 @@ mod tests {
                 String::from_utf8_lossy(&out.stderr),
             );
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A cache the record consumed and that is not beside it is a REFUSAL
+    /// THAT NAMES THE FILE, not a traceback. The first cut of `recompute.sh`
+    /// let `pathlib` raise: the exit code was right and the message was a
+    /// Python stack, which sends the reader to the script instead of to the
+    /// missing artefact. Both halves are asserted, because the exit code
+    /// alone was already correct and would have passed a test that checked
+    /// only that.
+    #[test]
+    fn a_consumed_cache_that_is_absent_is_named_rather_than_traced() {
+        let dir = scratch("absent-cache");
+        let path = write_run(&dir);
+        let into = dir.join("2026-01-01-a-sense-bakeoff");
+        assemble(&path, &into).expect("the assembly");
+
+        let gone = "even.vectors.jsonl";
+        std::fs::remove_file(into.join(gone)).expect("the cache to remove");
+        let run = std::process::Command::new("bash")
+            .arg("recompute.sh")
+            .current_dir(&into)
+            .output()
+            .expect("recompute.sh runs");
+
+        assert!(
+            !run.status.success(),
+            "a directory missing a cache re-derived"
+        );
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&run.stdout),
+            String::from_utf8_lossy(&run.stderr)
+        );
+        assert!(
+            said.contains(gone),
+            "the refusal does not name the file: {said}"
+        );
+        assert!(
+            !said.contains("Traceback"),
+            "the refusal is a stack trace rather than a sentence: {said}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
