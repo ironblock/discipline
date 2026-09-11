@@ -34,9 +34,9 @@ failure_class = "drive.the-product-digest-is-of-nothing"
 target = "diet/src/drive/mod.rs"
 expect_exit = 101
 anchor = '''
-            product_sha256: crate::digest::sha256_hex(product.as_bytes()),'''
+        product_sha256: crate::digest::sha256_hex(product.as_bytes()),'''
 becomes = '''
-            product_sha256: crate::digest::sha256_hex(b""),'''
+        product_sha256: crate::digest::sha256_hex(b""),'''
 catches = [
     "drive::tests::the_summary_totals_what_the_rows_say_and_the_digest_is_the_products",
 ]

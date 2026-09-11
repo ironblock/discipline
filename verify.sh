@@ -906,6 +906,61 @@ EOF
 # row served by one it did -- and the regime the result is attributed to is a
 # regime nothing in the file describes. The reference is the whole mechanism:
 # without the check it is a string somebody typed.
+# The product digest made the drive's business again -- read per kind, checked
+# per kind -- which is where it lived until 2026-09-11 and is the defect that
+# ruling closed. A recompute summary is then accepted carrying no digest of
+# the product it produced, and every results directory whose record is a
+# recompute becomes unlintable: `check-results.py` requires `product_sha256`
+# in the front-matter and requires it to equal the summary's, and there is
+# nothing there to equal. Nothing in the tree noticed for a day, because no
+# fixture crossed the schema and the directory linter.
+inject_record_recompute_digest_optional() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+
+read_now = """        Kind::Summary => Event::Summary {
+            summary: summary(&mut members, of)?,
+"""
+read_then = """        Kind::Summary => {
+            let summary = summary(&mut members, of)?;
+            let product_sha256 = match summary.kind() {
+                SummaryKind::Drive => take_string(&mut members, of, "product_sha256")?,
+                SummaryKind::Recompute => String::new(),
+            };
+            Event::Summary {
+                summary,
+"""
+check_now = """        if !digest_ok(product_sha256) {
+            return Err(StructureError::BadDigest(product_sha256.to_owned()).into());
+        }
+"""
+check_then = """        if matches!(summary, Summary::Drive { .. }) && !digest_ok(product_sha256) {
+            return Err(StructureError::BadDigest(product_sha256.to_owned()).into());
+        }
+"""
+for old in (read_now, check_now):
+    if source.count(old) != 1:
+        raise SystemExit(f"the anchor appears {source.count(old)} times")
+source = source.replace(read_now, read_then, 1).replace(check_now, check_then, 1)
+
+# The arm's tail, now one brace deeper.
+tail_now = """            product_sha256: take_string(&mut members, of, "product_sha256")?,
+        },
+    };
+"""
+tail_then = """                product_sha256,
+            }
+        }
+    };
+"""
+if source.count(tail_now) != 1:
+    raise SystemExit(f"the arm's tail appears {source.count(tail_now)} times")
+path.write_text(source.replace(tail_now, tail_then, 1), encoding="utf-8")
+EOF
+}
 inject_record_substrate_reference_unchecked() {
   python3 - <<'EOF'
 import pathlib
@@ -4852,6 +4907,8 @@ selftest() {
     'regime-missing-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "a summary kind's fields made advisory" test     inject_record_summary_kind_fields_advisory \
     'recompute-summary-carries-turns\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a recompute summary with no product digest" test inject_record_recompute_digest_optional \
+    'recompute-summary-without-its-product-digest\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "a summary that cannot be true of itself" test   inject_record_summary_impossible_unchecked \
     'recompute-matched-exceeds-checked\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "a substrate reference that resolves to anything" test inject_record_substrate_reference_unchecked \

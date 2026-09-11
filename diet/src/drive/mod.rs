@@ -729,8 +729,8 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         summary: Summary::Drive {
             turns,
             prefill_tokens_total: prefill_total,
-            product_sha256: crate::digest::sha256_hex(product.as_bytes()),
         },
+        product_sha256: crate::digest::sha256_hex(product.as_bytes()),
     });
 
     let built = Record { events };
@@ -1291,9 +1291,8 @@ mod tests {
                 Summary::Drive {
                     turns,
                     prefill_tokens_total,
-                    product_sha256,
                 },
-            ..
+            product_sha256,
         }) = drive.record.events.last()
         else {
             panic!(
