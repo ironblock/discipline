@@ -35,7 +35,7 @@
 [meta]
 source = "verify.sh"
 red_faults = 306
-mechanics_assertions = 59
+mechanics_assertions = 64
 migrated = 0
 
 
@@ -3434,3 +3434,47 @@ failure_class = "recompute.historical-without-a-reason"
 legacy_signature = "states no .historical_reason."
 migrated = false
 
+[[fault]]
+id = "mech.a-literal-in-a-file-with-one-undecodable-byte-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "a literal in a file with one undecodable byte is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.an-undecodable-byte-alone-is-not-a-hit"
+kind = "mechanics"
+check = "-"
+label = "an undecodable byte alone is not a hit"
+failure_class = "hygiene.clean"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.a-literal-wrapped-in-json-twice-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "a literal wrapped in JSON twice is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-scanner-with-no-decoder-beside-it-is-broken-not-dirty"
+kind = "mechanics"
+check = "-"
+label = "a scanner with no decoder beside it is broken, not dirty"
+failure_class = "hygiene.unusable"
+expected_exit = "2"
+migrated = false
+
+[[fault]]
+id = "mech.and-the-decoder-s-own-driver-says-so-the-same-way"
+kind = "mechanics"
+check = "-"
+label = "and the decoder's own driver says so the same way"
+failure_class = "hygiene.unusable"
+expected_exit = "2"
+migrated = false

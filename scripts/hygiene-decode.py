@@ -23,13 +23,18 @@ import argparse
 import pathlib
 import sys
 
+EXIT_BROKEN = 2
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 try:
     import decoding
 except ModuleNotFoundError:  # pragma: no cover -- an operator error, not a bug
-    sys.exit("hygiene-decode: decoding.py is not beside this script")
-
-EXIT_BROKEN = 2
+    # EXIT_BROKEN, not `sys.exit(message)`, which exits one. This script's
+    # caller reads a nonzero exit as "the decode phase broke", so the number
+    # matters less here than it does in check-hashes.py -- but the two scripts
+    # spell the same failure the same way or the next reader has to check.
+    print("hygiene-decode: decoding.py is not beside this script", file=sys.stderr)
+    sys.exit(EXIT_BROKEN)
 
 
 def main(argv: list[str]) -> int:

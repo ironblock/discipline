@@ -4792,6 +4792,59 @@ prove_mechanics() {
     python3 "${ROOT}/scripts/check-hashes.py" --table "${box}/no-rows.txt" \
       --tree "${box}/decoy-hit"
 
+  # ONE BYTE THAT IS NOT UTF-8 USED TO DROP THE WHOLE FILE. The scan caught a
+  # `UnicodeDecodeError`, skipped the file, and justified it by saying the
+  # pattern half covered it -- which is the one thing that cannot be true
+  # here, because patterns reach strings that have a shape and this half is
+  # for the strings that do not. The literal below sits in plain ASCII; only
+  # the curly quote beside it is undecodable.
+  mkdir -p "${box}/not-utf8"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='cp1252').write('owned by ' + sys.argv[2] + ', it\u2019s theirs\n')
+" "${box}/not-utf8/notes.txt" "$decoy"
+  expect_exit "a literal in a file with one undecodable byte is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/not-utf8"
+
+  # And the control, so the assertion above is about the ENCODING and not
+  # about the literal being present: the same undecodable byte, no literal.
+  mkdir -p "${box}/not-utf8-clean"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='cp1252').write('nothing here, it\u2019s fine\n')
+" "${box}/not-utf8-clean/notes.txt"
+  expect_exit "an undecodable byte alone is not a hit" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/not-utf8-clean"
+
+  # ESCAPED TWICE IS STILL ESCAPED. Parsing JSON spends one level, so content
+  # a tool logged from another tool's JSON output arrives with `\` and `n`
+  # still welded to the front of a token one layer down. The decoder runs to a
+  # fixed point and spends the escapes at each layer; before it did, this file
+  # was reported clean.
+  mkdir -p "${box}/twice-wrapped"
+  python3 -c "
+import json, sys
+inner = json.dumps({'out': 'ls -l\\n' + sys.argv[2] + ' staff 42'})
+open(sys.argv[1], 'w').write(json.dumps({'log': inner}) + '\n')
+" "${box}/twice-wrapped/nested.jsonl" "$decoy"
+  expect_exit "a literal wrapped in JSON twice is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/twice-wrapped"
+
+  # THE DECODER MISSING IS NOT A FINDING. `sys.exit(message)` exits one, which
+  # is this scanner's code for "ran, and found something" -- so an operator
+  # error would have been reported as a forbidden literal.
+  mkdir -p "${box}/lonely"
+  cp "${ROOT}/scripts/check-hashes.py" "${box}/lonely/check-hashes.py"
+  expect_exit "a scanner with no decoder beside it is broken, not dirty" 2 \
+    python3 "${box}/lonely/check-hashes.py" --table "$table" \
+      --tree "${box}/decoy-hit"
+  cp "${ROOT}/scripts/hygiene-decode.py" "${box}/lonely/hygiene-decode.py"
+  expect_exit "and the decoder's own driver says so the same way" 2 \
+    bash -c "printf '' | python3 '${box}/lonely/hygiene-decode.py' --into '${box}/lonely/mirror'"
+
   # A dot-prefixed directory under a results root is linted, not skipped.
   #
   # The valid directory beside it is what makes this assertion able to fail.

@@ -38,17 +38,23 @@ import pathlib
 import re
 import sys
 
+EXIT_DIRTY = 1
+EXIT_BROKEN = 2
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 try:
     import decoding
 except ModuleNotFoundError:  # pragma: no cover -- an operator error, not a bug
-    sys.exit("check-hashes: decoding.py is not beside this script")
+    # EXIT_BROKEN, not `sys.exit(message)`. That form exits ONE, which is this
+    # script's code for "the scan ran and found something" -- so a missing
+    # decoder would have been reported as a forbidden literal. The reason is
+    # spelled out under `Unusable` below, and this guard was the one place that
+    # did not follow it.
+    print("check-hashes: decoding.py is not beside this script", file=sys.stderr)
+    sys.exit(EXIT_BROKEN)
 
 HERE = pathlib.Path(__file__).resolve().parent
 DEFAULT_TABLE = HERE / "hygiene-hashes.txt"
-
-EXIT_DIRTY = 1
-EXIT_BROKEN = 2
 
 
 class Unusable(Exception):
@@ -184,12 +190,24 @@ def main(argv: list[str]) -> int:
     dirty = 0
     for path in paths:
         try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            # Not text. A digest is compared against tokens, and bytes that
-            # are not text have none; the pattern scan covers this file with
-            # its credential shapes.
-            continue
+            # `errors="replace"`, and NOT a skip on UnicodeDecodeError. The
+            # skip dropped the WHOLE FILE over one byte, and the reason given
+            # for it -- that the pattern scan covers the file instead -- is the
+            # one thing that cannot be true here: patterns reach strings that
+            # have a shape, and this half of the gate exists for the strings
+            # that do not. A committed replay log is exactly the artefact this
+            # check was built for (268 occurrences of an account name in one),
+            # and exactly the kind of file that picks up a stray byte from a
+            # terminal, an editor or a locale.
+            #
+            # Undecodable bytes become U+FFFD, which is not alphanumeric, so
+            # the tokeniser treats it as a separator like any other. That can
+            # split a token that spanned the bad byte -- the run either side is
+            # still scanned -- and it cannot invent a token that was not there,
+            # so it adds no false positives. Bytes that are not text at all
+            # yield tokens that match nothing, which costs time and no
+            # correctness.
+            text = path.read_text(encoding="utf-8", errors="replace")
         except OSError as err:
             print(f"check-hashes: cannot read {path}: {err}", file=sys.stderr)
             return EXIT_BROKEN
