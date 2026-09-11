@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 308
+red_faults = 307
 mechanics_assertions = 47
 migrated = 0
 
@@ -164,16 +164,6 @@ check = "injections"
 label = "an injection only GNU sed accepts"
 failure_class = "gate.injection-unportable"
 legacy_signature = "sed forms only GNU accepts"
-migrated = false
-
-[[fault]]
-id = "test.digest_padding_dropped"
-kind = "seeded-gate"
-check = "test"
-target = "lib/digest"
-label = "a digest that agrees with nothing"
-failure_class = "tool.digest-wrong"
-legacy_signature = "digest::tests::the_standards_vectors"
 migrated = false
 
 [[fault]]

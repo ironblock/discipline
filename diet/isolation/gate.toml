@@ -26,7 +26,7 @@
 name = "diet-isolation"
 check = "test"
 command = "cargo test -p discipline-diet -- isolation --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 19
+faults = 20
 
 [[fault]]
 id = "isolation.vm-falls-back-to-the-sandbox"
@@ -361,4 +361,19 @@ becomes = '''
 '''
 catches = [
     "isolation::tests::a_policy_is_read_from_the_regimen_or_refused_with_a_reason",
+]
+
+[[fault]]
+id = "isolation.the-escape-census-under-reports"
+failure_class = "isolation.the-escape-census-under-reports"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 101
+anchor = '''
+        // census with a case that proves the opposite thing.
+        2'''
+becomes = '''
+        // census with a case that proves the opposite thing.
+        1'''
+catches = [
+    "isolation::tests::the_seeded_escapes_are_denied_where_the_mechanism_is_present",
 ]
