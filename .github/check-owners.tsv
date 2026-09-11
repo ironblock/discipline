@@ -41,4 +41,5 @@ ci	repo
 history	repo
 injections	repo
 resolver	repo
+derive	repo
 parity	repo
