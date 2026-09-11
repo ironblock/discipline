@@ -24,6 +24,32 @@ The live case this closes: 268 occurrences of an account name in committed
 replay logs, as the owner column of `ls -l` output, with the pattern scan
 green over all of them. Nothing in the pattern table would have caught it.
 
+THE THREAT MODEL, because a tokeniser cannot be judged without one. Ruled
+2026-09-11: this gate exists to catch MISTAKES and a careless commit later
+tidied -- a name that landed in a committed log, a tidy-up that left an
+invisible byte behind -- and not an adversary. Three consequences, stated so
+that none of them is later mistaken for an oversight:
+
+  * A literal carrying a character of NO VISUAL WIDTH is still caught.
+    `decoding.tokens` drops Unicode `Cf` and `Mn` before splitting, on the
+    rule that a character nobody can see is not a separator. It is the one
+    evasion that survives review and `git diff` unaided, so it is in scope
+    even though it takes deliberate insertion. Seeded: a literal with a
+    zero-width space inside it must exit 1.
+  * A literal spelled in CONFUSABLE characters -- a hostname transliterated
+    into Cyrillic -- is NOT caught, and that is a decision rather than a gap.
+    Anyone who can do it has commit access and can defeat any pattern too; a
+    confusables table would buy false positives on legitimate non-Latin
+    content to guard a case this repository's trust model does not contain.
+  * A literal spanning a REAL LINE BREAK is not caught by this half. A
+    newline is a genuine boundary in a captured log, and splitting on it is
+    the tokeniser doing what it says. The pattern half, which matches by
+    shape, remains the guard for wrapped forms. A declared non-catch is
+    honest; an undeclared one is the vacuous class.
+
+`--emit` still refuses a literal that is more than one token: a row matches
+one token, and every fix above is on the SCANNING side.
+
 Reads NUL-separated paths on stdin, or walks `--tree DIR`.
 
 Stdlib only. Exit 0 if nothing matched, 1 if anything did, 2 if the scan

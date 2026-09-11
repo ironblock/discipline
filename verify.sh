@@ -4977,6 +4977,50 @@ open(sys.argv[1], 'w', encoding='cp1252').write('nothing here, it\u2019s fine\n'
     python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
       --tree "${box}/not-utf8-clean"
 
+  # A CHARACTER WITH NO VISUAL WIDTH IS NOT A SEPARATOR. A zero-width space
+  # inside the literal is invisible in review and invisible in `git diff`, and
+  # a tokeniser that split on it handed back two tokens that hash to nothing
+  # and reported the file clean. Ruled 2026-09-11 as IN SCOPE: this gate
+  # guards against mistakes and against a careless commit later tidied, and an
+  # invisible byte a tidy-up left behind is exactly that -- the one evasion
+  # that survives a human reading the diff.
+  mkdir -p "${box}/zero-width"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2][:5] + '​' + sys.argv[2][5:] + ' staff\n')
+" "${box}/zero-width/ls.txt" "$decoy"
+  expect_exit "a literal split by a zero-width space is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/zero-width"
+
+  # The control, so the assertion above is about the CHARACTER and not about
+  # the literal being present: the same zero-width space, no literal. Without
+  # it, "dropped the character" and "found the literal" are confounded and a
+  # scanner that fired on everything would satisfy the pair.
+  mkdir -p "${box}/zero-width-clean"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write('nothing​ here at all\n')
+" "${box}/zero-width-clean/notes.txt"
+  expect_exit "a zero-width space alone is not a hit" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/zero-width-clean"
+
+  # The other half of the rule, and it is a DIFFERENT category: a combining
+  # accent is `Mn` where the zero-width space is `Cf`. Both are dropped, and
+  # asserting only one leaves the other a branch nothing reaches -- which is
+  # how a guard ends up unable to fire.
+  mkdir -p "${box}/combining"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2][:5] + '́' + sys.argv[2][5:] + ' staff\n')
+" "${box}/combining/ls.txt" "$decoy"
+  expect_exit "a literal split by a combining mark is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/combining"
+
   # ESCAPED TWICE IS STILL ESCAPED. Parsing JSON spends one level, so content
   # a tool logged from another tool's JSON output arrives with `\` and `n`
   # still welded to the front of a token one layer down. The decoder runs to a

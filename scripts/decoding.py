@@ -21,6 +21,7 @@ have found it.
 from __future__ import annotations
 
 import json
+import unicodedata
 
 # A diff line's first column. Stripped before a line is offered to the JSON
 # reader, so that the patch text of a record file decodes as the record does.
@@ -145,6 +146,31 @@ def _decoded_once(text: str) -> str:
     return "".join(f"{line}\n" for line in found)
 
 
+# Characters with NO VISUAL WIDTH: Unicode format characters (`Cf` -- the
+# zero-width space, the joiner and non-joiner, the soft hyphen, the byte-order
+# mark and their kin) and nonspacing marks (`Mn` -- combining accents).
+#
+# They are dropped before tokenising rather than treated as separators, on one
+# rule: A CHARACTER WITH NO VISUAL WIDTH IS NOT A SEPARATOR. `zzsub<U+200B>jectzz`
+# is the same literal to every human reader and to `git diff`, neither of which
+# can see the character; a tokeniser that splits on it hands back two tokens
+# that hash to nothing and calls the file clean.
+#
+# Nothing wider is folded. NFKC compatibility folding would rewrite legitimate
+# content -- ligatures, full-width forms, superscripts -- to guard against a
+# case the threat model does not contain. See check-hashes.py's docstring for
+# what that threat model is.
+#
+# TWO CONSEQUENCES, named rather than discovered later. Dropping `Mn` strips
+# accents from decomposed text, so a decomposed `resume` with an acute on it
+# tokenises as `resume` and would hit a row holding that word: a false
+# positive bought deliberately, in a table whose rows are names and addresses
+# rather than ordinary vocabulary. And this is the DIGEST half's tokeniser
+# only -- the pattern half matches by shape and does not come through here, so
+# a shaped literal broken by a zero-width space still evades it.
+INVISIBLE = frozenset({"Cf", "Mn"})
+
+
 def tokens(text: str) -> list[str]:
     """`text` split into the tokens a digest row is compared against.
 
@@ -152,10 +178,17 @@ def tokens(text: str) -> list[str]:
     The obvious class keeps `owner.example.net` as one token, so a digest of
     the bare name never matches it -- measured, and the reason this function
     exists rather than a regex at each call site.
+
+    EXCEPT the characters with no width, which are dropped instead of
+    splitting on: see INVISIBLE above.
     """
     out: list[str] = []
     current: list[str] = []
     for char in text:
+        if unicodedata.category(char) in INVISIBLE:
+            # Not a token character and not a boundary either: it is not
+            # there, as far as anything that reads the file is concerned.
+            continue
         if char.isalnum():
             current.append(char)
         elif current:
