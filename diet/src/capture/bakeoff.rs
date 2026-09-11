@@ -616,9 +616,13 @@ mod tests {
         r#""hardware_fingerprint":"one-cpu","sampler_card":{"seed":0},"reasoning":"off"}]}}"#
     );
 
+    // The product digest is on the ROW and every kind carries it, including a
+    // recompute's -- ruled (a) on #68, 2026-09-11. A summary row without one
+    // does not parse, so this fixture would stop being a record.
     const SUMMARY: &str = concat!(
         r#"{"record":"summary","kind":"recompute","targets_checked":1,"targets_matched":1,"#,
-        r#""digests":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}"#
+        r#""digests":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"#,
+        r#""product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}"#
     );
 
     fn scratch(name: &str) -> PathBuf {
