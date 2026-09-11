@@ -894,10 +894,20 @@ import pathlib
 
 path = pathlib.Path("diet/src/formats/record/mod.rs")
 source = path.read_text(encoding="utf-8")
-old = '            let text = take_string(&mut members, of, "acts_sha256")?;'
-new = '            let text = take_string(&mut members, of, "acts_sha256").unwrap_or_default();'
+# BOTH halves, or the injection is inert. Making only the read optional leaves
+# the empty string failing `digest_ok`, so the fixture is still refused -- with
+# a different message and the same verdict, which the selftest grades GREEN
+# because the gate never stopped firing. It did, on the first attempt.
+old = """            let text = take_string(&mut members, of, "acts_sha256")?;
+            if !digest_ok(&text) {
+                return Err(StructureError::BadDigest(text).into());
+            }
+            Weights::Canned { acts_sha256: text }"""
+new = """            Weights::Canned {
+                acts_sha256: take_string(&mut members, of, "acts_sha256").unwrap_or_default(),
+            }"""
 if source.count(old) != 1:
-    raise SystemExit(f"the canned acts read appears {source.count(old)} times")
+    raise SystemExit(f"the canned acts block appears {source.count(old)} times")
 path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
