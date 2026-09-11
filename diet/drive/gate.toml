@@ -26,107 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 43
-
-[[fault]]
-id = "drive.digest-drops-the-zero-pad"
-failure_class = "drive.digest-drops-the-zero-pad"
-target = "diet/src/drive/digest.rs"
-expect_exit = 101
-anchor = '''
-        out.push(nibble(byte >> 4));
-        out.push(nibble(byte & 0x0f));'''
-becomes = '''
-        if byte >= 0x10 {
-            out.push(nibble(byte >> 4));
-        }
-        out.push(nibble(byte & 0x0f));'''
-catches = [
-    "drive::digest::tests::the_padding_boundaries_are_the_ones_that_break",
-    "drive::digest::tests::the_published_vectors_are_what_comes_out",
-    "drive::digest::tests::the_spelling_is_the_one_the_record_requires",
-    "drive::digest::tests::the_system_agrees_with_it",
-    "drive::tests::a_capture_counts_entries_and_not_patches",
-    "drive::tests::a_seams_audit_answer_is_kept_and_not_folded_with_the_wrong_grammar",
-    "drive::tests::a_truncated_fork_answer_is_recorded_as_truncated",
-    "drive::tests::a_two_turn_script_summarises_two_turns",
-    "drive::tests::every_audit_names_the_turn_it_actually_came_from",
-    "drive::tests::every_entry_the_fold_writes_names_its_lane_and_keeps_its_tag",
-    "drive::tests::every_row_the_drive_writes_is_true_of_the_run_that_produced_it",
-    "drive::tests::the_product_is_the_object_and_names_its_entries",
-    "drive::tests::the_record_carries_what_the_drive_actually_sent",
-    "drive::tests::the_record_is_an_archive_and_not_a_ledger",
-    "drive::tests::the_summary_totals_what_the_rows_say_and_the_digest_is_the_products",
-    "drive::tests::three_turns_produce_a_record_the_format_accepts_with_a_seam_and_a_capture_in_it",
-    "drive::tests::what_the_fold_could_not_capture_is_counted_and_named",
-    "drive::tests::what_the_record_cannot_spell_is_named_rather_than_dropped",
-]
-
-[[fault]]
-id = "drive.digest-pads-in-one-block-always"
-failure_class = "drive.digest-pads-in-one-block-always"
-target = "diet/src/drive/digest.rs"
-expect_exit = 101
-anchor = '''
-    let padded = if tail.len() < 56 { 64 } else { 128 };'''
-becomes = '''
-    let padded = 64;'''
-catches = [
-    "drive::digest::tests::the_padding_boundaries_are_the_ones_that_break",
-    "drive::digest::tests::the_published_vectors_are_what_comes_out",
-]
-
-[[fault]]
-id = "drive.digest-counts-bytes-not-bits"
-failure_class = "drive.digest-counts-bytes-not-bits"
-target = "diet/src/drive/digest.rs"
-expect_exit = 101
-anchor = '''
-    let bits = (bytes.len() as u64).wrapping_mul(8);'''
-becomes = '''
-    let bits = bytes.len() as u64;'''
-catches = [
-    "drive::digest::tests::the_padding_boundaries_are_the_ones_that_break",
-    "drive::digest::tests::the_published_vectors_are_what_comes_out",
-    "drive::digest::tests::the_system_agrees_with_it",
-]
-
-[[fault]]
-id = "drive.digest-skips-the-message-schedule"
-failure_class = "drive.digest-skips-the-message-schedule"
-target = "diet/src/drive/digest.rs"
-expect_exit = 101
-anchor = '''
-        w[i] = w[i - 16]
-            .wrapping_add(s0)
-            .wrapping_add(w[i - 7])
-            .wrapping_add(s1);'''
-becomes = '''
-        w[i] = w[i - 16].wrapping_add(s0).wrapping_add(s1);'''
-catches = [
-    "drive::digest::tests::the_padding_boundaries_are_the_ones_that_break",
-    "drive::digest::tests::the_published_vectors_are_what_comes_out",
-    "drive::digest::tests::the_system_agrees_with_it",
-]
-
-[[fault]]
-id = "drive.digest-forgets-to-add-the-state-back"
-failure_class = "drive.digest-forgets-to-add-the-state-back"
-target = "diet/src/drive/digest.rs"
-expect_exit = 101
-anchor = '''
-    for (slot, value) in state.iter_mut().zip(v) {
-        *slot = slot.wrapping_add(value);
-    }'''
-becomes = '''
-    for (slot, value) in state.iter_mut().zip(v) {
-        *slot = value;
-    }'''
-catches = [
-    "drive::digest::tests::the_padding_boundaries_are_the_ones_that_break",
-    "drive::digest::tests::the_published_vectors_are_what_comes_out",
-    "drive::digest::tests::the_system_agrees_with_it",
-]
+faults = 42
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -134,9 +34,9 @@ failure_class = "drive.the-product-digest-is-of-nothing"
 target = "diet/src/drive/mod.rs"
 expect_exit = 101
 anchor = '''
-        product_sha256: digest::sha256_hex(product.as_bytes()),'''
+        product_sha256: crate::digest::sha256_hex(product.as_bytes()),'''
 becomes = '''
-        product_sha256: digest::sha256_hex(b""),'''
+        product_sha256: crate::digest::sha256_hex(b""),'''
 catches = [
     "drive::tests::the_summary_totals_what_the_rows_say_and_the_digest_is_the_products",
 ]
@@ -152,11 +52,11 @@ becomes = '''
     let turns = 3;
     let Ok(_unused) = u32::try_from(script.turns.len()) else {'''
 catches = [
-    "drive::tests::a_capture_counts_entries_and_not_patches",
     "drive::tests::a_retried_call_archives_each_attempt_with_what_that_attempt_sent",
     "drive::tests::a_stripped_retry_archives_the_body_that_attempt_actually_sent",
     "drive::tests::a_truncated_fork_answer_is_recorded_as_truncated",
     "drive::tests::a_two_turn_script_summarises_two_turns",
+    "drive::tests::the_two_entry_counts_answer_two_questions_and_the_record_carries_one",
 ]
 
 [[fault]]
@@ -374,7 +274,7 @@ anchor = '''
     let answer = interview::parse(text).map_err(|why| format!("{why:?}"))?;'''
 becomes = '''
     let Ok(answer) = interview::parse(text) else {
-        return Ok((Vec::new(), Uncaptured { turn, fork: fork.unwrap_or(lane).to_owned(), regions: 0, captured: 0, passed_over: Vec::new(), truncated: false }));
+        return Ok((Vec::new(), Uncaptured { turn, fork: fork.unwrap_or(lane).to_owned(), regions: 0, captured: 0, passed_over: Vec::new(), truncated: false, entries_touched: 0, entries_created: 0 }));
     };'''
 catches = [
     "drive::tests::an_answer_the_fold_cannot_read_stops_the_drive",
@@ -386,16 +286,40 @@ failure_class = "drive.capture-entries-counts-patches"
 target = "diet/src/drive/mod.rs"
 expect_exit = 101
 anchor = '''
-            let mut wrote: BTreeSet<EntryId> = BTreeSet::new();
             for one in &applied {
-                wrote.extend(one.touched());
-            }'''
+                touched.extend(one.touched());'''
 becomes = '''
-            let mut wrote: BTreeSet<EntryId> = BTreeSet::new();
             for (at, one) in applied.iter().enumerate() {
-                let _ = one;
-                wrote.insert(EntryId::new(&format!("patch-{at}")).expect("a name"));
-            }'''
+                touched.insert(EntryId::new(&format!("patch-{at}")).expect("a name"));'''
+catches = [
+    "drive::tests::the_two_entry_counts_answer_two_questions_and_the_record_carries_one",
+]
+
+[[fault]]
+id = "drive.the-two-entry-counts-are-one-number"
+failure_class = "drive.the-two-entry-counts-are-one-number"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+                    Applied::Deduped(_) | Applied::StateChanged(_) | Applied::Unchanged(_) => {}'''
+becomes = '''
+                    Applied::Deduped(id) | Applied::StateChanged(id) => {
+                        created.insert(id.clone());
+                    }
+                    Applied::Unchanged(_) => {}'''
+catches = [
+    "drive::tests::a_capture_counts_entries_and_not_patches",
+]
+
+[[fault]]
+id = "drive.the-record-carries-the-created-count"
+failure_class = "drive.the-record-carries-the-created-count"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+                entries: entries_touched,'''
+becomes = '''
+                entries: entries_created,'''
 catches = [
     "drive::tests::a_capture_counts_entries_and_not_patches",
 ]
@@ -686,6 +610,32 @@ catches = [
 ]
 
 [[fault]]
+id = "drive.the-census-reports-a-count-no-run-produced"
+failure_class = "drive.the-census-reports-a-count-no-run-produced"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            Value::Integer(i64::from(one.entries_created)),'''
+becomes = '''
+            Value::Integer(9999),'''
+catches = [
+    "the_drive_writes_a_record_a_second_process_accepts",
+]
+
+[[fault]]
+id = "drive.the-census-reports-the-unrepresentable-sentinel"
+failure_class = "drive.the-census-reports-the-unrepresentable-sentinel"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            Value::Integer(i64::from(one.entries_touched)),'''
+becomes = '''
+            Value::Integer(-1),'''
+catches = [
+    "the_drive_writes_a_record_a_second_process_accepts",
+]
+
+[[fault]]
 id = "drive.the-sampler-crosses-as-a-debug-rendering"
 failure_class = "drive.the-sampler-crosses-as-a-debug-rendering"
 target = "diet/src/bin/drive.rs"
@@ -740,6 +690,7 @@ catches = [
     "drive::tests::the_record_carries_what_the_drive_actually_sent",
     "drive::tests::the_record_is_an_archive_and_not_a_ledger",
     "drive::tests::the_summary_totals_what_the_rows_say_and_the_digest_is_the_products",
+    "drive::tests::the_two_entry_counts_answer_two_questions_and_the_record_carries_one",
     "drive::tests::three_turns_produce_a_record_the_format_accepts_with_a_seam_and_a_capture_in_it",
     "drive::tests::what_the_fold_could_not_capture_is_counted_and_named",
     "drive::tests::what_the_record_cannot_spell_is_named_rather_than_dropped",
