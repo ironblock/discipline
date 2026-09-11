@@ -417,11 +417,14 @@ fn regime_of(regimen: &Regimen, endpoint_given: bool) -> Result<Regime, String> 
                 name: "diet-drive canned".to_owned(),
                 version_or_digest: canned::acts_digest(),
             },
-            // Computed, not declared, and a digest rather than a hosted name:
-            // the replies are in this repository, so the substrate that served
-            // them is reproducible by config, which is exactly what this
-            // variant means. See `canned::acts_digest`.
-            weights: Weights::Digest(canned::acts_digest()),
+            // Computed, not declared, and its OWN kind rather than a digest
+            // wearing `Digest`'s name. A canned server serves no weights, and
+            // saying so with the variant is what lets gate 1 compare a replay
+            // exactly instead of re-firing it within a band meant for sampling
+            // and hardware that cannot move here. Ruled 2026-09-11.
+            weights: Weights::Canned {
+                acts_sha256: canned::acts_digest(),
+            },
             hardware_fingerprint,
             sampler_card: sampler,
             reasoning,

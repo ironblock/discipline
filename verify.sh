@@ -884,6 +884,24 @@ EOF
 # Weights identified by whatever string is there. A name is prose: two runs
 # can spell the same weights differently and a third can spell different
 # weights the same, and then a regime comparison compares strings.
+# A canned substrate that may decline to identify itself. The acts are the
+# whole identity a server with no weights has, so a `canned` kind that does
+# not have to carry them is the null the typed identity was adopted to remove,
+# wearing the new kind's name.
+inject_record_canned_acts_optional() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            let text = take_string(&mut members, of, "acts_sha256")?;'
+new = '            let text = take_string(&mut members, of, "acts_sha256").unwrap_or_default();'
+if source.count(old) != 1:
+    raise SystemExit(f"the canned acts read appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
 inject_record_weights_named_not_digested() {
   python3 - <<'EOF'
 import pathlib
@@ -4724,6 +4742,8 @@ selftest() {
     'request-with-no-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "weights identified by name"            test     inject_record_weights_named_not_digested \
     'weights-named-not-digested\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a canned substrate that need not say which acts" test inject_record_canned_acts_optional \
+    'canned-with-no-acts-digest\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "a lane free to change substrate"       test     inject_record_lane_may_change_substrate \
     'lane-changes-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "a substrate reference inferred from a count" test inject_record_substrate_reference_inferred_from_a_count \
