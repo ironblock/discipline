@@ -766,6 +766,25 @@ mod tests {
     // rows two and three: the seeded escapes, against the real mechanism
     // -----------------------------------------------------------------------
 
+    /// The number of seeded escapes executed where the mechanism is present.
+    ///
+    /// CHECKED rather than printed. libtest discards a passing test's output,
+    /// so a census in an `eprintln!` is invisible by construction -- this
+    /// seat claimed twice on #62 that the census was visible in CI, measured
+    /// it, and found it was not. A row deleted from the test below would
+    /// leave the count unspoken; asserted, it does not.
+    const SEEDED_ESCAPES: usize = 6;
+
+    /// Set on a host where the sandbox is REQUIRED rather than merely welcome.
+    ///
+    /// Without it the no-runner branch is a correct refusal and nothing more:
+    /// on a machine with no `bwrap` the escapes cannot run and the refusal is
+    /// the whole result. That is also the "0 of 6 executed" case, and on a
+    /// host that installs the runner it is a regression that would otherwise
+    /// pass green and silent. Where this is set, a run that proves nothing
+    /// about confinement fails instead.
+    const REQUIRED: &str = "DIET_REQUIRE_SANDBOX";
+
     /// The six seeded escapes, and the three controls without which they
     /// prove nothing.
     ///
@@ -793,9 +812,13 @@ mod tests {
                     },
                     "no runner, so the drive refuses; the escapes are not executed here"
                 );
-                eprintln!(
-                    "isolation: `{RUNNER}` absent, 0 of 6 seeded escapes executed; \
-                     the refusal is what this host proves"
+                assert!(
+                    std::env::var_os(REQUIRED).is_none(),
+                    "`{REQUIRED}` is set, so this is a host where the sandbox is \
+                     required, and `{RUNNER}` is not on it: 0 of {SEEDED_ESCAPES} \
+                     seeded escapes were executed. The refusal asserted above is \
+                     correct and is not the point -- a run that proves nothing \
+                     about confinement must not be a green run here."
                 );
                 return;
             }
@@ -824,6 +847,8 @@ mod tests {
             "and the write reached the real tree, not a throwaway the caller never sees"
         );
 
+        let mut denied = 0_usize;
+
         // Row two: a write outside the tree.
         let outside = run(&["sh", "-c", "echo x > /tmp/outside"]);
         assert_ne!(outside.exit, Some(0), "the write was denied");
@@ -840,6 +865,7 @@ mod tests {
             !std::path::Path::new("/tmp/outside").exists(),
             "and nothing reached the host"
         );
+        denied += 1;
 
         // Rows two-b and two-c: the tmpfs mounts a single `--remount-ro /`
         // does not reach. `--dev` builds a separate mount and `/dev/shm` a
@@ -860,6 +886,7 @@ mod tests {
                 "and recorded as read-only, not invented: {:?}",
                 wrote.stderr
             );
+            denied += 1;
         }
 
         // The control those two need. Closing `/dev` by breaking it would
@@ -887,10 +914,16 @@ mod tests {
             read.stdout
         );
         assert!(secret.is_file(), "though it is right there on the host");
+        denied += 1;
 
-        the_network_rows(&confinement, &policy, &ground.tree);
+        denied += the_network_rows(&confinement, &policy, &ground.tree);
 
-        eprintln!("isolation: `{RUNNER}` present, 6 of 6 seeded escapes executed and denied");
+        assert_eq!(
+            denied, SEEDED_ESCAPES,
+            "every seeded escape ran against the real mechanism and was denied. \
+             This is the census, and it is an assertion because a printed one is \
+             discarded by libtest on the passing run that is the whole point."
+        );
     }
 
     /// A runner that is not a sandbox, so the RECORD can be checked on a host
@@ -1069,7 +1102,11 @@ mod tests {
     /// A function rather than four more inline paragraphs so the one test
     /// above stays readable; it is called from exactly one place and the
     /// branch on the runner's presence is still made there, once.
-    fn the_network_rows(confinement: &Confinement, policy: &Policy, tree: &std::path::Path) {
+    fn the_network_rows(
+        confinement: &Confinement,
+        policy: &Policy,
+        tree: &std::path::Path,
+    ) -> usize {
         let run = |declared: &Policy, parts: &[String]| {
             confinement
                 .run(declared, tree, parts)
@@ -1145,6 +1182,13 @@ mod tests {
             shared.stderr
         );
         drop(door);
+
+        // The two escapes this function executed and saw denied: the call to
+        // an address off this host, and the knock on the host's own loopback
+        // door. The control immediately above is not one of them -- it is
+        // the row that had to SUCCEED, and counting it would inflate the
+        // census with a case that proves the opposite thing.
+        2
     }
 
     // -----------------------------------------------------------------------
@@ -1383,78 +1427,17 @@ mod tests {
     /// same reason -- it is the number the orchestrator compares against.
     #[test]
     fn every_seeded_fault_still_names_source_that_is_there() {
-        let manifest = include_str!("../../isolation/gate.toml");
-        // The lane's whole source, so a catcher can be looked for wherever its
-        // test lives rather than only in this file.
-        let lane = concat!(
-            include_str!("mod.rs"),
-            include_str!("policy.rs"),
-            include_str!("bwrap.rs")
+        crate::gate::every_seeded_fault_still_names_source(
+            include_str!("../../isolation/gate.toml"),
+            // The lane's whole source, so a catcher can be looked for
+            // wherever its test lives rather than only in this file.
+            concat!(
+                include_str!("mod.rs"),
+                include_str!("policy.rs"),
+                include_str!("bwrap.rs")
+            ),
+            "isolation",
         );
-        let mut checked = 0;
-        for block in manifest.split("\n[[fault]]\n").skip(1) {
-            let id = between(block, "id = \"", "\"").expect("a fault has an id");
-            let target = between(block, "target = \"", "\"").expect("a fault has a target");
-            let anchor =
-                between(block, "anchor = '''\n", "'''\nbecomes = ").expect("a fault has an anchor");
-
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .expect("the workspace root")
-                .join(target);
-            let source = std::fs::read_to_string(&path)
-                .unwrap_or_else(|why| panic!("{id}: {} could not be read: {why}", path.display()));
-            assert_eq!(
-                source.matches(anchor).count(),
-                1,
-                "{id}: its anchor no longer appears exactly once in {target}. The \
-                 manifest is stale: either the mutation has to move with the code, \
-                 or the fault it seeds is gone."
-            );
-
-            between(block, "expect_exit = ", "\n")
-                .expect("a fault declares the exit it expects")
-                .parse::<i32>()
-                .unwrap_or_else(|why| panic!("{id}: its `expect_exit` is not a number: {why}"));
-
-            let catches = between(block, "catches = [\n", "]").expect("a fault names its catchers");
-            let mut named = 0;
-            for line in catches.lines() {
-                let Some(name) = between(line, "\"", "\"") else {
-                    continue;
-                };
-                let leaf = name.rsplit("::").next().unwrap_or(name);
-                assert_eq!(
-                    lane.matches(&format!("fn {leaf}(")).count(),
-                    1,
-                    "{id}: it claims to be caught by `{name}`, and no such test is in \
-                     the lane. A fault whose catcher was renamed or deleted is applied, \
-                     caught by nothing, and scored against a name."
-                );
-                named += 1;
-            }
-            assert!(
-                named > 0,
-                "{id}: a fault with an empty `catches` is a mutation nothing proves"
-            );
-            checked += 1;
-        }
-        let declared: usize = between(manifest, "\nfaults = ", "\n")
-            .expect("the package block declares a count")
-            .parse()
-            .expect("the count is a number");
-        assert_eq!(
-            checked, declared,
-            "the manifest declares its own count and this reads it: hardcoding the \
-             number here let `faults = 9001` pass"
-        );
-    }
-
-    /// The text between `open` and the next `close` after it.
-    fn between<'a>(haystack: &'a str, open: &str, close: &str) -> Option<&'a str> {
-        let start = haystack.find(open)? + open.len();
-        let end = haystack[start..].find(close)? + start;
-        Some(&haystack[start..end])
     }
 
     #[test]

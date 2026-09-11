@@ -216,7 +216,7 @@ fn answering(given: Option<&String>) -> Result<(Option<Stub>, Endpoint), (u8, St
 fn written(drive: &diet::drive::Drive, out_path: &str) -> ExitCode {
     if let Err(why) = std::fs::write(out_path, &drive.rendered) {
         return fail(
-            EXIT_HALT,
+            EXIT_OUTPUT,
             &format!("{out_path} could not be written: {why}"),
         );
     }
@@ -226,7 +226,7 @@ fn written(drive: &diet::drive::Drive, out_path: &str) -> ExitCode {
     let product_path = format!("{out_path}.product");
     if let Err(why) = std::fs::write(&product_path, &drive.product) {
         return fail(
-            EXIT_HALT,
+            EXIT_OUTPUT,
             &format!("{product_path} could not be written: {why}"),
         );
     }
@@ -269,6 +269,17 @@ fn census(one: &diet::drive::Uncaptured) -> Value {
         ("regions".to_owned(), count(one.regions)),
         ("captured".to_owned(), count(one.captured)),
         ("truncated".to_owned(), Value::Boolean(one.truncated)),
+        // BOTH counts -- ruling 6. Record v0 has one field and it means
+        // `touched`; a reader of this line gets the question the record
+        // cannot yet ask, which is whether the fork produced anything NEW.
+        (
+            "entries_touched".to_owned(),
+            Value::Integer(i64::from(one.entries_touched)),
+        ),
+        (
+            "entries_created".to_owned(),
+            Value::Integer(i64::from(one.entries_created)),
+        ),
         (
             "passed_over".to_owned(),
             Value::Array(
