@@ -671,14 +671,53 @@ mod tests {
     // The refusal #24's ruling asks for: the caches are recompute inputs, so a
     // cache whose bytes are not the bytes the record consumed is not the
     // cache the record's numbers came from.
+    //
+    // THE TAMPER IS WELL-FORMED, and that is the whole point of it. It used to
+    // append a row carrying one dimension where the set declares five hundred
+    // and twelve, so the ROW PARSER refused it before the digest was ever
+    // compared -- the test passed, and passed for a reason it had not checked.
+    // A review found that and could not rule out that a tampered cache which
+    // still parses would sail through. Ruled 2026-09-11: cut it well-formed,
+    // so nothing but the digest can fire.
+    //
+    // One value inside an existing row, same width, same text, same shape. If
+    // this ever goes green WITH the digest check present, the digest check has
+    // a hole, and that is worth learning here rather than after a bakeoff
+    // banks a number over a cache nobody verified.
     #[test]
     fn a_cache_the_record_did_not_consume_is_refused() {
         let dir = scratch("digest");
         let path = write_run(&dir);
         let cache = dir.join("even.vectors.jsonl");
-        let mut body = std::fs::read_to_string(&cache).expect("the cache");
-        body.push_str("{\"text\":\"one more\",\"vector\":[1.00000000]}\n");
-        std::fs::write(&cache, body).expect("a written cache");
+        let body = std::fs::read_to_string(&cache).expect("the cache");
+        let mut lines: Vec<String> = body.lines().map(ToOwned::to_owned).collect();
+        assert!(
+            !lines.is_empty(),
+            "a cache with no rows tampers with nothing"
+        );
+
+        let opened = lines[0].find("\"vector\":[").expect("a vector") + "\"vector\":[".len();
+        let comma = lines[0][opened..]
+            .find(',')
+            .expect("more than one dimension")
+            + opened;
+        let was: f64 = lines[0][opened..comma].parse().expect("a number");
+        lines[0] = format!(
+            "{}{:.8}{}",
+            &lines[0][..opened],
+            was + 0.5,
+            &lines[0][comma..]
+        );
+        std::fs::write(&cache, lines.join("\n") + "\n").expect("a written cache");
+
+        // It still parses, which is what makes the refusal below about the
+        // digest. Asserted rather than assumed: a tamper that broke the row
+        // would put this test back where it started.
+        let rows = std::fs::read_to_string(&cache).expect("the tampered cache");
+        assert!(
+            sense::Cached::load("even", &rows).is_ok(),
+            "the tampered cache must still be a cache, or the parser answers first"
+        );
 
         match run(&path) {
             Err(RunError::Digest { path, .. }) => {
