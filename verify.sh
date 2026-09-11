@@ -937,9 +937,6 @@ path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
 
-# Weights identified by whatever string is there. A name is prose: two runs
-# can spell the same weights differently and a third can spell different
-# weights the same, and then a regime comparison compares strings.
 inject_record_weights_named_not_digested() {
   python3 - <<'EOF'
 import pathlib
@@ -4490,6 +4487,26 @@ if source.count(old) != 1:
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
+# Weights identified by whatever string is there. A name is prose: two runs
+# can spell the same weights differently and a third can spell different
+# weights the same, and then a regime comparison compares strings.
+# A canned substrate that may decline to identify itself. The acts are the
+# whole identity a server with no weights has, so a `canned` kind that does
+# not have to carry them is the null the typed identity was adopted to remove,
+# wearing the new kind's name.
+inject_record_canned_acts_optional() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            let text = take_string(&mut members, of, "acts_sha256")?;'
+new = '            let text = take_string(&mut members, of, "acts_sha256").unwrap_or_default();'
+if source.count(old) != 1:
+    raise SystemExit(f"the canned acts read appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
 
 # Every pattern in a table, shown catching its own class. A pattern that has
 # never caught anything is a guess.
@@ -5236,6 +5253,8 @@ selftest() {
     'one-substrate-and-a-request-elsewhere\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "a fork that names no substrate"         test     inject_record_a_fork_names_no_substrate \
     'fork-names-an-undeclared-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a canned substrate that need not say which acts" test inject_record_canned_acts_optional \
+    'canned-with-no-acts-digest\.jsonl: accepted as' 'test:conformance/formats::record'
 
   echo
   echo "--- results fixtures, checked directly ---"
