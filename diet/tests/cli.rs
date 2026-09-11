@@ -411,7 +411,7 @@ fn write_bakeoff_run(dir: &Path) -> PathBuf {
         std::fs::write(dir.join(name), body).expect("a written input");
         consumes.push(format!(
             "{{\"path\":\"{name}\",\"sha256\":\"{}\"}}",
-            diet::digest::sha256(body.as_bytes())
+            diet::digest::sha256_hex(body.as_bytes())
         ));
     }
 

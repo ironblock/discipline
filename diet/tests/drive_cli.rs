@@ -92,7 +92,51 @@ fn the_drive_writes_a_record_a_second_process_accepts() {
         &[&regimen.to_string_lossy(), &ground.tree(), &ground.out()],
     );
     assert_eq!(code, 0, "stdout={out} stderr={err}");
+
+    // THE WHOLE RESULT LINE, not just `"ok":true`. A review replaced this
+    // function's entire body with two fabricated counts -- dropping `turn`,
+    // `fork`, `regions`, `captured`, `truncated` and `passed_over`, and
+    // reporting a NEGATIVE touch count no run can produce -- and all 593
+    // tests stayed green. This JSON is the only surface either entry count
+    // ever reaches a human through, since record v0 carries one field.
+    //
+    // The canned drive is deterministic, so these are the run's real numbers
+    // and not a shape check.
     assert!(out.contains("\"ok\":true"), "{out}");
+    assert!(out.contains("\"events\":24"), "twenty-four rows: {out}");
+    assert!(
+        out.contains("\"seams\":1"),
+        "one seam, where the script declared it: {out}"
+    );
+    assert!(
+        out.contains("\"audits_unread\":1"),
+        "and one audit put and not folded, because the verdict grammar is not \
+         built: {out}"
+    );
+
+    // Ruling 6's two counts, at the case where they DIVERGE. Turn two's fork
+    // repeats turn one's answer word for word, so it touched two entries and
+    // created none -- and a reader summing one number to size the object
+    // would double it. Asserting only turn one would pass under
+    // `entries_created = entries_touched`.
+    assert!(
+        out.contains("\"entries_created\":2,\"entries_touched\":2,\"fork\":\"fork-1\""),
+        "turn one's fork created what it touched: {out}"
+    );
+    assert!(
+        out.contains("\"entries_created\":0,\"entries_touched\":2,\"fork\":\"fork-2\""),
+        "and turn two's created NOTHING while touching the same two: {out}"
+    );
+    // No field carries `-1`, the sentinel `written()` uses for a count that
+    // does not fit -- matched as a VALUE, because the temp paths in this same
+    // line contain `-1` as a substring and the first version of this
+    // assertion failed on its own fixture.
+    for ending in [":-1,", ":-1}", ":-1]"] {
+        assert!(
+            !out.contains(ending),
+            "a field carries the unrepresentable-value sentinel: {out}"
+        );
+    }
 
     // The verdict comes from the OTHER binary reading the file, which is the
     // whole point: a record this crate can write and cannot read back through
@@ -106,7 +150,7 @@ fn the_drive_writes_a_record_a_second_process_accepts() {
     let product = format!("{}.product", ground.out());
     let bytes = std::fs::read(&product).expect("the product is beside the record");
     let claimed = std::fs::read_to_string(ground.out()).expect("the record");
-    let digest = diet::drive::digest::sha256_hex(&bytes);
+    let digest = diet::digest::sha256_hex(&bytes);
     assert!(
         claimed.contains(&format!("\"product_sha256\":\"{digest}\"")),
         "the summary's digest is of the product on disk: {digest}"
