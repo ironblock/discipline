@@ -37,6 +37,15 @@ A machine may also have no substrate at all. `mac-pro-2019` has none — nothing
 in this program serves a model on it — and it is registered as a host with an
 empty shelf rather than given an invented one.
 
+And a piece of equipment may not be a machine. The table is `[equipment.*]`,
+not `[machine.*]`, because `canned-loopback` — `diet-drive`'s own server,
+replaying a committed set of acts byte for byte — is equipment with no hardware.
+Its identity is exactly two artifacts, what serves and what it plays, and those
+are its declared fields. It exists so that the field defined as a registry
+digest never has to hold a sentinel string; #68 carried `"canned-loopback"`
+there as a placeholder, and the ruling was that no magic string sits in an
+identity field, anywhere.
+
 ## Instances
 
 An id is stable. What it points at is not: an operating system gets updated, a

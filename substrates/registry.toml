@@ -60,6 +60,15 @@ hardware_fields = [
 [entry_type.x86-workstation]
 hardware_fields = ["model_identifier", "cpu", "memory", "gpu", "architecture"]
 
+[entry_type.canned-server]
+# A canned server is equipment with no hardware: a program inside this
+# repository that replays a fixed set of acts, byte for byte, on loopback. Its
+# identity is exactly two artifacts -- what serves, and what it plays -- and
+# those are its "hardware fields", because together they determine every reply
+# the way a card and a set of weights do for a served model. Ruled on #68 in
+# place of a sentinel string in a field defined as a registry digest.
+hardware_fields = ["serves", "acts_sha256"]
+
 [entry_type.apple-silicon-laptop]
 hardware_fields = [
   "chip", "memory", "storage", "gpu_wired_memory_limit_mb",
@@ -67,10 +76,10 @@ hardware_fields = [
 ]
 
 # ---------------------------------------------------------------------------
-# machines
+# equipment
 # ---------------------------------------------------------------------------
 
-[machine.linux-pc]
+[equipment.linux-pc]
 display_name = "ironblock's Linux PC"
 entry_type = "accelerator-host"
 hardware_fingerprint = "e6489f9c1815a0c4540a0c6663acaa3c62b1b66e03806479475c2645347fe7af"
@@ -132,7 +141,7 @@ a custom 3D-printed (engineering resin) adapter for a hole pattern this board \
 does not have. Everything else in this entry is orderable; the loop is not \
 reproducible from a parts list, and the manifest should not imply it is."""
 
-[machine.mac-pro-2019]
+[equipment.mac-pro-2019]
 display_name = "ironblock's 2019 Mac Pro"
 entry_type = "x86-workstation"
 hardware_fingerprint = "f0efb982fe1e4793ba9cf832e32bf30759d358da42e0362251a023c095dc480a"
@@ -153,7 +162,7 @@ a truer record than inventing one. Worth stating that it is x86_64 with an AMD \
 GPU, because "runs on the Mac" is otherwise ambiguous between this machine and \
 the laptop, and the two share no acceleration path at all."""
 
-[machine.macbook-pro-2021]
+[equipment.macbook-pro-2021]
 display_name = "ironblock's 2021 MacBook Pro 16-inch"
 entry_type = "apple-silicon-laptop"
 hardware_fingerprint = "955d048e8d2033ab4ad72b68487dc37cac320121da9b65119cb63b3632b5208e"
@@ -184,7 +193,7 @@ still wants confirming. The manifest records the chip and the memory but not \
 the core counts."""
 not_measured = "core counts (inferred, above); storage device and firmware; battery and power state."
 
-[machine.macbook-pro-2021.floor_result]
+[equipment.macbook-pro-2021.floor_result]
 what_was_measured = """
 Qwen3.6 27B raw on this machine (`dflash_enabled=false`, `mtp_enabled=false` \
 confirmed before firing): a context-ceiling sweep from 4K to 32K, generation \
@@ -202,12 +211,38 @@ version of this registry entry stated "non-viable for the 27B" as a bare \
 measured class fact, which put the verdict in public without the evidence that \
 actually supports it and beside a number that does not."""
 
+[equipment.canned-loopback]
+display_name = "the canned loopback server"
+entry_type = "canned-server"
+hardware_fingerprint = "fc96af4713f9aaa26f2b7bda27720b497ec3d30c6edd9292da5fa8be8e0c37b0"
+role = "diet-drive's own server, serving no model: the acts it replays are the whole of what it is"
+measured = "2026-09-11"
+measured_by = """
+Read from the record `diet-drive` emits on #68 at `5c8e4fc`, and from the \
+committed fixture `valid/canned-substrate.jsonl` on the same head, which carry \
+the same digest. Provenance by record: the value is what that code computes over \
+its acts, and the consumer that resolves a record's substrate to this entry is \
+the place it gets re-derived."""
+serves = "diet-drive canned"
+acts_sha256 = "8947e69543df56300d85ed571a6799d66b25a51c18c6d456193918864d7f5e9d"
+acts_sha256_is = """
+`canned::acts_digest()` -- a length-prefixed sha256 over the acts the server \
+plays. The record names the same value as the engine's `version_or_digest` and \
+as `weights.acts_sha256`, deliberately: naming one artifact twice is the truth \
+about a server that IS its acts, and inventing a second fact to fill a second \
+field would not be."""
+no_instances_because = """
+A physical entry has instances because its deployment, kernel and engine can \
+change under a stable id. Nothing here can change without the entry changing: \
+new acts are a new digest, and a new digest is a new piece of equipment, not a \
+new instance of this one."""
+
 # ---------------------------------------------------------------------------
 # substrates
 # ---------------------------------------------------------------------------
 
 [substrate.accel24-beellama-qwen27b-q4kxl]
-machine = "linux-pc"
+equipment = "linux-pc"
 description = "Qwen3.6 27B at UD-Q4_K_XL on the 24 GiB accelerator, served by the beellama engine with a DFlash speculative draft model"
 pinned = true
 
@@ -359,8 +394,20 @@ this instance and no other, which is what ties the digest to this instance \
 rather than to the substrate at large."""
 current = true
 
+[substrate.canned]
+equipment = "canned-loopback"
+description = "diet-drive's canned server, replaying its committed acts on loopback; the substrate the first drive in the gym ran on"
+pinned = true
+engine_name = "diet-drive canned"
+engine_identity = "8947e69543df56300d85ed571a6799d66b25a51c18c6d456193918864d7f5e9d"
+engine_identity_is = "the acts digest -- the server is this repository's code, and what it plays is the acts"
+weights_kind = "canned"
+weights_acts_sha256 = "8947e69543df56300d85ed571a6799d66b25a51c18c6d456193918864d7f5e9d"
+reproducible_by_config = true
+reproducible_because = "replay the acts and the same bytes play again; exact match, no band. Gate 1 compares a canned run exactly rather than re-firing it within a band meant for sampling and hardware that cannot move here."
+
 [substrate.apple32-omlx-gemma12b]
-machine = "macbook-pro-2021"
+equipment = "macbook-pro-2021"
 description = "Gemma 4 12B, quantized, served by oMLX on Apple silicon; the floor suite's substrate"
 pinned = false
 measured = "2026-07-23"
