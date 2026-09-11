@@ -100,40 +100,63 @@ SOURCES = (
     pathlib.Path("rust-toolchain.toml"),
 )
 
-# What the crate embeds, asked of the crate rather than listed here.
+# What the crate embeds, ASKED OF THE COMPILER rather than inferred.
 #
 # A grammar and a dogma template ARE compiled in, so a change to one really
 # does make the binary stale -- and they live under `diet/` beside the
-# fixtures that are not. The difference is not visible from the path, so it is
-# read from the source that does the embedding: `include_str!`, its bytes
-# twin, and pest's `#[grammar]`, each resolved relative to the file that names
-# it. One reader, and it is the compiler's own list.
-EMBEDS = re.compile(
-    r"""include_(?:str|bytes)!\(\s*"([^"]+)"|#\[grammar\s*=\s*"([^"]+)"\]"""
-)
+# fixtures that are not. The difference is not visible from the path.
+#
+# It is also not reliably visible from the SOURCE. A previous version of this
+# read `include_str!` and `#[grammar]` out of `diet/src/**/*.rs` with a regex
+# and called that "the compiler's own list". It is not: a regex cannot see
+# `#[cfg(test)]`, so every fixture a test embeds counted as a source of the
+# binary. Touching one made `diet` look stale when `cargo build` would not
+# recompile it at all -- the same false positive this narrowing was written to
+# remove, arriving through a different door.
+#
+# `target/debug/diet.d` is the real list. Cargo writes it beside the binary on
+# every build, in Make's format -- one line, `<target>: <dep> <dep> ...` -- and
+# it holds exactly what rustc read to produce THAT artifact: no test-only
+# embed, and every grammar. There is no second reader to drift from.
+DEP_TARGET = re.compile(r"^(?P<target>(?:[^:\\]|\\.)+):\s*(?P<deps>.*)$")
 
 
-def embedded() -> list[pathlib.Path]:
-    """Every file compiled into the binary, by the source that embeds it."""
-    found: set[pathlib.Path] = set()
-    source = pathlib.Path("diet/src")
-    if not source.is_dir():
+def embedded(binary: pathlib.Path) -> list[pathlib.Path]:
+    """Every file compiled into `binary`, from cargo's dep-info beside it.
+
+    Empty when there is no dep-info to read -- a binary built by something
+    that did not write one. That is a smaller list, not a wrong one: the
+    directory walk over `SOURCES` still covers every `.rs` file, so the only
+    thing an absent `.d` loses is the embedded non-Rust files. Guessing them
+    from a regex instead is what produced the false positive above.
+    """
+    depinfo = binary.parent / f"{binary.name}.d"
+    try:
+        text = depinfo.read_text(encoding="utf-8", errors="replace")
+    except OSError:
         return []
-    for rust in source.rglob("*.rs"):
-        for match in EMBEDS.finditer(rust.read_text(encoding="utf-8", errors="replace")):
-            # THE TWO RESOLVE AGAINST DIFFERENT DIRECTORIES, and getting that
-            # wrong is silent: a path that resolves to nothing simply never
-            # makes the binary look stale. `include_str!` is relative to the
-            # file that writes it; pest's `#[grammar]` is relative to `src/`,
-            # which is why every one of them starts `../` and why they all
-            # still start `../` from files several directories down.
-            included, grammar = match.group(1), match.group(2)
-            named = included or grammar
-            against = rust.parent if included else source
-            resolved = (against / named).resolve()
+
+    here = pathlib.Path.cwd()
+    found: set[pathlib.Path] = set()
+    for line in text.splitlines():
+        match = DEP_TARGET.match(line)
+        if not match:
+            continue
+        # Make escapes a space in a path as `\ `, so splitting on bare
+        # whitespace would cut such a path in two and leave two names that
+        # exist nowhere -- which fails SILENTLY here, as a dependency that
+        # never makes anything look stale.
+        deps = re.split(r"(?<!\\) ", match.group("deps").strip())
+        for dep in deps:
+            dep = dep.replace("\\ ", " ").strip()
+            if not dep:
+                continue
             try:
-                found.add(resolved.relative_to(pathlib.Path.cwd()))
+                found.add(pathlib.Path(dep).resolve().relative_to(here))
             except ValueError:
+                # Outside the checkout: the registry sources of a dependency
+                # crate. A change there arrives through `Cargo.lock`, which is
+                # in SOURCES.
                 continue
     return sorted(found)
 
@@ -153,10 +176,14 @@ def digest(path: pathlib.Path) -> str:
     return sha.hexdigest()
 
 
-def newest_source() -> tuple[float, str] | None:
-    """The most recently modified source file, and its path."""
+def newest_source(binary: pathlib.Path) -> tuple[float, str] | None:
+    """The most recently modified source file, and its path.
+
+    `binary` is not itself a source; it names the dep-info beside it, which is
+    where the embedded files come from.
+    """
     newest: tuple[float, str] | None = None
-    for root in (*SOURCES, *embedded()):
+    for root in (*SOURCES, *embedded(binary)):
         if root.is_file():
             paths = [root]
         elif root.is_dir():
@@ -211,7 +238,7 @@ def main() -> int:
         )
 
     binary_stamp = path.stat().st_mtime
-    newest = newest_source()
+    newest = newest_source(path)
     if newest is None:
         # Rule three is stated without conditions, so it cannot quietly not
         # apply. Off the repository root none of SOURCES exists, the scan

@@ -63,9 +63,24 @@ GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
 # the machine, and an inert injection is a case that proves nothing while
 # reporting the same green.
 #
-# Checked by pattern here, cheaply, over every injection; PROVEN by execution
-# in `scripts/bsd-sed/`, which is a sed that reproduces the one difference so
-# that the whole corpus can be run against it on a Linux runner.
+# Two rules, and the STRUCTURAL one is the one that holds.
+#
+# Naming the GNU-only spellings is a blocklist, and a blocklist over a tool
+# with GNU's option surface is a list of the ones somebody thought of:
+# `sed --in-place=''` is the same defect as `sed -i''`, written the long way,
+# and it walked straight past the pattern below. So an injection body may not
+# invoke `sed` AT ALL -- `edit_in_place` is the one spelling, it is defined
+# once, and one definition is a thing that can be made portable. The patterns
+# stay for the rest of `verify.sh`, which is not injections and where a raw
+# `sed` is not a mistake.
+#
+# COMMAND POSITION ONLY. `sed` is also a word, and the injection that proves
+# this very lint fires builds the string `"sed" + " -" + "i"` in a Python
+# heredoc to plant the unportable form. A rule that matched the letters
+# anywhere reported that fault as the defect it exists to catch -- which is
+# the lint failing on its own regression test, and would have been read as the
+# lint working.
+RAW_SED = re.compile(r"(?:^|[|;&(`]|\$\(|&&|\|\|)\s*sed(?![\w./-])")
 GNU_SED = re.compile(r"\bsed +-i(?![A-Za-z0-9._])")
 GNU_REPLACEMENT = re.compile(
     r"s(?P<d>[|/#])(?:(?!(?P=d))[^\n])*(?P=d)(?:(?!(?P=d))[^\n])*\\n"
@@ -444,6 +459,27 @@ def main() -> int:
             unportable.append((number, "`sed -i` with the suffix on the flag", line.strip()))
         elif GNU_REPLACEMENT.search(line):
             unportable.append((number, "a `\\n` in a sed replacement", line.strip()))
+
+    # And the rule a blocklist cannot state: inside an injection, there is no
+    # spelling of `sed` that is this script's business to approve.
+    offset = {}
+    running = 1
+    for piece in text.split("\n"):
+        offset[running] = piece
+        running += 1
+    for match in FUNC_BODY.finditer(text):
+        name, body = match.group(1), match.group(2)
+        first = text[: match.start()].count("\n") + 1
+        for index, line in enumerate(body.split("\n"), start=1):
+            if line.lstrip().startswith("#") or not RAW_SED.search(line):
+                continue
+            unportable.append(
+                (
+                    first + index,
+                    f"`sed` inside {name}; the portable spelling is the only spelling",
+                    line.strip(),
+                )
+            )
     if unportable:
         print(
             f"check-injections: verify.sh uses sed forms only GNU accepts, so its "
