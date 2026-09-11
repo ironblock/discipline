@@ -42,7 +42,7 @@ REGISTRY = pathlib.Path(__file__).resolve().parent / "registry.toml"
 EXIT_BAD = 1
 EXIT_BROKEN = 2
 
-# Field names that describe the INSTANCE rather than the machine. Kept as a
+# Field names that describe the INSTANCE rather than the equipment. Kept as a
 # prefix list rather than an exact one so `os`, `os_deployment_version` and
 # anything else spelled that way are all refused by the same rule.
 INSTANCE_PREFIXES = ("os", "kernel", "deployment", "engine")
@@ -64,9 +64,9 @@ def main(argv: list[str]) -> int:
         return EXIT_BROKEN
 
     types = registry.get("entry_type")
-    machines = registry.get("machine")
+    machines = registry.get("equipment")
     if not types or not machines:
-        print("check-fingerprints: the registry declares no entry types or no machines; "
+        print("check-fingerprints: the registry declares no entry types or no equipment; "
               "an empty registry and a working one must not report the same", file=sys.stderr)
         return EXIT_BROKEN
 
