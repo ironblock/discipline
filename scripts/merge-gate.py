@@ -327,21 +327,61 @@ def union_file(path: Path, ours_ref: str, theirs_ref: str) -> bool:
                 f"(ours still matched the merge base): " + ", ".join(sorted(corrections))
             )
 
+        # THE BLOCKS ONLY ONE SIDE CARRIES -- and A DELETION IS NOT AN ABSENCE.
+        #
+        # The rule above decides blocks both sides have. This decides the
+        # rest, and the first version of it did not: it appended every block
+        # theirs had and ours lacked, unconditionally, without ever asking
+        # the base. So a block THIS BRANCH DELETED ON PURPOSE came straight
+        # back, because "ours retired it" and "theirs invented it" look
+        # identical from ours alone.
+        #
+        # The old code knew. Its own comment said the printed line was "the
+        # same sentence whether the union added a lane's new injection or
+        # resurrected one this branch deliberately retired", and answered
+        # that by NAMING them -- which makes a mechanical decision depend on
+        # somebody reading the output carefully, in a tool that exists
+        # because a silent line-merge cannot be trusted to careful reading.
+        #
+        # Caught by `check-fault-manifest.py` refusing the result: #65 had
+        # retired `recompute.recompute_nothing_recomputable` and replaced it
+        # with a case that proves something else, and the union put the
+        # retired entry back while its seeded case stayed gone -- a manifest
+        # claiming a fault verify.sh does not prove. The layered check caught
+        # what this tool should not have produced.
+        #
+        # The same three-way comparison, for presence rather than content:
+        #
+        #   not in base                theirs added it       -> take it
+        #   in base, theirs == base    ours retired it       -> ours stands
+        #   in base, theirs != base    ours retired what
+        #                              theirs edited         -> a person's
         mine = set(ours_blocks)
-        added = [
-            block for name, block in find_blocks(pattern, theirs) if name not in mine
-        ]
-        built = insert_after_last(built, pattern, added)
+        added, retired = [], []
+        for name, block in find_blocks(pattern, theirs):
+            if name in mine:
+                continue
+            was = base_blocks.get(name)
+            if was is None:
+                added.append((name, block))
+            elif block == was:
+                retired.append(name)
+            else:
+                contested.append((name, "(retired by ours)", block))
+        built = insert_after_last(built, pattern, [block for _, block in added])
         if added:
-            # Naming them, because "took 2 block(s)" is the same sentence
-            # whether the union added a lane's new injection or resurrected
-            # one this branch deliberately retired -- and those want
-            # different reactions from the person reading the output.
-            taken = [name for name, _ in find_blocks(pattern, theirs) if name not in mine]
             print(
                 f"merge-gate: {path.name}: took {len(added)} "
-                f"{KIND.get(id(pattern), 'block')}(s) from {theirs_ref}: "
-                + ", ".join(taken)
+                f"{KIND.get(id(pattern), 'block')}(s) {theirs_ref} added: "
+                + ", ".join(name for name, _ in added)
+            )
+        if retired:
+            # Said out loud, because a resolver that drops something silently
+            # is the defect this tool was written for, pointing the other way.
+            print(
+                f"merge-gate: {path.name}: kept {len(retired)} "
+                f"{KIND.get(id(pattern), 'block')}(s) RETIRED by {ours_ref} "
+                f"and untouched on {theirs_ref}: " + ", ".join(sorted(retired))
             )
 
     if contested:
