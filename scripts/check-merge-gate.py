@@ -586,9 +586,42 @@ inject_beta() {
 ALPHA_ONE = BASE_PAIR.replace("echo base > a.txt", "echo one > a.txt")
 ALPHA_TWO = BASE_PAIR.replace("echo base > a.txt", "echo two > a.txt")
 
+# Manifest-shaped, for the presence rule. `tools/gate/faults.toml` is a list
+# of entries with nothing between them, so a removed entry leaves the rest
+# byte-identical -- which is exactly why a resurrection was possible there and
+# why these three fixtures are driven over the manifest rather than verify.sh.
+FAULTS_PAIR = (
+    '[[fault]]\nid = "a.alpha"\nkind = "seeded-gate"\nmigrated = false\n\n'
+    '[[fault]]\nid = "a.beta"\nkind = "seeded-gate"\nmigrated = false\n'
+)
+FAULTS_BETA_ONLY = (
+    '[[fault]]\nid = "a.beta"\nkind = "seeded-gate"\nmigrated = false\n'
+)
+FAULTS_ALPHA_EDITED = FAULTS_PAIR.replace(
+    'id = "a.alpha"\nkind = "seeded-gate"\n',
+    'id = "a.alpha"\nkind = "seeded-gate"\nlabel = "edited by theirs"\n',
+)
 
-def drive_three_way(base_text: str, ours_text: str, theirs_text: str):
-    """Run `union_file` over a base and two branches off it."""
+# The pair with `inject_alpha` REMOVED -- a branch that retired a block on
+# purpose, which is a different thing from a branch that never had it and the
+# reason the union has to consult the base for presence as well as content.
+BETA_ONLY = """\
+inject_beta() {
+  echo base > b.txt
+}
+"""
+
+
+def drive_three_way(
+    base_text: str, ours_text: str, theirs_text: str, name: str = "verify.sh"
+):
+    """Run `union_file` over a base and two branches off it.
+
+    `name`, because REMOVING a block is only resolvable in the manifest: take
+    an injection out of verify.sh and the text around it moves too, so the
+    skeleton refusal fires first and the presence rule is never reached. The
+    manifest is a list of entries with nothing between them, which is why the
+    resurrection was possible there and is not reachable here."""
     with tempfile.TemporaryDirectory() as tmp:
         box = Path(tmp)
 
@@ -601,18 +634,19 @@ def drive_three_way(base_text: str, ours_text: str, theirs_text: str):
         git("init", "-q", "-b", "base")
         git("config", "user.email", "gate@example.invalid")
         git("config", "user.name", "gate")
-        (box / "verify.sh").write_text(base_text, encoding="utf-8")
-        git("add", "verify.sh")
+        (box / name).parent.mkdir(parents=True, exist_ok=True)
+        (box / name).write_text(base_text, encoding="utf-8")
+        git("add", name)
         git("commit", "-qm", "base")
         git("checkout", "-q", "-b", "ours")
-        (box / "verify.sh").write_text(ours_text, encoding="utf-8")
+        (box / name).write_text(ours_text, encoding="utf-8")
         # --allow-empty: a fixture in which OURS is the base is the whole
         # point of one of the cases below, and git will not commit nothing.
         git("commit", "-qam", "ours", "--allow-empty")
         ours = git("rev-parse", "HEAD")
         git("checkout", "-q", "base")
         git("checkout", "-q", "-b", "theirs")
-        (box / "verify.sh").write_text(theirs_text, encoding="utf-8")
+        (box / name).write_text(theirs_text, encoding="utf-8")
         git("commit", "-qam", "theirs", "--allow-empty")
         theirs = git("rev-parse", "HEAD")
         # Standing on ours, merging theirs -- which is where a resolver runs,
@@ -626,10 +660,10 @@ def drive_three_way(base_text: str, ours_text: str, theirs_text: str):
         try:
             os.chdir(box)
             with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
-                took = MG.union_file(Path("verify.sh"), ours, theirs)
+                took = MG.union_file(Path(name), ours, theirs)
         finally:
             os.chdir(here)
-        return took, out.getvalue(), err.getvalue(), (box / "verify.sh").read_text(encoding="utf-8")
+        return took, out.getvalue(), err.getvalue(), (box / name).read_text(encoding="utf-8")
 
 
 @fixture("a block only theirs changed is taken from theirs, not kept as ours")
@@ -659,6 +693,70 @@ def _union_keeps_our_own_change():
         return f"the union refused a block only we changed: {err.strip()[:160]!r}"
     if "echo one > a.txt" not in on_disk:
         return "our own change was replaced by the base"
+    return None
+
+
+@fixture("a block ours retired and theirs never touched stays retired")
+def _union_does_not_resurrect_what_ours_retired():
+    # A DELETION IS NOT AN ABSENCE, and the first version of this rule could
+    # not tell them apart: it appended every block theirs had and ours lacked
+    # without asking the base, so a block this branch retired on purpose came
+    # straight back.
+    #
+    # Found in the field rather than here: #65 retired
+    # `recompute.recompute_nothing_recomputable` and replaced it with a case
+    # that proves something else; the union put the entry back while its
+    # seeded case stayed gone, and `check-fault-manifest.py` refused the
+    # result -- a manifest claiming a fault verify.sh does not prove. The
+    # layered check caught what this tool should never have written.
+    took, out, err, on_disk = drive_three_way(
+        FAULTS_PAIR, FAULTS_BETA_ONLY, FAULTS_PAIR, "tools/gate/faults.toml"
+    )
+    if took is not True:
+        return f"the union refused a plain retirement: {err.strip()[:160]!r}"
+    if "a.alpha" in on_disk:
+        return "an entry ours deliberately retired was resurrected by the union"
+    if "a.beta" not in on_disk:
+        return "the union dropped an entry neither side touched"
+    if "a.alpha" not in out:
+        return (
+            "the retirement was kept silently; a resolver that drops a block "
+            "without saying so is this tool's own defect pointing the other way"
+        )
+    return None
+
+
+@fixture("a block theirs genuinely added is still taken")
+def _union_still_takes_a_real_addition():
+    # The control that stops the fix above from becoming "never add anything".
+    # Without it, a union that dropped every one-sided block would satisfy the
+    # retirement fixture perfectly.
+    took, out, _err, on_disk = drive_three_way(
+        FAULTS_BETA_ONLY, FAULTS_BETA_ONLY, FAULTS_PAIR, "tools/gate/faults.toml"
+    )
+    if took is not True:
+        return "the union refused an entry theirs added"
+    if "a.alpha" not in on_disk:
+        return "an entry theirs added was dropped as though ours had retired it"
+    if "a.alpha" not in out:
+        return "the addition was taken without saying so"
+    return None
+
+
+@fixture("a block ours retired and theirs edited is a person's")
+def _union_refuses_a_retirement_theirs_edited():
+    # The third case, and the one neither side can be given: ours removed the
+    # block, theirs changed it. Taking theirs reverts a deliberate retirement;
+    # keeping ours discards an authored edit. Refuse and print.
+    took, _out, err, on_disk = drive_three_way(
+        FAULTS_PAIR, FAULTS_BETA_ONLY, FAULTS_ALPHA_EDITED, "tools/gate/faults.toml"
+    )
+    if took is not False:
+        return "the union chose between a retirement and an edit of the same entry"
+    if on_disk != FAULTS_BETA_ONLY:
+        return "a refused union rewrote the file anyway"
+    if "a.alpha" not in err:
+        return "the refusal named no block, so the reader cannot act on it"
     return None
 
 
