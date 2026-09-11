@@ -356,6 +356,91 @@ fn the_bakeoff_verb_runs_the_bakeoff_and_not_another_lane() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `--into` is a SECOND ARGUMENT SHAPE through the same dispatch, and a shape
+/// is what a subprocess test catches.
+///
+/// `the_bakeoff_verb_runs_the_bakeoff_and_not_another_lane` pins the verb to
+/// its lane. It does not pin the flag: `capture::bakeoff::assemble` is tested
+/// as a FUNCTION, and the arm that routes `--into` to it lives in `bin/diet.rs`
+/// where no test reached. A `--into` misspelled in that match, or `path` and
+/// `into` transposed, falls through to the usage error with every unit test
+/// still green -- which is the defect the sibling test's docstring was written
+/// about, one argument along.
+///
+/// So both directions: the flag spelled right assembles, and a flag spelled
+/// wrong is a usage error that writes NOTHING. Without the second, an arm that
+/// accepted any fourth argument would satisfy the first.
+#[test]
+fn the_into_flag_assembles_a_directory_and_a_misspelling_writes_nothing() {
+    let dir = std::env::temp_dir().join(format!(
+        "diet-bakeoff-into-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_nanos())
+            .unwrap_or_default()
+    ));
+    let path = write_bakeoff_run(&dir);
+    let run_path = path.to_str().expect("a UTF-8 path").to_owned();
+
+    // A flag this program does not define is a usage error, and it must not
+    // have written the directory on its way to saying so.
+    let wrong = dir.join("never-written");
+    let (code, out, _) = run(&[
+        "bakeoff",
+        &run_path,
+        "--intoo",
+        wrong.to_str().expect("a UTF-8 path"),
+    ]);
+    assert_eq!(code, 2, "a flag the program does not define was accepted");
+    assert!(out.is_empty(), "a usage error printed a result: {out}");
+    assert!(
+        !wrong.exists(),
+        "a refused assembly wrote its directory anyway"
+    );
+
+    let into = dir.join("2026-01-01-a-sense-bakeoff");
+    let (code, out, err) = run(&[
+        "bakeoff",
+        &run_path,
+        "--into",
+        into.to_str().expect("a UTF-8 path"),
+    ]);
+    assert_eq!(code, 0, "bakeoff --into: {err}");
+    assert!(err.is_empty(), "bakeoff --into wrote to stderr: {err}");
+
+    let answer: serde_json::Value = serde_json::from_str(&out)
+        .unwrap_or_else(|why| panic!("stdout is not JSON ({why}): {out:?}"));
+    assert_eq!(answer["ok"], serde_json::json!(true), "{out}");
+    assert_eq!(
+        answer["value"]["directory"],
+        serde_json::json!(into.to_str().expect("a UTF-8 path")),
+        "the answer names a directory other than the one it was given"
+    );
+
+    // Every file the ruling named, and the caches the record consumed.
+    for name in [
+        "README.md",
+        "run.jsonl",
+        "regimen.toml",
+        "report.json",
+        "recompute.sh",
+    ] {
+        assert!(into.join(name).is_file(), "{name} was not written");
+    }
+
+    // The digest the answer states is the product's, so a caller has something
+    // to check without opening the directory.
+    let product = std::fs::read(into.join("report.json")).expect("the product");
+    assert_eq!(
+        answer["value"]["product_sha256"],
+        serde_json::json!(diet::digest::sha256_hex(&product)),
+        "the answer's digest is not the product's"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A bakeoff run directory: the shipped register, two caches, and a record
 /// that consumes all three by digest.
 ///
