@@ -33,8 +33,8 @@ use crate::capture::sense::{
     PRE_REGISTRATION, Reported, Row, ScoreError, Scoring, SenseSet, SetError, decimal,
 };
 use crate::digest::sha256_hex;
-use crate::formats::record::json::Value;
-use crate::formats::record::{Artifact, Event, Regime};
+use crate::formats::record::json::{self, Value};
+use crate::formats::record::{Artifact, Event, Regime, Summary};
 
 /// The seed every resampling in a run is drawn from.
 ///
@@ -99,11 +99,33 @@ pub enum RunError {
     Metric(sense::MetricError),
     /// The paired bootstrap could not run.
     Bootstrap(sense::BootstrapError),
+    /// The directory to assemble into already holds a report.
+    Occupied {
+        /// The directory.
+        path: String,
+    },
+    /// A file the assembly had to write could not be written.
+    Write {
+        /// The file.
+        path: String,
+        /// Why not.
+        reason: String,
+    },
 }
 
 impl fmt::Display for RunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Occupied { path } => write!(
+                f,
+                "{path} already holds a README.md: assembling over somebody's results is not \
+                 an assembly step, and a directory is cheap to name differently"
+            ),
+            Self::Write { path, reason } => write!(
+                f,
+                "{path} could not be written: {reason}. A directory assembled halfway is worse \
+                 than one not assembled, because it looks like a result"
+            ),
             Self::Record(reason) => write!(f, "the run record is not a session record: {reason}"),
             Self::Missing { path } => write!(
                 f,
@@ -297,6 +319,21 @@ impl CellReport {
 /// is absent or is not the bytes it consumed, a control does not land where it
 /// must, or a metric cannot be reported over rows built to fail.
 pub fn run(path: &Path) -> Result<Value, RunError> {
+    computed(path).map(|done| done.report)
+}
+
+/// A run, and everything the directory it assembles into needs from it.
+struct Computed {
+    /// The numbers.
+    report: Value,
+    /// The record the run was described by: its regime is the regime these
+    /// numbers are about.
+    record: crate::formats::record::Record,
+    /// Where that record lives, so a consumed input can be found beside it.
+    dir: PathBuf,
+}
+
+fn computed(path: &Path) -> Result<Computed, RunError> {
     let source = std::fs::read_to_string(path).map_err(|err| RunError::Record(err.to_string()))?;
     let record =
         crate::formats::record::parse(&source).map_err(|err| RunError::Record(err.to_string()))?;
@@ -363,7 +400,7 @@ pub fn run(path: &Path) -> Result<Value, RunError> {
         return Err(RunError::NoRegister { set });
     }
 
-    Ok(Value::Object(BTreeMap::from([
+    let report = Value::Object(BTreeMap::from([
         ("pre_registration".to_owned(), PRE_REGISTRATION.value()),
         ("regime".to_owned(), regime_ids(record.regime())),
         (
@@ -391,7 +428,12 @@ pub fn run(path: &Path) -> Result<Value, RunError> {
                     .collect(),
             ),
         ),
-    ])))
+    ]));
+    Ok(Computed {
+        report,
+        record,
+        dir,
+    })
 }
 
 /// Which of the pre-registration's blockers this run cleared by running.
@@ -485,12 +527,400 @@ fn null_over(cells: &[CellReport]) -> Value {
     ]))
 }
 
+// ---------------------------------------------------------------------------
+// assembling the directory
+// ---------------------------------------------------------------------------
+
+/// Gate 0 for a bakeoff directory, written beside the numbers it checks.
+///
+/// It re-derives what can be re-derived WITHOUT this crate's binary, and says
+/// so, because `check-recompute.py` runs it in a sandboxed copy of the
+/// directory where `target/debug/diet` is not reachable. So it hashes the
+/// committed artefacts against the digests the record declares, counts them
+/// against the summary's totals, and hashes the product against the digest the
+/// report states. It does NOT re-run the bakeoff: the metrics are not
+/// re-derived here, and a limit stated is a limit somebody can close.
+const RECOMPUTE: &str = r#"#!/usr/bin/env bash
+# Gate 0 for this directory: every number the report states re-derives from the
+# artefacts committed beside it.
+#
+# WHAT THIS DOES NOT DO, stated because an undeclared non-catch is the vacuous
+# class: it does not re-run the bakeoff. `check-recompute.py` runs this script
+# in a sandboxed copy of the directory, where the `diet` binary is not
+# reachable, so the metrics themselves are not re-derived here -- what is
+# re-derived is every digest and every count the record and the report state.
+# A cache edited after the fact, a product edited after the fact, and a total
+# that disagrees with the rows are all caught. A metric computed wrongly by a
+# binary that is not here is not.
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+
+python3 - <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+import tomllib
+
+FENCE = "+++"
+
+text = pathlib.Path("README.md").read_text(encoding="utf-8")
+if not text.startswith(FENCE + "\n"):
+    sys.exit("README.md does not open with +++ front-matter")
+front = tomllib.loads(text.split(FENCE + "\n", 2)[1])
+
+rows = [
+    json.loads(line)
+    for line in pathlib.Path("run.jsonl").read_text(encoding="utf-8").splitlines()
+    if line.strip()
+]
+summary = next((row for row in rows if row.get("record") == "summary"), None)
+if summary is None:
+    sys.exit("run.jsonl has no summary row")
+
+
+def digest(path):
+    return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+
+
+# The product, against the digest the report and the summary both state.
+product = digest("report.json")
+for where, stated in (("front-matter", front["product_sha256"]),
+                      ("the summary row", summary["product_sha256"])):
+    if stated != product:
+        sys.exit(f"{where} states product_sha256 {stated}, the product hashes to {product}")
+
+# Every consumed artefact, against the digest the record declares for it.
+consumed = [
+    artifact
+    for row in rows
+    if row.get("record") == "claim"
+    for artifact in row.get("consumes", [])
+]
+matched = 0
+for artifact in consumed:
+    found = digest(artifact["path"])
+    if found != artifact["sha256"]:
+        sys.exit(
+            f"{artifact['path']} is declared {artifact['sha256']} and hashes to {found}"
+        )
+    matched += 1
+
+# And the totals, against what was actually there to count.
+for field, counted in (("targets_checked", len(consumed)), ("targets_matched", matched)):
+    if summary[field] != counted:
+        sys.exit(f"the summary says {field} is {summary[field]}, the rows hold {counted}")
+    if front.get(field) not in (None, counted):
+        sys.exit(f"the front-matter says {field} is {front[field]}, the rows hold {counted}")
+
+print(f"{len(consumed)} artefact(s) and the product re-derive")
+PY
+"#;
+
+/// Where a bakeoff's numbers land.
+///
+/// ASSEMBLED, NOT PRINTED. Ruled 2026-09-10 on #69: printing the report to
+/// stdout leaves the assembly of a results directory to a person, which is a
+/// vacuum with a human in it. The verb writes the directory -- the record, the
+/// regimen, the caches by digest, the front-matter carrying the pre-registered
+/// endpoints -- and answers with where it put it.
+///
+/// The directory is NAMED BY THE CALLER, not by this. A results directory's
+/// name carries the date of the run and the claim's slug, and neither is a
+/// thing a program should invent: reading the clock would make the same inputs
+/// produce a different directory every day.
+///
+/// # Errors
+///
+/// Returns [`RunError`] for anything that stops the run, and for a directory
+/// that already holds a report -- overwriting somebody's results is not an
+/// assembly step.
+pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
+    let done = computed(path)?;
+    let mut product = String::new();
+    json::render(&done.report, &mut product);
+    product.push('\n');
+    let product_sha256 = sha256_hex(product.as_bytes());
+
+    let artifacts = consumed(&done.record.events);
+    let checked = u32::try_from(artifacts.len()).unwrap_or(u32::MAX);
+
+    if into.join("README.md").exists() {
+        return Err(RunError::Occupied {
+            path: into.display().to_string(),
+        });
+    }
+    std::fs::create_dir_all(into).map_err(|err| RunError::Write {
+        path: into.display().to_string(),
+        reason: err.to_string(),
+    })?;
+
+    // The caches and the register, by the digests the record declares. Copied
+    // rather than referenced: a results directory is a claim with its evidence
+    // ATTACHED, and evidence that lives somewhere else is a link.
+    for artifact in &artifacts {
+        let bytes =
+            std::fs::read(done.dir.join(&artifact.path)).map_err(|_| RunError::Missing {
+                path: artifact.path.clone(),
+            })?;
+        let landing = into.join(&artifact.path);
+        if let Some(parent) = landing.parent() {
+            std::fs::create_dir_all(parent).map_err(|err| RunError::Write {
+                path: parent.display().to_string(),
+                reason: err.to_string(),
+            })?;
+        }
+        write(&landing, &bytes)?;
+    }
+
+    let regime = done.record.regime().clone();
+    let record = crate::formats::record::Record {
+        events: vec![
+            Event::Start {
+                regime: Box::new(regime.clone()),
+            },
+            Event::Claim {
+                id: "c1".to_owned(),
+                hypothesis: PRE_REGISTRATION.primary.to_owned(),
+                // A recompute of an endpoint is not a verdict on it. The verb
+                // computes numbers; whether they support the pre-registered
+                // hypothesis is read off them by a person, and a program that
+                // wrote `supported` here would be making a claim it cannot
+                // make. Inconclusive is the honest machine answer, and it is
+                // the one a reader may change after reading the numbers.
+                result: crate::formats::record::Verdict::Inconclusive,
+                consumes: artifacts
+                    .iter()
+                    .map(|artifact| (*artifact).clone())
+                    .collect(),
+                supersedes: None,
+            },
+            Event::Summary {
+                summary: Summary::Recompute {
+                    targets_checked: checked,
+                    // Every one of them matched, or `computed` would have
+                    // refused: `read_consumed` compares each digest before a
+                    // single number is produced. So this is a count of what
+                    // was verified rather than a second verification.
+                    targets_matched: checked,
+                    digests: artifacts
+                        .iter()
+                        .map(|artifact| artifact.sha256.clone())
+                        .collect(),
+                },
+                product_sha256: product_sha256.clone(),
+            },
+        ],
+    };
+    write(
+        &into.join("run.jsonl"),
+        crate::formats::record::render(&record).as_bytes(),
+    )?;
+    write(&into.join("report.json"), product.as_bytes())?;
+    write(&into.join("regimen.toml"), regimen_of(&regime).as_bytes())?;
+    write(
+        &into.join("README.md"),
+        report_of(&regime, &product_sha256, checked).as_bytes(),
+    )?;
+    write(&into.join("recompute.sh"), RECOMPUTE.as_bytes())?;
+    executable(&into.join("recompute.sh"))?;
+
+    Ok(Value::Object(BTreeMap::from([
+        (
+            "directory".to_owned(),
+            Value::String(into.display().to_string()),
+        ),
+        ("product_sha256".to_owned(), Value::String(product_sha256)),
+        (
+            "targets_checked".to_owned(),
+            Value::Integer(i64::from(checked)),
+        ),
+    ])))
+}
+
+/// Write one file, naming it when the write fails.
+fn write(path: &Path, bytes: &[u8]) -> Result<(), RunError> {
+    std::fs::write(path, bytes).map_err(|err| RunError::Write {
+        path: path.display().to_string(),
+        reason: err.to_string(),
+    })
+}
+
+/// Make `recompute.sh` runnable, because gate 0 runs it.
+#[cfg(unix)]
+fn executable(path: &Path) -> Result<(), RunError> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).map_err(|err| {
+        RunError::Write {
+            path: path.display().to_string(),
+            reason: err.to_string(),
+        }
+    })
+}
+
+/// Elsewhere there is nothing to set, and `check-recompute.py` invokes the
+/// script through `bash` rather than by executing it, so this is a courtesy
+/// rather than the contract.
+#[cfg(not(unix))]
+fn executable(_path: &Path) -> Result<(), RunError> {
+    Ok(())
+}
+
+/// The regimen this run applied, as a `regimen` v1 document.
+///
+/// Every key the front-matter's `[regime]` table carries has to be bound here
+/// -- `check-results.py` refuses a regime field the regimen does not bind, on
+/// the grounds that it is a claim about the run that nothing backs -- so the
+/// two are written from the same three values.
+fn regimen_of(regime: &Regime) -> String {
+    let ids: Vec<String> = regime
+        .substrate_ids()
+        .into_iter()
+        .map(|id| format!("{id:?}"))
+        .collect();
+    format!(
+        "# The regimen this run applied, written by `diet bakeoff --into`.\n\
+         #\n\
+         # It is the regimen of the run being RECOMPUTED: these numbers are\n\
+         # about that run's substrates, and a recompute that declared its own\n\
+         # would be describing the machine that did the arithmetic rather than\n\
+         # the machine the result is about.\n\
+         arm = {:?}\n\
+         substrates = [{}]\n\
+         dogma_version = {}\n",
+        regime.arm,
+        ids.join(", "),
+        regime.dogma_version,
+    )
+}
+
+/// The report: front-matter the directory linter accepts, then the sections it
+/// requires, in the order it requires them.
+///
+/// THE PRE-REGISTERED ENDPOINTS ARE STRINGS HERE AND THE NUMBERS ARE NOT.
+/// `check-results.py` walks every number in the front-matter outside `[regime]`
+/// and requires it to appear in the summary row -- that is the prose-against-
+/// data rule, and it is the rule that makes a report's numbers checkable. The
+/// pre-registration carries numbers of its own (the resamples, the attainable
+/// p floor, the shuffles, the budget ladder) and a recompute summary has three
+/// fields, so carrying them here would mean either a front-matter number
+/// nothing backs or a linter taught the schema's internals. They live in
+/// `report.json`, whole, where the record's digest holds them.
+///
+/// `targets_checked` IS carried, because the summary binds it. It is also what
+/// `check-recompute.py`'s tamper probe perturbs: that probe bumps an integer
+/// in the report and requires `recompute.sh` to notice, so a report with no
+/// number in it would make the probe vacuous.
+fn report_of(regime: &Regime, product_sha256: &str, checked: u32) -> String {
+    let ids: Vec<String> = regime
+        .substrate_ids()
+        .into_iter()
+        .map(|id| format!("{id:?}"))
+        .collect();
+    // A hosted substrate's weights can change under a re-firing, so a
+    // directory whose record names one may not claim to be reproducible by
+    // config -- ruled 2026-09-08, and enforced by `check-results.py`. Decided
+    // here from the record rather than left to whoever edits the file.
+    let hosted = regime.hosted_substrate_ids();
+    let kind = if hosted.is_empty() {
+        "reproducible-by-config"
+    } else {
+        "historical-observation"
+    };
+    let caveat = if hosted.is_empty() {
+        "Every input is committed beside this file at the digest the record \
+         consumed, so the same command over the same bytes produces the same \
+         numbers."
+            .to_owned()
+    } else {
+        format!(
+            "The run being recomputed was served by hosted weights ({}), which can \
+             change under a re-firing, so this is a historical observation rather \
+             than something reproducible by config.",
+            hosted.join(", ")
+        )
+    };
+    format!(
+        "+++\n\
+         hypothesis = {:?}\n\
+         result = \"inconclusive\"\n\
+         kind = {kind:?}\n\
+         product_sha256 = {product_sha256:?}\n\
+         controls_run = [\"scoring-extremes\", \"shuffled-label-null\"]\n\
+         known_defects = []\n\
+         targets_checked = {checked}\n\
+         \n\
+         [regime]\n\
+         arm = {:?}\n\
+         substrates = [{}]\n\
+         dogma_version = {}\n\
+         \n\
+         [pre_registration]\n\
+         primary = {:?}\n\
+         separation = {:?}\n\
+         over_firing = {:?}\n\
+         comparator = {:?}\n\
+         correction = {:?}\n\
+         +++\n\
+         \n\
+         # The sense bakeoff, over the caches this record consumed\n\
+         \n\
+         Written by `diet bakeoff --into`. The numbers are in `report.json`;\n\
+         this file is what makes them checkable.\n\
+         \n\
+         ## Observation\n\
+         \n\
+         A record declared the caches it consumed, with a digest for each, and\n\
+         nothing had turned those caches into numbers.\n\
+         \n\
+         ## Hypothesis\n\
+         \n\
+         {}\n\
+         \n\
+         ## Test\n\
+         \n\
+         `diet bakeoff run.jsonl --into <this directory>`, over the artefacts\n\
+         committed here. Every cache is read at the digest the record declares\n\
+         for it; a cache whose bytes are not those bytes stops the run rather\n\
+         than scoring something else. The pre-registered endpoints are in the\n\
+         `[pre_registration]` table above and the settings they run under --\n\
+         the budget ladder, the resamples, the shuffles, the attainable p floor\n\
+         -- are in `report.json`.\n\
+         \n\
+         ## Results\n\
+         \n\
+         {checked} artefact(s) checked, {checked} matched. The cells, the\n\
+         comparisons and the null are in `report.json`, whose digest is\n\
+         `product_sha256` above and in the summary row.\n\
+         \n\
+         ## Conclusion\n\
+         \n\
+         `inconclusive`, and written that way by the program rather than\n\
+         decided: this verb computes the endpoints, it does not test them\n\
+         against a threshold. A reader who has read `report.json` may change\n\
+         it; a program that wrote `supported` here would be making a claim it\n\
+         cannot make.\n\
+         \n\
+         {caveat}\n",
+        PRE_REGISTRATION.primary,
+        regime.arm,
+        ids.join(", "),
+        regime.dogma_version,
+        PRE_REGISTRATION.primary,
+        PRE_REGISTRATION.separation,
+        PRE_REGISTRATION.over_firing,
+        PRE_REGISTRATION.comparator,
+        PRE_REGISTRATION.correction,
+        PRE_REGISTRATION.primary,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::fmt::Write as _;
     use std::path::{Path, PathBuf};
 
-    use super::{RunError, run};
+    use super::{RunError, assemble, run};
     use crate::capture::sense::{self, Embedder, Fixture};
     use crate::digest::sha256_hex;
     use crate::formats::record::json::Value;
@@ -626,6 +1056,132 @@ mod tests {
             Value::Object(members) => members.get(key).expect("the key"),
             _ => panic!("not an object"),
         }
+    }
+
+    /// THE WHOLE POINT OF "ASSEMBLE, DON'T PRINT": the directory the verb
+    /// writes is one the gates accept. Anything less is a verb that produces
+    /// a shape nobody can land.
+    ///
+    /// Both linters are run against it, as themselves, from this test --
+    /// because the two things that could be wrong are different. The
+    /// directory linter says the report agrees with the record; gate 0 says
+    /// the numbers re-derive from the artefacts. A directory that passed one
+    /// and failed the other would be exactly the half-assembled shape the
+    /// ruling was about.
+    #[test]
+    fn the_assembled_directory_is_one_the_gates_accept() {
+        // UNDER THE REPOSITORY, not in the system temp directory, because
+        // gate 0 asks git whether `recompute.sh` modified the tree and
+        // refuses when git cannot answer. Under `target/` it is ignored, so
+        // the answer is "nothing changed" -- which is the answer the check
+        // wants and the one a scratch directory outside any repository
+        // cannot give.
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the workspace root")
+            .to_path_buf();
+        let dir = root.join("target/bakeoff-assembled");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = write_run(&dir);
+        let into = dir.join("2026-01-01-a-sense-bakeoff");
+        let answer =
+            assemble(&path, &into).unwrap_or_else(|err| panic!("the assembly failed: {err}"));
+
+        // Every file the ruling named, and the two the gates require.
+        for name in [
+            "README.md",
+            "run.jsonl",
+            "regimen.toml",
+            "report.json",
+            "recompute.sh",
+        ] {
+            assert!(into.join(name).is_file(), "{name} was not written");
+        }
+        // The caches, by digest, beside the record that consumed them.
+        assert!(
+            into.join("even.vectors.jsonl").is_file(),
+            "a cache the record consumed was not committed beside it"
+        );
+
+        // The answer names where it put it, and the digest of what it put
+        // there -- so a caller has something to check without opening the
+        // directory.
+        let Value::String(reported) = field(&answer, "product_sha256") else {
+            panic!("the answer names the product's digest")
+        };
+        let product = std::fs::read(into.join("report.json")).expect("the product");
+        assert_eq!(
+            *reported,
+            sha256_hex(&product),
+            "the answer's digest is not the product's"
+        );
+
+        // AND THE GATES. `check-results.py` dispatches the record verdict to
+        // the built binary, and refuses when that binary does not reflect the
+        // source -- which `cargo test` alone does not guarantee, because
+        // nothing rebuilds it. So the same resolver the linter uses is asked
+        // first, and a binary it will not vouch for SKIPS the two gates
+        // loudly rather than failing them: the defect would be in the build,
+        // not in the directory, and a test that says "refused" about the
+        // wrong thing sends the next reader to the wrong file.
+        //
+        // Loudly, because a test that quietly passes when it could not run is
+        // the thing this repository refuses. `verify.sh` builds the binary
+        // before it runs the suite, so in the gate this branch is not taken.
+        let resolved = std::process::Command::new("python3")
+            .arg(root.join("scripts/resolve-diet.py"))
+            .current_dir(&root)
+            .output();
+        let usable = matches!(&resolved, Ok(out) if out.status.success());
+        if !usable {
+            let why = resolved.map_or_else(
+                |err| err.to_string(),
+                |out| String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            );
+            eprintln!(
+                "the assembled directory was NOT linted, and this test proved nothing about \
+                 the gates: {why}"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        for (script, what) in [
+            ("scripts/check-results.py", "the directory linter"),
+            ("scripts/check-recompute.py", "gate 0"),
+        ] {
+            let out = std::process::Command::new("python3")
+                .arg(root.join(script))
+                .arg("--root")
+                .arg(&dir)
+                .current_dir(&root)
+                .output()
+                .unwrap_or_else(|err| panic!("{what} could not be run: {err}"));
+            assert!(
+                out.status.success(),
+                "{what} refused the assembled directory:\n{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr),
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Assembling over somebody's results is not an assembly step.
+    #[test]
+    fn a_directory_that_already_holds_a_report_is_refused() {
+        let dir = scratch("occupied");
+        let path = write_run(&dir);
+        let into = dir.join("2026-01-01-a-sense-bakeoff");
+        assemble(&path, &into).expect("the first assembly");
+        let before = std::fs::read(into.join("README.md")).expect("the report");
+        let err = assemble(&path, &into).expect_err("the second assembly");
+        assert!(matches!(err, RunError::Occupied { .. }), "{err}");
+        assert_eq!(
+            std::fs::read(into.join("README.md")).expect("the report"),
+            before,
+            "a refused assembly rewrote the report anyway"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
