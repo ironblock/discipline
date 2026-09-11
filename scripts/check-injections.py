@@ -82,7 +82,11 @@ def brace_span(text: str, opened: int) -> int | None:
 
 
 USE_LINE = re.compile(r"^\s*(?:pub\s+)?use\s+([A-Za-z_][A-Za-z0-9_:]*)::(?:\{([^}]*)\}|([A-Za-z_][A-Za-z0-9_]*))", re.M)
-EDITS = re.compile(r"\b(diet/src/[A-Za-z0-9_/]+\.rs)\b")
+# Both roots, because a resolver that cannot SEE a declaration is a resolver
+# that places a literal against the wrong one. `Ground` is declared in
+# diet/tests/drive_cli.rs beside two diet/src modules, so reading only src
+# meant the scan knew two of the three and could not know it was short.
+EDITS = re.compile(r"\b(diet/(?:src|tests)/[A-Za-z0-9_/]+\.rs)\b")
 
 
 def module_file(root: Path, path: str) -> Path | None:
@@ -97,7 +101,7 @@ def module_file(root: Path, path: str) -> Path | None:
     return None
 
 
-def declared_types(root: Path) -> dict[str, list[str]]:
+def declared_types(*roots: Path) -> dict[str, list[str]]:
     """Every braced type in the crate, by the name a literal spells, with the
     fields a literal of it must name.
 
@@ -109,15 +113,16 @@ def declared_types(root: Path) -> dict[str, list[str]]:
     A variant is keyed both ways -- `Event::Summary` and `Summary` -- because
     an injection may spell either, and both are the same obligation.
 
-    Keyed by name AND by the file that declares it, because five names in
-    this crate are declared twice with different fields, and one of them is
+    Keyed by name AND by the file that declares it, because TWENTY-THREE
+    names here are declared in more than one place -- measured, after a
+    disclosure claimed five and was never re-asked -- and one of them is
     `Provenance` -- the type whose growth invalidated an injection on #43 and
     the reason this scan exists. A map from bare names to one field list would
     have compared that injection against the wrong `Provenance` and reported
     nine failures on a clean tree, which is how a scan gets switched off.
     """
     found: dict[str, dict[Path, list[str]]] = {}
-    for path in sorted(root.rglob("*.rs")):
+    for path in sorted(p for root in roots for p in root.rglob("*.rs")):
         text = path.read_text(encoding="utf-8", errors="replace")
         for decl in TYPE_DECL.finditer(text):
             kind, name = decl.group(1), decl.group(2)
@@ -139,7 +144,9 @@ def declared_types(root: Path) -> dict[str, list[str]]:
     return found
 
 
-def incomplete_literals(source: str, types: dict, root: Path) -> list[str]:
+def incomplete_literals(
+    source: str, types: dict, crate: Path, repo: Path
+) -> list[str]:
     """Injections whose replacement text builds a literal missing a field.
 
     THE COMPILER CANNOT SEE INSIDE AN INJECTION. Its replacement text is a
@@ -161,7 +168,9 @@ def incomplete_literals(source: str, types: dict, root: Path) -> list[str]:
     unresolved: list[str] = []
     for match in FUNC_BODY.finditer(source):
         name, body = match.group(1), match.group(2)
-        edits = [root / Path(p).relative_to("diet/src") for p in EDITS.findall(body)]
+        # Repository-relative, because an injection may now edit diet/tests as
+        # well as diet/src and the two do not share a prefix to strip.
+        edits = [repo / p for p in EDITS.findall(body)]
         for spelling, where in types.items():
             for opened in literal_starts(body, spelling):
                 brace = opened + len(spelling) + 1
@@ -171,7 +180,7 @@ def incomplete_literals(source: str, types: dict, root: Path) -> list[str]:
                 inner = body[brace + 1 : end]
                 if ".." in inner:
                     continue  # this literal's own functional update supplies the rest
-                fields, why = resolve(spelling, where, edits, root)
+                fields, why = resolve(spelling, where, edits, crate)
                 if fields is None:
                     unresolved.append(f"{name}  builds a {spelling}: {why}")
                     continue
@@ -403,8 +412,11 @@ def main() -> int:
     # injection writes still name every field its type declares? Asked
     # statically, before a single box is built, because the answer is in two
     # texts and needs no tree at all.
-    sources = root / "diet" / "src"
-    stale = incomplete_literals(text, declared_types(sources), sources)
+    crate_root = root / "diet" / "src"
+    tests_root = root / "diet" / "tests"
+    stale = incomplete_literals(
+        text, declared_types(crate_root, tests_root), crate_root, root
+    )
     if stale:
         print(
             f"check-injections: {len(stale)} injection(s) build a literal the "

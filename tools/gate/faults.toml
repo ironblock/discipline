@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 305
+red_faults = 306
 mechanics_assertions = 42
 migrated = 0
 
@@ -3275,3 +3275,11 @@ failure_class = "schema.canned-without-acts"
 legacy_signature = "canned-with-no-acts-digest\\.jsonl: accepted as"
 migrated = false
 
+[[fault]]
+id = "injections.injections_literal_unplaceable"
+kind = "seeded-gate"
+check = "injections"
+label = "a literal the scan cannot place"
+failure_class = "gate.injection-literal-unplaceable"
+legacy_signature = "builds a Ground: declared in 3 places"
+migrated = false
