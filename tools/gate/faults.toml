@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 305
+red_faults = 306
 mechanics_assertions = 47
 migrated = 0
 
@@ -3316,5 +3316,15 @@ target = "test:conformance/formats::record"
 label = "a fork that names no substrate"
 failure_class = "schema.undeclared-substrate"
 legacy_signature = "fork-names-an-undeclared-substrate\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_canned_acts_optional"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a canned substrate that need not say which acts"
+failure_class = "schema.canned-without-acts"
+legacy_signature = "canned-with-no-acts-digest\\.jsonl: accepted as"
 migrated = false
 

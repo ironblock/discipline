@@ -98,23 +98,38 @@ vocabulary! {
         /// Weights behind an endpoint, identified by who serves them and what
         /// they are called.
         Hosted => "hosted",
+        /// No weights at all: a canned server replaying authored acts,
+        /// identified by the digest of the acts it plays.
+        Canned => "canned",
     }
 }
 
 /// Which weights a substrate ran, and how they are identified.
 ///
 /// A HOSTED MODEL IS A SUBSTRATE WHOSE WEIGHTS CAN CHANGE UNDER YOU -- the
-/// engine's re-pointed tag, at scale -- so the two variants are not two
-/// spellings of one thing. Gate 0 re-derives a result from committed
-/// artifacts and is indifferent to which this is; gate 1 re-fires it on a
-/// declared substrate and cannot, so [`Weights::is_reproducible`] is what
-/// `check-results.py` asks before letting a directory call itself
-/// `reproducible-by-config`.
+/// engine's re-pointed tag, at scale -- so the variants are not spellings of
+/// one thing. Gate 0 re-derives a result from committed artifacts and is
+/// indifferent to which this is; gate 1 re-fires it on a declared substrate
+/// and cannot, so [`Weights::is_reproducible`] is what `check-results.py`
+/// asks before letting a directory call itself `reproducible-by-config`.
 ///
-/// Ruled 2026-09-08. The alternative considered and refused was a
-/// `weights_digest` that also accepts a name: that is a field whose meaning
-/// depends on what happens to be in it, and the reason for a digest was that
-/// there should be one meaning.
+/// THE THREE ARE REPRODUCED BY DIFFERENT MECHANISMS, which is why a kind is
+/// not decoration on a digest:
+///
+/// - [`Weights::Digest`] is re-fired on the declared hardware and compared
+///   within a pre-registered band, because sampling and hardware move.
+/// - [`Weights::Canned`] is REPLAYED, and compared exactly. There is no band,
+///   because there is nothing to vary: the same acts play again, byte for
+///   byte. It is the strongest form of reproducible-by-config and not the
+///   same claim as parity.
+/// - [`Weights::Hosted`] is neither. It may be observed and never certified.
+///
+/// Ruled 2026-09-08, and extended 2026-09-11. The alternative refused twice
+/// is one field whose meaning depends on what happens to be in it: first a
+/// `weights_digest` that also accepts a name, then a canned server's acts
+/// digest read through `Digest`. The second is the subtler one -- it makes
+/// `Digest` mean weights OR replay acts, told apart only by knowing the
+/// engine's name, which is a label standing in for a value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Weights {
     /// Weights on disk, by sha256.
@@ -130,6 +145,15 @@ pub enum Weights {
         /// neither is a guarantee, which is the point.
         version_or_date_observed: String,
     },
+    /// No weights: a canned server replaying acts written in advance.
+    Canned {
+        /// The digest of the acts it plays, which is its whole identity.
+        ///
+        /// A canned server has no weights and that is not the same as having
+        /// nothing identifiable: the acts decided every reply, they are an
+        /// artifact somebody can hold, and this is their sha256.
+        acts_sha256: String,
+    },
 }
 
 impl Weights {
@@ -139,6 +163,7 @@ impl Weights {
         match self {
             Self::Digest(_) => WeightsKind::Digest,
             Self::Hosted { .. } => WeightsKind::Hosted,
+            Self::Canned { .. } => WeightsKind::Canned,
         }
     }
 
@@ -151,7 +176,21 @@ impl Weights {
     /// `reproducible-by-config`.
     #[must_use]
     pub fn is_reproducible(&self) -> bool {
-        matches!(self, Self::Digest(_))
+        // Canned is reproducible BY REPLAY rather than by re-firing, and it is
+        // the stronger of the two: the acts play again exactly. See
+        // [`Weights::is_replayed`] for the half that decides HOW a gate
+        // compares, which is a different question from whether it may.
+        matches!(self, Self::Digest(_) | Self::Canned { .. })
+    }
+
+    /// Whether reproducing this means replaying acts rather than re-firing.
+    ///
+    /// Gate 1 compares a replay EXACTLY and a re-firing within a band. Asking
+    /// this rather than reading the engine's name is the whole reason the kind
+    /// exists.
+    #[must_use]
+    pub fn is_replayed(&self) -> bool {
+        matches!(self, Self::Canned { .. })
     }
 }
 
@@ -263,7 +302,11 @@ impl Regime {
     pub fn hosted_substrate_ids(&self) -> Vec<&str> {
         self.substrates
             .iter()
-            .filter(|s| !s.weights.is_reproducible())
+            // MATCHED, not inferred from `!is_reproducible()`. With two
+            // variants those were the same set; with three they are only the
+            // same until a fourth, and this list is named for hosted
+            // substrates rather than for whatever is left over.
+            .filter(|s| matches!(s.weights, Weights::Hosted { .. }))
             .map(|s| s.id.as_str())
             .collect()
     }
@@ -1441,6 +1484,19 @@ fn weights(fields: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Wei
             model_id: take_string(&mut members, of, "model_id")?,
             version_or_date_observed: take_string(&mut members, of, "version_or_date_observed")?,
         },
+        // Checked as a digest, like `Digest` and for the same reason: it is
+        // an identity claim about an artifact, and a string that is not a
+        // digest cannot make one. What it digests is the acts rather than
+        // weights, which is exactly why it is not spelled `sha256` here --
+        // two kinds sharing a field name is how the reader stops being able
+        // to say which it got.
+        WeightsKind::Canned => {
+            let text = take_string(&mut members, of, "acts_sha256")?;
+            if !digest_ok(&text) {
+                return Err(StructureError::BadDigest(text).into());
+            }
+            Weights::Canned { acts_sha256: text }
+        }
     };
     if let Some(field) = members.keys().next() {
         return Err(SchemaError::UnknownField {
@@ -2351,6 +2407,9 @@ fn weights_value(weights: &Weights) -> Value {
                 Value::String(version_or_date_observed.clone()),
             );
         }
+        Weights::Canned { acts_sha256 } => {
+            members.insert("acts_sha256".to_owned(), Value::String(acts_sha256.clone()));
+        }
     }
     Value::Object(members)
 }
@@ -2848,11 +2907,14 @@ mod tests {
         parse(&two_lanes).expect("two lanes, two substrates");
     }
 
-    // The whole reason the identity is typed: gate 1 asks this question, and a
-    // kind added later that nobody classified would answer it by accident.
-    // Enumerating the vocabulary means a new kind fails to compile here.
+    // The whole reason the identity is typed: gate 1 asks these questions, and
+    // a kind added later that nobody classified would answer them by accident.
+    // Enumerating the vocabulary means a new kind fails to COMPILE here, which
+    // is how `Canned` came to be classified rather than defaulted: adding it
+    // broke this match, and a variant that cannot be added silently is the
+    // point of spelling the match out instead of writing a wildcard.
     #[test]
-    fn only_digested_weights_can_be_re_fired() {
+    fn every_weights_kind_answers_gate_one_the_way_its_mechanism_does() {
         for kind in WeightsKind::ALL {
             let weights = match kind {
                 WeightsKind::Digest => Weights::Digest("a".repeat(64)),
@@ -2861,12 +2923,28 @@ mod tests {
                     model_id: "a-model-4".to_owned(),
                     version_or_date_observed: "2026-09-08".to_owned(),
                 },
+                WeightsKind::Canned => Weights::Canned {
+                    acts_sha256: "b".repeat(64),
+                },
             };
             assert_eq!(weights.kind(), *kind, "{} mislabels itself", kind.tag());
+
+            // MAY it be reproduced. Digest by re-firing, Canned by replay;
+            // Hosted by neither, because the weights can change under you.
             assert_eq!(
                 weights.is_reproducible(),
-                *kind == WeightsKind::Digest,
-                "{} answers gate 1 wrongly",
+                matches!(kind, WeightsKind::Digest | WeightsKind::Canned),
+                "{} answers gate 1 wrongly about whether it may be reproduced",
+                kind.tag()
+            );
+
+            // HOW. A replay is compared exactly and a re-firing within a band,
+            // so a gate that confused them would apply a tolerance meant for
+            // sampling and hardware to a run where neither can vary.
+            assert_eq!(
+                weights.is_replayed(),
+                matches!(kind, WeightsKind::Canned),
+                "{} answers gate 1 wrongly about how it is reproduced",
                 kind.tag()
             );
         }

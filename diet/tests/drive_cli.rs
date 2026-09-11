@@ -177,12 +177,22 @@ fn a_drives_regime_crosses_from_the_regimen_without_being_paraphrased() {
     // sides is the entire content of the claim.
     let digest = diet::drive::canned::acts_digest();
     assert!(
-        start.contains(&format!("\"sha256\":\"{digest}\"")),
-        "the weights are the acts, by digest: {start}"
+        start.contains(&format!("\"acts_sha256\":\"{digest}\"")),
+        "the identity is the acts, by digest: {start}"
+    );
+    // ITS OWN KIND, not `digest`. A canned server runs no weights, and reading
+    // its acts digest through the kind that means "these weights" would make
+    // that field mean two things told apart only by the engine's name. Gate 1
+    // compares a replay exactly and a re-firing within a band, so the kinds
+    // have to be distinguishable before either comparison is right. Ruled
+    // 2026-09-11.
+    assert!(
+        start.contains("\"kind\":\"canned\""),
+        "and it says which mechanism reproduces it: {start}"
     );
     assert!(
-        start.contains("\"kind\":\"digest\""),
-        "and it is spelled as a digest, not as a hosted name: {start}"
+        !start.contains("\"kind\":\"digest\""),
+        "not borrowing the kind that means weights: {start}"
     );
 }
 
