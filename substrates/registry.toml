@@ -1,0 +1,443 @@
+# The test-equipment registry.
+#
+# A manifest of the hardware available for testing, in detail, plus one entry
+# per SUBSTRATE -- a served model on a machine, which is not the same thing. Two
+# of this program's substrates are the same machine, so a registry keyed by
+# machine could not record the experiment that compares them.
+#
+# FULL SPECIFICATIONS, NOT CLASS DESCRIPTIONS, per the ruling on #52. A class
+# description ("a 24 GiB Ampere-class card") erases exactly the facts diagnosis
+# needs, and platform-specific cannot be told from systemic without them. The
+# excluded set is IDENTITY, and only identity: serial numbers, MAC addresses,
+# hostnames, physical location. A product name is a specification.
+#
+# Read `substrates/README.md` for what an id means, what an instance means, and
+# where this file departs from a ruling and why.
+#
+# PROVENANCE IS PER FIELD. Every value is measured on the machine or read out of
+# a committed record, and each block says which and when. An inference carries
+# `*_inferred = true` and states what it was inferred from. A specification the
+# amendment names and nobody has measured is listed as absent, by name, so the
+# gap is visible rather than merely empty.
+
+[registry]
+version = 1
+
+
+# ---------------------------------------------------------------------------
+# entry types, and the hardware fields each one declares
+# ---------------------------------------------------------------------------
+#
+# `hardware_fingerprint` is a digest over an entry's DECLARED hardware fields,
+# and this is where the declaration lives -- per entry TYPE, so an Apple entry's
+# `chip` and a workstation's `model_identifier` are both covered by name rather
+# than by a fixed list that happened to fit one of them. A first attempt used a
+# single list across all three entries and silently covered TWO of twelve fields
+# on the Apple machines, because their entries name different things. That is why
+# the coverage rule below exists.
+#
+# COVERAGE RULE. Every field a type declares must be PRESENT on every entry of
+# that type, and the digest is over exactly those fields. A fingerprint covering
+# fewer fields than its type declares is a failure, not a smaller fingerprint --
+# one that quietly covers two of twelve is worse than none.
+#
+# EXCLUDED BY RULE, and enforced rather than remembered:
+#   * `os` and anything naming a deployment. Those are the INSTANCE. A hardware
+#     fingerprint that changes on an operating-system update is not one.
+#   * any field marked `<name>_inferred = true`. An unverified claim baked into
+#     an identifier is one nobody can correct later without changing the
+#     identity of every record that cites it. The laptop's core counts are the
+#     live case: measured nowhere, so absent from its type's list.
+
+[entry_type.accelerator-host]
+hardware_fields = [
+  "accelerator", "accelerator_memory_mib", "accelerator_driver",
+  "accelerator_vbios", "accelerator_power_limit_w",
+  "accelerator_power_limit_ceiling_w", "accelerator_max_sm_clock_mhz",
+  "interconnect", "cpu", "memory", "board", "firmware", "storage", "cooling",
+]
+
+[entry_type.x86-workstation]
+hardware_fields = ["model_identifier", "cpu", "memory", "gpu", "architecture"]
+
+[entry_type.canned-server]
+# A canned server is equipment with no hardware: a program inside this
+# repository that replays a fixed set of acts, byte for byte, on loopback. Its
+# identity is exactly two artifacts -- what serves, and what it plays -- and
+# those are its "hardware fields", because together they determine every reply
+# the way a card and a set of weights do for a served model. Ruled on #68 in
+# place of a sentinel string in a field defined as a registry digest.
+hardware_fields = ["serves", "acts_sha256"]
+
+[entry_type.apple-silicon-laptop]
+hardware_fields = [
+  "chip", "memory", "storage", "gpu_wired_memory_limit_mb",
+  "gpu_wired_low_watermark_mb",
+]
+
+# ---------------------------------------------------------------------------
+# equipment
+# ---------------------------------------------------------------------------
+
+[equipment.linux-pc]
+display_name = "ironblock's Linux PC"
+entry_type = "accelerator-host"
+hardware_fingerprint = "e6489f9c1815a0c4540a0c6663acaa3c62b1b66e03806479475c2645347fe7af"
+role = "the accelerator host"
+measured = "2026-09-05"
+
+accelerator = "NVIDIA GeForce RTX 3090 (GA102, PCI 10de:2204, Founders Edition)"
+accelerator_memory_mib = 24576
+accelerator_driver = "610.57.04"
+accelerator_vbios = "94.02.4B.00.0B"
+accelerator_power_limit_w = 350
+accelerator_power_limit_ceiling_w = 400
+accelerator_max_sm_clock_mhz = 2100
+interconnect = "PCIe 4.0 x16"
+interconnect_measured_by = """
+`nvidia-smi --query-gpu=pcie.link.gen.max,pcie.link.gen.current,pcie.link.width.max,\
+pcie.link.width.current` returning `4, 1, 16, 16` at pstate P8, read on the \
+machine 2026-09-05. The maximum is the specification; `gen.current` reads 1 at \
+idle and ramps under load, so a rate sampled from an idle card understates the \
+bus by three generations.
+
+NOT measured by the archived fingerprints, and an earlier version of this entry \
+said it was. The capture instrument records six hard-coded PCI addresses, and \
+nothing in the archive identifies which -- if any -- is the accelerator, so the \
+`sta=8GT/s` those captures record cannot be attributed to this card either way."""
+
+cpu = "AMD Ryzen 7 5800X, 8 cores / 16 threads, max 3801 MHz"
+memory = "4 x 8 GiB DDR4-2666, dual channel, four slots populated = 32 GB, 31 GiB usable"
+board = "ASUSTeK TUF GAMING X570-PRO (WI-FI), Rev X.0x"
+firmware = "BIOS 5044 (2026-01-04)"
+storage = "2 x 1.8 TB NVMe (Corsair Force MP600)"
+os = "Bazzite, an immutable Fedora-derived image; the deployment and kernel of a given fire are instance fields, not machine fields"
+
+not_measured = """
+Two specifications the #52 amendment names are absent from this entry because \
+nobody has read them: the POWER SUPPLY (model and rating -- the amendment calls \
+out power-supply derating under heat-soaked drives as a diagnosis this manifest \
+should support) and the NVMe devices' FIRMWARE revisions. Listed by name so the \
+gap is visible; a reader diagnosing either will know the manifest cannot help \
+yet."""
+
+cooling = """
+Custom hardline water loop: three radiators (2 x 360 mm + 280 mm), six 120 mm \
+and four 140 mm fans, a full-cover block and an active backplate on the card, a \
+monoblock over CPU and VRMs, and a chipset block. Measured idle: GPU 28 C at 18 \
+W with the card's fan speed at 0% (there is no fan on the card), CPU Tctl 30.5 \
+C."""
+cooling_matters_because = """
+A stock air-cooled 3090 Founders Edition throttles under sustained decode and \
+this card does not. Absolute decode rates measured on this machine are \
+therefore NOT portable to a stock card of the same model; only within-machine \
+comparisons are. Any result citing a substrate on this machine inherits that \
+limit."""
+cooling_not_reproducible_because = """
+Two parts of the loop do not fit this board as sold. The monoblock is nominally \
+for a different manufacturer's X570 board and mounts here only with decorative \
+trim removed; the chipset block is nominally another vendor's part, mounted on \
+a custom 3D-printed (engineering resin) adapter for a hole pattern this board \
+does not have. Everything else in this entry is orderable; the loop is not \
+reproducible from a parts list, and the manifest should not imply it is."""
+
+[equipment.mac-pro-2019]
+display_name = "ironblock's 2019 Mac Pro"
+entry_type = "x86-workstation"
+hardware_fingerprint = "f0efb982fe1e4793ba9cf832e32bf30759d358da42e0362251a023c095dc480a"
+role = "the data seat's workstation; a host, with no substrate beneath it"
+measured = "2026-09-05"
+
+model_identifier = "MacPro7,1"
+cpu = "Intel Xeon W-3235, 12 cores / 24 threads, 3.30 GHz"
+memory = "12 x 8 GiB DDR4 R-DIMM @ 2933 MHz, all twelve slots populated, six channels fully banked = 96 GiB"
+gpu = "AMD Radeon Pro W5700X, 16 GB, Metal 3"
+architecture = "x86_64"
+os = "macOS 26.5.2 (build 25F84)"
+not_measured = "storage devices and firmware; power supply."
+no_substrate_because = """
+Nothing in this program serves a model on this machine: its GPU is not adept at \
+the workload. It is registered as a host with no substrate beneath it, which is \
+a truer record than inventing one. Worth stating that it is x86_64 with an AMD \
+GPU, because "runs on the Mac" is otherwise ambiguous between this machine and \
+the laptop, and the two share no acceleration path at all."""
+
+[equipment.macbook-pro-2021]
+display_name = "ironblock's 2021 MacBook Pro 16-inch"
+entry_type = "apple-silicon-laptop"
+hardware_fingerprint = "955d048e8d2033ab4ad72b68487dc37cac320121da9b65119cb63b3632b5208e"
+role = "the Apple-silicon floor suite's host"
+measured = "2026-07-23"
+measured_by = """
+The floor suite's own substrate manifest, recorded on the machine before its \
+first fire. An earlier version of this entry said "not measured -- \
+owner-supplied" and gave the operating system as unknown. That was wrong: the \
+readout exists and is committed. What is true is narrower -- no seat has read \
+this machine SINCE, and the fields below that the manifest does not cover are \
+marked."""
+
+chip = "Apple M1 Max"
+memory = "32 GB unified"
+storage = "1 TB"
+in_service = true
+os = "macOS 26.5.1 (build 25F80)"
+gpu_wired_memory_limit_mb = 30720
+gpu_wired_low_watermark_mb = 0
+core_counts = "10-core CPU / 32-core GPU"
+core_counts_inferred = true
+core_counts_inferred_from = """
+The owner supplied "highest core count for that year", which resolves to this \
+across the two SKUs M1 Max shipped in. An inference from that phrase and the \
+public SKU list, not a reading off the machine, and the one field here that \
+still wants confirming. The manifest records the chip and the memory but not \
+the core counts."""
+not_measured = "core counts (inferred, above); storage device and firmware; battery and power state."
+
+[equipment.macbook-pro-2021.floor_result]
+what_was_measured = """
+Qwen3.6 27B raw on this machine (`dflash_enabled=false`, `mtp_enabled=false` \
+confirmed before firing): a context-ceiling sweep from 4K to 32K, generation \
+17.2 -> 13.7 tokens/second, degrading gently across the range."""
+what_disqualified_it = """
+NOT the throughput. A hard memory-pressure eviction at the 32K cell's second \
+draw. The sweep's own record says the gentle degradation was "never the \
+disqualifying signal"."""
+a_number_not_to_cite = """
+An inherited "~80 tok/s prefill / ~15 tok/s decode from zero context" figure \
+circulates for this machine. The archive holds no raw measurement behind it, \
+and the session that surfaced it recorded that the decode half was taken with a \
+speculative decoding path enabled -- so it is not a raw baseline. An earlier \
+version of this registry entry stated "non-viable for the 27B" as a bare \
+measured class fact, which put the verdict in public without the evidence that \
+actually supports it and beside a number that does not."""
+
+[equipment.canned-loopback]
+display_name = "the canned loopback server"
+entry_type = "canned-server"
+hardware_fingerprint = "fc96af4713f9aaa26f2b7bda27720b497ec3d30c6edd9292da5fa8be8e0c37b0"
+role = "diet-drive's own server, serving no model: the acts it replays are the whole of what it is"
+measured = "2026-09-11"
+measured_by = """
+Read from the record `diet-drive` emits on #68 at `5c8e4fc`, and from the \
+committed fixture `valid/canned-substrate.jsonl` on the same head, which carry \
+the same digest. Provenance by record: the value is what that code computes over \
+its acts, and the consumer that resolves a record's substrate to this entry is \
+the place it gets re-derived."""
+serves = "diet-drive canned"
+acts_sha256 = "8947e69543df56300d85ed571a6799d66b25a51c18c6d456193918864d7f5e9d"
+acts_sha256_is = """
+`canned::acts_digest()` -- a length-prefixed sha256 over the acts the server \
+plays. The record names the same value as the engine's `version_or_digest` and \
+as `weights.acts_sha256`, deliberately: naming one artifact twice is the truth \
+about a server that IS its acts, and inventing a second fact to fill a second \
+field would not be."""
+no_instances_because = """
+A physical entry has instances because its deployment, kernel and engine can \
+change under a stable id. Nothing here can change without the entry changing: \
+new acts are a new digest, and a new digest is a new piece of equipment, not a \
+new instance of this one."""
+
+# ---------------------------------------------------------------------------
+# substrates
+# ---------------------------------------------------------------------------
+
+[substrate.accel24-beellama-qwen27b-q4kxl]
+equipment = "linux-pc"
+description = "Qwen3.6 27B at UD-Q4_K_XL on the 24 GiB accelerator, served by the beellama engine with a DFlash speculative draft model"
+pinned = true
+
+engine_name = "beellama"
+engine_identity = "980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4"
+engine_identity_is = "sha256 of the llama-server binary, hashed on the machine 2026-09-05"
+engine_identity_note = """
+NO SUBSTRATE CAPTURE RECORDS THE ENGINE. All four captures carry an empty \
+`source_commit`, the 2026-09-04 one included, and no capture has a binary-digest \
+field at all. This digest was produced by a separate act of measurement on \
+2026-09-05, on the deployment the `2026-09-04` instance describes -- so it \
+attaches to the substrate and to that instance, and NOT to the three earlier \
+ones, which per the ruling on #52 must carry their own engine digest rather \
+than inherit this one.
+
+An earlier version of this file gave the reason for that split as the earlier \
+captures having an empty `source_commit`. That does not distinguish them: all \
+four are empty. The distinguishing fact is the date of the hashing, which is \
+what this field now says.
+
+The recommendation the whole series supports: a substrate capture should record \
+the serving binary's digest. Nothing else in the capture identifies it -- the \
+binary appears there by modification time and size, if at all."""
+engine_label = "preview-v0.3.2"
+engine_label_is_not_identity = """
+Upstream re-pointed this release tag on 2026-07-10, from one commit to a \
+descendant, because the release was re-cut with extra fixes. The tarball here \
+was downloaded 2026-06-14 and is the original cut, so two machines can both \
+honestly report `preview-v0.3.2` and run different code. The label is for \
+readers; the binary digest is what parity matches."""
+engine_release_tarball_sha256 = "9da1f400e03925c797f1d699c5f275d6bd4616df5b9cdeb4c54f649850ced558"
+engine_release_downloaded = "2026-06-14"
+engine_build_toolchain = "GCC 13.3.0, CUDA 13.1, x86_64"
+engine_self_reported_version = "0 (unknown)"
+engine_self_reported_build_info = "b0-unknown-dirty"
+engine_provenance_note = """
+The engine is an unpacked prebuilt release tarball, not a local build. That is \
+why there is no git checkout at or above the serving directory, no \
+`CMakeCache.txt` recording a source tree, and `LLAMA_BUILD_NUMBER` resolving to \
+`b0`: there was never a build tree to find. Pin the BINARY and not its \
+directory -- the unpacked directory also holds unrelated files, so a \
+directory-level digest would drift for reasons that have nothing to do with the \
+engine. The engine is a declared factor of the science and not an identity to \
+be scrubbed, per the ruling on #52."""
+
+weights_main = "ff6941ded525b34eb159496762c29dd0ec6e71dc31b74d57e75d871a03eec259"
+weights_main_file = "Qwen3.6-27B-UD-Q4_K_XL.gguf"
+weights_draft = "08e4dffcd7893a4c15981ab2061afa128013731be60f1a6847785a3d630f7c8d"
+weights_draft_file = "Qwen3.6-27B-DFlash-IQ4_XS.gguf"
+weights_projector = "05353347512982ee62317b9d8c89372bc815f4b4043580e7ef3ad411ec1a1cd3"
+weights_projector_file = "mmproj-BF16.gguf"
+
+sampler_card = "temperature 0.6, top_k 20, top_p 1.0, min_p 0.0"
+sampler_card_is = """
+The server's own defaults, as the serving line sets them. A fire may override \
+them, and its regime records what it sent; where the two differ the fire's \
+regime is what ran. The extraction bakeoff of 2026-08-10 is one such fire."""
+
+serving_context = 160000
+serving_flags = "--flash-attn on, --kv-unified, --cache-type-k q5_0, --cache-type-v q4_1, --spec-type dflash, --spec-dflash-cross-ctx 1024, --spec-draft-ngl all, -ngl all, -b 2048, -ub 512, --mlock, --no-mmap, --no-host, --no-mmproj-offload, --jinja, --chat-template-kwargs {\"preserve_thinking\":true}, --image-min-tokens 1024, --reasoning on"
+serving_flags_constant_across_instances = true
+serving_flags_excludes = """
+The captured serving line's remaining flags are carried elsewhere rather than \
+dropped: `--ctx-size` is `serving_context`, the four sampler flags are the \
+`sampler_card`, `-np` is a regimen field and not this file's, and `-m`, \
+`--mmproj` and `--spec-draft-model` are file paths, withheld as identity and \
+carried here as the three weights digests. Nothing else in the captures is \
+omitted; an earlier version of this field silently dropped the template and \
+image flags, which govern how the model is prompted."""
+
+# Instances, oldest first. Each is pinned by a committed substrate capture in
+# the private research archive; the capture's date is the instance id.
+#
+# `os_deployment_digest` IS THE BASE-CHECKSUM, not the deployment's own. The
+# capture tool reads `rpm-ostree status` and takes `base-checksum` where it
+# exists, which names the upstream base IMAGE and does not change when packages
+# are layered locally on top of it. Verified on the machine 2026-09-07: the
+# booted 44.20260902 deployment reports base-checksum `b7807f90a98c...` -- the
+# value every capture carries -- and its own checksum `48f798c562fe...`, which
+# no capture records. The deployment checksum is the more specific identity;
+# the base-checksum is what the archive has, and calling it the deployment's
+# digest without saying so would overstate what an instance pins.
+[[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
+id = "2026-07-25"
+os_deployment_version = "44.20260721"
+os_deployment_digest = "ece1632fd68d2b17089db0b960fd182d1a9b10bbc2c999457597d24d1616acaa"
+kernel = "7.1.3-ogc5.1.fc44.x86_64"
+pinned_by = "substrate capture of 2026-07-25, and the archive's frozen v1.0 baseline of the same configuration"
+engine_identity_measured = false
+engine_identified_by_record = """
+The frozen baseline's own note records that the server ran from the unpacked \
+`preview-v0.3.2` release directory rather than a git checkout. That is which \
+engine, by record. It is not the engine's bytes, by measurement."""
+weights_digest_note = """
+Two captures pin this instance. One records the three weights files by sha256, \
+the other by size and modification time only -- the capture tool recorded both \
+forms in this era. The digests in the first agree with every capture from \
+2026-08-13 onward, so the weights are the same files throughout; the size and \
+mtime form is noted because a reader diffing the two captures will find them \
+unlike and should know why."""
+
+[[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
+id = "2026-08-13"
+os_deployment_version = "44.20260802"
+os_deployment_digest = "6b752810f32080830f3a294428b7851fb686fc298f54016152d78f4671f71f79"
+kernel = "7.1.5-ogc5.1.fc44.x86_64"
+pinned_by = "substrate captures of 2026-08-13 and 2026-08-16, taken after a kernel update"
+engine_identity_measured = false
+one_instance_two_captures = """
+An earlier version of this file made these two captures two instances, because \
+the server's parallel-slot count went from 1 to 2 between them under an \
+otherwise fixed deployment. Ruled otherwise, and the ruling is the cleaner \
+line: the registry records what the machine IS -- deployment, kernel, engine \
+and weights digests, hardware -- and the regimen records how it was RUN. A slot \
+count is how it was run. The two captures agree on every field this entry \
+carries, so they are one instance, keyed on the deployment.
+
+The measurement is not lost, only rehomed: the archive does record the slot \
+count changing under a fixed deployment, which is a fact about a run and \
+belongs in the regimen that declares it."""
+
+[[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
+id = "2026-09-04"
+os_deployment_version = "44.20260902"
+os_deployment_digest = "b7807f90a98c33e911dc0ec008bc73b50561e89566cee2b85b18ff950f47ec78"
+kernel = "7.2.1-ogc4.1.fc44.x86_64"
+pinned_by = "substrate capture of 2026-09-04, taken after the operating system update of 2026-09-03"
+os_deployment_checksum = "48f798c562fe4a76ba311f638a6b543429d02bdfd01fe9dfa7e7063109ee6e19"
+os_deployment_checksum_note = """
+The booted deployment's own checksum, read on the machine 2026-09-07. Recorded \
+only for this instance because it is the only one still bootable to read; the \
+three earlier instances have the base-checksum their captures took and nothing \
+more."""
+engine_identity_measured = true
+engine_identity_measured_on = "2026-09-05"
+engine_identity_reconfirmed_on = "2026-09-07"
+engine_identity_reconfirmed_how = """
+The running server's binary was hashed again through `/proc/<pid>/exe`, without \
+using a remembered path, and returned the same digest. The serving slot count \
+read 2 from the same process's command line, matching this instance."""
+successor_staged = "44.20260907"
+successor_staged_note = """
+As of 2026-09-07 a newer image is staged and not booted. It will mint a new \
+instance on the next reboot; `current = true` here is a statement about today."""
+engine_identity_measured_how = """
+The binary was hashed on the running deployment. The capture of 2026-09-05 taken \
+during that session records the same deployment digest, version and kernel as \
+this instance and no other, which is what ties the digest to this instance \
+rather than to the substrate at large."""
+current = true
+
+[substrate.canned]
+equipment = "canned-loopback"
+description = "diet-drive's canned server, replaying its committed acts on loopback; the substrate the first drive in the gym ran on"
+pinned = true
+engine_name = "diet-drive canned"
+engine_identity = "8947e69543df56300d85ed571a6799d66b25a51c18c6d456193918864d7f5e9d"
+engine_identity_is = "the acts digest -- the server is this repository's code, and what it plays is the acts"
+weights_kind = "canned"
+weights_acts_sha256 = "8947e69543df56300d85ed571a6799d66b25a51c18c6d456193918864d7f5e9d"
+reproducible_by_config = true
+reproducible_because = "replay the acts and the same bytes play again; exact match, no band. Gate 1 compares a canned run exactly rather than re-firing it within a band meant for sampling and hardware that cannot move here."
+
+[substrate.apple32-omlx-gemma12b]
+equipment = "macbook-pro-2021"
+description = "Gemma 4 12B, quantized, served by oMLX on Apple silicon; the floor suite's substrate"
+pinned = false
+measured = "2026-07-23"
+measured_by = "the floor suite's substrate manifest, recorded on the machine before its first fire"
+
+engine_name = "oMLX"
+engine_label = "0.5.3"
+weights_model_id = "gemma-4-12B-it-qat-OptiQ-4bit"
+weights_quantization = "affine, group size 64, mixed 4/8-bit -- embeddings, attention and some MLP at 8-bit, most MLP at 4-bit"
+weights_size_on_disk = "8.4 GB"
+draft_model_id = "gemma-4-12B-it-assistant"
+draft_model_note = "oMLX's VLM-MTP path: an 837 MB drafter proposing tokens for the 12B target. Not DFlash; the manifest confirms `dflash_enabled: false`, `mtp_enabled: false`, `vlm_mtp_enabled: true`."
+sampler_card = "temperature 1.0, top_k 64, top_p 0.95"
+sampler_card_is = "the model card's required values, confirmed live against the serving configuration at manifest time"
+prefix_cache_block_tokens = 1024
+prefix_cache_note = """
+Four times coarser than the accelerator substrate's 256-token blocks, and only 8 \
+of 48 layers keep a full growing cache. A conversation whose per-turn growth \
+stays under ~1024 tokens gets zero incremental cache credit turn to turn here \
+where it would get credit every 256 tokens there. A real difference in \
+warm-fork economics between the two substrates, and a reason not to compare \
+their cache numbers directly."""
+
+unpinned_because = """
+No digests. The manifest records model ids, quantization and size on disk and \
+states plainly that file hashes were not computed, so this substrate cannot be \
+pinned for parity -- an id and a size do not distinguish two builds of the same \
+model. Everything else the shape asks for IS measured and is carried above.
+
+An earlier version of this entry said "nothing about it has been measured... a \
+name with a machine behind it and nothing else". That was false in three of its \
+four particulars, and the manifest it should have been read against was \
+committed before the fixtures that reference this substrate were written."""
