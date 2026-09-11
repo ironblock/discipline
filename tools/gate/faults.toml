@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 306
+red_faults = 308
 mechanics_assertions = 64
 migrated = 0
 
@@ -3478,3 +3478,23 @@ label = "and the decoder's own driver says so the same way"
 failure_class = "hygiene.unusable"
 expected_exit = "2"
 migrated = false
+[[fault]]
+id = "test.record_substrate_reference_inferred_from_a_count"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a substrate reference inferred from a count"
+failure_class = "schema.undeclared-substrate"
+legacy_signature = "one-substrate-and-a-request-elsewhere\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_a_fork_names_no_substrate"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a fork that names no substrate"
+failure_class = "schema.undeclared-substrate"
+legacy_signature = "fork-names-an-undeclared-substrate\\.jsonl: accepted as"
+migrated = false
+
