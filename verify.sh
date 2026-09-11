@@ -987,22 +987,24 @@ path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
 
-# The budget raised past what the instrument can demonstrate failing at. The
-# precision fixture holds eight non-positives above its positives, so at nine
-# a positive enters its own top-k, the fixture stops reading as failure, and
-# `Reported::take` refuses -- which is the guard working. Seeded because the
-# ceiling is a property of a fixture rather than of the arithmetic, and a
-# ceiling nothing tests is a ceiling somebody raises.
+# The precision fixture pinned back to a remembered size instead of built from
+# the pre-registered ladder. The widest budget the bakeoff reports at is then a
+# budget the instrument has never been seen fail at, so `Reported::take`
+# refuses it -- correctly, and a bakeoff that reports nothing is not the defect
+# being seeded. The defect is the one the 2026-09-10 ruling named: a fixture's
+# shape capping the instrument's parameter space, which is how the budget came
+# to be eight in the first place. Eight was never chosen; it was the widest the
+# fixture allowed.
 inject_bakeoff_budget_unfixtured() {
   python3 - <<'EOF'
 import pathlib
 
-path = pathlib.Path("diet/src/capture/bakeoff.rs")
+path = pathlib.Path("diet/src/capture/sense.rs")
 source = path.read_text(encoding="utf-8")
-old = "pub const BUDGET: usize = 8;"
-new = "pub const BUDGET: usize = 9;"
+old = "Metric::PrecisionAtK => (widest_budget(), Label::Negative, vec![Label::Positive; 2]),"
+new = "Metric::PrecisionAtK => (8, Label::Negative, vec![Label::Positive; 2]),"
 if source.count(old) != 1:
-    raise SystemExit(f"the budget appears {source.count(old)} times")
+    raise SystemExit(f"the precision fixture's width appears {source.count(old)} times")
 path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
@@ -5228,7 +5230,7 @@ selftest() {
   seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \
     'an edited cache was not refused' 'lib/capture::bakeoff'
   seeded_case "a budget no fixture demonstrates"      test     inject_bakeoff_budget_unfixtured \
-    'rows built to fail' 'lib/capture::bakeoff'
+    'its fixture does not demonstrate failure there' 'lib/capture::sense'
   seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
     'retry-of-itself\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "record nesting left unbounded"         test     inject_record_depth_unbounded \

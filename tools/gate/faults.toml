@@ -180,10 +180,10 @@ migrated = false
 id = "test.bakeoff_budget_unfixtured"
 kind = "seeded-gate"
 check = "test"
-target = "lib/capture::bakeoff"
+target = "lib/capture::sense"
 label = "a budget no fixture demonstrates"
 failure_class = "results.metric-never-failed"
-legacy_signature = "rows built to fail"
+legacy_signature = "its fixture does not demonstrate failure there"
 migrated = false
 
 [[fault]]
