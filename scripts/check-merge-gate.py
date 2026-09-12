@@ -796,6 +796,144 @@ def _union_takes_the_incumbents_correction():
     return None
 
 
+def drive_no_common_base(
+    ours_text: str, theirs_text: str, name: str = "faults.toml", in_base: bool = True
+):
+    """Run `union_file` over two branches with NO shared commit, or over a base
+    that does not carry the file.
+
+    Both states are handled deliberately in `union_file` -- `merge_base`
+    returning None, and `show` raising `Missing` -- and NEITHER was reachable
+    from any fixture. A fresh instance proved it by replacing each branch's
+    body with `raise RuntimeError` and watching all 38 fixtures pass. Every
+    generated fixture descends from one base commit that carries the file, so
+    the suite could not construct either state however many rows it grew.
+
+    `in_base=False` keeps the shared commit and leaves the file out of it, so
+    the two cases are separable: no-common-history, and no-file-in-history.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        box = Path(tmp)
+
+        def git(*args: str) -> str:
+            run = subprocess.run(("git",) + args, cwd=box, capture_output=True, text=True)
+            if run.returncode != 0:
+                raise RuntimeError(f"git {' '.join(args)}: {run.stderr.strip()}")
+            return run.stdout.strip()
+
+        git("init", "-q", "-b", "ours")
+        git("config", "user.email", "gate@example.invalid")
+        git("config", "user.name", "gate")
+        (box / name).parent.mkdir(parents=True, exist_ok=True)
+
+        if in_base:
+            # Two ORPHAN branches: each has its own root commit, so the two
+            # share no ancestor and `merge_base` has nothing to answer with.
+            (box / name).write_text(ours_text, encoding="utf-8")
+            git("add", name)
+            git("commit", "-qm", "ours")
+            ours = git("rev-parse", "HEAD")
+            git("checkout", "-q", "--orphan", "theirs")
+            git("rm", "-q", "-rf", ".")
+            (box / name).write_text(theirs_text, encoding="utf-8")
+            git("add", name)
+            git("commit", "-qm", "theirs")
+            theirs = git("rev-parse", "HEAD")
+            git("checkout", "-q", "ours")
+        else:
+            # One shared root that does NOT carry the file; both sides add it.
+            (box / "unrelated.txt").write_text("a base with no manifest\n", encoding="utf-8")
+            git("add", "unrelated.txt")
+            git("commit", "-qm", "base")
+            git("checkout", "-q", "-b", "one")
+            (box / name).write_text(ours_text, encoding="utf-8")
+            git("add", name)
+            git("commit", "-qm", "ours")
+            ours = git("rev-parse", "HEAD")
+            git("checkout", "-q", "-")
+            git("checkout", "-q", "-b", "two")
+            (box / name).write_text(theirs_text, encoding="utf-8")
+            git("add", name)
+            git("commit", "-qm", "theirs")
+            theirs = git("rev-parse", "HEAD")
+            git("checkout", "-q", "one")
+
+        here = os.getcwd()
+        err = io.StringIO()
+        out = io.StringIO()
+        try:
+            os.chdir(box)
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+                took = MG.union_file(Path(name), ours, theirs)
+        finally:
+            os.chdir(here)
+        return took, out.getvalue(), err.getvalue(), (box / name).read_text(encoding="utf-8")
+
+
+@fixture("two branches sharing no commit are told so, and nothing is guessed")
+def _union_says_when_there_is_no_base():
+    # `merge_base` returning None is a real answer: with no shared commit
+    # there is no incumbent, so no disagreement can be settled from the base
+    # and every one of them is the operator's. The branch was written and
+    # commented and NOTHING REACHED IT -- replacing its body with a raise left
+    # all 38 fixtures green. Two orphan roots are what it takes to get here.
+    ours = FAULTS_PAIR
+    theirs = FAULTS_PAIR.replace('kind = "seeded-gate"\nmigrated = false\n\n', 'kind = "mechanics"\nmigrated = false\n\n', 1)
+    took, _out, err, _disk = drive_no_common_base(ours, theirs)
+    if "share no" not in err:
+        return f"no base, and the union did not say so: {err.strip()[:200]!r}"
+    if took is not False:
+        return "two authored versions with no incumbent were merged rather than refused"
+    return None
+
+
+@fixture("a file neither side inherited has no incumbent, and differences are the operator's")
+def _union_handles_a_file_absent_from_the_base():
+    # `show` raising `Missing` -- the file is not in the merge base at all,
+    # because both sides added it. Then no block in it has an incumbent and
+    # every disagreement is contested, exactly as the no-base case. Also
+    # never reached by any fixture before this one.
+    ours = FAULTS_PAIR
+    theirs = FAULTS_PAIR.replace('kind = "seeded-gate"\nmigrated = false\n\n', 'kind = "mechanics"\nmigrated = false\n\n', 1)
+    took, _out, err, _disk = drive_no_common_base(ours, theirs, in_base=False)
+    if took is not False:
+        return (
+            "a block both sides authored, with nothing in the base to prefer "
+            f"either, was merged rather than refused: {err.strip()[:200]!r}"
+        )
+    return None
+
+
+@fixture("an entry nobody touched is not contested by the spacing after it")
+def _union_ignores_the_separator_after_a_block():
+    # `ENTRY` runs to the NEXT header or EOF, so the blank lines separating an
+    # entry from the one after it are inside its match. Two branches that each
+    # APPEND a new entry, with different spacing, therefore hand the union
+    # three different texts for an entry neither of them edited -- and the
+    # union called it contested and refused a fully mechanical merge, printing
+    # a diff whose only content was a blank line.
+    #
+    # Found by a fresh instance, through the real CLI on real commits. NONE of
+    # the eighteen presence rows could see it, and that is the lesson worth
+    # keeping: every one of them is generated from a template that holds each
+    # entry's separator identical across the three sides, so the artefact the
+    # defect is made of cannot occur in them. A generator cannot vary the axis
+    # it holds fixed, and a suite of eighteen felt like coverage.
+    base = FAULTS_PAIR
+    ours = base + '\n[[fault]]\nid = "a.ours"\nkind = "seeded-gate"\nmigrated = false\n'
+    theirs = base + '\n\n[[fault]]\nid = "a.theirs"\nkind = "seeded-gate"\nmigrated = false\n'
+    took, _out, err, on_disk = drive_three_way(base, ours, theirs, name="faults.toml")
+    if took is not True:
+        return (
+            "the union refused a merge in which no entry was edited, on the "
+            f"spacing after one: {err.strip()[:200]!r}"
+        )
+    for want in ("a.alpha", "a.beta", "a.ours", "a.theirs"):
+        if f'id = "{want}"' not in on_disk:
+            return f"the assembled file lost `{want}`"
+    return None
+
+
 @fixture("a block only ours changed stays ours")
 def _union_keeps_our_own_change():
     # The other half, and the reason this is a three-way comparison rather

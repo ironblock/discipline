@@ -1,7 +1,15 @@
-`local` is not a weights kind. There are two -- `digest` and `hosted` -- and
-they are two because the difference decides what a result may claim, not
-because two spellings were convenient.
+`local` is not a weights kind. There are three -- `digest`, `hosted` and
+`canned` -- and they are three because each decides something different about
+what a result may claim: a digest can be re-fired, hosted weights can change
+under a re-firing, and a canned server has no weights at all.
 
-A third kind read as "close enough to a digest" would be identity by guess.
+A fourth kind read as "close enough to a digest" would be identity by guess.
 The vocabulary is closed, so a reader that meets one it does not know says so
 instead of picking.
+
+This reason said TWO until 2026-09-12. `canned` was added by `fc70015` in this
+same PR, on the 2026-09-11 ruling, and that commit updated other `.reason`
+files and not this one. Nothing in the gate compares a `.reason` to the tree
+-- it is read only when its fixture unexpectedly parses -- so a fixture can go
+on refusing correctly while the text beside it teaches a vocabulary that has
+grown. Found by a fresh instance reading the two against each other.
