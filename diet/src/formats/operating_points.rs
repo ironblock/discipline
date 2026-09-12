@@ -118,7 +118,27 @@ pub enum Error {
     /// Two entries matching the same substring: which one wins would depend
     /// on the order, and an operating point decided by position alone is a
     /// measurement nobody can look up.
-    DuplicateMatch(String),
+    ///
+    /// SAME-EXCEPT-CASE COUNTS, because [`serves`] folds. Found by a fresh
+    /// instance reviewing the fold that made it true: the fold taught the
+    /// MATCHER that two spellings are one match and left the DETECTOR
+    /// comparing raw bytes, so `Shared` and `shared` were two entries the
+    /// document was allowed to declare and the second could never be reached
+    /// for any input. The pair travels together or the invariant is a
+    /// sentence rather than a rule.
+    ///
+    /// BOTH SPELLINGS ARE CARRIED, and that is not cosmetic: the corpus
+    /// refuses a second fixture that produces an existing fixture's message,
+    /// so a case-only duplicate reported with the byte-identical case's
+    /// wording pins nothing that one did not — and worse, sends a reader to
+    /// search the file for a literal that appears there only once.
+    DuplicateMatch {
+        /// The earlier entry's spelling: the one that wins.
+        first: String,
+        /// The later entry's spelling: the one nothing can reach. Equal to
+        /// `first` when the two are byte-identical.
+        again: String,
+    },
     /// An entry with no `match`, or no `nothink_ops`.
     MissingKey {
         /// The entry.
@@ -149,11 +169,17 @@ impl std::fmt::Display for Error {
                           question a reader should have to answer"
                 )
             }
-            Self::DuplicateMatch(text) => write!(
+            Self::DuplicateMatch { first, again } if first == again => write!(
                 f,
-                "two entries match `{text}`; the rule is first match in file order, so \
+                "two entries match `{first}`; the rule is first match in file order, so \
                  the second is unreachable and the reader that finds it has read a \
                  different file"
+            ),
+            Self::DuplicateMatch { first, again } => write!(
+                f,
+                "`{first}` and `{again}` differ only in case, and matching folds case, \
+                 so they are one match written twice; the rule is first match in file \
+                 order, so `{again}` is unreachable for every input"
             ),
             Self::MissingKey { entry, key } => {
                 write!(f, "`[{entry}]` carries no `{key}`")
@@ -246,13 +272,23 @@ pub fn parse(source: &str) -> Result<Vec<Entry>, Error> {
         entries.push(entry(model)?);
     }
     let mut keys = std::collections::BTreeSet::new();
-    let mut matches = std::collections::BTreeSet::new();
+    // A map rather than a set, because the message must name the spelling
+    // that WON as well as the one that lost -- see `Error::DuplicateMatch`.
+    let mut matches = std::collections::BTreeMap::new();
     for found in &entries {
         if !keys.insert(found.key.clone()) {
             return Err(Error::DuplicateKey(found.key.clone()));
         }
-        if !matches.insert(found.matches.clone()) {
-            return Err(Error::DuplicateMatch(found.matches.clone()));
+        // Folded, because `serves` folds. Compared on the folded spelling and
+        // REPORTED in the ones the file was written in, so the message names
+        // bytes a reader can search for.
+        if let Some(first) =
+            matches.insert(found.matches.to_ascii_lowercase(), found.matches.clone())
+        {
+            return Err(Error::DuplicateMatch {
+                first,
+                again: found.matches.clone(),
+            });
         }
     }
     Ok(entries)
@@ -561,11 +597,14 @@ mod tests {
     /// import re, subprocess, pathlib
     /// matches = ["qwen3.6", "qwen3.5", "qwen3", "gemma"]
     /// tok = re.compile(r"[A-Za-z0-9._-]+")
+    /// SELF = "diet/src/formats/operating_points.rs"
     /// found = set()
     /// for name in subprocess.run(["git","ls-files","-z"],
     ///                            capture_output=True).stdout.split(b"\0"):
     ///     if not name: continue
-    ///     path = pathlib.Path(name.decode())
+    ///     rel = name.decode()
+    ///     if rel == SELF: continue
+    ///     path = pathlib.Path(rel)
     ///     if not path.is_file(): continue
     ///     for t in tok.findall(path.read_text(encoding="utf-8", errors="replace")):
     ///         if any(m in t.lower() for m in matches): found.add(t)
@@ -573,11 +612,27 @@ mod tests {
     /// EOF
     /// ```
     ///
-    /// Nineteen at the commit that wrote this. An earlier count of thirty-six
-    /// was reported on #65 from a looser tokenisation that never got written
-    /// down; the sixteen-that-serve figure is the same under both, which is
-    /// what that measurement was actually about. This definition is the one
-    /// that is reproducible, so it is the one pinned.
+    /// Nineteen, and re-derived on 2026-09-12 to check that it still is.
+    ///
+    /// THIS FILE IS EXCLUDED, and the exclusion is the correction rather than
+    /// a convenience. Without it the script yields TWENTY: the extra token is
+    /// `qwen3.4`, a probe id in this module's own tests, swept in because it
+    /// contains `qwen3`. A harvest that reads the file stating the harvest is
+    /// measuring itself, and the number it produces moves whenever a test
+    /// below gains a probe — so the claim "nineteen, re-derive with this" was
+    /// false as written within a day of being written.
+    ///
+    /// It is the third time this exact shape has cost something here: the
+    /// `Qwen3.6-27B` frequency was first reported as 317 for "the tree" when
+    /// the corpus figure is 316, the other two sweeping in the doc comment and
+    /// the test making the claim. A count over a tree that contains the count
+    /// needs to say what it excludes, every time.
+    ///
+    /// An earlier count of thirty-six was reported on #65 from a looser
+    /// tokenisation that never got written down; the sixteen-that-serve figure
+    /// is the same under both, which is what that measurement was actually
+    /// about. This definition is the one that is reproducible, so it is the
+    /// one pinned.
     const HARVESTED: &[&str] = &[
         "Gemma",
         "Qwen3",
