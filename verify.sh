@@ -5173,6 +5173,36 @@ EOF
       && ! grep -qE 'front-matter|summary row|product_sha256' <<<\"\$out\" \
       && grep -q 'record verdicts from .* sha256=' <<<\"\$out\""
 
+  # --- the resolver's own suite cannot report a pass it did not measure ---
+  #
+  # 0 from `check-merge-gate.py` is the only thing standing between a lane
+  # merge and a resolver that guesses, and 0 is indistinguishable from "not
+  # asked" to CI, to verify.sh, and to a person reading a log. Both of the
+  # ways it can fail to ask are exercised here, because the suite that guards
+  # the resolver was itself guarded by nothing.
+  local suite; scratch; suite="$SCRATCH"
+  cat > "${suite}/empty.py" <<'PYEOF'
+import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("cm", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module.FIXTURES.clear()
+sys.exit(module.main())
+PYEOF
+  expect_exit "a resolver suite that collected nothing is not a pass" 2 \
+    python3 "${suite}/empty.py" "${ROOT}/scripts/check-merge-gate.py"
+  # ...and the control, which is what makes the assertion above about the
+  # EMPTY list rather than about the driver: the same driver, without the
+  # clear, runs the real suite and passes.
+  sed 's/^module.FIXTURES.clear()$//' "${suite}/empty.py" > "${suite}/full.py"
+  expect_exit "and the same driver, with the fixtures left in place, passes" 0 \
+    python3 "${suite}/full.py" "${ROOT}/scripts/check-merge-gate.py"
+  # Every fixture drives a real repository, so no git is no verdict.
+  mkdir -p "${suite}/nogit"
+  ln -sf "$(command -v python3)" "${suite}/nogit/python3"
+  expect_exit "a resolver suite with no git has no verdict to give" 2 \
+    env PATH="${suite}/nogit" python3 "${ROOT}/scripts/check-merge-gate.py"
+
   # --- binary provenance at the boundary ---
   #
   # The resolver's whole job is refusing to guess, so each refusal is asserted
