@@ -10,6 +10,22 @@
 # /usr/bin/git, and a gate that cries wolf on every binary is a gate
 # people switch off.
 #
+# WHAT A PATTERN HERE DOES NOT SEE, and this is the place to say it because
+# this is the file somebody opens when they add a credential shape.
+#
+# The rows here are matched BY SHAPE, against the file's text and its decoded
+# view. They do NOT go through `scripts/decoding.py`'s `tokens()`, so the
+# invisible-character strip that protects the DIGEST half does not protect
+# these. Measured: an AWS-key-shaped literal broken by a zero-width space
+# scans clean, while the same key without it is caught.
+#
+# So a shaped secret split by a character that renders as nothing evades
+# every row in this file. That is declared at `decoding.py`'s `tokens()` too,
+# and it was declared ONLY there until a fresh instance pointed out that a
+# maintainer adding a row reads this header and not that docstring. Closing
+# it means deciding what the shape patterns are allowed to see, which is a
+# rule about this table rather than a scanner change -- open on #72.
+#
 # `scripts/hygiene.sh` fails the build if any tracked file matches any
 # pattern here. This file is the only file the scan skips: it is the one
 # place forbidden shapes are meant to be written down.

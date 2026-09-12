@@ -66,10 +66,19 @@ def harvest(source: pathlib.Path) -> tuple[str, list[tuple[int, int]]]:
         # A file that yielded nothing is a file that was not the UCD, or a
         # property that was renamed. Either way there is no table to write,
         # and writing an empty one would disable the whole strip in silence.
-        raise SystemExit(
+        #
+        # EXIT 2, NOT 1 -- this is "could not run", and it said 1 until
+        # 2026-09-12 because `SystemExit(str)` exits 1 whatever the string
+        # says. The docstring above has promised three codes since it was
+        # written; this path contradicted it, in the same script whose whole
+        # subject is a table that must not be silently empty. Found by a fresh
+        # instance reading the contract against the code.
+        print(
             f"derive-ignorable: no `{PROPERTY}` rows in {source}; that is not "
-            f"the file this harvest reads, or the property has moved"
+            f"the file this harvest reads, or the property has moved",
+            file=sys.stderr,
         )
+        raise SystemExit(2)
     found.sort()
     return version, found
 
