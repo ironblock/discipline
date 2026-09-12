@@ -236,15 +236,9 @@ fn an_adapted_replay_is_the_same_bytes_every_time_it_is_run() {
     // The gym reads this output back. A census whose key order or counts
     // depended on a hash seed would make two runs of the same log
     // incomparable, which is the one thing the census exists to allow.
-    let args = [
-        "--adapter",
-        "claude-code",
-        "--regimen",
-        &regimen().to_string_lossy().into_owned(),
-        &fixture("session").to_string_lossy().into_owned(),
-    ]
-    .map(std::string::ToString::to_string);
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let regimen = regimen().to_string_lossy().into_owned();
+    let log = fixture("session").to_string_lossy().into_owned();
+    let args = ["--adapter", "claude-code", "--regimen", &regimen, &log];
 
     let (first_code, first, _) = run(&args);
     let (again_code, again, _) = run(&args);

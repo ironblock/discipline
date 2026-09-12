@@ -63,15 +63,21 @@ fn main() -> ExitCode {
         return ExitCode::from(EXIT_INPUT);
     };
 
-    // One adapter today. A `match` with no default arm, so a second one has
-    // to be decided here rather than falling through to the first.
-    let adapter = match parsed.adapter.as_str() {
-        "claude-code" => ClaudeCode,
-        other => {
-            eprintln!("`{other}` names no adapter; this build has: claude-code");
-            return ExitCode::from(EXIT_INPUT);
-        }
-    };
+    // Asked of the adapter rather than matched against a literal here: the
+    // name an adapter answers to is the one it declares, and `diet/src` admits
+    // no match arm on a string literal for exactly the reason a second copy of
+    // that name would be wrong. A second adapter turns this into a lookup over
+    // a list of constructors returning `Box<dyn Adapter>`; with one, the list
+    // is the one line below.
+    let adapter = ClaudeCode;
+    if parsed.adapter != adapter.name() {
+        eprintln!(
+            "`{}` names no adapter; this build has: {}",
+            parsed.adapter,
+            adapter.name()
+        );
+        return ExitCode::from(EXIT_INPUT);
+    }
 
     let log = match std::fs::read_to_string(&parsed.log) {
         Ok(text) => text,
@@ -188,6 +194,37 @@ fn derived(lane: &Lane) -> Vec<Patch> {
     patches
 }
 
+/// A flag this program reads, and the one place its spelling lives.
+///
+/// Same rule as the adapter's own vocabularies: a tag becomes a flag in
+/// [`Flag::from_tag`], walking [`Flag::ALL`], and nothing else compares a
+/// string to decide what an argument is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Flag {
+    /// Which adapter reads the log.
+    Adapter,
+    /// The regimen the replay is filed under.
+    Regimen,
+}
+
+impl Flag {
+    /// Every flag this program takes.
+    const ALL: &'static [Self] = &[Self::Adapter, Self::Regimen];
+
+    /// How it is spelled on the command line.
+    const fn tag(self) -> &'static str {
+        match self {
+            Self::Adapter => "--adapter",
+            Self::Regimen => "--regimen",
+        }
+    }
+
+    /// The one place an argument becomes a flag.
+    fn from_tag(tag: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|flag| flag.tag() == tag)
+    }
+}
+
 /// The command line, or nothing when it is not one this program can serve.
 struct Args {
     adapter: String,
@@ -198,33 +235,28 @@ struct Args {
 impl Args {
     /// Parsed strictly: an unknown flag is a refusal rather than a default.
     fn of(args: &[String]) -> Option<Self> {
-        let mut flags: BTreeMap<&str, String> = BTreeMap::new();
+        let mut flags: BTreeMap<Flag, String> = BTreeMap::new();
         let mut positional = Vec::new();
         let mut rest = args.iter();
         while let Some(arg) = rest.next() {
-            match arg.as_str() {
-                "--adapter" | "--regimen" => {
-                    let key = arg.trim_start_matches("--");
-                    flags.insert(
-                        if key == "adapter" {
-                            "adapter"
-                        } else {
-                            "regimen"
-                        },
-                        rest.next()?.clone(),
-                    );
-                }
-                flag if flag.starts_with("--") => return None,
-                value => positional.push(value),
+            if let Some(flag) = Flag::from_tag(arg) {
+                flags.insert(flag, rest.next()?.clone());
+            } else if arg.starts_with("--") {
+                // An unknown flag is a refusal rather than a default: a
+                // misspelled `--regimen` that fell through to the positional
+                // list would run the replay under a regime nobody declared.
+                return None;
+            } else {
+                positional.push(arg);
             }
         }
         if positional.len() != 1 {
             return None;
         }
         Some(Self {
-            adapter: flags.get("adapter")?.clone(),
-            regimen: flags.get("regimen")?.clone(),
-            log: positional.remove(0).to_string(),
+            adapter: flags.get(&Flag::Adapter)?.clone(),
+            regimen: flags.get(&Flag::Regimen)?.clone(),
+            log: positional.remove(0).clone(),
         })
     }
 }

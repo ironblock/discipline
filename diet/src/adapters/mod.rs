@@ -433,7 +433,15 @@ mod tests {
     }
 
     #[test]
-    fn the_adapter_declares_the_kinds_it_maps() {
+    /// Named for what it checks, which is less than it used to claim.
+    ///
+    /// It was `the_adapter_declares_the_kinds_it_maps`, and the seeded fault
+    /// `adapters.the-declared-kinds-disagree-with-the-mapped-ones` -- which
+    /// cuts `MAPS` down to one kind -- walked straight past it: `!is_empty()`
+    /// is true of one element. The kinds themselves are pinned in
+    /// `claude_code::tests::the_two_foreign_vocabularies_have_one_definition_each`,
+    /// where the vocabulary lives. This is the trait's contract only.
+    fn an_adapter_declares_a_name_and_at_least_one_kind() {
         let adapter = ClaudeCode;
         assert!(
             !adapter.maps().is_empty(),

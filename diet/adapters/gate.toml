@@ -40,7 +40,7 @@
 name = "diet-adapters"
 check = "test"
 command = "cargo test --no-fail-fast -p discipline-diet -- adapt --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 12
+faults = 13
 
 [[fault]]
 # The census is the product. A row kind the adapter has no word for that
@@ -51,9 +51,9 @@ failure_class = "adapters.an-unmapped-kind-is-walked-past-uncounted"
 target = "diet/src/adapters/claude_code.rs"
 expect_exit = 101
 anchor = '''
-                self.census.unmapped_one(other);'''
+            self.census.unmapped_one(kind);'''
 becomes = '''
-                let _ = other;'''
+            let _ = kind;'''
 catches = [
     "a_kind_the_adapter_never_saw_is_counted_and_does_not_stop_the_replay",
     "adapters::claude_code::tests::a_kind_this_adapter_does_not_map_is_counted_rather_than_dropped",
@@ -159,9 +159,9 @@ failure_class = "adapters.reasoning-is-discarded-rather-than-counted"
 target = "diet/src/adapters/claude_code.rs"
 expect_exit = 101
 anchor = '''
-                Some(other) => self.census.dropped_one(&format!("assistant/{other}")),'''
+                    Some(other) => self.census.dropped_one(&format!("assistant/{other}")),'''
 becomes = '''
-                Some(_other) => {}'''
+                    Some(_other) => {}'''
 catches = [
     "adapters::claude_code::tests::the_committed_corpus_adapts_and_refuses_as_it_says_it_does",
     "adapters::claude_code::tests::thinking_has_no_home_in_the_schema_and_is_counted_as_dropped",
@@ -228,17 +228,35 @@ failure_class = "adapters.the-census-counts-a-mapped-row-in-both-buckets"
 target = "diet/src/adapters/claude_code.rs"
 expect_exit = 101
 anchor = '''
-            "user" => {
-                self.census.mapped_one(kind);'''
+        self.census.mapped_one(kind);
+        match mapped {'''
 becomes = '''
-            "user" => {
-                self.census.mapped_one(kind);
-                self.census.unmapped_one(kind);'''
+        self.census.mapped_one(kind);
+        self.census.unmapped_one(kind);
+        match mapped {'''
 catches = [
     "a_kind_the_adapter_never_saw_is_counted_and_does_not_stop_the_replay",
     "adapters::claude_code::tests::a_kind_this_adapter_does_not_map_is_counted_rather_than_dropped",
     "adapters::claude_code::tests::the_committed_corpus_adapts_and_refuses_as_it_says_it_does",
     "an_adapted_session_replays_to_a_census_and_a_working_object",
+]
+
+[[fault]]
+# The one invariant here the compiler does not hold. `Row` is an enum and
+# every match on it is exhaustive, but `Adapter::maps` hands back a
+# `&'static [&'static str]` that a const cannot build by walking the enum,
+# so the two definitions are held in step by a test. This is that test
+# being worth having.
+id = "adapters.the-declared-kinds-disagree-with-the-mapped-ones"
+failure_class = "adapters.the-declared-kinds-disagree-with-the-mapped-ones"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+const MAPS: &[&str] = &["user", "assistant"];'''
+becomes = '''
+const MAPS: &[&str] = &["user"];'''
+catches = [
+    "adapters::claude_code::tests::the_two_foreign_vocabularies_have_one_definition_each",
 ]
 
 [[fault]]

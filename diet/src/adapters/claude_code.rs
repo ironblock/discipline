@@ -44,7 +44,82 @@ use crate::formats::record::{Count, Event, json::Value};
 pub struct ClaudeCode;
 
 /// The row kinds this adapter has a mapping for.
+///
+/// Kept beside [`Row`] rather than derived from it because `Adapter::maps`
+/// hands back a `&'static [&'static str]` and a const cannot walk an enum.
+/// `the_two_foreign_vocabularies_have_one_definition_each` holds the two in
+/// step, which is the weaker guarantee and is named as such.
 const MAPS: &[&str] = &["user", "assistant"];
+
+/// A row kind this adapter maps.
+///
+/// A type rather than a string, because `diet/src` admits no match arm on a
+/// string literal and the reason is this exact situation: the foreign
+/// vocabulary is matched in several places, and a sixth kind added as an arm
+/// somewhere would compile while the others quietly stopped covering it. A
+/// tag becomes a `Row` in ONE place -- [`Row::from_tag`], walking
+/// [`Row::ALL`] -- and every use after that is exhaustive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Row {
+    /// A person's turn, or the harness handing back a tool's output.
+    User,
+    /// What the model said, called, or thought.
+    Assistant,
+}
+
+impl Row {
+    /// Every row kind this adapter maps.
+    const ALL: &'static [Self] = &[Self::User, Self::Assistant];
+
+    /// The tag Claude Code writes for it.
+    const fn tag(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Assistant => "assistant",
+        }
+    }
+
+    /// The one place a foreign tag becomes a row kind.
+    fn from_tag(tag: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|row| row.tag() == tag)
+    }
+}
+
+/// A content block this adapter reads.
+///
+/// Same reason as [`Row`], and the same shape. A block type that is not one
+/// of these is counted as dropped content under its own foreign name, which
+/// is why `from_tag` returns an `Option` rather than a fallback variant: "a
+/// block this adapter has no word for" is a fact about the census, not a kind
+/// of block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Block {
+    /// Text the model wrote, or a person did.
+    Text,
+    /// A call the model made.
+    ToolUse,
+    /// The answer to one.
+    ToolResult,
+}
+
+impl Block {
+    /// Every block type this adapter reads.
+    const ALL: &'static [Self] = &[Self::Text, Self::ToolUse, Self::ToolResult];
+
+    /// The tag Claude Code writes for it.
+    const fn tag(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::ToolUse => "tool_use",
+            Self::ToolResult => "tool_result",
+        }
+    }
+
+    /// The one place a foreign tag becomes a block type.
+    fn from_tag(tag: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|block| block.tag() == tag)
+    }
+}
 
 /// Claude Code's tool names, in the vocabulary the capture lanes speak.
 ///
@@ -158,21 +233,16 @@ impl Run {
         let Some(kind) = row.get("type").and_then(serde_json::Value::as_str) else {
             return Err(Drift::NoKind { at_row });
         };
-        match kind {
-            "user" => {
-                self.census.mapped_one(kind);
-                self.user(at_row, row, rest)
-            }
-            "assistant" => {
-                self.census.mapped_one(kind);
-                self.assistant(at_row, row)
-            }
-            // A kind this adapter has no word for is NEWS, not a failure: the
-            // census carries it and the walk goes on.
-            other => {
-                self.census.unmapped_one(other);
-                Ok(())
-            }
+        // A kind this adapter has no word for is NEWS, not a failure: the
+        // census carries it and the walk goes on.
+        let Some(mapped) = Row::from_tag(kind) else {
+            self.census.unmapped_one(kind);
+            return Ok(());
+        };
+        self.census.mapped_one(kind);
+        match mapped {
+            Row::User => self.user(at_row, row, rest),
+            Row::Assistant => self.assistant(at_row, row),
         }
     }
 
@@ -189,17 +259,27 @@ impl Run {
             serde_json::Value::String(text) => said.push_str(text),
             serde_json::Value::Array(blocks) => {
                 for block in blocks {
-                    match block_type(block) {
-                        Some("text") => {
+                    let tag = block_type(block);
+                    match tag.and_then(Block::from_tag) {
+                        Some(Block::Text) => {
                             if let Some(text) =
                                 block.get("text").and_then(serde_json::Value::as_str)
                             {
                                 said.push_str(text);
                             }
                         }
-                        Some("tool_result") => self.tool_result(block),
-                        Some(other) => self.census.dropped_one(&format!("user/{other}")),
-                        None => self.census.dropped_one("user/<untyped block>"),
+                        Some(Block::ToolResult) => self.tool_result(block),
+                        // A call inside a `user` row. The mapping reads calls
+                        // from `assistant` rows only, so this is content with
+                        // no home rather than a call -- counted under its own
+                        // name, like any other.
+                        Some(known @ Block::ToolUse) => {
+                            self.census.dropped_one(&format!("user/{}", known.tag()));
+                        }
+                        None => match tag {
+                            Some(other) => self.census.dropped_one(&format!("user/{other}")),
+                            None => self.census.dropped_one("user/<untyped block>"),
+                        },
                     }
                 }
             }
@@ -253,16 +333,25 @@ impl Run {
         };
 
         for block in &blocks {
-            match block_type(block) {
-                Some("text") => {
+            let tag = block_type(block);
+            match tag.and_then(Block::from_tag) {
+                Some(Block::Text) => {
                     if let Some(text) = block.get("text").and_then(serde_json::Value::as_str) {
                         spoke.push_str(text);
                     }
                 }
-                Some("tool_use") => self.tool_use(at_row, block)?,
+                Some(Block::ToolUse) => self.tool_use(at_row, block)?,
+                // An answer in the row that asks. The mapping joins answers
+                // from `user` rows, so this is content with no home.
+                Some(known @ Block::ToolResult) => {
+                    self.census
+                        .dropped_one(&format!("assistant/{}", known.tag()));
+                }
                 // Reasoning has no event kind here. Counted, not discarded.
-                Some(other) => self.census.dropped_one(&format!("assistant/{other}")),
-                None => self.census.dropped_one("assistant/<untyped block>"),
+                None => match tag {
+                    Some(other) => self.census.dropped_one(&format!("assistant/{other}")),
+                    None => self.census.dropped_one("assistant/<untyped block>"),
+                },
             }
         }
 
@@ -500,7 +589,7 @@ fn value_of(at_row: usize, field: &str, raw: &serde_json::Value) -> Result<Value
 #[cfg(test)]
 mod tests {
 
-    use super::{ClaudeCode, native_tool};
+    use super::{Block, ClaudeCode, MAPS, Row, native_tool};
     use crate::adapters::{Adapter, Drift};
     use crate::formats::record::Event;
 
@@ -578,19 +667,20 @@ mod tests {
             else {
                 continue;
             };
-            match id.as_str() {
-                "second" => {
-                    assert_eq!(output.as_deref(), Some("B"));
-                    assert_eq!(*exit, Some(1), "`is_error` true is a failure");
-                }
-                "first" => {
-                    assert_eq!(output.as_deref(), None, "nothing answered it");
-                    assert_eq!(
-                        *exit, None,
-                        "absent is not zero: the harness did not say it succeeded"
-                    );
-                }
-                other => panic!("unexpected call {other}"),
+            // `if` rather than a `match` on the id, because `diet/src` admits
+            // no match arm on a string literal and a call id is exactly the
+            // kind of loose vocabulary that rule is about.
+            if id == "second" {
+                assert_eq!(output.as_deref(), Some("B"));
+                assert_eq!(*exit, Some(1), "`is_error` true is a failure");
+            } else if id == "first" {
+                assert_eq!(output.as_deref(), None, "nothing answered it");
+                assert_eq!(
+                    *exit, None,
+                    "absent is not zero: the harness did not say it succeeded"
+                );
+            } else {
+                panic!("unexpected call {id}");
             }
         }
     }
@@ -741,6 +831,48 @@ mod tests {
         );
     }
 
+    /// `MAPS` and [`Row`] say the same thing, and `Block`'s tags are distinct.
+    ///
+    /// The weaker half of the vocabulary discipline, named rather than
+    /// implied: `Adapter::maps` hands back a `&'static [&'static str]`, which
+    /// a const cannot build by walking an enum, so the two definitions are
+    /// held in step by this test instead of by the compiler. A kind added to
+    /// `Row` and not to `MAPS` would otherwise be mapped while the adapter
+    /// declared it was not.
+    #[test]
+    fn the_two_foreign_vocabularies_have_one_definition_each() {
+        let from_type: Vec<&str> = Row::ALL.iter().map(|row| row.tag()).collect();
+        assert_eq!(
+            MAPS, from_type,
+            "the kinds this adapter declares are the kinds it maps"
+        );
+        for tag in MAPS {
+            assert!(
+                Row::from_tag(tag).is_some(),
+                "`{tag}` is declared and does not parse"
+            );
+        }
+
+        // Round-tripping is the whole claim of a `from_tag` that walks `ALL`:
+        // no two variants answer to one tag, and none answers to none.
+        for block in Block::ALL {
+            assert_eq!(
+                Block::from_tag(block.tag()),
+                Some(*block),
+                "{block:?} round-trips through its own tag"
+            );
+        }
+        assert_eq!(
+            Block::ALL.len(),
+            Block::ALL
+                .iter()
+                .map(|block| block.tag())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            "and no two block types share a tag"
+        );
+    }
+
     /// The corpus is committed, and it is what the tests above are about.
     ///
     /// Table-driven against the DIRECTORY rather than against a list of
@@ -750,9 +882,11 @@ mod tests {
     /// beside them unmentioned.
     #[test]
     fn the_committed_corpus_adapts_and_refuses_as_it_says_it_does() {
-        /// `(fixture, rows, unmapped rows, dropped content)`, or `None` for a
-        /// fixture whose whole point is that it is refused.
-        const EXPECTED: &[(&str, Option<(u64, u64, u64)>)] = &[
+        /// What one fixture is claimed to do: `(rows, unmapped rows, dropped
+        /// content)`, or `None` for a fixture whose whole point is that it is
+        /// refused.
+        type Claim = Option<(u64, u64, u64)>;
+        const EXPECTED: &[(&str, Claim)] = &[
             ("session", Some((9, 3, 1))),
             ("an-unmapped-kind", Some((3, 1, 0))),
             ("a-path-that-resolves-to-nothing", Some((3, 0, 0))),
