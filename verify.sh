@@ -1432,14 +1432,23 @@ EOF
 
 # The sign let back onto a zero. `-0.0` is then a second spelling of `0.0`,
 # and a banked sampler temperature reads back as a number nobody wrote.
+#
+# The lesion is in `number.pest` because that is where the rule went on
+# 2026-09-12; before that it was in the record's own grammar. The move
+# CHANGED WHAT THIS FAULT PROVES, and the change is the point: widening the
+# shared terminal widens `regimen::float` and `record::decimal` together, so
+# the parity test between them stays green -- both readers agree, and both
+# are wrong. What catches it is the record's refusal fixture, one level down
+# from the agreement. A shared terminal removes the divergence class and
+# leaves the widening class exactly where it was; this case is what says so.
 inject_record_negative_zero_decimal() {
   python3 - <<'EOF'
 import pathlib
 
-path = pathlib.Path("diet/formats/record/grammar.pest")
+path = pathlib.Path("diet/formats/number.pest")
 source = path.read_text(encoding="utf-8")
-old = """decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
-new = """decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
+old = """fraction = @{ ("-" ~ negative_fraction) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
+new = """fraction = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -2022,13 +2031,36 @@ EOF
 # The regimen's float rule widened past the record's decimal. `-0.0` is then
 # a regimen float and not a record decimal, so the same digits are a value or
 # an error depending on which side of the format you ask.
+#
+# Since 2026-09-12 the two names alias one shared rule, so there is no longer
+# a second copy to widen: the ONLY way back to a divergence is to stop
+# aliasing and write a body out again under the old name. That is what this
+# lesion does.
+#
+# ONE GATE SEES IT, NOT TWO. The shared-terminal guard in tests/conformance.rs
+# compares bodies, and this body is not a copy of the shared one -- it is a
+# WIDER one, so the comparison finds no match and the guard stays green.
+# Measured, after writing the opposite here first.
+#
+# The two gates divide the class cleanly, and each is blind where the other
+# sees:
+#
+#   * A body copied EXACTLY under another name leaves the two formats still
+#     agreeing, so the parity test is green; the conformance guard catches it.
+#     Seeded as `a shared body written out under another name`.
+#   * A body written out WIDER, as here, has already diverged, so the
+#     conformance guard has nothing to match; the parity test catches it.
+#
+# Neither of them alone is the gate. That is why the widening half is scoped
+# to the regimen tests below and the copying half is scoped to conformance:
+# each case runs the gate that can actually see it.
 inject_regimen_float_rule_widened() {
   python3 - <<'EOF'
 import pathlib
 
 path = pathlib.Path("diet/formats/regimen/grammar.pest")
 source = path.read_text(encoding="utf-8")
-old = 'float     = @{ ("-" ~ negative_float) | (int_part ~ "." ~ ASCII_DIGIT+) }\n'
+old = 'float     = @{ fraction }\n'
 new = 'float     = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }\n'
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
@@ -2073,6 +2105,46 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 echo "recompute: 3 recorded value(s) re-derived from the artefacts"
 exit 0
 SH
+}
+
+# THE PROBE DISENGAGED BY A TRAILING COMMENT, which is how the vacuity check
+# came to have a vacuity of its own. It located the integer to perturb with
+# `^(\w+) = (\d+)$` -- a TOML reader written in a hurry -- so
+# `dogma_version = 0  # ...` did not match, the probe returned None, and the
+# caller read None as "passed" and counted the directory as RECOMPUTED. A
+# script reading nothing and comparing nothing, counted as one recomputed
+# result, by the gate whose docstring says a check of nothing is not a pass.
+#
+# The field is chosen by `tomllib` now -- the same reader `front_matter` uses,
+# which is the only one this repository is supposed to have -- and the edit is
+# RE-PARSED before the probe is trusted. This fault puts a comment on every
+# front-matter integer AND makes the script vacuous: under the old reader the
+# tree passes with the directory counted, under the new one the script is
+# named. Ruled 2026-09-12.
+inject_recompute_probe_blinded_by_a_comment() {
+  cat > results/_template/recompute.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+echo "recompute: 3 recorded value(s) re-derived from the artefacts"
+exit 0
+SH
+  python3 - <<'PY'
+import pathlib, re
+
+report = pathlib.Path("results/_template/README.md")
+text = report.read_text(encoding="utf-8")
+_, fence, rest = text.partition("+++\n")
+front, closing, tail = rest.partition("+++\n")
+front, count = re.subn(
+    r"^([A-Za-z0-9_-]+ = \d+)(?=\s*$)",
+    r"\1  # the comment that used to blind the probe",
+    front,
+    flags=re.M,
+)
+assert count, "no front-matter integer to comment; this fault would prove nothing"
+report.write_text(fence + front + closing + tail, encoding="utf-8")
+PY
 }
 
 # A recompute.sh that makes the comparison true instead of finding it true.
@@ -2388,6 +2460,32 @@ path = pathlib.Path("diet/formats/decline/grammar.pest")
 path.write_text(
     path.read_text(encoding="utf-8")
     + '\ninteger = @{ ("-" ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*) | "0" }\n',
+    encoding="utf-8",
+)
+EOF
+}
+
+# The same drift wearing a name nobody is looking for. The guard above this
+# one asks "is a shared rule defined outside the shared file", which reads
+# NAMES -- and a copy called something else walks straight past it. That is
+# why the guard grew a body comparison, and this is the case that says the
+# comparison works: `nonzero`'s body, written out again as `counter`.
+#
+# `nonzero` rather than `fraction` because the body has to COMPILE where it
+# lands: `fraction` is built out of `int_part` and `negative_fraction`, which
+# the decline grammar has never heard of, and a build error would prove the
+# compiler works rather than the guard. `nonzero`'s body stands alone.
+#
+# The name is deliberately innocuous. A drift that announced itself would not
+# need a gate.
+inject_number_terminal_body_regrown() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/decline/grammar.pest")
+path.write_text(
+    path.read_text(encoding="utf-8")
+    + "\ncounter = _{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }\n",
     encoding="utf-8",
 )
 EOF
@@ -5085,6 +5183,8 @@ selftest() {
     'front-matter .kind. is None'
   seeded_case "a recompute that cannot fail"          recompute inject_recompute_cannot_fail \
     'does not compare the report to the artefacts'
+  seeded_case "a probe blinded by a trailing comment"  recompute inject_recompute_probe_blinded_by_a_comment \
+    'does not compare the report to the artefacts'
   seeded_case "a recompute that edits what it checks"  recompute inject_recompute_tampers \
     'tampering, not recomputation'
   seeded_case "a claim consuming evidence outside"     results   inject_results_consumes_outside \
@@ -5141,6 +5241,8 @@ selftest() {
     "the projection lost the file's order" 'lib/formats::operating_points'
   seeded_case "an integer terminal grown a second time" test     inject_number_terminal_regrown \
     'it belongs in number\.pest and nowhere else' 'test:conformance/the_integer_terminal'
+  seeded_case "a shared body written out under another name" test inject_number_terminal_body_regrown \
+    'has a shared terminal.s body written out again' 'test:conformance/the_integer_terminal'
   seeded_case "historical, and carrying a recompute"   recompute inject_recompute_historical_with_a_script \
     'declares .historical-observation. and carries a recompute\.sh'
   seeded_case "historical with no reason stated"       recompute inject_recompute_historical_without_a_reason \

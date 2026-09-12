@@ -102,26 +102,21 @@ boolean_false = { "false" }
 // character-for-character the record's `integer`: ("-" ~ nonzero) | int_part.
 
 // A float is an exact DECIMAL: the digits as written, never a binary float.
-// This rule is character-for-character the `decimal` rule of the record's
-// grammar, and deliberately so -- `formats::record::json::Decimal::new` is
-// what this module builds the value with, and that constructor checks the
-// text against the RECORD's rule. Two rules that must agree, one of which
-// does the enforcing: if they ever drift, a document this grammar accepts
-// fails to build a value and the parser says so, rather than a regimen and a
-// record disagreeing about the same digits in silence. A test drives a table
-// of literals through both readers.
 //
-// `-0.0` is refused, as it is in the record: one spelling per value, and
-// negative zero is a second spelling of zero. (`-0` as an INTEGER is
-// accepted, because it was before this rule existed and TOML admits it; that
-// asymmetry is real and is the one thing here a later version should settle.)
+// THE NAME IS HERE; THE RULE IS IN `number.pest` -- ruled 2026-09-12. This
+// was character-for-character the `decimal` rule of the record's grammar,
+// with a comment saying so, which is the two-readers class at the terminal
+// level: nothing executed the claim, so nothing would notice the day one was
+// widened and the other was not. Worse than the integer case, because
+// `formats::record::json::Decimal::new` is what this module builds the value
+// with and that constructor checks against the RECORD's rule -- so a drift
+// showed up as a document this grammar accepts and cannot build a value for.
 //
-// No exponent. `7e-1` is a second spelling of `0.7`, and a regime identified
-// by its settings cannot afford two ways to write one setting.
-float     = @{ ("-" ~ negative_float) | (int_part ~ "." ~ ASCII_DIGIT+) }
-negative_float = _{
-    (nonzero ~ "." ~ ASCII_DIGIT+) | ("0" ~ "." ~ "0"* ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
-}
+// `@` is load-bearing: an atomic rule emits no inner token, so `Rule::float`
+// still carries the whole span and no child, exactly as it did when the
+// digits were spelled out here. `regimen.rs` matches on that rule and is
+// untouched.
+float     = @{ fraction }
 
 comment   =  { "#" ~ (!(nl | control) ~ ANY)* }
 
