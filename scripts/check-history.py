@@ -63,9 +63,27 @@ class Undeterminable(Exception):
 
 
 def git(*args: str, check: bool = True) -> str:
+    # BYTES, then decode with `errors="replace"`. `text=True` decodes as
+    # strict UTF-8 and RAISES on the first byte that is not -- and `git show
+    # --patch` pulls raw file content into that decode, so one committed
+    # non-UTF-8 file killed the whole scan with a traceback and exit 1.
+    #
+    # Exit 1 is this repository's code for "the scan ran and found something".
+    # A crash is not a finding. It reddened the lane over history nothing
+    # could edit, and no content change could clear it.
+    #
+    # Six such files are already committed here, so the range that reaches
+    # them is not exotic -- a branch cut from an older point, a force-push
+    # whose merge base is older, or a pull_request whose base.sha predates
+    # them all do it. Measured on 8acb58b, which is in origin/main:
+    #
+    #   text=True          UnicodeDecodeError, 0xff at 14023   exit 1
+    #   errors="replace"   1 commit message(s) and 1 patch(es)  exit 0
     done = subprocess.run(
-        ["git", "-C", str(ROOT), *args], capture_output=True, text=True
+        ["git", "-C", str(ROOT), *args], capture_output=True
     )
+    done.stdout = done.stdout.decode("utf-8", errors="replace")
+    done.stderr = done.stderr.decode("utf-8", errors="replace")
     if check and done.returncode != 0:
         raise Undeterminable(f"`git {' '.join(args)}` failed: {done.stderr.strip()}")
     return done.stdout.strip()
@@ -214,7 +232,24 @@ def main(argv: list[str]) -> int:
             # already in the commits it merges, and every one of those is in
             # this range. A merge shown against each parent would double the
             # text and report each hit twice.
-            patch = git("show", "--format=", "--patch", sha, check=False)
+            # `--text`, because without it git renders a binary path as
+            # `Binary files a/x and b/x differ` and a `-diff` path the same
+            # way -- and the pattern table carries a `b` flag precisely
+            # because a secret in a .pack or an image is as committed as one
+            # in a text file. Added-then-removed was the hole this check was
+            # written to close, and without `--text` it stayed open for
+            # exactly the content the tree gate treats as most dangerous.
+            #
+            # Measured on a two-file commit -- one path binary by git's NUL
+            # heuristic, one path plain text marked `-diff` in .gitattributes
+            # -- each carrying a decoy of `aws-access-key-id` shape:
+            #
+            #   git show --patch          0 occurrences, 2 `Binary files` lines
+            #   git show --patch --text   2 occurrences, 0 `Binary files` lines
+            #
+            # The `-diff` half matters on its own: an attribute in the tree
+            # under scan decided what the history scan could see.
+            patch = git("show", "--format=", "--patch", "--text", sha, check=False)
             if patch:
                 (out / f"patch-{sha[:12]}.txt").write_text(patch + "\n", encoding="utf-8")
                 patches += 1

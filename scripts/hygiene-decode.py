@@ -55,11 +55,36 @@ def main(argv: list[str]) -> int:
             continue
         path = pathlib.Path(name.decode("utf-8", "surrogateescape"))
         try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            # Not decodable text, so it has no decoded view. The bytes
-            # themselves are still scanned by the caller; this is a view
-            # beside them, never instead of them.
+            # `errors="replace"`, and NOT a skip on UnicodeDecodeError -- the
+            # same correction `check-hashes.py` already carries, for the same
+            # reason, in the same tree. THE SKIP DROPPED THE WHOLE FILE OVER
+            # ONE BYTE: a cp1252 curly quote anywhere in a JSON log meant no
+            # decoded view for any of it, and a token welded to an escape one
+            # line away went unseen while the gate printed `1 file(s) clean`.
+            #
+            # The justification written here was that the caller still scans
+            # the bytes. That is the one thing that cannot rescue this: a
+            # token welded to `\n` is exactly what the bytes DO NOT show, and
+            # undoing that weld is this view's whole job. Measured -- same
+            # token, same file, one byte's difference:
+            #
+            #   pure UTF-8       internal-ticket-id: (decoded) ...:3   exit 1
+            #   + one cp1252     1 file(s) clean, 0 decoded view(s)    exit 0
+            #
+            # U+FFFD is not alphanumeric, so it separates like any other
+            # non-token byte: it can split a token that spanned the bad byte,
+            # and it cannot invent one that was not there.
+            #
+            # SIX TRACKED FILES in this repository are already undecodable,
+            # one of them a JSONL record fixture, so this was not hypothetical.
+            # Over `git ls-files` on this branch the skip cost one view:
+            # 409 before, 410 after, the difference being that fixture --
+            # `diet/formats/record/fixtures/invalid/not-utf8.jsonl`, the file
+            # whose whole purpose is to hold bytes a reader must survive.
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            # Unreadable is a different thing from undecodable, and stays a
+            # skip: there are no bytes to make a view out of.
             continue
         view = decoding.decoded_text(text)
         if not view:

@@ -4982,6 +4982,30 @@ prove_mechanics() {
   expect_exit "the same bytes, unread, are not a hit" 1 \
     grep -qiE "(^|[^A-Za-z0-9])DIE-?[0-9]+" "${box}/welded/run.jsonl"
 
+  # THE SAME WELD, in a file carrying one byte that is not UTF-8. The decoder
+  # skipped the WHOLE FILE on UnicodeDecodeError, so one cp1252 quote anywhere
+  # in a log meant no decoded view for ANY of it -- the weld above went unseen
+  # and the gate printed `clean`. Six such files are already tracked here, one
+  # of them a JSONL record fixture, so the combination is not exotic.
+  #
+  # `errors="replace"` keeps the view. U+FFFD is not alphanumeric, so it
+  # separates like any other non-token byte: it can split a token that spanned
+  # the bad byte, and it cannot invent one that was not there.
+  mkdir -p "${box}/welded-undecodable"
+  printf '{"stdout":"ran\\n%s%s regressed\\n"}\n' 'die' '45' \
+    > "${box}/welded-undecodable/run.jsonl"
+  printf '{"note":"caf\xe9"}\n' >> "${box}/welded-undecodable/run.jsonl"
+  expect_exit "a weld survives one byte that is not UTF-8" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/welded-undecodable"
+  # Two controls, because this assertion has two ways to pass for the wrong
+  # reason. The file must really be undecodable...
+  expect_exit "and that file really is undecodable as UTF-8" 1 \
+    python3 -c 'import sys; open(sys.argv[1], encoding="utf-8").read()' \
+      "${box}/welded-undecodable/run.jsonl"
+  # ...and its raw bytes must really be clean, so the hit came from the view.
+  expect_exit "and its raw bytes, unread, are not a hit" 1 \
+    grep -qiE "(^|[^A-Za-z0-9])DIE-?[0-9]+" "${box}/welded-undecodable/run.jsonl"
+
   # A pattern beginning with `-`. grep would read it as an OPTION and report
   # every row after it absent -- a whole class silently unguarded, printing
   # the same green. The scanner passes each regex with `-e`.
@@ -5234,6 +5258,75 @@ open(sys.argv[1], 'w').write(json.dumps({'log': inner}) + '\n')
     env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
         GITHUB_EVENT_PATH="${fake}/push-new-branch.json" \
       python3 "${fake}/repo/scripts/check-history.py"
+
+  # A SECRET IN A PATH GIT WILL NOT DIFF. Without `--text`, `git show` prints
+  # `Binary files a/x and b/x differ` for a path its NUL heuristic calls
+  # binary AND for a plain-text path marked `-diff` in .gitattributes -- so
+  # the content never reaches the scan. Added-then-removed is the hole this
+  # check exists to close, and it stayed open for exactly the content the
+  # pattern table singles out with its `b` flag: "a secret in a .pack or an
+  # image is exactly as committed as one in a text file".
+  #
+  # The `-diff` form is used here rather than the NUL form because it is the
+  # worse one: an attribute committed to the tree under scan decided what the
+  # history scan was allowed to see.
+  local fake_undiffable
+  (
+    cd "${fake}/repo"
+    printf 'hidden.txt -diff\n' > .gitattributes
+    printf 'ticket %s%s, in a path git will not diff\n' 'DIE' '-4242' \
+      > hidden.txt
+    git add --all && seed_commit --message 'a path marked -diff'
+  )
+  fake_undiffable="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_head" "$fake_undiffable" > "${fake}/pr-undiffable.json"
+  expect_exit "history: a secret git renders as binary is still found" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-undiffable.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+  # The control. git really does hide it: if this stops finding the `Binary
+  # files` line, the assertion above has stopped testing `--text` and is
+  # passing on an ordinary text diff.
+  expect_exit "and git really does hide that path without --text" 0 \
+    bash -c "git -C '${fake}/repo' show --format= --patch '${fake_undiffable}' \
+      | grep -q '^Binary files'"
+
+  # A COMMITTED BYTE THAT IS NOT UTF-8. `text=True` decodes the patch as
+  # strict UTF-8 and RAISES on the first byte that is not -- and `git show
+  # --patch` pulls raw file content into that decode. The traceback exits 1,
+  # which is this repository's code for "the scan ran and found something".
+  # A crash is not a finding: it reddens the lane over history nothing can
+  # edit, and no content change clears it.
+  local fake_undecodable
+  (
+    cd "${fake}/repo"
+    printf 'caf\xe9, in cp1252\n' > bytes.txt
+    git add --all && seed_commit --message 'a byte that is not UTF-8'
+  )
+  fake_undecodable="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_undiffable" "$fake_undecodable" > "${fake}/pr-undecodable.json"
+  expect_exit "history: a committed non-UTF-8 byte is survived, not reported" 0 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-undecodable.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+  # The control, and this one is load-bearing: without it the assertion above
+  # is satisfied by any clean range, and says nothing about the decoding.
+  cat > "${fake}/strict.py" <<'STRICT'
+import subprocess, sys
+try:
+    subprocess.run(
+        ["git", "-C", sys.argv[1], "show", "--format=", "--patch", "--text",
+         sys.argv[2]],
+        capture_output=True, text=True,
+    )
+except UnicodeDecodeError:
+    sys.exit(0)
+sys.exit(1)
+STRICT
+  expect_exit "and a strict decode of that same patch really does raise" 0 \
+    python3 "${fake}/strict.py" "${fake}/repo" "$fake_undecodable"
 
   # The CI aggregator's comparison. A skipped job is not a failed job, and
   # GitHub's own `!failure()` idiom passes on skipped, so the one thing this

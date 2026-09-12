@@ -35,7 +35,7 @@
 [meta]
 source = "verify.sh"
 red_faults = 313
-mechanics_assertions = 67
+mechanics_assertions = 74
 migrated = 0
 
 
@@ -1499,6 +1499,42 @@ label = "history: a faked new-branch push resolves a base"
 failure_class = "history.clean"
 expected_exit = "0"
 migrated = false
+
+[[fault]]
+id = "mech.history-a-secret-git-renders-as-binary-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "history: a secret git renders as binary is still found"
+failure_class = "history.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.and-git-really-does-hide-that-path-without-text"
+kind = "mechanics"
+check = "-"
+label = "and git really does hide that path without --text"
+failure_class = "history.control"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.history-a-committed-non-utf-8-byte-is-survived-not-reported"
+kind = "mechanics"
+check = "-"
+label = "history: a committed non-UTF-8 byte is survived, not reported"
+failure_class = "history.clean"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.and-a-strict-decode-of-that-same-patch-really-does-raise"
+kind = "mechanics"
+check = "-"
+label = "and a strict decode of that same patch really does raise"
+failure_class = "history.control"
+expected_exit = "0"
+migrated = false
 [[fault]]
 id = "mech.the-gate-accepts-a-run-where-every-job-succeeded"
 kind = "mechanics"
@@ -2609,6 +2645,33 @@ id = "mech.the-same-bytes-unread-are-not-a-hit"
 kind = "mechanics"
 check = "hygiene"
 label = "the same bytes, unread, are not a hit"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-weld-survives-one-byte-that-is-not-utf-8"
+kind = "mechanics"
+check = "hygiene"
+label = "a weld survives one byte that is not UTF-8"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.and-that-file-really-is-undecodable-as-utf-8"
+kind = "mechanics"
+check = "hygiene"
+label = "and that file really is undecodable as UTF-8"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.and-its-raw-bytes-unread-are-not-a-hit"
+kind = "mechanics"
+check = "hygiene"
+label = "and its raw bytes, unread, are not a hit"
 failure_class = "hygiene.scanner-mechanics"
 legacy_signature = ""
 migrated = false
