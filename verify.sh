@@ -5535,6 +5535,42 @@ EOF
     printf '  - %s\n' "${SELFTEST_BROKEN[@]}"
     return "$EXIT_FAIL"
   fi
+  # A CHECK OF NOTHING IS NOT A PASS, and this line is the one place the
+  # selftest says otherwise. `--shard 275/1000` selects no case at all: the
+  # `1 <= K <= N` bound admits it, every loop below runs zero times, nothing
+  # lands in SELFTEST_BROKEN, and the run prints "every gate was seen red on
+  # its own seeded fault" and exits 0. Every word of that sentence is false
+  # about a run that saw no gate.
+  #
+  # Found by a fresh instance, reproduced live. Not reachable through CI --
+  # the matrix is eight against a fault list far longer, and the census
+  # refuses an incomplete union whatever any single shard claims -- so this
+  # is a foot-gun for a person running --shard by hand, and a comment that
+  # overclaimed what the bound guards against. Both are the same defect: the
+  # thing that made it safe was somewhere else, and nothing said so here.
+  #
+  # THIS GUARD HAS NO SEEDED FAULT AND NO MECHANICS ASSERTION, which by this
+  # repository's own law makes it a gate nothing has seen red -- so here is
+  # why, rather than a silence somebody has to rediscover. Both are run from
+  # inside `selftest`: a seeded case runs one `verify.sh --only <check>`, and
+  # `prove_mechanics` runs unconditionally in every shard. An assertion that
+  # invoked `verify.sh --selftest` to watch this line refuse would re-enter
+  # the function containing it, and the inner run would do the same. Covering
+  # it needs a re-entry flag, which is a change to how the selftest is
+  # invoked and not a fixture.
+  #
+  # It was proved by hand in both directions, and the commit that added it
+  # records the transcript: `--shard 275/1000` exits 2 naming the empty
+  # shard, `--shard 1/8` runs 35 of 274 and still declares the pass. That is
+  # weaker than a fixture and it is what there is.
+  if [ "${#SELFTEST_RAN[@]}" -eq 0 ]; then
+    echo "selftest: this run selected no seeded case, so it proves nothing" >&2
+    if [ "$SELFTEST_SHARD" -ne 0 ]; then
+      echo "selftest: shard ${SELFTEST_SHARD} of ${SELFTEST_SHARDS} is empty; \
+there are ${SELFTEST_UNITS} case(s) to divide" >&2
+    fi
+    return "$EXIT_MISUSE"
+  fi
   echo "selftest: every gate was seen red on its own seeded fault."
 }
 

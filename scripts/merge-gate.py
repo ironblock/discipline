@@ -146,6 +146,37 @@ def find_blocks(pattern, text):
     return found
 
 
+def block_body(text: str) -> str:
+    """A block's text without the blank lines trailing it.
+
+    `ENTRY` runs from its own header to the NEXT header or to EOF, so whatever
+    blank lines separate a block from the one after it land inside this
+    block's match -- and how many there are is a fact about the file's
+    spacing, not about this entry. Comparing raw matches therefore calls an
+    entry nobody touched "edited on both sides" the moment two branches append
+    new entries with different spacing, and a fully mechanical merge is
+    refused as contested with a diff whose only content is a blank line.
+
+    Found by a fresh instance, reproduced through the real CLI on real
+    commits. The 18-row presence matrix could not see it: every generated
+    fixture keeps each entry's separator identical across ours, theirs and
+    base by construction, so the artefact it is built from never appears.
+    That is the fixture-family blind spot the matrix's own shape creates --
+    a generator that varies one axis cannot vary the axis it holds fixed.
+    """
+    return text.rstrip("\n")
+
+
+def block_tail(text: str) -> str:
+    """The separator `block_body` took off.
+
+    A correction spliced in keeps the spacing of the file it lands in rather
+    than importing the other side's, so taking a corrected entry cannot
+    silently reflow the file around it.
+    """
+    return text[len(text.rstrip("\n")) :]
+
+
 def strip_blocks(text: str, patterns) -> str:
     """The file with every named block taken out, so what is left is the part
     a union does not decide."""
@@ -312,15 +343,23 @@ def union_file(path: Path, ours_ref: str, theirs_ref: str) -> bool:
         base_blocks = dict(find_blocks(pattern, base))
         corrections: dict[str, str] = {}
         for name in sorted(set(ours_blocks) & set(theirs_blocks)):
-            if ours_blocks[name] == theirs_blocks[name]:
+            # ON BODIES, NOT ON RAW MATCHES -- see `block_body`. The trailing
+            # blank lines belong to the file's spacing and not to the entry,
+            # and comparing them made an untouched entry contested.
+            mine = block_body(ours_blocks[name])
+            yours = block_body(theirs_blocks[name])
+            if mine == yours:
                 continue
             was = base_blocks.get(name)
-            if was is not None and ours_blocks[name] == was:
-                corrections[name] = theirs_blocks[name]
-            elif was is not None and theirs_blocks[name] == was:
+            was = None if was is None else block_body(was)
+            if was is not None and mine == was:
+                # Theirs' body, ours' spacing: taking a correction may change
+                # what the entry says and may not reflow the file around it.
+                corrections[name] = yours + block_tail(ours_blocks[name])
+            elif was is not None and yours == was:
                 continue
             else:
-                contested.append((name, ours_blocks[name], theirs_blocks[name]))
+                contested.append((name, mine, yours))
         if corrections:
             def swap(m, key=key, corrections=corrections):
                 return corrections.get(key(m.group(0)), m.group(0))
