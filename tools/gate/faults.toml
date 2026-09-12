@@ -35,7 +35,7 @@
 [meta]
 source = "verify.sh"
 red_faults = 309
-mechanics_assertions = 42
+mechanics_assertions = 45
 migrated = 0
 
 
@@ -3313,3 +3313,30 @@ label = "a literal the scan cannot place"
 failure_class = "gate.injection-literal-unplaceable"
 legacy_signature = "builds a Ground: declared in 3 places"
 migrated = false
+[[fault]]
+id = "mech.a-resolver-suite-that-collected-nothing-is-not-a-pass"
+kind = "mechanics"
+check = "resolver"
+label = "a resolver suite that collected nothing is not a pass"
+failure_class = "resolver.suite-cannot-run"
+expected_exit = "2"
+migrated = false
+
+[[fault]]
+id = "mech.and-the-same-driver-with-the-fixtures-left-in-place-passes"
+kind = "mechanics"
+check = "resolver"
+label = "and the same driver, with the fixtures left in place, passes"
+failure_class = "resolver.control"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.a-resolver-suite-with-no-git-has-no-verdict-to-give"
+kind = "mechanics"
+check = "resolver"
+label = "a resolver suite with no git has no verdict to give"
+failure_class = "resolver.suite-cannot-run"
+expected_exit = "2"
+migrated = false
+
