@@ -4851,32 +4851,71 @@ prove_patterns() {
     # A corpus that carries escaped twins requires one for EVERY class, and
     # requires each class to fire on it. A class that guards prose and not
     # logs is a guard over the half of the surface where the artefacts are
-    # not -- and the twin reaches the pattern only through the decoded view,
-    # so this is also what keeps that view load-bearing. Derived from the
-    # corpus rather than passed in: a table whose seeder stops writing twins
-    # loses the requirement, and a table that never had them (the published
-    # surface is HTML and CSS, never a JSON string) is not asked for one.
-    if [ "$escaped" = true ] && [ ! -f "${dir}/${label}.jsonl" ]; then
-      printf 'UNSEEDED %s pattern %s  <-- NO ESCAPED TWIN TO PROVE IT AGAINST\n' "$kind" "$label"
-      SELFTEST_BROKEN+=("${kind} pattern ${label} has no escaped twin")
-      continue
+    # not. Derived from the corpus rather than passed in: a table whose seeder
+    # stops writing twins loses the requirement, and a table that never had
+    # them (the published surface is HTML and CSS, never a JSON string) is not
+    # asked for one.
+    #
+    # A CORRECTION. This comment used to add "and the twin reaches the pattern
+    # only through the decoded view, so this is also what keeps that view
+    # load-bearing". IT DID NOT. `json.dumps` puts the escaped newline at the
+    # END of the line, so nothing is welded to the forbidden string's left and
+    # the raw bytes match it anyway -- measured, with the mirror removed, 13
+    # of 14 classes still fired on their twin. The twin proved the pattern and
+    # said nothing about the view.
+    #
+    # The WELDED file is what does that job, and it is required too: the
+    # fragment alone, immediately after an escaped newline, which is the shape
+    # the decoder exists for. With the mirror removed it silences the four
+    # classes whose match may begin with an alphanumeric; the other ten are
+    # anchored on a character that is never a token character (`/home/`,
+    # `-----BEGIN `, `C:\`, `sk-ant-`) and cannot be welded shut at all. See
+    # seed-hygiene-fault.sh for the measurement and the list.
+    if [ "$escaped" = true ]; then
+      local missing=""
+      [ -f "${dir}/${label}.jsonl" ] || missing="escaped twin"
+      [ -f "${dir}/${label}.welded.jsonl" ] || missing="${missing:+${missing} and }welded twin"
+      if [ -n "$missing" ]; then
+        printf 'UNSEEDED %s pattern %s  <-- NO %s TO PROVE IT AGAINST\n' \
+          "$kind" "$label" "$(printf '%s' "$missing" | tr '[:lower:]' '[:upper:]')"
+        SELFTEST_BROKEN+=("${kind} pattern ${label} has no ${missing}")
+        continue
+      fi
     fi
 
     rc=0
     out="$(bash "${ROOT}/scripts/hygiene.sh" --patterns "${ROOT}/${table}" --tree "$dir" 2>&1)" || rc=$?
-    local plain=false twin=false
-    printf '%s\n' "$out" | grep "hygiene: ${label}:" | grep -qv "${label}\.jsonl" && plain=true
+    local plain=false twin=false welded=false
+    # The PROSE form is "a hit in neither twin", not "a hit in `${label}.txt`":
+    # the pages corpus writes `.html`, `.css` and `.js`, and naming one
+    # extension made every one of those classes report prose=false. Caught by
+    # this suite on the first run after the welded form was added, which is
+    # the corpus doing its job -- but the fix is to exclude both twins by
+    # name, since with three files "not the plain twin" is no longer enough.
+    printf '%s\n' "$out" | grep "hygiene: ${label}:" \
+      | grep -v "${label}\.welded\.jsonl" \
+      | grep -qv "${label}\.jsonl" && plain=true
     if [ "$escaped" = true ]; then
+      # `${label}.jsonl` matches only the plain twin: the welded file is
+      # `${label}.welded.jsonl`, which does not contain that string.
       printf '%s\n' "$out" | grep -q "hygiene: ${label}:.*${label}\.jsonl" && twin=true
+      printf '%s\n' "$out" | grep -q "hygiene: ${label}:.*${label}\.welded\.jsonl" && welded=true
     else
       twin=true
+      welded=true
     fi
 
-    if [ "$rc" -eq 1 ] && [ "$plain" = true ] && [ "$twin" = true ]; then
+    if [ "$rc" -eq 1 ] && [ "$plain" = true ] && [ "$twin" = true ] \
+       && [ "$welded" = true ]; then
       printf 'RED   hygiene.sh exit %-3d  %s\n' "$rc" "$label"
-    elif [ "$rc" -eq 1 ] && { [ "$plain" = true ] || [ "$twin" = true ]; }; then
-      printf 'GREEN hygiene.sh exit %-3d  %s  <-- FIRED ON ONE FORM, NOT BOTH\n' "$rc" "$label"
-      SELFTEST_BROKEN+=("${kind} pattern ${label}: one form, not both")
+    elif [ "$rc" -eq 1 ] \
+         && { [ "$plain" = true ] || [ "$twin" = true ] || [ "$welded" = true ]; }; then
+      printf 'GREEN hygiene.sh exit %-3d  %s  <-- FIRED ON %s%s%s, NOT ALL THREE\n' \
+        "$rc" "$label" \
+        "$([ "$plain" = true ] && printf 'prose ' || true)" \
+        "$([ "$twin" = true ] && printf 'twin ' || true)" \
+        "$([ "$welded" = true ] && printf 'welded' || true)"
+      SELFTEST_BROKEN+=("${kind} pattern ${label}: not every form")
     else
       printf 'GREEN hygiene.sh exit %-3d  %s  <-- PATTERN DID NOT FIRE\n' "$rc" "$label"
       SELFTEST_BROKEN+=("${kind} pattern ${label}")
@@ -5239,6 +5278,115 @@ open(sys.argv[1], 'w').write(json.dumps({'log': inner}) + '\n')
   expect_exit "a literal wrapped in JSON twice is still found" 1 \
     python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
       --tree "${box}/twice-wrapped"
+
+  # THREE GUARDS THE FIXTURE ABOVE DOES NOT REACH, each one measured by
+  # neutering the code it names and watching the whole suite stay green.
+  # Its input is nested JSON, so "parsed another layer" and "spent the
+  # escapes" are confounded in the one case that touches both -- and the two
+  # halves of the decoder that only one of those exercises had no fixture at
+  # all. A fixture that proves nothing the first one didn't is not a fixture;
+  # a guard nothing reaches is worse than no guard.
+
+  # 1. THE ESCAPE-SPENDING HALF, ALONE. A JSON string whose PARSED value still
+  # holds a literal backslash-n -- two backslashes in the file -- welded to
+  # the token. There is no second JSON layer here, so parsing cannot recover
+  # it and only `_unescaped` can. Measured with `_unescaped` made the identity
+  # function: the view loses its second half and this file reads clean.
+  mkdir -p "${box}/escape-only"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    '{\"stdout\":\"ran' + chr(92) + chr(92) + 'n' + sys.argv[2] + ' regressed\"}' + chr(10))
+" "${box}/escape-only/run.jsonl" "$decoy"
+  expect_exit "a token welded one layer under the parse is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/escape-only"
+  # Its control, and it is about TOKENS rather than about the substring: the
+  # decoy is right there in the bytes -- what is missing is a separator to its
+  # left, because the character before it is the `n` of an escaped newline.
+  # A boundary-aware search of the raw file finds nothing, which is exactly
+  # the silence the decoded view exists to break.
+  expect_exit "and the raw bytes hold no such token" 1 \
+    grep -qE "(^|[^A-Za-z0-9])${decoy}([^A-Za-z0-9]|$)" \
+      "${box}/escape-only/run.jsonl"
+
+  # 2. MORE THAN ONE PASS. `MAX_PASSES` was reachable by nothing: the decoy is
+  # recovered at one pass in every nested case, because spending the escapes
+  # collapses arbitrary depth in a single go. A UNICODE escape is the case it
+  # cannot: `_unescaped` spends `\n`, `\t` and `\r` and not `\u0009`, so
+  # only a SECOND JSON PARSE separates the token. Measured: one pass reads
+  # this clean, two find it.
+  mkdir -p "${box}/two-passes"
+  python3 -c "
+import json, sys
+inner = '{\"stdout\":\"ran' + chr(92) + 'u0009' + sys.argv[2] + ' x\"}'
+open(sys.argv[1], 'w', encoding='utf-8').write(json.dumps({'log': inner}) + chr(10))
+" "${box}/two-passes/nested.jsonl" "$decoy"
+  expect_exit "a token only a second parse can separate is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/two-passes"
+
+  # 3. SPLIT ON EVERY NON-ALPHANUMERIC. The tokeniser's central rule, and the
+  # reason this function exists rather than a regex at each call site: the
+  # obvious class keeps `owner.example.net` whole, so a digest of the bare
+  # name never matches it. The decoy carries no dot, so every fixture above
+  # passes with the rule reverted. This one does not.
+  mkdir -p "${box}/dotted"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'proxy: ' + sys.argv[2] + '.example.net:8080' + chr(10))
+" "${box}/dotted/hosts.txt" "$decoy"
+  expect_exit "a literal joined by dots to more text is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/dotted"
+  # Its control, and the one that says the row above is about the SPLITTING:
+  # the same file with the decoy standing alone must fire too, so a failure
+  # here is never "the decoy stopped being in the table".
+  mkdir -p "${box}/dotted-control"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write('proxy: ' + sys.argv[2] + chr(10))
+" "${box}/dotted-control/hosts.txt" "$decoy"
+  expect_exit "and the same decoy standing alone is a hit" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/dotted-control"
+
+  # 4. SOMETHING IN FRONT OF THE JSON. Not the token -- the WHOLE VIEW. The
+  # decoder required the first character of a line to open a JSON value, so
+  # one byte of preamble meant no decoded view for the file at all, and the
+  # welded token went unseen while the gate printed clean. Both forms are
+  # accidents rather than evasions, which is this gate's stated threat model:
+  # PowerShell's `Out-File` writes a BOM by default, and every timestamped
+  # log line ever written has a prefix.
+  mkdir -p "${box}/bom" "${box}/log-prefix"
+  python3 -c "
+import sys
+d = sys.argv[3]
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    '\ufeff{\"stdout\":\"ran' + chr(92) + 'n' + d + ' x\"}' + chr(10))
+open(sys.argv[2], 'w', encoding='utf-8').write(
+    '2026-01-01T00:00:00Z INFO {\"stdout\":\"ran' + chr(92) + 'n' + d + ' x\"} (ok)' + chr(10))
+" "${box}/bom/run.jsonl" "${box}/log-prefix/run.jsonl" "$decoy"
+  expect_exit "a byte-order mark in front of the JSON does not blind the view" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" --tree "${box}/bom"
+  expect_exit "a log prefix in front of the JSON does not blind the view" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/log-prefix"
+  # The control both rows need: neither file holds the decoy as a token in its
+  # raw bytes, so each hit came from a view the preamble used to prevent.
+  expect_exit "and neither file's raw bytes hold such a token" 1 \
+    grep -qE "(^|[^A-Za-z0-9])${decoy}([^A-Za-z0-9]|$)" \
+      "${box}/bom/run.jsonl" "${box}/log-prefix/run.jsonl"
+  # ...and the other control, which stops the pair from passing on a decoder
+  # that returns a view for ANY line: prose with a stray brace is not JSON and
+  # must still decode to nothing.
+  mkdir -p "${box}/brace-prose"
+  printf 'a sentence with a { brace and no JSON in it at all\n' \
+    > "${box}/brace-prose/notes.txt"
+  expect_exit "a stray brace in prose is not a document" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/brace-prose"
 
   # THE DECODER MISSING IS NOT A FINDING. `sys.exit(message)` exits one, which
   # is this scanner's code for "ran, and found something" -- so an operator

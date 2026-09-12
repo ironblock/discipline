@@ -227,11 +227,31 @@ def main(argv: list[str]) -> int:
         for sha in shas:
             body = git("log", "-1", "--format=%B%n%an <%ae>", sha)
             (out / f"commit-{sha[:12]}.txt").write_text(body + "\n", encoding="utf-8")
-            # `--format=` so the message is not scanned twice, and no `-m`, so
-            # a merge commit contributes no patch: whatever it brings in is
-            # already in the commits it merges, and every one of those is in
-            # this range. A merge shown against each parent would double the
-            # text and report each hit twice.
+            # `--format=` so the message is not scanned twice, and NO `-m`.
+            #
+            # A CORRECTION. This comment used to say a merge commit
+            # "contributes no patch". That is wrong, and the truth is better:
+            # without `-m`, git shows a merge as a COMBINED diff, which holds
+            # the hunks that differ from EVERY parent -- that is, exactly the
+            # content a conflict resolution invented and neither side had.
+            # Measured on merges built for the purpose:
+            #
+            #   ordinary merge, no conflict                    0 bytes
+            #   conflicted merge resolved as one parent's text 0 bytes
+            #   EVIL merge, resolution in neither parent       the diff, and
+            #                                                  the token in it
+            #
+            # So the two things this range must not do are both already true:
+            # content a merge merely carries forward is not scanned twice --
+            # it is in the commits being merged, and every one of those is in
+            # this range -- while content the RESOLUTION introduced, which is
+            # in no other commit and is the only way a secret enters through a
+            # merge, is scanned exactly once.
+            #
+            # `-m` would break that: it shows the merge against each parent
+            # separately, which reports every carried-forward hit once per
+            # parent. The old reasoning would have justified changing this
+            # line; the behaviour it describes is the one to keep.
             # `--text`, because without it git renders a binary path as
             # `Binary files a/x and b/x differ` and a `-diff` path the same
             # way -- and the pattern table carries a `b` flag precisely

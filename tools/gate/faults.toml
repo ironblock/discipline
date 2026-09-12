@@ -35,7 +35,7 @@
 [meta]
 source = "verify.sh"
 red_faults = 313
-mechanics_assertions = 83
+mechanics_assertions = 92
 migrated = 0
 
 
@@ -3629,6 +3629,87 @@ check = "-"
 label = "a literal wrapped in JSON twice is still found"
 failure_class = "hygiene.forbidden-literal"
 expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-token-welded-one-layer-under-the-parse-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "a token welded one layer under the parse is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.and-the-raw-bytes-hold-no-such-token"
+kind = "mechanics"
+check = "-"
+label = "and the raw bytes hold no such token"
+failure_class = "hygiene.control"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-token-only-a-second-parse-can-separate-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "a token only a second parse can separate is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-literal-joined-by-dots-to-more-text-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "a literal joined by dots to more text is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.and-the-same-decoy-standing-alone-is-a-hit"
+kind = "mechanics"
+check = "-"
+label = "and the same decoy standing alone is a hit"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-byte-order-mark-in-front-of-the-json-does-not-blind-the-view"
+kind = "mechanics"
+check = "-"
+label = "a byte-order mark in front of the JSON does not blind the view"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-log-prefix-in-front-of-the-json-does-not-blind-the-view"
+kind = "mechanics"
+check = "-"
+label = "a log prefix in front of the JSON does not blind the view"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.and-neither-file-s-raw-bytes-hold-such-a-token"
+kind = "mechanics"
+check = "-"
+label = "and neither file's raw bytes hold such a token"
+failure_class = "hygiene.control"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-stray-brace-in-prose-is-not-a-document"
+kind = "mechanics"
+check = "-"
+label = "a stray brace in prose is not a document"
+failure_class = "hygiene.clean"
+expected_exit = "0"
 migrated = false
 
 [[fault]]

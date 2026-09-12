@@ -42,20 +42,64 @@ def _strings(value: object, into: list[str]) -> None:
             _strings(member, into)
 
 
+# The two ways a real log puts something in front of its JSON. Both defeated
+# the decoder outright -- not the token, the WHOLE VIEW: `_parsed` required
+# the first character to open a JSON value, so one byte of preamble meant no
+# decoded view for the file and the welded token went unseen while the gate
+# printed clean. Both are squarely inside this gate's stated threat model,
+# which is accidents:
+#
+#   a BOM             PowerShell's `Out-File` writes one by default
+#   a line prefix     every timestamped log line ever written
+#
+# Measured, on a line whose only hit is welded to an escaped newline:
+#
+#   {"stdout":"ran\nTKT-45 x"}                      view 20 bytes, hit
+#   <BOM>{"stdout":"ran\nTKT-45 x"}                 view  0 bytes, MISS
+#   2026-01-01T00:00:00Z INFO {"stdout":"ran\n..."}  view  0 bytes, MISS
+#
+# (`TKT-45` stands in for the ticket shape the pattern table actually holds.
+# Spelling that one out here would put a forbidden literal in the file that
+# scans for it -- which the first draft of this comment did, and the gate
+# caught.)
+BOM = "\ufeff"
+OPENERS = "{[\""
+
+
 def _parsed(text: str) -> object | None:
     """`text` as JSON, or None if it is not JSON.
 
     A bare number or `true` parses and carries no strings, so it is rejected
     here rather than walked: `1` is not a document, and treating every line of
     digits as one would put the decoder in the hot path for nothing.
+
+    A leading BOM is dropped, and a JSON value that begins PART WAY THROUGH
+    the line is read from where it begins -- with `raw_decode`, so that
+    trailing text after the value does not sink the parse the way `json.loads`
+    would. Neither widens what counts as JSON: a line with no JSON in it still
+    returns None, one failed parse attempt later.
     """
     text = text.strip()
-    if not text or text[0] not in "{[\"":
+    if text.startswith(BOM):
+        text = text.lstrip(BOM).strip()
+    if not text:
+        return None
+    if text[0] in OPENERS:
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, RecursionError):
+            pass  # ...and fall through: it may be a value with text after it.
+    start = min(
+        (at for at in (text.find(opener) for opener in "{[") if at > 0),
+        default=-1,
+    )
+    if start < 0:
         return None
     try:
-        return json.loads(text)
+        value, _end = json.JSONDecoder().raw_decode(text, start)
     except (json.JSONDecodeError, RecursionError):
         return None
+    return value
 
 
 # How many times to decode. Content reaches this repository wrapped, and
@@ -242,13 +286,36 @@ def ignorable() -> frozenset[int]:
 # legitimate content -- ligatures, full-width forms, superscripts -- to guard
 # against a case the threat model does not contain.
 #
-# TWO CONSEQUENCES, named rather than discovered later. Dropping `Mn` strips
-# accents from decomposed text, so a decomposed `resume` with an acute on it
-# tokenises as `resume` and would hit a row holding that word: a false
-# positive bought deliberately, in a table whose rows are names and addresses
-# rather than ordinary vocabulary. And this is the DIGEST half's tokeniser
-# only -- the pattern half matches by shape and does not come through here, so
-# a shaped literal broken by a zero-width space still evades it.
+# THREE CONSEQUENCES, named rather than discovered later.
+#
+# 1. A FALSE POSITIVE, bought deliberately. Dropping `Mn` strips accents from
+#    decomposed text, so a decomposed `resume` with an acute on it tokenises
+#    as `resume` and would hit a row holding that word -- acceptable in a
+#    table whose rows are names and addresses rather than ordinary
+#    vocabulary.
+#
+# 2. A FALSE NEGATIVE, which is the same coin and was NOT declared until now.
+#    Dropping `Mn` is asymmetric across Unicode's two spellings of the same
+#    text, because only the decomposed one HAS an `Mn` to drop:
+#
+#      NFC  "cafe" with a precomposed e-acute   -> one token, accent intact
+#      NFD  the same text, e + combining acute  -> one token, accent stripped
+#
+#    So a row emitted from the NFD spelling matches only NFD content, and the
+#    NFC spelling of the very same name walks past it. macOS filesystem APIs
+#    hand back NFD; almost everything else emits NFC. `--emit` will produce
+#    such a row without complaint.
+#
+#    NFC normalisation before tokenising would close it -- both spellings
+#    compose to the same string, and nothing else changes. That is NOT done
+#    here: it changes what a row MEANS, which is a rule about the table, and
+#    the 2026-09-11 ruling that admitted this strip scoped normalisation
+#    narrowly on purpose. Raised rather than chosen; declared rather than
+#    left for someone to find.
+#
+# 3. THIS IS THE DIGEST HALF'S TOKENISER ONLY. The pattern half matches by
+#    shape and does not come through here, so a shaped literal broken by a
+#    zero-width space still evades it.
 
 
 def tokens(text: str) -> list[str]:
