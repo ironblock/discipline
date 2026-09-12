@@ -64,11 +64,21 @@ receipts_name = { "receipts" }
 // The keys a model entry may carry, and nothing else. `match` and
 // `nothink_ops` are required; the two thinking flags are not, because a model
 // family that has no soft switch to describe should not have to say so.
-model_pair = _{ match_pair | nothink_pair | thinking_kwarg_pair | preserve_thinking_pair }
+//
+// `fallback` is the fourth optional key and the only one that changes how the
+// document is READ rather than what it says about a model. An entry marked
+// `fallback = true` is tried only after every unmarked entry's `match` has
+// failed, so it may hold a substring that shadows another entry -- which is
+// exactly the position `qwen3` occupies today, and today it is safe only
+// because it was written below the two entries it shadows. Marked, the
+// document says so; unmarked, the reader has to notice the ordering and know
+// why. Absent means false: an ordinary entry.
+model_pair = _{ match_pair | nothink_pair | thinking_kwarg_pair | preserve_thinking_pair | fallback_pair }
 match_pair = { sp* ~ "match" ~ sp* ~ "=" ~ sp* ~ string ~ sp* ~ comment? ~ (nl | &EOI) }
 nothink_pair = { sp* ~ "nothink_ops" ~ sp* ~ "=" ~ sp* ~ nothink_array ~ sp* ~ comment? ~ (nl | &EOI) }
 thinking_kwarg_pair = { sp* ~ "thinking_kwarg" ~ sp* ~ "=" ~ sp* ~ boolean ~ sp* ~ comment? ~ (nl | &EOI) }
 preserve_thinking_pair = { sp* ~ "preserve_thinking" ~ sp* ~ "=" ~ sp* ~ boolean ~ sp* ~ comment? ~ (nl | &EOI) }
+fallback_pair = { sp* ~ "fallback" ~ sp* ~ "=" ~ sp* ~ boolean ~ sp* ~ comment? ~ (nl | &EOI) }
 
 // The closed vocabulary. An empty list is admitted and means the same thing
 // the file says it means: everything keeps thinking.

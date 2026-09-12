@@ -82,6 +82,11 @@ pub struct Entry {
     pub thinking_kwarg: Option<bool>,
     /// Whether the reasoning block must be preserved in the prefix.
     pub preserve_thinking: Option<bool>,
+    /// Whether this entry is consulted only after every other `match` fails.
+    ///
+    /// Absent in the document means `false`: an ordinary entry, matched in
+    /// file order with the rest. See [`serves`] for what the flag buys.
+    pub fallback: bool,
     /// Sampler settings, as the serving stack names them.
     pub sampler: Vec<(String, crate::formats::record::json::Value)>,
     /// Gate settings.
@@ -157,6 +162,44 @@ impl std::fmt::Display for Error {
     }
 }
 
+/// The entry that serves a model id, or `None` if the document has none.
+///
+/// **This function is the matching rule.** It lived in a test until now, as
+/// its only implementation — which meant the rule the whole format exists to
+/// state had no caller outside the assertion that checked it, and any
+/// consumer wanting an operating point had to re-derive it. One reader.
+///
+/// Two passes, and the second is the whole point of [`Entry::fallback`]:
+///
+/// 1. The first UNMARKED entry, in file order, whose `match` is a substring
+///    of the served id. This is the rule the file's own header states.
+/// 2. Failing that, the first entry MARKED `fallback = true`, in file order,
+///    whose `match` is a substring of the served id.
+///
+/// A document with no fallback behaves exactly as it did before this existed:
+/// pass two finds nothing to consider, and pass one is the old rule verbatim.
+/// A document that marks its shadowing entry gets something the old rule
+/// could not give it — the answer stops depending on where the entry sits.
+/// `qwen3` is a substring of `qwen3.6`, so today it must be written below the
+/// entry it would otherwise steal; marked, it may be written anywhere.
+///
+/// The comparison is `served.contains(entry.matches)`, BYTE FOR BYTE, and
+/// that is not a detail: `Qwen3.6-27B` — the spelling this repository writes
+/// 317 times, more than any other model id in the tree — serves nothing here,
+/// while `qwen3.6-27b` serves `qwen3_6`. Whether the rule should fold case is
+/// a question about the dogma's data, not about this reader, and it is open.
+#[must_use]
+pub fn serves<'a>(entries: &'a [Entry], served: &str) -> Option<&'a Entry> {
+    entries
+        .iter()
+        .find(|entry| !entry.fallback && served.contains(entry.matches.as_str()))
+        .or_else(|| {
+            entries
+                .iter()
+                .find(|entry| entry.fallback && served.contains(entry.matches.as_str()))
+        })
+}
+
 /// Read a document, in the order it was written.
 ///
 /// # Errors
@@ -200,6 +243,7 @@ fn entry(model: Pair<'_, Rule>) -> Result<Entry, Error> {
     let mut nothink: Option<Vec<NoThinkOp>> = None;
     let mut thinking_kwarg = None;
     let mut preserve_thinking = None;
+    let mut fallback = false;
     let mut sampler = Vec::new();
     let mut gate = Vec::new();
     let mut receipts = Vec::new();
@@ -223,6 +267,7 @@ fn entry(model: Pair<'_, Rule>) -> Result<Entry, Error> {
             }
             Rule::thinking_kwarg_pair => thinking_kwarg = Some(flag(&part)),
             Rule::preserve_thinking_pair => preserve_thinking = Some(flag(&part)),
+            Rule::fallback_pair => fallback = flag(&part),
             Rule::sampler_table => sampler = sub_table(&part, &key, "sampler")?,
             Rule::gate_table => gate = sub_table(&part, &key, "gate")?,
             Rule::receipts_table => receipts = sub_table(&part, &key, "receipts")?,
@@ -241,6 +286,7 @@ fn entry(model: Pair<'_, Rule>) -> Result<Entry, Error> {
         key,
         thinking_kwarg,
         preserve_thinking,
+        fallback,
         sampler,
         gate,
         receipts,
@@ -374,6 +420,13 @@ pub fn project(source: &str) -> Result<crate::formats::record::json::Value, Stri
         if let Some(flag) = found.preserve_thinking {
             members.insert("preserve_thinking".to_owned(), Json::Boolean(flag));
         }
+        // Emitted only when true, because absent and false are the same
+        // thing here -- an ordinary entry -- and a projection that spelled
+        // out the default would change every existing expected value to say
+        // nothing new.
+        if found.fallback {
+            members.insert("fallback".to_owned(), Json::Boolean(true));
+        }
         for (name, pairs) in [
             ("sampler", found.sampler),
             ("gate", found.gate),
@@ -395,7 +448,7 @@ pub fn project(source: &str) -> Result<crate::formats::record::json::Value, Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{Error, NoThinkOp, parse, project};
+    use super::{Entry, Error, NoThinkOp, parse, project, serves};
 
     const FIXTURE: &str = include_str!("../../formats/operating_points/fixtures/valid/dogma.toml");
 
@@ -451,19 +504,231 @@ mod tests {
     }
 
     /// First match in file order, on the id the receipt was written about.
+    ///
+    /// Through [`serves`], which is now the only implementation of the rule.
+    /// It used to be spelled out here, inline, which made this test both the
+    /// assertion and the thing asserted — a consumer wanting an operating
+    /// point had to write the rule a second time from the file's comment.
     #[test]
     fn the_first_match_in_file_order_is_the_one_that_serves() {
         let entries = parse(FIXTURE).expect("the dogma's operating points parse");
-        let served = "qwen3.6";
-        let chosen = entries
-            .iter()
-            .find(|entry| served.contains(entry.matches.as_str()))
-            .expect("something matches");
+        let chosen = serves(&entries, "qwen3.6").expect("something matches");
         assert_eq!(chosen.key, "qwen3_6");
         assert_eq!(
             chosen.thinking_kwarg,
             Some(true),
             "the kwarg is the only working control on this family"
+        );
+    }
+
+    /// The candidate respell, which is not the dogma and is not read at run
+    /// time. See its own header for what it is for.
+    const CANDIDATE: &str =
+        include_str!("../../formats/operating_points/fixtures/valid/dogma-with-fallback.toml");
+
+    /// Every token in the tracked tree that any entry's `match` could match.
+    ///
+    /// NOT a list of model ids: `qwen3_6.sampler` is a TOML header fragment
+    /// and `Gemma` is prose. That is deliberate. The domain this invariance
+    /// has to hold over is every string the rule could be handed, and the
+    /// ones nobody meant as an id are the ones a hand-written list omits.
+    ///
+    /// Re-derive with, from the repository root:
+    ///
+    /// ```text
+    /// python3 - <<'EOF'
+    /// import re, subprocess, pathlib
+    /// matches = ["qwen3.6", "qwen3.5", "qwen3", "gemma"]
+    /// tok = re.compile(r"[A-Za-z0-9._-]+")
+    /// found = set()
+    /// for name in subprocess.run(["git","ls-files","-z"],
+    ///                            capture_output=True).stdout.split(b"\0"):
+    ///     if not name: continue
+    ///     path = pathlib.Path(name.decode())
+    ///     if not path.is_file(): continue
+    ///     for t in tok.findall(path.read_text(encoding="utf-8", errors="replace")):
+    ///         if any(m in t.lower() for m in matches): found.add(t)
+    /// print(len(found)); [print(t) for t in sorted(found)]
+    /// EOF
+    /// ```
+    ///
+    /// Nineteen at the commit that wrote this. An earlier count of thirty-six
+    /// was reported on #65 from a looser tokenisation that never got written
+    /// down; the sixteen-that-serve figure is the same under both, which is
+    /// what that measurement was actually about. This definition is the one
+    /// that is reproducible, so it is the one pinned.
+    const HARVESTED: &[&str] = &[
+        "Gemma",
+        "Qwen3",
+        "Qwen3.6-27B",
+        "gemma",
+        "gemma.gate",
+        "gemma.receipts",
+        "gemma.sampler",
+        "qwen3",
+        "qwen3.5",
+        "qwen3.6",
+        "qwen3.gate",
+        "qwen3.sampler",
+        "qwen3_5",
+        "qwen3_5.gate",
+        "qwen3_5.sampler",
+        "qwen3_6",
+        "qwen3_6.gate",
+        "qwen3_6.receipts",
+        "qwen3_6.sampler",
+    ];
+
+    fn key_of<'a>(entries: &'a [Entry], served: &str) -> Option<&'a str> {
+        serves(entries, served).map(|entry| entry.key.as_str())
+    }
+
+    /// The candidate serves every harvested name exactly as the dogma does.
+    ///
+    /// This is the precondition on the respell, and it is the whole reason
+    /// the candidate is a separate file rather than an edit: the dogma is a
+    /// set of transcribed measurements behind a pinned digest, and a respell
+    /// nobody has shown to be serving-invariant is a change to what the
+    /// program does dressed up as a change to how a file reads.
+    #[test]
+    fn the_fallback_spelling_serves_every_harvested_name_the_same() {
+        let dogma = parse(FIXTURE).expect("the dogma's operating points parse");
+        let candidate = parse(CANDIDATE).expect("the candidate parses");
+        let mut served = 0;
+        for name in HARVESTED {
+            let (was, now) = (key_of(&dogma, name), key_of(&candidate, name));
+            assert_eq!(
+                was, now,
+                "`{name}` serves {was:?} today and {now:?} respelled"
+            );
+            served += usize::from(now.is_some());
+        }
+        assert_eq!(
+            served, 16,
+            "sixteen of the nineteen harvested names serve; a count that moves              means the harvest is stale, and an invariance proved over the wrong              names is not proved"
+        );
+    }
+
+    /// The candidate is the dogma plus one mark, and nothing else.
+    ///
+    /// Its header says so. Without this, that sentence is a claim nothing can
+    /// check — and the thing it would be hiding is the worst kind of drift
+    /// available here: a sampler value or a receipt edited into a file that
+    /// presents itself as a respell, carried into the dogma on the strength
+    /// of an invariance proof that only ever looked at which entry serves.
+    ///
+    /// Compared as PARSED ENTRIES, not as text: the two files differ in their
+    /// comments by design, and a text diff would either fail on that or have
+    /// to be taught to ignore it. Entry equality covers the keys, the match
+    /// strings, both thinking flags, the nothink vocabulary, every sampler,
+    /// gate and receipt pair, and the order.
+    #[test]
+    fn the_candidate_differs_from_the_dogma_in_the_mark_and_nothing_else() {
+        let dogma = parse(FIXTURE).expect("the dogma's operating points parse");
+        let mut candidate = parse(CANDIDATE).expect("the candidate parses");
+        let marked: Vec<String> = candidate
+            .iter()
+            .filter(|entry| entry.fallback)
+            .map(|entry| entry.key.clone())
+            .collect();
+        assert_eq!(
+            marked,
+            vec!["qwen3".to_owned()],
+            "the candidate proposes marking exactly one entry, and which one is              the whole proposal"
+        );
+        for entry in &mut candidate {
+            entry.fallback = false;
+        }
+        assert_eq!(
+            candidate, dogma,
+            "the candidate carries something the dogma does not, so it has              stopped being a respell and become a second set of measurements"
+        );
+    }
+
+    /// And the candidate says the same thing whatever order it is written in.
+    ///
+    /// This is what the respell buys, and the control below is what makes
+    /// the claim mean anything: reversed, the CURRENT file changes its answer
+    /// — `qwen3.6` stops reaching `qwen3_6` and lands on `qwen3`, whose
+    /// `thinking_kwarg = false` is the control that does not work on that
+    /// family. The dogma is correct today only because of where a line sits.
+    #[test]
+    fn the_fallback_spelling_does_not_depend_on_where_the_lines_sit() {
+        let candidate = parse(CANDIDATE).expect("the candidate parses");
+        let reversed: Vec<Entry> = candidate.iter().rev().cloned().collect();
+        for name in HARVESTED {
+            assert_eq!(
+                key_of(&candidate, name),
+                key_of(&reversed, name),
+                "`{name}` serves a different entry when the candidate is reversed,                  which is the dependence the fallback mark exists to remove"
+            );
+        }
+
+        let dogma = parse(FIXTURE).expect("the dogma's operating points parse");
+        let dogma_reversed: Vec<Entry> = dogma.iter().rev().cloned().collect();
+        let moved: Vec<&&str> = HARVESTED
+            .iter()
+            .filter(|name| key_of(&dogma, name) != key_of(&dogma_reversed, name))
+            .collect();
+        assert!(
+            !moved.is_empty(),
+            "reversing the CURRENT file changed nothing, so this test is passing              on a file that never had the ordering dependence and proves nothing              about removing it"
+        );
+        assert_eq!(
+            key_of(&dogma_reversed, "qwen3.6"),
+            Some("qwen3"),
+            "reversed, `qwen3.6` should land on the entry that shadows it — the              one whose receipt says the soft switch is dead and the kwarg is the              only control there is"
+        );
+    }
+
+    /// A document with no fallback is served by the rule it always had.
+    ///
+    /// The second pass must be inert, not merely harmless: if `serves` ever
+    /// reordered or re-ranked an unmarked document, every consumer of the
+    /// dogma would silently change which measurement it read.
+    #[test]
+    fn a_document_that_marks_nothing_is_matched_exactly_as_before() {
+        let dogma = parse(FIXTURE).expect("the dogma's operating points parse");
+        assert!(
+            dogma.iter().all(|entry| !entry.fallback),
+            "the dogma marks nothing today; if it does, this test has stopped              being about a document with no fallback"
+        );
+        for name in HARVESTED {
+            let old_rule = dogma
+                .iter()
+                .find(|entry| name.contains(entry.matches.as_str()))
+                .map(|entry| entry.key.as_str());
+            assert_eq!(key_of(&dogma, name), old_rule, "`{name}`");
+        }
+    }
+
+    /// A marked entry is not consulted while any unmarked one still can be.
+    ///
+    /// Built here rather than taken from a fixture, so the assertion does not
+    /// depend on the candidate keeping its shape: two entries, the marked one
+    /// written FIRST, so file order alone would hand it the id.
+    #[test]
+    fn a_marked_entry_loses_to_an_unmarked_one_written_below_it() {
+        let document = "[wide]\nmatch = \"qwen3\"\nfallback = true\nnothink_ops = []\n                        [wide.sampler]\nt = 1\n[wide.gate]\nv = 1\n                        [narrow]\nmatch = \"qwen3.6\"\nnothink_ops = []\n                        [narrow.sampler]\nt = 1\n[narrow.gate]\nv = 1\n";
+        let entries = parse(document).expect("it parses");
+        assert_eq!(key_of(&entries, "qwen3.6"), Some("narrow"));
+        assert_eq!(
+            key_of(&entries, "qwen3.4"),
+            Some("wide"),
+            "nothing unmarked matches, so the marked entry is what is left"
+        );
+        assert_eq!(key_of(&entries, "gemma"), None);
+    }
+
+    /// `fallback` is projected only when it is true.
+    #[test]
+    fn the_projection_carries_a_mark_and_is_silent_without_one() {
+        let shown = format!("{:?}", project(CANDIDATE).expect("it projects"));
+        assert!(shown.contains("fallback"), "{shown}");
+        let plain = format!("{:?}", project(FIXTURE).expect("it projects"));
+        assert!(
+            !plain.contains("fallback"),
+            "an unmarked document projected the default, which would rewrite              every expected value on record to say nothing new"
         );
     }
 
