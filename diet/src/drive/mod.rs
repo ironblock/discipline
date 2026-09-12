@@ -54,6 +54,7 @@
 //! see [`Drive::uncaptured`].
 
 pub mod canned;
+pub mod regimen;
 pub mod script;
 
 use std::cell::Cell;
@@ -1919,6 +1920,11 @@ mod tests {
                 include_str!("mod.rs"),
                 include_str!("canned.rs"),
                 include_str!("script.rs"),
+                // The regimen reader, lifted out of `bin/drive.rs` so both
+                // binaries share one. A fault targeting it is already in the
+                // manifest; a catcher living beside it has to be findable
+                // here too.
+                include_str!("regimen.rs"),
                 // The binary's own tests, which live outside `src/` and are the
                 // only thing that runs the program. A `catches` naming one of
                 // them has to be checkable here too, or the half of this lane
