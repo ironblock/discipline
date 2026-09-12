@@ -285,3 +285,81 @@ fn adapters_a_path_that_resolves_to_nothing_makes_no_fact() {
          as a read of the empty string: {out}"
     );
 }
+
+#[test]
+fn adapters_a_reader_that_stops_reading_is_not_a_failed_replay() {
+    // `diet-replay | head` closes the pipe partway through, and `println!`
+    // panics when a write fails: the acid test against a 14 MB log printed a
+    // correct census and exited 101. A program whose contract is an exit code
+    // cannot have one that depends on whether somebody piped it.
+    //
+    // The log is GENERATED rather than committed because the defect needs
+    // more output than a pipe buffer holds -- roughly 64 KiB on Linux. A
+    // fixture small enough to be readable would sit inside the buffer, every
+    // write would succeed, and the case would pass whether or not the bug was
+    // there. A case that cannot go red is not a case.
+    use std::fmt::Write as _;
+
+    /// Enough calls that the object's dump is larger than a pipe buffer.
+    const CALLS: usize = 1_500;
+
+    let mut log = String::from(
+        "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"touch many files\"},\
+         \"sessionId\":\"s\"}\n",
+    );
+    for at in 0..CALLS {
+        let _ = writeln!(
+            log,
+            "{{\"type\":\"assistant\",\"message\":{{\"role\":\"assistant\",\"content\":\
+             [{{\"type\":\"tool_use\",\"id\":\"t{at}\",\"name\":\"Read\",\"input\":\
+             {{\"file_path\":\"/srv/project/a-file-with-a-long-enough-name-{at}.rs\"}}}}],\
+             \"usage\":{{\"output_tokens\":1}}}},\"sessionId\":\"s\"}}"
+        );
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "diet-replay-pipe-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_nanos())
+            .unwrap_or_default()
+    ));
+    std::fs::create_dir_all(&dir).expect("a directory for the generated log");
+    let path = dir.join("many.jsonl");
+    std::fs::write(&path, &log).expect("the generated log");
+
+    let mut child = Command::new(REPLAY)
+        .args([
+            "--adapter",
+            "claude-code",
+            "--regimen",
+            &regimen().to_string_lossy(),
+            &path.to_string_lossy(),
+        ])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("diet-replay runs");
+
+    // Read one line, the way `head -1` does, then close the pipe.
+    let mut stdout = child.stdout.take().expect("a pipe");
+    let mut census = String::new();
+    {
+        use std::io::BufRead as _;
+        let mut reader = std::io::BufReader::new(&mut stdout);
+        reader.read_line(&mut census).expect("the census line");
+    }
+    drop(stdout);
+
+    let status = child.wait().expect("it finishes");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(
+        census.contains(&format!("\"mapped_rows\":{}", CALLS + 1)),
+        "the census was written before the reader left: {census}"
+    );
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "a reader that stopped reading ends the run at 0, not at a panic's 101"
+    );
+}

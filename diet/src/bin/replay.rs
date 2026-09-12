@@ -48,6 +48,35 @@ const EXIT_INPUT: u8 = 1;
 ///
 /// Pinned by #28, and deliberately not this program's usage code.
 const EXIT_DRIFT: u8 = 2;
+/// The output could not be written. Three, as in `diet-drive`.
+const EXIT_OUTPUT: u8 = 3;
+
+/// Write one line to stdout, saying how the run should end.
+///
+/// Not `println!`, which panics when the write fails, and the write fails
+/// routinely: `diet-replay | head` closes the pipe, and this program's output
+/// is a census followed by every entry in the object -- 223 lines from the
+/// log it was written against. A reader that stops reading is not an error in
+/// the replay, so a broken pipe ends the run at [`EXIT_OK`] rather than at a
+/// panic's 101. Found by running the program, not by reading it: the acid
+/// test against a 14 MB log was piped into `head` and exited 101 with the
+/// census on screen and every count correct.
+fn line(text: &str) -> Result<(), u8> {
+    use std::io::Write as _;
+    let mut out = std::io::stdout().lock();
+    match out
+        .write_all(text.as_bytes())
+        .and_then(|()| out.write_all(b"\n"))
+    {
+        Ok(()) => Ok(()),
+        Err(why) if why.kind() == std::io::ErrorKind::BrokenPipe => Err(EXIT_OK),
+        Err(why) => {
+            // Stderr may be gone too; there is nothing useful to do if it is.
+            let _ = writeln!(std::io::stderr(), "the census could not be written: {why}");
+            Err(EXIT_OUTPUT)
+        }
+    }
+}
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -121,14 +150,29 @@ fn main() -> ExitCode {
         return ExitCode::from(EXIT_INPUT);
     }
 
-    println!("{}", read.census.render());
-    println!(
-        "{{\"entries\":{entries},\"events\":{},\"object_version\":{}}}",
-        read.events.len(),
-        object.version()
-    );
-    print!("{}", object.dump());
-    ExitCode::from(EXIT_OK)
+    let dump = object.dump();
+    let written = line(&read.census.render())
+        .and_then(|()| {
+            line(&format!(
+                "{{\"entries\":{entries},\"events\":{},\"object_version\":{}}}",
+                read.events.len(),
+                object.version()
+            ))
+        })
+        .and_then(|()| {
+            // `dump` already ends every entry with a newline, so the lines are
+            // written one at a time rather than as one blob: a reader that
+            // leaves partway through gets whole lines, and the broken pipe is
+            // noticed at the line it happened on.
+            for entry in dump.lines() {
+                line(entry)?;
+            }
+            Ok(())
+        });
+    match written {
+        Ok(()) => ExitCode::from(EXIT_OK),
+        Err(code) => ExitCode::from(code),
+    }
 }
 
 /// What the deterministic lane derived, as entries the object can hold.
