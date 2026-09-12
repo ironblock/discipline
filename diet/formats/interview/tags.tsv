@@ -22,6 +22,16 @@
 # They are listed here so the drift lint can tell "a tag nobody declared" from
 # "a tag deliberately not a tag".
 #
+# `UNRELATED` joined them when the lint learned the DASH register. SUPERSEDE's
+# template writes `... | CONTRADICTS | UNRELATED — followed, if not UNRELATED,
+# by CORRECTED: <...>`, where it is a verdict VALUE in a list and the em-dash
+# is punctuation -- tag-shaped, deliberately not a tag, one line along from
+# `CORRECTED`, which is here for the same reason and was only visible before
+# because it is followed by a colon. Its siblings `REPLACES`, `RESOLVES` and
+# `CONTRADICTS` are followed by `|`, which is not a separator, so they are not
+# tag-shaped and are not listed. If that line is ever rewritten to put a dash
+# after one of them, the lint will say so.
+#
 # WHY THE OLD SPELLINGS STAY. `decision`, `evidence`, `learned`, `plan`,
 # `stuck` are what 630 archived answers and 22,220 generated ones are written
 # in. A vocabulary that stopped admitting them would not be a narrower
@@ -63,6 +73,7 @@ WHY	inline	-
 IMPLICATION	inline	-
 ANCHORS	inline	-
 CORRECTED	inline	-
+UNRELATED	inline	-
 # One letter each, inside an audit's UPDATE answer:
 #   UPDATE: Q: <question> — A: <answer>
 # The lint counts a run of one uppercase letter as a tag on purpose. A rule

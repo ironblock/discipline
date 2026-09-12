@@ -1478,77 +1478,66 @@ mod tests {
         (alternatives("colon"), alternatives("dash"))
     }
 
-    /// Every run of `[A-Z_]` a dogma template writes WHERE A TAG MAY OPEN.
+    /// Every run of `[A-Z_]` a dogma template writes in a tag's SHAPE.
     ///
-    /// A TAG OPENS A LINE. Nothing else does -- the grammar says so in those
-    /// words, and ruled it on 2026-09-08: text after a separator is that
-    /// field's value, all of it, including something that looks like a second
-    /// tag. So this walks each line's opening the way `tag_line` does --
-    /// `hspace* ~ bullet? ~ (heading_marker | emphasis)?` -- and only then
-    /// reads the run.
+    /// ANYWHERE IN THE LINE, not only where a tag may open, and that is the
+    /// table's design rather than an oversight. `tags.tsv`'s header: inline
+    /// rows are listed "so the drift lint can tell *a tag nobody declared*
+    /// from *a tag deliberately not a tag*". A word mid-line that is shaped
+    /// like a tag is exactly what this must surface; the six `inline` rows
+    /// are the answer to it, not a reason to stop looking.
     ///
-    /// The first version scanned for `:` ANYWHERE in the text, which was
-    /// wrong in both directions at once. It missed the whole dash register --
-    /// the grammar has admitted `—`, `–`, `--`, `-`, `=`, `»` and `>` the
-    /// entire time, so `IMPACT — what this changes` was invisible while
-    /// `tags.tsv`'s header claimed "add a tag to a template and two tests go
-    /// red". And widening it to the dash register without anchoring to the
-    /// line immediately produced a false positive on real dogma:
-    /// `VERDICT: REPLACES | RESOLVES | CONTRADICTS | UNRELATED — followed…`,
-    /// where `UNRELATED` is a value in a list and the em-dash is punctuation.
-    /// That is exactly the 71-of-630 bug the ruling forbids reading into.
+    /// I anchored this to a line opening once, reasoning from the grammar's
+    /// "A TAG OPENS A LINE" — true of the PARSER and beside the point here.
+    /// The seeded case `a dogma tag in no vocabulary` went green: it removes
+    /// the `IMPLICATION` inline row, and `IMPLICATION` appears mid-line by
+    /// definition. The gate caught it; the reasoning was wrong.
     ///
     /// Three shapes count, each because the grammar admits it:
     ///
     ///   `TAG:`         `hspace* ~ colon`, a colon may hug the tag
     ///   `TAG —`        `hspace+ ~ dash ~ &(hspace | nl | EOI)`, a dash may
     ///                  not, because `Evidence-based` is a word
-    ///   `## TAG`       a heading tag needs no separator at all
+    ///   `## TAG`       a heading tag needs no separator at all -- the one
+    ///                  shape that IS positional, because a heading marker
+    ///                  is only a heading marker at the head of a line
+    ///
+    /// The dash register is the fix this function exists for: the grammar has
+    /// admitted `—`, `–`, `--`, `-`, `=`, `»` and `>` the entire time and
+    /// this saw none of them, so `IMPACT — what this changes` was invisible
+    /// while tags.tsv's header claimed "add a tag to a template and two tests
+    /// go red until it is named here".
     fn capitalised_tags(text: &str) -> BTreeSet<String> {
         let (colons, dashes) = separators();
+        let chars: Vec<char> = text.chars().collect();
         let hspace = |c: char| c == ' ' || c == '\t';
         let mut found = BTreeSet::new();
-        for line in text.lines() {
-            let mut rest = line.trim_start_matches(hspace);
-            // `bullet`, and only one: `- - TAG` is not a list item twice.
-            for mark in ["- ", "* ", "+ "] {
-                if let Some(tail) = rest.strip_prefix(mark) {
-                    rest = tail.trim_start_matches(hspace);
-                    break;
-                }
+
+        // The two separator registers, at any position.
+        for end in 0..=chars.len() {
+            let mut start = end;
+            while start > 0 && (chars[start - 1].is_ascii_uppercase() || chars[start - 1] == '_') {
+                start -= 1;
             }
-            let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
-            if digits > 0 {
-                let after = &rest[digits..];
-                if let Some(tail) = after.strip_prefix('.').or_else(|| after.strip_prefix(')'))
-                    && tail.starts_with(hspace)
-                {
-                    rest = tail.trim_start_matches(hspace);
-                }
-            }
-            let heading = rest.starts_with('#');
-            if heading {
-                rest = rest.trim_start_matches('#').trim_start_matches(hspace);
-            }
-            // `emphasis`, longest first: `**` before `*`.
-            for mark in ["***", "**", "__", "*", "_", "`"] {
-                if let Some(tail) = rest.strip_prefix(mark) {
-                    rest = tail;
-                    break;
-                }
-            }
-            let run: String = rest
-                .chars()
-                .take_while(|c| c.is_ascii_uppercase() || *c == '_')
-                .collect();
-            if run.is_empty() || !run.chars().any(|r| r.is_ascii_uppercase()) {
+            if start == end {
                 continue;
             }
-            let mut tail = &rest[run.len()..];
+            let run: String = chars[start..end].iter().collect();
+            if !run.chars().any(|r| r.is_ascii_uppercase()) {
+                continue;
+            }
+            // Maximal on the left: `xABC:` is not a tag, it is the tail of a
+            // word. `**` and `_` are emphasis and DO open one.
+            let opens =
+                start == 0 || !(chars[start - 1].is_alphanumeric() || chars[start - 1] == '_');
+            if !opens {
+                continue;
+            }
+            let mut tail: String = chars[end..].iter().collect();
             // `**TAG**: value` -- the emphasis may close before the separator.
             for mark in ["***", "**", "__", "*", "_", "`"] {
                 if let Some(after) = tail.strip_prefix(mark) {
-                    tail = after;
+                    tail = after.to_owned();
                     break;
                 }
             }
@@ -1558,13 +1547,31 @@ mod tests {
                 && dashes.iter().any(|d| {
                     after_spaces
                         .strip_prefix(d.as_str())
-                        .is_some_and(|after| after.is_empty() || after.starts_with(hspace))
+                        .is_some_and(|rest| rest.is_empty() || rest.starts_with(hspace))
                 });
-            // A heading with no separator must have nothing else on its line,
-            // or `# Evidence of the leak` is an EVIDENCE field. The grammar
-            // draws that line and so does this.
-            let bare_heading = heading && after_spaces.is_empty();
-            if hugged || spaced || bare_heading {
+            if hugged || spaced {
+                found.insert(run);
+            }
+        }
+
+        // The heading shape, which has no separator to find and so has to be
+        // looked for where a heading marker means anything: the line's head.
+        for line in text.lines() {
+            let mut rest = line.trim_start_matches(hspace);
+            if !rest.starts_with('#') {
+                continue;
+            }
+            rest = rest.trim_start_matches('#').trim_start_matches(hspace);
+            let run: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_uppercase() || *c == '_')
+                .collect();
+            // Nothing else on the line, or `# Evidence of the leak` is an
+            // EVIDENCE field -- the constraint the grammar states too.
+            if !run.is_empty()
+                && run.chars().any(|r| r.is_ascii_uppercase())
+                && rest[run.len()..].trim().is_empty()
+            {
                 found.insert(run);
             }
         }
