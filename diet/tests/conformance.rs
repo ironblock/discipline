@@ -465,7 +465,19 @@ fn the_integer_terminal_is_defined_once_and_shared() {
 
     let mut failures = Vec::new();
     let mut users = 0;
-    for rule in ["integer", "int_part", "nonzero"] {
+    // BOTH TERMINALS. `fraction` and `negative_fraction` joined the shared
+    // file on 2026-09-12: `regimen::float` and `record::decimal` were
+    // byte-identical modulo the rule name, with not even a comment claiming
+    // they agreed. Naming only the integer three here would have left the
+    // half that just moved unguarded — which is how the divergence came back
+    // the first time.
+    for rule in [
+        "integer",
+        "int_part",
+        "nonzero",
+        "fraction",
+        "negative_fraction",
+    ] {
         let defined: Vec<&PathBuf> = grammars
             .iter()
             .filter(|path| defines(&std::fs::read_to_string(path).unwrap_or_default(), rule))
@@ -483,12 +495,40 @@ fn the_integer_terminal_is_defined_once_and_shared() {
             )),
         }
     }
+    // AND THE SAME QUESTION ASKED OF THE BODIES, because a copy under a new
+    // name is not a copy the name check can see. Measured: re-inline the
+    // shared fractional rule into the regimen grammar as `negative_float` and
+    // the loop above stays green — it is looking for `negative_fraction`.
+    let shared_bodies: BTreeSet<String> =
+        rules_of(&std::fs::read_to_string(&shared).unwrap_or_default())
+            .into_iter()
+            .map(|(_, body)| body)
+            .collect();
+    assert!(
+        !shared_bodies.is_empty(),
+        "no rule was read out of {SHARED}, so the body comparison below \
+         compares against nothing"
+    );
+
     for path in &grammars {
         if *path == shared {
             continue;
         }
         let text = std::fs::read_to_string(path).unwrap_or_default();
-        if text.lines().any(|line| line.contains("integer")) {
+        for (name, body) in rules_of(&text) {
+            if shared_bodies.contains(&body) {
+                failures.push(format!(
+                    "`{name}` in {} has a shared terminal's body written out again; \
+                     name it `= @{{ <the shared rule> }}` instead, or the divergence \
+                     is back under a new name",
+                    path.display()
+                ));
+            }
+        }
+        if text
+            .lines()
+            .any(|line| line.contains("integer") || line.contains("fraction"))
+        {
             users += 1;
         }
     }
@@ -519,6 +559,86 @@ fn the_integer_terminal_is_defined_once_and_shared() {
 /// Comments are removed first rather than skipped per line, for the same
 /// reason: `// integer` on one line and `= @{ ... }` on the next must not
 /// join up into a definition that is not there.
+/// Every rule a `.pest` file defines, as `(name, body)` with the body's
+/// whitespace collapsed and its comments stripped.
+///
+/// Bodies, because NAMES ARE NOT ENOUGH. The first version of the shared-
+/// terminal guard asked "is this rule defined anywhere but the shared file",
+/// which a re-inlined copy under a DIFFERENT NAME walks straight past: put
+/// `negative_float` back into the regimen grammar with the shared rule's
+/// exact body and nothing notices, because the guard is looking for
+/// `negative_fraction`. Measured — the lesion passed the suite.
+///
+/// That is the same hole this test was hardened for once already, one level
+/// along: it globbed one filename, so a copy in `numbers.pest` was invisible;
+/// now it named one set of rules, so a copy under a new name was. A guard
+/// that enumerates what it knows misses whatever it was not told about, and
+/// the body is the thing that actually duplicates.
+fn rules_of(grammar: &str) -> Vec<(String, String)> {
+    let mut source = String::with_capacity(grammar.len());
+    for line in grammar.lines() {
+        source.push_str(line.split("//").next().unwrap_or(""));
+        source.push('\n');
+    }
+    let mut found = Vec::new();
+    let bytes: Vec<char> = source.chars().collect();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] != '=' {
+            at += 1;
+            continue;
+        }
+        // The name is the token to the left of the `=`.
+        let mut start = at;
+        while start > 0 && bytes[start - 1].is_whitespace() {
+            start -= 1;
+        }
+        let end = start;
+        while start > 0 && (bytes[start - 1].is_alphanumeric() || bytes[start - 1] == '_') {
+            start -= 1;
+        }
+        if start == end {
+            at += 1;
+            continue;
+        }
+        let name: String = bytes[start..end].iter().collect();
+        // Then the modifier, then the braced body.
+        let mut open = at + 1;
+        while open < bytes.len() && bytes[open] != '{' {
+            if !bytes[open].is_whitespace() && !"@_$!".contains(bytes[open]) {
+                break;
+            }
+            open += 1;
+        }
+        if open >= bytes.len() || bytes[open] != '{' {
+            at += 1;
+            continue;
+        }
+        let mut depth = 0;
+        let mut close = open;
+        while close < bytes.len() {
+            match bytes[close] {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            close += 1;
+        }
+        if close >= bytes.len() {
+            break;
+        }
+        let body: String = bytes[open + 1..close].iter().collect();
+        found.push((name, body.split_whitespace().collect::<Vec<_>>().join(" ")));
+        at = close + 1;
+    }
+    found
+}
+
 fn defines(grammar: &str, rule: &str) -> bool {
     let mut source = String::with_capacity(grammar.len());
     for line in grammar.lines() {
