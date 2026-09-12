@@ -35,7 +35,7 @@
 [meta]
 source = "verify.sh"
 red_faults = 313
-mechanics_assertions = 77
+mechanics_assertions = 83
 migrated = 0
 
 
@@ -3564,6 +3564,60 @@ id = "mech.a-literal-split-by-a-combining-mark-is-still-found"
 kind = "mechanics"
 check = "-"
 label = "a literal split by a combining mark is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-literal-welded-by-a-hangul-filler-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "a literal welded by a hangul filler is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-hangul-filler-alone-is-not-a-hit"
+kind = "mechanics"
+check = "-"
+label = "a hangul filler alone is not a hit"
+failure_class = "hygiene.clean"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.a-visible-lookalike-is-the-declared-limit-not-a-hit"
+kind = "mechanics"
+check = "-"
+label = "a visible lookalike is the declared limit, not a hit"
+failure_class = "hygiene.declared-limit"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.and-the-same-line-with-the-latin-letter-is-a-hit"
+kind = "mechanics"
+check = "-"
+label = "and the same line with the Latin letter is a hit"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-decoder-with-no-invisible-character-table-is-broken-not-clean"
+kind = "mechanics"
+check = "-"
+label = "a decoder with no invisible-character table is broken, not clean"
+failure_class = "hygiene.scanner-cannot-run"
+expected_exit = "2"
+migrated = false
+
+[[fault]]
+id = "mech.and-the-same-copy-with-the-table-beside-it-finds-the-literal"
+kind = "mechanics"
+check = "-"
+label = "and the same copy, with the table beside it, finds the literal"
 failure_class = "hygiene.forbidden-literal"
 expected_exit = "1"
 migrated = false

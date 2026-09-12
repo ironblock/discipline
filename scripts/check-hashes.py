@@ -31,11 +31,18 @@ invisible byte behind -- and not an adversary. Three consequences, stated so
 that none of them is later mistaken for an oversight:
 
   * A literal carrying a character of NO VISUAL WIDTH is still caught.
-    `decoding.tokens` drops Unicode `Cf` and `Mn` before splitting, on the
-    rule that a character nobody can see is not a separator. It is the one
-    evasion that survives review and `git diff` unaided, so it is in scope
-    even though it takes deliberate insertion. Seeded: a literal with a
-    zero-width space inside it must exit 1.
+    `decoding.tokens` drops every code point Unicode marks
+    `Default_Ignorable_Code_Point`, plus the combining marks, on the rule that
+    a character nobody can see is not a separator. It is the one evasion that
+    survives review and `git diff` unaided, so it is in scope even though it
+    takes deliberate insertion. Seeded: a literal with a zero-width space
+    inside it, and one with a Hangul filler, must both exit 1.
+
+    THE PROPERTY, NOT A LIST OF CATEGORIES -- ruled 2026-09-12, after the
+    first version of this promise was true only for `Cf` and `Mn`. A Hangul
+    filler is category `Lo` and `isalnum()` true: it welds INTO a token
+    instead of splitting it, so no set of categories could reach it, and the
+    promise above was unqualified while the code behind it was not.
   * A literal spelled in CONFUSABLE characters -- a hostname transliterated
     into Cyrillic -- is NOT caught, and that is a decision rather than a gap.
     Anyone who can do it has commit access and can defeat any pattern too; a
@@ -165,6 +172,18 @@ def main(argv: list[str]) -> int:
     try:
         salt, rows = table(pathlib.Path(args.table))
     except Unusable as err:
+        print(f"check-hashes: {err}", file=sys.stderr)
+        return EXIT_BROKEN
+
+    # The invisible-character table, read here rather than at the first token,
+    # so a tree that cannot be scanned says so before it prints a count. Its
+    # absence is EXIT_BROKEN for the same reason a missing salt is: the whole
+    # point of the strip is the characters a reader cannot see, so a scan
+    # without it is exactly as blind as the defect it exists to catch, and
+    # `clean` from a blind scan is the vacuous class.
+    try:
+        decoding.ignorable()
+    except decoding.NoTable as err:
         print(f"check-hashes: {err}", file=sys.stderr)
         return EXIT_BROKEN
 

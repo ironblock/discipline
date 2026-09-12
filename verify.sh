@@ -5150,6 +5150,81 @@ open(sys.argv[1], 'w', encoding='utf-8').write(
     python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
       --tree "${box}/combining"
 
+  # THE SIBLING ONE STEP SIDEWAYS, and the reason the strip is a PROPERTY now
+  # rather than a list of categories. `U+3164 HANGUL FILLER` is category `Lo`
+  # and `isalnum()` is TRUE for it, so it does not split the token -- it welds
+  # INTO it, and no set of categories could ever have reached it while the
+  # docstring promised "a character of no visual width is still caught"
+  # without qualification. Ruled 2026-09-12: strip Unicode
+  # `Default_Ignorable_Code_Point`, which names exactly the code points that
+  # render as nothing, the four alphanumeric fillers among them.
+  mkdir -p "${box}/filler"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2][:5] + '\u3164' + sys.argv[2][5:] + ' staff\n')
+" "${box}/filler/ls.txt" "$decoy"
+  expect_exit "a literal welded by a hangul filler is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/filler"
+
+  # Its control, for the same reason the other two have one.
+  mkdir -p "${box}/filler-clean"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write('nothing\u3164 here at all\n')
+" "${box}/filler-clean/notes.txt"
+  expect_exit "a hangul filler alone is not a hit" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/filler-clean"
+
+  # THE DECLARED LIMIT, asserted rather than only written down. A visible
+  # lookalike -- Cyrillic `e` where a Latin one belongs -- is NOT caught, and
+  # that is the line the ruling drew: invisible to a reader is in scope, a
+  # confusable is not. An undeclared non-catch is the vacuous class; this one
+  # is declared, and pinned, so a later change that quietly starts folding
+  # confusables has to come here and say so.
+  mkdir -p "${box}/confusable"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2].replace('e', '\u0435', 1) + ' staff\n')
+" "${box}/confusable/ls.txt" "$decoy"
+  expect_exit "a visible lookalike is the declared limit, not a hit" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/confusable"
+
+  # ...and the control that stops the row above from passing because the decoy
+  # has no `o` in it to replace. Same file, same shape, the Latin letter left
+  # alone: that one must fire.
+  mkdir -p "${box}/confusable-control"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2] + ' staff\n')
+" "${box}/confusable-control/ls.txt" "$decoy"
+  expect_exit "and the same line with the Latin letter is a hit" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/confusable-control"
+
+  # NO TABLE IS NO SCAN. The strip reads `default-ignorable.tsv` beside the
+  # decoder, and without it the tokeniser does not know which characters are
+  # invisible -- which makes it exactly as blind as the defect it exists to
+  # catch. Exit 2, like a missing salt and a missing decoder, because `clean`
+  # from a blind scan is the vacuous class.
+  mkdir -p "${box}/tableless"
+  cp "${ROOT}/scripts/check-hashes.py" "${ROOT}/scripts/decoding.py" "${box}/tableless/"
+  expect_exit "a decoder with no invisible-character table is broken, not clean" 2 \
+    python3 "${box}/tableless/check-hashes.py" --table "$table" \
+      --tree "${box}/decoy-hit"
+  # The control: the same copied pair, WITH the table, finds the same hit the
+  # real scanner does. Without it the row above passes on any copy that fails
+  # for any reason at all.
+  cp "${ROOT}/scripts/default-ignorable.tsv" "${box}/tableless/"
+  expect_exit "and the same copy, with the table beside it, finds the literal" 1 \
+    python3 "${box}/tableless/check-hashes.py" --table "$table" \
+      --tree "${box}/decoy-hit"
+
   # ESCAPED TWICE IS STILL ESCAPED. Parsing JSON spends one level, so content
   # a tool logged from another tool's JSON output arrives with `\` and `n`
   # still welded to the front of a token one layer down. The decoder runs to a

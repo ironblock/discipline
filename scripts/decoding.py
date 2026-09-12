@@ -21,6 +21,7 @@ have found it.
 from __future__ import annotations
 
 import json
+import pathlib
 import unicodedata
 
 # A diff line's first column. Stripped before a line is offered to the JSON
@@ -146,20 +147,100 @@ def _decoded_once(text: str) -> str:
     return "".join(f"{line}\n" for line in found)
 
 
-# Characters with NO VISUAL WIDTH: Unicode format characters (`Cf` -- the
-# zero-width space, the joiner and non-joiner, the soft hyphen, the byte-order
-# mark and their kin) and nonspacing marks (`Mn` -- combining accents).
+class NoTable(Exception):
+    """The invisible-character table is missing or unreadable.
+
+    Its own exception, and every caller turns it into EXIT 2, for the reason
+    the callers already spell out: exit 1 is "the scan ran and found
+    something". A tokeniser that does not know which characters are invisible
+    is a tokeniser that cannot scan, and calling that clean would be the
+    vacuous class -- the whole point of the table is the characters a reader
+    cannot see, so a scan without it is exactly as blind as the defect.
+    """
+
+
+TABLE = pathlib.Path(__file__).resolve().parent / "default-ignorable.tsv"
+
+# Nonspacing marks: combining accents. VISIBLE, but not separators, and they
+# stay in the strip -- ruled 2026-09-11, and the ruling of 2026-09-12 that
+# widened everything else left this one standing. `unicodedata` carries them,
+# so unlike the table below they need no harvest.
+COMBINING = frozenset({"Mn"})
+
+
+def _ignorable() -> frozenset[int]:
+    """Every code point Unicode marks `Default_Ignorable_Code_Point`.
+
+    FROM A TABLE, NOT FROM A CATEGORY TEST, and that is the 2026-09-12 ruling
+    rather than a preference. The first version of this strip enumerated
+    categories -- `Cf` and `Mn` -- which is the author-imagined case; the
+    sibling one step sideways is `U+3164 HANGUL FILLER`, category `Lo`,
+    `isalnum()` TRUE, and invisible. It does not split a token, it WELDS INTO
+    one, so no set of categories can reach it and no amount of adding
+    categories would have found it. Unicode already names the set the rule
+    wants: the code points that render as nothing by specification. Four of
+    them are alphanumeric -- U+115F, U+1160, U+3164, U+FFA0.
+
+    The stdlib does not expose the property, so it is harvested into
+    `default-ignorable.tsv` by `derive-ignorable.py` beside this file.
+    """
+    try:
+        text = TABLE.read_text(encoding="utf-8")
+    except OSError as err:
+        raise NoTable(f"cannot read {TABLE}: {err}") from err
+    found: set[int] = set()
+    for line in text.splitlines():
+        body = line.split("#", 1)[0].strip()
+        if not body:
+            continue
+        low, _, high = body.partition("\t")
+        try:
+            start, stop = int(low, 16), int(high or low, 16)
+        except ValueError as err:
+            raise NoTable(f"{TABLE}: {line!r} is not a hex range") from err
+        found.update(range(start, stop + 1))
+    if not found:
+        # An empty table would disable the strip and print the same green as
+        # a full one. A check of nothing is not a pass.
+        raise NoTable(f"{TABLE} carries no ranges, so nothing would be stripped")
+    return frozenset(found)
+
+
+_IGNORABLE: frozenset[int] | None = None
+
+
+def ignorable() -> frozenset[int]:
+    """The table, read once."""
+    global _IGNORABLE  # noqa: PLW0603 -- one file, read once, per process
+    if _IGNORABLE is None:
+        _IGNORABLE = _ignorable()
+    return _IGNORABLE
+
+
+# WHAT IS STRIPPED, AND WHY, in one place:
 #
-# They are dropped before tokenising rather than treated as separators, on one
-# rule: A CHARACTER WITH NO VISUAL WIDTH IS NOT A SEPARATOR. `zzsub<U+200B>jectzz`
-# is the same literal to every human reader and to `git diff`, neither of which
-# can see the character; a tokeniser that splits on it hands back two tokens
-# that hash to nothing and calls the file clean.
+#   * `Default_Ignorable_Code_Point` -- renders as nothing by specification.
+#     The zero-width space and its kin, the variation selectors, the tag
+#     characters, and the four Hangul fillers that are alphanumeric.
+#   * `Mn` -- combining marks. Visible, but not separators.
 #
-# Nothing wider is folded. NFKC compatibility folding would rewrite legitimate
-# content -- ligatures, full-width forms, superscripts -- to guard against a
-# case the threat model does not contain. See check-hashes.py's docstring for
-# what that threat model is.
+# One rule: A CHARACTER WITH NO VISUAL WIDTH IS NOT A SEPARATOR.
+# `zzsub<U+200B>jectzz` and `zzsub<U+3164>jectzz` are the same literal to
+# every human reader and to `git diff`, neither of which can see the
+# character; a tokeniser that splits on the first and keeps the second welded
+# hands back tokens that hash to nothing and calls the file clean.
+#
+# STILL OUT: visible confusables. A Cyrillic `\u043e` where a Latin `o`
+# belongs is a different literal to the scanner and an identical one to the
+# eye -- but the line this gate draws is INVISIBLE TO A READER, and a
+# lookalike is not invisible. Anyone who can transliterate a hostname has
+# commit access and can defeat any pattern; see check-hashes.py's docstring
+# for the threat model. Ruled 2026-09-12, and declared here so the omission
+# is never read as an oversight.
+#
+# Nothing wider is folded. NFKC compatibility folding would rewrite
+# legitimate content -- ligatures, full-width forms, superscripts -- to guard
+# against a case the threat model does not contain.
 #
 # TWO CONSEQUENCES, named rather than discovered later. Dropping `Mn` strips
 # accents from decomposed text, so a decomposed `resume` with an acute on it
@@ -168,7 +249,6 @@ def _decoded_once(text: str) -> str:
 # rather than ordinary vocabulary. And this is the DIGEST half's tokeniser
 # only -- the pattern half matches by shape and does not come through here, so
 # a shaped literal broken by a zero-width space still evades it.
-INVISIBLE = frozenset({"Cf", "Mn"})
 
 
 def tokens(text: str) -> list[str]:
@@ -179,13 +259,19 @@ def tokens(text: str) -> list[str]:
     the bare name never matches it -- measured, and the reason this function
     exists rather than a regex at each call site.
 
-    EXCEPT the characters with no width, which are dropped instead of
-    splitting on: see INVISIBLE above.
+    EXCEPT the characters with no width, which are dropped instead of split
+    on: see the note above `ignorable`.
+
+    # Raises
+
+    `NoTable` when the invisible-character table cannot be read. Callers turn
+    that into exit 2 rather than letting a blind scan print `clean`.
     """
+    invisible = ignorable()
     out: list[str] = []
     current: list[str] = []
     for char in text:
-        if unicodedata.category(char) in INVISIBLE:
+        if ord(char) in invisible or unicodedata.category(char) in COMBINING:
             # Not a token character and not a boundary either: it is not
             # there, as far as anything that reads the file is concerned.
             continue
