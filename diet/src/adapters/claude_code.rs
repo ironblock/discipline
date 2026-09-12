@@ -2,15 +2,31 @@
 //!
 //! Claude Code writes one JSON object per line to
 //! `~/.claude/projects/<slug>/<session>.jsonl`. The first log this adapter was
-//! written against is this repository's own: 5,577 rows, nine top-level
-//! kinds, of which this schema has a word for two.
+//! written against is this repository's own.
+//!
+//! # Every count below is one measurement, and the file it came from moves
+//!
+//! That log is the session this adapter was written IN, so it grew while it
+//! was being read: the first pass over it saw 5,577 rows and the last saw
+//! 6,348. Numbers taken at different moments would quietly disagree with each
+//! other, so every figure in this file comes from ONE reading --
+//! **6,348 rows, 2026-09-12** -- and is a snapshot rather than a constant.
+//! The proportions are what the argument rests on; the absolute counts are
+//! there so a reader can check the proportions.
+//!
+//! At that reading: 9 top-level kinds, of which this schema has a word for
+//! two. `assistant` (2,122) and `user` (1,213) map; `attachment` (1,369),
+//! `last-prompt` (393), `atis-latch` (364), `custom-title` (362), `mode`
+//! (321), `queue-operation` (179) and `system` (25) do not. **3,013 rows --
+//! 47% -- have no schema kind**, which is the number this adapter exists to
+//! make visible rather than to improve.
 //!
 //! # The mapping, and the two places it would be easy to lie
 //!
-//! **A `user` row is not a turn.** Of 1,080 `user` rows in that log, 1,019
-//! carry nothing but `tool_result` blocks -- the harness handing a tool's
+//! **A `user` row is not a turn.** Of 1,213 `user` rows, 1,151 -- 95% --
+//! carry nothing but `tool_result` blocks: the harness handing a tool's
 //! output back to the model, which is not a person saying anything. Mapping
-//! every `user` row to a turn would have invented about a thousand turns that
+//! every `user` row to a turn would have invented over a thousand turns that
 //! never happened, in a record whose whole purpose is that its counts are
 //! true. So a `user` row opens a turn only when it carries text a person
 //! wrote; otherwise its `tool_result` blocks are joined to the call they
@@ -27,12 +43,12 @@
 //! # What it cannot carry
 //!
 //! `thinking` blocks have no event kind in this schema, so they are counted
-//! as dropped content rather than quietly discarded -- 552 of them in that
-//! same log. Six of the nine row kinds (`attachment`, `last-prompt`,
-//! `atis-latch`, `custom-title`, `mode`, `queue-operation`) have no mapping
-//! either, and are counted as unmapped rows. Together that is 47% of the
-//! file, which is the number this adapter exists to make visible rather than
-//! to improve.
+//! as dropped content rather than quietly discarded -- 628 of them at that
+//! reading. The seven unmapped row kinds are counted as unmapped rows. Both
+//! are in the census, and neither is in the record: an adapted record is
+//! **lossy by declaration**, a view of a foreign session rather than a
+//! transcript of one, and the census is the authority on what was seen and
+//! not carried.
 
 use std::collections::BTreeMap;
 
@@ -126,7 +142,7 @@ impl Block {
 /// **This table is why the adapter exists.** `diet::capture::mechanical`
 /// knows `bash`, `read_file` and `edit_file`; Claude Code writes `Bash`,
 /// `Read`, `Edit` and `Write`. Pointed at a real log without this, the lane
-/// matched not one of 1,021 tool calls and derived nothing at all -- no
+/// matched not one of 1,153 tool calls and derived nothing at all -- no
 /// working directory, no file touched, no failed `cd` -- while every count in
 /// the census still read as a success. A translation nobody wrote is a lane
 /// that silently observes nothing, which is this issue's own failure mode
@@ -605,7 +621,7 @@ mod tests {
 
     /// THE THOUSAND-TURN LIE, refused.
     ///
-    /// In the log this adapter was written against, 1,019 of 1,080 `user`
+    /// In the log this adapter was written against, 1,151 of 1,213 `user`
     /// rows carry nothing but a `tool_result` -- the harness handing output
     /// back to the model. Counting those as turns would put a thousand turns
     /// in a record whose entire value is that its counts are true.

@@ -15,18 +15,34 @@
 # in `[package]` was run, and `catches` is what actually failed. No entry
 # claims a catch it does not have.
 #
-# The first run of that generator was WRONG, and the way it was wrong is
-# worth the paragraph: it shared one `target/` directory across the twelve
-# boxes, and copied sources with their original mtimes. Cargo fingerprints on
-# mtime, so three boxes silently reused the binary the PREVIOUS fault had
-# built and were scored against that fault's failures. The giveaway was a
-# mutation in `diet/src/bin/replay.rs` reported as caught by two library
-# tests that never run the binary. A manifest is only worth the run behind
-# it, and a run is only worth its isolation.
+# That generator was wrong TWICE before it was right, both times about the
+# build cache, and both are worth the paragraph because a manifest is only
+# worth the run behind it and a run is only worth its isolation.
+#
+# First: it shared one `target/` directory across the boxes and copied
+# sources with their original mtimes. Cargo fingerprints on mtime, so three
+# boxes silently reused the binary the PREVIOUS fault had built and were
+# scored against that fault's failures. The giveaway was a mutation in
+# `diet/src/bin/replay.rs` reported as caught by two library tests that never
+# run the binary.
+#
+# Second: the directory it shared was the REPOSITORY's. Touching the sources
+# fixed the staleness between boxes and did nothing about the bleed out of
+# them -- the last box left a binary built from a mutated tree in the
+# repository's cache, and the next `cargo test` on a clean checkout went red
+# on a fault nobody had applied. The boxes now build into a target directory
+# of their own. Two trees that are not the same tree do not share a cache.
 #
 # The drift guard (`every_seeded_fault_still_names_source_that_is_there`)
 # fires for EVERY fault by construction, because a mutation is an anchor
 # being replaced. So `command` skips it and `catches` excludes it.
+#
+# The filter is `adapters`, which is #28's own acceptance command, so the
+# lane's gate and the issue's row run the same set. Every integration test
+# in `diet/tests/replay_cli.rs` is named to match it: an integration test
+# has no module path, so a filter it does not carry in its own name reaches
+# none of them, and the issue's command would pass having run nothing that
+# runs the program.
 #
 # `--no-fail-fast` is in the command and the other lanes' commands do not
 # have it. Without it, a fault caught in the library stops cargo before the
@@ -39,7 +55,7 @@
 [package]
 name = "diet-adapters"
 check = "test"
-command = "cargo test --no-fail-fast -p discipline-diet -- adapt --skip every_seeded_fault_still_names_source_that_is_there"
+command = "cargo test --no-fail-fast -p discipline-diet -- adapters --skip every_seeded_fault_still_names_source_that_is_there"
 faults = 13
 
 [[fault]]
@@ -55,10 +71,10 @@ anchor = '''
 becomes = '''
             let _ = kind;'''
 catches = [
-    "a_kind_the_adapter_never_saw_is_counted_and_does_not_stop_the_replay",
     "adapters::claude_code::tests::a_kind_this_adapter_does_not_map_is_counted_rather_than_dropped",
     "adapters::claude_code::tests::the_committed_corpus_adapts_and_refuses_as_it_says_it_does",
-    "an_adapted_session_replays_to_a_census_and_a_working_object",
+    "adapters_a_kind_never_seen_is_counted_and_does_not_stop_the_replay",
+    "adapters_an_adapted_session_replays_to_a_census_and_a_working_object",
 ]
 
 [[fault]]
@@ -81,13 +97,13 @@ becomes = '''
     let message = row.get("message").or_else(|| row.get("msg")).unwrap_or(row);'''
 catches = [
     "adapters::claude_code::tests::a_renamed_field_on_a_mapped_kind_is_refused_rather_than_guessed_at",
-    "an_adapter_refuses_a_renamed_field_with_its_own_exit_code_and_writes_no_object",
+    "adapters_a_renamed_field_is_refused_with_its_own_exit_code_and_no_object",
 ]
 
 [[fault]]
 # The defect this adapter was built around. `diet::capture::mechanical`
 # knows `bash` and `read_file`; the log says `Bash` and `Read`. Without the
-# table not one of 1,021 tool calls in the reference log matched, the lane
+# table not one of 1,153 tool calls in the reference log matched, the lane
 # derived nothing, and the census still read as a success.
 id = "adapters.the-tool-names-cross-untranslated"
 failure_class = "adapters.the-tool-names-cross-untranslated"
@@ -101,11 +117,11 @@ anchor = '''
 becomes = '''
     (name, false)'''
 catches = [
-    "a_replay_of_an_adapted_log_needs_no_endpoint_and_opens_no_socket",
     "adapters::claude_code::tests::a_translated_tool_name_is_declared_in_the_census",
     "adapters::claude_code::tests::claude_codes_tool_names_are_translated_into_the_lanes_vocabulary",
-    "an_adapted_session_replays_to_a_census_and_a_working_object",
-    "an_adapted_tool_call_whose_path_resolves_to_nothing_makes_no_fact",
+    "adapters_a_path_that_resolves_to_nothing_makes_no_fact",
+    "adapters_a_replay_needs_no_endpoint_and_is_given_nowhere_to_dial",
+    "adapters_an_adapted_session_replays_to_a_census_and_a_working_object",
 ]
 
 [[fault]]
@@ -126,9 +142,9 @@ anchor = '''
 becomes = '''
                     let key = key.clone();'''
 catches = [
-    "a_replay_of_an_adapted_log_needs_no_endpoint_and_opens_no_socket",
     "adapters::claude_code::tests::a_translated_tool_name_is_declared_in_the_census",
-    "an_adapted_session_replays_to_a_census_and_a_working_object",
+    "adapters_a_replay_needs_no_endpoint_and_is_given_nowhere_to_dial",
+    "adapters_an_adapted_session_replays_to_a_census_and_a_working_object",
 ]
 
 [[fault]]
@@ -168,8 +184,8 @@ catches = [
 ]
 
 [[fault]]
-# 1,019 of 1,080 `user` rows in the reference log carry nothing but tool
-# output. Mapping them to turns invents about a thousand turns in a record
+# 1,151 of 1,213 `user` rows in the reference log carry nothing but tool
+# output. Mapping them to turns invents over a thousand turns in a record
 # whose whole purpose is that its counts are true.
 id = "adapters.a-tool-result-row-opens-a-turn-of-its-own"
 failure_class = "adapters.a-tool-result-row-opens-a-turn-of-its-own"
@@ -181,7 +197,7 @@ becomes = '''
         if said.len() > 1_000_000 {'''
 catches = [
     "adapters::claude_code::tests::a_user_row_carrying_only_a_tool_result_is_not_a_turn",
-    "an_adapted_session_replays_to_a_census_and_a_working_object",
+    "adapters_an_adapted_session_replays_to_a_census_and_a_working_object",
 ]
 
 [[fault]]
@@ -235,10 +251,10 @@ becomes = '''
         self.census.unmapped_one(kind);
         match mapped {'''
 catches = [
-    "a_kind_the_adapter_never_saw_is_counted_and_does_not_stop_the_replay",
     "adapters::claude_code::tests::a_kind_this_adapter_does_not_map_is_counted_rather_than_dropped",
     "adapters::claude_code::tests::the_committed_corpus_adapts_and_refuses_as_it_says_it_does",
-    "an_adapted_session_replays_to_a_census_and_a_working_object",
+    "adapters_a_kind_never_seen_is_counted_and_does_not_stop_the_replay",
+    "adapters_an_adapted_session_replays_to_a_census_and_a_working_object",
 ]
 
 [[fault]]
@@ -272,7 +288,7 @@ const EXIT_DRIFT: u8 = 2;'''
 becomes = '''
 const EXIT_DRIFT: u8 = 1;'''
 catches = [
-    "an_adapter_refuses_a_renamed_field_with_its_own_exit_code_and_writes_no_object",
+    "adapters_a_renamed_field_is_refused_with_its_own_exit_code_and_no_object",
 ]
 
 [[fault]]
@@ -292,5 +308,5 @@ becomes = '''
             continue;
         }'''
 catches = [
-    "an_adapted_tool_call_whose_path_resolves_to_nothing_makes_no_fact",
+    "adapters_a_path_that_resolves_to_nothing_makes_no_fact",
 ]

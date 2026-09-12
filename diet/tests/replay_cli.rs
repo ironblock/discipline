@@ -8,14 +8,19 @@
 //! the adapter refuses exits 2 and writes no object, and that nothing on the
 //! path needs an endpoint.
 //!
-//! **Every test here has `adapt` in its name, and that is load-bearing.**
-//! `cargo test -p discipline-diet -- adapt` is what this lane's `gate.toml`
-//! declares, and that is a substring filter over test names. A lib test
-//! carries its module path (`adapters::…`, which contains it); an integration
-//! test is named by its function alone. The `drive` lane shipped two seeded
-//! faults recorded as catching nothing for exactly this reason -- the filter
-//! never reached the tests that caught them -- and this file is written after
-//! that lesson rather than before it.
+//! **Every test here begins with `adapters_`, and that is load-bearing.**
+//! #28's own acceptance row is `cargo test -p discipline-diet -- adapters`,
+//! and that is a substring filter over test names. A library test carries its
+//! module path, so `adapters::claude_code::tests::…` matches it for free; an
+//! integration test is named by its function alone and matches nothing unless
+//! the filter is in the name. Without the prefix the issue's command would
+//! exit 0 having run none of the tests that run the program -- a pass that
+//! proves the opposite of what it looks like.
+//!
+//! The `drive` lane shipped two seeded faults recorded as catching nothing
+//! for exactly this reason: its filter never reached the tests that caught
+//! them. This file is written after that lesson rather than before it, and
+//! the lane's `gate.toml` declares the same filter the issue does.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -68,7 +73,7 @@ fn heading(stdout: &str) -> (&str, &str) {
 }
 
 #[test]
-fn an_adapted_session_replays_to_a_census_and_a_working_object() {
+fn adapters_an_adapted_session_replays_to_a_census_and_a_working_object() {
     let (code, out, err) = run(&[
         "--adapter",
         "claude-code",
@@ -106,7 +111,7 @@ fn an_adapted_session_replays_to_a_census_and_a_working_object() {
 }
 
 #[test]
-fn a_replay_of_an_adapted_log_needs_no_endpoint_and_opens_no_socket() {
+fn adapters_a_replay_needs_no_endpoint_and_is_given_nowhere_to_dial() {
     // The whole claim of replay mode: work that already happened is read, not
     // redone. The command line has no endpoint to give it, and an object still
     // comes out -- which is what makes the census a free observation rather
@@ -135,7 +140,7 @@ fn a_replay_of_an_adapted_log_needs_no_endpoint_and_opens_no_socket() {
 }
 
 #[test]
-fn a_kind_the_adapter_never_saw_is_counted_and_does_not_stop_the_replay() {
+fn adapters_a_kind_never_seen_is_counted_and_does_not_stop_the_replay() {
     let (code, out, err) = run(&[
         "--adapter",
         "claude-code",
@@ -161,7 +166,7 @@ fn a_kind_the_adapter_never_saw_is_counted_and_does_not_stop_the_replay() {
 }
 
 #[test]
-fn an_adapter_refuses_a_renamed_field_with_its_own_exit_code_and_writes_no_object() {
+fn adapters_a_renamed_field_is_refused_with_its_own_exit_code_and_no_object() {
     let (code, out, err) = run(&[
         "--adapter",
         "claude-code",
@@ -187,7 +192,7 @@ fn an_adapter_refuses_a_renamed_field_with_its_own_exit_code_and_writes_no_objec
 }
 
 #[test]
-fn every_adapter_refusal_that_is_not_drift_exits_one() {
+fn adapters_every_refusal_that_is_not_drift_exits_one() {
     let regimen = regimen().to_string_lossy().into_owned();
     let log = fixture("session").to_string_lossy().into_owned();
     let missing = fixture("no-such-fixture").to_string_lossy().into_owned();
@@ -232,7 +237,7 @@ fn every_adapter_refusal_that_is_not_drift_exits_one() {
 }
 
 #[test]
-fn an_adapted_replay_is_the_same_bytes_every_time_it_is_run() {
+fn adapters_a_replay_is_the_same_bytes_every_time_it_is_run() {
     // The gym reads this output back. A census whose key order or counts
     // depended on a hash seed would make two runs of the same log
     // incomparable, which is the one thing the census exists to allow.
@@ -248,7 +253,7 @@ fn an_adapted_replay_is_the_same_bytes_every_time_it_is_run() {
 }
 
 #[test]
-fn an_adapted_tool_call_whose_path_resolves_to_nothing_makes_no_fact() {
+fn adapters_a_path_that_resolves_to_nothing_makes_no_fact() {
     // Distilled from row 5,955 of the log this adapter was written against: a
     // `Bash` call whose pipeline the capture lane read a file operand out of
     // and could not resolve, with no `cd` before it to resolve against. The
