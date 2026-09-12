@@ -2248,11 +2248,20 @@ impl Members {
 /// arm that has one: that method is already the single statement of which
 /// kinds carry an id, and a second copy here could disagree with it.
 ///
-/// Long because the vocabulary is, and kept whole for that reason: this is a
-/// FLAT DISPATCH over a closed set of kinds, and every arm is here so that
-/// adding a kind fails to compile until someone says how it is written.
-/// Splitting it to satisfy a line count would put a kind's writer somewhere a
-/// reader has to go looking for, and would buy nothing back.
+/// EXHAUSTIVE OVER EVERY EVENT KIND; SPLITTING SCATTERS THE MATCH. That is
+/// the wording the 2026-09-12 ruling requires of this suppression, and the
+/// ruling is a criterion rather than a grant: an `#[allow]` is acceptable for
+/// exactly one shape, an exhaustive `match` over an enum whose length IS its
+/// completeness, and anything long for another reason -- helpers inlined,
+/// formatting repeated per kind -- gets split instead.
+///
+/// Measured against that criterion before claiming it. Eleven arms for the
+/// eleven `Event` variants and no wildcard, so adding a kind fails to compile
+/// until someone says how it is written. The shared work is hoisted OUT of
+/// the match -- `record` and `id` are written once above it -- so it is not
+/// formatting repeated per kind. The three structures with any depth to them
+/// delegate to `regime_value`, `artifacts_value` and `summary_value`, so it
+/// is not helpers inlined. What is left is the vocabulary, one arm each.
 #[allow(clippy::too_many_lines)]
 fn event_value(event: &Event) -> BTreeMap<String, Value> {
     let mut members = Members(BTreeMap::new());
