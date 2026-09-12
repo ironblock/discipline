@@ -11,7 +11,22 @@ name: verify
 # comment is a description rather than a promise.
 
 on:
+  # `push` is scoped to the default branch, and nothing else is. On a branch
+  # with a pull request open, `push` and `pull_request` fire on the SAME sha
+  # and GitHub keys the concurrency group per event, so both ran to completion
+  # -- the whole gate, twice, for one commit. Scoping push to `main` leaves
+  # each sha with exactly one run: the pull-request run while it is a branch,
+  # the push run once it is history.
+  #
+  # This is a branch filter, not a path filter, and the difference is what
+  # makes it safe: no check is skipped for any sha that a pull request covers.
+  # The cost it does have is real and worth stating -- a branch pushed with no
+  # pull request open gets no run at all. `pull_request` carries no `branches:`
+  # for the same reason: a filter there would leave pull requests targeting
+  # anything but the named branch ungated, which is the failure this comment
+  # is about. check-ci-coverage.py refuses one.
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -39,6 +54,14 @@ jobs:
     needs: [diet, pages, repo, selftest]
     if: always()
     runs-on: ubuntu-latest
+    # `actions: read` on top of the workflow's `contents: read`, because this
+    # job downloads the shards' census artifacts and the workflow-level grant
+    # is a ceiling, not a floor: without it the token cannot read this run's
+    # own artifacts and the census step fails for a reason that has nothing to
+    # do with the shards.
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v5
 
@@ -49,3 +72,21 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: python3 scripts/check-job-results.py
+
+      # Only reached when the step above passed, because `run` steps stop at
+      # the first failure. So the census is asked its question -- did the
+      # shards between them run every fault -- of a set of shards that all
+      # succeeded. Two different claims, in the order that makes each one
+      # answerable: every shard went green, and every fault was in a shard.
+      #
+      # It lives here rather than in a job of its own inside gate-selftest.yml
+      # because this job is the one check-ci-coverage.py already proves is
+      # depended upon. A new job there would be a job nothing checks is
+      # reachable, and a skipped one would leave the called workflow green.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: selftest-census-*
+          path: ${{ runner.temp }}/census
+
+      - name: Every fault was run by exactly one shard
+        run: python3 scripts/check-selftest-census.py "${{ runner.temp }}/census"
