@@ -1360,12 +1360,41 @@ mod tests {
             .split_once("\n}")
             .expect("tag_word is closed")
             .0;
-        let admitted: BTreeSet<String> = body
-            .split('|')
-            .filter_map(|alt| alt.trim().strip_prefix("^\""))
-            .filter_map(|alt| alt.split('"').next())
-            .map(str::to_owned)
-            .collect();
+        // EVERY ALTERNATIVE IS READ, and one this cannot read is a FAILURE
+        // rather than a skip. `filter_map` dropped anything not spelled
+        // `^"..."` on the floor: append `| "IMPACT"` -- a case-sensitive
+        // literal, which is legal pest -- and the grammar admits a tag the
+        // table does not carry while all 582 tests stay green. A reader that
+        // silently ignores what it does not understand is not comparing two
+        // lists; it is comparing one list against the part of the other it
+        // happened to parse.
+        let mut unreadable: Vec<&str> = Vec::new();
+        let mut admitted: BTreeSet<String> = BTreeSet::new();
+        for alt in body.split('|') {
+            let alt = alt.trim();
+            if alt.is_empty() {
+                continue;
+            }
+            match alt
+                .strip_prefix("^\"")
+                .and_then(|rest| rest.split_once('"'))
+            {
+                // Nothing may trail the closing quote: `^"plan" ~ x` is a
+                // sequence, not a bare alternative, and reading only its head
+                // would understate what the grammar admits.
+                Some((word, rest)) if rest.trim().is_empty() => {
+                    admitted.insert(word.to_owned());
+                }
+                _ => unreadable.push(alt),
+            }
+        }
+        assert!(
+            unreadable.is_empty(),
+            "tag_word holds {} alternative(s) this test cannot read: {unreadable:?}. \
+             Every alternative must be a bare `^\"word\"`; anything else is a \
+             spelling the grammar admits and this comparison would not see",
+            unreadable.len()
+        );
         let tabled: BTreeSet<String> = tag_rows()
             .filter(|(_, position, _)| *position == TagPosition::Line)
             .map(|(tag, _, _)| tag.to_lowercase())
@@ -1409,23 +1438,133 @@ mod tests {
         );
     }
 
-    /// Every maximal run of `[A-Z_]` that a colon follows, provided the run
-    /// holds at least one letter and does not continue a longer word.
+    /// The separator alphabets, READ OUT OF THE GRAMMAR rather than retyped.
+    ///
+    /// This is the whole point of the fix below. The lint knew about `:` and
+    /// nothing else, while the grammar has admitted a second register --
+    /// `dash = { "—" | "–" | "--" | "-" | "=" | "»" | ">" }` -- the entire
+    /// time. A tag written `IMPACT — what this changes` was invisible to the
+    /// lint, read as prose by the parser, and `tags.tsv`'s header said "add a
+    /// tag to a template and two tests go red until it is named here": false
+    /// for every tag not followed by a colon.
+    ///
+    /// Harvested, so a THIRD register added to the grammar cannot leave this
+    /// behind the way the second did.
+    fn separators() -> (Vec<String>, Vec<String>) {
+        const GRAMMAR: &str = include_str!("../../formats/interview/grammar.pest");
+        fn alternatives(rule: &str) -> Vec<String> {
+            let body = GRAMMAR
+                .split_once(&format!("\n{rule} = {{"))
+                .unwrap_or_else(|| panic!("the grammar defines {rule}"))
+                .1
+                .split_once('}')
+                .expect("the rule is closed")
+                .0;
+            let found: Vec<String> = body
+                .split('|')
+                .map(|alt| {
+                    let alt = alt.trim();
+                    alt.strip_prefix('"')
+                        .and_then(|rest| rest.strip_suffix('"'))
+                        .unwrap_or_else(|| {
+                            panic!("{rule} holds an alternative this cannot read: {alt:?}")
+                        })
+                        .to_owned()
+                })
+                .collect();
+            assert!(!found.is_empty(), "{rule} yielded no alternatives");
+            found
+        }
+        (alternatives("colon"), alternatives("dash"))
+    }
+
+    /// Every run of `[A-Z_]` a dogma template writes WHERE A TAG MAY OPEN.
+    ///
+    /// A TAG OPENS A LINE. Nothing else does -- the grammar says so in those
+    /// words, and ruled it on 2026-09-08: text after a separator is that
+    /// field's value, all of it, including something that looks like a second
+    /// tag. So this walks each line's opening the way `tag_line` does --
+    /// `hspace* ~ bullet? ~ (heading_marker | emphasis)?` -- and only then
+    /// reads the run.
+    ///
+    /// The first version scanned for `:` ANYWHERE in the text, which was
+    /// wrong in both directions at once. It missed the whole dash register --
+    /// the grammar has admitted `—`, `–`, `--`, `-`, `=`, `»` and `>` the
+    /// entire time, so `IMPACT — what this changes` was invisible while
+    /// `tags.tsv`'s header claimed "add a tag to a template and two tests go
+    /// red". And widening it to the dash register without anchoring to the
+    /// line immediately produced a false positive on real dogma:
+    /// `VERDICT: REPLACES | RESOLVES | CONTRADICTS | UNRELATED — followed…`,
+    /// where `UNRELATED` is a value in a list and the em-dash is punctuation.
+    /// That is exactly the 71-of-630 bug the ruling forbids reading into.
+    ///
+    /// Three shapes count, each because the grammar admits it:
+    ///
+    ///   `TAG:`         `hspace* ~ colon`, a colon may hug the tag
+    ///   `TAG —`        `hspace+ ~ dash ~ &(hspace | nl | EOI)`, a dash may
+    ///                  not, because `Evidence-based` is a word
+    ///   `## TAG`       a heading tag needs no separator at all
     fn capitalised_tags(text: &str) -> BTreeSet<String> {
-        let chars: Vec<char> = text.chars().collect();
+        let (colons, dashes) = separators();
+        let hspace = |c: char| c == ' ' || c == '\t';
         let mut found = BTreeSet::new();
-        for (at, c) in chars.iter().enumerate() {
-            if *c != ':' {
+        for line in text.lines() {
+            let mut rest = line.trim_start_matches(hspace);
+            // `bullet`, and only one: `- - TAG` is not a list item twice.
+            for mark in ["- ", "* ", "+ "] {
+                if let Some(tail) = rest.strip_prefix(mark) {
+                    rest = tail.trim_start_matches(hspace);
+                    break;
+                }
+            }
+            let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+            if digits > 0 {
+                let after = &rest[digits..];
+                if let Some(tail) = after.strip_prefix('.').or_else(|| after.strip_prefix(')'))
+                    && tail.starts_with(hspace)
+                {
+                    rest = tail.trim_start_matches(hspace);
+                }
+            }
+            let heading = rest.starts_with('#');
+            if heading {
+                rest = rest.trim_start_matches('#').trim_start_matches(hspace);
+            }
+            // `emphasis`, longest first: `**` before `*`.
+            for mark in ["***", "**", "__", "*", "_", "`"] {
+                if let Some(tail) = rest.strip_prefix(mark) {
+                    rest = tail;
+                    break;
+                }
+            }
+            let run: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_uppercase() || *c == '_')
+                .collect();
+            if run.is_empty() || !run.chars().any(|r| r.is_ascii_uppercase()) {
                 continue;
             }
-            let mut start = at;
-            while start > 0 && (chars[start - 1].is_ascii_uppercase() || chars[start - 1] == '_') {
-                start -= 1;
+            let mut tail = &rest[run.len()..];
+            // `**TAG**: value` -- the emphasis may close before the separator.
+            for mark in ["***", "**", "__", "*", "_", "`"] {
+                if let Some(after) = tail.strip_prefix(mark) {
+                    tail = after;
+                    break;
+                }
             }
-            let run: String = chars[start..at].iter().collect();
-            let opens =
-                start == 0 || !(chars[start - 1].is_alphanumeric() || chars[start - 1] == '_');
-            if opens && run.chars().any(|r| r.is_ascii_uppercase()) {
+            let after_spaces = tail.trim_start_matches(hspace);
+            let hugged = colons.iter().any(|c| after_spaces.starts_with(c.as_str()));
+            let spaced = tail.starts_with(hspace)
+                && dashes.iter().any(|d| {
+                    after_spaces
+                        .strip_prefix(d.as_str())
+                        .is_some_and(|after| after.is_empty() || after.starts_with(hspace))
+                });
+            // A heading with no separator must have nothing else on its line,
+            // or `# Evidence of the leak` is an EVIDENCE field. The grammar
+            // draws that line and so does this.
+            let bare_heading = heading && after_spaces.is_empty();
+            if hugged || spaced || bare_heading {
                 found.insert(run);
             }
         }
