@@ -80,8 +80,19 @@ GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
 # anywhere reported that fault as the defect it exists to catch -- which is
 # the lint failing on its own regression test, and would have been read as the
 # lint working.
-RAW_SED = re.compile(r"(?:^|[|;&(`]|\$\(|&&|\|\|)\s*sed(?![\w./-])")
-GNU_SED = re.compile(r"\bsed +-i(?![A-Za-z0-9._])")
+RAW_SED = re.compile(r"(?:^|[|;&(`]|\$\(|&&|\|\|)\s*(?:g?sed)(?![\w./-])")
+# BOTH SPELLINGS OF THE FLAG. This knew only `-i` until a fresh instance ran
+# `--in-place=''` through `find -exec`, `xargs` and `eval` and got exit 0 from
+# all three: the structural rule below does not see a `sed` that is not in
+# command position, and this backstop -- which scans the whole file and would
+# have caught them -- was looking for a spelling they did not use. The long
+# option is the same GNU extension written out, and it walked past the rule
+# whose own comment says a two-spelling blocklist is what it must not be.
+GNU_SED = re.compile(r"\bg?sed +(?:-i(?![A-Za-z0-9._])|--in-place)")
+# `S=sed; $S -i ...`. A name bound to the command and then run through the
+# name is the cheapest indirection there is, and no scan of command position
+# can see it -- so the BINDING is what is refused, which a scan can see.
+SED_BOUND_TO_A_NAME = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*=(?:'|\")?g?sed\b")
 GNU_REPLACEMENT = re.compile(
     r"s(?P<d>[|/#])(?:(?!(?P=d))[^\n])*(?P=d)(?:(?!(?P=d))[^\n])*\\n"
 )
@@ -468,12 +479,43 @@ def main() -> int:
         if line.lstrip().startswith("#"):
             continue
         if GNU_SED.search(line):
-            unportable.append((number, "`sed -i` with the suffix on the flag", line.strip()))
+            unportable.append(
+                (number, "an in-place `sed`, in either spelling of the flag", line.strip())
+            )
+        elif SED_BOUND_TO_A_NAME.search(line):
+            unportable.append(
+                (number, "`sed` bound to a name, which runs it out of command position", line.strip())
+            )
         elif GNU_REPLACEMENT.search(line):
             unportable.append((number, "a `\\n` in a sed replacement", line.strip()))
 
-    # And the rule a blocklist cannot state: inside an injection, there is no
-    # spelling of `sed` that is this script's business to approve.
+    # And the rule a blocklist cannot state: inside an injection, a `sed` in
+    # COMMAND POSITION is refused whatever its flags.
+    #
+    # WHAT THIS DOES NOT CATCH, because a fresh instance got six spellings
+    # past the version that claimed it caught everything. The claim was:
+    # "there is no spelling of sed that is this script's business to approve".
+    # That was false, and the six are recorded on #70 rather than paraphrased.
+    # Five of them ran the long flag through `find -exec`, `xargs`, `eval` or
+    # a shell variable, and they are closed above -- the whole-file backstop
+    # now knows `--in-place`, and binding the command to a name is refused
+    # outright.
+    #
+    # THE SIXTH IS NOT CLOSED AND CANNOT BE, BY ANY SCAN OF THIS KIND:
+    #
+    #     "s""ed" --in-place='' 's/x/y/' f
+    #
+    # The shell concatenates adjacent strings, so the command's NAME does not
+    # appear in the file. No regex over the text can see a word that is not
+    # written in it, and a scanner that tried would have to interpret shell
+    # quoting -- which is a shell, not a lint.
+    #
+    # This is the same technique `inject_injection_needs_gnu_sed` uses to
+    # plant its own fault without tripping the lint while editing it, and the
+    # reviewer's sharpest point is that its presence in this tree proves the
+    # authors knew text scanning is defeatable this way. What actually closes
+    # it is running the corpus under BSD semantics -- #75 -- and until that
+    # exists, this residue is declared and not defended.
     offset = {}
     running = 1
     for piece in text.split("\n"):
