@@ -2,5 +2,12 @@ A negative zero float. TOML accepts it; this format does not, because
 `-0.0` is a second spelling of `0.0` and a regime is identified by the
 settings it names. The float is built through the record's decimal
 constructor, which refuses the second spelling on both sides of the point.
-(`-0` as an INTEGER is accepted, which predates the float rule; the
-asymmetry is real and stated in the grammar.)
+
+`-0` as an INTEGER is refused too, by `negative-zero.toml` beside this file.
+An earlier version of this reason said it was accepted and called the
+asymmetry "real and stated in the grammar". There is no asymmetry: the
+integer terminal has refused `-0` since it moved to `number.pest`, and the
+grammar comment that was cited as stating the asymmetry said the same false
+thing until it was corrected on 2026-09-12. A `.reason` is only read when its
+fixture unexpectedly parses, so nothing in the gate compares one to the tree
+-- which is how this sentence outlived the rule it described.
