@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 296
+red_faults = 297
 mechanics_assertions = 45
 migrated = 0
 
@@ -3141,6 +3141,15 @@ target = "test:conformance/the_integer_terminal"
 label = "an integer terminal grown a second time"
 failure_class = "grammar.terminal-defined-twice"
 legacy_signature = "it belongs in number\\.pest and nowhere else"
+migrated = false
+[[fault]]
+id = "test.number_terminal_body_regrown"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/the_integer_terminal"
+label = "a shared body written out under another name"
+failure_class = "grammar.terminal-defined-twice"
+legacy_signature = "has a shared terminal.s body written out again"
 migrated = false
 [[fault]]
 id = "recompute.recompute_historical_with_a_script"

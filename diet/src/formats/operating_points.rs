@@ -187,12 +187,16 @@ impl std::fmt::Display for Error {
 /// ruled 2026-09-12, and it is a BUG FIX rather than a spelling change.
 ///
 /// The comparison used to be `served.contains(entry.matches)` byte for byte,
-/// and `Qwen3.6-27B` — the spelling this repository writes 317 times, more
-/// than any other model id in the tree — served NOTHING, while its lowercase
-/// twin served `qwen3_6`. No `nothink_ops`, no `thinking_kwarg`, no sampler,
-/// for the family the file is mostly about. Model identifiers are ASCII and
-/// case-preserving but not case-MEANINGFUL, so that was a defect and not a
-/// policy.
+/// and `Qwen3.6-27B` — written 316 times in
+/// `diet/capture/sense/register/mined.provenance.jsonl`, the mined corpus
+/// this serves, and more than any other model id — served NOTHING, while its
+/// lowercase twin served `qwen3_6`. (Counted in the record, not in the tree:
+/// a tree-wide grep sweeps in this comment and the test below, which is how
+/// a first count of it came out at 317.)
+///
+/// No `nothink_ops`, no `thinking_kwarg`, no sampler, for the family the file
+/// is mostly about. Model identifiers are ASCII and case-preserving but not
+/// case-MEANINGFUL, so that was a defect and not a policy.
 ///
 /// **This is not serving-invariant, and must never be recorded as though it
 /// were.** Three of the nineteen harvested names go from *nothing served* to
@@ -721,8 +725,9 @@ mod tests {
                 ("Qwen3.6-27B", "qwen3_6"),
             ],
             "the fold reaches exactly three of the nineteen harvested names, and \
-             `Qwen3.6-27B` is the one that matters: 317 occurrences, the most \
-             frequent model id in this tree, previously served by nothing at all"
+             `Qwen3.6-27B` is the one that matters: 316 occurrences in the mined \
+             provenance record, the most frequent model id in the corpus, \
+             previously served by nothing at all"
         );
     }
 

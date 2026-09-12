@@ -42,10 +42,13 @@ nonzero  = _{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
 // round-tripped.
 //
 // `-0.0` is refused. One spelling per value, and negative zero is a second
-// spelling of zero -- the same narrowing `-0` gets above. (`-0` as an INTEGER
-// is still accepted, because it was before that rule existed and TOML admits
-// it; that asymmetry is real and is the one thing here a later version should
-// settle.)
+// spelling of zero -- the same narrowing `-0` gets above, and in the same
+// direction: `regimen/fixtures/invalid/negative-zero.toml` and
+// `negative-zero-float.toml` are the pair that refuse them, so neither half
+// of the narrowing rests on this comment. (An earlier draft of this comment
+// claimed `-0` was still accepted as an integer, as an asymmetry a later
+// version should settle. It said that of the rule three lines above it, which
+// refuses it. There is no asymmetry and there is nothing to settle.)
 //
 // No exponent. `7e-1` is a second spelling of `0.7`.
 fraction = @{ ("-" ~ negative_fraction) | (int_part ~ "." ~ ASCII_DIGIT+) }
