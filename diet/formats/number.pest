@@ -1,4 +1,4 @@
-// The integer terminal, defined once.
+// The number terminals, defined once.
 //
 // Two grammars need it -- `regimen` and `record` -- and for a while each
 // spelled it out for itself. The two spellings admitted the same strings and
@@ -22,3 +22,39 @@ integer  = @{ ("-" ~ nonzero) | int_part }
 // fractional rules are built out of these too.
 int_part = _{ "0" | nonzero }
 nonzero  = _{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
+
+// AND THE FRACTIONAL TERMINAL, for the same reason and by the same ruling --
+// 2026-09-12. `regimen::float` and `record::decimal` were byte-identical
+// modulo the rule name, and so were their negative halves, with not even a
+// comment claiming they agreed. The `-0` ruling named the INTEGER terminal
+// because that was the divergence in front of it; the rule was never
+// integer-specific.
+//
+// Each grammar keeps its own NAME -- `float` there, `decimal` here -- as an
+// ATOMIC alias of this rule. Atomic matters: `@` suppresses inner tokens, so
+// `Rule::float` and `Rule::decimal` still carry the whole span and no child,
+// exactly as they did when each spelled the digits out. The readers that
+// match on those rules are untouched.
+//
+// AN EXACT DECIMAL, never a binary float: the digits as written. A binary
+// float would read `0.6` back as `0.59999999999999998`, and a regime
+// identified by its settings cannot have a value that changes when it is
+// round-tripped.
+//
+// `-0.0` is refused. One spelling per value, and negative zero is a second
+// spelling of zero -- the same narrowing `-0` gets above. (`-0` as an INTEGER
+// is still accepted, because it was before that rule existed and TOML admits
+// it; that asymmetry is real and is the one thing here a later version should
+// settle.)
+//
+// No exponent. `7e-1` is a second spelling of `0.7`.
+fraction = @{ ("-" ~ negative_fraction) | (int_part ~ "." ~ ASCII_DIGIT+) }
+
+// `ASCII_NONZERO_DIGIT` in the second alternative is a RESTATEMENT, not the
+// enforcement: `"0"*` is greedy and pest does not backtrack a repetition, so
+// whatever follows it is already not a zero. It is spelled out because the
+// rule is about which digit may be nonzero, and a reader who narrowed `"0"*`
+// to `"0"?` with `ASCII_DIGIT` there would reopen the hole in silence.
+negative_fraction = _{
+    (nonzero ~ "." ~ ASCII_DIGIT+) | ("0" ~ "." ~ "0"* ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
+}

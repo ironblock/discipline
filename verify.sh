@@ -1781,6 +1781,46 @@ exit 0
 SH
 }
 
+# THE PROBE DISENGAGED BY A TRAILING COMMENT, which is how the vacuity check
+# came to have a vacuity of its own. It located the integer to perturb with
+# `^(\w+) = (\d+)$` -- a TOML reader written in a hurry -- so
+# `dogma_version = 0  # ...` did not match, the probe returned None, and the
+# caller read None as "passed" and counted the directory as RECOMPUTED. A
+# script reading nothing and comparing nothing, counted as one recomputed
+# result, by the gate whose docstring says a check of nothing is not a pass.
+#
+# The field is chosen by `tomllib` now -- the same reader `front_matter` uses,
+# which is the only one this repository is supposed to have -- and the edit is
+# RE-PARSED before the probe is trusted. This fault puts a comment on every
+# front-matter integer AND makes the script vacuous: under the old reader the
+# tree passes with the directory counted, under the new one the script is
+# named. Ruled 2026-09-12.
+inject_recompute_probe_blinded_by_a_comment() {
+  cat > results/_template/recompute.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+echo "recompute: 3 recorded value(s) re-derived from the artefacts"
+exit 0
+SH
+  python3 - <<'PY'
+import pathlib, re
+
+report = pathlib.Path("results/_template/README.md")
+text = report.read_text(encoding="utf-8")
+_, fence, rest = text.partition("+++\n")
+front, closing, tail = rest.partition("+++\n")
+front, count = re.subn(
+    r"^([A-Za-z0-9_-]+ = \d+)(?=\s*$)",
+    r"\1  # the comment that used to blind the probe",
+    front,
+    flags=re.M,
+)
+assert count, "no front-matter integer to comment; this fault would prove nothing"
+report.write_text(fence + front + closing + tail, encoding="utf-8")
+PY
+}
+
 # A recompute.sh that makes the comparison true instead of finding it true.
 # Re-derivation reads; a script that rewrites the artefact and then restates
 # the report's digest has proved nothing and destroyed the evidence.
@@ -4770,6 +4810,8 @@ selftest() {
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
     'front-matter .kind. is None'
   seeded_case "a recompute that cannot fail"          recompute inject_recompute_cannot_fail \
+    'does not compare the report to the artefacts'
+  seeded_case "a probe blinded by a trailing comment"  recompute inject_recompute_probe_blinded_by_a_comment \
     'does not compare the report to the artefacts'
   seeded_case "a recompute that edits what it checks"  recompute inject_recompute_tampers \
     'tampering, not recomputation'

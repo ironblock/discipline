@@ -46,19 +46,18 @@ value = { object | array | string | decimal | integer | boolean }
 
 // `-0` is a second spelling of `0`, and so is `-0.0`. One spelling per value
 // is the rule `01` and `7e-1` are already fixtured rejections for; the sign
-// was the hole in it, on both sides of the point. A negative number is one
-// with a digit that is not zero, which for a decimal means either side of
-// the point may carry it.
+// was the hole in it, on both sides of the point.
 //
-// `ASCII_NONZERO_DIGIT` in the second alternative is a restatement, not the
-// enforcement: `"0"*` is greedy and pest does not backtrack a repetition, so
-// whatever follows it is already not a zero. It is spelled out because the
-// rule is about which digit may be nonzero, and a reader who narrowed `"0"*`
-// to `"0"?` with `ASCII_DIGIT` there would reopen the hole in silence.
-decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }
-negative_decimal = _{
-    (nonzero ~ "." ~ ASCII_DIGIT+) | ("0" ~ "." ~ "0"* ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
-}
+// THE NAME IS HERE; THE RULE IS IN `number.pest` -- ruled 2026-09-12, for the
+// same reason the integer terminal moved there. This and `regimen::float`
+// were byte-identical modulo the name, and the enforcement lives on this
+// side: `json::Decimal::new` checks text against `Rule::decimal`, so a drift
+// between the two showed up as a regimen document that parses and cannot
+// build a value.
+//
+// `@` is load-bearing: an atomic rule emits no inner token, so `Rule::decimal`
+// still carries the whole span and no child.
+decimal = @{ fraction }
 
 // Two rules rather than one with two spellings, so the reader matches on the
 // RULE. `as_str() == "true"` reads every other spelling as false, which is a
