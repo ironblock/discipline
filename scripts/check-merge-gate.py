@@ -101,6 +101,7 @@ import importlib.util
 import io
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -586,10 +587,23 @@ inject_beta() {
 ALPHA_ONE = BASE_PAIR.replace("echo base > a.txt", "echo one > a.txt")
 ALPHA_TWO = BASE_PAIR.replace("echo base > a.txt", "echo two > a.txt")
 
-# Manifest-shaped, for the presence rule. `tools/gate/faults.toml` is a list
-# of entries with nothing between them, so a removed entry leaves the rest
-# byte-identical -- which is exactly why a resurrection was possible there and
-# why these three fixtures are driven over the manifest rather than verify.sh.
+# Manifest-shaped, for the presence rule over `tools/gate/faults.toml`.
+#
+# A CORRECTION. The commit that added these said they were driven over the
+# manifest rather than verify.sh because "removing an injection moves the
+# text around it, so the skeleton refusal fires first and the presence rule
+# is never reached". THAT IS FALSE, and the line that falsifies it is the
+# last line of `skeleton_of` -- `re.sub(r"\n{2,}", "\n\n", text)`, whose own
+# comment says runs of blank lines are not a difference. Measured over the
+# real verify.sh at the head that shipped the claim:
+#
+#   remove each of the 223 injections    223 skeletons identical, 0 differ
+#   remove each of the 223 seeded cases  223 skeletons identical, 0 differ
+#
+# So the presence rule was reachable in verify.sh all along, and the reason
+# the fixtures covered one of three block kinds was not a constraint but an
+# untested assumption stated as one. The verify.sh-shaped fixtures below
+# close the other two.
 FAULTS_PAIR = (
     '[[fault]]\nid = "a.alpha"\nkind = "seeded-gate"\nmigrated = false\n\n'
     '[[fault]]\nid = "a.beta"\nkind = "seeded-gate"\nmigrated = false\n'
@@ -611,17 +625,116 @@ inject_beta() {
 }
 """
 
+# verify.sh-shaped, carrying BOTH block kinds the resolver knows there.
+# `union_file` runs FUNC and CASE as separate patterns over the same text, so
+# a fixture that carries only injections proves the presence rule for one of
+# the two -- and "one of two" is how this suite came to cover one of three.
+VERIFY_PAIR = """\
+inject_alpha() {
+  echo base > a.txt
+}
+
+inject_beta() {
+  echo base > b.txt
+}
+
+run_cases() {
+  seeded_case "alpha goes red" fmt inject_alpha \\
+    'alpha signature'
+  seeded_case "beta goes red" fmt inject_beta \\
+    'beta signature'
+}
+"""
+
+# One variant per PATTERN, not one per file: removing the injection exercises
+# FUNC with CASE untouched, and removing the case exercises CASE with FUNC
+# untouched. Together they say which pattern a failure is in, which a single
+# variant that removed both would not.
+# EXACTLY the block `find_blocks` returns, and not the blank line framing it.
+# Taking the blank line too is a different edit, and here it is a detectable
+# one: these blocks sit at the head of the file, so `\n\n\n` at the start
+# collapses to `\n\n` while `\n\n` stays `\n\n`, and the skeleton refusal
+# fires before the presence rule is reached. Which is a real edge in
+# `skeleton_of` -- its collapse of blank-line runs is not a no-op at a file
+# boundary -- and is NOT the claim corrected above: removing each of the real
+# verify.sh's 223 injections, as `find_blocks` delimits them, leaves the
+# skeleton identical 223 times out of 223.
+VERIFY_NO_ALPHA_FUNC = VERIFY_PAIR.replace(
+    "inject_alpha() {\n  echo base > a.txt\n}\n", ""
+)
+VERIFY_NO_ALPHA_CASE = VERIFY_PAIR.replace(
+    '  seeded_case "alpha goes red" fmt inject_alpha \\\n    \'alpha signature\'\n', ""
+)
+VERIFY_ALPHA_FUNC_EDITED = VERIFY_PAIR.replace(
+    "echo base > a.txt", "echo edited-by-theirs > a.txt"
+)
+VERIFY_ALPHA_CASE_EDITED = VERIFY_PAIR.replace(
+    "'alpha signature'", "'alpha signature, edited by theirs'"
+)
+
+# The presence rule has four rows and three block kinds. Naming the shapes
+# once and generating the fixtures from them is what stops a fifth row, or a
+# fourth kind, from being added for one and forgotten for the others -- which
+# is the shape of the omission that left this suite covering a third of what
+# it claimed.
+#
+# (label, file, both, alpha retired, alpha edited, alpha marker, beta marker)
+PRESENCE_SHAPES = [
+    (
+        "a fault entry",
+        "tools/gate/faults.toml",
+        None,  # filled below: the manifest fixtures are defined above
+        None,
+        None,
+        "a.alpha",
+        "a.beta",
+    ),
+    (
+        "an injection",
+        "verify.sh",
+        None,
+        None,
+        None,
+        "inject_alpha() {",
+        "inject_beta() {",
+    ),
+    (
+        "a seeded case",
+        "verify.sh",
+        None,
+        None,
+        None,
+        'seeded_case "alpha goes red"',
+        'seeded_case "beta goes red"',
+    ),
+]
+PRESENCE_SHAPES[0] = PRESENCE_SHAPES[0][:2] + (
+    FAULTS_PAIR,
+    FAULTS_BETA_ONLY,
+    FAULTS_ALPHA_EDITED,
+) + PRESENCE_SHAPES[0][5:]
+PRESENCE_SHAPES[1] = PRESENCE_SHAPES[1][:2] + (
+    VERIFY_PAIR,
+    VERIFY_NO_ALPHA_FUNC,
+    VERIFY_ALPHA_FUNC_EDITED,
+) + PRESENCE_SHAPES[1][5:]
+PRESENCE_SHAPES[2] = PRESENCE_SHAPES[2][:2] + (
+    VERIFY_PAIR,
+    VERIFY_NO_ALPHA_CASE,
+    VERIFY_ALPHA_CASE_EDITED,
+) + PRESENCE_SHAPES[2][5:]
+
 
 def drive_three_way(
     base_text: str, ours_text: str, theirs_text: str, name: str = "verify.sh"
 ):
     """Run `union_file` over a base and two branches off it.
 
-    `name`, because REMOVING a block is only resolvable in the manifest: take
-    an injection out of verify.sh and the text around it moves too, so the
-    skeleton refusal fires first and the presence rule is never reached. The
-    manifest is a list of entries with nothing between them, which is why the
-    resurrection was possible there and is not reachable here."""
+    `name` decides which patterns `union_file` uses -- (FUNC, CASE) for
+    verify.sh, (ENTRY,) for anything else -- so it is what lets one set of
+    presence fixtures range over all three block kinds. It was introduced
+    on the false premise that removing a block from verify.sh trips the
+    skeleton refusal; see the correction above the manifest fixtures."""
     with tempfile.TemporaryDirectory() as tmp:
         box = Path(tmp)
 
@@ -696,68 +809,144 @@ def _union_keeps_our_own_change():
     return None
 
 
-@fixture("a block ours retired and theirs never touched stays retired")
-def _union_does_not_resurrect_what_ours_retired():
-    # A DELETION IS NOT AN ABSENCE, and the first version of this rule could
-    # not tell them apart: it appended every block theirs had and ours lacked
-    # without asking the base, so a block this branch retired on purpose came
-    # straight back.
-    #
-    # Found in the field rather than here: #65 retired
-    # `recompute.recompute_nothing_recomputable` and replaced it with a case
-    # that proves something else; the union put the entry back while its
-    # seeded case stayed gone, and `check-fault-manifest.py` refused the
-    # result -- a manifest claiming a fault verify.sh does not prove. The
-    # layered check caught what this tool should never have written.
-    took, out, err, on_disk = drive_three_way(
-        FAULTS_PAIR, FAULTS_BETA_ONLY, FAULTS_PAIR, "tools/gate/faults.toml"
-    )
-    if took is not True:
-        return f"the union refused a plain retirement: {err.strip()[:160]!r}"
-    if "a.alpha" in on_disk:
-        return "an entry ours deliberately retired was resurrected by the union"
-    if "a.beta" not in on_disk:
-        return "the union dropped an entry neither side touched"
-    if "a.alpha" not in out:
-        return (
-            "the retirement was kept silently; a resolver that drops a block "
-            "without saying so is this tool's own defect pointing the other way"
-        )
-    return None
+# THE PRESENCE MATRIX. Six rows, three block kinds, generated rather than
+# written out eighteen times.
+#
+# The rule that decides a block only one side carries has two halves and each
+# half has three rows, and the suite that shipped it had three fixtures: one
+# half, one kind. Both omissions were invisible because a fixture that is
+# absent looks exactly like a fixture that passes.
+#
+#   ours has it, theirs does not          theirs has it, ours does not
+#   --------------------------------      --------------------------------
+#   not in base   ours added it, keep     not in base   theirs added, take
+#   ours == base  THEIRS retired, drop    theirs==base  ours retired, keep
+#   ours != base  a person's              theirs!=base  a person's
+#
+# Each half's "keep/take" row is the CONTROL for its "drop" row. Without it,
+# a resolver that dropped every one-sided block satisfies the drop row and a
+# resolver that kept every one-sided block satisfies nothing else.
 
 
-@fixture("a block theirs genuinely added is still taken")
-def _union_still_takes_a_real_addition():
-    # The control that stops the fix above from becoming "never add anything".
-    # Without it, a union that dropped every one-sided block would satisfy the
-    # retirement fixture perfectly.
-    took, out, _err, on_disk = drive_three_way(
-        FAULTS_BETA_ONLY, FAULTS_BETA_ONLY, FAULTS_PAIR, "tools/gate/faults.toml"
-    )
-    if took is not True:
-        return "the union refused an entry theirs added"
-    if "a.alpha" not in on_disk:
-        return "an entry theirs added was dropped as though ours had retired it"
-    if "a.alpha" not in out:
-        return "the addition was taken without saying so"
-    return None
+def _presence_matrix():
+    for label, name, both, retired, edited, alpha, beta in PRESENCE_SHAPES:
+
+        @fixture(f"{label} ours retired and theirs never touched stays retired")
+        def _ours_retired(both=both, retired=retired, name=name, alpha=alpha, beta=beta):
+            # A DELETION IS NOT AN ABSENCE, and the first version of this
+            # rule could not tell them apart: it appended every block theirs
+            # had and ours lacked without asking the base, so a block this
+            # branch retired on purpose came straight back.
+            #
+            # Found in the field rather than here: #65 retired
+            # `recompute.recompute_nothing_recomputable` and replaced it with
+            # a case that proves something else; the union put the entry back
+            # while its seeded case stayed gone, and check-fault-manifest.py
+            # refused the result -- a manifest claiming a fault verify.sh
+            # does not prove. The layered check caught what this tool should
+            # never have written.
+            took, out, err, on_disk = drive_three_way(both, retired, both, name)
+            if took is not True:
+                return f"the union refused a plain retirement: {err.strip()[:160]!r}"
+            if alpha in on_disk:
+                return "a block ours deliberately retired was resurrected by the union"
+            if beta not in on_disk:
+                return "the union dropped a block neither side touched"
+            if "RETIRED by" not in out:
+                return (
+                    "the retirement was kept silently; a resolver that acts on a "
+                    "block without saying so is this tool's own defect pointing "
+                    "the other way"
+                )
+            return None
+
+        @fixture(f"{label} theirs genuinely added is still taken")
+        def _theirs_added(both=both, retired=retired, name=name, alpha=alpha):
+            # The control that stops the row above from becoming "never add
+            # anything". Without it, a union that dropped every one-sided
+            # block would satisfy the retirement row perfectly.
+            took, out, _err, on_disk = drive_three_way(retired, retired, both, name)
+            if took is not True:
+                return "the union refused a block theirs added"
+            if alpha not in on_disk:
+                return "a block theirs added was dropped as though ours had retired it"
+            if "added" not in out:
+                return "the addition was taken without saying so"
+            return None
+
+        @fixture(f"{label} ours retired and theirs edited is a person's")
+        def _ours_retired_theirs_edited(both=both, retired=retired, edited=edited, name=name):
+            # The case neither side can be given: ours removed the block,
+            # theirs changed it. Taking theirs reverts a deliberate
+            # retirement; keeping ours discards an authored edit.
+            took, _out, err, on_disk = drive_three_way(both, retired, edited, name)
+            if took is not False:
+                return "the union chose between a retirement and an edit of the same block"
+            if on_disk != retired:
+                return "a refused union rewrote the file anyway"
+            if "retired by ours" not in err:
+                return "the refusal did not say the block was one ours had retired"
+            return None
+
+        # --- and the same three, with the sides swapped ------------------
+        #
+        # `built` starts as `ours`, so every block ours carried survived by
+        # default and in silence -- no rule, no printed line, not even the
+        # careful-reader escape hatch the half above at least provides.
+
+        @fixture(f"{label} theirs retired and ours never touched is dropped")
+        def _theirs_retired(both=both, retired=retired, name=name, alpha=alpha, beta=beta):
+            took, out, err, on_disk = drive_three_way(both, both, retired, name)
+            if took is not True:
+                return f"the union refused a plain retirement by theirs: {err.strip()[:160]!r}"
+            if alpha in on_disk:
+                return (
+                    "a block THEIRS deliberately retired survived the union, "
+                    "because ours carried it and nothing asked the base"
+                )
+            if beta not in on_disk:
+                return "the union dropped a block neither side touched"
+            if "RETIRED by" not in out:
+                return "the block was dropped silently, which is worse than keeping it"
+            if on_disk != retired:
+                # Byte-for-byte, not just "the marker is gone". In THIS
+                # fixture ours is the base, so once the retirement is honoured
+                # the assembled file is theirs exactly -- which is what makes
+                # the strong form available here, and what catches the blank
+                # lines a removal leaves behind. It is a fact about the
+                # fixture, not a rule about every merge.
+                return (
+                    f"the retirement was honoured but left residue: "
+                    f"{on_disk!r} != {retired!r}"
+                )
+            return None
+
+        @fixture(f"{label} ours genuinely added is still kept")
+        def _ours_added(both=both, retired=retired, name=name, alpha=alpha):
+            # The control for the row above, and it is not redundant with
+            # "theirs added": that one enters through `insert_after_last`,
+            # this one through never being removed. Different code, same
+            # question.
+            took, _out, _err, on_disk = drive_three_way(retired, both, retired, name)
+            if took is not True:
+                return "the union refused a block ours added"
+            if alpha not in on_disk:
+                return "a block ours added was dropped as though theirs had retired it"
+            return None
+
+        @fixture(f"{label} theirs retired and ours edited is a person's")
+        def _theirs_retired_ours_edited(both=both, retired=retired, edited=edited, name=name):
+            took, _out, err, on_disk = drive_three_way(both, edited, retired, name)
+            if took is not False:
+                return "the union chose between a retirement and an edit of the same block"
+            if on_disk != edited:
+                return "a refused union rewrote the file anyway"
+            if "retired by theirs" not in err:
+                return "the refusal did not say the block was one theirs had retired"
+            return None
 
 
-@fixture("a block ours retired and theirs edited is a person's")
-def _union_refuses_a_retirement_theirs_edited():
-    # The third case, and the one neither side can be given: ours removed the
-    # block, theirs changed it. Taking theirs reverts a deliberate retirement;
-    # keeping ours discards an authored edit. Refuse and print.
-    took, _out, err, on_disk = drive_three_way(
-        FAULTS_PAIR, FAULTS_BETA_ONLY, FAULTS_ALPHA_EDITED, "tools/gate/faults.toml"
-    )
-    if took is not False:
-        return "the union chose between a retirement and an edit of the same entry"
-    if on_disk != FAULTS_BETA_ONLY:
-        return "a refused union rewrote the file anyway"
-    if "a.alpha" not in err:
-        return "the refusal named no block, so the reader cannot act on it"
-    return None
+_presence_matrix()
 
 
 @fixture("a block both sides edited is refused and printed")
@@ -809,12 +998,57 @@ def _union_takes_a_block_and_writes():
     return None
 
 
+# The exit codes, which are a contract in this repository and not a habit:
+#
+#   0  every fixture ran and passed
+#   1  a fixture ran and FOUND SOMETHING
+#   2  the suite COULD NOT RUN, and therefore found nothing either way
+#
+# 2 is the one a check like this gets wrong. A suite that cannot run prints a
+# tidy summary line and exits 0, and 0 is indistinguishable from "the resolver
+# is sound" to every caller -- CI, verify.sh, a person reading a log. A check
+# of nothing is not a pass.
+EXIT_FOUND = 1
+EXIT_CANNOT_RUN = 2
+
+
 def main() -> int:
+    # A CHECK OF NOTHING IS NOT A PASS. If `FIXTURES` is empty -- a refactor
+    # that drops the decorator, an import that half-fails, a future harness
+    # that filters -- everything below succeeds vacuously and prints
+    # `0 fixture(s), 0 failed`. The resolver every lane merge in this
+    # repository runs through would then be gated by a green line meaning
+    # nothing was asked.
+    if not FIXTURES:
+        print(
+            "check-merge-gate: no fixtures were collected, so nothing was "
+            "asked of the resolver; that is a broken harness, not a pass",
+            file=sys.stderr,
+        )
+        return EXIT_CANNOT_RUN
+
+    # Every fixture drives a real git repository. Without git there is no
+    # verdict to give, and reporting one either way would be a lie -- 0 says
+    # the resolver is sound and 1 says it is broken, and neither was measured.
+    if shutil.which("git") is None:
+        print(
+            "check-merge-gate: no `git` on PATH; every fixture drives a real "
+            "repository, so this suite has no verdict to give",
+            file=sys.stderr,
+        )
+        return EXIT_CANNOT_RUN
+
     failed = []
     for name, fn in FIXTURES:
         try:
             why = fn()
-        except Exception as err:  # a fixture that explodes is a fixture that failed
+        except Exception as err:
+            # A fixture that explodes stays a FINDING, not a could-not-run.
+            # These call into `merge-gate.py`, and the crash this most often
+            # is, is the resolver raising on input it should have refused
+            # cleanly -- which is exactly what this suite exists to catch.
+            # The two guards above cover the cases where the harness itself
+            # is what is missing.
             why = f"{type(err).__name__}: {err}"
         print(f"{'ok  ' if why is None else 'FAIL'}  {name}")
         if why is not None:
@@ -825,7 +1059,7 @@ def main() -> int:
         f"check-merge-gate: {len(FIXTURES)} fixture(s), {len(failed)} failed",
         file=sys.stderr if failed else sys.stdout,
     )
-    return 1 if failed else 0
+    return EXIT_FOUND if failed else 0
 
 
 if __name__ == "__main__":
