@@ -15,7 +15,12 @@ Two passes, because one is not enough:
   1. **Union by name.** Both sides' blocks, ours first, the incumbent's copy
      kept where both carry one -- reading the two sides whole rather than the
      conflict hunks, because a hunk boundary is wherever the diff happened to
-     land. `red_faults` and `mechanics_assertions` are COUNTED from the
+     land. A block only ONE side carries is decided against the merge base,
+     in both directions: a deletion is not an absence, and which side did the
+     deleting does not change that. Ours retired it and theirs left it alone,
+     it stays retired; theirs retired it and ours left it alone, it is
+     dropped; either way the line saying so is printed, and a retirement one
+     side edited is a person's. `red_faults` and `mechanics_assertions` are COUNTED from the
      assembled tree: base-plus-deltas double-counts whatever both branches
      inherited by two routes, which a stack of lanes produces routinely, and
      it was retracted forty minutes after it was adopted. A file that is
@@ -382,6 +387,53 @@ def union_file(path: Path, ours_ref: str, theirs_ref: str) -> bool:
                 f"merge-gate: {path.name}: kept {len(retired)} "
                 f"{KIND.get(id(pattern), 'block')}(s) RETIRED by {ours_ref} "
                 f"and untouched on {theirs_ref}: " + ", ".join(sorted(retired))
+            )
+
+        # ...AND THE SAME QUESTION, POINTED THE OTHER WAY.
+        #
+        # Everything above decides a block THEIRS has and ours lacks. A block
+        # OURS has and theirs lacks was never asked about at all: `built`
+        # starts as `ours`, so it survived by default and in silence. That is
+        # the identical defect mirrored, and the mirror is the half this fix
+        # left open the first time -- the commit that added the rule above
+        # says "a deletion is not an absence" and then read the base in one
+        # direction only.
+        #
+        # Measured on the branch that shipped the half above, before this:
+        # theirs retires a block, ours leaves it untouched, and the assembled
+        # file still carried it -- `alpha on disk: True`, output `(NOTHING)`.
+        # It was never removed rather than put back, which is why nothing
+        # printed: not even the careful-reader escape hatch the other half at
+        # least provides.
+        #
+        #   not in base                ours added it         -> keep it
+        #   in base, ours == base      THEIRS retired it     -> drop it
+        #   in base, ours != base      theirs retired what
+        #                              ours edited           -> a person's
+        theirs_names = set(theirs_blocks)
+        dropped = []
+        for name, block in find_blocks(pattern, ours):
+            if name in theirs_names:
+                continue
+            was = base_blocks.get(name)
+            if was is None:
+                continue  # ours added it; it stays, and it is already in `built`
+            if block == was:
+                dropped.append(name)
+            else:
+                contested.append((name, block, "(retired by theirs)"))
+        if dropped:
+            gone = set(dropped)
+            built = pattern.sub(
+                lambda m, key=key, gone=gone: "" if key(m.group(0)) in gone else m.group(0),
+                built,
+            )
+            # Said out loud for the same reason the line above is, and the
+            # louder of the two: this one takes something away.
+            print(
+                f"merge-gate: {path.name}: dropped {len(dropped)} "
+                f"{KIND.get(id(pattern), 'block')}(s) RETIRED by {theirs_ref} "
+                f"and untouched on {ours_ref}: " + ", ".join(sorted(dropped))
             )
 
     if contested:
