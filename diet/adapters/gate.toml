@@ -56,7 +56,7 @@
 name = "diet-adapters"
 check = "test"
 command = "cargo test --no-fail-fast -p discipline-diet -- adapters --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 26
+faults = 28
 
 [[fault]]
 # The census is the product. A row kind the adapter has no word for that
@@ -113,16 +113,51 @@ expect_exit = 101
 anchor = '''
     TOOL_NAMES
         .iter()
-        .find(|(foreign, _)| *foreign == name)
+        .find(|(foreign, _)| foreign.eq_ignore_ascii_case(name))
         .map_or((name, false), |(_, native)| (*native, true))'''
 becomes = '''
     (name, false)'''
 catches = [
+    "adapters::claude_code::tests::a_tool_name_is_translated_whatever_case_it_arrives_in",
     "adapters::claude_code::tests::a_translated_tool_name_is_declared_in_the_census",
     "adapters::claude_code::tests::claude_codes_tool_names_are_translated_into_the_lanes_vocabulary",
     "adapters_a_path_that_resolves_to_nothing_makes_no_fact",
     "adapters_a_replay_takes_no_endpoint_and_the_binary_holds_no_transport",
     "adapters_an_adapted_session_replays_to_a_census_and_a_working_object",
+]
+
+[[fault]]
+# Ruled on #76: case-folding joins the adapter's normalisation, as it did
+# for model identifiers on #65. A lookup exact about case is the table's
+# own specimen waiting on the next harness release -- the lane knew `bash`
+# while the log said `Bash`, and the failure was silent both times.
+id = "adapters.a-tool-name-must-match-the-tables-own-case"
+failure_class = "adapters.a-tool-name-must-match-the-tables-own-case"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+        .find(|(foreign, _)| foreign.eq_ignore_ascii_case(name))'''
+becomes = '''
+        .find(|(foreign, _)| *foreign == name)'''
+catches = [
+    "adapters::claude_code::tests::a_tool_name_is_translated_whatever_case_it_arrives_in",
+]
+
+[[fault]]
+# Folding case for the LOOKUP must not fold it for the COUNT. A harness
+# that started writing `BASH` is a fact about the harness; recorded under
+# the table's own key it is a fact that disappears into another row.
+id = "adapters.a-folded-tool-name-is-counted-under-the-tables-spelling"
+failure_class = "adapters.a-folded-tool-name-is-counted-under-the-tables-spelling"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+            self.census.translated_one(tool, native);'''
+becomes = '''
+            self.census.translated_one(native, native);'''
+catches = [
+    "adapters::claude_code::tests::a_tool_name_is_translated_whatever_case_it_arrives_in",
+    "adapters::claude_code::tests::a_translated_tool_name_is_declared_in_the_census",
 ]
 
 [[fault]]

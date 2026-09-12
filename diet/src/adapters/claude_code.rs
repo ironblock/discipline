@@ -174,10 +174,23 @@ const FOREIGN_PATH: &str = "file_path";
 const NATIVE_PATH: &str = "path";
 
 /// `name` in the capture lanes' vocabulary, and whether it was translated.
+///
+/// **Matched without regard to case**, per the ruling on #76, and for the
+/// reason the table exists at all: the specimen was a lane that knew `bash`
+/// while the harness wrote `Bash`, and a lookup that is exact about case is
+/// the same defect waiting on the next harness to write `BASH` or the next
+/// release to lower-case its own table. Case-folding joined the record's
+/// normalisation of model identifiers on #65; it joins the adapter's here.
+///
+/// ASCII-folded rather than Unicode-folded on purpose. A tool name is an
+/// identifier in a harness's source, and the four this table knows are ASCII;
+/// full Unicode case folding would make `ẞ` and `SS` the same tool, which is
+/// a claim about a foreign vocabulary nobody made. A name outside ASCII is
+/// left alone and reaches the lane as written.
 fn native_tool(name: &str) -> (&str, bool) {
     TOOL_NAMES
         .iter()
-        .find(|(foreign, _)| *foreign == name)
+        .find(|(foreign, _)| foreign.eq_ignore_ascii_case(name))
         .map_or((name, false), |(_, native)| (*native, true))
 }
 
@@ -492,6 +505,10 @@ impl Run {
         };
         let (native, translated) = native_tool(tool);
         if translated {
+            // `tool` and not the table's key: the census records the name the
+            // LOG carried, so a harness that started writing `BASH` shows up
+            // as its own row rather than being folded into `Bash`'s count and
+            // becoming invisible.
             self.census.translated_one(tool, native);
         }
         // `input` is a field this mapping declares, so it is read or refused.
@@ -1041,6 +1058,57 @@ mod tests {
             "a mapped row can still have thrown something away, and the census \
              is where that is said"
         );
+    }
+
+    /// A tool name is translated whatever case the harness wrote it in.
+    ///
+    /// Ruled on #76. The specimen the table was written for was a lane that
+    /// knew `bash` while the harness wrote `Bash`; a lookup exact about case
+    /// is that same defect waiting on the next harness to write `BASH`, and
+    /// the failure is silent -- the call is recorded under a name the lane has
+    /// no word for, and the census reads as a success.
+    #[test]
+    fn a_tool_name_is_translated_whatever_case_it_arrives_in() {
+        for spelling in ["Bash", "bash", "BASH", "bAsH"] {
+            let (native, translated) = native_tool(spelling);
+            assert_eq!(
+                (native, translated),
+                ("bash", true),
+                "`{spelling}` is the lane's `bash`"
+            );
+        }
+
+        // And the census says what the LOG carried, not what the table is
+        // keyed on: a harness that changed case is a fact about the harness,
+        // and folding it into one count is how that fact disappears.
+        let log = [
+            user_says("go"),
+            assistant(
+                "[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"BASH\",\
+                 \"input\":{\"command\":\"cd /srv/p\"}}]",
+                1,
+                [1, 0, 0],
+            ),
+        ]
+        .join("\n");
+        let census = ClaudeCode.adapt(&log).expect("it adapts").census;
+        assert_eq!(
+            census.translated.get("BASH -> bash"),
+            Some(&1),
+            "the census carries the spelling that arrived: {census:?}"
+        );
+
+        // Untranslated names are still untranslated, in any case. `Grep`'s
+        // contract is not one this adapter claims to know, and folding case
+        // does not change which contracts it knows.
+        for spelling in ["Grep", "grep", "Task", "mcp__x__y"] {
+            let (native, translated) = native_tool(spelling);
+            assert_eq!(
+                (native, translated),
+                (spelling, false),
+                "`{spelling}` is carried as written"
+            );
+        }
     }
 
     /// `MAPS` and [`Row`] say the same thing, and `Block`'s tags are distinct.
