@@ -41,20 +41,20 @@ fn fixture(name: &str) -> PathBuf {
 
 /// Run the program and return `(exit code, stdout, stderr)`.
 ///
-/// The environment is stripped of every proxy and endpoint variable a
-/// transport could pick a destination out of. It cannot prove the program
-/// makes no call -- nothing short of a network namespace does -- but it does
-/// mean a future edit that reached for one could not be handed a destination
-/// by the test that is supposed to be showing it does not.
+/// A plain run, with nothing removed from the environment. An earlier version
+/// stripped a handful of proxy and endpoint variables and said in its own doc
+/// that it stripped "every" one, which was false twice over: it named six of
+/// them, and this crate reads no endpoint variable anywhere -- `grep env::var`
+/// over `diet/src` finds `PATH`, in the isolation lane, and nothing else. The
+/// strip proved nothing and implied something, which is worse than absent.
+///
+/// What actually stands behind "no model is called" is
+/// `adapters_a_replay_takes_no_endpoint_and_the_binary_holds_no_transport`
+/// below. Neither it nor this helper observes a socket; nothing here does,
+/// and nothing here claims to.
 fn run(args: &[&str]) -> (i32, String, String) {
     let out = Command::new(REPLAY)
         .args(args)
-        .env_remove("HTTP_PROXY")
-        .env_remove("HTTPS_PROXY")
-        .env_remove("http_proxy")
-        .env_remove("https_proxy")
-        .env_remove("DIET_ENDPOINT")
-        .env_remove("OPENAI_BASE_URL")
         .output()
         .expect("diet-replay runs");
     (
@@ -92,8 +92,22 @@ fn adapters_an_adapted_session_replays_to_a_census_and_a_working_object() {
         "the census is the first line and it counts the corpus: {census}"
     );
     assert!(
-        tally.contains("\"entries\":2") && tally.contains("\"events\":6"),
+        tally.contains("\"entries\":2") && tally.contains("\"events\":7"),
         "and the second line says what the lane derived: {tally}"
+    );
+    // Seven, and the seventh is the point. Three assistant rows, three user
+    // rows, and of the assistant rows one makes a tool call and says nothing
+    // at all -- which used to emit no response and take its `output_tokens`
+    // with it. The census says which mapped rows produced no event and why,
+    // so "mapped" can no longer be read as "carried".
+    assert!(
+        census.contains("\"no_event\":{\"user/carried no text of its own\":2}")
+            && census.contains("\"silent_rows\":2"),
+        "the mapped rows that produced no event are named and counted: {census}"
+    );
+    assert!(
+        census.contains("\"assumptions\":0"),
+        "and this log needed nothing assumed: {census}"
     );
 
     // The object, which is the other half of #28's acceptance line. Its dump
@@ -108,14 +122,33 @@ fn adapters_an_adapted_session_replays_to_a_census_and_a_working_object() {
             && out.contains("mechanical/file:/srv/project/parser.rs"),
         "with the facts the deterministic lane derived: {out}"
     );
+    // The provenance of a derived fact is the turn the LANE recorded, not a
+    // constant. Every entry of a real replay used to say turn zero -- a turn
+    // the adapter never emits, since its turns are one-based.
+    assert!(
+        out.contains(
+            "\"content\":\"read /srv/project/parser.rs\",\
+             \"id\":\"mechanical/file:/srv/project/parser.rs\",\
+             \"provenances\":[{\"index\":0,\"lane\":\"mechanical\",\"turn\":1}]"
+        ),
+        "the file was read in turn one and the entry says so: {out}"
+    );
 }
 
 #[test]
-fn adapters_a_replay_needs_no_endpoint_and_is_given_nowhere_to_dial() {
+fn adapters_a_replay_takes_no_endpoint_and_the_binary_holds_no_transport() {
     // The whole claim of replay mode: work that already happened is read, not
     // redone. The command line has no endpoint to give it, and an object still
     // comes out -- which is what makes the census a free observation rather
     // than a second run of the session.
+    //
+    // Named for what it checks. It was `…_and_opens_no_socket`, and it does
+    // not watch a socket: it shows the program needs no endpoint, refuses one
+    // offered, and produces its object anyway. Proving no connect is made
+    // wants a network namespace or an strace, neither of which belongs in a
+    // unit test -- and the structural argument is the stronger one anyway:
+    // `diet-replay` links no transport, which the linker check below states
+    // as an assertion rather than as a comment.
     let (code, out, _) = run(&[
         "--adapter",
         "claude-code",
@@ -137,6 +170,25 @@ fn adapters_a_replay_needs_no_endpoint_and_is_given_nowhere_to_dial() {
         "http://127.0.0.1:1/v1",
     ]);
     assert_eq!(code, 1, "a second positional is refused, not dialled");
+
+    // The structural half: the program's own binary carries none of the
+    // transport's strings. `diet::client::transport` builds requests out of
+    // these, and a build that linked it would carry them -- so this fails the
+    // moment somebody gives replay mode a way to call a model without saying
+    // so. Not a proof (a transport could be written that uses neither), but
+    // it is an observation of the artifact rather than a sentence about it.
+    let binary = std::fs::read(REPLAY).expect("the binary this test just ran");
+    for marker in [
+        &b"POST /v1"[..],
+        &b"application/json"[..],
+        &b"Content-Length"[..],
+    ] {
+        assert!(
+            !binary.windows(marker.len()).any(|window| window == marker),
+            "diet-replay carries `{}`, which is a transport's vocabulary",
+            String::from_utf8_lossy(marker)
+        );
+    }
 }
 
 #[test]

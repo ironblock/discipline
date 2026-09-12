@@ -26,7 +26,15 @@ dogma_version = 0
 substrate = "claude-code"
 substrate_model = "undeclared-by-the-log"
 substrate_quantization = "undeclared-by-the-log"
-substrate_reasoning = "off"
+# The ONE key here that states a fact rather than its absence, because the
+# schema gives it no choice: `Reasoning` is `off | on | suppressed` and has no
+# "undeclared". `off` was written here first and was simply false -- the
+# session fixture beside this file carries a `thinking` block, and the log it
+# was distilled from carries 646 of them, every one counted in the census as
+# dropped content. A regimen filing a reasoning session as `reasoning = off`
+# while the census counts the reasoning it dropped is the kind of disagreement
+# that survives because nobody reads two files at once.
+substrate_reasoning = "on"
 substrate_hardware = "undeclared-by-the-log"
 
 # Replay runs no commands, so there is nothing for a sandbox to confine. The

@@ -9,15 +9,30 @@
 //!
 //! A foreign log is not the record's subset and never will be. The record
 //! admits no `null`, no exponents and eleven event kinds; a real Claude Code
-//! session log carries `null` on its first line and **nine** top-level row
-//! kinds, six of which this schema has no word for. So the interesting
+//! session log carries `null` in its `parentUuid` and **nine** top-level row
+//! kinds, seven of which this schema has no word for. So the interesting
 //! question is not what an adapter maps. It is what it does with the rest.
 //!
-//! The answer this module enforces is a [`Census`]: every foreign kind is
-//! counted, and every row is either MAPPED or UNMAPPED with nowhere else to
-//! go. There is no third bucket and no silent drop -- which is the failure
-//! the issue names, and the one practitioners running memory tools across
-//! harnesses report: *the format moves under you and nothing says so.*
+//! The answer this module enforces is a [`Census`], and it counts in four
+//! independent registers because a row can be lost in four different ways:
+//!
+//! * **kind** -- every row is MAPPED or UNMAPPED, with nowhere else to go;
+//! * **content** -- a block inside a mapped row with no schema home is
+//!   [`Census::dropped`];
+//! * **silence** -- a row whose kind was mapped and which produced no event
+//!   anyway is [`Census::no_event`];
+//! * **assumption** -- a value the record demands and the log never carried
+//!   is [`Census::assumed`].
+//!
+//! The third and fourth registers are here because the first two were not
+//! enough, and the way that was found is the point. A fresh-instance review
+//! measured this adapter against the log it was written from: an assistant
+//! row that made a tool call and said nothing had no text, so it emitted no
+//! response, so its `output_tokens` went nowhere -- **1,824 of 2,173
+//! assistant rows and 80.7% of every token the model generated**, under a
+//! census that read as a clean success. Both halves of "mapped" and "dropped"
+//! were true and the total was a lie. A census with a bucket missing is worse
+//! than no census, because it is believed.
 //!
 //! # An unknown KIND is news; a missing FIELD is drift
 //!
@@ -41,9 +56,16 @@
 //!
 //! An adapted log is a VIEW of a foreign session, not a transcript of one.
 //! The census is the measure of the difference and is meant to be read, not
-//! filed away. Nothing here fabricates a value the foreign log did not carry:
-//! where the record wants a number and the harness never said, the field is
-//! absent rather than zero. A zero is a measurement.
+//! filed away.
+//!
+//! Where the record wants a number and the harness never said, the field is
+//! absent rather than zero, because a zero is a measurement. Where the record
+//! gives no way to be absent -- `Turn::prefill_tokens` is a `Count` and not
+//! an `Option<Count>` -- the zero goes in and is counted in
+//! [`Census::assumed`], which is the only honest handling available without
+//! a change to `diet/formats/`, a directory this seat does not own. An
+//! assumption that is counted is a known gap; the same assumption uncounted
+//! is the fabrication this module exists to refuse.
 
 pub mod claude_code;
 
@@ -90,6 +112,26 @@ pub struct Census {
     /// A reader who disagrees with one can see it was made; a silent rename
     /// is a claim about a foreign contract with nothing standing behind it.
     pub translated: BTreeMap<String, u64>,
+    /// Rows this adapter mapped that produced no event anyway, by reason.
+    ///
+    /// **`mapped` is a count of kinds understood, not of rows carried**, and
+    /// the difference is where this adapter lost 80.7% of the session's
+    /// output tokens before a review measured it. A `user` row that carries
+    /// only tool output legitimately produces no event of its own -- its
+    /// content joins the call it answers -- and that is a different fact from
+    /// a row that produced nothing because the mapping had a hole in it. Both
+    /// are here, each under its own reason, so the two can be told apart by
+    /// reading rather than by trusting.
+    pub no_event: BTreeMap<String, u64>,
+    /// Values the record demanded that the log did not carry, by what was
+    /// assumed.
+    ///
+    /// The record has required fields with no way to spell "the harness did
+    /// not say". Where one is reached, the assumption is made once and
+    /// counted here rather than made silently. A reader who finds a session
+    /// whose prefill totals look wrong can see how many of its turns had no
+    /// prefill to read.
+    pub assumed: BTreeMap<String, u64>,
 }
 
 impl Census {
@@ -99,10 +141,26 @@ impl Census {
         self.mapped_rows() + self.unmapped_rows()
     }
 
-    /// Rows this adapter turned into events.
+    /// Rows whose KIND this adapter had a mapping for.
+    ///
+    /// Not "rows turned into events", which is what this used to claim and
+    /// what a reader judging coverage will assume unless told otherwise.
+    /// Subtract [`Census::silent_rows`] for that number.
     #[must_use]
     pub fn mapped_rows(&self) -> u64 {
         self.mapped.values().sum()
+    }
+
+    /// Mapped rows that produced no event.
+    #[must_use]
+    pub fn silent_rows(&self) -> u64 {
+        self.no_event.values().sum()
+    }
+
+    /// Values assumed because the record required them and the log had none.
+    #[must_use]
+    pub fn assumptions(&self) -> u64 {
+        self.assumed.values().sum()
     }
 
     /// Rows this adapter had no word for.
@@ -134,6 +192,16 @@ impl Census {
         *self.dropped.entry(what.to_owned()).or_default() += 1;
     }
 
+    /// Count one mapped row that produced no event, and say why.
+    pub fn no_event_one(&mut self, why: &str) {
+        *self.no_event.entry(why.to_owned()).or_default() += 1;
+    }
+
+    /// Count one value the record demanded that the log did not carry.
+    pub fn assumed_one(&mut self, what: &str) {
+        *self.assumed.entry(what.to_owned()).or_default() += 1;
+    }
+
     /// Content inside mapped rows that went nowhere.
     #[must_use]
     pub fn dropped_content(&self) -> u64 {
@@ -149,6 +217,10 @@ impl Census {
     pub fn render(&self) -> String {
         let mut out = String::from("{\"adapter\":");
         push_string(&mut out, &self.adapter);
+        out.push_str(",\"assumed\":");
+        push_counts(&mut out, &self.assumed);
+        out.push_str(",\"assumptions\":");
+        out.push_str(&self.assumptions().to_string());
         out.push_str(",\"dropped\":");
         push_counts(&mut out, &self.dropped);
         out.push_str(",\"dropped_content\":");
@@ -157,10 +229,14 @@ impl Census {
         push_counts(&mut out, &self.mapped);
         out.push_str(",\"mapped_rows\":");
         out.push_str(&self.mapped_rows().to_string());
+        out.push_str(",\"no_event\":");
+        push_counts(&mut out, &self.no_event);
         out.push_str(",\"rows\":");
         out.push_str(&self.rows().to_string());
         out.push_str(",\"translated\":");
         push_counts(&mut out, &self.translated);
+        out.push_str(",\"silent_rows\":");
+        out.push_str(&self.silent_rows().to_string());
         out.push_str(",\"unmapped\":");
         push_counts(&mut out, &self.unmapped);
         out.push_str(",\"unmapped_rows\":");
@@ -318,29 +394,46 @@ mod tests {
 
     #[test]
     fn a_census_counts_every_row_once_and_into_exactly_one_bucket() {
-        let mut census = Census {
-            adapter: "example".to_owned(),
-            ..Census::default()
-        };
-        census.mapped_one("user");
-        census.mapped_one("user");
-        census.mapped_one("assistant");
-        census.unmapped_one("mode");
+        // Asserted against a LOG, not against the census's own arithmetic.
+        // This test used to read `rows() == mapped_rows() + unmapped_rows()`,
+        // which is how `rows()` is defined: it could not fail for any input
+        // ever, and a fresh-instance review said so. The invariant worth
+        // holding is that each row of the file reaches exactly one bucket,
+        // and only walking a file can show that.
+        let log = [
+            r#"{"type":"user","message":{"role":"user","content":"go"}}"#,
+            r#"{"type":"mode","mode":"default"}"#,
+            "",
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"output_tokens":1}}}"#,
+            r#"{"type":"mode","mode":"plan"}"#,
+            r#"{"type":"a-kind-nobody-has-seen"}"#,
+            "   ",
+        ]
+        .join("\n");
+        let lines = log.lines().filter(|line| !line.trim().is_empty()).count() as u64;
 
-        assert_eq!(census.mapped_rows(), 3);
-        assert_eq!(census.unmapped_rows(), 1);
+        let census = ClaudeCode.adapt(&log).expect("it adapts").census;
         assert_eq!(
             census.rows(),
-            census.mapped_rows() + census.unmapped_rows(),
-            "there is no third bucket: a row is mapped or it is not"
+            lines,
+            "every non-blank line of the file is a row of the census"
         );
-        assert_eq!(census.rows(), 4);
+        assert_eq!(census.mapped_rows(), 2, "the two kinds it has a word for");
+        assert_eq!(census.unmapped_rows(), 3, "and the three it does not");
+        assert_eq!(
+            census.mapped.values().sum::<u64>() + census.unmapped.values().sum::<u64>(),
+            lines,
+            "counted once each: a row in both buckets or in neither would \
+             leave these unequal"
+        );
 
-        // Content loss is counted apart from rows, because a row can be
-        // mapped and still have thrown something away.
-        census.dropped_one("assistant/thinking");
-        assert_eq!(census.dropped_content(), 1);
-        assert_eq!(census.rows(), 4, "dropped content is not a row");
+        // And a blank line is not a row. `rows` is not `wc -l`, which is the
+        // kind of thing a reader assumes unless a test says otherwise.
+        assert_eq!(
+            census.rows(),
+            5,
+            "the two blank lines are not rows of anything"
+        );
     }
 
     #[test]
@@ -351,13 +444,23 @@ mod tests {
         };
         census.mapped_one("assistant");
         census.unmapped_one("mode");
+        census.no_event_one("user/carried no text of its own");
+        census.assumed_one("turn.prefill_tokens = 0");
 
+        // Every register renders, keys sorted, and the byte string is written
+        // out rather than recomputed: a test that built the expectation the
+        // same way the code does would pass on any ordering at all, and the
+        // ordering is the property the gym depends on.
         let rendered = census.render();
         assert_eq!(
             rendered,
-            "{\"adapter\":\"claude-code\",\"dropped\":{},\"dropped_content\":0,\
+            "{\"adapter\":\"claude-code\",\
+             \"assumed\":{\"turn.prefill_tokens = 0\":1},\"assumptions\":1,\
+             \"dropped\":{},\"dropped_content\":0,\
              \"mapped\":{\"assistant\":1},\"mapped_rows\":1,\
-             \"rows\":2,\"translated\":{},\"unmapped\":{\"mode\":1},\"unmapped_rows\":1}"
+             \"no_event\":{\"user/carried no text of its own\":1},\
+             \"rows\":2,\"translated\":{},\"silent_rows\":1,\
+             \"unmapped\":{\"mode\":1},\"unmapped_rows\":1}"
         );
         // The census is read back by the gym, so it is held to the record's
         // own rules rather than to whatever a JSON writer happens to emit.

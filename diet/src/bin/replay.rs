@@ -37,6 +37,7 @@ use std::process::ExitCode;
 use diet::adapters::{Adapter, claude_code::ClaudeCode};
 use diet::capture::mechanical::Lane;
 use diet::drive::regimen::regime_of;
+use diet::formats::record::Event;
 use diet::formats::regimen;
 use diet::object::{EntryId, Patch, Provenance, WorkingObject};
 
@@ -143,11 +144,19 @@ fn main() -> ExitCode {
     }
 
     let mut object = WorkingObject::open(regime);
-    let patches = derived(&lane);
-    let entries = patches.len();
-    if let Err(why) = object.apply_turn(&patches) {
-        eprintln!("the derived facts did not apply: {why}");
-        return ExitCode::from(EXIT_INPUT);
+    let turns = derived(&lane, &read.events);
+    let entries: usize = turns.iter().map(|(_, patches)| patches.len()).sum();
+    // One `apply_turn` per turn, in turn order. The object refuses a turn of
+    // patches whose provenances name different turns -- "a turn is ordered
+    // within itself" -- and it is right to: a replay of a six-turn session is
+    // six turns of derived facts, not one turn with six turns' provenance
+    // stamped on it. The first version applied everything at once and only
+    // got away with it because every entry claimed turn zero.
+    for (_, patches) in &turns {
+        if let Err(why) = object.apply_turn(patches) {
+            eprintln!("the derived facts did not apply: {why}");
+            return ExitCode::from(EXIT_INPUT);
+        }
     }
 
     let dump = object.dump();
@@ -175,44 +184,34 @@ fn main() -> ExitCode {
     }
 }
 
-/// What the deterministic lane derived, as entries the object can hold.
+/// What the deterministic lane derived, as turns of entries the object holds.
+///
+/// Grouped by the turn the fact belongs to and returned in turn order,
+/// because that is the shape `WorkingObject::apply_turn` takes: its patches
+/// must agree on their turn, since an entry's `index` is its position WITHIN
+/// a turn and two turns' entries interleaved would have no order at all.
 ///
 /// Only facts the lane actually established. A file it never saw touched
 /// produces no entry, and the working directory produces one only when it is
 /// a path -- `Cwd` is deliberately able to say "unknown", and an entry
 /// asserting an unknown directory would be the invention this whole module is
 /// written against.
-fn derived(lane: &Lane) -> Vec<Patch> {
-    let mut patches = Vec::new();
-    // The index is carried rather than read back off `patches`, because the
-    // provenance of an entry is its position in the turn and that has to be
-    // decided when the entry is made, not recovered from how many happen to
-    // have been made so far.
-    let mut index = 0_u32;
-    let mut add = |patches: &mut Vec<Patch>, id: &str, content: String| {
-        let Ok(id) = EntryId::new(id) else {
-            return;
-        };
-        patches.push(Patch::Add {
-            id,
-            content,
-            provenance: Provenance {
-                turn: 0,
-                lane: "mechanical".to_owned(),
-                fork: None,
-                tangent: None,
-                index,
-            },
-        });
-        index += 1;
-    };
+fn derived(lane: &Lane, events: &[Event]) -> Vec<(u32, Vec<Patch>)> {
+    // `(turn, id, content)`, gathered before any patch is cut so the turns
+    // can be grouped without the index of one turn's entries depending on
+    // what another turn happened to derive.
+    let mut facts: Vec<(u32, String, String)> = Vec::new();
 
     if let Some(cwd) = lane.facts().cwd {
-        add(
-            &mut patches,
-            "mechanical/cwd",
+        // Turn zero, and meant: `Facts` is the lane's state at the END of the
+        // walk, with no event and no turn behind it. Naming a turn here would
+        // be picking one. Every other entry below carries the turn the lane
+        // actually recorded.
+        facts.push((
+            0,
+            "mechanical/cwd".to_owned(),
             format!("the working directory is {cwd}"),
-        );
+        ));
     }
     for (path, touch) in lane.files() {
         // A touch with no path says "read " and names nothing. The lane can
@@ -222,20 +221,57 @@ fn derived(lane: &Lane) -> Vec<Patch> {
         if path.as_os_str().is_empty() {
             continue;
         }
-        add(
-            &mut patches,
-            &format!("mechanical/file:{}", path.display()),
+        facts.push((
+            // The turn the LANE recorded. Every entry used to say turn zero,
+            // which is a turn the adapter never emits -- its turns are
+            // one-based -- so the provenance of all 221 entries of a real
+            // replay named a turn that did not exist.
+            touch.turn,
+            format!("mechanical/file:{}", path.display()),
             format!("{} {}", touch.kind.verb(), path.display()),
-        );
+        ));
     }
     for (at, failure) in lane.failures().iter().enumerate() {
-        add(
-            &mut patches,
-            &format!("mechanical/failure/{at}"),
+        facts.push((
+            // `Failure` carries no turn, so it is looked up through the event
+            // that failed -- which the adapter DID stamp with a turn.
+            at_turn_of(events, &failure.event),
+            format!("mechanical/failure/{at}"),
             format!("{}: {}", failure.command, failure.report),
-        );
+        ));
     }
-    patches
+
+    let mut turns: BTreeMap<u32, Vec<Patch>> = BTreeMap::new();
+    for (turn, id, content) in facts {
+        let Ok(id) = EntryId::new(&id) else {
+            continue;
+        };
+        let patches = turns.entry(turn).or_default();
+        let index = u32::try_from(patches.len()).unwrap_or(u32::MAX);
+        patches.push(Patch::Add {
+            id,
+            content,
+            provenance: Provenance {
+                turn,
+                lane: "mechanical".to_owned(),
+                fork: None,
+                tangent: None,
+                index,
+            },
+        });
+    }
+    turns.into_iter().collect()
+}
+
+/// The turn a tool call happened in, by the event id the lane recorded.
+fn at_turn_of(events: &[Event], event: &str) -> u32 {
+    events
+        .iter()
+        .find_map(|held| match held {
+            Event::ToolCall { id, at_turn, .. } if id == event => Some(*at_turn),
+            _ => None,
+        })
+        .unwrap_or(0)
 }
 
 /// A flag this program reads, and the one place its spelling lives.

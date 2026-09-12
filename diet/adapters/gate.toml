@@ -56,7 +56,7 @@
 name = "diet-adapters"
 check = "test"
 command = "cargo test --no-fail-fast -p discipline-diet -- adapters --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 14
+faults = 26
 
 [[fault]]
 # The census is the product. A row kind the adapter has no word for that
@@ -73,6 +73,7 @@ becomes = '''
 catches = [
     "adapters::claude_code::tests::a_kind_this_adapter_does_not_map_is_counted_rather_than_dropped",
     "adapters::claude_code::tests::the_committed_corpus_adapts_and_refuses_as_it_says_it_does",
+    "adapters::tests::a_census_counts_every_row_once_and_into_exactly_one_bucket",
     "adapters_a_kind_never_seen_is_counted_and_does_not_stop_the_replay",
     "adapters_an_adapted_session_replays_to_a_census_and_a_working_object",
 ]
@@ -120,7 +121,7 @@ catches = [
     "adapters::claude_code::tests::a_translated_tool_name_is_declared_in_the_census",
     "adapters::claude_code::tests::claude_codes_tool_names_are_translated_into_the_lanes_vocabulary",
     "adapters_a_path_that_resolves_to_nothing_makes_no_fact",
-    "adapters_a_replay_needs_no_endpoint_and_is_given_nowhere_to_dial",
+    "adapters_a_replay_takes_no_endpoint_and_the_binary_holds_no_transport",
     "adapters_an_adapted_session_replays_to_a_census_and_a_working_object",
 ]
 
@@ -143,7 +144,7 @@ becomes = '''
                     let key = key.clone();'''
 catches = [
     "adapters::claude_code::tests::a_translated_tool_name_is_declared_in_the_census",
-    "adapters_a_replay_needs_no_endpoint_and_is_given_nowhere_to_dial",
+    "adapters_a_replay_takes_no_endpoint_and_the_binary_holds_no_transport",
     "adapters_an_adapted_session_replays_to_a_census_and_a_working_object",
 ]
 
@@ -156,15 +157,118 @@ failure_class = "adapters.the-prefill-counts-only-the-uncached-tokens"
 target = "diet/src/adapters/claude_code.rs"
 expect_exit = 101
 anchor = '''
-        let sum: u64 = [
-            "input_tokens",
-            "cache_creation_input_tokens",
-            "cache_read_input_tokens",
-        ]'''
+const PREFILL_KEYS: &[&str] = &[
+    "input_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+];'''
 becomes = '''
-        let sum: u64 = ["input_tokens"]'''
+const PREFILL_KEYS: &[&str] = &["input_tokens"];'''
 catches = [
     "adapters::claude_code::tests::the_prefill_is_every_token_that_was_fed_in_not_the_uncached_ones",
+    "adapters::claude_code::tests::two_turns_in_a_row_do_not_both_claim_the_same_prefill",
+]
+
+[[fault]]
+# Two person turns in a row -- a message queued before the model replied,
+# eight times in the reference log -- both took the same assistant row's
+# prefill. `Event::Summary` sums prefill across turns, so the session
+# total counted those tokens twice.
+id = "adapters.the-prefill-lookahead-runs-past-the-next-turn"
+failure_class = "adapters.the-prefill-lookahead-runs-past-the-next-turn"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+            Some(kind) if kind == Row::User.tag() && opens_a_turn(row) => return Ok(None),'''
+becomes = '''
+            Some(kind) if kind == Row::User.tag() && !opens_a_turn(row) => return Ok(None),'''
+catches = [
+    "adapters::claude_code::tests::two_turns_in_a_row_do_not_both_claim_the_same_prefill",
+]
+
+[[fault]]
+# `Turn::prefill_tokens` is a `Count` with no way to be absent, so an
+# unknown prefill becomes a zero. Counted, that is a declared gap;
+# uncounted, it is a measurement of zero tokens that were never measured.
+id = "adapters.a-prefill-the-log-never-carried-passes-as-measured"
+failure_class = "adapters.a-prefill-the-log-never-carried-passes-as-measured"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+            self.census.assumed_one(PREFILL_ASSUMED);'''
+becomes = '''
+            let _ = PREFILL_ASSUMED;'''
+catches = [
+    "adapters::claude_code::tests::two_turns_in_a_row_do_not_both_claim_the_same_prefill",
+]
+
+[[fault]]
+# `Count::new(n).unwrap_or_default()` was here, reinstating one line at a
+# time the exact failure `Count` exists to prevent: a value that reads
+# back different from the one written.
+id = "adapters.a-count-past-the-cap-becomes-a-zero"
+failure_class = "adapters.a-count-past-the-cap-becomes-a-zero"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+    Count::new(raw).map_err(|_| Drift::Unrepresentable {
+        at_row,
+        field: field.to_owned(),
+        why: format!("the count {raw} is past what the record can hold"),
+    })'''
+becomes = '''
+    let _ = (at_row, field);
+    Ok(Count::new(raw).unwrap_or_default())'''
+catches = [
+    "adapters::claude_code::tests::a_count_past_what_the_record_holds_is_refused_rather_than_zeroed",
+]
+
+[[fault]]
+# THE EIGHTY-PERCENT DROP, found by a fresh-instance review measuring this
+# adapter against the log it was written from. An assistant row that makes
+# a tool call and says nothing in words is the commonest shape in a real
+# log -- 1,824 of 2,173 rows -- and it emitted no response at all, taking
+# 80.7% of every token the model generated with it, under a census that
+# read as a clean success.
+id = "adapters.an-assistant-row-that-said-nothing-reports-nothing-spent"
+failure_class = "adapters.an-assistant-row-that-said-nothing-reports-nothing-spent"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+        self.events.push(Event::Response {
+            id: format!("a/{}", self.events.len()),'''
+becomes = '''
+        if spoke.trim().is_empty() {
+            return Ok(());
+        }
+        self.events.push(Event::Response {
+            id: format!("a/{}", self.events.len()),'''
+catches = [
+    "adapters::claude_code::tests::an_assistant_row_that_said_nothing_still_reports_what_it_spent",
+    "adapters_an_adapted_session_replays_to_a_census_and_a_working_object",
+]
+
+[[fault]]
+# `to_request` was `u/{turn.max(1)}`, which names `u/1` when no turn has
+# been opened: a dangling link the record's own structure check rejects,
+# invented in the very field `tool_use` refuses to invent it in sixty
+# lines below. Any resumed or compacted session reaches it.
+id = "adapters.a-response-names-a-request-that-is-not-there"
+failure_class = "adapters.a-response-names-a-request-that-is-not-there"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+            self.census
+                .no_event_one("assistant/spoke before any turn was opened");
+            return Ok(());
+        }
+        self.events.push(Event::Response {'''
+becomes = '''
+            let _ = &self.census;
+        }
+        self.events.push(Event::Response {'''
+catches = [
+    "adapters::claude_code::tests::an_assistant_row_before_any_turn_names_no_request_and_is_counted",
 ]
 
 [[fault]]
@@ -201,6 +305,22 @@ catches = [
 ]
 
 [[fault]]
+# `mapped` counts kinds understood, not rows carried, and the gap between
+# them is where the eighty-percent drop hid. A mapped row that produced no
+# event says so, under its own reason.
+id = "adapters.a-mapped-row-that-produced-nothing-is-not-counted"
+failure_class = "adapters.a-mapped-row-that-produced-nothing-is-not-counted"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+            self.census.no_event_one("user/carried no text of its own");'''
+becomes = '''
+            let _ = &self.census;'''
+catches = [
+    "adapters_an_adapted_session_replays_to_a_census_and_a_working_object",
+]
+
+[[fault]]
 # A call joined to its answer with the answer thrown away is a tool call
 # the object can see happened and nothing more.
 id = "adapters.a-tool-result-is-joined-without-its-output"
@@ -208,7 +328,7 @@ failure_class = "adapters.a-tool-result-is-joined-without-its-output"
 target = "diet/src/adapters/claude_code.rs"
 expect_exit = 101
 anchor = '''
-        *output = Some(flatten(block.get("content")));'''
+        *output = block.get("content").map(|content| flatten(Some(content)));'''
 becomes = '''
         *output = None;'''
 catches = [
@@ -216,23 +336,132 @@ catches = [
 ]
 
 [[fault]]
-# The census is read back by the gym. A raw control byte in a kind taken
-# from a foreign log makes the line unparseable, and the kinds in that
-# position are the ones nobody has seen before by construction.
-id = "adapters.a-control-character-crosses-into-the-census-raw"
-failure_class = "adapters.a-control-character-crosses-into-the-census-raw"
-target = "diet/src/adapters/mod.rs"
+# "The harness did not say" and "it succeeded" are different facts about a
+# call. This fault went GREEN when it was first run: the only test
+# asserting an absent exit did it on a call that was never answered, where
+# the mutated line never executes. The test it needed was written because
+# the fault said it was missing.
+id = "adapters.an-absent-is-error-becomes-a-zero"
+failure_class = "adapters.an-absent-is-error-becomes-a-zero"
+target = "diet/src/adapters/claude_code.rs"
 expect_exit = 101
 anchor = '''
-            c if (c as u32) < 0x20 => {
-                let _ = write!(out, "\\u{:04x}", c as u32);
+        *exit = block
+            .get("is_error")
+            .and_then(serde_json::Value::as_bool)
+            .map(i64::from);'''
+becomes = '''
+        *exit = Some(
+            block
+                .get("is_error")
+                .and_then(serde_json::Value::as_bool)
+                .map_or(0, i64::from),
+        );'''
+catches = [
+    "adapters::claude_code::tests::a_tool_result_that_said_neither_leaves_both_absent",
+]
+
+[[fault]]
+# A `text` block whose text was renamed made a person's turn vanish with
+# no drift, no census entry and exit 0 -- verbatim the scenario this
+# module's header gives as the thing an adapter must never do.
+id = "adapters.a-users-text-block-that-moved-is-read-around"
+failure_class = "adapters.a-users-text-block-that-moved-is-read-around"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+                            let Some(text) = block.get("text").and_then(serde_json::Value::as_str)
+                            else {
+                                return Err(Drift::MissingField {
+                                    at_row,
+                                    kind: Row::User.tag().to_owned(),
+                                    field: "content[].text.text".to_owned(),
+                                });
+                            };'''
+becomes = '''
+                            let text = block
+                                .get("text")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or_default();'''
+catches = [
+    "adapters::claude_code::tests::every_declared_field_is_refused_when_it_moves_not_read_around",
+]
+
+[[fault]]
+# A call whose `input` moved became a call with no arguments: recognised,
+# counted, translated, and useless to the capture lane. The tool-name
+# defect one field across.
+id = "adapters.a-calls-arguments-that-moved-are-read-as-none"
+failure_class = "adapters.a-calls-arguments-that-moved-are-read-as-none"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+            None => {
+                return Err(Drift::MissingField {
+                    at_row,
+                    kind: Row::Assistant.tag().to_owned(),
+                    field: "content[].tool_use.input".to_owned(),
+                });
             }'''
 becomes = '''
-            c if (c as u32) < 0x20 => {
-                out.push(c);
-            }'''
+            None => None,'''
 catches = [
-    "adapters::tests::a_control_character_in_a_kind_is_escaped_rather_than_written_raw",
+    "adapters::claude_code::tests::every_declared_field_is_refused_when_it_moves_not_read_around",
+]
+
+[[fault]]
+# A number rendered as text is a lie about its type, and this is the layer
+# where it would be introduced. The whole `Unrepresentable` path had no
+# test, no fixture and no fault until a review counted how many of the
+# five refusal variants anything in the suite had ever produced: one.
+id = "adapters.an-unspellable-argument-is-coerced-into-a-string"
+failure_class = "adapters.an-unspellable-argument-is-coerced-into-a-string"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+        serde_json::Value::Null => Err(Drift::Unrepresentable {
+            at_row,
+            field: field.to_owned(),
+            why: "null".to_owned(),
+        }),'''
+becomes = '''
+        serde_json::Value::Null => Ok(Value::String("null".to_owned())),'''
+catches = [
+    "adapters::claude_code::tests::a_tool_argument_the_record_cannot_spell_is_named_rather_than_coerced",
+]
+
+[[fault]]
+# Two numbering systems inside one enum whose whole doc comment is that a
+# refusal says WHERE: one blank line above the fault sent a reader to the
+# wrong line of the file.
+id = "adapters.a-refusal-points-at-a-kept-row-and-not-a-file-line"
+failure_class = "adapters.a-refusal-points-at-a-kept-row-and-not-a-file-line"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+        rows.push((at + 1, row));'''
+becomes = '''
+        rows.push((rows.len() + 1, row));'''
+catches = [
+    "adapters::claude_code::tests::a_refusal_counts_the_files_lines_and_not_the_rows_it_kept",
+]
+
+[[fault]]
+# The one invariant here the compiler does not hold. `Row` is an enum and
+# every match on it is exhaustive, but `Adapter::maps` hands back a
+# `&'static [&'static str]` that a const cannot build by walking the enum,
+# so the two definitions are held in step by a test. This is that test
+# being worth having.
+id = "adapters.the-declared-kinds-disagree-with-the-mapped-ones"
+failure_class = "adapters.the-declared-kinds-disagree-with-the-mapped-ones"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+const MAPS: &[&str] = &["user", "assistant"];'''
+becomes = '''
+const MAPS: &[&str] = &["user"];'''
+catches = [
+    "adapters::claude_code::tests::the_two_foreign_vocabularies_have_one_definition_each",
 ]
 
 [[fault]]
@@ -253,26 +482,29 @@ becomes = '''
 catches = [
     "adapters::claude_code::tests::a_kind_this_adapter_does_not_map_is_counted_rather_than_dropped",
     "adapters::claude_code::tests::the_committed_corpus_adapts_and_refuses_as_it_says_it_does",
+    "adapters::tests::a_census_counts_every_row_once_and_into_exactly_one_bucket",
     "adapters_a_kind_never_seen_is_counted_and_does_not_stop_the_replay",
     "adapters_an_adapted_session_replays_to_a_census_and_a_working_object",
 ]
 
 [[fault]]
-# The one invariant here the compiler does not hold. `Row` is an enum and
-# every match on it is exhaustive, but `Adapter::maps` hands back a
-# `&'static [&'static str]` that a const cannot build by walking the enum,
-# so the two definitions are held in step by a test. This is that test
-# being worth having.
-id = "adapters.the-declared-kinds-disagree-with-the-mapped-ones"
-failure_class = "adapters.the-declared-kinds-disagree-with-the-mapped-ones"
-target = "diet/src/adapters/claude_code.rs"
+# The census is read back by the gym. A raw control byte in a kind taken
+# from a foreign log makes the line unparseable, and the kinds in that
+# position are the ones nobody has seen before by construction.
+id = "adapters.a-control-character-crosses-into-the-census-raw"
+failure_class = "adapters.a-control-character-crosses-into-the-census-raw"
+target = "diet/src/adapters/mod.rs"
 expect_exit = 101
 anchor = '''
-const MAPS: &[&str] = &["user", "assistant"];'''
+            c if (c as u32) < 0x20 => {
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }'''
 becomes = '''
-const MAPS: &[&str] = &["user"];'''
+            c if (c as u32) < 0x20 => {
+                out.push(c);
+            }'''
 catches = [
-    "adapters::claude_code::tests::the_two_foreign_vocabularies_have_one_definition_each",
+    "adapters::tests::a_control_character_in_a_kind_is_escaped_rather_than_written_raw",
 ]
 
 [[fault]]
@@ -327,4 +559,20 @@ becomes = '''
         }'''
 catches = [
     "adapters_a_path_that_resolves_to_nothing_makes_no_fact",
+]
+
+[[fault]]
+# Every derived entry said turn zero -- a turn the adapter never emits,
+# since its turns are one-based -- so the provenance of all 221 entries of
+# a real replay named a turn that did not exist.
+id = "adapters.a-derived-fact-claims-a-turn-that-never-happened"
+failure_class = "adapters.a-derived-fact-claims-a-turn-that-never-happened"
+target = "diet/src/bin/replay.rs"
+expect_exit = 101
+anchor = '''
+            touch.turn,'''
+becomes = '''
+            0,'''
+catches = [
+    "adapters_an_adapted_session_replays_to_a_census_and_a_working_object",
 ]

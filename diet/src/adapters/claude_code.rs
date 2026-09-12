@@ -28,9 +28,17 @@
 //! output back to the model, which is not a person saying anything. Mapping
 //! every `user` row to a turn would have invented over a thousand turns that
 //! never happened, in a record whose whole purpose is that its counts are
-//! true. So a `user` row opens a turn only when it carries text a person
-//! wrote; otherwise its `tool_result` blocks are joined to the call they
-//! answer.
+//! true. So a `user` row opens a turn only when it carries TEXT; otherwise
+//! its `tool_result` blocks are joined to the call they answer.
+//!
+//! Text, and not "text a person wrote", which is what this said first and is
+//! a claim the predicate cannot make. Two of the 62 turns the census counts
+//! in the reference log are slash-command envelopes the harness composed
+//! (`<command-name>…</command-name>`), and a log written by a subagent
+//! carries its parent's prompts in the same position. The row says a person
+//! is the author; this adapter reports what the row says and does not
+//! second-guess it, and the distance between "the `user` role" and "a human
+//! being" is the operator's to judge rather than a heuristic's to erase.
 //!
 //! **`input_tokens` is not the prefill.** A typical assistant row in that log
 //! reads `input_tokens: 2` beside `cache_read_input_tokens: 38639` and
@@ -185,8 +193,8 @@ impl Adapter for ClaudeCode {
     fn adapt(&self, log: &str) -> Result<Adapted, Drift> {
         let rows = parse(log)?;
         let mut run = Run::new(self.name());
-        for (at_row, row) in rows.iter().enumerate() {
-            run.row(at_row + 1, row, rows.get(at_row + 1..).unwrap_or(&[]))?;
+        for (at, (at_row, row)) in rows.iter().enumerate() {
+            run.row(*at_row, row, rows.get(at + 1..).unwrap_or(&[]))?;
         }
         Ok(Adapted {
             events: run.events,
@@ -195,8 +203,16 @@ impl Adapter for ClaudeCode {
     }
 }
 
-/// Every non-blank line, as JSON, or the first line that is not.
-fn parse(log: &str) -> Result<Vec<serde_json::Value>, Drift> {
+/// Every non-blank line, as JSON and the FILE line it came from.
+///
+/// The line number is carried rather than recovered, because it cannot be
+/// recovered: blank lines are skipped, so a row's position in this vector is
+/// not its position in the file. The first version returned bare values and
+/// numbered the refusals by vector index, which meant `NotJson` counted file
+/// lines and `MissingField` counted rows -- two numbering systems inside one
+/// enum whose whole doc comment is that a refusal says WHERE. One blank line
+/// anywhere above the fault was enough to send a reader to the wrong line.
+fn parse(log: &str) -> Result<Vec<(usize, serde_json::Value)>, Drift> {
     let mut rows = Vec::new();
     for (at, line) in log.lines().enumerate() {
         if line.trim().is_empty() {
@@ -209,7 +225,7 @@ fn parse(log: &str) -> Result<Vec<serde_json::Value>, Drift> {
         if !row.is_object() {
             return Err(Drift::NotAnObject { at_row: at + 1 });
         }
-        rows.push(row);
+        rows.push((at + 1, row));
     }
     Ok(rows)
 }
@@ -244,7 +260,7 @@ impl Run {
         &mut self,
         at_row: usize,
         row: &serde_json::Value,
-        rest: &[serde_json::Value],
+        rest: &[(usize, serde_json::Value)],
     ) -> Result<(), Drift> {
         let Some(kind) = row.get("type").and_then(serde_json::Value::as_str) else {
             return Err(Drift::NoKind { at_row });
@@ -267,9 +283,9 @@ impl Run {
         &mut self,
         at_row: usize,
         row: &serde_json::Value,
-        rest: &[serde_json::Value],
+        rest: &[(usize, serde_json::Value)],
     ) -> Result<(), Drift> {
-        let content = content_of(at_row, "user", row)?;
+        let content = content_of(at_row, Row::User.tag(), row)?;
         let mut said = String::new();
         match content {
             serde_json::Value::String(text) => said.push_str(text),
@@ -278,11 +294,20 @@ impl Run {
                     let tag = block_type(block);
                     match tag.and_then(Block::from_tag) {
                         Some(Block::Text) => {
-                            if let Some(text) =
-                                block.get("text").and_then(serde_json::Value::as_str)
-                            {
-                                said.push_str(text);
-                            }
+                            // Declared, so read or refused. Shrugging here
+                            // drops a person's turn on the floor with a
+                            // census that says nothing happened -- which is
+                            // the module header's own example of the failure
+                            // this adapter exists to refuse.
+                            let Some(text) = block.get("text").and_then(serde_json::Value::as_str)
+                            else {
+                                return Err(Drift::MissingField {
+                                    at_row,
+                                    kind: Row::User.tag().to_owned(),
+                                    field: "content[].text.text".to_owned(),
+                                });
+                            };
+                            said.push_str(text);
                         }
                         Some(Block::ToolResult) => self.tool_result(block),
                         // A call inside a `user` row. The mapping reads calls
@@ -312,13 +337,28 @@ impl Run {
             // Not a turn. The row carried a tool's answer, which has been
             // joined to the call above, or content with no home, which has
             // been counted. Inventing a turn here is the thousand-turn lie.
+            //
+            // Counted all the same: this is a row whose kind was mapped and
+            // which produced no event, and `mapped` alone would report it as
+            // carried.
+            self.census.no_event_one("user/carried no text of its own");
             return Ok(());
         }
 
         self.turn += 1;
+        let prefill = if let Some(counted) = prefill_after(rest)? {
+            counted
+        } else {
+            // The record's `Turn::prefill_tokens` is a `Count`, not an
+            // `Option<Count>`, so there is no way to say "the log did not
+            // say". The zero goes in and is declared, which is the only
+            // honest option without a change to `diet/formats/`.
+            self.census.assumed_one(PREFILL_ASSUMED);
+            Count::default()
+        };
         self.events.push(Event::Turn {
             index: self.turn,
-            prefill_tokens: prefill_after(rest),
+            prefill_tokens: prefill,
         });
         self.events.push(Event::Request {
             id: format!("u/{}", self.turn),
@@ -352,9 +392,14 @@ impl Run {
             let tag = block_type(block);
             match tag.and_then(Block::from_tag) {
                 Some(Block::Text) => {
-                    if let Some(text) = block.get("text").and_then(serde_json::Value::as_str) {
-                        spoke.push_str(text);
-                    }
+                    let Some(text) = block.get("text").and_then(serde_json::Value::as_str) else {
+                        return Err(Drift::MissingField {
+                            at_row,
+                            kind: Row::Assistant.tag().to_owned(),
+                            field: "content[].text.text".to_owned(),
+                        });
+                    };
+                    spoke.push_str(text);
                 }
                 Some(Block::ToolUse) => self.tool_use(at_row, block)?,
                 // An answer in the row that asks. The mapping joins answers
@@ -371,9 +416,6 @@ impl Run {
             }
         }
 
-        if spoke.trim().is_empty() {
-            return Ok(());
-        }
         // A response names its token count, so the count has to be there. It
         // is the one field of the mapping that cannot be absent without the
         // event becoming a guess.
@@ -385,16 +427,34 @@ impl Run {
         else {
             return Err(Drift::MissingField {
                 at_row,
-                kind: "assistant".to_owned(),
+                kind: Row::Assistant.tag().to_owned(),
                 field: "message.usage.output_tokens".to_owned(),
             });
         };
-        let to_request = format!("u/{}", self.turn.max(1));
+
+        // EVERY assistant row emits a response, whether or not it said
+        // anything in words. This used to return early when there was no
+        // text, and a row that made a tool call and spoke not at all is the
+        // commonest shape in a real log: 1,824 of 2,173 assistant rows, and
+        // with them 80.7% of every token the model generated, left through
+        // that early return under a census that read as a clean success.
+        // Silence is not absence -- the model ran, the tokens were spent, and
+        // `text: None` says exactly that where an omitted event said nothing.
+        if self.turn == 0 {
+            // Nothing to answer. The record's `Response::to_request` is
+            // required and a response naming a request that is not in the
+            // stream is a dangling link the record itself would reject; this
+            // used to emit `u/1` regardless, inventing turn one in the very
+            // field `tool_use` refuses to invent it in sixty lines below.
+            self.census
+                .no_event_one("assistant/spoke before any turn was opened");
+            return Ok(());
+        }
         self.events.push(Event::Response {
             id: format!("a/{}", self.events.len()),
-            to_request,
-            output_tokens: Count::new(tokens).unwrap_or_default(),
-            text: Some(spoke),
+            to_request: format!("u/{}", self.turn),
+            output_tokens: count_of(at_row, "message.usage.output_tokens", tokens)?,
+            text: (!spoke.trim().is_empty()).then_some(spoke),
         });
         Ok(())
     }
@@ -405,8 +465,15 @@ impl Run {
             // Nothing to attach it to: the record refuses a row naming a turn
             // that never happened, and inventing turn one would be the same
             // fabrication in a different field.
+            // Under `assistant/tool_use`, like any other unhomed block of
+            // that type, with the reason in `no_event` where reasons live.
+            // Two vocabularies in one map -- `assistant/thinking` beside
+            // `assistant/tool_use before any turn` -- gave a reader tallying
+            // by block type two keys for one type.
             self.census
-                .dropped_one("assistant/tool_use before any turn");
+                .dropped_one(&format!("assistant/{}", Block::ToolUse.tag()));
+            self.census
+                .no_event_one("assistant/called a tool before any turn was opened");
             return Ok(());
         }
         let Some(id) = block.get("id").and_then(serde_json::Value::as_str) else {
@@ -427,7 +494,20 @@ impl Run {
         if translated {
             self.census.translated_one(tool, native);
         }
+        // `input` is a field this mapping declares, so it is read or refused.
+        // Reading a reshaped one as "no arguments" is the same defect
+        // `TOOL_NAMES` exists to prevent, one field across: the call is
+        // recognised, the census reads as a success, the translation is even
+        // counted, and the capture lane derives nothing from a call it can
+        // see. `null` is refused by `value_of` for the same reason.
         let args = match block.get("input") {
+            None => {
+                return Err(Drift::MissingField {
+                    at_row,
+                    kind: Row::Assistant.tag().to_owned(),
+                    field: "content[].tool_use.input".to_owned(),
+                });
+            }
             Some(serde_json::Value::Object(input)) => {
                 let mut args = BTreeMap::new();
                 for (key, raw) in input {
@@ -445,7 +525,16 @@ impl Run {
                 }
                 Some(args)
             }
-            _ => None,
+            Some(other) => {
+                return Err(Drift::Unrepresentable {
+                    at_row,
+                    field: "content[].tool_use.input".to_owned(),
+                    why: format!(
+                        "it is {}, and a call's arguments are an object",
+                        shape_of(other)
+                    ),
+                });
+            }
         };
         self.awaiting.insert(id.to_owned(), self.events.len());
         self.events.push(Event::ToolCall {
@@ -467,19 +556,25 @@ impl Run {
             .map(str::to_owned)
         else {
             self.census
-                .dropped_one("user/tool_result without a tool_use_id");
+                .dropped_one(&format!("user/{}", Block::ToolResult.tag()));
+            self.census
+                .no_event_one("user/a tool result naming no call");
             return;
         };
         let Some(at) = self.awaiting.remove(&id) else {
             // An answer to a call this log never showed. Counted rather than
             // attached to whichever call happened to be last.
             self.census
-                .dropped_one("user/tool_result answering no known call");
+                .dropped_one(&format!("user/{}", Block::ToolResult.tag()));
+            self.census
+                .no_event_one("user/a tool result answering no known call");
             return;
         };
         let Some(Event::ToolCall { exit, output, .. }) = self.events.get_mut(at) else {
             self.census
-                .dropped_one("user/tool_result answering no known call");
+                .dropped_one(&format!("user/{}", Block::ToolResult.tag()));
+            self.census
+                .no_event_one("user/a tool result answering no known call");
             return;
         };
         // `is_error` is a boolean, not an exit code. True becomes 1 because
@@ -490,7 +585,10 @@ impl Run {
             .get("is_error")
             .and_then(serde_json::Value::as_bool)
             .map(i64::from);
-        *output = Some(flatten(block.get("content")));
+        // Absent stays absent, for the same reason `is_error` does: "the
+        // harness said nothing" and "the tool printed nothing" are different
+        // facts about a call, and `Some("")` says the second about both.
+        *output = block.get("content").map(|content| flatten(Some(content)));
     }
 }
 
@@ -514,34 +612,127 @@ fn content_of<'a>(
     })
 }
 
+/// What a JSON value is, for a refusal that has to say why it will not fit.
+///
+/// Named rather than `{:?}`-rendered: a debug rendering of a whole foreign
+/// object in an error message is how a log's contents end up in a terminal
+/// nobody meant to paste them into.
+fn shape_of(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "a boolean",
+        serde_json::Value::Number(_) => "a number",
+        serde_json::Value::String(_) => "a string",
+        serde_json::Value::Array(_) => "a list",
+        serde_json::Value::Object(_) => "an object",
+    }
+}
+
 /// A content block's `type`, if it has one.
 fn block_type(block: &serde_json::Value) -> Option<&str> {
     block.get("type").and_then(serde_json::Value::as_str)
 }
 
-/// The prefill of the next assistant row, or zero where none follows.
+/// The prefill of the assistant row that answers THIS turn, if one does.
 ///
-/// All three components, because all three were fed to the model. See this
+/// All three token fields, because all three were fed to the model. See this
 /// module's header for why `input_tokens` alone is a lie.
-fn prefill_after(rest: &[serde_json::Value]) -> Count {
-    for row in rest {
-        if row.get("type").and_then(serde_json::Value::as_str) != Some("assistant") {
-            continue;
+///
+/// # Why the scan stops
+///
+/// It used to run to the next `assistant` row anywhere ahead of it. Two
+/// person turns in a row -- a second message queued before the model replied,
+/// which happens eight times in the log this was written from -- then gave
+/// BOTH turns the same prefill, and `Event::Summary` sums prefill across
+/// turns, so the session total counted those tokens twice. The scan now stops
+/// at the next row that opens a turn: an assistant row after that answers
+/// that turn, not this one.
+///
+/// `None` means the log affords no answer -- an interrupted session's last
+/// turn, or a usage object carrying none of the three keys. The caller turns
+/// that into the zero the record gives it no way to avoid, and counts it.
+fn prefill_after(rest: &[(usize, serde_json::Value)]) -> Result<Option<Count>, Drift> {
+    for (at_row, row) in rest {
+        match row.get("type").and_then(serde_json::Value::as_str) {
+            Some(kind) if kind == Row::Assistant.tag() => {}
+            // A row that opens a turn of its own ends the lookahead: whatever
+            // answers it is that turn's prefill and not this one's.
+            Some(kind) if kind == Row::User.tag() && opens_a_turn(row) => return Ok(None),
+            _ => continue,
         }
         let Some(usage) = row.get("message").and_then(|m| m.get("usage")) else {
-            return Count::default();
+            return Ok(None);
         };
-        let sum: u64 = [
-            "input_tokens",
-            "cache_creation_input_tokens",
-            "cache_read_input_tokens",
-        ]
-        .iter()
-        .filter_map(|key| usage.get(*key).and_then(serde_json::Value::as_u64))
-        .sum();
-        return Count::new(sum).unwrap_or_default();
+        let mut sum = 0_u64;
+        let mut said = false;
+        for key in PREFILL_KEYS {
+            if let Some(part) = usage.get(*key).and_then(serde_json::Value::as_u64) {
+                said = true;
+                sum = sum
+                    .checked_add(part)
+                    .ok_or_else(|| Drift::Unrepresentable {
+                        at_row: *at_row,
+                        field: PREFILL_FIELD.to_owned(),
+                        why: "the three counts sum past what a count can hold".to_owned(),
+                    })?;
+            }
+        }
+        if !said {
+            return Ok(None);
+        }
+        return count_of(*at_row, PREFILL_FIELD, sum).map(Some);
     }
-    Count::default()
+    Ok(None)
+}
+
+/// The three token fields that together are what was fed to the model.
+const PREFILL_KEYS: &[&str] = &[
+    "input_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+];
+
+/// What a refusal calls the field the three counts live in.
+const PREFILL_FIELD: &str = "message.usage (the three prefill counts)";
+
+/// What is assumed when the log affords no prefill for a turn.
+const PREFILL_ASSUMED: &str = "turn.prefill_tokens = 0 (no assistant row answers this turn)";
+
+/// A count the record can hold, or a refusal naming the one it cannot.
+///
+/// `Count::new(n).unwrap_or_default()` was here, and it turned a number past
+/// the cap into a silent zero -- reinstating, one line at a time, exactly the
+/// failure `Count` exists to prevent: a value that reads back different from
+/// the one written. A number this record cannot spell is drift, and [`Drift`]
+/// already has the word for it.
+fn count_of(at_row: usize, field: &str, raw: u64) -> Result<Count, Drift> {
+    Count::new(raw).map_err(|_| Drift::Unrepresentable {
+        at_row,
+        field: field.to_owned(),
+        why: format!("the count {raw} is past what the record can hold"),
+    })
+}
+
+/// Whether a `user` row carries text, and so opens a turn.
+///
+/// The same predicate the mapping uses, factored out because the prefill
+/// lookahead has to agree with it exactly. Two copies that disagreed would
+/// give a turn the prefill of a different turn.
+fn opens_a_turn(row: &serde_json::Value) -> bool {
+    match row
+        .get("message")
+        .and_then(|message| message.get("content"))
+    {
+        Some(serde_json::Value::String(text)) => !text.trim().is_empty(),
+        Some(serde_json::Value::Array(blocks)) => blocks.iter().any(|block| {
+            block_type(block).and_then(Block::from_tag) == Some(Block::Text)
+                && block
+                    .get("text")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|text| !text.trim().is_empty())
+        }),
+        _ => false,
+    }
 }
 
 /// A tool result's content as text, however the harness shaped it.
@@ -608,6 +799,11 @@ mod tests {
     use super::{Block, ClaudeCode, MAPS, Row, native_tool};
     use crate::adapters::{Adapter, Drift};
     use crate::formats::record::Event;
+
+    /// One `user` row carrying text a person wrote.
+    fn user_says(text: &str) -> String {
+        format!("{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"{text}\"}}}}")
+    }
 
     /// One assistant row, with `content` and `usage` written in full.
     fn assistant(content: &str, output_tokens: u64, prefill: [u64; 3]) -> String {
@@ -886,6 +1082,309 @@ mod tests {
                 .collect::<std::collections::BTreeSet<_>>()
                 .len(),
             "and no two block types share a tag"
+        );
+    }
+
+    /// THE EIGHTY-PERCENT DROP.
+    ///
+    /// An assistant row that makes a tool call and says nothing in words is
+    /// the commonest shape in a real log -- 1,824 of 2,173 rows -- and it
+    /// used to emit no response at all, taking its `output_tokens` with it.
+    /// 80.7% of every token the model generated left through that hole under
+    /// a census that read as a clean success. Found by a fresh-instance
+    /// review measuring the adapter against the log it was written from, not
+    /// by any test here, which is why this one exists.
+    #[test]
+    fn an_assistant_row_that_said_nothing_still_reports_what_it_spent() {
+        let log = [
+            user_says("go"),
+            assistant(
+                "[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Read\",\
+                 \"input\":{\"file_path\":\"/srv/p/a.rs\"}}]",
+                4242,
+                [1, 0, 0],
+            ),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode.adapt(&log).expect("it adapts");
+        let spent: Vec<(u64, Option<&str>)> = adapted
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Response {
+                    output_tokens,
+                    text,
+                    ..
+                } => Some((output_tokens.get(), text.as_deref())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            spent,
+            vec![(4242, None)],
+            "the row spent 4,242 tokens saying nothing, and both halves of \
+             that are recorded: the count, and `text: None` rather than an \
+             omitted event"
+        );
+        assert_eq!(
+            adapted.census.silent_rows(),
+            0,
+            "and no assistant row is silent: the census would say so if one were"
+        );
+    }
+
+    /// A response cannot name a request that is not in the stream.
+    ///
+    /// `to_request` used to be `u/{turn.max(1)}`, which emits `u/1` when no
+    /// turn has been opened -- a dangling link the record's own structure
+    /// check rejects, invented in the very field `tool_use` refuses to invent
+    /// it in sixty lines below. Reachable from any resumed or compacted
+    /// session whose first mapped row is an assistant row.
+    #[test]
+    fn an_assistant_row_before_any_turn_names_no_request_and_is_counted() {
+        let log = assistant("[{\"type\":\"text\",\"text\":\"resumed\"}]", 9, [1, 0, 0]);
+
+        let adapted = ClaudeCode.adapt(&log).expect("it adapts");
+        assert!(
+            !adapted
+                .events
+                .iter()
+                .any(|event| matches!(event, Event::Response { .. })),
+            "no response, because there is no request for one to answer"
+        );
+        assert_eq!(
+            adapted.census.no_event["assistant/spoke before any turn was opened"], 1,
+            "and the row is counted rather than passed over in silence"
+        );
+        assert_eq!(
+            adapted.census.mapped_rows(),
+            1,
+            "it was still a kind we map"
+        );
+    }
+
+    /// Two person turns in a row do not share one prefill.
+    ///
+    /// The lookahead used to run to the next assistant row wherever it was,
+    /// so a message queued before the model replied gave BOTH turns the same
+    /// prefill -- and `Event::Summary` sums prefill across turns, so the
+    /// session total counted those tokens twice. Eight such pairs exist in
+    /// the log this was written from.
+    #[test]
+    fn two_turns_in_a_row_do_not_both_claim_the_same_prefill() {
+        let log = [
+            user_says("first"),
+            user_says("second, before it answered"),
+            assistant("[{\"type\":\"text\",\"text\":\"ok\"}]", 3, [10, 20, 70]),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode.adapt(&log).expect("it adapts");
+        let prefills: Vec<u64> = adapted
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Turn { prefill_tokens, .. } => Some(prefill_tokens.get()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            prefills,
+            vec![0, 100],
+            "the assistant row answers the SECOND turn; the first has none, \
+             and 100 counted twice would overstate the session by 100"
+        );
+        assert_eq!(
+            adapted.census.assumed["turn.prefill_tokens = 0 (no assistant row answers this turn)"],
+            1,
+            "and the zero the record forces is declared rather than passed off \
+             as a measurement"
+        );
+    }
+
+    /// A number the record cannot hold is drift, not a zero.
+    ///
+    /// `Count::new(n).unwrap_or_default()` was here. It turned a count past
+    /// the cap into `0` with a success census -- reinstating one line at a
+    /// time the exact failure `Count` exists to prevent: a value that reads
+    /// back different from the one written.
+    #[test]
+    fn a_count_past_what_the_record_holds_is_refused_rather_than_zeroed() {
+        let huge = u64::MAX;
+        let log = [
+            user_says("go"),
+            assistant("[{\"type\":\"text\",\"text\":\"ok\"}]", huge, [1, 0, 0]),
+        ]
+        .join("\n");
+        assert!(
+            matches!(
+                ClaudeCode.adapt(&log),
+                Err(Drift::Unrepresentable { field, .. }) if field.contains("output_tokens")
+            ),
+            "an output count past the cap is named, not silently zeroed"
+        );
+
+        // And the same for the three prefill counts, which are summed.
+        let log = [
+            user_says("go"),
+            assistant(
+                "[{\"type\":\"text\",\"text\":\"ok\"}]",
+                1,
+                [huge, huge, huge],
+            ),
+        ]
+        .join("\n");
+        assert!(
+            matches!(ClaudeCode.adapt(&log), Err(Drift::Unrepresentable { .. })),
+            "a prefill sum that overflows is a refusal, not a wrap or a panic"
+        );
+    }
+
+    /// Every field the mapping declares is read or refused -- all of them.
+    ///
+    /// Three declared fields used to be read with a shrug: a `text` block
+    /// with its text renamed dropped a person's turn on the floor, and a
+    /// `tool_use` whose `input` was renamed or reshaped became a call with no
+    /// arguments -- recognised, counted, translated, and useless to the
+    /// capture lane. That is the failure `TOOL_NAMES` exists to prevent,
+    /// reproduced one field across.
+    #[test]
+    fn every_declared_field_is_refused_when_it_moves_not_read_around() {
+        let moved: &[(&str, &str)] = &[
+            (
+                "a user row's text block",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\
+                 [{\"type\":\"text\",\"body\":\"please fix the parser\"}]}}",
+            ),
+            (
+                "an assistant row's text block",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":\
+                 [{\"type\":\"text\",\"body\":\"hi\"}],\"usage\":{\"output_tokens\":1}}}",
+            ),
+        ];
+        for (what, row) in moved {
+            let log = [user_says("go").as_str(), row].join("\n");
+            assert!(
+                matches!(ClaudeCode.adapt(&log), Err(Drift::MissingField { .. })),
+                "{what}: a declared field that moved is a refusal"
+            );
+        }
+
+        // `input` renamed away entirely, and `input` reshaped.
+        for input in [
+            "\"arguments\":{\"file_path\":\"/srv/p/a.rs\"}",
+            "\"input\":\"ls -la\"",
+        ] {
+            let log = [
+                user_says("go"),
+                assistant(
+                    &format!("[{{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"Read\",{input}}}]"),
+                    1,
+                    [1, 0, 0],
+                ),
+            ]
+            .join("\n");
+            assert!(
+                ClaudeCode.adapt(&log).is_err(),
+                "a call whose arguments moved is refused, not read as a call \
+                 with none: {input}"
+            );
+        }
+    }
+
+    /// A tool argument the record's value space cannot hold is refused.
+    ///
+    /// The whole `Drift::Unrepresentable` path had no test, no fixture and no
+    /// seeded fault: four of the five refusal variants were never produced by
+    /// anything in the suite. Under this repository's own rule, most of the
+    /// refusal vocabulary had never been seen at all.
+    #[test]
+    fn a_tool_argument_the_record_cannot_spell_is_named_rather_than_coerced() {
+        for (why, value) in [("null", "null"), ("an exponent", "1e5")] {
+            let log = [
+                user_says("go"),
+                assistant(
+                    &format!(
+                        "[{{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"Read\",\
+                         \"input\":{{\"file_path\":{value}}}}}]"
+                    ),
+                    1,
+                    [1, 0, 0],
+                ),
+            ]
+            .join("\n");
+            assert!(
+                matches!(ClaudeCode.adapt(&log), Err(Drift::Unrepresentable { .. })),
+                "{why} is refused by name rather than coerced into a string"
+            );
+        }
+    }
+
+    /// A refusal points at the line of the FILE, blank lines and all.
+    ///
+    /// `parse` numbered by file line and the walk renumbered by position in
+    /// the filtered vector, so one blank line anywhere above a fault sent a
+    /// reader to the wrong line -- two numbering systems inside one enum
+    /// whose whole doc comment is that a refusal says where.
+    #[test]
+    fn a_refusal_counts_the_files_lines_and_not_the_rows_it_kept() {
+        let log = [
+            "",
+            "",
+            "{\"type\":\"assistant\",\"msg\":{\"role\":\"assistant\",\"content\":[]}}",
+        ]
+        .join("\n");
+        assert!(
+            matches!(
+                ClaudeCode.adapt(&log),
+                Err(Drift::MissingField { at_row: 3, .. })
+            ),
+            "the bad row is on line three of the file, not row one of the vector"
+        );
+    }
+
+    /// "The harness said nothing" is not "the tool printed nothing", and the
+    /// same for "it did not fail".
+    ///
+    /// The `is_error` half of this had no test, and a seeded fault turning an
+    /// absent `is_error` into `Some(0)` went green: the one test that asserts
+    /// an absent exit does it on a call that was never ANSWERED, where
+    /// `tool_result` never runs and the `None` comes from construction. An
+    /// answered call whose `is_error` the harness omitted -- which is every
+    /// successful call Claude Code writes -- went through the mutated line
+    /// and nothing looked.
+    #[test]
+    fn a_tool_result_that_said_neither_leaves_both_absent() {
+        let log = [
+            user_says("go"),
+            assistant(
+                "[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Bash\",\
+                 \"input\":{\"command\":\"true\"}}]",
+                1,
+                [1, 0, 0],
+            ),
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\
+             [{\"type\":\"tool_result\",\"tool_use_id\":\"t1\"}]}}"
+                .to_owned(),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode.adapt(&log).expect("it adapts");
+        let answered = adapted.events.iter().find_map(|event| match event {
+            Event::ToolCall { output, exit, .. } => Some((output.clone(), *exit)),
+            _ => None,
+        });
+        let (output, exit) = answered.expect("the call is in the stream");
+        assert_eq!(
+            output, None,
+            "the call was answered and the answer said nothing about output; \
+             `Some(\"\")` would claim the tool printed an empty string"
+        );
+        assert_eq!(
+            exit, None,
+            "and nothing about failure either; `Some(0)` would claim the \
+             harness reported a success it never reported"
         );
     }
 
