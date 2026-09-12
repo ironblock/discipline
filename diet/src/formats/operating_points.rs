@@ -183,21 +183,42 @@ impl std::fmt::Display for Error {
 /// `qwen3` is a substring of `qwen3.6`, so today it must be written below the
 /// entry it would otherwise steal; marked, it may be written anywhere.
 ///
-/// The comparison is `served.contains(entry.matches)`, BYTE FOR BYTE, and
-/// that is not a detail: `Qwen3.6-27B` — the spelling this repository writes
-/// 317 times, more than any other model id in the tree — serves nothing here,
-/// while `qwen3.6-27b` serves `qwen3_6`. Whether the rule should fold case is
-/// a question about the dogma's data, not about this reader, and it is open.
+/// CASE IS FOLDED, both sides, to ASCII lowercase before the comparison —
+/// ruled 2026-09-12, and it is a BUG FIX rather than a spelling change.
+///
+/// The comparison used to be `served.contains(entry.matches)` byte for byte,
+/// and `Qwen3.6-27B` — written 316 times in
+/// `diet/capture/sense/register/mined.provenance.jsonl`, the mined corpus
+/// this serves, and more than any other model id — served NOTHING, while its
+/// lowercase twin served `qwen3_6`. (Counted in the record, not in the tree:
+/// a tree-wide grep sweeps in this comment and the test below, which is how
+/// a first count of it came out at 317.)
+///
+/// No `nothink_ops`, no `thinking_kwarg`, no sampler, for the family the file
+/// is mostly about. Model identifiers are ASCII and case-preserving but not
+/// case-MEANINGFUL, so that was a defect and not a policy.
+///
+/// **This is not serving-invariant, and must never be recorded as though it
+/// were.** Three of the nineteen harvested names go from *nothing served* to
+/// *an entry served*; the invariance the respell rests on is between the two
+/// FILES under one rule, not between this rule and the one before it.
+/// [`tests::the_fold_is_a_bug_fix_and_not_an_invariance`] pins the difference
+/// so it cannot be quietly relabelled.
+///
+/// ASCII only, deliberately: `to_ascii_lowercase` and not `to_lowercase`.
+/// Full Unicode folding would make the rule depend on locale-adjacent
+/// behaviour (the Turkish dotless i, the Kelvin sign) for identifiers that
+/// are ASCII by construction, which is a wider promise than the ruling made.
 #[must_use]
 pub fn serves<'a>(entries: &'a [Entry], served: &str) -> Option<&'a Entry> {
+    let served = served.to_ascii_lowercase();
+    let hit = |entry: &&Entry, fallback: bool| {
+        entry.fallback == fallback && served.contains(&entry.matches.to_ascii_lowercase())
+    };
     entries
         .iter()
-        .find(|entry| !entry.fallback && served.contains(entry.matches.as_str()))
-        .or_else(|| {
-            entries
-                .iter()
-                .find(|entry| entry.fallback && served.contains(entry.matches.as_str()))
-        })
+        .find(|entry| hit(entry, false))
+        .or_else(|| entries.iter().find(|entry| hit(entry, true)))
 }
 
 /// Read a document, in the order it was written.
@@ -604,8 +625,10 @@ mod tests {
             served += usize::from(now.is_some());
         }
         assert_eq!(
-            served, 16,
-            "sixteen of the nineteen harvested names serve; a count that moves              means the harvest is stale, and an invariance proved over the wrong              names is not proved"
+            served,
+            HARVESTED.len(),
+            "every harvested name serves; a count that moves means the harvest is \
+             stale, and an invariance proved over the wrong names is not proved"
         );
     }
 
@@ -642,6 +665,69 @@ mod tests {
         assert_eq!(
             candidate, dogma,
             "the candidate carries something the dogma does not, so it has              stopped being a respell and become a second set of measurements"
+        );
+    }
+
+    /// The fold is a BUG FIX, and this is what stops it being filed as a
+    /// spelling change.
+    ///
+    /// Ruled 2026-09-12: *"This is not serving-invariant and must not be
+    /// recorded as such."* Every other test in this module asserts that
+    /// something did NOT move; this one asserts that three things DID, names
+    /// them, and fails if the count drifts in either direction.
+    ///
+    /// The direction matters as much as the count. Every difference must be
+    /// `None` becoming `Some` — a name that served nothing now served by the
+    /// entry its lowercase twin already reached. A name that served one entry
+    /// and now serves a DIFFERENT one would be a rerouting, which is a change
+    /// to what a measurement applies to and is not what was ruled.
+    ///
+    /// That rerouting arm is NOT reachable with today's data — every `match`
+    /// in the dogma is already lowercase, so folding can only add reach, never
+    /// move it. It is written for the document that carries a mixed-case
+    /// `match` one day, and it is declared here rather than left to look like
+    /// something this run exercised.
+    #[test]
+    fn the_fold_is_a_bug_fix_and_not_an_invariance() {
+        let dogma = parse(FIXTURE).expect("the dogma's operating points parse");
+        let unfolded = |served: &str| {
+            dogma
+                .iter()
+                .find(|entry| !entry.fallback && served.contains(entry.matches.as_str()))
+                .or_else(|| {
+                    dogma
+                        .iter()
+                        .find(|entry| entry.fallback && served.contains(entry.matches.as_str()))
+                })
+                .map(|entry| entry.key.as_str())
+        };
+
+        let mut gained: Vec<(&str, &str)> = Vec::new();
+        for name in HARVESTED {
+            let (was, now) = (unfolded(name), key_of(&dogma, name));
+            if was == now {
+                continue;
+            }
+            assert_eq!(
+                was, None,
+                "`{name}` served {was:?} before the fold and {now:?} after: that is a \
+                 REROUTING, not a name the fold reached, and it changes what a \
+                 transcribed measurement applies to"
+            );
+            gained.push((name, now.expect("a difference from None is a Some")));
+        }
+
+        assert_eq!(
+            gained,
+            vec![
+                ("Gemma", "gemma"),
+                ("Qwen3", "qwen3"),
+                ("Qwen3.6-27B", "qwen3_6"),
+            ],
+            "the fold reaches exactly three of the nineteen harvested names, and \
+             `Qwen3.6-27B` is the one that matters: 316 occurrences in the mined \
+             provenance record, the most frequent model id in the corpus, \
+             previously served by nothing at all"
         );
     }
 
@@ -694,11 +780,15 @@ mod tests {
             "the dogma marks nothing today; if it does, this test has stopped              being about a document with no fallback"
         );
         for name in HARVESTED {
-            let old_rule = dogma
+            // The single-pass rule, spelled out. It FOLDS, because the
+            // subject here is whether the second pass is inert -- not whether
+            // the fold happens, which is the test below.
+            let folded = name.to_ascii_lowercase();
+            let one_pass = dogma
                 .iter()
-                .find(|entry| name.contains(entry.matches.as_str()))
+                .find(|entry| folded.contains(&entry.matches.to_ascii_lowercase()))
                 .map(|entry| entry.key.as_str());
-            assert_eq!(key_of(&dogma, name), old_rule, "`{name}`");
+            assert_eq!(key_of(&dogma, name), one_pass, "`{name}`");
         }
     }
 

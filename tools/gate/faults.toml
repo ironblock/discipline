@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 310
+red_faults = 312
 mechanics_assertions = 50
 migrated = 0
 
@@ -3389,3 +3389,21 @@ failure_class = "resolver.suite-cannot-run"
 expected_exit = "2"
 migrated = false
 
+[[fault]]
+id = "recompute.recompute_probe_blinded_by_a_comment"
+kind = "seeded-gate"
+check = "recompute"
+label = "a probe blinded by a trailing comment"
+failure_class = "results.recompute-cannot-fail"
+legacy_signature = "does not compare the report to the artefacts"
+migrated = false
+
+[[fault]]
+id = "test.number_terminal_body_regrown"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/the_integer_terminal"
+label = "a shared body written out under another name"
+failure_class = "grammar.terminal-defined-twice"
+legacy_signature = "has a shared terminal.s body written out again"
+migrated = false

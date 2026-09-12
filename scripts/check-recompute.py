@@ -88,7 +88,27 @@ def front_matter(directory: pathlib.Path) -> tuple[dict | None, str | None]:
         return None, f"README.md front-matter is not TOML: {err}"
 
 
-INTEGER = re.compile(r"^(\w+) = (\d+)$", re.M)
+class CannotProbe(Exception):
+    """The comparison probe could not be set up on this directory.
+
+    ITS OWN EXCEPTION, and it becomes EXIT_NOTHING rather than a failure,
+    because "the probe found the script vacuous" and "the probe could not be
+    run" are different facts and this script's exit codes already say so
+    everywhere else. Returning `None` for the second was the defect: the
+    caller reads `None` as "the probe passed" and counts the directory as
+    RECOMPUTED, so a report the probe could not read became a recomputed
+    result in the census -- in the gate whose docstring is "a check of
+    nothing is not a pass".
+    """
+
+
+# Locating the line to perturb. NOT A SECOND READER: whatever this matches is
+# a PROPOSAL, and `tomllib` -- the same reader `front_matter` uses -- confirms
+# the perturbation landed before the probe is trusted. The regex it replaced
+# was `^(\w+) = (\d+)$`, which is a TOML reader written in a hurry: a trailing
+# comment (`dogma_version = 0  # bumped when the dogma changes`) does not
+# match it, the probe returned None, and the directory counted as recomputed.
+INTEGER_LINE = re.compile(r"^(?P<lead>[ \t]*(?P<key>[A-Za-z0-9_-]+)[ \t]*=[ \t]*)(?P<value>\d+)", re.M)
 
 
 def tracked_state(directory: pathlib.Path) -> str | None:
@@ -112,21 +132,59 @@ def proves_it_compares(directory: pathlib.Path, script: pathlib.Path) -> str | N
     say so. So: one integer in the report is changed, and the script is run
     against that copy. A script that still exits 0 was not reading the report.
     """
-    report = (directory / "README.md")
+    report = directory / "README.md"
     try:
         text = report.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as err:
-        return f"README.md cannot be read for the comparison probe: {err}"
-    match = INTEGER.search(text)
-    if match is None:
-        return None  # no number stated; nothing to perturb, nothing to claim
-    bumped = f"{match.group(1)} = {int(match.group(2)) + 1}"
+        raise CannotProbe(f"README.md cannot be read: {err}") from err
+
+    # THE AUTHORISED READER PICKS THE FIELD. `front_matter` is the one place
+    # this repository parses a report's front-matter, and it uses `tomllib`;
+    # the probe used to run its own regex over the whole file instead, which
+    # is the two-readers class inside the vacuity check.
+    parsed, why = front_matter(directory)
+    if parsed is None:
+        raise CannotProbe(f"the front-matter could not be read ({why})")
+    integers = sorted(
+        key
+        for key, value in parsed.items()
+        # `bool` is an `int` in Python, and bumping `true` to `2` would make a
+        # document TOML still accepts and mean nothing.
+        if isinstance(value, int) and not isinstance(value, bool)
+    )
+    if not integers:
+        # NOT a pass. A report stating no number is a report this probe cannot
+        # perturb, so it has no verdict to give -- and counting it as
+        # recomputed is exactly the vacuous pass the probe exists to prevent.
+        raise CannotProbe(
+            "the front-matter states no integer, so there is nothing to perturb "
+            "and no way to tell a script that compares from one that does not"
+        )
+    key = integers[0]
+    want = parsed[key] + 1
+
+    # Locate the line and rewrite only its digits, so a trailing comment
+    # survives. Then RE-PARSE: the regex proposed the edit, `tomllib` decides
+    # whether it landed.
+    perturbed, count = INTEGER_LINE.subn(
+        lambda m: f"{m.group('lead')}{want}" if m.group("key") == key else m.group(0),
+        text,
+        count=0,
+    )
+    if count == 0 or perturbed == text:
+        raise CannotProbe(f"`{key}` could not be located in README.md to perturb it")
     with tempfile.TemporaryDirectory() as box:
         copy = pathlib.Path(box) / directory.name
         shutil.copytree(directory, copy, symlinks=True)
-        (copy / "README.md").write_text(
-            text[: match.start()] + bumped + text[match.end() :], encoding="utf-8"
-        )
+        (copy / "README.md").write_text(perturbed, encoding="utf-8")
+        confirmed, why = front_matter(copy)
+        if confirmed is None or confirmed.get(key) != want:
+            raise CannotProbe(
+                f"the perturbation did not land: `{key}` reads "
+                f"{None if confirmed is None else confirmed.get(key)!r} after the edit, "
+                f"wanted {want!r}"
+                + (f" ({why})" if why else "")
+            )
         # The COPY's script, not the original's. Every `recompute.sh` opens by
         # cd-ing to its own directory -- that is the contract, so it runs from
         # anywhere -- which means handing it the original path would send it
@@ -139,9 +197,9 @@ def proves_it_compares(directory: pathlib.Path, script: pathlib.Path) -> str | N
         )
     if run.returncode == 0:
         return (
-            f"{RECOMPUTE} exits 0 with `{match.group(0)}` in the report changed to "
-            f"`{bumped}`, so it does not compare the report to the artefacts; a "
-            f"script that cannot fail recomputes nothing"
+            f"{RECOMPUTE} exits 0 with `{key}` in the report changed from "
+            f"{parsed[key]!r} to {want!r}, so it does not compare the report to the "
+            f"artefacts; a script that cannot fail recomputes nothing"
         )
     return None
 
@@ -157,6 +215,11 @@ def main(argv: list[str]) -> int:
         return EXIT_NOTHING
 
     failures: list[str] = []
+    # Directories whose vacuity probe could not be set up. Their own list, and
+    # their own exit code: they are neither proven vacuous nor proven sound,
+    # and folding them into either column is the lie this whole check exists
+    # to refuse.
+    unprobed: list[str] = []
     recomputed = 0
     historical = 0
     undeclared = 0
@@ -267,7 +330,14 @@ def main(argv: list[str]) -> int:
                 + ("\n  " + "\n  ".join(detail) if detail else "")
             )
             continue
-        vacuous = proves_it_compares(directory, script)
+        try:
+            vacuous = proves_it_compares(directory, script)
+        except CannotProbe as err:
+            # NOT a failure and NOT a count. The census below reports what was
+            # recomputed; a directory whose vacuity could not be established
+            # belongs in neither column, and saying so is EXIT_NOTHING.
+            unprobed.append(f"{directory}: {err}")
+            continue
         if vacuous is not None:
             failures.append(f"{directory}: {vacuous}")
             continue
@@ -286,6 +356,20 @@ def main(argv: list[str]) -> int:
     if failures:
         print(census, file=sys.stderr)
         return EXIT_FAIL
+    if unprobed:
+        # Before the census is printed as a claim, not after. A directory the
+        # probe could not read is one this script has no verdict on, and the
+        # census's whole meaning is that the numbers came back out of the
+        # artefacts.
+        for message in unprobed:
+            print(f"{message}", file=sys.stderr)
+        print(
+            f"{census}\ncheck-recompute: {len(unprobed)} directory(s) could not be "
+            f"probed for vacuity, so whether their scripts compare anything is "
+            f"unknown; that is not a pass",
+            file=sys.stderr,
+        )
+        return EXIT_NOTHING
     if results_seen == 0:
         # A tree with no results directory in it has nothing to check, and
         # says so. This is the one shape that is not a failure: it is a
