@@ -564,27 +564,60 @@ import tomllib
 
 FENCE = "+++"
 
+# 0 CLEAN, 1 FOUND SOMETHING, 2 COULD NOT RUN -- the repository's contract,
+# and this script speaks all three since 2026-09-12. It used to exit 1 for
+# everything, because `sys.exit("message")` does, so "the numbers do not
+# re-derive" and "this directory cannot be read at all" were one code. Ruled:
+# the census must be able to tell a recompute that failed from one that could
+# not be attempted, and conflating them is how a gate reads "nothing wrong"
+# when it means "did not look".
+#
+# The line: 2 when this script cannot reach a verdict, 1 when it reached one
+# and the verdict is that the numbers do not re-derive. A consumed artefact
+# that is not here is a 1 -- the answer is known, and it is no.
+def cannot_run(message):
+    print(f"recompute: {message}", file=sys.stderr)
+    raise SystemExit(2)
+
+
 def read(path):
     # A FILE THAT IS NOT HERE IS A SENTENCE, NOT A TRACEBACK. This script is
     # read by whoever is holding a directory that will not re-derive, and a
     # stack trace tells them which line of Python raised rather than which
-    # artefact is missing. Every read goes through here so that no path out of
-    # this script is an exception nobody wrote.
+    # artefact is missing.
+    #
+    # An earlier version of this comment claimed "no path out of this script
+    # is an exception nobody wrote". THAT WAS FALSE and a fresh instance
+    # proved it: only the file READ came through here, so a file that was
+    # present and malformed went straight to `json.loads` or `tomllib.loads`
+    # and out as a raw traceback. The parses are wrapped below now, and the
+    # claim is not restated -- what holds it is the two cases in
+    # `a_directory_this_script_cannot_read_is_a_two_not_a_traceback`.
     try:
         return pathlib.Path(path).read_text(encoding="utf-8")
     except OSError as err:
-        sys.exit(f"{path} cannot be read: {err.strerror}")
+        cannot_run(f"{path} cannot be read: {err.strerror}")
 
 
 text = read("README.md")
 if not text.startswith(FENCE + "\n"):
-    sys.exit("README.md does not open with +++ front-matter")
-front = tomllib.loads(text.split(FENCE + "\n", 2)[1])
+    cannot_run("README.md does not open with +++ front-matter")
+try:
+    front = tomllib.loads(text.split(FENCE + "\n", 2)[1])
+except (tomllib.TOMLDecodeError, IndexError) as err:
+    cannot_run(f"README.md front-matter is not TOML: {err}")
 
-rows = [json.loads(line) for line in read("run.jsonl").splitlines() if line.strip()]
+rows = []
+for number, line in enumerate(read("run.jsonl").splitlines(), start=1):
+    if not line.strip():
+        continue
+    try:
+        rows.append(json.loads(line))
+    except json.JSONDecodeError as err:
+        cannot_run(f"run.jsonl line {number} is not JSON: {err.msg}")
 summary = next((row for row in rows if row.get("record") == "summary"), None)
 if summary is None:
-    sys.exit("run.jsonl has no summary row")
+    cannot_run("run.jsonl has no summary row")
 
 
 def digest(path):
@@ -1219,6 +1252,107 @@ mod tests {
             !said.contains("Traceback"),
             "the refusal is a stack trace rather than a sentence: {said}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 0 clean, 1 found something, 2 could not run -- and this script has to
+    /// tell the last two apart.
+    ///
+    /// Ruled 2026-09-12: `sys.exit("message")` exits 1, so every refusal came
+    /// out as "found something", including the ones that mean "I could not
+    /// read this directory at all". The census cannot distinguish a recompute
+    /// that FAILED from one that could not be ATTEMPTED if they share a code,
+    /// and that is how a gate reads "nothing wrong" when it means "did not
+    /// look".
+    ///
+    /// BOTH DIRECTIONS ARE ASSERTED. A test that only checked the 2s would
+    /// pass a script that exited 2 for everything, which loses exactly as
+    /// much as exiting 1 for everything did. The 1 row is the control.
+    ///
+    /// The malformed cases are also the ones a fresh instance found raising a
+    /// BARE TRACEBACK: only the file read was wrapped, so a file that was
+    /// present and unparseable went out through `json.loads` or
+    /// `tomllib.loads` with a Python stack trace, under a comment claiming no
+    /// path out of the script was an exception nobody wrote.
+    #[test]
+    fn a_directory_this_script_cannot_read_is_a_two_not_a_traceback() {
+        let dir = scratch("exit-codes");
+        let path = write_run(&dir);
+        let into = dir.join("2026-01-01-a-sense-bakeoff");
+        assemble(&path, &into).expect("the assembly");
+
+        let run_it = |dir: &std::path::Path| {
+            let run = std::process::Command::new("bash")
+                .arg("recompute.sh")
+                .current_dir(dir)
+                .output()
+                .expect("recompute.sh runs");
+            let said = format!(
+                "{}{}",
+                String::from_utf8_lossy(&run.stdout),
+                String::from_utf8_lossy(&run.stderr)
+            );
+            (run.status.code(), said)
+        };
+
+        // Clean, first, so the rest are a change from a known state.
+        let (code, said) = run_it(&into);
+        assert_eq!(
+            code,
+            Some(0),
+            "an untouched assembly did not re-derive: {said}"
+        );
+
+        let readme = into.join("README.md");
+        let record = into.join("run.jsonl");
+        let good_readme = std::fs::read_to_string(&readme).expect("the report");
+        let good_record = std::fs::read_to_string(&record).expect("the record");
+
+        // COULD NOT RUN -- three ways, each present-but-unreadable rather
+        // than absent, because absent was the only case the old helper knew.
+        for (what, file, text) in [
+            (
+                "front-matter that is not TOML",
+                &readme,
+                good_readme.replacen("+++\n", "+++\nhypothesis = \"unterminated\n", 1),
+            ),
+            (
+                "a README with no front-matter",
+                &readme,
+                "no fence here\n".to_owned(),
+            ),
+            (
+                "a record line that is not JSON",
+                &record,
+                "not json at all {{{\n".to_owned(),
+            ),
+        ] {
+            std::fs::write(file, &text).expect("the damaged file");
+            let (code, said) = run_it(&into);
+            assert_eq!(code, Some(2), "{what}: expected 2, got {code:?}: {said}");
+            assert!(
+                !said.contains("Traceback"),
+                "{what}: refused with a stack trace rather than a sentence: {said}"
+            );
+            std::fs::write(&readme, &good_readme).expect("the report back");
+            std::fs::write(&record, &good_record).expect("the record back");
+        }
+
+        // FOUND SOMETHING -- the control. The script read everything it
+        // needed, reached a verdict, and the verdict is no.
+        let product = into.join("report.json");
+        let good_product = std::fs::read(&product).expect("the product");
+        let mut tampered = good_product.clone();
+        tampered.push(b' ');
+        std::fs::write(&product, &tampered).expect("the tampered product");
+        let (code, said) = run_it(&into);
+        assert_eq!(
+            code,
+            Some(1),
+            "a product that does not match its digest is a finding, not an \
+             inability: {said}"
+        );
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 
