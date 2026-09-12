@@ -426,12 +426,31 @@ fn the_harness_covers_at_least_one_format() {
 fn the_integer_terminal_is_defined_once_and_shared() {
     const SHARED: &str = "number.pest";
     let root = formats_dir();
+    // EVERY `.pest` FILE, not `<dir>/grammar.pest`.
+    //
+    // The first version joined the literal name, and all eight grammars
+    // happened to follow that convention -- so a complete second copy of the
+    // three rules, written into `verdict/numbers.pest`, was invisible to this
+    // guard and to `cargo test --workspace`, which stayed at 582 passed.
+    // Latent rather than live, but only because nobody had added a second
+    // `#[grammar]` file yet, and `operating_points.rs` already carries three.
+    //
+    // The unused second copy is exactly the shape the divergence comes back
+    // in: the shared text still sits there, unread, while a grammar spells
+    // the rule again.
     let mut grammars: Vec<PathBuf> = files_in_or_empty(&root)
         .into_iter()
-        .filter(|path| path.is_dir())
-        .map(|dir| dir.join("grammar.pest"))
-        .filter(|path| path.is_file())
+        .flat_map(|path| {
+            if path.is_dir() {
+                files_in_or_empty(&path)
+            } else {
+                vec![path]
+            }
+        })
+        .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "pest"))
         .collect();
+    grammars.retain(|path| *path != root.join(SHARED));
+    grammars.sort();
     let shared = root.join(SHARED);
     assert!(
         shared.is_file(),
