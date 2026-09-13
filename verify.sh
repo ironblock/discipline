@@ -2148,6 +2148,33 @@ path.write_text(
 EOF
 }
 
+# The shadowing refusal switched off, so the dogma's own retired spelling is
+# accepted again.
+#
+# `qwen3` is a substring of `qwen3.6`. Unmarked, whichever is written first
+# wins, and an operating point -- a transcribed measurement -- is decided by a
+# line number. Enabled 2026-09-13 with the respell, and the fixture it refuses
+# is the dogma as it was actually written until that day, not a document
+# invented to fail.
+#
+# Skips the loop rather than deleting it: a deleted loop is an unused-variable
+# warning away from being a compile error, and a case that fails to build
+# grades BROKEN rather than RED.
+inject_shadowing_admitted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/operating_points.rs")
+source = path.read_text(encoding="utf-8")
+anchor = "    for wider in &entries {\n        if wider.fallback {\n"
+assert source.count(anchor) == 1, "the shadowing loop moved"
+path.write_text(
+    source.replace(anchor, "    for wider in &entries {\n        if true {\n", 1),
+    encoding="utf-8",
+)
+EOF
+}
+
 # A grammar that grew its own integer terminal while the others go on sharing
 # one.
 #
@@ -4925,6 +4952,8 @@ selftest() {
     'dogma tag\(s\) absent from diet/formats/interview/tags\.tsv' 'lib/formats::interview'
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \
     "the projection lost the file's order" 'lib/formats::operating_points'
+  seeded_case "an unmarked entry that shadows another is admitted" test  inject_shadowing_admitted \
+    "the dogma's retired spelling parsed again" 'lib/formats::operating_points'
   seeded_case "an integer terminal grown a second time" test     inject_number_terminal_regrown \
     'it belongs in number\.pest and nowhere else' 'test:conformance/the_integer_terminal'
   seeded_case "a shared body written out under another name" test inject_number_terminal_body_regrown \
