@@ -3362,5 +3362,5 @@ check = "test"
 target = "lib/formats::operating_points"
 label = "an unmarked entry that shadows another is admitted"
 failure_class = "operating-points.shadowed-unmarked"
-legacy_signature = "the dogma's retired spelling parsed again"
+legacy_signature = "the retired spelling is refused"
 migrated = false

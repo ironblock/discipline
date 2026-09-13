@@ -5267,7 +5267,7 @@ selftest() {
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \
     "the projection lost the file's order" 'lib/formats::operating_points'
   seeded_case "an unmarked entry that shadows another is admitted" test  inject_shadowing_admitted \
-    "the dogma's retired spelling parsed again" 'lib/formats::operating_points'
+    "the retired spelling is refused" 'lib/formats::operating_points'
   seeded_case "an integer terminal grown a second time" test     inject_number_terminal_regrown \
     'it belongs in number\.pest and nowhere else' 'test:conformance/the_integer_terminal'
   seeded_case "a shared body written out under another name" test inject_number_terminal_body_regrown \
