@@ -1962,6 +1962,71 @@ inject_parity() {
   rm -rf tests/fixtures/results-bad/2026-01-14-bad-sha
 }
 
+# An injection that writes a literal of an AMBIGUOUS type while editing a file
+# that knows none of its declarations. Twenty-three names in this crate are
+# declared in more than one place -- measured on 2026-09-11, after a disclosure
+# claimed five and had never been re-asked -- and the scan places a literal by
+# the file the injection edits, then that file's imports, then a tree-wide
+# answer only if there is exactly one. None of the three applies here.
+#
+# RULED 2026-09-11: that turns the injections lane RED rather than being
+# skipped, because a scan that guesses places a literal against the wrong
+# declaration, and one that skips reports a pass over something it never read.
+# This is the case that proves the branch fires; before it, the branch had
+# never been seen red, which is the condition this repository refuses.
+#
+# `Ground` is the literal because it is declared THREE times -- twice under
+# diet/src and once in diet/tests/drive_cli.rs -- so it also proves the scan
+# now reads the tests root. `diet/src/lib.rs` names Ground nowhere, which is
+# what makes the edited file no help in placing it.
+inject_injections_literal_unplaceable() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+anchor = "inject_injections_struct_grew() {\n"
+assert source.count(anchor) == 1, "the anchor is not where this fault expects it"
+seeded = (
+    "inject_seeded_unplaceable_ground() {\n"
+    "  edit_in_place 's/^/ /' diet/src/lib.rs\n"
+    # ASSEMBLED FROM PIECES, and it has to be. The scan looks for the two
+    # tokens written together, and this fault's own body is scanned like any
+    # other: written whole, it made the CLEAN tree fail the check this fault
+    # exists to prove fires on a dirty one. Caught by running it -- the fault
+    # fired, and named itself alongside the injection it plants. The same
+    # trap `inject_injection_needs_gnu_sed` documents, one lint along.
+    "  # " + "Ground" + " { tree: PathBuf::new() }\n"
+    "}\n\n"
+)
+path.write_text(source.replace(anchor, seeded + anchor, 1), encoding="utf-8")
+EOF
+}
+
+# A merge that adds a field to a struct. Every injection that writes a WHOLE
+# literal of that struct is now invalid text -- and the tree still builds,
+# because an injection's replacement text is a string the compiler never sees.
+# This went red on CI once, as "red for the wrong reason", forty minutes in.
+inject_injections_struct_grew() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+opened = "pub struct Provenance {\n"
+assert source.count(opened) == 1
+path.write_text(
+    source.replace(
+        opened,
+        opened + "    /// Seeded fault: a field a merge added.\n"
+        "    pub cohort: Option<String>,\n",
+        1,
+    ),
+    encoding="utf-8",
+)
+EOF
+}
+
 inject_ci() {
   # Take a check's owner away: it then runs in no workflow, while CI is green.
   sed -i '/^hygiene\t/d' .github/check-owners.tsv
@@ -4555,6 +4620,10 @@ selftest() {
     'holds its own binding and the table below it' 'lib/formats::regimen::tests'
   seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
     'an array item was read by something other than the value reader' 'lib/formats::regimen::tests'
+  seeded_case "a merged field an injection cannot see" injections inject_injections_struct_grew \
+    'builds a Provenance without cohort'
+  seeded_case "a literal the scan cannot place"       injections inject_injections_literal_unplaceable \
+    'builds a Ground: declared in 3 places'
   seeded_case "a case naming no injection"            injections inject_case_without_an_injection \
     'named by a seeded case, defined nowhere'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
@@ -4919,6 +4988,36 @@ EOF
       && ! grep -qE 'front-matter|summary row|product_sha256' <<<\"\$out\" \
       && grep -q 'record verdicts from .* sha256=' <<<\"\$out\""
 
+  # --- the resolver's own suite cannot report a pass it did not measure ---
+  #
+  # 0 from `check-merge-gate.py` is the only thing standing between a lane
+  # merge and a resolver that guesses, and 0 is indistinguishable from "not
+  # asked" to CI, to verify.sh, and to a person reading a log. Both of the
+  # ways it can fail to ask are exercised here, because the suite that guards
+  # the resolver was itself guarded by nothing.
+  local suite; scratch; suite="$SCRATCH"
+  cat > "${suite}/empty.py" <<'PYEOF'
+import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("cm", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module.FIXTURES.clear()
+sys.exit(module.main())
+PYEOF
+  expect_exit "a resolver suite that collected nothing is not a pass" 2 \
+    python3 "${suite}/empty.py" "${ROOT}/scripts/check-merge-gate.py"
+  # ...and the control, which is what makes the assertion above about the
+  # EMPTY list rather than about the driver: the same driver, without the
+  # clear, runs the real suite and passes.
+  sed 's/^module.FIXTURES.clear()$//' "${suite}/empty.py" > "${suite}/full.py"
+  expect_exit "and the same driver, with the fixtures left in place, passes" 0 \
+    python3 "${suite}/full.py" "${ROOT}/scripts/check-merge-gate.py"
+  # Every fixture drives a real repository, so no git is no verdict.
+  mkdir -p "${suite}/nogit"
+  ln -sf "$(command -v python3)" "${suite}/nogit/python3"
+  expect_exit "a resolver suite with no git has no verdict to give" 2 \
+    env PATH="${suite}/nogit" python3 "${ROOT}/scripts/check-merge-gate.py"
+
   # --- binary provenance at the boundary ---
   #
   # The resolver's whole job is refusing to guess, so each refusal is asserted
@@ -5082,6 +5181,54 @@ EOF
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/stray-ordinal"
   expect_exit "a census claiming to be a shard that cannot exist" 1 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/impossible-shard"
+
+  # --- nothing is read from a half-merged file ---
+  #
+  # This gate has two inputs and both of them conflict routinely: `faults.toml`
+  # conflicts on essentially every merge in a stack, which is what
+  # `merge-gate.py --union` exists for, and `verify.sh` conflicts whenever two
+  # branches both seed a case. What a checker reads out of a half-merged file
+  # is the union of both sides, or neither side, depending on where the markers
+  # fell -- and either way it looks like an answer. So it refuses, exit 2, "I
+  # was asked something I cannot answer".
+  #
+  # Neither refusal had ever been seen fire. The manifest side did not exist:
+  # a conflicted `faults.toml` reached `tomllib`, came back "not TOML", exit 1,
+  # a finding about the manifest when the truth was that the caller is
+  # mid-merge.
+  #
+  # Run against COPIES of this repository rather than against it. The check
+  # locates its inputs from its own path, so the only way to hand it a
+  # conflicted file is to hand it a different root; and the scripts are copied
+  # rather than symlinked because that path is resolved before it is used.
+  local halfmerged side; scratch; halfmerged="$SCRATCH"
+  for side in verify manifest; do
+    mkdir -p "${halfmerged}/${side}/scripts" "${halfmerged}/${side}/tools/gate"
+    cp "${ROOT}/scripts/check-fault-manifest.py" "${ROOT}/scripts/gatelib.py" \
+      "${halfmerged}/${side}/scripts/"
+    cp "${ROOT}/verify.sh" "${halfmerged}/${side}/verify.sh"
+    cp "${ROOT}/tools/gate/faults.toml" "${halfmerged}/${side}/tools/gate/faults.toml"
+  done
+  # One marker apiece, of the kind git writes, on the file whose turn it is.
+  # `=======` alone is deliberately not enough to trip this -- it is a
+  # plausible separator in ordinary prose -- so each case carries an arrow.
+  printf '<%s HEAD\n' '<<<<<<' | cat - "${ROOT}/verify.sh" \
+    > "${halfmerged}/verify/verify.sh.half"
+  mv "${halfmerged}/verify/verify.sh.half" "${halfmerged}/verify/verify.sh"
+  printf '>%s theirs\n' '>>>>>>' >> "${halfmerged}/manifest/tools/gate/faults.toml"
+
+  # The manifest side needs its `verify.sh` to parse cleanly, because the
+  # refusal it is about fires after `observed()` has read one.
+  expect_exit "a half-merged verify.sh is refused rather than counted" 2 \
+    python3 "${halfmerged}/verify/scripts/check-fault-manifest.py"
+  expect_exit "a half-merged manifest is a refusal and not a finding" 2 \
+    python3 "${halfmerged}/manifest/scripts/check-fault-manifest.py"
+  # And the same manifest asked for a COUNT still answers, because that is the
+  # one caller holding a conflicted manifest on purpose: `merge-gate.py` is
+  # mid-merge and about to rewrite it with the number it is asking for. A
+  # refusal hoisted up to the top of the script would break exactly it.
+  expect_exit "a count is still answered over a manifest being merged" 0 \
+    python3 "${halfmerged}/manifest/scripts/check-fault-manifest.py" --count-red
 
   # --- the scope's own control ---
   #
