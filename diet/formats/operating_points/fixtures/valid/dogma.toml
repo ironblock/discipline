@@ -6,11 +6,18 @@
 # what every future fire does and makes results before and after
 # non-comparable. Changing one is a dogma version bump.
 #
-# Matched by substring against the served model id, IN FILE ORDER: the first
-# table whose `match` is a substring of the id wins. That is why `qwen3`, a
-# substring of `qwen3.6` and `qwen3.5`, comes after both. A consumer that
-# reads these tables into an unordered map and matches from it has changed
-# the rule; match in file order, or by the longest `match` that fits.
+# Matched by substring against the served model id: the first UNMARKED table
+# whose `match` is a substring of the id wins, and only if none does are the
+# tables marked `fallback = true` tried, in file order. Case is folded on both
+# sides before the comparison.
+#
+# `qwen3` is a substring of `qwen3.6` and `qwen3.5`, and it is MARKED. Until
+# 2026-09-13 it was unmarked and safe only because it was written below both,
+# with this comment explaining the ordering -- which meant a consumer reading
+# these tables into an unordered map got a different answer and no error. The
+# mark says what the entry is, so where it sits no longer decides anything,
+# and `operating_points::parse` now REFUSES a document that shadows without
+# marking. The comment stopped being load-bearing and became a description.
 #
 # The tables are the research program's, byte for byte; the receipts are
 # restated here as content, since they pointed at that program's tickets and
@@ -52,6 +59,7 @@ votes       = 1
 
 [qwen3]
 match          = "qwen3"          # the original Qwen3 honours /no_think
+fallback       = true             # shadows qwen3.6 and qwen3.5; tried last
 nothink_ops    = ["extraction"]
 thinking_kwarg = false
 [qwen3.sampler]

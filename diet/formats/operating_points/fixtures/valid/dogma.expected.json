@@ -69,6 +69,7 @@
     "thinking_kwarg": true
   },
   {
+    "fallback": true,
     "gate": {
       "temperature": {
         "float": 0.0
