@@ -60,7 +60,7 @@ faults = 29
 
 [[fault]]
 # The census is the product. A row kind the adapter has no word for that
-# is walked past rather than counted turns 47% of a real log into silence,
+# is walked past rather than counted turns half of a real log into silence,
 # and every count that remains reads as a success.
 id = "adapters.an-unmapped-kind-is-walked-past-uncounted"
 failure_class = "adapters.an-unmapped-kind-is-walked-past-uncounted"
@@ -104,7 +104,7 @@ catches = [
 [[fault]]
 # The defect this adapter was built around. `diet::capture::mechanical`
 # knows `bash` and `read_file`; the log says `Bash` and `Read`. Without the
-# table not one of 1,153 tool calls in the reference log matched, the lane
+# table not ONE tool call in the reference log matched, the lane
 # derived nothing, and the census still read as a success.
 id = "adapters.the-tool-names-cross-untranslated"
 failure_class = "adapters.the-tool-names-cross-untranslated"
@@ -206,7 +206,7 @@ catches = [
 
 [[fault]]
 # Two person turns in a row -- a message queued before the model replied,
-# eight times in the reference log -- both took the same assistant row's
+# which the reference log contains -- both took the same assistant row's
 # prefill. `Event::Summary` sums prefill across turns, so the session
 # total counted those tokens twice.
 id = "adapters.the-prefill-lookahead-runs-past-the-next-turn"
@@ -262,8 +262,8 @@ catches = [
 # THE EIGHTY-PERCENT DROP, found by a fresh-instance review measuring this
 # adapter against the log it was written from. An assistant row that makes
 # a tool call and says nothing in words is the commonest shape in a real
-# log -- 1,824 of 2,173 rows -- and it emitted no response at all, taking
-# 80.7% of every token the model generated with it, under a census that
+# log -- three rows in four -- and it emitted no response at all, taking
+# four fifths of every token the model generated with it, under a census that
 # read as a clean success.
 id = "adapters.an-assistant-row-that-said-nothing-reports-nothing-spent"
 failure_class = "adapters.an-assistant-row-that-said-nothing-reports-nothing-spent"
@@ -323,7 +323,7 @@ catches = [
 ]
 
 [[fault]]
-# 1,151 of 1,213 `user` rows in the reference log carry nothing but tool
+# Nine in ten `user` rows in the reference log carry nothing but tool
 # output. Mapping them to turns invents over a thousand turns in a record
 # whose whole purpose is that its counts are true.
 id = "adapters.a-tool-result-row-opens-a-turn-of-its-own"

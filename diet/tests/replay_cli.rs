@@ -334,7 +334,9 @@ fn adapters_a_replay_is_the_same_bytes_every_time_it_is_run() {
 
 #[test]
 fn adapters_a_path_that_resolves_to_nothing_makes_no_fact() {
-    // Distilled from row 5,955 of the log this adapter was written against: a
+    // Distilled from a real row of the log this adapter was written against --
+    // the fixture beside this test is the committed evidence, which the log
+    // itself cannot be: a
     // `Bash` call whose pipeline the capture lane read a file operand out of
     // and could not resolve, with no `cd` before it to resolve against. The
     // lane hands back a touch whose path is the empty string, and the first

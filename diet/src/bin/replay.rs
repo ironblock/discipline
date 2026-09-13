@@ -79,8 +79,8 @@ const EXIT_REFUSED: u8 = 3;
 ///
 /// Not `println!`, which panics when the write fails, and the write fails
 /// routinely: `diet-replay | head` closes the pipe, and this program's output
-/// is a census followed by every entry in the object -- 223 lines from the
-/// log it was written against. A reader that stops reading is not an error in
+/// is a census followed by every entry in the object -- hundreds of lines on
+/// a real session. A reader that stops reading is not an error in
 /// the replay, so a broken pipe ends the run at [`EXIT_OK`] rather than at a
 /// panic's 101. Found by running the program, not by reading it: the acid
 /// test against a 14 MB log was piped into `head` and exited 101 with the
@@ -251,8 +251,8 @@ fn derived(lane: &Lane, events: &[Event]) -> Vec<(u32, Vec<Patch>)> {
         facts.push((
             // The turn the LANE recorded. Every entry used to say turn zero,
             // which is a turn the adapter never emits -- its turns are
-            // one-based -- so the provenance of all 221 entries of a real
-            // replay named a turn that did not exist.
+            // one-based -- so every entry of a real replay named a turn that
+            // did not exist.
             touch.turn,
             format!("mechanical/file:{}", path.display()),
             format!("{} {}", touch.kind.verb(), path.display()),

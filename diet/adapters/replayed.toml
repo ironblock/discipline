@@ -30,8 +30,11 @@ substrate_quantization = "undeclared-by-the-log"
 # schema gives it no choice: `Reasoning` is `off | on | suppressed` and has no
 # "undeclared". `off` was written here first and was simply false -- the
 # session fixture beside this file carries a `thinking` block, and the log it
-# was distilled from carries 646 of them, every one counted in the census as
-# dropped content. A regimen filing a reasoning session as `reasoning = off`
+# was distilled from carries hundreds of them, every one counted in the census
+# as dropped content. (The count itself lives in one stamped block in
+# `diet/src/adapters/claude_code.rs` and is not restated here: that log grows,
+# and a number repeated in two files is two claims that can disagree -- as
+# these two did.) A regimen filing a reasoning session as `reasoning = off`
 # while the census counts the reasoning it dropped is the kind of disagreement
 # that survives because nobody reads two files at once.
 substrate_reasoning = "on"

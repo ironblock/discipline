@@ -4,45 +4,71 @@
 //! `~/.claude/projects/<slug>/<session>.jsonl`. The first log this adapter was
 //! written against is this repository's own.
 //!
-//! # Every count below is one measurement, and the file it came from moves
+//! # THE ONE READING. Every absolute count from that log is here and nowhere
+//! else.
 //!
-//! That log is the session this adapter was written IN, so it grew while it
-//! was being read: the first pass over it saw 5,577 rows and the last saw
-//! 6,348. Numbers taken at different moments would quietly disagree with each
-//! other, so every figure in this file comes from ONE reading --
-//! **6,348 rows, 2026-09-12** -- and is a snapshot rather than a constant.
-//! The proportions are what the argument rests on; the absolute counts are
-//! there so a reader can check the proportions.
+//! The log is the session this adapter was written IN, so it grew while it
+//! was being read -- 5,577 rows at the first pass, 6,348 at the second,
+//! **7,674 at the reading below**. An earlier version of this file quoted
+//! whichever number was current when each paragraph was written, and ended up
+//! carrying four different readings as though each were *the* number: 2,173
+//! assistant rows in one comment and 2,122 in another, 628 `thinking` blocks
+//! here and 646 in the regimen beside it. Every one was true when written.
+//! That is [#77]'s class exactly -- prose about the tree that nothing checks
+//! -- committed by the file whose whole subject is counts that are true.
 //!
-//! At that reading: 9 top-level kinds, of which this schema has a word for
-//! two. `assistant` (2,122) and `user` (1,213) map; `attachment` (1,369),
-//! `last-prompt` (393), `atis-latch` (364), `custom-title` (362), `mode`
-//! (321), `queue-operation` (179) and `system` (25) do not. **3,013 rows --
-//! 47% -- have no schema kind**, which is the number this adapter exists to
-//! make visible rather than to improve.
+//! So: the counts live in this block, stamped, and **no other comment in this
+//! lane restates one.** Elsewhere the argument is made in proportions and
+//! shapes, which do not drift. A reader who wants to check a proportion reads
+//! it here; a reader who reruns the adapter gets different absolutes and
+//! should, because the file moved.
+//!
+//! These cannot be bound to a test the way a claim about a committed fixture
+//! can: **the log is not in the tree and cannot be** -- it is an unscrubbed
+//! session transcript. That is the same limit `Start.source.source_available
+//! = pinned_only` exists to make machine-readable, and it is stated here
+//! rather than implied.
+//!
+//! ```text
+//! reading of 2026-09-13, 7,674 rows, 9 top-level kinds
+//!
+//!   mapped     assistant 2,471   user 1,454                    3,925  51%
+//!   unmapped   attachment 1,641  last-prompt 501  atis-latch 445
+//!              custom-title 443  mode 402  queue-operation 261
+//!              system 56                                       3,749  49%
+//!
+//!   of the 1,454 `user` rows, 1,357 carry only tool output            93%
+//!   `thinking` blocks, which have no event kind here                   689
+//!   tool calls                                                       1,359
+//! ```
+//!
+//! **Roughly half the file has no schema kind**, which is the fact this
+//! adapter exists to make visible rather than to improve.
 //!
 //! # The mapping, and the two places it would be easy to lie
 //!
-//! **A `user` row is not a turn.** Of 1,213 `user` rows, 1,151 -- 95% --
-//! carry nothing but `tool_result` blocks: the harness handing a tool's
-//! output back to the model, which is not a person saying anything. Mapping
-//! every `user` row to a turn would have invented over a thousand turns that
-//! never happened, in a record whose whole purpose is that its counts are
-//! true. So a `user` row opens a turn only when it carries TEXT; otherwise
+//! **A `user` row is not a turn.** Nine in ten `user` rows carry nothing but
+//! `tool_result` blocks -- the harness handing a tool's output back to the
+//! model, which is not a person saying anything. Mapping every `user` row to
+//! a turn would have invented a turn for each of them, in a record whose
+//! whole purpose is that its counts are true. So a `user` row opens a turn only when it carries TEXT; otherwise
 //! its `tool_result` blocks are joined to the call they answer.
 //!
 //! Text, and not "text a person wrote", which is what this said first and is
-//! a claim the predicate cannot make. Two of the 62 turns the census counts
-//! in the reference log are slash-command envelopes the harness composed
-//! (`<command-name>…</command-name>`), and a log written by a subagent
+//! a claim the predicate cannot make. A handful of the turns the census
+//! counts in the reference log are slash-command envelopes the harness
+//! composed (`<command-name>…</command-name>`), and a log written by a
+//! subagent
 //! carries its parent's prompts in the same position. The row says a person
 //! is the author; this adapter reports what the row says and does not
 //! second-guess it, and the distance between "the `user` role" and "a human
 //! being" is the operator's to judge rather than a heuristic's to erase.
 //!
 //! **`input_tokens` is not the prefill.** A typical assistant row in that log
-//! reads `input_tokens: 2` beside `cache_read_input_tokens: 38639` and
-//! `cache_creation_input_tokens: 22468`. Recording the first as the turn's
+//! reads something like `input_tokens: 2` beside
+//! `cache_read_input_tokens: 38639`. Those are one row's fields rather than a
+//! count of the file, and the shape is the point: recording the first as the
+//! turn's
 //! prefill would say a turn prefilled two tokens when it prefilled sixty-one
 //! thousand: cached tokens are still tokens that were fed to the model, and
 //! the cache is an accounting detail of what they cost, not of whether they
@@ -51,8 +77,8 @@
 //! # What it cannot carry
 //!
 //! `thinking` blocks have no event kind in this schema, so they are counted
-//! as dropped content rather than quietly discarded -- 628 of them at that
-//! reading. The seven unmapped row kinds are counted as unmapped rows. Both
+//! as dropped content rather than quietly discarded; the reading above says
+//! how many. The seven unmapped row kinds are counted as unmapped rows. Both
 //! are in the census, and neither is in the record: an adapted record is
 //! **lossy by declaration**, a view of a foreign session rather than a
 //! transcript of one, and the census is the authority on what was seen and
@@ -150,7 +176,7 @@ impl Block {
 /// **This table is why the adapter exists.** `diet::capture::mechanical`
 /// knows `bash`, `read_file` and `edit_file`; Claude Code writes `Bash`,
 /// `Read`, `Edit` and `Write`. Pointed at a real log without this, the lane
-/// matched not one of 1,153 tool calls and derived nothing at all -- no
+/// matched not ONE tool call in the reference log and derived nothing -- no
 /// working directory, no file touched, no failed `cd` -- while every count in
 /// the census still read as a success. A translation nobody wrote is a lane
 /// that silently observes nothing, which is this issue's own failure mode
@@ -448,9 +474,10 @@ impl Run {
         // EVERY assistant row emits a response, whether or not it said
         // anything in words. This used to return early when there was no
         // text, and a row that made a tool call and spoke not at all is the
-        // commonest shape in a real log: 1,824 of 2,173 assistant rows, and
-        // with them 80.7% of every token the model generated, left through
-        // that early return under a census that read as a clean success.
+        // commonest shape in a real log -- three assistant rows in four --
+        // and with them FOUR FIFTHS of every token the model generated left
+        // through that early return, under a census that read as a clean
+        // success.
         // Silence is not absence -- the model ran, the tokens were spent, and
         // `text: None` says exactly that where an omitted event said nothing.
         if self.turn == 0 {
@@ -659,8 +686,8 @@ fn block_type(block: &serde_json::Value) -> Option<&str> {
 ///
 /// It used to run to the next `assistant` row anywhere ahead of it. Two
 /// person turns in a row -- a second message queued before the model replied,
-/// which happens eight times in the log this was written from -- then gave
-/// BOTH turns the same prefill, and `Event::Summary` sums prefill across
+/// which the reference log does contain -- then gave BOTH turns the same
+/// prefill, and `Event::Summary` sums prefill across
 /// turns, so the session total counted those tokens twice. The scan now stops
 /// at the next row that opens a turn: an assistant row after that answers
 /// that turn, not this one.
@@ -834,10 +861,10 @@ mod tests {
 
     /// THE THOUSAND-TURN LIE, refused.
     ///
-    /// In the log this adapter was written against, 1,151 of 1,213 `user`
-    /// rows carry nothing but a `tool_result` -- the harness handing output
-    /// back to the model. Counting those as turns would put a thousand turns
-    /// in a record whose entire value is that its counts are true.
+    /// Nine in ten `user` rows in the reference log carry nothing but a
+    /// `tool_result` -- the harness handing output back to the model.
+    /// Counting those as turns would put a turn in the record for every tool
+    /// call, in a record whose entire value is that its counts are true.
     #[test]
     fn a_user_row_carrying_only_a_tool_result_is_not_a_turn() {
         let log = [
@@ -1156,10 +1183,10 @@ mod tests {
     /// THE EIGHTY-PERCENT DROP.
     ///
     /// An assistant row that makes a tool call and says nothing in words is
-    /// the commonest shape in a real log -- 1,824 of 2,173 rows -- and it
+    /// the commonest shape in a real log -- three rows in four -- and it
     /// used to emit no response at all, taking its `output_tokens` with it.
-    /// 80.7% of every token the model generated left through that hole under
-    /// a census that read as a clean success. Found by a fresh-instance
+    /// Four fifths of every token the model generated left through that hole
+    /// under a census that read as a clean success. Found by a fresh-instance
     /// review measuring the adapter against the log it was written from, not
     /// by any test here, which is why this one exists.
     #[test]
@@ -1237,8 +1264,8 @@ mod tests {
     /// The lookahead used to run to the next assistant row wherever it was,
     /// so a message queued before the model replied gave BOTH turns the same
     /// prefill -- and `Event::Summary` sums prefill across turns, so the
-    /// session total counted those tokens twice. Eight such pairs exist in
-    /// the log this was written from.
+    /// session total counted those tokens twice. The reference log contains
+    /// such pairs; `assumed` counts what they cost.
     #[test]
     fn two_turns_in_a_row_do_not_both_claim_the_same_prefill() {
         let log = [

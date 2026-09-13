@@ -28,11 +28,16 @@
 //! enough, and the way that was found is the point. A fresh-instance review
 //! measured this adapter against the log it was written from: an assistant
 //! row that made a tool call and said nothing had no text, so it emitted no
-//! response, so its `output_tokens` went nowhere -- **1,824 of 2,173
-//! assistant rows and 80.7% of every token the model generated**, under a
-//! census that read as a clean success. Both halves of "mapped" and "dropped"
-//! were true and the total was a lie. A census with a bucket missing is worse
-//! than no census, because it is believed.
+//! response, so its `output_tokens` went nowhere -- **three assistant rows in
+//! four, and four fifths of every token the model generated**, under a census
+//! that read as a clean success. Both halves of "mapped" and "dropped" were
+//! true and the total was a lie. A census with a bucket missing is worse than
+//! no census, because it is believed.
+//!
+//! (Proportions, not counts. The absolute figures from that log live in one
+//! stamped block in [`claude_code`] and nowhere else -- the log grows, it is
+//! not in the tree, and a number repeated in six comments is six claims
+//! nothing checks.)
 //!
 //! # An unknown KIND is news; a missing FIELD is drift
 //!
@@ -115,7 +120,7 @@ pub struct Census {
     /// Rows this adapter mapped that produced no event anyway, by reason.
     ///
     /// **`mapped` is a count of kinds understood, not of rows carried**, and
-    /// the difference is where this adapter lost 80.7% of the session's
+    /// the difference is where this adapter lost four fifths of the session's
     /// output tokens before a review measured it. A `user` row that carries
     /// only tool output legitimately produces no event of its own -- its
     /// content joins the call it answers -- and that is a different fact from
