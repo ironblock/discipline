@@ -56,7 +56,7 @@
 name = "diet-adapters"
 check = "test"
 command = "cargo test --no-fail-fast -p discipline-diet -- adapters --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 28
+faults = 29
 
 [[fault]]
 # The census is the product. A row kind the adapter has no word for that
@@ -98,7 +98,7 @@ becomes = '''
     let message = row.get("message").or_else(|| row.get("msg")).unwrap_or(row);'''
 catches = [
     "adapters::claude_code::tests::a_renamed_field_on_a_mapped_kind_is_refused_rather_than_guessed_at",
-    "adapters_a_renamed_field_is_refused_with_its_own_exit_code_and_no_object",
+    "adapters_a_renamed_field_is_refused_with_the_clis_refusal_code_and_no_object",
 ]
 
 [[fault]]
@@ -543,19 +543,40 @@ catches = [
 ]
 
 [[fault]]
-# #28 pins 2 on drift. Collapsed into 1 -- which here means the command
-# line -- a harness that changed its format is indistinguishable from a
-# typo, and a script that retries on 1 would retry forever.
-id = "adapters.a-refused-log-exits-with-the-drive-programs-usage-code"
-failure_class = "adapters.a-refused-log-exits-with-the-drive-programs-usage-code"
+# The CLI's codes, ruled on #76: 0 ok, 1 a verdict, 2 usage or could not
+# run, 3 input refused. Collapsing 3 into 2 makes a harness that changed
+# its format indistinguishable from a typo -- which is the collision the
+# ruling was issued to remove, reintroduced in one character.
+id = "adapters.a-refusal-collapses-into-the-could-not-run-code"
+failure_class = "adapters.a-refusal-collapses-into-the-could-not-run-code"
 target = "diet/src/bin/replay.rs"
 expect_exit = 101
 anchor = '''
-const EXIT_DRIFT: u8 = 2;'''
+const EXIT_REFUSED: u8 = 3;'''
 becomes = '''
-const EXIT_DRIFT: u8 = 1;'''
+const EXIT_REFUSED: u8 = 2;'''
 catches = [
-    "adapters_a_renamed_field_is_refused_with_its_own_exit_code_and_no_object",
+    "adapters_a_renamed_field_is_refused_with_the_clis_refusal_code_and_no_object",
+    "adapters_every_invocation_that_never_reached_an_answer_exits_two",
+]
+
+[[fault]]
+# A regimen that cannot be OPENED is a file that could not be read; a
+# regimen that is read and declined is a document whose schema this tool
+# recognises and refuses. Same class as a log whose format moved, same
+# code, and the two paths are one line apart.
+id = "adapters.a-declined-regimen-is-reported-as-a-failure-to-run"
+failure_class = "adapters.a-declined-regimen-is-reported-as-a-failure-to-run"
+target = "diet/src/bin/replay.rs"
+expect_exit = 101
+anchor = '''
+            eprintln!("{why}");
+            return ExitCode::from(EXIT_REFUSED);'''
+becomes = '''
+            eprintln!("{why}");
+            return ExitCode::from(EXIT_COULD_NOT_RUN);'''
+catches = [
+    "adapters_every_invocation_that_never_reached_an_answer_exits_two",
 ]
 
 [[fault]]
@@ -564,14 +585,14 @@ catches = [
 # exit code that depends on whether somebody piped the program is not an
 # exit code. Its catcher generates its own log, because the defect needs
 # more output than a pipe buffer holds.
-id = "adapters.a-reader-that-left-is-an-output-failure"
-failure_class = "adapters.a-reader-that-left-is-an-output-failure"
+id = "adapters.a-reader-that-left-is-a-failure-to-run"
+failure_class = "adapters.a-reader-that-left-is-a-failure-to-run"
 target = "diet/src/bin/replay.rs"
 expect_exit = 101
 anchor = '''
         Err(why) if why.kind() == std::io::ErrorKind::BrokenPipe => Err(EXIT_OK),'''
 becomes = '''
-        Err(why) if why.kind() == std::io::ErrorKind::BrokenPipe => Err(EXIT_OUTPUT),'''
+        Err(why) if why.kind() == std::io::ErrorKind::BrokenPipe => Err(EXIT_COULD_NOT_RUN),'''
 catches = [
     "adapters_a_reader_that_stops_reading_is_not_a_failed_replay",
 ]

@@ -23,13 +23,32 @@
 //! This is a deliberate divergence from the issue's acceptance line, and it
 //! is disclosed on the PR rather than smoothed over.
 //!
-//! # The exit codes, and one that disagrees with `diet-drive`
+//! # The exit codes, which are the CLI's and not this program's
 //!
-//! `2` here means **the adapter refused the log**, because #28 pins it there:
-//! *"the adapter exits 2 (refuses) rather than mapping the wrong field."* In
-//! `diet-drive` a `2` is a usage error. They are different programs and each
-//! follows its own issue, but the difference is worth knowing before reading
-//! a shell script that runs both.
+//! Ruled on #76, CLI-wide, so that no two meanings ever share a number again:
+//!
+//! | code | meaning |
+//! | ---- | ------- |
+//! | `0` | ok |
+//! | `1` | a verdict was reached and it is a failure or a finding |
+//! | `2` | usage, or could not run |
+//! | `3` | input refused -- the format moved, a version is unsupported, a schema the tool recognises and declines |
+//!
+//! **This supersedes #28's row four, which says the adapter exits `2`.** That
+//! row was written when replay was to be its own program; the ruling moved
+//! the verb onto `diet`, where `2` already meant a usage error, and *one code
+//! meaning two things was the sentinel class wearing an exit status*. The
+//! refusal is still a declared refusal under its own code -- which is what
+//! the row was for -- and the number is `3`.
+//!
+//! Replay never exits `1`, and that is not an oversight: `1` is a verdict on
+//! a document, and this program does not reach one. It reads a log or refuses
+//! it. A census is not a verdict.
+//!
+//! One judgement call inside the ruled vocabulary, disclosed rather than
+//! buried: **a failed WRITE exits `2`.** It is not input being refused, so it
+//! is not `3`; it is not a verdict, so it is not `1`; "could not run" is the
+//! closest true thing in the vocabulary and it is what `2` is for.
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
@@ -43,14 +62,18 @@ use diet::object::{EntryId, Patch, Provenance, WorkingObject};
 
 /// Everything ran.
 const EXIT_OK: u8 = 0;
-/// The command line, the log or the regimen could not be used.
-const EXIT_INPUT: u8 = 1;
-/// The adapter refused the log: a row it maps had lost a field it reads.
+/// The command line was not one this program serves, a file it was pointed at
+/// could not be read, or its output could not be written.
 ///
-/// Pinned by #28, and deliberately not this program's usage code.
-const EXIT_DRIFT: u8 = 2;
-/// The output could not be written. Three, as in `diet-drive`.
-const EXIT_OUTPUT: u8 = 3;
+/// The CLI's `2`: *usage, or could not run*. One number for one meaning, and
+/// the meaning is "this invocation never got as far as an answer".
+const EXIT_COULD_NOT_RUN: u8 = 2;
+/// Input refused: the adapter found a row whose format has moved, or the
+/// regimen is a document this program recognises and declines.
+///
+/// The CLI's `3`. #28's row four asks for a declared refusal under its own
+/// code rather than a mapped guess; the ruling on #76 says which code.
+const EXIT_REFUSED: u8 = 3;
 
 /// Write one line to stdout, saying how the run should end.
 ///
@@ -74,7 +97,7 @@ fn line(text: &str) -> Result<(), u8> {
         Err(why) => {
             // Stderr may be gone too; there is nothing useful to do if it is.
             let _ = writeln!(std::io::stderr(), "the census could not be written: {why}");
-            Err(EXIT_OUTPUT)
+            Err(EXIT_COULD_NOT_RUN)
         }
     }
 }
@@ -90,7 +113,7 @@ fn main() -> ExitCode {
              type -- read it, because an adapted log is a view of a session and not a\n\
              transcript of one."
         );
-        return ExitCode::from(EXIT_INPUT);
+        return ExitCode::from(EXIT_COULD_NOT_RUN);
     };
 
     // Asked of the adapter rather than matched against a literal here: the
@@ -106,14 +129,14 @@ fn main() -> ExitCode {
             parsed.adapter,
             adapter.name()
         );
-        return ExitCode::from(EXIT_INPUT);
+        return ExitCode::from(EXIT_COULD_NOT_RUN);
     }
 
     let log = match std::fs::read_to_string(&parsed.log) {
         Ok(text) => text,
         Err(why) => {
             eprintln!("{}: {why}", parsed.log);
-            return ExitCode::from(EXIT_INPUT);
+            return ExitCode::from(EXIT_COULD_NOT_RUN);
         }
     };
     let regime = match std::fs::read_to_string(&parsed.regimen)
@@ -123,8 +146,12 @@ fn main() -> ExitCode {
     {
         Ok(regime) => regime,
         Err(why) => {
+            // `3`, not `2`. A regimen this program cannot READ is a file that
+            // could not be opened; a regimen it reads and declines is a
+            // document whose schema it recognises and refuses, which is the
+            // same class as a log whose format moved.
             eprintln!("{why}");
-            return ExitCode::from(EXIT_INPUT);
+            return ExitCode::from(EXIT_REFUSED);
         }
     };
 
@@ -132,7 +159,7 @@ fn main() -> ExitCode {
         Ok(read) => read,
         Err(drift) => {
             eprintln!("{drift}");
-            return ExitCode::from(EXIT_DRIFT);
+            return ExitCode::from(EXIT_REFUSED);
         }
     };
 
@@ -155,7 +182,7 @@ fn main() -> ExitCode {
     for (_, patches) in &turns {
         if let Err(why) = object.apply_turn(patches) {
             eprintln!("the derived facts did not apply: {why}");
-            return ExitCode::from(EXIT_INPUT);
+            return ExitCode::from(EXIT_COULD_NOT_RUN);
         }
     }
 

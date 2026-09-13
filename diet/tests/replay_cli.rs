@@ -169,7 +169,10 @@ fn adapters_a_replay_takes_no_endpoint_and_the_binary_holds_no_transport() {
         &fixture("session").to_string_lossy(),
         "http://127.0.0.1:1/v1",
     ]);
-    assert_eq!(code, 1, "a second positional is refused, not dialled");
+    assert_eq!(
+        code, 2,
+        "a second positional is a usage error, not a destination"
+    );
 
     // The structural half: the program's own binary carries none of the
     // transport's strings. `diet::client::transport` builds requests out of
@@ -218,7 +221,7 @@ fn adapters_a_kind_never_seen_is_counted_and_does_not_stop_the_replay() {
 }
 
 #[test]
-fn adapters_a_renamed_field_is_refused_with_its_own_exit_code_and_no_object() {
+fn adapters_a_renamed_field_is_refused_with_the_clis_refusal_code_and_no_object() {
     let (code, out, err) = run(&[
         "--adapter",
         "claude-code",
@@ -227,11 +230,12 @@ fn adapters_a_renamed_field_is_refused_with_its_own_exit_code_and_no_object() {
         &fixture("a-renamed-field").to_string_lossy(),
     ]);
 
-    // 2 is pinned by #28: "the adapter exits 2 (refuses) rather than mapping
-    // the wrong field". Distinct from 1, which is everything about the
-    // invocation, because "your command line is wrong" and "the harness
-    // changed its format" are different things to wake up to.
-    assert_eq!(code, 2, "{err}");
+    // `3`, the CLI's *input refused*, ruled on #76. #28's row four says `2`
+    // and that row was written when replay was to be its own program; the
+    // ruling moved the verb onto `diet`, where `2` already meant a usage
+    // error. The row's substance -- a DECLARED refusal under its own code
+    // rather than a mapped guess -- is what `3` carries here.
+    assert_eq!(code, 3, "{err}");
     assert!(
         err.contains("row 2") && err.contains("`assistant`") && err.contains("`message`"),
         "the refusal names the row, the kind and the field: {err}"
@@ -244,7 +248,12 @@ fn adapters_a_renamed_field_is_refused_with_its_own_exit_code_and_no_object() {
 }
 
 #[test]
-fn adapters_every_refusal_that_is_not_drift_exits_one() {
+fn adapters_every_invocation_that_never_reached_an_answer_exits_two() {
+    // The CLI's `2`: *usage, or could not run*. Everything here is an
+    // invocation that never got as far as reading a log -- a command line
+    // this program does not serve, or a file it could not open. A document it
+    // READ and declined is `3` and is tested above; the two are different
+    // things to wake up to, which is the whole reason they are two numbers.
     let regimen = regimen().to_string_lossy().into_owned();
     let log = fixture("session").to_string_lossy().into_owned();
     let missing = fixture("no-such-fixture").to_string_lossy().into_owned();
@@ -276,15 +285,34 @@ fn adapters_every_refusal_that_is_not_drift_exits_one() {
             "a log that is not there",
             vec!["--adapter", "claude-code", "--regimen", &regimen, &missing],
         ),
-        (
-            "a regimen that is not one",
-            vec!["--adapter", "claude-code", "--regimen", &log, &log],
-        ),
     ] {
         let (code, out, err) = run(&args);
-        assert_eq!(code, 1, "{why}: exits 1, not {code}. {err}");
+        assert_eq!(code, 2, "{why}: exits 2, not {code}. {err}");
         assert!(!err.is_empty(), "{why}: and says why");
         assert!(out.is_empty(), "{why}: and prints no census");
+    }
+
+    // And the one that is NOT `2`: a regimen this program reads and declines
+    // is a document whose schema it recognises and refuses -- the same class
+    // as a log whose format moved, and the same code.
+    let (code, out, err) = run(&["--adapter", "claude-code", "--regimen", &log, &log]);
+    assert_eq!(
+        code, 3,
+        "a regimen that is not one is refused, not a usage error. {err}"
+    );
+    assert!(!err.is_empty() && out.is_empty());
+
+    // `1` is a verdict on a document, and this program never reaches one:
+    // it reads a log or refuses it, and a census is not a verdict. Asserted
+    // rather than assumed, because a `1` appearing here later would mean
+    // somebody gave replay an opinion it is not supposed to have.
+    for args in [
+        vec!["--adapter", "claude-code", "--regimen", &regimen, &log],
+        vec!["--adapter", "claude-code", "--regimen", &regimen, &missing],
+        vec![],
+    ] {
+        let (code, _, _) = run(&args);
+        assert_ne!(code, 1, "replay reaches no verdict, so it never exits 1");
     }
 }
 
