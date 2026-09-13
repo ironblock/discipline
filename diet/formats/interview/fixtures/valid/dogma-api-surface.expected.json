@@ -1,0 +1,35 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "find_blocks, strip_blocks, insert_after_last, skeleton_of"
+      },
+      "raw": "find_blocks, strip_blocks, insert_after_last, skeleton_of",
+      "tag": {
+        "as_written": "SURFACE:",
+        "kind": "api_surface"
+      }
+    },
+    {
+      "outcome": {
+        "value": "a block key comes from the definition line \u2014 IMPLICATION: a rationale comment naming another injection does not rename this one"
+      },
+      "raw": "a block key comes from the definition line \u2014 IMPLICATION: a rationale comment naming another injection does not rename this one",
+      "tag": {
+        "as_written": "GOTCHA:",
+        "kind": "gotcha"
+      }
+    },
+    {
+      "outcome": {
+        "value": "PENDING \u00abwhether ENTRY should key on id or on label\u00bb"
+      },
+      "raw": "PENDING \u00abwhether ENTRY should key on id or on label\u00bb",
+      "tag": {
+        "as_written": "FOLLOWUP:",
+        "kind": "followup"
+      }
+    }
+  ]
+}

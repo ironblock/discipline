@@ -1,0 +1,16 @@
+Two entries match the same substring, spelled with different case. This is
+`duplicate-match.toml`'s case one step sideways, and it is a separate fixture
+because the two were separate behaviours until 2026-09-12: matching folds case,
+so `Shared` and `shared` are ONE match, and the detector compared raw bytes and
+saw two.
+
+That gap was opened by the fold itself. The ruling that made `serves`
+case-insensitive taught the MATCHER that two spellings are one match; the
+DETECTOR that refuses two entries from claiming one match was not told, so a
+document could declare `beta` and have it be unreachable for every input --
+exactly the state `duplicate-match.toml` exists to refuse, wearing a different
+spelling. A fresh instance found it by lesioning the fold and asking what else
+the fold had made true.
+
+The pair travels together: fold in one and you fold in the other, or the
+invariant is a sentence rather than a rule.

@@ -1,0 +1,4 @@
+`guessing` is not an operation. The vocabulary is closed in the grammar, not
+checked after the parse: everything not listed keeps thinking, so a spelling
+nobody measured must not be able to widen the list. Suppressing thinking on an
+operation no run measured is what this refusal exists to prevent.

@@ -1,0 +1,145 @@
+[
+  {
+    "gate": {
+      "temperature": {
+        "float": 0.0
+      },
+      "votes": {
+        "integer": 1
+      }
+    },
+    "key": "qwen3_6",
+    "match": "qwen3.6",
+    "nothink_ops": [
+      "extraction"
+    ],
+    "preserve_thinking": true,
+    "receipts": {
+      "gate": {
+        "string": "The '9 of 9' precision figure in circulation is the pre-commit gate's 8 of 8 pooled with a separate run's 1 of 1: nine correct precision draws of nine, arithmetically exact, resolved 2026-08-14. Not a report error; two runs' figures were being read as one. The sampler values were never in dispute."
+      },
+      "nothink": {
+        "string": "Measured: suppressing thinking collapses this family's judgment (open questions captured 19 -> 0), so judgment keeps thinking and only extraction is safe without it."
+      },
+      "preserve_thinking": {
+        "string": "Load-bearing for cache cleanliness: with it off, the prefix a fork re-sends is not byte-identical to what the session sent, and the fork prefills cold. Must never leave the launch line."
+      },
+      "thinking_kwarg": {
+        "string": "the /no_think soft switch is DEAD on this model; the kwarg is the only working control."
+      }
+    },
+    "sampler": {
+      "temperature": {
+        "float": 0.3
+      },
+      "top_k": {
+        "integer": 20
+      },
+      "top_p": {
+        "float": 1.0
+      }
+    },
+    "thinking_kwarg": true
+  },
+  {
+    "gate": {
+      "temperature": {
+        "float": 0.0
+      },
+      "votes": {
+        "integer": 1
+      }
+    },
+    "key": "qwen3_5",
+    "match": "qwen3.5",
+    "nothink_ops": [
+      "extraction"
+    ],
+    "sampler": {
+      "temperature": {
+        "float": 0.3
+      },
+      "top_k": {
+        "integer": 20
+      },
+      "top_p": {
+        "float": 1.0
+      }
+    },
+    "thinking_kwarg": true
+  },
+  {
+    "gate": {
+      "temperature": {
+        "float": 0.0
+      },
+      "votes": {
+        "integer": 1
+      }
+    },
+    "key": "qwen3",
+    "match": "qwen3",
+    "nothink_ops": [
+      "extraction"
+    ],
+    "sampler": {
+      "temperature": {
+        "float": 0.3
+      },
+      "top_k": {
+        "integer": 20
+      },
+      "top_p": {
+        "float": 1.0
+      }
+    },
+    "thinking_kwarg": false
+  },
+  {
+    "gate": {
+      "temperature": {
+        "float": 1.0
+      },
+      "votes": {
+        "integer": 5
+      }
+    },
+    "key": "gemma",
+    "match": "gemma",
+    "nothink_ops": [
+      "extraction",
+      "judgment",
+      "audit"
+    ],
+    "preserve_thinking": false,
+    "receipts": {
+      "gate": {
+        "string": "needs majority vote (5) even to review; a single sample is not enough on this model."
+      },
+      "note": {
+        "string": "needs an explicit proactive-capture prompt; Gemma captures reactively where Qwen captures proactively."
+      },
+      "nothink": {
+        "string": "no-think is SAFE broadly here \u2014 judgment stayed robust (18 -> 17), the opposite of Qwen."
+      },
+      "preserve_thinking": {
+        "string": "absent by spec on this model."
+      },
+      "sampler": {
+        "string": "Measured on the cross-model run: the model card's temp 1.0 / top_k 64 / top_p 0.95 is REQUIRED; temp 0 made real capability look absent."
+      }
+    },
+    "sampler": {
+      "temperature": {
+        "float": 1.0
+      },
+      "top_k": {
+        "integer": 64
+      },
+      "top_p": {
+        "float": 0.95
+      }
+    },
+    "thinking_kwarg": true
+  }
+]

@@ -882,7 +882,17 @@ mod tests {
     #[test]
     fn the_operating_points_have_one_reader() {
         let constant = format!("{}{}", "OPERATING_POINTS", "_TEXT");
-        let file = format!("{}-{}", "operating", "points");
+        // The needle is the dogma's FILE, path and extension included, not the
+        // bare phrase. It was the bare phrase, and the phrase is not the
+        // subject: this guard is about the TEXT being embedded once and handed
+        // out only after the digest check, and `diet/formats/operating_points/`
+        // is a grammar directory that embeds none of it. Under the old needle
+        // a `#[grammar]` attribute pointing at that directory failed a gate
+        // about digest-checked dogma, and so would a comment mentioning the
+        // format by name. Same class of coverage, same acknowledged limit -- a
+        // path assembled from pieces still evades both -- and it no longer
+        // fires on something it is not about.
+        let file = format!("dogma/{}-{}.toml", "operating", "points");
         let declaration = format!("const {constant}:");
         let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let this = Path::new("dogma/mod.rs");

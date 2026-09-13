@@ -43,6 +43,7 @@ use json::{Value, ValueError};
 
 #[derive(Parser)]
 #[grammar = "../formats/record/grammar.pest"]
+#[grammar = "../formats/number.pest"]
 struct RecordParser;
 
 /// Declare a closed vocabulary: the enum, its `ALL`, its tag and its lookup.

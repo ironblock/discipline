@@ -1,0 +1,35 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "`--union` is the one to reach for. It ignores the conflict hunks entirely."
+      },
+      "raw": "`--union` is the one to reach for. It ignores the conflict hunks entirely.",
+      "tag": {
+        "as_written": "EXCERPT:",
+        "kind": "evidence"
+      }
+    },
+    {
+      "outcome": {
+        "value": "the epitaph for the deleted third mode (top of scripts/merge-gate.py)"
+      },
+      "raw": "the epitaph for the deleted third mode (top of scripts/merge-gate.py)",
+      "tag": {
+        "as_written": "POINTER:",
+        "kind": "pointer"
+      }
+    },
+    {
+      "outcome": {
+        "value": "the hand resolution is per branch, so it is a cost and not a defect"
+      },
+      "raw": "the hand resolution is per branch, so it is a cost and not a defect",
+      "tag": {
+        "as_written": "PLAN_IMPACT:",
+        "kind": "plan_impact"
+      }
+    }
+  ]
+}

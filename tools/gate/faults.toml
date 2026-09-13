@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 288
+red_faults = 297
 mechanics_assertions = 48
 migrated = 0
 
@@ -1239,33 +1239,6 @@ legacy_signature = ""
 migrated = false
 
 [[fault]]
-id = "mech.a-resolver-suite-that-collected-nothing-is-not-a-pass"
-kind = "mechanics"
-check = "resolver"
-label = "a resolver suite that collected nothing is not a pass"
-failure_class = "resolver.suite-cannot-run"
-expected_exit = "2"
-migrated = false
-
-[[fault]]
-id = "mech.and-the-same-driver-with-the-fixtures-left-in-place-passes"
-kind = "mechanics"
-check = "resolver"
-label = "and the same driver, with the fixtures left in place, passes"
-failure_class = "resolver.control"
-expected_exit = "0"
-migrated = false
-
-[[fault]]
-id = "mech.a-resolver-suite-with-no-git-has-no-verdict-to-give"
-kind = "mechanics"
-check = "resolver"
-label = "a resolver suite with no git has no verdict to give"
-failure_class = "resolver.suite-cannot-run"
-expected_exit = "2"
-migrated = false
-
-[[fault]]
 id = "mech.a-pinned-diet-bin-is-the-binary-that-is-used"
 kind = "mechanics"
 check = "regimen"
@@ -2366,7 +2339,7 @@ kind = "seeded-gate"
 check = "recompute"
 label = "a results directory declaring no kind"
 failure_class = "results.kind-undeclared"
-legacy_signature = "0 recomputed, 0 declared historical, 1 undeclared"
+legacy_signature = "front-matter .kind. is None"
 migrated = false
 
 [[fault]]
@@ -2444,12 +2417,12 @@ legacy_signature = "carries no recompute.sh"
 migrated = false
 
 [[fault]]
-id = "recompute.recompute_nothing_recomputable"
+id = "recompute.recompute_template_opts_out"
 kind = "seeded-gate"
 check = "recompute"
-label = "a gate 0 with nothing recomputable"
+label = "the template carrying the opt-out"
 failure_class = "results.recompute-over-nothing"
-legacy_signature = "nothing was recomputed"
+legacy_signature = "the template declares .historical-observation."
 migrated = false
 
 [[fault]]
@@ -2457,6 +2430,15 @@ id = "recompute.recompute_cannot_fail"
 kind = "seeded-gate"
 check = "recompute"
 label = "a recompute that cannot fail"
+failure_class = "results.recompute-cannot-fail"
+legacy_signature = "does not compare the report to the artefacts"
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_probe_blinded_by_a_comment"
+kind = "seeded-gate"
+check = "recompute"
+label = "a probe blinded by a trailing comment"
 failure_class = "results.recompute-cannot-fail"
 legacy_signature = "does not compare the report to the artefacts"
 migrated = false
@@ -3094,33 +3076,6 @@ failure_class = "shard.census-empty"
 legacy_signature = ""
 migrated = false
 [[fault]]
-id = "mech.a-half-merged-verify-sh-is-refused-rather-than-counted"
-kind = "mechanics"
-check = "parity"
-label = "a half-merged verify.sh is refused rather than counted"
-failure_class = "parity.counted-from-a-half-merged-file"
-legacy_signature = ""
-migrated = false
-
-[[fault]]
-id = "mech.a-half-merged-manifest-is-a-refusal-and-not-a-finding"
-kind = "mechanics"
-check = "parity"
-label = "a half-merged manifest is a refusal and not a finding"
-failure_class = "parity.merge-state-read-as-a-finding"
-legacy_signature = ""
-migrated = false
-
-[[fault]]
-id = "mech.a-count-is-still-answered-over-a-manifest-being-merged"
-kind = "mechanics"
-check = "parity"
-label = "a count is still answered over a manifest being merged"
-failure_class = "parity.count-refused-mid-merge"
-legacy_signature = ""
-migrated = false
-
-[[fault]]
 id = "mech.a-test-scope-that-selects-nothing-is-not-a-pass"
 kind = "mechanics"
 check = "test"
@@ -3161,6 +3116,76 @@ failure_class = "gate.injection-literal-incomplete"
 legacy_signature = "builds a Provenance without cohort"
 migrated = false
 [[fault]]
+id = "test.interview_tag_undeclared"
+kind = "seeded-gate"
+check = "test"
+target = "lib/formats::interview"
+label = "a dogma tag in no vocabulary"
+failure_class = "interview.tag-undeclared"
+legacy_signature = "dogma tag\\(s\\) absent from diet/formats/interview/tags\\.tsv"
+migrated = false
+[[fault]]
+id = "test.operating_points_sorted"
+kind = "seeded-gate"
+check = "test"
+target = "lib/formats::operating_points"
+label = "operating points sorted, not in file order"
+failure_class = "operating-points.order-lost"
+legacy_signature = "the projection lost the file's order"
+migrated = false
+[[fault]]
+id = "test.number_terminal_regrown"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/the_integer_terminal"
+label = "an integer terminal grown a second time"
+failure_class = "grammar.terminal-defined-twice"
+legacy_signature = "it belongs in number\\.pest and nowhere else"
+migrated = false
+[[fault]]
+id = "test.number_terminal_body_regrown"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/the_integer_terminal"
+label = "a shared body written out under another name"
+failure_class = "grammar.terminal-defined-twice"
+legacy_signature = "has a shared terminal.s body written out again"
+migrated = false
+[[fault]]
+id = "recompute.recompute_historical_with_a_script"
+kind = "seeded-gate"
+check = "recompute"
+label = "historical, and carrying a recompute"
+failure_class = "gate-zero.historical-and-recomputable"
+legacy_signature = "declares .historical-observation. and carries a recompute\\.sh"
+migrated = false
+[[fault]]
+id = "recompute.recompute_historical_without_a_reason"
+kind = "seeded-gate"
+check = "recompute"
+label = "historical with no reason stated"
+failure_class = "gate-zero.historical-without-a-reason"
+legacy_signature = "states no .historical_reason."
+migrated = false
+[[fault]]
+id = "recompute.recompute_historical_reason_blank"
+kind = "seeded-gate"
+check = "recompute"
+target = "recompute"
+label = "historical with a reason that says nothing"
+failure_class = "recompute.historical-without-a-reason"
+legacy_signature = "states no .historical_reason."
+migrated = false
+
+[[fault]]
+id = "recompute.recompute_only_the_template_recomputes"
+kind = "seeded-gate"
+check = "recompute"
+label = "only the template recomputes"
+failure_class = "gate-zero.nothing-recomputed"
+legacy_signature = "results are present and none recomputed"
+migrated = false
+[[fault]]
 id = "injections.injections_literal_unplaceable"
 kind = "seeded-gate"
 check = "injections"
@@ -3168,3 +3193,57 @@ label = "a literal the scan cannot place"
 failure_class = "gate.injection-literal-unplaceable"
 legacy_signature = "builds a Ground: declared in 3 places"
 migrated = false
+[[fault]]
+id = "mech.a-resolver-suite-that-collected-nothing-is-not-a-pass"
+kind = "mechanics"
+check = "resolver"
+label = "a resolver suite that collected nothing is not a pass"
+failure_class = "resolver.suite-cannot-run"
+expected_exit = "2"
+migrated = false
+
+[[fault]]
+id = "mech.and-the-same-driver-with-the-fixtures-left-in-place-passes"
+kind = "mechanics"
+check = "resolver"
+label = "and the same driver, with the fixtures left in place, passes"
+failure_class = "resolver.control"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.a-resolver-suite-with-no-git-has-no-verdict-to-give"
+kind = "mechanics"
+check = "resolver"
+label = "a resolver suite with no git has no verdict to give"
+failure_class = "resolver.suite-cannot-run"
+expected_exit = "2"
+migrated = false
+
+[[fault]]
+id = "mech.a-half-merged-verify-sh-is-refused-rather-than-counted"
+kind = "mechanics"
+check = "parity"
+label = "a half-merged verify.sh is refused rather than counted"
+failure_class = "parity.counted-from-a-half-merged-file"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-half-merged-manifest-is-a-refusal-and-not-a-finding"
+kind = "mechanics"
+check = "parity"
+label = "a half-merged manifest is a refusal and not a finding"
+failure_class = "parity.merge-state-read-as-a-finding"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-count-is-still-answered-over-a-manifest-being-merged"
+kind = "mechanics"
+check = "parity"
+label = "a count is still answered over a manifest being merged"
+failure_class = "parity.count-refused-mid-merge"
+legacy_signature = ""
+migrated = false
+

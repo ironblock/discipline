@@ -1150,14 +1150,23 @@ EOF
 
 # The sign let back onto a zero. `-0.0` is then a second spelling of `0.0`,
 # and a banked sampler temperature reads back as a number nobody wrote.
+#
+# The lesion is in `number.pest` because that is where the rule went on
+# 2026-09-12; before that it was in the record's own grammar. The move
+# CHANGED WHAT THIS FAULT PROVES, and the change is the point: widening the
+# shared terminal widens `regimen::float` and `record::decimal` together, so
+# the parity test between them stays green -- both readers agree, and both
+# are wrong. What catches it is the record's refusal fixture, one level down
+# from the agreement. A shared terminal removes the divergence class and
+# leaves the widening class exactly where it was; this case is what says so.
 inject_record_negative_zero_decimal() {
   python3 - <<'EOF'
 import pathlib
 
-path = pathlib.Path("diet/formats/record/grammar.pest")
+path = pathlib.Path("diet/formats/number.pest")
 source = path.read_text(encoding="utf-8")
-old = """decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
-new = """decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
+old = """fraction = @{ ("-" ~ negative_fraction) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
+new = """fraction = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -1728,13 +1737,36 @@ EOF
 # The regimen's float rule widened past the record's decimal. `-0.0` is then
 # a regimen float and not a record decimal, so the same digits are a value or
 # an error depending on which side of the format you ask.
+#
+# Since 2026-09-12 the two names alias one shared rule, so there is no longer
+# a second copy to widen: the ONLY way back to a divergence is to stop
+# aliasing and write a body out again under the old name. That is what this
+# lesion does.
+#
+# ONE GATE SEES IT, NOT TWO. The shared-terminal guard in tests/conformance.rs
+# compares bodies, and this body is not a copy of the shared one -- it is a
+# WIDER one, so the comparison finds no match and the guard stays green.
+# Measured, after writing the opposite here first.
+#
+# The two gates divide the class cleanly, and each is blind where the other
+# sees:
+#
+#   * A body copied EXACTLY under another name leaves the two formats still
+#     agreeing, so the parity test is green; the conformance guard catches it.
+#     Seeded as `a shared body written out under another name`.
+#   * A body written out WIDER, as here, has already diverged, so the
+#     conformance guard has nothing to match; the parity test catches it.
+#
+# Neither of them alone is the gate. That is why the widening half is scoped
+# to the regimen tests below and the copying half is scoped to conformance:
+# each case runs the gate that can actually see it.
 inject_regimen_float_rule_widened() {
   python3 - <<'EOF'
 import pathlib
 
 path = pathlib.Path("diet/formats/regimen/grammar.pest")
 source = path.read_text(encoding="utf-8")
-old = 'float     = @{ ("-" ~ negative_float) | (int_part ~ "." ~ ASCII_DIGIT+) }\n'
+old = 'float     = @{ fraction }\n'
 new = 'float     = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }\n'
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
@@ -1779,6 +1811,46 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 echo "recompute: 3 recorded value(s) re-derived from the artefacts"
 exit 0
 SH
+}
+
+# THE PROBE DISENGAGED BY A TRAILING COMMENT, which is how the vacuity check
+# came to have a vacuity of its own. It located the integer to perturb with
+# `^(\w+) = (\d+)$` -- a TOML reader written in a hurry -- so
+# `dogma_version = 0  # ...` did not match, the probe returned None, and the
+# caller read None as "passed" and counted the directory as RECOMPUTED. A
+# script reading nothing and comparing nothing, counted as one recomputed
+# result, by the gate whose docstring says a check of nothing is not a pass.
+#
+# The field is chosen by `tomllib` now -- the same reader `front_matter` uses,
+# which is the only one this repository is supposed to have -- and the edit is
+# RE-PARSED before the probe is trusted. This fault puts a comment on every
+# front-matter integer AND makes the script vacuous: under the old reader the
+# tree passes with the directory counted, under the new one the script is
+# named. Ruled 2026-09-12.
+inject_recompute_probe_blinded_by_a_comment() {
+  cat > results/_template/recompute.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+echo "recompute: 3 recorded value(s) re-derived from the artefacts"
+exit 0
+SH
+  python3 - <<'PY'
+import pathlib, re
+
+report = pathlib.Path("results/_template/README.md")
+text = report.read_text(encoding="utf-8")
+_, fence, rest = text.partition("+++\n")
+front, closing, tail = rest.partition("+++\n")
+front, count = re.subn(
+    r"^([A-Za-z0-9_-]+ = \d+)(?=\s*$)",
+    r"\1  # the comment that used to blind the probe",
+    front,
+    flags=re.M,
+)
+assert count, "no front-matter integer to comment; this fault would prove nothing"
+report.write_text(fence + front + closing + tail, encoding="utf-8")
+PY
 }
 
 # A recompute.sh that makes the comparison true instead of finding it true.
@@ -1856,7 +1928,7 @@ inject_recompute_script_missing() {
 # Every directory declared historical, so gate 0 has nothing to run. A census
 # reading "0 recomputed, N historical, 0 undeclared" is a gate over nothing,
 # and the tripwire for it is the reason exit 2 exists.
-inject_recompute_nothing_recomputable() {
+inject_recompute_template_opts_out() {
   sed -i 's/^kind = "reproducible-by-config"$/kind = "historical-observation"/' \
     results/_template/README.md
 }
@@ -1864,12 +1936,19 @@ inject_recompute_nothing_recomputable() {
 inject_recompute_kind_undeclared() {
   python3 - <<'EOF'
 import pathlib
+import shutil
 
-path = pathlib.Path("results/_template/README.md")
-source = path.read_text(encoding="utf-8")
-old = 'kind = "reproducible-by-config"\n'
-assert old in source
-path.write_text(source.replace(old, "", 1), encoding="utf-8")
+# A RESULTS directory, not the template. The census counts the template
+# separately and it never satisfies the check, so emptying the template's kind
+# proves something about the template rather than about an undeclared result --
+# which is what this case's label has always said it was for.
+seeded = pathlib.Path("results/2026-01-30-seeded-undeclared")
+shutil.copytree(pathlib.Path("results/_template"), seeded)
+readme = seeded / "README.md"
+source = readme.read_text(encoding="utf-8")
+row = 'kind = "reproducible-by-config"\n'
+assert row in source
+readme.write_text(source.replace(row, "", 1), encoding="utf-8")
 EOF
 }
 
@@ -2020,6 +2099,196 @@ path.write_text(
         opened,
         opened + "    /// Seeded fault: a field a merge added.\n"
         "    pub cohort: Option<String>,\n",
+        1,
+    ),
+    encoding="utf-8",
+)
+EOF
+}
+
+# A tag the dogma writes and the vocabulary does not carry. The interview
+# parser reads it as prose, silently, on every answer that carries it -- the
+# continuation bug in a new dress, and the reason the table is checked against
+# the templates rather than trusted beside them.
+#
+# An INLINE row, deliberately, and the two obvious choices were tried first: a
+# tag added to a template also trips the dogma's digest pin, and a `line` row
+# removed from the table also trips the grammar/table agreement test. Both
+# would go red for two reasons at once, and a signature that fires for two
+# faults grades neither.
+inject_interview_tag_undeclared() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/interview/tags.tsv")
+source = path.read_text(encoding="utf-8")
+row = "IMPLICATION\tinline\t-\n"
+assert row in source, "the row this injection removes is not in the table"
+path.write_text(source.replace(row, "", 1), encoding="utf-8")
+EOF
+}
+
+# The operating points sorted. A table sorts, which is why this format projects
+# to an array -- and sorted, `qwen3` precedes `qwen3.6`, so the id `qwen3.6`
+# matches the entry whose `thinking_kwarg` is false, while the entry that
+# should have won says true and carries the receipt that the soft switch is
+# dead on that model. The wrong control, silently, and reachable.
+inject_operating_points_sorted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/operating_points.rs")
+source = path.read_text(encoding="utf-8")
+anchor = "    Ok(entries)\n"
+assert source.count(anchor) == 1, "the projection's return moved"
+path.write_text(
+    source.replace(anchor, "    entries.sort_by(|a, b| a.key.cmp(&b.key));\n" + anchor, 1),
+    encoding="utf-8",
+)
+EOF
+}
+
+# A grammar that grew its own integer terminal while the others go on sharing
+# one.
+#
+# The obvious injection is wrong and running it is how that was found:
+# re-inlining `integer` into the regimen grammar breaks the RECORD parser --
+# eighteen compile errors, and the guard never runs, so the case would prove
+# the compiler works. Leaving the shared copy in place as well is a duplicate
+# rule, which pest rejects: also a build error. The drift that actually
+# COMPILES is a third grammar growing a copy of its own, unused, which pest is
+# perfectly happy with and nothing but this guard would say a word about.
+inject_number_terminal_regrown() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/decline/grammar.pest")
+path.write_text(
+    path.read_text(encoding="utf-8")
+    + '\ninteger = @{ ("-" ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*) | "0" }\n',
+    encoding="utf-8",
+)
+EOF
+}
+
+# The same drift wearing a name nobody is looking for. The guard above this
+# one asks "is a shared rule defined outside the shared file", which reads
+# NAMES -- and a copy called something else walks straight past it. That is
+# why the guard grew a body comparison, and this is the case that says the
+# comparison works: `nonzero`'s body, written out again as `counter`.
+#
+# `nonzero` rather than `fraction` because the body has to COMPILE where it
+# lands: `fraction` is built out of `int_part` and `negative_fraction`, which
+# the decline grammar has never heard of, and a build error would prove the
+# compiler works rather than the guard. `nonzero`'s body stands alone.
+#
+# The name is deliberately innocuous. A drift that announced itself would not
+# need a gate.
+inject_number_terminal_body_regrown() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/decline/grammar.pest")
+path.write_text(
+    path.read_text(encoding="utf-8")
+    + "\ncounter = _{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }\n",
+    encoding="utf-8",
+)
+EOF
+}
+
+# Declared unreproducible and recomputable at once. The way a red result would
+# escape gate 0 is by ACQUIRING the tag rather than by losing the script, so
+# the two together are a contradiction and not a skip.
+inject_recompute_historical_with_a_script() {
+  python3 - <<'EOF'
+import pathlib
+import shutil
+
+template = pathlib.Path("results/_template")
+seeded = pathlib.Path("results/2026-01-30-seeded-historical")
+shutil.copytree(template, seeded)
+readme = seeded / "README.md"
+text = readme.read_text(encoding="utf-8")
+text = text.replace(
+    'kind = "reproducible-by-config"',
+    'kind = "historical-observation"\nhistorical_reason = "the capture lane dropped substrate ids"',
+    1,
+)
+readme.write_text(text, encoding="utf-8")
+EOF
+}
+
+# A tag with no reason behind it, which is the opt-out every red result reaches
+# for. Which capture-side flaw, or why the inputs cannot exist.
+inject_recompute_historical_without_a_reason() {
+  python3 - <<'EOF'
+import pathlib
+import shutil
+
+template = pathlib.Path("results/_template")
+seeded = pathlib.Path("results/2026-01-30-seeded-unreasoned")
+shutil.copytree(template, seeded)
+(seeded / "recompute.sh").unlink()
+readme = seeded / "README.md"
+readme.write_text(
+    readme.read_text(encoding="utf-8").replace(
+        'kind = "reproducible-by-config"', 'kind = "historical-observation"', 1
+    ),
+    encoding="utf-8",
+)
+EOF
+}
+
+# The reason present and EMPTY. `historical-observation` is the opt-out from
+# gate 0, so what it costs is a sentence saying which part of the world made
+# the run unreproducible. Two quotes is not that sentence -- it is the tag
+# acquired for free, which is what every red result reaches for.
+#
+# Its own case because the sibling above deletes the KEY, and the two are
+# different code paths: one is `reason is None`, this one is a string that is
+# there and says nothing. A fresh instance found that removing `.strip()`
+# from the check left the absent-key case still red and this one green, so
+# the sibling was never testing this line.
+inject_recompute_historical_reason_blank() {
+  python3 - <<'EOF'
+import pathlib
+import shutil
+
+template = pathlib.Path("results/_template")
+seeded = pathlib.Path("results/2026-01-31-seeded-blank-reason")
+shutil.copytree(template, seeded)
+(seeded / "recompute.sh").unlink()
+readme = seeded / "README.md"
+readme.write_text(
+    readme.read_text(encoding="utf-8").replace(
+        'kind = "reproducible-by-config"',
+        'kind = "historical-observation"\nhistorical_reason = "   "',
+        1,
+    ),
+    encoding="utf-8",
+)
+EOF
+}
+
+# Results present and none of them recomputed, with the template excluded from
+# the count. A check of nothing is not a pass, applied to results -- and the
+# directory this leaves behind is entirely LEGAL, which is the point: the
+# census goes red on the shape of the tree, not on a defect in the directory.
+inject_recompute_only_the_template_recomputes() {
+  python3 - <<'EOF'
+import pathlib
+import shutil
+
+template = pathlib.Path("results/_template")
+seeded = pathlib.Path("results/2026-01-30-seeded-only-historical")
+shutil.copytree(template, seeded)
+(seeded / "recompute.sh").unlink()
+readme = seeded / "README.md"
+readme.write_text(
+    readme.read_text(encoding="utf-8").replace(
+        'kind = "reproducible-by-config"',
+        'kind = "historical-observation"\nhistorical_reason = "the substrate no longer exists"',
         1,
     ),
     encoding="utf-8",
@@ -4597,8 +4866,10 @@ selftest() {
   seeded_case "a summary the rows do not carry"       recompute inject_recompute_summary_not_derived \
     'the report does not re-derive'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
-    '0 recomputed, 0 declared historical, 1 undeclared'
+    'front-matter .kind. is None'
   seeded_case "a recompute that cannot fail"          recompute inject_recompute_cannot_fail \
+    'does not compare the report to the artefacts'
+  seeded_case "a probe blinded by a trailing comment"  recompute inject_recompute_probe_blinded_by_a_comment \
     'does not compare the report to the artefacts'
   seeded_case "a recompute that edits what it checks"  recompute inject_recompute_tampers \
     'tampering, not recomputation'
@@ -4610,8 +4881,8 @@ selftest() {
     'which is not a file here'
   seeded_case "reproducible, with nothing to run"      recompute inject_recompute_script_missing \
     'carries no recompute.sh'
-  seeded_case "a gate 0 with nothing recomputable"     recompute inject_recompute_nothing_recomputable \
-    'nothing was recomputed'
+  seeded_case "the template carrying the opt-out"      recompute inject_recompute_template_opts_out \
+    'the template declares .historical-observation.'
   seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
     'but the committed file hashes to'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
@@ -4650,6 +4921,22 @@ selftest() {
     'hygiene: internal-ticket-id:'
   seeded_case "external subresource on the site"      pages    inject_pages \
     'hygiene: external-subresource:'
+  seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
+    'dogma tag\(s\) absent from diet/formats/interview/tags\.tsv' 'lib/formats::interview'
+  seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \
+    "the projection lost the file's order" 'lib/formats::operating_points'
+  seeded_case "an integer terminal grown a second time" test     inject_number_terminal_regrown \
+    'it belongs in number\.pest and nowhere else' 'test:conformance/the_integer_terminal'
+  seeded_case "a shared body written out under another name" test inject_number_terminal_body_regrown \
+    'has a shared terminal.s body written out again' 'test:conformance/the_integer_terminal'
+  seeded_case "historical, and carrying a recompute"   recompute inject_recompute_historical_with_a_script \
+    'declares .historical-observation. and carries a recompute\.sh'
+  seeded_case "historical with no reason stated"       recompute inject_recompute_historical_without_a_reason \
+    'states no .historical_reason.'
+  seeded_case "historical with a reason that says nothing" recompute inject_recompute_historical_reason_blank \
+    'states no .historical_reason.'
+  seeded_case "only the template recomputes"           recompute inject_recompute_only_the_template_recomputes \
+    'results are present and none recomputed'
   seeded_case "a check no workflow runs"              ci       inject_ci \
     'has no owner in check-owners\.tsv'
   seeded_case "pull requests filtered by branch"      ci       inject_ci_pr_branch_filter \

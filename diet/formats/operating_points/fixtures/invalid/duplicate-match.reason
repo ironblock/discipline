@@ -1,0 +1,3 @@
+Two entries match `shared`. The rule is first match in file order, so the
+second can never be reached -- and a reader that found it, having matched some
+other way, has read a different file from the one the rule describes.

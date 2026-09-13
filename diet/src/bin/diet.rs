@@ -54,6 +54,10 @@ const COMMANDS: &[(&str, Operation)] = &[
     ("classify-decline", Operation::Format("decline")),
     ("parse-interview", Operation::Format("interview")),
     ("check-record", Operation::Format("record")),
+    (
+        "check-operating-points",
+        Operation::Format("operating_points"),
+    ),
     ("check-regimen", Operation::Format("regimen")),
     ("parse-shell", Operation::Format("shell")),
     ("parse-verdict", Operation::Format("verdict")),

@@ -1,0 +1,3 @@
+SURFACE: find_blocks, strip_blocks, insert_after_last, skeleton_of
+GOTCHA: a block key comes from the definition line — IMPLICATION: a rationale comment naming another injection does not rename this one
+FOLLOWUP: PENDING «whether ENTRY should key on id or on label»

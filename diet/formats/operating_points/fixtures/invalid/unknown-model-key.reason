@@ -1,0 +1,4 @@
+`temperature` is not a key a model entry carries -- it is a sampler setting,
+and it belongs under `[alpha.sampler]`. The entry's keys are closed by the
+grammar, so a setting written one level too high is refused rather than
+ignored: ignored, it would read as a sampler that was never applied.
