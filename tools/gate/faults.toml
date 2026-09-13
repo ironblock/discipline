@@ -34,8 +34,8 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 311
-mechanics_assertions = 48
+red_faults = 312
+mechanics_assertions = 56
 migrated = 0
 
 
@@ -165,6 +165,15 @@ target = "test:conformance/formats::record"
 label = "a summary that cannot be true of itself"
 failure_class = "schema.summary-impossible-accepted"
 legacy_signature = "recompute-matched-exceeds-checked\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "injections.injection_needs_gnu_sed"
+kind = "seeded-gate"
+check = "injections"
+label = "an injection only GNU sed accepts"
+failure_class = "gate.injection-unportable"
+legacy_signature = "sed forms only GNU accepts"
 migrated = false
 
 [[fault]]
@@ -3082,6 +3091,46 @@ failure_class = "parity.signature-matches-its-scope"
 legacy_signature = "matches the line naming its own scope"
 migrated = false
 [[fault]]
+id = "mech.a-force-push-is-scanned-not-refused"
+kind = "mechanics"
+check = "history"
+label = "a force-push is scanned, not refused"
+failure_class = "history.force-push-scanned"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.an-ordinary-push-still-scans-before-after"
+kind = "mechanics"
+check = "history"
+label = "an ordinary push still scans before..after"
+failure_class = "history.push-range-kept"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.no-trunk-to-fall-back-to-is-still-undeterminable"
+kind = "mechanics"
+check = "history"
+label = "no trunk to fall back to is still undeterminable"
+failure_class = "history.undeterminable-kept"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-grammar-makes-the-binary-stale"
+kind = "mechanics"
+check = "resolver"
+label = "a grammar makes the binary stale"
+failure_class = "resolver.embedded-is-a-source"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-conformance-fixture-does-not"
+kind = "mechanics"
+check = "resolver"
+label = "a conformance fixture does not"
+failure_class = "resolver.data-is-not-a-source"
+legacy_signature = ""
+migrated = false
+[[fault]]
 id = "mech.shards-that-between-them-ran-every-fault-are-a-whole"
 kind = "mechanics"
 check = "parity"
@@ -3313,6 +3362,33 @@ label = "a literal the scan cannot place"
 failure_class = "gate.injection-literal-unplaceable"
 legacy_signature = "builds a Ground: declared in 3 places"
 migrated = false
+[[fault]]
+id = "mech.a-grammar-changed-under-a-binary-with-no-dep-info-is-stale"
+kind = "mechanics"
+check = "regimen"
+label = "a grammar changed under a binary with no dep-info is stale"
+failure_class = "provenance.embedded-set-unknowable"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.and-a-binary-with-no-dep-info-over-an-untouched-tree-resolves"
+kind = "mechanics"
+check = "regimen"
+label = "and a binary with no dep-info over an untouched tree resolves"
+failure_class = "provenance.rule-did-not-apply"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-dep-info-that-does-narrow-still-narrows"
+kind = "mechanics"
+check = "regimen"
+label = "a dep-info that does narrow still narrows"
+failure_class = "provenance.wrong-artifact"
+legacy_signature = ""
+migrated = false
+
 [[fault]]
 id = "mech.a-resolver-suite-that-collected-nothing-is-not-a-pass"
 kind = "mechanics"

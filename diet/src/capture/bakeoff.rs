@@ -1022,7 +1022,17 @@ mod tests {
     ///
     /// The real file rather than rows invented here: a runner proved against a
     /// corpus written to suit it is a runner proved against itself.
-    const REGISTER: &str = include_str!("../../capture/sense/register/authored-mistake.jsonl");
+    ///
+    /// READ AT TEST TIME, not `include_str!`-ed. A register is data this
+    /// binary reads, never data it carries, and `resolve-diet.py` decides
+    /// whether the binary is stale by asking the source what it embeds -- so
+    /// embedding a corpus in a test would make every edit to it look like a
+    /// stale binary, which is the defect #50 reports one directory over.
+    fn register_source() -> String {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("capture/sense/register/authored-mistake.jsonl");
+        std::fs::read_to_string(path).expect("the shipped register")
+    }
 
     /// A cache in the instrument's own row format, over every text a run
     /// touches.
@@ -1075,7 +1085,7 @@ mod tests {
     fn write_run(dir: &Path) -> PathBuf {
         std::fs::create_dir_all(dir).expect("a directory");
         let senses = sense::shipped_senses().expect("the shipped senses");
-        let rows = sense::register(REGISTER).expect("the shipped register");
+        let rows = sense::register(&register_source()).expect("the shipped register");
         let register_texts: Vec<String> = rows.iter().map(|row| row.text.clone()).collect();
         let mut texts = register_texts.clone();
         texts.extend(senses.iter().map(|sense| sense.text.clone()));
@@ -1094,7 +1104,7 @@ mod tests {
         texts.dedup();
 
         let files = [
-            ("authored-mistake.jsonl", REGISTER.to_owned()),
+            ("authored-mistake.jsonl", register_source()),
             ("even.vectors.jsonl", cache(&texts, &register_texts, false)),
             ("lean.vectors.jsonl", cache(&texts, &register_texts, true)),
         ];
@@ -1708,12 +1718,12 @@ mod tests {
     fn a_run_with_no_cache_is_refused() {
         let dir = scratch("nocache");
         std::fs::create_dir_all(&dir).expect("a directory");
-        std::fs::write(dir.join("authored-mistake.jsonl"), REGISTER).expect("a register");
+        std::fs::write(dir.join("authored-mistake.jsonl"), register_source()).expect("a register");
         let record = format!(
             "{START}\n{{\"record\":\"claim\",\"id\":\"c1\",\"hypothesis\":\"nothing to \
              compare\",\"result\":\"supported\",\"consumes\":[{{\"path\":\"authored-mistake.\
              jsonl\",\"sha256\":\"{}\"}}]}}\n{SUMMARY}\n",
-            sha256_hex(REGISTER.as_bytes())
+            sha256_hex(register_source().as_bytes())
         );
         let path = dir.join("run.jsonl");
         std::fs::write(&path, record).expect("a record");

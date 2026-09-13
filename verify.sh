@@ -723,6 +723,35 @@ seeded_case() {
   fi
 }
 
+# Apply one `sed` expression to each file, in place, portably.
+#
+# `sed -i` IS NOT PORTABLE AND THIS GATE MUST NOT DEPEND ON WHICH SED IS
+# INSTALLED. GNU sed takes the suffix as an optional argument attached to the
+# flag; BSD sed takes it as the NEXT argument, so `sed -i 's/a/b/' f` there
+# means suffix `s/a/b/` with `f` as the script -- and the errors that come
+# back are about the script, not about the flag, which is why they read as
+# nonsense. Twenty-eight injections were inert on a Mac and passing in CI for
+# that reason (#50), and an inert injection is a case that proves nothing
+# while reporting the same green.
+#
+# The portable form is no `-i` at all: read the file, write a temporary, and
+# move it over only if sed succeeded. A failed edit that has already truncated
+# the file leaves a sandbox in a state neither side asked for.
+edit_in_place() {
+  local expression="$1"; shift
+  local file temporary
+  for file in "$@"; do
+    temporary="${file}.edit-in-place"
+    if sed "$expression" "$file" > "$temporary"; then
+      mv -- "$temporary" "$file"
+    else
+      rm -f -- "$temporary"
+      echo "edit_in_place: sed refused ${expression} on ${file}" >&2
+      return 1
+    fi
+  done
+}
+
 inject_fmt() {
   printf '\n#[allow(dead_code)]\nfn seeded_fmt_fault(){let x=1;let _=x;}\n' >> diet/src/lib.rs
 }
@@ -759,7 +788,7 @@ EOF
 # `^none\b` matcher does and why English declines and decline-shaped content
 # were both mis-read for a year.
 inject_decline_unanchored() {
-  sed -i \
+  edit_in_place \
     's/^document = { SOI ~ ws\* ~ decline ~ ws\* ~ EOI }$/document = { SOI ~ ws* ~ decline ~ ANY* }/' \
     diet/formats/decline/grammar.pest
 }
@@ -774,7 +803,7 @@ inject_conformance() {
 # and shipped its own regression, which is why the corpus rather than the
 # tolerance is the gate.
 inject_interview_drops_continuations() {
-  sed -i 's|^    let joined = value.join("\\n");$|    let joined = value.first().cloned().unwrap_or_default();|' \
+  edit_in_place 's|^    let joined = value.join("\\n");$|    let joined = value.first().cloned().unwrap_or_default();|' \
     diet/src/formats/interview.rs
 }
 
@@ -857,7 +886,7 @@ EOF
 # The depth limit removed. Recursive descent then runs out of stack and aborts
 # the process, and an abort is not a verdict.
 inject_record_depth_unbounded() {
-  sed -i 's|^    if depth > MAX_DEPTH {$|    if false {|' diet/src/formats/record/mod.rs
+  edit_in_place 's|^    if depth > MAX_DEPTH {$|    if false {|' diet/src/formats/record/mod.rs
 }
 
 # The kind's own fields made advisory. `turns` is drained and thrown away on a
@@ -906,6 +935,39 @@ EOF
 # row served by one it did -- and the regime the result is attributed to is a
 # regime nothing in the file describes. The reference is the whole mechanism:
 # without the check it is a string somebody typed.
+# An injection written in a form only GNU sed accepts. It applies here and is
+# inert on a Mac, so the tree's verdict depends on the machine -- twenty-eight
+# of them did, and CI was green the whole time (#50).
+#
+# The flag is ASSEMBLED rather than written: the lint this seeds scans
+# verify.sh line by line, so a literal in this body would make the clean tree
+# fail the check it exists to prove fires on a dirty one.
+inject_injection_needs_gnu_sed() {
+  python3 - <<'EOF'
+import pathlib
+import re
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+# The injection is found by NAME and its helper call swapped for the GNU form.
+# Neither the anchor nor the flag is written literally: the lint this seeds
+# scans verify.sh line by line, so a literal in this body would make the clean
+# tree fail the check it exists to prove fires on a dirty one -- and an anchor
+# written literally would appear twice, here and there, which is how the first
+# version of this refused to run.
+body = re.search(
+    r"^inject_record_depth_unbounded\(\) \{\n.*?^\}\n", source, re.M | re.S
+)
+if body is None:
+    raise SystemExit("inject_record_depth_unbounded is not there to make unportable")
+was = body.group(0)
+if "edit_in_place" not in was:
+    raise SystemExit("that injection no longer uses the portable helper")
+now = was.replace("edit_in_place", "sed" + " -" + "i", 1)
+path.write_text(source.replace(was, now, 1), encoding="utf-8")
+EOF
+}
+
 # The runner's digest comparison made advisory. The cache is still read, the
 # scores are still computed, and they are the scores of whatever bytes happen
 # to be on disk rather than of the bytes the record consumed -- which is a
@@ -1155,11 +1217,11 @@ EOF
 # A floor of zero, which every lane meets. The per-lane rule switched off by a
 # value that looks like a setting.
 inject_grounded_zero_floor() {
-  sed -i 's|^        if grounded == 0 {$|        if false {|' diet/src/capture/grounded.rs
+  edit_in_place 's|^        if grounded == 0 {$|        if false {|' diet/src/capture/grounded.rs
 }
 
 inject_grounded_floor_inert() {
-  sed -i 's|^    let outcome = if score.meets(floor) {$|    let outcome = if true {|' \
+  edit_in_place 's|^    let outcome = if score.meets(floor) {$|    let outcome = if true {|' \
     diet/src/capture/grounded.rs
 }
 
@@ -1167,7 +1229,7 @@ inject_grounded_floor_inert() {
 # gate that does it rejects legitimate content -- the failure that made the
 # scoping a ruling rather than an implementation detail.
 inject_grounded_gates_judgment() {
-  sed -i 's|^        !matches!(self, Self::Judgment)$|        let _ = self; true|' \
+  edit_in_place 's|^        !matches!(self, Self::Judgment)$|        let _ = self; true|' \
     diet/src/capture/grounded.rs
 }
 
@@ -1175,7 +1237,7 @@ inject_grounded_gates_judgment() {
 # 1.000 that meant nothing was a real score, computed by real code, on a probe
 # where fabrication was structurally impossible.
 inject_grounded_undemonstrated() {
-  sed -i 's|^        if demonstrated_failure.outcome != LaneOutcome::Rejected {$|        if false {|' \
+  edit_in_place 's|^        if demonstrated_failure.outcome != LaneOutcome::Rejected {$|        if false {|' \
     diet/src/capture/grounded.rs
 }
 
@@ -1190,7 +1252,7 @@ inject_stringly_predicate() {
 # nowhere, and `cargo test -- object` selects nothing and exits 0 -- which is
 # how five hundred lines and eleven tests went unrun with the gate green.
 inject_orphaned_module() {
-  sed -i '/^pub mod object;$/d' diet/src/lib.rs
+  edit_in_place '/^pub mod object;$/d' diet/src/lib.rs
 }
 
 # The same module lost the ordinary way: commented OUT rather than deleted.
@@ -1223,8 +1285,20 @@ inject_stringly_or_pattern() {
 # without wiring it. Every exhaustive match over FieldKind stops compiling,
 # which is the whole reason the predicate is an enum.
 inject_field_kind_variant() {
-  sed -i 's|^    Stuck,$|    Stuck,\n    /// Seeded: a variant nothing covers.\n    Seeded,|' \
-    diet/src/formats/interview.rs
+  # Not `sed`: a `\n` in the replacement is a GNU extension, and POSIX wants a
+  # literal backslash-newline. The python form every other multi-line
+  # injection uses says what it does instead of encoding it.
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/interview.rs")
+source = path.read_text(encoding="utf-8")
+old = "    Stuck,\n"
+new = "    Stuck,\n    /// Seeded: a variant nothing covers.\n    Seeded,\n"
+if source.count(old) != 1:
+    raise SystemExit(f"`Stuck,` appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
 }
 
 # A supersede that deletes what it replaced. Claim atomicity at the object
@@ -1571,7 +1645,7 @@ EOF
 # and orders the turn, so a name the record does not already have is a second
 # name for what the tangent in the provenance already says.
 inject_tangent_closing_lane_coined() {
-  sed -i 's|^const CLOSING_LANE: &str = "main";$|const CLOSING_LANE: \&str = "tangent-closure";|' \
+  edit_in_place 's|^const CLOSING_LANE: &str = "main";$|const CLOSING_LANE: \&str = "tangent-closure";|' \
     diet/src/object/tangent.rs
 }
 
@@ -1643,7 +1717,7 @@ EOF
 # of the object, and two states rendering the same word read as one to
 # everyone who arrives later.
 inject_object_park_renders_as_retired() {
-  sed -i 's|^            Self::Parked => "parked",$|            Self::Parked => "retired",|' \
+  edit_in_place 's|^            Self::Parked => "parked",$|            Self::Parked => "retired",|' \
     diet/src/object.rs
 }
 
@@ -1665,7 +1739,7 @@ path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
 inject_cli_usage_exit() {
-  sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
+  edit_in_place 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
 
 inject_cli_wrong_format() {
@@ -1684,7 +1758,7 @@ EOF
 }
 
 inject_cli_silent() {
-  sed -i 's|^    println!("{rendered}");$||' diet/src/bin/diet.rs
+  edit_in_place 's|^    println!("{rendered}");$||' diet/src/bin/diet.rs
 }
 
 inject_object_self_void() {
@@ -1823,7 +1897,7 @@ EOF
 }
 
 inject_object_no_dedup() {
-  sed -i 's|^        if let Some(held) = self.by_content.get(&key).cloned() {$|        if let Some(held) = None::<EntryId> {|' \
+  edit_in_place 's|^        if let Some(held) = self.by_content.get(&key).cloned() {$|        if let Some(held) = None::<EntryId> {|' \
     diet/src/object.rs
 }
 
@@ -1879,7 +1953,7 @@ inject_results_nested_directory() {
 # run to a specific build being a silent no-op is how four instruments banked
 # numbers through a release binary seven days behind its source.
 inject_diet_bin_ignored() {
-  sed -i 's|^    pinned = os.environ.get("DIET_BIN")$|    pinned = None|' \
+  edit_in_place 's|^    pinned = os.environ.get("DIET_BIN")$|    pinned = None|' \
     scripts/resolve-diet.py
 }
 
@@ -1907,7 +1981,7 @@ inject_toml_subset() {
 }
 
 inject_metadata() {
-  sed -i 's/"name": "claim"/"name": "claim-renamed"/' .github/labels.json
+  edit_in_place 's/"name": "claim"/"name": "claim-renamed"/' .github/labels.json
 }
 
 inject_hygiene() {
@@ -2200,7 +2274,7 @@ inject_recompute_script_missing() {
 # reading "0 recomputed, N historical, 0 undeclared" is a gate over nothing,
 # and the tripwire for it is the reason exit 2 exists.
 inject_recompute_template_opts_out() {
-  sed -i 's/^kind = "reproducible-by-config"$/kind = "historical-observation"/' \
+  edit_in_place 's/^kind = "reproducible-by-config"$/kind = "historical-observation"/' \
     results/_template/README.md
 }
 
@@ -2569,7 +2643,7 @@ EOF
 
 inject_ci() {
   # Take a check's owner away: it then runs in no workflow, while CI is green.
-  sed -i '/^hygiene\t/d' .github/check-owners.tsv
+  edit_in_place '/^hygiene\t/d' .github/check-owners.tsv
 }
 
 # A branch filter on the PULL-REQUEST trigger. On `push` the same filter is
@@ -2655,7 +2729,7 @@ EOF
 # one namer left it quietly stops grading anything while still reporting a
 # pass -- which is the shape of both defects this whole file was extended for.
 inject_ci_trunk_uncorroborated() {
-  sed -i '/^    branches: \[main\]$/d' \
+  edit_in_place '/^    branches: \[main\]$/d' \
     .github/workflows/pages.yml .github/workflows/repo-metadata.yml
 }
 
@@ -2666,13 +2740,13 @@ inject_ci_trunk_uncorroborated() {
 # knows what the trunk is called; the other workflows that name it do, and
 # they are what catches this.
 inject_ci_trunk_typo() {
-  sed -i 's|^    branches: \[main\]$|    branches: [mian]|' .github/workflows/verify.yml
+  edit_in_place 's|^    branches: \[main\]$|    branches: [mian]|' .github/workflows/verify.yml
 }
 
 # A gating workflow that narrows the test check to part of the suite. The job
 # is green, the run is faster, and most of the tests did not happen.
 inject_ci_scoped_test() {
-  sed -i 's|^\( *\)\./verify\.sh "\${args\[@\]}"$|\1./verify.sh "${args[@]}" --scope lib|' \
+  edit_in_place 's|^\( *\)\./verify\.sh "\${args\[@\]}"$|\1./verify.sh "${args[@]}" --scope lib|' \
     .github/workflows/pkg-diet.yml
 }
 # A subshell run against the shell's own state. `cd a; (cd b; ls); pwd` then
@@ -4181,21 +4255,21 @@ EOF
 # is true. The 454-entry fabrication came through a lane that was also
 # confident, also well-formed, and also sure of itself.
 inject_tools_ungrounded() {
-  sed -i 's|^    let kept = !report.kept().is_empty();$|    let kept = true;|' \
+  edit_in_place 's|^    let kept = !report.kept().is_empty();$|    let kept = true;|' \
     diet/src/capture/tools.rs
 }
 # The reminder that never comes round. Every model eventually stops recording;
 # a cadence that cannot fire turns the forget rate this lane exists to survive
 # into a silence nobody counts.
 inject_tools_reminder_silent() {
-  sed -i 's|^        if self.since < self.cadence.interval() {$|        if true {|' \
+  edit_in_place 's|^        if self.since < self.cadence.interval() {$|        if true {|' \
     diet/src/capture/tools.rs
 }
 # A harness tool call accepted as a capture. Another system's tool output then
 # becomes a fact about this session, written with capture authority, and the
 # provenance says the model recorded it.
 inject_tools_foreign_call() {
-  sed -i 's|^        return Err(ToolError::NotACaptureTool(tool.clone()));$|        return Ok(Effect::default());|' \
+  edit_in_place 's|^        return Err(ToolError::NotACaptureTool(tool.clone()));$|        return Ok(Effect::default());|' \
     diet/src/capture/tools.rs
 }
 # A phase-transition proposal that writes. The tool was the most successful
@@ -4266,7 +4340,7 @@ EOF
 # entry being certified against turn-9's output -- evidence that did not exist
 # when the model wrote.
 inject_tools_future_output() {
-  sed -i 's|^            Ordering::Greater => return,$|            Ordering::Greater => \&mut self.source,|' \
+  edit_in_place 's|^            Ordering::Greater => return,$|            Ordering::Greater => \&mut self.source,|' \
     diet/src/capture/tools.rs
 }
 # A superseding entry whose id is minted from a counter. The entry that
@@ -4290,7 +4364,7 @@ EOF
 # A verdict that resolves somebody else's entry. The one patch a verdict alone
 # is allowed to justify, pointed at an entry the model never named.
 inject_tools_resolve_elsewhere() {
-  sed -i 's|^            target: entry.clone(),$|            target: EntryId::new("somebody/else").map_err(ToolError::BadEntry)?,|' \
+  edit_in_place 's|^            target: entry.clone(),$|            target: EntryId::new("somebody/else").map_err(ToolError::BadEntry)?,|' \
     diet/src/capture/tools.rs
 }
 # The asks, reworded to nothing. What this lane says out loud is its whole
@@ -4331,7 +4405,7 @@ EOF
 # nowhere, and the enumeration over `ALL` certifies the enum rather than the
 # caller that was supposed to use it.
 inject_tools_sweep_kind() {
-  sed -i 's|^                kind: AskKind::Sweep,$|                kind: AskKind::Reminder,|' \
+  edit_in_place 's|^                kind: AskKind::Sweep,$|                kind: AskKind::Reminder,|' \
     diet/src/capture/tools.rs
 }
 # The model's own spelling of a closed choice, kept. Case is then decided
@@ -4353,14 +4427,14 @@ EOF
 # A phase proposal with no reason. The tool is a request for a ruling, and the
 # why is the whole of what it carries into one.
 inject_tools_proposal_reasonless() {
-  sed -i 's|^            reason: text_argument(&args, "reason"),$|            reason: String::new(),|' \
+  edit_in_place 's|^            reason: text_argument(&args, "reason"),$|            reason: String::new(),|' \
     diet/src/capture/tools.rs
 }
 # A reminder that drops what the router put off. The deferral then reaches only
 # the post-drive sweep, and the cadence half of the join with the router is
 # dead while every test stays green.
 inject_tools_reminder_deferral_dropped() {
-  sed -i 's|^            about: self.deferred.get(&turn).cloned(),$|            about: None,|' \
+  edit_in_place 's|^            about: self.deferred.get(&turn).cloned(),$|            about: None,|' \
     diet/src/capture/tools.rs
 }
 # Every tool description reduced to one character. These bytes are what a
@@ -4420,7 +4494,7 @@ EOF
 # is invited to say `abandoned`, the harness constrains its argument to it, and
 # `apply` then refuses the answer it asked for.
 inject_tools_verdict_list_open() {
-  sed -i 's|"of":\["done","not_this","partial","superseded"\]|"of":["abandoned","done","not_this","partial","superseded"]|' \
+  edit_in_place 's|"of":\["done","not_this","partial","superseded"\]|"of":["abandoned","done","not_this","partial","superseded"]|' \
     diet/src/capture/tools/contract.jsonl
 }
 # The depth limit on the record reader's other door. `objects` is a second
@@ -4448,7 +4522,7 @@ EOF
 # A turn that recorded in the end, swept anyway. The sweep then asks about a
 # fact the model did record, which teaches that recording changes nothing.
 inject_tools_silent_kept() {
-  sed -i 's|^            self.silent.remove(&turn);$||' diet/src/capture/tools.rs
+  edit_in_place 's|^            self.silent.remove(&turn);$||' diet/src/capture/tools.rs
 }
 # The one corpus case that drives a tool other than `update_record`, cut back
 # to `update_record` alone. The corpus then covers the tool whose calls its
@@ -5117,6 +5191,8 @@ selftest() {
     'request-with-no-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "weights identified by name"            test     inject_record_weights_named_not_digested \
     'weights-named-not-digested\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "an injection only GNU sed accepts"     injections inject_injection_needs_gnu_sed \
+    'sed forms only GNU accepts'
   seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \
     'an edited cache was not refused' 'lib/capture::bakeoff'
   seeded_case "the assembled directory's evidence is elsewhere" test inject_bakeoff_evidence_not_attached \
@@ -5647,6 +5723,177 @@ selftest() {
       && ! grep -qE 'front-matter|summary row|product_sha256' <<<\"\$out\" \
       && grep -q 'record verdicts from .* sha256=' <<<\"\$out\""
 
+  # --- #50: the three defects a Mac seat found, each asserted here ---
+  #
+  # Every one of them was a verdict that depended on the machine or on the
+  # operation, and every one was invisible on the machine that had the
+  # forgiving behaviour. That is the class these assertions exist for.
+
+  # A force-push orphans the sha the push payload names as `before`, so it is
+  # absent from CI's fresh checkout. That is the EXPECTED shape of a
+  # legitimate operation -- this repository's own rules mandate rebases, so
+  # the check was guaranteed to redden the lane that gates the merge on a
+  # branch whose content is fine.
+  # IN A REPOSITORY OF THEIR OWN, not in this one. These ran against `$ROOT`
+  # and passed on every full clone; `actions/checkout` takes a SHALLOW one, so
+  # in CI `HEAD~1` did not resolve and `origin/main` did not exist, and both
+  # assertions failed for reasons that had nothing to do with what they test.
+  # An assertion whose subject is "the checkout you happen to have" is the
+  # same defect as the one it was written for -- a verdict that depends on the
+  # machine -- so it builds the shape it needs instead.
+  local pushes; scratch; pushes="$SCRATCH"
+  (
+    cd "$pushes" && git init -q .
+    git -c user.email=gate@example.invalid -c user.name=gate \
+      commit -q --allow-empty -m "a trunk commit"
+    git update-ref refs/remotes/origin/main HEAD
+    git -c user.email=gate@example.invalid -c user.name=gate \
+      commit -q --allow-empty -m "one"
+    git -c user.email=gate@example.invalid -c user.name=gate \
+      commit -q --allow-empty -m "two"
+  ) > /dev/null 2>&1
+  cp -r "${ROOT}/scripts" "${pushes}/scripts"
+  printf '{"before":"0123456789012345678901234567890123456789","after":"%s"}' \
+    "$(git -C "$pushes" rev-parse HEAD)" > "${pushes}/force.json"
+  printf '{"before":"%s","after":"%s"}' \
+    "$(git -C "$pushes" rev-parse HEAD~1)" "$(git -C "$pushes" rev-parse HEAD)" \
+    > "${pushes}/ordinary.json"
+  expect_exit "a force-push is scanned, not refused" 0 \
+    bash -c "cd '${pushes}' && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
+      GITHUB_EVENT_PATH='${pushes}/force.json' python3 scripts/check-history.py \
+      | grep -q 'push, force-push: merge-base..after'"
+  expect_exit "an ordinary push still scans before..after" 0 \
+    bash -c "cd '${pushes}' && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
+      GITHUB_EVENT_PATH='${pushes}/ordinary.json' python3 scripts/check-history.py \
+      | grep -q 'push before..after'"
+
+  # A base that is genuinely undeterminable is still a failure. The fallback
+  # above must not have turned "I cannot tell what to scan" into "scan the
+  # trunk", which would be an empty scan wearing a verdict.
+  local lonely; scratch; lonely="$SCRATCH"
+  ( cd "$lonely" && git init -q . \
+    && git -c user.email=gate@example.invalid -c user.name=gate \
+         commit -q --allow-empty -m "only commit" ) > /dev/null 2>&1
+  cp -r "${ROOT}/scripts" "${lonely}/scripts"
+  printf '{"before":"0123456789012345678901234567890123456789","after":"HEAD"}' \
+    > "${lonely}/event.json"
+  expect_exit "no trunk to fall back to is still undeterminable" 2 \
+    bash -c "cd '${lonely}' && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
+      GITHUB_EVENT_PATH='${lonely}/event.json' \
+      GITHUB_SHA=\$(git rev-parse HEAD) python3 scripts/check-history.py"
+
+  # `resolve-diet` decides staleness by asking the source what it EMBEDS. A
+  # grammar and a dogma template are compiled in; a conformance fixture and a
+  # register corpus are data the binary reads at test time. Before this, the
+  # whole of `diet/` counted, so editing a fixture made `--only regimen` exit
+  # 2 until the binary was relinked -- and `cargo build` did not clear it,
+  # because cargo correctly rebuilds nothing.
+  #
+  # EACH PUTS THE TREE BACK. These two touch a real file and then ask about
+  # the real binary, so an assertion that left the binary stale would hand
+  # every assertion after it a tree it did not make -- which is what happened:
+  # `a pin spelled with ./ is the same pin` read exit 2 from a grammar this
+  # block had touched three lines earlier.
+  expect_exit "a grammar makes the binary stale" 2 \
+    bash -c "cd '${ROOT}' && touch diet/src/lib.rs && cargo build --quiet --bin diet \
+      && touch diet/formats/record/grammar.pest \
+      ; python3 scripts/resolve-diet.py > /dev/null 2>&1; rc=\$? \
+      ; touch diet/src/lib.rs && cargo build --quiet --bin diet; exit \$rc"
+  expect_exit "a conformance fixture does not" 0 \
+    bash -c "cd '${ROOT}' && touch diet/src/lib.rs && cargo build --quiet --bin diet \
+      && touch diet/formats/record/fixtures/valid/minimal.expected.json \
+      ; python3 scripts/resolve-diet.py > /dev/null 2>&1; rc=\$? \
+      ; touch diet/src/lib.rs && cargo build --quiet --bin diet; exit \$rc"
+
+  # A BINARY WHOSE DEP-INFO CANNOT SAY WHAT IT EMBEDS IS NOT THEREBY FRESH.
+  #
+  # The narrowing above reads `target/debug/diet.d` for the embedded set.
+  # When there is none to read, `embedded()` used to return an empty list
+  # under a comment calling that "a smaller list, not a wrong one". Both
+  # halves of its reasoning were true and the conclusion was not: the answer
+  # this feeds is a NEGATIVE one -- nothing is newer than the binary -- and a
+  # list with the grammars missing produces that answer for a binary whose
+  # grammars have changed.
+  #
+  # Every binary pinned through `DIET_BIN` carries no `.d`, so the embedded
+  # half of rule three was switched off for exactly the case the rule was
+  # written about: a build handed in from somewhere else. It now falls back
+  # to the whole of `diet/`.
+  #
+  # Synthetic roots, not this one. The question is what the resolver does
+  # with a tree it cannot narrow, and building that state here would mean
+  # deleting dep-info from a real build the rest of this run depends on.
+  local depless; scratch; depless="$SCRATCH"
+  python3 - "$depless" <<'PYEOF'
+import os
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+# Fixed stamps rather than offsets from now, so the three cases differ by
+# years and no clock skew can reorder them.
+OLD, BUILT, NEW = 1577836800, 1609459200, 1767225600  # 2020, 2021, 2026
+CASES = ("a-grammar-it-embeds", "nothing-newer", "dep-info-narrows")
+TREE = (
+    "Cargo.toml",
+    "Cargo.lock",
+    "rust-toolchain.toml",
+    "diet/Cargo.toml",
+    "diet/src/lib.rs",
+    "diet/formats/record/grammar.pest",
+    "diet/formats/record/fixtures/one.json",
+)
+
+
+def stamp(path, when):
+    os.utime(path, (when, when))
+
+
+for case in CASES:
+    here = root / case
+    for name in TREE:
+        path = here / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x\n", encoding="utf-8")
+        stamp(path, OLD)
+    binary = here / "diet-bin"
+    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    binary.chmod(0o755)
+    stamp(binary, BUILT)
+
+# THE CASE: a grammar the binary embeds, changed after it was built. There is
+# no dep-info to say it is embedded, and it is under `diet/`.
+stamp(root / CASES[0] / "diet/formats/record/grammar.pest", NEW)
+
+# THE CONTROL is `nothing-newer`, left exactly as built above. It is what
+# keeps the case about a STALE binary rather than about pinning one: a
+# fallback that refused every dep-info-less binary would satisfy the first
+# assertion and break every pinned build.
+
+# AND THE NARROWING, still applying wherever cargo did write a list. This
+# `.d` names `diet/src/lib.rs` and nothing else, and the file made newer is
+# a test fixture the binary does not embed. Widening when there is no list
+# must not become widening when there is one.
+narrows = root / CASES[2]
+(narrows / "diet-bin.d").write_text(
+    f"{narrows / 'diet-bin'}: diet/src/lib.rs\n", encoding="utf-8"
+)
+stamp(narrows / "diet-bin.d", BUILT)
+stamp(narrows / "diet/formats/record/fixtures/one.json", NEW)
+PYEOF
+  expect_exit "a grammar changed under a binary with no dep-info is stale" 2 \
+    bash -c "cd '${depless}/a-grammar-it-embeds' \
+      && DIET_BIN='${depless}/a-grammar-it-embeds/diet-bin' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+  expect_exit "and a binary with no dep-info over an untouched tree resolves" 0 \
+    bash -c "cd '${depless}/nothing-newer' \
+      && DIET_BIN='${depless}/nothing-newer/diet-bin' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+  expect_exit "a dep-info that does narrow still narrows" 0 \
+    bash -c "cd '${depless}/dep-info-narrows' \
+      && DIET_BIN='${depless}/dep-info-narrows/diet-bin' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+
   # --- the resolver's own suite cannot report a pass it did not measure ---
   #
   # 0 from `check-merge-gate.py` is the only thing standing between a lane
@@ -5746,9 +5993,24 @@ PYEOF
       python3 '${ROOT}/scripts/resolve-diet.py'"
 
   # A pin honoured is not a pin ignored, whatever spelling it arrived in.
+  #
+  # WITH A SOURCE TO CHECK IT AGAINST. This used to run in a directory whose
+  # only content was a file named `diet`, and the staleness check took THAT as
+  # the crate -- `diet/` was a source root, `is_file()` matched, and the binary
+  # was compared against itself. The assertion passed for a reason that had
+  # nothing to do with pins, and it passed right beside a sibling asserting
+  # that a directory with no sources is a REFUSAL. It surfaced when `diet/`
+  # stopped being a source root (#50); it was resting on the coincidence the
+  # whole time.
+  local spelled; scratch; spelled="$SCRATCH"
+  mkdir -p "${spelled}/diet/src" "${spelled}/build"
+  : > "${spelled}/diet/src/lib.rs"
+  : > "${spelled}/Cargo.toml"
+  printf '#!/bin/sh\nexit 0\n' > "${spelled}/build/diet"
+  chmod +x "${spelled}/build/diet"
   expect_exit "a pin spelled with ./ is the same pin" 0 \
-    bash -c "cd '${pin}' && CARGO_TARGET_DIR= DIET_BIN=./diet \
-      python3 '${ROOT}/scripts/resolve-diet.py' --expect ./diet"
+    bash -c "cd '${spelled}' && CARGO_TARGET_DIR= DIET_BIN=./build/diet \
+      python3 '${ROOT}/scripts/resolve-diet.py' --expect ./build/diet"
 
   expect_exit "a file that cannot be run is not a build" 2 \
     bash -c "cd '${builds}' && CARGO_TARGET_DIR= DIET_BIN='${builds}/diet/src/main.rs' \
