@@ -210,8 +210,33 @@ fn a_drives_regime_crosses_from_the_regimen_without_being_paraphrased() {
         "and not as a debug rendering of the reader's own type: {start}"
     );
     assert!(
-        start.contains("\"arm\":\"dev-loop\"") && start.contains("\"name\":\"canned\""),
+        start.contains("\"arm\":\"dev-loop\"") && start.contains("\"id\":\"canned\""),
         "and the regime is the regimen's, not one this program wrote down: {start}"
+    );
+
+    // The substrate's identity is TYPED and COMPUTED. `weights` is the sha256
+    // of the acts the canned server played, taken from the same function the
+    // program takes it from -- a digest this test spelled out itself would
+    // pass while the program wrote a different one, and being the same on both
+    // sides is the entire content of the claim.
+    let digest = diet::drive::canned::acts_digest();
+    assert!(
+        start.contains(&format!("\"acts_sha256\":\"{digest}\"")),
+        "the identity is the acts, by digest: {start}"
+    );
+    // ITS OWN KIND, not `digest`. A canned server runs no weights, and reading
+    // its acts digest through the kind that means "these weights" would make
+    // that field mean two things told apart only by the engine's name. Gate 1
+    // compares a replay exactly and a re-firing within a band, so the kinds
+    // have to be distinguishable before either comparison is right. Ruled
+    // 2026-09-11.
+    assert!(
+        start.contains("\"kind\":\"canned\""),
+        "and it says which mechanism reproduces it: {start}"
+    );
+    assert!(
+        !start.contains("\"kind\":\"digest\""),
+        "not borrowing the kind that means weights: {start}"
     );
 }
 
@@ -248,7 +273,7 @@ fn every_drive_refusal_has_its_own_exit_code() {
                 ground.tree(),
                 ground.out(),
             ],
-            "substrate_model",
+            "substrate_reasoning",
         ),
         (
             vec![
@@ -293,5 +318,54 @@ fn every_drive_refusal_has_its_own_exit_code() {
     assert!(
         !ground.base.join("tree/one.txt").exists(),
         "and nothing ran: the output path is claimed before the first call"
+    );
+}
+
+#[test]
+fn a_drive_against_an_endpoint_that_answers_is_still_refused() {
+    // THE REFUSAL IS ABOUT IDENTITY, NOT REACHABILITY, and the first version
+    // of this test could not tell the two apart. It pointed the program at
+    // `127.0.0.1:1`, where nothing listens, so deleting the refusal made the
+    // test fail with `the main call did not answer` and exit 2 -- red, for a
+    // reason the test had not checked. A review found that by deleting the
+    // refusal and watching the test "catch" it through a connection error.
+    //
+    // So: a real server, on loopback, playing the same acts the canned one
+    // plays, which will answer every call this drive makes. Everything works
+    // except the one thing that must not.
+    //
+    // WHAT THE REFUSAL PREVENTS, and why it is worth a server to test: with it
+    // gone, this run exits 0 and writes a record whose `weights` is the
+    // sha256 of the LOCAL canned acts, while an external endpoint answered
+    // every call. That record is schema-legal, `diet check-record` accepts it,
+    // and gate 1 reads `Weights::Digest` as reproducible -- so a hosted
+    // substrate arrives in the results as a local one that anybody can
+    // reproduce. Laundering a substrate's identity is the exact thing the
+    // typed-weights ruling exists to refuse.
+    let stub = diet::client::stub::Stub::serving(diet::drive::canned::acts())
+        .expect("a loopback server to answer the drive");
+    let ground = Ground::make("answering-endpoint");
+    let (code, out, err) = run(
+        DRIVE,
+        &[
+            &regimen().to_string_lossy(),
+            &ground.tree(),
+            &ground.out(),
+            &stub.url(),
+        ],
+    );
+
+    assert_eq!(code, 1, "an input this program will not run: {out}{err}");
+    assert!(
+        out.contains("regimen v1 cannot say"),
+        "and it refuses over the substrate's identity, not over reaching the \
+         server it just declined to use: {out}"
+    );
+    // The other half of "not reachability": the stub is still bound and would
+    // have answered. A refusal that only happened because nothing was
+    // listening would leave this failing.
+    assert!(
+        !out.contains("did not answer") && !out.contains("could not"),
+        "nothing here is a connection failure: {out}"
     );
 }

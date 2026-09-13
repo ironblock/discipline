@@ -321,8 +321,17 @@ fn lost(entry: &Entry) -> Option<&'static str> {
 ///
 /// The lane a request belongs to travels on the `Sent` entry, so this needs
 /// nothing from outside the journal.
+///
+/// `substrate` is the id of the declared substrate these calls were put to,
+/// and it comes from the CALLER rather than from the journal because the
+/// journal does not carry one. That is not the reference being defaulted --
+/// the schema refuses a `request` row with no substrate, and refuses it even
+/// when a run declares exactly one, precisely so the reference cannot be
+/// inferred from a count. It is the caller stating what it knows: whoever
+/// made these calls chose the substrate to make them on, and `start` already
+/// declares it.
 #[must_use]
-pub fn project(journal: &Journal) -> Projection {
+pub fn project(journal: &Journal, substrate: &str) -> Projection {
     let mut events = Vec::new();
     let mut unspellable: Vec<Unspellable> = Vec::new();
     // Deduplicated by kind AND by what, not by kind alone. One kind can lose
@@ -351,6 +360,7 @@ pub fn project(journal: &Journal) -> Projection {
                 events.push(Event::Request {
                     id: id.clone(),
                     lane: lane.clone(),
+                    substrate: substrate.to_owned(),
                     retry_of: retry_of.clone(),
                     text: None,
                 });

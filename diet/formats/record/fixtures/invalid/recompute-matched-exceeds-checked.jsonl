@@ -1,0 +1,2 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"sampler_card":{"seed":7},"reasoning":"on","hardware_fingerprint":"one-gpu"}]}}
+{"record":"summary","kind":"recompute","targets_checked":1,"targets_matched":2,"digests":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}

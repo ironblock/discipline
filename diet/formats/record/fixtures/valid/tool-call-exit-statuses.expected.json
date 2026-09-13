@@ -1,5 +1,5 @@
 {
-  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrate\":{\"hardware\":\"one-gpu\",\"model\":\"a-model\",\"name\":\"local\",\"quantization\":\"q4\",\"reasoning\":\"on\",\"sampler\":{\"seed\":7}}}}\n{\"index\":1,\"prefill_tokens\":900,\"record\":\"turn\"}\n{\"id\":\"q1\",\"lane\":\"main\",\"record\":\"request\",\"text\":\"Run the suite under the memory cap, then the gate.\"}\n{\"args\":{\"command\":\"cargo test --workspace\"},\"at_turn\":1,\"exit\":137,\"id\":\"t1\",\"output\":\"error: process didn't exit successfully (signal: 9, SIGKILL: kill)\",\"record\":\"tool_call\",\"tool\":\"bash\"}\n{\"args\":{\"command\":\"./verify.sh --selftest\"},\"at_turn\":1,\"exit\":-1,\"id\":\"t2\",\"output\":\"\",\"record\":\"tool_call\",\"tool\":\"bash\"}\n{\"id\":\"a1\",\"output_tokens\":30,\"record\":\"response\",\"text\":\"The suite was killed at 137 and the gate never started.\",\"to_request\":\"q1\"}\n{\"prefill_tokens_total\":900,\"product_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"record\":\"summary\",\"turns\":1}\n",
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"one-gpu\",\"id\":\"local\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]}}\n{\"index\":1,\"prefill_tokens\":900,\"record\":\"turn\"}\n{\"id\":\"q1\",\"lane\":\"main\",\"record\":\"request\",\"substrate\":\"local\",\"text\":\"Run the suite under the memory cap, then the gate.\"}\n{\"args\":{\"command\":\"cargo test --workspace\"},\"at_turn\":1,\"exit\":137,\"id\":\"t1\",\"output\":\"error: process didn't exit successfully (signal: 9, SIGKILL: kill)\",\"record\":\"tool_call\",\"tool\":\"bash\"}\n{\"args\":{\"command\":\"./verify.sh --selftest\"},\"at_turn\":1,\"exit\":-1,\"id\":\"t2\",\"output\":\"\",\"record\":\"tool_call\",\"tool\":\"bash\"}\n{\"id\":\"a1\",\"output_tokens\":30,\"record\":\"response\",\"text\":\"The suite was killed at 137 and the gate never started.\",\"to_request\":\"q1\"}\n{\"kind\":\"drive\",\"prefill_tokens_total\":900,\"product_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"record\":\"summary\",\"turns\":1}\n",
   "kinds": [
     "start",
     "turn",
@@ -11,6 +11,9 @@
   "regime": {
     "arm": "baseline",
     "dogma_version": 0,
-    "substrate": "local"
+    "hosted_substrates": [],
+    "substrates": [
+      "local"
+    ]
   }
 }

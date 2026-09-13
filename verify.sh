@@ -637,9 +637,18 @@ seeded_case() {
   # reported as a gate that did not fire. That is the right verdict for the
   # wrong reason, and it costs a debugging session every time. Fingerprint the
   # sandbox instead, and say which of the two actually happened.
-  local state_before state_after
+  #
+  # AND THE INJECTION'S OWN EXIT STATUS IS EVIDENCE. It used to be discarded,
+  # and then an injection that did half its work -- `cp -r` a directory, then
+  # raise KeyError on a field the schema had renamed -- was graded on the tree
+  # it left behind. The tree HAD changed, so the fingerprint was satisfied;
+  # the check then passed on a copy of a valid directory and the case read
+  # GREEN, THE GATE DID NOT FIRE. It is not the gate that did not fire. Found
+  # by running it: item 3 renamed `substrate` to `substrates` and this case
+  # accused the gate of a fault that was in the injection.
+  local state_before state_after injected=0
   state_before="$(sandbox_state "$box")"
-  ( cd "$box" && "$inject" )
+  ( cd "$box" && "$inject" ) || injected=$?
   state_after="$(sandbox_state "$box")"
   case "${state_before}${state_after}" in
     *"${STATE_UNREADABLE}"*)
@@ -669,6 +678,16 @@ seeded_case() {
   # repository's binary older than its source for anything that resolved it
   # afterwards. The results-fixture loop below found that out.
   touch "${box}/diet/src/lib.rs" 2> /dev/null || true
+
+  # Before the fingerprint, because "the injection exited 1" says more than
+  # "the injection changed nothing" and a half-applied injection can satisfy
+  # the fingerprint while proving nothing.
+  if [ "$injected" -ne 0 ]; then
+    printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE INJECTION EXITED %d\n' \
+      "$(( SECONDS - started ))" "$check" "$label" "$injected"
+    SELFTEST_BROKEN+=("${label}: ${inject} exited ${injected}, so whatever it left is not the fault")
+    return
+  fi
 
   if [ "$state_before" = "$state_after" ]; then
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE INJECTION CHANGED NOTHING\n' \
@@ -841,30 +860,293 @@ inject_record_depth_unbounded() {
   sed -i 's|^    if depth > MAX_DEPTH {$|    if false {|' diet/src/formats/record/mod.rs
 }
 
+# The kind's own fields made advisory. `turns` is drained and thrown away on a
+# recompute summary, so the row is accepted and the number nobody can compute
+# is simply not there afterwards -- which is exactly the "tolerate the stray
+# field" change somebody makes when a producer emits one, and exactly what
+# #47's acceptance row exists to refuse.
+inject_record_summary_kind_fields_advisory() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """        SummaryKind::Recompute => Summary::Recompute {
+            targets_checked: take_u32(members, of, "targets_checked")?,"""
+new = """        SummaryKind::Recompute => Summary::Recompute {
+            targets_checked: {
+                members.remove("turns");
+                take_u32(members, of, "targets_checked")?
+            },"""
+if source.count(old) != 1:
+    raise SystemExit(f"the recompute arm appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# The one total a recompute summary can contradict on its own, left unchecked.
+# Nothing counts a recompute's targets, so this is the only rule that can tell
+# a summary that cannot be true of itself from one that merely surprises you.
+inject_record_summary_impossible_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """                if targets_matched > targets_checked {"""
+new = """                if false && targets_matched > targets_checked {"""
+if source.count(old) != 1:
+    raise SystemExit(f"the impossible-total check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# A reference that resolves to whatever it names. `declares` answers yes for
+# every id, so a row served by a substrate the run never declared reads as a
+# row served by one it did -- and the regime the result is attributed to is a
+# regime nothing in the file describes. The reference is the whole mechanism:
+# without the check it is a string somebody typed.
+# The product digest made the drive's business again -- read per kind, checked
+# per kind -- which is where it lived until 2026-09-11 and is the defect that
+# ruling closed. A recompute summary is then accepted carrying no digest of
+# the product it produced, and every results directory whose record is a
+# recompute becomes unlintable: `check-results.py` requires `product_sha256`
+# in the front-matter and requires it to equal the summary's, and there is
+# nothing there to equal. Nothing in the tree noticed for a day, because no
+# fixture crossed the schema and the directory linter.
+inject_record_recompute_digest_optional() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+
+read_now = """        Kind::Summary => Event::Summary {
+            summary: summary(&mut members, of)?,
+"""
+read_then = """        Kind::Summary => {
+            let summary = summary(&mut members, of)?;
+            let product_sha256 = match summary.kind() {
+                SummaryKind::Drive => take_string(&mut members, of, "product_sha256")?,
+                SummaryKind::Recompute => String::new(),
+            };
+            Event::Summary {
+                summary,
+"""
+check_now = """        if !digest_ok(product_sha256) {
+            return Err(StructureError::BadDigest(product_sha256.to_owned()).into());
+        }
+"""
+check_then = """        if matches!(summary, Summary::Drive { .. }) && !digest_ok(product_sha256) {
+            return Err(StructureError::BadDigest(product_sha256.to_owned()).into());
+        }
+"""
+for old in (read_now, check_now):
+    if source.count(old) != 1:
+        raise SystemExit(f"the anchor appears {source.count(old)} times")
+source = source.replace(read_now, read_then, 1).replace(check_now, check_then, 1)
+
+# The arm's tail, now one brace deeper.
+tail_now = """            product_sha256: take_string(&mut members, of, "product_sha256")?,
+        },
+    };
+"""
+tail_then = """                product_sha256,
+            }
+        }
+    };
+"""
+if source.count(tail_now) != 1:
+    raise SystemExit(f"the arm's tail appears {source.count(tail_now)} times")
+path.write_text(source.replace(tail_now, tail_then, 1), encoding="utf-8")
+EOF
+}
+inject_record_substrate_reference_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "        self.substrates.iter().any(|s| s.id == id)"
+new = "        let _ = id;\n        true"
+if source.count(old) != 1:
+    raise SystemExit(f"`declares` body appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# The reference made optional, resolved to the only declared substrate. Every
+# record in the corpus still parses -- they all declare one -- which is what
+# makes it the tempting change and what makes it worth a seeded fault: the
+# same three lines then mean something different in a two-substrate run, and
+# nothing in the row says so.
+inject_record_substrate_defaults_when_alone() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            substrate: take_string(&mut members, of, "substrate")?,\n            retry_of:'
+new = ('            substrate: take_optional_string(&mut members, of, "substrate")?\n'
+       '                .unwrap_or_else(|| "local".to_owned()),\n'
+       '            retry_of:')
+if source.count(old) != 1:
+    raise SystemExit(f"the request arm appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# Weights identified by whatever string is there. A name is prose: two runs
+# can spell the same weights differently and a third can spell different
+# weights the same, and then a regime comparison compares strings.
+# A canned substrate that may decline to identify itself. The acts are the
+# whole identity a server with no weights has, so a `canned` kind that does
+# not have to carry them is the null the typed identity was adopted to remove,
+# wearing the new kind's name.
+inject_record_canned_acts_optional() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+# BOTH halves, or the injection is inert. Making only the read optional leaves
+# the empty string failing `digest_ok`, so the fixture is still refused -- with
+# a different message and the same verdict, which the selftest grades GREEN
+# because the gate never stopped firing. It did, on the first attempt.
+old = """            let text = take_string(&mut members, of, "acts_sha256")?;
+            if !digest_ok(&text) {
+                return Err(StructureError::BadDigest(text).into());
+            }
+            Weights::Canned { acts_sha256: text }"""
+new = """            Weights::Canned {
+                acts_sha256: take_string(&mut members, of, "acts_sha256").unwrap_or_default(),
+            }"""
+if source.count(old) != 1:
+    raise SystemExit(f"the canned acts block appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+inject_record_weights_named_not_digested() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            let text = take_string(&mut members, of, "sha256")?;\n            if !digest_ok(&text) {'
+new = '            let text = take_string(&mut members, of, "sha256")?;\n            if false && !digest_ok(&text) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the weights check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# A lane free to change substrate mid-run. Then a `rejected` row, which
+# carries a lane and no substrate, has two answers to inherit from -- and the
+# one that answers is whichever the lookup happens to find first.
+inject_record_lane_may_change_substrate() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            if let Some(was) = lanes.insert(lane.as_str(), id.as_str())\n                && was != id\n'
+new = '            if let Some(was) = lanes.insert(lane.as_str(), id.as_str())\n                && false\n                && was != id\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the lane check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+inject_record_substrate_reference_inferred_from_a_count() {
+  python3 - <<'EOF'
+import pathlib
+
+# THE REFERENCE, RESOLVED BY COUNTING. Enforcing it only when the run declares
+# more than one substrate is the plausible edit -- with one declared there is
+# nothing to choose between, so the check looks like a formality. It is not:
+# the field exists so that a row's substrate is never inferred from how many
+# there are, and this is the shape that inference takes.
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            if let Some(known) = regime.as_ref()\n                && !known.declares(id)\n'
+new = (
+    '            if let Some(known) = regime.as_ref()\n'
+    '                && known.substrate_ids().len() > 1\n'
+    '                && !known.declares(id)\n'
+)
+if source.count(old) != 1:
+    raise SystemExit(f"the declares check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+inject_record_a_fork_names_no_substrate() {
+  python3 - <<'EOF'
+import pathlib
+
+# THE FORK ARM, DROPPED. A fork is how a run reaches a second substrate, so it
+# is the row most able to name one nothing declared -- and both substrate
+# rules read request and fork rows through the same match. Removing the fork
+# arm leaves every request-shaped fixture passing.
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Event::Fork {\n                lane, substrate, ..\n            } => Some(("fork", lane, substrate)),\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the fork arm appears {source.count(old)} times")
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
 inject_record_substrate_optional() {
   python3 - <<'EOF'
 import pathlib
 
 path = pathlib.Path("diet/src/formats/record/mod.rs")
 source = path.read_text(encoding="utf-8")
-old = '    let mut substrate_members = take_object(members, of, "substrate")?;'
-new = """    let mut substrate_members = take_object(members, of, "substrate").unwrap_or_else(|_| {
-        BTreeMap::from([
-            ("name".to_owned(), Value::String("unknown".to_owned())),
-            ("model".to_owned(), Value::String("unknown".to_owned())),
-            ("quantization".to_owned(), Value::String("unknown".to_owned())),
+old = """    let Some(value) = members.remove("substrates") else {
+        return Err(SchemaError::MissingField {
+            of,
+            field: "substrates",
+        }
+        .into());
+    };"""
+new = """    let value = members.remove("substrates").unwrap_or_else(|| {
+        Value::Array(vec![Value::Object(BTreeMap::from([
+            ("id".to_owned(), Value::String("unknown".to_owned())),
             (
-                "sampler".to_owned(),
+                "engine".to_owned(),
+                Value::Object(BTreeMap::from([
+                    ("name".to_owned(), Value::String("unknown".to_owned())),
+                    (
+                        "version_or_digest".to_owned(),
+                        Value::String("unknown".to_owned()),
+                    ),
+                ])),
+            ),
+            (
+                "weights".to_owned(),
+                Value::Object(BTreeMap::from([
+                    ("kind".to_owned(), Value::String("digest".to_owned())),
+                    ("sha256".to_owned(), Value::String("0".repeat(64))),
+                ])),
+            ),
+            (
+                "hardware_fingerprint".to_owned(),
+                Value::String("unknown".to_owned()),
+            ),
+            (
+                "sampler_card".to_owned(),
                 Value::Object(BTreeMap::from([(
                     "seed".to_owned(),
                     Value::Integer(0),
                 )])),
             ),
             ("reasoning".to_owned(), Value::String("off".to_owned())),
-            ("hardware".to_owned(), Value::String("unknown".to_owned())),
-        ])
+        ]))])
     });"""
-assert old in source
+if source.count(old) != 1:
+    raise SystemExit(f"the substrates guard appears {source.count(old)} times")
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
@@ -1575,19 +1857,31 @@ inject_results() {
 # A run.jsonl whose start row has lost its substrate. The report is fine; the
 # record is not a session record, and only diet says so -- the linter must
 # relay that verdict and reach none of its own.
-inject_results_no_substrate() {
-  cp -r results/_template results/2026-01-30-no-substrate
-  python3 - <<'EOF'
-import json, pathlib
+# Take the declared substrates out of a record's `start` row.
+#
+# ONE READER, because there were two and they went stale one at a time. The
+# seeded case and the mechanics assertion below both need this exact edit --
+# the case makes it inside a sandbox, the assertion inside a scratch relay --
+# and each carried its own copy of the four lines. Item 3 renamed the field,
+# the copies were fixed one run apart, and the second cost a whole selftest to
+# find. The edit is spelled here now and both call it.
+strip_substrates() {
+  python3 - "$1" <<'EOF'
+import json, pathlib, sys
 
-path = pathlib.Path("results/2026-01-30-no-substrate/run.jsonl")
+path = pathlib.Path(sys.argv[1])
 lines = path.read_text(encoding="utf-8").split("\n")
 row = json.loads(lines[0])
-assert row["record"] == "start"
-del row["regime"]["substrate"]
+assert row["record"] == "start", "the first row of a record is its start"
+del row["regime"]["substrates"]
 lines[0] = json.dumps(row, separators=(",", ":"))
 path.write_text("\n".join(lines), encoding="utf-8")
 EOF
+}
+
+inject_results_no_substrate() {
+  cp -r results/_template results/2026-01-30-no-substrate
+  strip_substrates results/2026-01-30-no-substrate/run.jsonl
 }
 
 # A run directory inside a run directory. Every walker is one level deep, so
@@ -1790,8 +2084,8 @@ report.write_text(source.replace("turns = 2\n", "turns = 3\n", 1), encoding="utf
 
 record = pathlib.Path("results/_template/run.jsonl")
 source = record.read_text(encoding="utf-8")
-old = '{"record":"summary","turns":2,'
-new = '{"record":"summary","turns":3,'
+old = '{"record":"summary","kind":"drive","turns":2,'
+new = '{"record":"summary","kind":"drive","turns":3,'
 assert old in source
 record.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -4750,6 +5044,26 @@ selftest() {
     'no fixture.*spurious' 'lib/formats::record::tests'
   seeded_case "record substrate made optional"        test     inject_record_substrate_optional \
     'regime-missing-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a summary kind's fields made advisory" test     inject_record_summary_kind_fields_advisory \
+    'recompute-summary-carries-turns\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a recompute summary with no product digest" test inject_record_recompute_digest_optional \
+    'recompute-summary-without-its-product-digest\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a summary that cannot be true of itself" test   inject_record_summary_impossible_unchecked \
+    'recompute-matched-exceeds-checked\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a substrate reference that resolves to anything" test inject_record_substrate_reference_unchecked \
+    'lane-names-an-undeclared-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a substrate reference defaulted when alone" test inject_record_substrate_defaults_when_alone \
+    'request-with-no-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "weights identified by name"            test     inject_record_weights_named_not_digested \
+    'weights-named-not-digested\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a canned substrate that need not say which acts" test inject_record_canned_acts_optional \
+    'canned-with-no-acts-digest\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a lane free to change substrate"       test     inject_record_lane_may_change_substrate \
+    'lane-changes-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a substrate reference inferred from a count" test inject_record_substrate_reference_inferred_from_a_count \
+    'one-substrate-and-a-request-elsewhere\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a fork that names no substrate"         test     inject_record_a_fork_names_no_substrate \
+    'fork-names-an-undeclared-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
     'retry-of-itself\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "record nesting left unbounded"         test     inject_record_depth_unbounded \
@@ -4905,8 +5219,8 @@ selftest() {
     'object.rs: no .mod. declaration reaches it'
   seeded_case "a stringly predicate cargo fmt wrapped" library inject_stringly_or_pattern \
     'a_decision_tag_that_is_quite_long_indeed'
-  seeded_case "a record missing its substrate"        results  inject_results_no_substrate \
-    'says diet check-record: a .start. row is missing its required .substrate.'
+  seeded_case "a record missing its substrates"       results  inject_results_no_substrate \
+    'says diet check-record: a .start. row is missing its required .substrates.'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
     'front-matter `turns` states 3 but the summary record binds'
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \
@@ -5258,20 +5572,11 @@ selftest() {
   # remove.
   local relay; scratch; relay="$SCRATCH"
   cp -r "${ROOT}/results/_template" "${relay}/2026-01-30-no-substrate"
-  python3 - "${relay}/2026-01-30-no-substrate/run.jsonl" <<'EOF'
-import json, pathlib, sys
-
-path = pathlib.Path(sys.argv[1])
-lines = path.read_text(encoding="utf-8").split("\n")
-row = json.loads(lines[0])
-del row["regime"]["substrate"]
-lines[0] = json.dumps(row, separators=(",", ":"))
-path.write_text("\n".join(lines), encoding="utf-8")
-EOF
+  strip_substrates "${relay}/2026-01-30-no-substrate/run.jsonl"
   expect_exit "a record diet refuses gets no verdict from the linter" 0 \
     bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
       && out=\$(python3 scripts/check-results.py '${relay}/2026-01-30-no-substrate' 2>&1; true) \
-      && grep -q 'says diet check-record: a .start. row is missing its required .substrate.' <<<\"\$out\" \
+      && grep -q 'says diet check-record: a .start. row is missing its required .substrates.' <<<\"\$out\" \
       && ! grep -qE 'front-matter|summary row|product_sha256' <<<\"\$out\" \
       && grep -q 'record verdicts from .* sha256=' <<<\"\$out\""
 

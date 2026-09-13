@@ -41,7 +41,7 @@ use diet::client::stub::Stub;
 use diet::client::transport::{Endpoint, Http};
 use diet::drive::{Gym, Halt, canned, run};
 use diet::formats::record::json::{self, Value};
-use diet::formats::record::{Reasoning, Regime, Substrate};
+use diet::formats::record::{Engine, Reasoning, Regime, Substrate, Weights};
 use diet::formats::regimen::{self, Regimen};
 use diet::isolation::{self, Policy as IsolationPolicy};
 use diet::seam::policy::Policy as SeamPolicy;
@@ -64,14 +64,16 @@ const EXIT_INPUT: u8 = 1;
 /// one number would be counted together.
 const EXIT_OUTPUT: u8 = 3;
 
-/// The keys this program reads for the four regime facts a regimen v1 has no
-/// place for, named after the record's own field paths.
-const SUBSTRATE_KEYS: &[&str] = &[
-    "substrate_model",
-    "substrate_quantization",
-    "substrate_reasoning",
-    "substrate_hardware",
-];
+/// The keys this program reads for the regime facts a regimen v1 has no place
+/// for, named after the record's own field paths.
+///
+/// `substrate_model` and `substrate_quantization` used to be here and are not
+/// any more. Item 3 made a substrate's identity TYPED -- a sha256 of the
+/// weights, or a named hosted model with a version -- and a model's prose name
+/// beside a quantization label is neither. Reading them and calling the result
+/// an identity is the one thing the ruling excludes, so this program stopped
+/// reading them rather than keep two keys whose only use was to be misread.
+const SUBSTRATE_KEYS: &[&str] = &["substrate_reasoning", "substrate_hardware"];
 
 fn usage() -> String {
     let mut out =
@@ -106,7 +108,21 @@ fn main() -> ExitCode {
         return ExitCode::from(EXIT_USAGE);
     }
 
-    let (regime, isolation_policy, seam_policy) = match declared(regimen_path) {
+    // Parsed BEFORE the regime, because the two refusals are about different
+    // things and the first one reached is the one reported. A URL that was
+    // never an endpoint should be told it is not an endpoint, not told what
+    // regimen v1 cannot say about the substrate behind it.
+    let given = match args.get(3) {
+        Some(url) => match Endpoint::parse(url) {
+            Ok(endpoint) => Some(endpoint),
+            Err(why) => {
+                return fail(EXIT_INPUT, &format!("`{url}` is not an endpoint: {why:?}"));
+            }
+        },
+        None => None,
+    };
+
+    let (regime, isolation_policy, seam_policy) = match declared(regimen_path, given.is_some()) {
         Ok(three) => three,
         Err((code, why)) => return fail(code, &why),
     };
@@ -144,7 +160,7 @@ fn main() -> ExitCode {
     // `held` is not an unused binding: dropping the stub stops its serving
     // thread, and a canned server that stopped mid-drive would reach the
     // client as a substrate that hung up. It lives as long as the run does.
-    let (held, endpoint) = match answering(args.get(3)) {
+    let (held, endpoint) = match answering(given) {
         Ok(pair) => pair,
         Err((code, why)) => return fail(code, &why),
     };
@@ -179,12 +195,19 @@ fn main() -> ExitCode {
 }
 
 /// Everything the regimen at `path` declares that a drive needs.
-fn declared(path: &str) -> Result<(Regime, IsolationPolicy, SeamPolicy), (u8, String)> {
+///
+/// `endpoint_given` is not a detail of the regimen and is passed anyway: the
+/// substrate's identity depends on what serves it, and a regimen cannot know
+/// that.
+fn declared(
+    path: &str,
+    endpoint_given: bool,
+) -> Result<(Regime, IsolationPolicy, SeamPolicy), (u8, String)> {
     let text = std::fs::read_to_string(path)
         .map_err(|why| (EXIT_INPUT, format!("{path} could not be read: {why}")))?;
     let regimen = regimen::parse(&text)
         .map_err(|why| (EXIT_INPUT, format!("{path} is not a regimen: {why:?}")))?;
-    let regime = regime_of(&regimen).map_err(|why| (EXIT_INPUT, why))?;
+    let regime = regime_of(&regimen, endpoint_given).map_err(|why| (EXIT_INPUT, why))?;
     let isolation_policy = IsolationPolicy::from_regimen(&regimen)
         .map_err(|why| (EXIT_INPUT, format!("its isolation policy: {why}")))?;
     let seam_policy = SeamPolicy::from_regimen(&regimen)
@@ -198,18 +221,16 @@ fn declared(path: &str) -> Result<(Regime, IsolationPolicy, SeamPolicy), (u8, St
 /// The stub comes back so the caller can hold it: dropped, it stops the
 /// serving thread, and a canned server that stopped mid-drive would look like
 /// a substrate that hung up.
-fn answering(given: Option<&String>) -> Result<(Option<Stub>, Endpoint), (u8, String)> {
-    let (served, url) = if let Some(endpoint) = given {
-        (None, endpoint.clone())
-    } else {
-        let stub = Stub::serving(canned::acts())
-            .map_err(|why| (EXIT_HALT, format!("the canned server did not bind: {why}")))?;
-        let url = stub.url();
-        (Some(stub), url)
-    };
+fn answering(given: Option<Endpoint>) -> Result<(Option<Stub>, Endpoint), (u8, String)> {
+    if let Some(endpoint) = given {
+        return Ok((None, endpoint));
+    }
+    let stub = Stub::serving(canned::acts())
+        .map_err(|why| (EXIT_HALT, format!("the canned server did not bind: {why}")))?;
+    let url = stub.url();
     let endpoint = Endpoint::parse(&url)
         .map_err(|why| (EXIT_INPUT, format!("`{url}` is not an endpoint: {why:?}")))?;
-    Ok((served, endpoint))
+    Ok((Some(stub), endpoint))
 }
 
 /// Write the record and the product, and report where they went.
@@ -314,7 +335,24 @@ fn fail(code: u8, why: &str) -> ExitCode {
 }
 
 /// The regime `regimen` declares, or the list of what it is missing.
-fn regime_of(regimen: &Regimen) -> Result<Regime, String> {
+fn regime_of(regimen: &Regimen, endpoint_given: bool) -> Result<Regime, String> {
+    // WHAT ACTUALLY SERVED decides this, not what the regimen says served.
+    // A regimen naming a substrate is a declaration; a run against the canned
+    // server is a fact, and the identity written into the record has to be the
+    // second. This is the same argument as `substrate` coming from the caller
+    // in `client::journal::project`, one level up.
+    if endpoint_given {
+        return Err(
+            "an endpoint was given, and regimen v1 cannot say WHICH weights are behind it. \
+             Item 3 made a substrate's identity typed -- `weights` is a sha256 of the weights \
+             or a hosted `provider`/`model_id`/`version_or_date_observed` -- and this program \
+             will not invent either from a prose model name. The registry that resolves a \
+             substrate id to those facts lands with the equipment registry; until it does, \
+             `diet-drive` runs against its own canned server, whose identity it can compute"
+                .to_owned(),
+        );
+    }
+
     let mut missing = Vec::new();
     let mut text = |key: &'static str| match regimen.get(key) {
         Some(regimen::Value::String(value)) if !value.is_empty() => value.clone(),
@@ -325,11 +363,9 @@ fn regime_of(regimen: &Regimen) -> Result<Regime, String> {
     };
 
     let arm = text("arm");
-    let name = text("substrate");
-    let model = text(SUBSTRATE_KEYS[0]);
-    let quantization = text(SUBSTRATE_KEYS[1]);
-    let reasoning_written = text(SUBSTRATE_KEYS[2]);
-    let hardware = text(SUBSTRATE_KEYS[3]);
+    let id = text("substrate");
+    let reasoning_written = text(SUBSTRATE_KEYS[0]);
+    let hardware_fingerprint = text(SUBSTRATE_KEYS[1]);
 
     let Some(regimen::Value::Integer(dogma_version)) = regimen.get("dogma_version") else {
         missing.push("dogma_version");
@@ -375,16 +411,35 @@ fn regime_of(regimen: &Regimen) -> Result<Regime, String> {
         ));
     };
 
+    // ONE substrate, because this program serves one. A regime may now carry
+    // several -- a drive whose interview fork runs on a small local model while
+    // the main lane runs a large one is the arrangement this repository exists
+    // to measure -- and `diet-drive` makes every call to the same server, so a
+    // second entry here would be a substrate nothing was put to.
     Ok(Regime {
         arm,
-        substrate: Substrate {
-            name,
-            model,
-            quantization,
-            sampler,
+        substrates: vec![Substrate {
+            id,
+            // The canned server IS this program, and what it plays is the acts.
+            // Naming the same artifact twice is the truth about it; giving the
+            // engine a version of its own would be inventing a second fact to
+            // fill a second field.
+            engine: Engine {
+                name: "diet-drive canned".to_owned(),
+                version_or_digest: canned::acts_digest(),
+            },
+            // Computed, not declared, and its OWN kind rather than a digest
+            // wearing `Digest`'s name. A canned server serves no weights, and
+            // saying so with the variant is what lets gate 1 compare a replay
+            // exactly instead of re-firing it within a band meant for sampling
+            // and hardware that cannot move here. Ruled 2026-09-11.
+            weights: Weights::Canned {
+                acts_sha256: canned::acts_digest(),
+            },
+            hardware_fingerprint,
+            sampler_card: sampler,
             reasoning,
-            hardware,
-        },
+        }],
         dogma_version,
     })
 }
@@ -428,7 +483,12 @@ fn sampled(value: &regimen::Value) -> Value {
 /// The request every call is a variation of.
 fn shape(regime: &Regime) -> RequestShape {
     RequestShape {
-        model: regime.substrate.model.clone(),
+        // The substrate's id, because the schema no longer carries a model
+        // name and this program no longer drives anything that would read one:
+        // the canned server answers whatever it is asked. When a real endpoint
+        // is drivable again the wire name is one of the facts the registry has
+        // to supply, and it is named in the refusal in `regime_of`.
+        model: regime.substrates[0].id.clone(),
         messages: vec![Message::new(Role::User, "replaced per call")],
         // Nothing pinned. A drive that pinned a sampler setting the regimen
         // declares would be pinning it twice -- once in the regime it records

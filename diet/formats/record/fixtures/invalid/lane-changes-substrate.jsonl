@@ -1,0 +1,7 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"big","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"two-gpu","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on"},{"id":"small","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"hardware_fingerprint":"one-gpu","sampler_card":{"seed":7,"temperature":0.0},"reasoning":"off"}]}}
+{"record":"turn","index":1,"prefill_tokens":1024}
+{"record":"request","id":"q1","lane":"main","substrate":"big","text":"Find where the parser drops a line."}
+{"record":"response","id":"a1","to_request":"q1","output_tokens":40,"text":"In the caller."}
+{"record":"request","id":"q2","lane":"main","substrate":"small","text":"And again, cheaper."}
+{"record":"response","id":"a2","to_request":"q2","output_tokens":40,"text":"In the caller."}
+{"record":"summary","kind":"drive","turns":1,"prefill_tokens_total":1024,"product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}

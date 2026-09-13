@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 297
+red_faults = 308
 mechanics_assertions = 48
 migrated = 0
 
@@ -135,6 +135,76 @@ target = "lib/formats::record::tests"
 label = "an event kind with no fixture"
 failure_class = "format.kind-without-fixture"
 legacy_signature = "no fixture.*spurious"
+migrated = false
+
+[[fault]]
+id = "test.record_summary_kind_fields_advisory"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a summary kind's fields made advisory"
+failure_class = "schema.kind-field-not-refused"
+legacy_signature = "recompute-summary-carries-turns\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_recompute_digest_optional"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a recompute summary with no product digest"
+failure_class = "schema.summary-product-digest-optional"
+legacy_signature = "recompute-summary-without-its-product-digest\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_summary_impossible_unchecked"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a summary that cannot be true of itself"
+failure_class = "schema.summary-impossible-accepted"
+legacy_signature = "recompute-matched-exceeds-checked\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_substrate_reference_unchecked"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a substrate reference that resolves to anything"
+failure_class = "schema.substrate-reference-unchecked"
+legacy_signature = "lane-names-an-undeclared-substrate\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_substrate_defaults_when_alone"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a substrate reference defaulted when alone"
+failure_class = "schema.substrate-reference-defaulted"
+legacy_signature = "request-with-no-substrate\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_weights_named_not_digested"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "weights identified by name"
+failure_class = "schema.weights-not-digested"
+legacy_signature = "weights-named-not-digested\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_lane_may_change_substrate"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a lane free to change substrate"
+failure_class = "schema.lane-changed-substrate"
+legacy_signature = "lane-changes-substrate\\.jsonl: accepted as"
 migrated = false
 
 [[fault]]
@@ -341,9 +411,9 @@ migrated = false
 id = "results.results_no_substrate"
 kind = "seeded-gate"
 check = "results"
-label = "a record missing its substrate"
+label = "a record missing its substrates"
 failure_class = "results.record-not-a-record"
-legacy_signature = "says diet check-record: a .start. row is missing its required .substrate."
+legacy_signature = "says diet check-record: a .start. row is missing its required .substrates."
 migrated = false
 
 [[fault]]
@@ -2435,15 +2505,6 @@ legacy_signature = "does not compare the report to the artefacts"
 migrated = false
 
 [[fault]]
-id = "recompute.recompute_probe_blinded_by_a_comment"
-kind = "seeded-gate"
-check = "recompute"
-label = "a probe blinded by a trailing comment"
-failure_class = "results.recompute-cannot-fail"
-legacy_signature = "does not compare the report to the artefacts"
-migrated = false
-
-[[fault]]
 id = "recompute.recompute_tampers"
 kind = "seeded-gate"
 check = "recompute"
@@ -2470,30 +2531,11 @@ failure_class = "results.provenance-escapes-the-directory"
 migrated = false
 
 [[fault]]
-id = "mech.shards-that-disagree-about-how-many-there-are"
-kind = "mechanics"
-check = "parity"
-label = "shards that disagree about how many there are"
-failure_class = "selftest.census-not-a-whole"
-legacy_signature = ""
-migrated = false
-
-[[fault]]
-id = "mech.an-ordinal-outside-the-manifest-s-range"
-kind = "mechanics"
-check = "parity"
-label = "an ordinal outside the manifest's range"
-failure_class = "selftest.census-not-a-whole"
-legacy_signature = ""
-migrated = false
-
-[[fault]]
-id = "mech.a-census-claiming-to-be-a-shard-that-cannot-exist"
-kind = "mechanics"
-check = "parity"
-label = "a census claiming to be a shard that cannot exist"
-failure_class = "selftest.census-not-a-whole"
-legacy_signature = ""
+id = "results.2026-01-29-hosted-weights-called-reproducible"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-29-hosted-weights-called-reproducible"
+failure_class = "results.hosted-cannot-be-reproducible"
 migrated = false
 
 [[fault]]
@@ -3143,15 +3185,6 @@ failure_class = "grammar.terminal-defined-twice"
 legacy_signature = "it belongs in number\\.pest and nowhere else"
 migrated = false
 [[fault]]
-id = "test.number_terminal_body_regrown"
-kind = "seeded-gate"
-check = "test"
-target = "test:conformance/the_integer_terminal"
-label = "a shared body written out under another name"
-failure_class = "grammar.terminal-defined-twice"
-legacy_signature = "has a shared terminal.s body written out again"
-migrated = false
-[[fault]]
 id = "recompute.recompute_historical_with_a_script"
 kind = "seeded-gate"
 check = "recompute"
@@ -3168,6 +3201,41 @@ failure_class = "gate-zero.historical-without-a-reason"
 legacy_signature = "states no .historical_reason."
 migrated = false
 [[fault]]
+id = "recompute.recompute_only_the_template_recomputes"
+kind = "seeded-gate"
+check = "recompute"
+label = "only the template recomputes"
+failure_class = "gate-zero.nothing-recomputed"
+legacy_signature = "results are present and none recomputed"
+migrated = false
+[[fault]]
+id = "mech.shards-that-disagree-about-how-many-there-are"
+kind = "mechanics"
+check = "parity"
+label = "shards that disagree about how many there are"
+failure_class = "selftest.census-not-a-whole"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.an-ordinal-outside-the-manifest-s-range"
+kind = "mechanics"
+check = "parity"
+label = "an ordinal outside the manifest's range"
+failure_class = "selftest.census-not-a-whole"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-census-claiming-to-be-a-shard-that-cannot-exist"
+kind = "mechanics"
+check = "parity"
+label = "a census claiming to be a shard that cannot exist"
+failure_class = "selftest.census-not-a-whole"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
 id = "recompute.recompute_historical_reason_blank"
 kind = "seeded-gate"
 check = "recompute"
@@ -3178,13 +3246,35 @@ legacy_signature = "states no .historical_reason."
 migrated = false
 
 [[fault]]
-id = "recompute.recompute_only_the_template_recomputes"
+id = "test.record_substrate_reference_inferred_from_a_count"
 kind = "seeded-gate"
-check = "recompute"
-label = "only the template recomputes"
-failure_class = "gate-zero.nothing-recomputed"
-legacy_signature = "results are present and none recomputed"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a substrate reference inferred from a count"
+failure_class = "schema.undeclared-substrate"
+legacy_signature = "one-substrate-and-a-request-elsewhere\\.jsonl: accepted as"
 migrated = false
+
+[[fault]]
+id = "test.record_a_fork_names_no_substrate"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a fork that names no substrate"
+failure_class = "schema.undeclared-substrate"
+legacy_signature = "fork-names-an-undeclared-substrate\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "test.record_canned_acts_optional"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a canned substrate that need not say which acts"
+failure_class = "schema.canned-without-acts"
+legacy_signature = "canned-with-no-acts-digest\\.jsonl: accepted as"
+migrated = false
+
 [[fault]]
 id = "injections.injections_literal_unplaceable"
 kind = "seeded-gate"
@@ -3220,6 +3310,24 @@ failure_class = "resolver.suite-cannot-run"
 expected_exit = "2"
 migrated = false
 
+[[fault]]
+id = "recompute.recompute_probe_blinded_by_a_comment"
+kind = "seeded-gate"
+check = "recompute"
+label = "a probe blinded by a trailing comment"
+failure_class = "results.recompute-cannot-fail"
+legacy_signature = "does not compare the report to the artefacts"
+migrated = false
+
+[[fault]]
+id = "test.number_terminal_body_regrown"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/the_integer_terminal"
+label = "a shared body written out under another name"
+failure_class = "grammar.terminal-defined-twice"
+legacy_signature = "has a shared terminal.s body written out again"
+migrated = false
 [[fault]]
 id = "mech.a-half-merged-verify-sh-is-refused-rather-than-counted"
 kind = "mechanics"

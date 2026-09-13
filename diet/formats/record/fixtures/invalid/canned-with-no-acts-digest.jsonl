@@ -1,0 +1,3 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"canned","engine":{"name":"diet-drive canned","version_or_digest":"8947e69543df56300d85ed571a6799d66b25a51c18c6d456193918864d7f5e9d"},"weights":{"kind":"canned"},"hardware_fingerprint":"fc96af4713f9aaa26f2b7bda27720b497ec3d30c6edd9292da5fa8be8e0c37b0","sampler_card":{"seed":7},"reasoning":"off"}]}}
+{"record":"turn","index":1,"prefill_tokens":1024}
+{"record":"request","id":"q1","lane":"main","substrate":"canned","text":"Find where the parser drops a line."}

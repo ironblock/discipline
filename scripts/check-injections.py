@@ -47,7 +47,9 @@ FUNC_BODY = re.compile(r"^(inject_[a-z0-9_]+)\(\) \{\n(.*?)^\}\n", re.M | re.S)
 # "changed nothing"; that is forty minutes away and this is not.
 # Every helper an injection may call, sourced alongside it. Extracted by name
 # rather than by sourcing verify.sh, which would run the gate.
-HELPERS = re.compile(r"^(?:seed_commit)\(\) \{\n.*?^\}\n", re.M | re.S)
+HELPERS = re.compile(
+    r"^(?:seed_commit|strip_substrates)\(\) \{\n.*?^\}\n", re.M | re.S
+)
 
 GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
 
@@ -445,7 +447,15 @@ def main() -> int:
                 text=True,
                 env={**os.environ, **GIT_ENV},
             )
-            if fingerprint(box) == before:
+            # TWO WAYS AN INJECTION FAILS TO BE A FAULT, and only one of them
+            # used to be read. The fingerprint answers "did anything change";
+            # the exit status answers "did what it meant to do happen". An
+            # injection that copies a directory and THEN raises on a field the
+            # schema renamed satisfies the first and fails the second -- and
+            # was reported as fine here, while the selftest graded the check
+            # against the half-made tree and called it a gate that did not
+            # fire. Found by running it, after item 3 renamed `substrate`.
+            if fingerprint(box) == before or run.returncode != 0:
                 tail = (run.stderr or "").strip().splitlines()[-1:] or [""]
                 inert.append((name, run.returncode, tail[0][:80]))
             restore(box, root, pristine)
@@ -465,8 +475,9 @@ def main() -> int:
         shutil.rmtree(box, ignore_errors=True)
 
     print(
-        f"check-injections: {len(names)} injection(s), {len(inert)} change nothing; "
-        f"every struct literal inside one names every field its type declares"
+        f"check-injections: {len(names)} injection(s), {len(inert)} that change "
+        f"nothing or do not finish; every struct literal inside one names every "
+        f"field its type declares"
     )
     for name, code, err in inert:
         print(f"  {name}  exit={code}  {err}")

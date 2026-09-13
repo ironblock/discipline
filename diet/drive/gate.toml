@@ -474,12 +474,14 @@ anchor = '''
             events.push(Event::Fork {
                 id: fork_id.clone(),
                 lane: INTERVIEW.to_owned(),
+                substrate: substrate.clone(),
                 of_turn: index,
             });'''
 becomes = '''
             events.push(Event::Fork {
                 id: fork_id.clone(),
                 lane: MAIN.to_owned(),
+                substrate: substrate.clone(),
                 of_turn: 1,
             });'''
 catches = [

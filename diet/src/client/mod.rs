@@ -758,6 +758,16 @@ fn complaint(body: &str) -> String {
 mod tests {
     use std::time::Duration;
 
+    /// The substrate these calls were put to, as the projection's caller
+    /// states it.
+    ///
+    /// A journal does not carry one: the schema refuses a `request` row with
+    /// no substrate reference, and refuses it even when a run declares exactly
+    /// one, so that the reference cannot be inferred from a count. In a test
+    /// that means saying it out loud, which is the same thing `diet-drive`
+    /// does one level up.
+    const SUBSTRATE: &str = "a-substrate";
+
     use super::echo::{Verdict, Verified};
     use super::journal::{Entry, EntryKind};
     use super::shape::{
@@ -984,7 +994,7 @@ mod tests {
 
         // The half that matters most: nothing downstream can mistake this for
         // a response, because the projection emits none.
-        let projected = journal::project(&call.journal);
+        let projected = journal::project(&call.journal, SUBSTRATE);
         let responses = projected
             .events
             .iter()
@@ -1575,7 +1585,7 @@ mod tests {
         // The record gets a `request` row for it, and the record's `request`
         // means "a request went to the substrate" -- which this did not. The
         // projection names that gap rather than papering over it.
-        let projected = journal::project(&call.journal);
+        let projected = journal::project(&call.journal, SUBSTRATE);
         assert!(
             projected.unspellable.iter().any(|entry| entry
                 .what
@@ -1696,7 +1706,7 @@ mod tests {
             &shaped(card(), 5_000, 20_000, 1),
         );
 
-        let projected = journal::project(&call.journal);
+        let projected = journal::project(&call.journal, SUBSTRATE);
         let kinds: Vec<EntryKind> = projected
             .unspellable
             .iter()
@@ -1765,7 +1775,7 @@ mod tests {
         let decide = |kind: EntryKind| {
             let mut journal = journal::Journal::new();
             journal.push(sample(kind));
-            let projected = journal::project(&journal);
+            let projected = journal::project(&journal, SUBSTRATE);
             match (
                 projected.events.is_empty(),
                 projected.unspellable.is_empty(),

@@ -1,0 +1,9 @@
+The fork is served by `medium`, which nothing declares.
+
+The same rule as a request naming an undeclared substrate, on the row that
+makes the point of declaring them: a fork is how a run reaches a SECOND
+substrate -- an interview on a small local model beside a main lane on a large
+one -- so a fork is the row most likely to name one the regime forgot.
+
+Fixtured because the review found the fork arm of this check unexercised:
+deleting it from the match left every test green.

@@ -1,11 +1,14 @@
 {
-  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrate\":{\"hardware\":\"h\",\"model\":\"m\",\"name\":\"local\",\"quantization\":\"q\",\"reasoning\":\"on\",\"sampler\":{\"floor\":-0.142,\"min_p\":-0.5,\"seed\":0,\"temperature\":0.7000,\"top_p\":0.94999999999999996}}}}\n",
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"h\",\"id\":\"local\",\"reasoning\":\"on\",\"sampler_card\":{\"floor\":-0.142,\"min_p\":-0.5,\"seed\":0,\"temperature\":0.7000,\"top_p\":0.94999999999999996},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]}}\n",
   "kinds": [
     "start"
   ],
   "regime": {
     "arm": "baseline",
     "dogma_version": 0,
-    "substrate": "local"
+    "hosted_substrates": [],
+    "substrates": [
+      "local"
+    ]
   }
 }

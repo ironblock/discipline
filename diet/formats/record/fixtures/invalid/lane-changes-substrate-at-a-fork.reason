@@ -1,0 +1,10 @@
+The `interview` lane requests on `small` and then forks on `big`.
+
+A lane is a role on a substrate, fixed for the run, and the rule does not care
+which kind of row moved it. `lane-changes-substrate.jsonl` covers two requests;
+this covers a request and a fork, because the check reads both row kinds into
+one map and dropping the fork arm would leave the other fixture passing.
+
+A different lane and the other direction, deliberately: the harness refuses a
+fixture whose refusal message another fixture already produces, and the first
+version of this one named the same lane and the same two substrates.

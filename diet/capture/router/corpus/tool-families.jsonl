@@ -1,6 +1,6 @@
-{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"harness","model":"withheld","quantization":"none","sampler":{"seed":0},"reasoning":"on","hardware":"cloud-container"}}}
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"harness","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"sampler_card":{"seed":0},"reasoning":"on","hardware_fingerprint":"cloud-container"}]}}
 {"record":"turn","index":1,"prefill_tokens":800}
-{"record":"request","id":"r1","lane":"main","text":"Read the owner's rules and the object, under a harness that names its tools differently."}
+{"record":"request","id":"r1","lane":"main","substrate":"harness","text":"Read the owner's rules and the object, under a harness that names its tools differently."}
 {"record":"tool_call","id":"f1","at_turn":1,"tool":"LS","args":{"path":"diet/src/capture"}}
 {"record":"tool_call","id":"f2","at_turn":1,"tool":"list_directory","args":{"path":"diet/formats"}}
 {"record":"tool_call","id":"f3","at_turn":1,"tool":"list_files","args":{"path":"tools/gate"}}
@@ -11,7 +11,7 @@
 {"record":"tool_call","id":"f8","at_turn":1,"tool":"sh","args":{"command":"cat diet/AGENTS.md | head -20"}}
 {"record":"response","id":"p1","to_request":"r1","output_tokens":24,"text":"The rules are read and the object's entry states are in hand. Next I search for where the routing is decided."}
 {"record":"turn","index":2,"prefill_tokens":1200}
-{"record":"request","id":"r2","lane":"main","text":"Continue."}
+{"record":"request","id":"r2","lane":"main","substrate":"harness","text":"Continue."}
 {"record":"tool_call","id":"f9","at_turn":2,"tool":"Glob","args":{"pattern":"diet/src/**/*.rs"}}
 {"record":"tool_call","id":"f10","at_turn":2,"tool":"glob","args":{"pattern":"diet/formats/*/grammar.pest"}}
 {"record":"tool_call","id":"f11","at_turn":2,"tool":"Grep","args":{"pattern":"fn classify","path":"diet/src"}}
@@ -23,7 +23,7 @@
 {"record":"tool_call","id":"f17","at_turn":2,"tool":"web_fetch","args":{"url":"https://example.invalid/toml/subset"}}
 {"record":"response","id":"p2","to_request":"r2","output_tokens":22,"text":"Ordered choice explains why the decimal rule has to precede the integer one. Let me change the table and run the tests."}
 {"record":"turn","index":3,"prefill_tokens":1500}
-{"record":"request","id":"r3","lane":"main","text":"Continue."}
+{"record":"request","id":"r3","lane":"main","substrate":"harness","text":"Continue."}
 {"record":"tool_call","id":"f18","at_turn":3,"tool":"MultiEdit","args":{"file_path":"diet/src/capture/router/mod.rs"}}
 {"record":"tool_call","id":"f19","at_turn":3,"tool":"edit_file","args":{"path":"diet/src/capture/router/classes.tsv"}}
 {"record":"tool_call","id":"f20","at_turn":3,"tool":"write_file","args":{"path":"diet/capture/router/corpus/tool-families.expected.json"}}
@@ -32,4 +32,4 @@
 {"record":"tool_call","id":"f23","at_turn":3,"tool":"run_command","args":{"command":"df -h ."}}
 {"record":"tool_call","id":"f24","at_turn":3,"tool":"execute","args":{"command":"rm -rf target/debug/incremental"}}
 {"record":"response","id":"p3","to_request":"r3","output_tokens":19,"text":"The table now names one row per rule and the router's tests pass over both drives."}
-{"record":"summary","turns":3,"prefill_tokens_total":3500,"product_sha256":"3c0b6988ca8b9cf01f678a21eebb835d24e289051bb3762f9407acbe57f51f37"}
+{"record":"summary","kind":"drive","turns":3,"prefill_tokens_total":3500,"product_sha256":"3c0b6988ca8b9cf01f678a21eebb835d24e289051bb3762f9407acbe57f51f37"}
