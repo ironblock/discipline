@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"hello"},"timestamp":"2026-01-01T00:00:00Z","uuid":"u1","sessionId":"s"}
+{"type":"assistant","msg":{"role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{"output_tokens":2}},"timestamp":"2026-01-01T00:00:01Z","uuid":"a1","sessionId":"s"}

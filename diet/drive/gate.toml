@@ -638,7 +638,7 @@ catches = [
 [[fault]]
 id = "drive.the-sampler-crosses-as-a-debug-rendering"
 failure_class = "drive.the-sampler-crosses-as-a-debug-rendering"
-target = "diet/src/bin/drive.rs"
+target = "diet/src/drive/regimen.rs"
 expect_exit = 101
 anchor = '''
         regimen::Value::Float(decimal) => Value::Decimal(decimal.clone()),'''

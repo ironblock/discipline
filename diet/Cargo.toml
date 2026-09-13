@@ -44,3 +44,11 @@ workspace = true
 [[bin]]
 name = "diet-drive"
 path = "src/bin/drive.rs"
+
+# The read-only front door (#28): run the capture lanes over a session log
+# this library did not produce. Its own binary rather than a `diet` verb, so
+# that the adapter lane does not edit the shared verb table while another
+# seat is changing it -- disclosed on the PR.
+[[bin]]
+name = "diet-replay"
+path = "src/bin/replay.rs"

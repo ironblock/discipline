@@ -1,0 +1,49 @@
+# The regimen a replay of a foreign session runs under.
+#
+# A Claude Code session log records no model, no quantization and no sampler
+# settings. Its `version` field is the harness's version, not the model's, and
+# nothing in the file says which model answered. So the regime a replay is
+# filed under cannot be derived from the log -- the operator declares it, the
+# way `diet-drive` makes them declare it, and for the same reason: a regime
+# tag a program invented makes every result under it incomparable with every
+# other, which is what the tags are for.
+#
+# THIS FILE IS A FIXTURE, and every value in it is about the fixture log it
+# accompanies rather than about any real session. Replaying your own log means
+# writing your own regimen, saying what you were actually running. Copying
+# this one and pointing it at a different log would be exactly the
+# fabrication this arrangement exists to prevent.
+
+arm = "replay-fixture"
+dogma_version = 0
+
+# What served the session being replayed. `claude-code` is the harness, which
+# is the honest answer to "what produced this log" -- and it is deliberately
+# NOT a model name, because the log does not carry one. The remaining keys say
+# `undeclared` in the same spirit: the fixture states that the fact is absent
+# rather than inventing a plausible value for it, and a reader can tell the
+# difference between "nobody wrote it down" and "it was this".
+substrate = "claude-code"
+substrate_model = "undeclared-by-the-log"
+substrate_quantization = "undeclared-by-the-log"
+# The ONE key here that states a fact rather than its absence, because the
+# schema gives it no choice: `Reasoning` is `off | on | suppressed` and has no
+# "undeclared". `off` was written here first and was simply false -- the
+# session fixture beside this file carries a `thinking` block, and the log it
+# was distilled from carries 646 of them, every one counted in the census as
+# dropped content. A regimen filing a reasoning session as `reasoning = off`
+# while the census counts the reasoning it dropped is the kind of disagreement
+# that survives because nobody reads two files at once.
+substrate_reasoning = "on"
+substrate_hardware = "undeclared-by-the-log"
+
+# Replay runs no commands, so there is nothing for a sandbox to confine. The
+# capture lane reads tool calls that already happened; it does not re-run one.
+isolation = "none"
+
+# The record refuses a blank `substrate.sampler`, because "nobody wrote the
+# settings down" and "the settings were these" are different facts about a
+# run. A replayed session has the first kind, and says so in the one place the
+# schema gives it.
+[sampler]
+declared = false
