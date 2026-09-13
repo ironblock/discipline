@@ -35,7 +35,7 @@
 [meta]
 source = "verify.sh"
 red_faults = 312
-mechanics_assertions = 53
+mechanics_assertions = 56
 migrated = 0
 
 
@@ -3362,6 +3362,33 @@ label = "a literal the scan cannot place"
 failure_class = "gate.injection-literal-unplaceable"
 legacy_signature = "builds a Ground: declared in 3 places"
 migrated = false
+[[fault]]
+id = "mech.a-grammar-changed-under-a-binary-with-no-dep-info-is-stale"
+kind = "mechanics"
+check = "regimen"
+label = "a grammar changed under a binary with no dep-info is stale"
+failure_class = "provenance.embedded-set-unknowable"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.and-a-binary-with-no-dep-info-over-an-untouched-tree-resolves"
+kind = "mechanics"
+check = "regimen"
+label = "and a binary with no dep-info over an untouched tree resolves"
+failure_class = "provenance.rule-did-not-apply"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-dep-info-that-does-narrow-still-narrows"
+kind = "mechanics"
+check = "regimen"
+label = "a dep-info that does narrow still narrows"
+failure_class = "provenance.wrong-artifact"
+legacy_signature = ""
+migrated = false
+
 [[fault]]
 id = "mech.a-resolver-suite-that-collected-nothing-is-not-a-pass"
 kind = "mechanics"

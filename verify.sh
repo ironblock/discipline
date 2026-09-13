@@ -5805,6 +5805,95 @@ selftest() {
       ; python3 scripts/resolve-diet.py > /dev/null 2>&1; rc=\$? \
       ; touch diet/src/lib.rs && cargo build --quiet --bin diet; exit \$rc"
 
+  # A BINARY WHOSE DEP-INFO CANNOT SAY WHAT IT EMBEDS IS NOT THEREBY FRESH.
+  #
+  # The narrowing above reads `target/debug/diet.d` for the embedded set.
+  # When there is none to read, `embedded()` used to return an empty list
+  # under a comment calling that "a smaller list, not a wrong one". Both
+  # halves of its reasoning were true and the conclusion was not: the answer
+  # this feeds is a NEGATIVE one -- nothing is newer than the binary -- and a
+  # list with the grammars missing produces that answer for a binary whose
+  # grammars have changed.
+  #
+  # Every binary pinned through `DIET_BIN` carries no `.d`, so the embedded
+  # half of rule three was switched off for exactly the case the rule was
+  # written about: a build handed in from somewhere else. It now falls back
+  # to the whole of `diet/`.
+  #
+  # Synthetic roots, not this one. The question is what the resolver does
+  # with a tree it cannot narrow, and building that state here would mean
+  # deleting dep-info from a real build the rest of this run depends on.
+  local depless; scratch; depless="$SCRATCH"
+  python3 - "$depless" <<'PYEOF'
+import os
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+# Fixed stamps rather than offsets from now, so the three cases differ by
+# years and no clock skew can reorder them.
+OLD, BUILT, NEW = 1577836800, 1609459200, 1767225600  # 2020, 2021, 2026
+CASES = ("a-grammar-it-embeds", "nothing-newer", "dep-info-narrows")
+TREE = (
+    "Cargo.toml",
+    "Cargo.lock",
+    "rust-toolchain.toml",
+    "diet/Cargo.toml",
+    "diet/src/lib.rs",
+    "diet/formats/record/grammar.pest",
+    "diet/formats/record/fixtures/one.json",
+)
+
+
+def stamp(path, when):
+    os.utime(path, (when, when))
+
+
+for case in CASES:
+    here = root / case
+    for name in TREE:
+        path = here / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x\n", encoding="utf-8")
+        stamp(path, OLD)
+    binary = here / "diet-bin"
+    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    binary.chmod(0o755)
+    stamp(binary, BUILT)
+
+# THE CASE: a grammar the binary embeds, changed after it was built. There is
+# no dep-info to say it is embedded, and it is under `diet/`.
+stamp(root / CASES[0] / "diet/formats/record/grammar.pest", NEW)
+
+# THE CONTROL is `nothing-newer`, left exactly as built above. It is what
+# keeps the case about a STALE binary rather than about pinning one: a
+# fallback that refused every dep-info-less binary would satisfy the first
+# assertion and break every pinned build.
+
+# AND THE NARROWING, still applying wherever cargo did write a list. This
+# `.d` names `diet/src/lib.rs` and nothing else, and the file made newer is
+# a test fixture the binary does not embed. Widening when there is no list
+# must not become widening when there is one.
+narrows = root / CASES[2]
+(narrows / "diet-bin.d").write_text(
+    f"{narrows / 'diet-bin'}: diet/src/lib.rs\n", encoding="utf-8"
+)
+stamp(narrows / "diet-bin.d", BUILT)
+stamp(narrows / "diet/formats/record/fixtures/one.json", NEW)
+PYEOF
+  expect_exit "a grammar changed under a binary with no dep-info is stale" 2 \
+    bash -c "cd '${depless}/a-grammar-it-embeds' \
+      && DIET_BIN='${depless}/a-grammar-it-embeds/diet-bin' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+  expect_exit "and a binary with no dep-info over an untouched tree resolves" 0 \
+    bash -c "cd '${depless}/nothing-newer' \
+      && DIET_BIN='${depless}/nothing-newer/diet-bin' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+  expect_exit "a dep-info that does narrow still narrows" 0 \
+    bash -c "cd '${depless}/dep-info-narrows' \
+      && DIET_BIN='${depless}/dep-info-narrows/diet-bin' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+
   # --- the resolver's own suite cannot report a pass it did not measure ---
   #
   # 0 from `check-merge-gate.py` is the only thing standing between a lane
