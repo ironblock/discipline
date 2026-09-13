@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 311
+red_faults = 312
 mechanics_assertions = 48
 migrated = 0
 
@@ -3385,3 +3385,12 @@ failure_class = "parity.count-refused-mid-merge"
 legacy_signature = ""
 migrated = false
 
+[[fault]]
+id = "test.shadowing_admitted"
+kind = "seeded-gate"
+check = "test"
+target = "lib/formats::operating_points"
+label = "an unmarked entry that shadows another is admitted"
+failure_class = "operating-points.shadowed-unmarked"
+legacy_signature = "the dogma's retired spelling parsed again"
+migrated = false
