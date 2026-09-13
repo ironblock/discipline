@@ -6,6 +6,7 @@
 //! says what may be believed.
 
 pub mod ablation;
+pub mod bakeoff;
 pub mod collector;
 pub mod grounded;
 pub mod mechanical;

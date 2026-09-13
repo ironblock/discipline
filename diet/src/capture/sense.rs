@@ -2118,6 +2118,50 @@ pub enum Metric {
 /// One row of a failure fixture: an id, what it is, and the score it is given.
 type FixtureRow = (&'static str, Label, f64);
 
+/// The nomination budgets the bakeoff reports at, pre-registered.
+///
+/// THE BUDGET IS A DESIGN PARAMETER OF THE COLLECTOR, NOT A PROPERTY OF A
+/// FIXTURE. It used to be a `const` in the runner set to eight, and eight was
+/// not chosen: it was the largest budget the precision failure fixture
+/// happened to demonstrate, because that fixture held eight non-positives
+/// above its positives. A fixture that stops at eight pins what its author was
+/// thinking about, and the instrument's parameter space is not a fixture's to
+/// cap. Ruled 2026-09-10 on #69.
+///
+/// So the ladder is declared here, before there is data -- the same argument
+/// [`PRE_REGISTRATION`] makes about every other endpoint -- and the two
+/// budgeted fixtures are BUILT FROM IT rather than compared against it. One
+/// nomination, through the range a rolling summary would actually surface, to
+/// fifty over a register of a few hundred rows.
+///
+/// THE RUNGS ARE WHERE THE CURVE IS, not where a round number is. The
+/// budgets are nomination counts per session at deployment, and a confirm slot
+/// costs the operator's attention -- so production sits between one and five
+/// nominations, which is where the precision-at-budget curve's knee most
+/// likely is. Three is the rung that resolves that knee; twenty-five and fifty
+/// characterise the tail. Ruled 2026-09-10, amended 2026-09-11 on #69.
+///
+/// Changing it changes both fixtures, and
+/// `every_pre_registered_budget_is_one_its_fixture_demonstrates` is what says
+/// so rather than leaving it to be discovered at the first refusal.
+pub const BUDGETS: &[usize] = &[1, 3, 5, 10, 25, 50];
+
+/// The widest pre-registered budget: how far down the precision fixture must
+/// keep the positives.
+#[must_use]
+pub fn widest_budget() -> usize {
+    BUDGETS.iter().copied().max().unwrap_or(1)
+}
+
+/// The narrowest pre-registered budget: how many hard negatives the
+/// over-firing fixture may put on top and still read as total over-firing at
+/// every budget, since `over_firing` is 1.0 only when the budget reaches every
+/// hard negative there is.
+#[must_use]
+pub fn narrowest_budget() -> usize {
+    BUDGETS.iter().copied().min().unwrap_or(1)
+}
+
 /// For each metric, rows on which it must report the worst it can say.
 ///
 /// The fixtures are rankings built against the metric: three of them put the
@@ -2125,37 +2169,16 @@ type FixtureRow = (&'static str, Label, f64);
 /// on top. A metric that reads its own fixture as anything but failure is not
 /// measuring what its name says.
 ///
-/// Both budgeted fixtures are budget-sensitive by construction. The precision
-/// fixture holds eight non-positives above its positives, so it fails at any
-/// budget up to eight; the over-firing fixture holds two hard negatives at the
-/// top, so it fails at any budget of two or more. A budget outside those is
-/// not a budget these fixtures demonstrate, and [`Reported::take`] refuses
-/// rather than reports.
+/// THE TWO BUDGETED FIXTURES ARE NOT IN THIS TABLE. Their content is a RULE
+/// rather than a ranking somebody picked -- "every non-positive above every
+/// positive, as many as the widest budget reaches", and "every hard negative
+/// on top, as few as the narrowest budget reaches" -- and a rule written out
+/// fifty times is a rule somebody has to remember to extend. They are built
+/// from [`BUDGETS`] in [`budgeted_fixture`] instead, which is what stops a
+/// fixture's shape from capping the instrument's parameter space. The other
+/// two have no budget and are ranked by hand, because there is nothing to
+/// derive them from.
 const FAILURE_FIXTURES: &[(Metric, &[FixtureRow])] = &[
-    (
-        Metric::PrecisionAtK,
-        &[
-            ("failing/negative/0.9", Label::Negative, 0.9),
-            ("failing/hard_negative/0.8", Label::HardNegative, 0.8),
-            ("failing/negative/0.7", Label::Negative, 0.7),
-            ("failing/hard_negative/0.6", Label::HardNegative, 0.6),
-            ("failing/negative/0.5", Label::Negative, 0.5),
-            ("failing/negative/0.4", Label::Negative, 0.4),
-            ("failing/negative/0.3", Label::Negative, 0.3),
-            ("failing/negative/0.2", Label::Negative, 0.2),
-            ("failing/positive/0.1", Label::Positive, 0.1),
-            ("failing/positive/0.0", Label::Positive, 0.0),
-        ],
-    ),
-    (
-        Metric::OverFiring,
-        &[
-            ("failing/hard_negative/0.9", Label::HardNegative, 0.9),
-            ("failing/hard_negative/0.8", Label::HardNegative, 0.8),
-            ("failing/positive/0.2", Label::Positive, 0.2),
-            ("failing/negative/0.1", Label::Negative, 0.1),
-        ],
-    ),
     (
         Metric::Auc,
         &[
@@ -2175,6 +2198,59 @@ const FAILURE_FIXTURES: &[(Metric, &[FixtureRow])] = &[
         ],
     ),
 ];
+
+/// The failure fixture for a metric that takes a budget, built from
+/// [`BUDGETS`] rather than written out.
+///
+/// PRECISION: every non-positive first, `widest_budget()` of them, then the
+/// positives. `precision_at_k` over the top `k` finds no positive for any `k`
+/// the ladder names, so it reads 0 -- the worst it can say -- at every one.
+///
+/// OVER-FIRING: every hard negative first, `narrowest_budget()` of them, then
+/// a positive and a negative. `over_firing` is the share of ALL hard-negative
+/// rows inside the top `k`, so it reads 1.0 only once `k` reaches every hard
+/// negative there is -- which is why the count is the NARROWEST budget and not
+/// the widest. Put more hard negatives in and the narrowest budget stops
+/// demonstrating total over-firing, which is the trap the hand-written version
+/// was already in at a budget of one.
+///
+/// Scores descend from 1.0 in equal steps so that `ranked` gets a strict order
+/// with no ties: two rows on the same score make the top-k a matter of which
+/// sort the implementation happens to use, and a fixture whose answer depends
+/// on that is a fixture that will move under a refactor.
+fn budgeted_fixture(metric: Metric) -> Vec<Scored> {
+    let (above, above_label, below) = match metric {
+        Metric::PrecisionAtK => (widest_budget(), Label::Negative, vec![Label::Positive; 2]),
+        Metric::OverFiring => (
+            narrowest_budget(),
+            Label::HardNegative,
+            vec![Label::Positive, Label::Negative],
+        ),
+        Metric::Auc | Metric::DPrime => return Vec::new(),
+    };
+    let labels: Vec<Label> = std::iter::repeat_n(above_label, above)
+        .chain(below)
+        .collect();
+    // The rank arithmetic in f64 rather than in usize, and the conversion is
+    // exact: a fixture is tens of rows, not petabytes of them, and a budget
+    // ladder that reached 2^53 would have run out of register long before it
+    // ran out of mantissa.
+    let rows = u32::try_from(labels.len()).unwrap_or(u32::MAX);
+    let step = 1.0 / (f64::from(rows) + 1.0);
+    labels
+        .into_iter()
+        .enumerate()
+        .map(|(rank, label)| {
+            let place = f64::from(u32::try_from(rank).unwrap_or(u32::MAX));
+            Scored {
+                id: format!("failing/{}/{rank}", label.tag()),
+                label,
+                score: 1.0 - step * (place + 1.0),
+                admitted: true,
+            }
+        })
+        .collect()
+}
 
 impl Metric {
     /// Every metric, so a report cannot leave one unfixtured.
@@ -2239,8 +2315,17 @@ impl Metric {
     }
 
     /// The rows this metric must fail on.
+    ///
+    /// Built from [`BUDGETS`] for the two metrics that take one, and read from
+    /// [`FAILURE_FIXTURES`] for the two that do not. One door either way, so a
+    /// caller cannot tell which kind it asked for -- and so a metric that grew
+    /// a budget later cannot keep a hand-written fixture by accident.
     #[must_use]
     pub fn failure_fixture(self) -> Vec<Scored> {
+        let budgeted = budgeted_fixture(self);
+        if !budgeted.is_empty() {
+            return budgeted;
+        }
         FAILURE_FIXTURES
             .iter()
             .find(|(metric, _)| *metric == self)
@@ -2281,6 +2366,8 @@ pub enum MetricError {
     InstrumentNeverFailed {
         /// The metric.
         metric: Metric,
+        /// The budget it was asked for.
+        budget: usize,
         /// What the failing rows actually scored.
         value: f64,
         /// The reading that would have counted as failure.
@@ -2301,11 +2388,15 @@ impl fmt::Display for MetricError {
             Self::InstrumentNeverFailed {
                 metric,
                 value,
+                budget,
                 reading,
             } => write!(
                 f,
-                "{} scored {value} on rows built to fail, where {reading} is failure, and did \
-                 not fail: an instrument that has never been seen fail cannot certify anything",
+                "{} at a budget of {budget} scored {value} on rows built to fail, where \
+                 {reading} is failure, and did not fail: an instrument that has never been seen \
+                 fail cannot certify anything. The pre-registered budgets are {BUDGETS:?}, and \
+                 the fixtures are built to demonstrate failure at every one of them -- so a \
+                 budget outside that ladder is refused here rather than reported quietly",
                 metric.tag()
             ),
             Self::Undefined { metric, on } => {
@@ -2343,6 +2434,7 @@ impl Reported {
         if !metric.failed(on_failure_fixture) {
             return Err(MetricError::InstrumentNeverFailed {
                 metric,
+                budget: k,
                 value: on_failure_fixture,
                 reading: metric.failure_reading(),
             });
@@ -2495,6 +2587,13 @@ pub struct PreRegistration {
     pub comparator: &'static str,
     /// How significance is tested and corrected.
     pub correction: &'static str,
+    /// The nomination budgets the primary endpoint is reported at.
+    ///
+    /// Pre-registered like every other endpoint here, and for the same reason:
+    /// a budget chosen after the numbers are in is a budget the numbers chose.
+    /// Before 2026-09-11 it was a `const` in the runner whose value was
+    /// whatever a fixture allowed.
+    pub budgets: &'static [usize],
     /// Bootstrap resamples per comparison.
     pub resamples: u32,
     /// Label shuffles per null.
@@ -2516,6 +2615,7 @@ pub const PRE_REGISTRATION: PreRegistration = PreRegistration {
               scoring and gate",
     separation: "the area under the curve and the standardised separation, per cell",
     over_firing: "the share of hard-negative rows nominated within the budget",
+    budgets: BUDGETS,
     comparator: "an entailment cross-encoder as the accuracy ceiling, so the gap between it \
                  and an embedder is priced rather than assumed",
     correction: "paired bootstrap across embedders, Holm-corrected across cells, the \
@@ -2547,6 +2647,15 @@ impl PreRegistration {
             ("over_firing".to_owned(), text(self.over_firing)),
             ("comparator".to_owned(), text(self.comparator)),
             ("correction".to_owned(), text(self.correction)),
+            (
+                "budgets".to_owned(),
+                Value::Array(
+                    self.budgets
+                        .iter()
+                        .map(|k| Value::Integer(i64::try_from(*k).unwrap_or(i64::MAX)))
+                        .collect(),
+                ),
+            ),
             (
                 "resamples".to_owned(),
                 Value::Integer(i64::from(self.resamples)),
@@ -2640,7 +2749,12 @@ impl PreRegistration {
 /// The one place a number a program computed becomes a number a record holds.
 /// A value with no spelling -- not finite -- comes back as the string
 /// `undefined` rather than as a number that is not one.
-fn decimal(value: f64, digits: usize) -> Value {
+/// A float as an exact decimal of `digits` places.
+///
+/// Crate-visible because the bakeoff runner spells numbers too, and a
+/// second copy of this would be a second place that has to remember
+/// `-0.0000` is a second spelling of zero.
+pub(crate) fn decimal(value: f64, digits: usize) -> Value {
     let spelled = format!("{value:.digits$}");
     // `-0.0000` is a second spelling of zero, which the record refuses; the
     // sign carries no information once every digit is a zero.
@@ -2659,13 +2773,13 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        Blocker, BootstrapError, Cached, Cell, Control, ControlFailure, DataError, Embedded,
-        EmbeddedSet, Embedder, Fixture, Fraction, Gate, JoinError, Label, Metric, MetricError,
-        NULL_AUC_BAND, NULL_D_PRIME_BAND, NULL_SHUFFLES, PRE_REGISTRATION, Polarity,
+        BUDGETS, Blocker, BootstrapError, Cached, Cell, Control, ControlFailure, DataError,
+        Embedded, EmbeddedSet, Embedder, Fixture, Fraction, Gate, JoinError, Label, Metric,
+        MetricError, NULL_AUC_BAND, NULL_D_PRIME_BAND, NULL_SHUFFLES, PRE_REGISTRATION, Polarity,
         REGISTER_SIDECARS, RegisterName, Reported, Row, ScoreError, Scored, Scoring, SenseSet,
         SetError, Source, Xorshift, attainable_p_floor, auc, controls, cosine, d_prime, holm,
-        joined, over_firing, paired_bootstrap, precision_at_k, provenance, register, score_rows,
-        seeds, senses, shipped_senses, shuffled_null,
+        joined, narrowest_budget, over_firing, paired_bootstrap, precision_at_k, provenance,
+        register, score_rows, seeds, senses, shipped_senses, shuffled_null, widest_budget,
     };
     use crate::formats::record::json::{self, Decimal, Value};
 
@@ -4397,14 +4511,91 @@ mod tests {
         assert!(Metric::OverFiring.failed(1.0) && !Metric::OverFiring.failed(0.99));
     }
 
+    // THE COVERAGE THE RULING ASKED FOR. A budget the bakeoff pre-registers
+    // and a fixture does not demonstrate is a budget nothing can be reported
+    // at -- so the endpoint exists on paper and produces no number, which is
+    // the shape "decouple the budget from the fixture" was ruled against.
+    //
+    // Every pre-registered budget, every metric, through the one door that
+    // takes them: `Reported::take` computes the fixture at the budget it was
+    // asked for and refuses unless that reading is failure. Passing here is
+    // exactly "the instrument has been seen fail at this budget".
+    #[test]
+    fn every_pre_registered_budget_is_one_its_fixture_demonstrates() {
+        assert!(
+            !BUDGETS.is_empty(),
+            "a ladder of no budgets reports nothing"
+        );
+        let subject = ungated();
+        for &budget in BUDGETS {
+            for metric in Metric::ALL {
+                let taken = Reported::take(*metric, budget, &subject).unwrap_or_else(|err| {
+                    panic!(
+                        "{} is pre-registered at a budget of {budget} and its fixture does not \
+                         demonstrate failure there: {err}",
+                        metric.tag()
+                    )
+                });
+                assert_eq!(taken.budget(), budget);
+                assert!(
+                    metric.failed(taken.demonstrated_failure()),
+                    "{} reported at {budget} without a demonstrated failure",
+                    metric.tag()
+                );
+            }
+        }
+        // And the fixtures are the ladder's, not a remembered shape. Both
+        // counts follow from BUDGETS, so widening the ladder widens them --
+        // which is the whole content of the change. Asserted rather than
+        // trusted, because a builder that ignored its argument would satisfy
+        // every assertion above: all four metrics would still fail at every
+        // budget, on fixtures that happened to be big enough.
+        let precision = Metric::PrecisionAtK.failure_fixture();
+        assert_eq!(
+            precision
+                .iter()
+                .filter(|row| !row.label.is_positive())
+                .count(),
+            widest_budget(),
+            "the precision fixture does not hold the widest budget above its positives"
+        );
+        let over_firing = Metric::OverFiring.failure_fixture();
+        assert_eq!(
+            over_firing
+                .iter()
+                .filter(|row| row.label.is_hard_negative())
+                .count(),
+            narrowest_budget(),
+            "the over-firing fixture holds more hard negatives than the narrowest budget reaches"
+        );
+        // No ties, or the top-k is whichever order the sort happened to give.
+        for fixture in [&precision, &over_firing] {
+            let mut scores: Vec<f64> = fixture.iter().map(|row| row.score).collect();
+            scores.sort_by(|a, b| a.partial_cmp(b).expect("a finite score"));
+            let before = scores.len();
+            scores.dedup_by(|a, b| near(*a, *b));
+            assert_eq!(before, scores.len(), "a budgeted fixture has tied scores");
+        }
+    }
+
     #[test]
     fn a_metric_that_has_not_been_seen_fail_is_not_reported() {
         let subject = ungated();
-        // Both budgeted fixtures are budget-sensitive by construction. Outside
-        // the budget they demonstrate, they report success -- and a metric
-        // whose instrument has not been seen fail at the budget it is being
-        // reported at says nothing about the subject.
-        for (metric, budget) in [(Metric::PrecisionAtK, 9), (Metric::OverFiring, 1)] {
+        // Both budgeted fixtures are budget-sensitive by construction, and the
+        // budgets they cover are the pre-registered ones. OUTSIDE that ladder
+        // they report success -- and a metric whose instrument has not been
+        // seen fail at the budget it is being reported at says nothing about
+        // the subject.
+        //
+        // The two budgets below are DERIVED from the ladder rather than
+        // written. Written, they would have gone stale the moment the ladder
+        // moved, and gone stale in the direction that hides the defect: a
+        // hard-coded 9 stops being outside the ladder as soon as the ladder
+        // reaches 9, and the test then asserts a refusal that never comes.
+        for (metric, budget) in [
+            (Metric::PrecisionAtK, widest_budget() + 1),
+            (Metric::OverFiring, narrowest_budget() - 1),
+        ] {
             let err = Reported::take(metric, budget, &subject)
                 .err()
                 .unwrap_or_else(|| {
@@ -4413,12 +4604,32 @@ mod tests {
                         metric.tag()
                     )
                 });
-            let MetricError::InstrumentNeverFailed { value, reading, .. } = &err else {
+            let MetricError::InstrumentNeverFailed {
+                value,
+                reading,
+                budget: refused,
+                ..
+            } = &err
+            else {
                 panic!("{}: {err:?}", metric.tag())
             };
             assert!(!metric.failed(*value), "{}: {err:?}", metric.tag());
             assert!(near(*reading, metric.failure_reading()));
+            assert_eq!(*refused, budget, "{}: {err:?}", metric.tag());
             assert!(err.to_string().contains("never been seen fail"), "{err}");
+            // DECLARED RATHER THAN SILENT, which is the half of the ruling a
+            // refusal alone does not satisfy: the reader is told which budget
+            // was asked for and which ladder the fixtures cover, so the answer
+            // to "then what may I ask for" is in the refusal.
+            let said = err.to_string();
+            assert!(
+                said.contains(&format!("budget of {budget}")),
+                "the refusal does not name the budget it refused: {said}"
+            );
+            assert!(
+                said.contains(&format!("{BUDGETS:?}")),
+                "the refusal does not name the ladder the fixtures cover: {said}"
+            );
         }
         assert!(matches!(
             Reported::take(Metric::Auc, 3, &[]),
@@ -4448,6 +4659,7 @@ mod tests {
             [
                 "attainable_p_floor",
                 "blocked_on",
+                "budgets",
                 "cells",
                 "comparator",
                 "controls",

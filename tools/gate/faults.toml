@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 308
+red_faults = 311
 mechanics_assertions = 48
 migrated = 0
 
@@ -168,6 +168,36 @@ legacy_signature = "recompute-matched-exceeds-checked\\.jsonl: accepted as"
 migrated = false
 
 [[fault]]
+id = "test.bakeoff_digest_unchecked"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "the runner's digest made advisory"
+failure_class = "results.recompute-input-unchecked"
+legacy_signature = "an edited cache was not refused"
+migrated = false
+
+[[fault]]
+id = "test.bakeoff_evidence_not_attached"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "the assembled directory's evidence is elsewhere"
+failure_class = "results.evidence-not-attached"
+legacy_signature = "a cache the record consumed was not committed beside it"
+migrated = false
+
+[[fault]]
+id = "test.bakeoff_budget_unfixtured"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::sense"
+label = "a budget no fixture demonstrates"
+failure_class = "results.metric-never-failed"
+legacy_signature = "its fixture does not demonstrate failure there"
+migrated = false
+
+[[fault]]
 id = "test.record_substrate_reference_unchecked"
 kind = "seeded-gate"
 check = "test"
@@ -195,16 +225,6 @@ target = "test:conformance/formats::record"
 label = "weights identified by name"
 failure_class = "schema.weights-not-digested"
 legacy_signature = "weights-named-not-digested\\.jsonl: accepted as"
-migrated = false
-
-[[fault]]
-id = "test.record_lane_may_change_substrate"
-kind = "seeded-gate"
-check = "test"
-target = "test:conformance/formats::record"
-label = "a lane free to change substrate"
-failure_class = "schema.lane-changed-substrate"
-legacy_signature = "lane-changes-substrate\\.jsonl: accepted as"
 migrated = false
 
 [[fault]]
@@ -2531,14 +2551,6 @@ failure_class = "results.provenance-escapes-the-directory"
 migrated = false
 
 [[fault]]
-id = "results.2026-01-29-hosted-weights-called-reproducible"
-kind = "results-fixture"
-check = "results"
-label = "2026-01-29-hosted-weights-called-reproducible"
-failure_class = "results.hosted-cannot-be-reproducible"
-migrated = false
-
-[[fault]]
 id = "mech.every-results-fixture-emits-the-class-its-fault-declares"
 kind = "mechanics"
 check = "results"
@@ -3208,6 +3220,24 @@ label = "only the template recomputes"
 failure_class = "gate-zero.nothing-recomputed"
 legacy_signature = "results are present and none recomputed"
 migrated = false
+[[fault]]
+id = "test.record_lane_may_change_substrate"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a lane free to change substrate"
+failure_class = "schema.lane-changed-substrate"
+legacy_signature = "lane-changes-substrate\\.jsonl: accepted as"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-29-hosted-weights-called-reproducible"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-29-hosted-weights-called-reproducible"
+failure_class = "results.hosted-cannot-be-reproducible"
+migrated = false
+
 [[fault]]
 id = "mech.shards-that-disagree-about-how-many-there-are"
 kind = "mechanics"

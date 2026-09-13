@@ -43,6 +43,13 @@ enum Operation {
     Format(&'static str),
     /// Route an archived drive and answer with the router's census.
     Route,
+    /// Run the sense bakeoff described by a results directory's run record.
+    ///
+    /// The only verb that reads more than the file it is given: the record
+    /// names the inputs it consumed and this reads them from beside it, each
+    /// checked against the digest the record declares. That is not a second
+    /// format -- it is this format's `consumes`, followed.
+    Bakeoff,
 }
 
 /// The verb each operation is exposed under.
@@ -62,6 +69,7 @@ const COMMANDS: &[(&str, Operation)] = &[
     ("parse-shell", Operation::Format("shell")),
     ("parse-verdict", Operation::Format("verdict")),
     ("route", Operation::Route),
+    ("bakeoff", Operation::Bakeoff),
 ];
 
 fn usage() -> String {
@@ -75,6 +83,12 @@ fn usage() -> String {
                 out,
                 "  {command:<18} route an archived drive and report its census"
             ),
+            Operation::Bakeoff => writeln!(
+                out,
+                "  {command:<18} run the sense bakeoff a run record describes\n\
+                 {:<20} ...and with `--into DIR`, assemble the results directory",
+                ""
+            ),
         };
     }
     out.push_str("\nEvery command writes a JSON result to stdout. Exit 0 when the\n");
@@ -85,9 +99,16 @@ fn usage() -> String {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let [command, path] = args.as_slice() else {
-        eprint!("{}", usage());
-        return ExitCode::from(EXIT_USAGE);
+    // `bakeoff` takes a second argument and nothing else does, so the shape is
+    // read here rather than by a flag parser: two forms, both exact, and
+    // anything else is the usage text.
+    let (command, path, into) = match args.as_slice() {
+        [command, path] => (command, path, None),
+        [command, path, flag, into] if flag == "--into" => (command, path, Some(into)),
+        _ => {
+            eprint!("{}", usage());
+            return ExitCode::from(EXIT_USAGE);
+        }
     };
 
     let Some((_, operation)) = COMMANDS.iter().find(|(verb, _)| verb == command) else {
@@ -115,6 +136,21 @@ fn main() -> ExitCode {
             (format.name, text.and_then(|text| (format.project)(text)))
         }
         Operation::Route => ("route", text.and_then(route)),
+        Operation::Bakeoff => (
+            "bakeoff",
+            match into {
+                // ASSEMBLE, DON'T PRINT. Ruled 2026-09-10 on #69: the numbers
+                // are a results directory, and printing them leaves the
+                // assembly of one to a person.
+                Some(into) => diet::capture::bakeoff::assemble(
+                    std::path::Path::new(path),
+                    std::path::Path::new(into),
+                )
+                .map_err(|err| err.to_string()),
+                None => diet::capture::bakeoff::run(std::path::Path::new(path))
+                    .map_err(|err| err.to_string()),
+            },
+        ),
     };
 
     let (ok, key, held) = match outcome {
@@ -145,7 +181,7 @@ fn format_for(command: &str) -> Option<&'static Format> {
     let (_, operation) = COMMANDS.iter().find(|(verb, _)| *verb == command)?;
     match operation {
         Operation::Format(name) => diet::formats::format(name),
-        Operation::Route => None,
+        Operation::Route | Operation::Bakeoff => None,
     }
 }
 
@@ -175,7 +211,7 @@ mod tests {
             .iter()
             .filter_map(|(_, operation)| match operation {
                 Operation::Format(name) => Some(*name),
-                Operation::Route => None,
+                Operation::Route | Operation::Bakeoff => None,
             })
             .collect();
         let declared: std::collections::BTreeSet<&str> =
@@ -193,8 +229,8 @@ mod tests {
                 ),
                 // A lane's verb has no format, and must not borrow one: a
                 // census answered under a format's name would read as that
-                // format's value.
-                Operation::Route => assert!(
+                // format's value, and a bakeoff's numbers are not a document.
+                Operation::Route | Operation::Bakeoff => assert!(
                     format_for(command).is_none(),
                     "`{command}` is a lane, and it resolved to a format"
                 ),
