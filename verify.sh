@@ -5841,6 +5841,54 @@ EOF
   expect_exit "a census claiming to be a shard that cannot exist" 1 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/impossible-shard"
 
+  # --- nothing is read from a half-merged file ---
+  #
+  # This gate has two inputs and both of them conflict routinely: `faults.toml`
+  # conflicts on essentially every merge in a stack, which is what
+  # `merge-gate.py --union` exists for, and `verify.sh` conflicts whenever two
+  # branches both seed a case. What a checker reads out of a half-merged file
+  # is the union of both sides, or neither side, depending on where the markers
+  # fell -- and either way it looks like an answer. So it refuses, exit 2, "I
+  # was asked something I cannot answer".
+  #
+  # Neither refusal had ever been seen fire. The manifest side did not exist:
+  # a conflicted `faults.toml` reached `tomllib`, came back "not TOML", exit 1,
+  # a finding about the manifest when the truth was that the caller is
+  # mid-merge.
+  #
+  # Run against COPIES of this repository rather than against it. The check
+  # locates its inputs from its own path, so the only way to hand it a
+  # conflicted file is to hand it a different root; and the scripts are copied
+  # rather than symlinked because that path is resolved before it is used.
+  local halfmerged side; scratch; halfmerged="$SCRATCH"
+  for side in verify manifest; do
+    mkdir -p "${halfmerged}/${side}/scripts" "${halfmerged}/${side}/tools/gate"
+    cp "${ROOT}/scripts/check-fault-manifest.py" "${ROOT}/scripts/gatelib.py" \
+      "${halfmerged}/${side}/scripts/"
+    cp "${ROOT}/verify.sh" "${halfmerged}/${side}/verify.sh"
+    cp "${ROOT}/tools/gate/faults.toml" "${halfmerged}/${side}/tools/gate/faults.toml"
+  done
+  # One marker apiece, of the kind git writes, on the file whose turn it is.
+  # `=======` alone is deliberately not enough to trip this -- it is a
+  # plausible separator in ordinary prose -- so each case carries an arrow.
+  printf '<%s HEAD\n' '<<<<<<' | cat - "${ROOT}/verify.sh" \
+    > "${halfmerged}/verify/verify.sh.half"
+  mv "${halfmerged}/verify/verify.sh.half" "${halfmerged}/verify/verify.sh"
+  printf '>%s theirs\n' '>>>>>>' >> "${halfmerged}/manifest/tools/gate/faults.toml"
+
+  # The manifest side needs its `verify.sh` to parse cleanly, because the
+  # refusal it is about fires after `observed()` has read one.
+  expect_exit "a half-merged verify.sh is refused rather than counted" 2 \
+    python3 "${halfmerged}/verify/scripts/check-fault-manifest.py"
+  expect_exit "a half-merged manifest is a refusal and not a finding" 2 \
+    python3 "${halfmerged}/manifest/scripts/check-fault-manifest.py"
+  # And the same manifest asked for a COUNT still answers, because that is the
+  # one caller holding a conflicted manifest on purpose: `merge-gate.py` is
+  # mid-merge and about to rewrite it with the number it is asking for. A
+  # refusal hoisted up to the top of the script would break exactly it.
+  expect_exit "a count is still answered over a manifest being merged" 0 \
+    python3 "${halfmerged}/manifest/scripts/check-fault-manifest.py" --count-red
+
   # --- the scope's own control ---
   #
   # `cargo test` with a filter matching no test prints `running 0 tests` and
