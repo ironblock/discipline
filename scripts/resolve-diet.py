@@ -121,20 +121,48 @@ SOURCES = (
 DEP_TARGET = re.compile(r"^(?P<target>(?:[^:\\]|\\.)+):\s*(?P<deps>.*)$")
 
 
+# What a binary embeds when its dep-info cannot say. Not a guess at the set:
+# the directory that contains it, whole.
+UNNARROWED = pathlib.Path("diet")
+
+
 def embedded(binary: pathlib.Path) -> list[pathlib.Path]:
     """Every file compiled into `binary`, from cargo's dep-info beside it.
 
-    Empty when there is no dep-info to read -- a binary built by something
-    that did not write one. That is a smaller list, not a wrong one: the
-    directory walk over `SOURCES` still covers every `.rs` file, so the only
-    thing an absent `.d` loses is the embedded non-Rust files. Guessing them
-    from a regex instead is what produced the false positive above.
+    `UNNARROWED` when there is no dep-info to read, or when what is there
+    names nothing inside this checkout -- a binary built by something that
+    did not write dep-info, or built from a different tree.
+
+    THAT FALLBACK IS THE POINT, and this returned an empty list until
+    2026-09-13. "A smaller list, not a wrong one" was the claim, and the
+    reasoning given for it was that the walk over `SOURCES` still covers
+    every `.rs` file, so an absent `.d` loses only the embedded non-Rust
+    files. Both halves are true. The conclusion does not follow: the answer
+    this function feeds is "nothing is newer than the binary", and a list
+    with the grammars missing produces that answer for a binary whose
+    grammars have changed. A smaller list makes a WRONG ANSWER here, because
+    the answer is a negative one.
+
+    Every binary a caller pins through `DIET_BIN` carries no `.d`. So the
+    narrowing had quietly switched the embedded half of rule three off for
+    exactly the case the rule was written about -- a build handed in from
+    somewhere else. Measured before the fix: a `DIET_BIN` five years older
+    than a grammar under `diet/formats/` resolved clean, exit 0, reporting
+    `checked_against` a file in `diet/src`.
+
+    Widening is not the pre-narrowing bug returning. That bug was `diet/`
+    counting when cargo's list was AVAILABLE and said otherwise; a fixture
+    would make `--only regimen` exit 2 that `cargo build` could not clear.
+    Here there is no list to be narrower than. What is lost by widening is
+    precision on a foreign binary -- a fixture under `diet/` newer than a
+    pinned build now refuses -- and that is a false positive a person can
+    clear by rebuilding, against a false negative nothing can catch.
     """
     depinfo = binary.parent / f"{binary.name}.d"
     try:
         text = depinfo.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return []
+        return [UNNARROWED]
 
     here = pathlib.Path.cwd()
     found: set[pathlib.Path] = set()
@@ -158,6 +186,13 @@ def embedded(binary: pathlib.Path) -> list[pathlib.Path]:
                 # crate. A change there arrives through `Cargo.lock`, which is
                 # in SOURCES.
                 continue
+    # Dep-info that resolves to nothing in this tree is dep-info about some
+    # other tree, and it narrows this one to nothing at all. Same fallback,
+    # for the same reason: a list that cannot be trusted to be complete
+    # cannot be trusted to say that nothing changed. An unparseable file
+    # lands here too -- no line matches, `found` stays empty.
+    if not found:
+        return [UNNARROWED]
     return sorted(found)
 
 EXIT_REFUSED = 2

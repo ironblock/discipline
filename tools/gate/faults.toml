@@ -35,7 +35,7 @@
 [meta]
 source = "verify.sh"
 red_faults = 315
-mechanics_assertions = 92
+mechanics_assertions = 98
 migrated = 0
 
 
@@ -3812,3 +3812,57 @@ label = "a shared body written out under another name"
 failure_class = "grammar.terminal-defined-twice"
 legacy_signature = "has a shared terminal.s body written out again"
 migrated = false
+[[fault]]
+id = "mech.a-grammar-changed-under-a-binary-with-no-dep-info-is-stale"
+kind = "mechanics"
+check = "regimen"
+label = "a grammar changed under a binary with no dep-info is stale"
+failure_class = "provenance.embedded-set-unknowable"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.and-a-binary-with-no-dep-info-over-an-untouched-tree-resolves"
+kind = "mechanics"
+check = "regimen"
+label = "and a binary with no dep-info over an untouched tree resolves"
+failure_class = "provenance.rule-did-not-apply"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-dep-info-that-does-narrow-still-narrows"
+kind = "mechanics"
+check = "regimen"
+label = "a dep-info that does narrow still narrows"
+failure_class = "provenance.wrong-artifact"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-half-merged-verify-sh-is-refused-rather-than-counted"
+kind = "mechanics"
+check = "parity"
+label = "a half-merged verify.sh is refused rather than counted"
+failure_class = "parity.counted-from-a-half-merged-file"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-half-merged-manifest-is-a-refusal-and-not-a-finding"
+kind = "mechanics"
+check = "parity"
+label = "a half-merged manifest is a refusal and not a finding"
+failure_class = "parity.merge-state-read-as-a-finding"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-count-is-still-answered-over-a-manifest-being-merged"
+kind = "mechanics"
+check = "parity"
+label = "a count is still answered over a manifest being merged"
+failure_class = "parity.count-refused-mid-merge"
+legacy_signature = ""
+migrated = false
+
