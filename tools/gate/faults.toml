@@ -35,7 +35,7 @@
 [meta]
 source = "verify.sh"
 red_faults = 312
-mechanics_assertions = 50
+mechanics_assertions = 53
 migrated = 0
 
 
@@ -3407,3 +3407,30 @@ label = "a shared body written out under another name"
 failure_class = "grammar.terminal-defined-twice"
 legacy_signature = "has a shared terminal.s body written out again"
 migrated = false
+[[fault]]
+id = "mech.a-half-merged-verify-sh-is-refused-rather-than-counted"
+kind = "mechanics"
+check = "parity"
+label = "a half-merged verify.sh is refused rather than counted"
+failure_class = "parity.counted-from-a-half-merged-file"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-half-merged-manifest-is-a-refusal-and-not-a-finding"
+kind = "mechanics"
+check = "parity"
+label = "a half-merged manifest is a refusal and not a finding"
+failure_class = "parity.merge-state-read-as-a-finding"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-count-is-still-answered-over-a-manifest-being-merged"
+kind = "mechanics"
+check = "parity"
+label = "a count is still answered over a manifest being merged"
+failure_class = "parity.count-refused-mid-merge"
+legacy_signature = ""
+migrated = false
+
