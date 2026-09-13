@@ -73,7 +73,8 @@ readonly CHECKS=(fmt clippy test library results recompute regimen metadata hygi
 # Every class, not only the ones the brief names: otherwise a pattern and its
 # seeded class can be deleted together and the selftest still reports success.
 readonly REQUIRED_HYGIENE_CLASSES=(
-  private-ipv4 internal-hostname personal-home-path windows-user-path
+  private-ipv4 internal-hostname personal-home-path session-scratchpad-path
+  ssh-user-at-host windows-user-path
   internal-ticket-id aws-access-key-id github-token slack-token
   private-key-block anthropic-api-key openai-api-key assigned-secret
 )
@@ -2006,6 +2007,27 @@ inject_history() {
   printf 'x\n' >> pages/index.html
   git add --all
   seed_commit --message "carries $(printf '%s%s' 'DIE' '-9001') forward"
+}
+
+# Content that enters a diff and leaves again in the next commit. The tree is
+# clean at the end and every commit message is clean throughout, so the file
+# gate and the message gate both pass -- and `git log -p` still hands the
+# token to anyone. Measured on merged `main` before this was gated: 32
+# occurrences in patch text, zero in the tree, both checks green.
+inject_history_added_then_removed() {
+  git add --all
+  seed_commit --message 'a base commit'
+  git update-ref refs/remotes/origin/main HEAD
+  # The copy lives under .git/, which git never tracks: a scratch file beside
+  # the source would be committed by the `git add --all` below and then
+  # deleted, putting a second file in the very patches this case reads.
+  cp pages/index.html .git/index.html.before
+  printf 'host = %s%s\n' '192.168' '.4.9' >> pages/index.html
+  git add --all
+  seed_commit --message 'add a line'
+  cp .git/index.html.before pages/index.html
+  git add --all
+  seed_commit --message 'and take it out again'
 }
 
 # An injection that changes nothing. This is the whole failure the
@@ -4906,6 +4928,9 @@ prove_patterns() {
   scratch; seed="$SCRATCH"
   bash "${ROOT}/${seeder}" "$seed" > /dev/null
 
+  local escaped=false
+  if find "$seed" -name '*.jsonl' -print -quit | grep -q .; then escaped=true; fi
+
   while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
     case "$label" in ''|\#*) continue ;; esac
     [ -n "${regex:-}" ] || continue
@@ -4921,10 +4946,74 @@ prove_patterns() {
       continue
     fi
 
+    # A corpus that carries escaped twins requires one for EVERY class, and
+    # requires each class to fire on it. A class that guards prose and not
+    # logs is a guard over the half of the surface where the artefacts are
+    # not. Derived from the corpus rather than passed in: a table whose seeder
+    # stops writing twins loses the requirement, and a table that never had
+    # them (the published surface is HTML and CSS, never a JSON string) is not
+    # asked for one.
+    #
+    # A CORRECTION. This comment used to add "and the twin reaches the pattern
+    # only through the decoded view, so this is also what keeps that view
+    # load-bearing". IT DID NOT. `json.dumps` puts the escaped newline at the
+    # END of the line, so nothing is welded to the forbidden string's left and
+    # the raw bytes match it anyway -- measured, with the mirror removed, 13
+    # of 14 classes still fired on their twin. The twin proved the pattern and
+    # said nothing about the view.
+    #
+    # The WELDED file is what does that job, and it is required too: the
+    # fragment alone, immediately after an escaped newline, which is the shape
+    # the decoder exists for. With the mirror removed it silences the four
+    # classes whose match may begin with an alphanumeric; the other ten are
+    # anchored on a character that is never a token character (`/home/`,
+    # `-----BEGIN `, `C:\`, `sk-ant-`) and cannot be welded shut at all. See
+    # seed-hygiene-fault.sh for the measurement and the list.
+    if [ "$escaped" = true ]; then
+      local missing=""
+      [ -f "${dir}/${label}.jsonl" ] || missing="escaped twin"
+      [ -f "${dir}/${label}.welded.jsonl" ] || missing="${missing:+${missing} and }welded twin"
+      if [ -n "$missing" ]; then
+        printf 'UNSEEDED %s pattern %s  <-- NO %s TO PROVE IT AGAINST\n' \
+          "$kind" "$label" "$(printf '%s' "$missing" | tr '[:lower:]' '[:upper:]')"
+        SELFTEST_BROKEN+=("${kind} pattern ${label} has no ${missing}")
+        continue
+      fi
+    fi
+
     rc=0
     out="$(bash "${ROOT}/scripts/hygiene.sh" --patterns "${ROOT}/${table}" --tree "$dir" 2>&1)" || rc=$?
-    if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "hygiene: ${label}:"; then
+    local plain=false twin=false welded=false
+    # The PROSE form is "a hit in neither twin", not "a hit in `${label}.txt`":
+    # the pages corpus writes `.html`, `.css` and `.js`, and naming one
+    # extension made every one of those classes report prose=false. Caught by
+    # this suite on the first run after the welded form was added, which is
+    # the corpus doing its job -- but the fix is to exclude both twins by
+    # name, since with three files "not the plain twin" is no longer enough.
+    printf '%s\n' "$out" | grep "hygiene: ${label}:" \
+      | grep -v "${label}\.welded\.jsonl" \
+      | grep -qv "${label}\.jsonl" && plain=true
+    if [ "$escaped" = true ]; then
+      # `${label}.jsonl` matches only the plain twin: the welded file is
+      # `${label}.welded.jsonl`, which does not contain that string.
+      printf '%s\n' "$out" | grep -q "hygiene: ${label}:.*${label}\.jsonl" && twin=true
+      printf '%s\n' "$out" | grep -q "hygiene: ${label}:.*${label}\.welded\.jsonl" && welded=true
+    else
+      twin=true
+      welded=true
+    fi
+
+    if [ "$rc" -eq 1 ] && [ "$plain" = true ] && [ "$twin" = true ] \
+       && [ "$welded" = true ]; then
       printf 'RED   hygiene.sh exit %-3d  %s\n' "$rc" "$label"
+    elif [ "$rc" -eq 1 ] \
+         && { [ "$plain" = true ] || [ "$twin" = true ] || [ "$welded" = true ]; }; then
+      printf 'GREEN hygiene.sh exit %-3d  %s  <-- FIRED ON %s%s%s, NOT ALL THREE\n' \
+        "$rc" "$label" \
+        "$([ "$plain" = true ] && printf 'prose ' || true)" \
+        "$([ "$twin" = true ] && printf 'twin ' || true)" \
+        "$([ "$welded" = true ] && printf 'welded' || true)"
+      SELFTEST_BROKEN+=("${kind} pattern ${label}: not every form")
     else
       printf 'GREEN hygiene.sh exit %-3d  %s  <-- PATTERN DID NOT FIRE\n' "$rc" "$label"
       SELFTEST_BROKEN+=("${kind} pattern ${label}")
@@ -4995,6 +5084,419 @@ prove_mechanics() {
   expect_exit "the last pattern in an unterminated table still fires" 1 \
     bash "${ROOT}/scripts/hygiene.sh" --patterns "${box}/unterminated-patterns.tsv" \
       --tree "${box}/last-line"
+
+  # --- content as a reader would see it -------------------------------------
+  #
+  # An address that exists ONLY inside a JSON string, immediately after an
+  # escaped newline. `private-ipv4` requires a non-alphanumeric to its left;
+  # in the bytes on disk the character to its left is the `n` of `\n`, so the
+  # raw scan reads the escaping and calls the content clean. This is how a
+  # private path reached a replay log unflagged.
+  mkdir -p "${box}/escaped"
+  printf '{"stdout":"up\\n%s%s ok\\n"}\n' '192.168' '.4.9' \
+    > "${box}/escaped/run.jsonl"
+  expect_exit "an address only a decoded view can see is caught" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/escaped"
+  # The control. Without it the assertion above passes on a file whose bytes
+  # match anyway, and proves nothing about the decoding.
+  expect_exit "the same address, unread, is not a hit" 1 \
+    grep -qE "(^|[^0-9A-Za-z.-])192\\.168\\.[0-9]{1,3}\\.[0-9]{1,3}" \
+      "${box}/escaped/run.jsonl"
+
+  # THE WELDED CASE, which is the one the boundary misses rather than the one
+  # the escaping hides. `\n` puts a literal `n` immediately left of the token,
+  # so `(^|[^A-Za-z0-9])` does not match there -- the raw bytes are searched
+  # and found clean while the content is not. This is the defect the data seat
+  # reported: a pattern that guards prose does not guard logs.
+  mkdir -p "${box}/welded"
+  printf '{"stdout":"ran\\n%s%s regressed\\n"}\n' 'die' '45' \
+    > "${box}/welded/run.jsonl"
+  expect_exit "an escape-welded token is caught through the decoding" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/welded"
+  # ...and the control that makes the assertion above mean something: the same
+  # bytes, matched directly, are NOT a hit. If this ever exits 0 the case
+  # above has stopped testing the decoding and started testing the pattern.
+  expect_exit "the same bytes, unread, are not a hit" 1 \
+    grep -qiE "(^|[^A-Za-z0-9])DIE-?[0-9]+" "${box}/welded/run.jsonl"
+
+  # THE SAME WELD, in a file carrying one byte that is not UTF-8. The decoder
+  # skipped the WHOLE FILE on UnicodeDecodeError, so one cp1252 quote anywhere
+  # in a log meant no decoded view for ANY of it -- the weld above went unseen
+  # and the gate printed `clean`. Six such files are already tracked here, one
+  # of them a JSONL record fixture, so the combination is not exotic.
+  #
+  # `errors="replace"` keeps the view. U+FFFD is not alphanumeric, so it
+  # separates like any other non-token byte: it can split a token that spanned
+  # the bad byte, and it cannot invent one that was not there.
+  mkdir -p "${box}/welded-undecodable"
+  printf '{"stdout":"ran\\n%s%s regressed\\n"}\n' 'die' '45' \
+    > "${box}/welded-undecodable/run.jsonl"
+  printf '{"note":"caf\xe9"}\n' >> "${box}/welded-undecodable/run.jsonl"
+  expect_exit "a weld survives one byte that is not UTF-8" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/welded-undecodable"
+  # Two controls, because this assertion has two ways to pass for the wrong
+  # reason. The file must really be undecodable...
+  expect_exit "and that file really is undecodable as UTF-8" 1 \
+    python3 -c 'import sys; open(sys.argv[1], encoding="utf-8").read()' \
+      "${box}/welded-undecodable/run.jsonl"
+  # ...and its raw bytes must really be clean, so the hit came from the view.
+  expect_exit "and its raw bytes, unread, are not a hit" 1 \
+    grep -qiE "(^|[^A-Za-z0-9])DIE-?[0-9]+" "${box}/welded-undecodable/run.jsonl"
+
+  # A pattern beginning with `-`. grep would read it as an OPTION and report
+  # every row after it absent -- a whole class silently unguarded, printing
+  # the same green. The scanner passes each regex with `-e`.
+  mkdir -p "${box}/dash-lead"
+  printf 'value = %s%s\n' '-forbid' 'den-shape' > "${box}/dash-lead/hit.txt"
+  printf 'dash-leading\t-\t-forbidden-shape\n' > "${box}/dash-patterns.tsv"
+  expect_exit "a pattern beginning with a dash is a pattern, not an option" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --patterns "${box}/dash-patterns.tsv" \
+      --tree "${box}/dash-lead"
+
+  # --- literals that have no shape ------------------------------------------
+  #
+  # A digest row cannot be seeded the way a pattern row is: assembling the
+  # literal from fragments would still BE the literal, in a public repository,
+  # which is what the row exists to avoid. A DECOY token and a scratch table
+  # prove the mechanism end to end without the real value ever being written.
+  local decoy table
+  decoy="$(printf '%s%s%s' 'zz' 'subject' 'zz')"
+  table="${box}/decoy-hashes.txt"
+  printf '# Salt: discipline-hygiene-v1\n' > "$table"
+  python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+    --emit "$decoy" decoy-username >> "$table"
+
+  mkdir -p "${box}/decoy-hit"
+  printf 'drwx 3 %s staff\n' "$decoy" > "${box}/decoy-hit/ls.txt"
+  expect_exit "a digest row catches its literal" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" --tree "${box}/decoy-hit"
+
+  # The same token welded to an escape. A regex can be given a looser
+  # boundary to reach through one; a digest cannot be given a looser hash, so
+  # this half needs the decoding more than the other half does.
+  mkdir -p "${box}/decoy-welded"
+  printf '{"stdout":"total 4\\n%s ok\\n"}\n' "$decoy" \
+    > "${box}/decoy-welded/run.jsonl"
+  expect_exit "a digest row catches an escape-welded literal" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" --tree "${box}/decoy-welded"
+
+  # A SUBSTRING IS NOT THE TOKEN. Without this the row would fire on every
+  # word that contains the literal, and a gate that cries wolf gets switched
+  # off -- the same failure mode as an over-loose pattern, arrived at by
+  # hashing instead of by matching.
+  mkdir -p "${box}/decoy-miss"
+  printf '%sx and x%s and someone-else\n' "$decoy" "$decoy" \
+    > "${box}/decoy-miss/near.txt"
+  expect_exit "a substring of the literal is not the literal" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" --tree "${box}/decoy-miss"
+
+  # THE REPORT NAMES THE LABEL AND NEVER THE TOKEN. A scanner that printed
+  # what it found would publish the value on every CI log that caught one.
+  expect_exit "a hit names its label, not what it matched" 0 \
+    bash -c "out=\$(python3 '${ROOT}/scripts/check-hashes.py' --table '$table' \
+      --tree '${box}/decoy-hit' 2>&1; true) \
+      && grep -q 'decoy-username' <<<\"\$out\" \
+      && ! grep -q '$decoy' <<<\"\$out\""
+
+  # THE WIRING, not just the scanner. Every assertion above runs
+  # `check-hashes.py` directly, so all of them would still pass with the call
+  # removed from `hygiene.sh` -- and then `--only hygiene` would be a pattern
+  # scan wearing a digest scan's green.
+  expect_exit "the hygiene gate runs the digest half" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --hashes "$table" --tree "${box}/decoy-hit"
+
+  # A table with no salt cannot be computed against, and a table with no rows
+  # checks nothing. Neither is a pass.
+  printf 'c3cfd25a52f47a385452ff4098ace911eb0c4b44e7eebfc39c29fb38dcee408a  x\n' \
+    > "${box}/no-salt.txt"
+  expect_exit "a digest table naming no salt is refused" 2 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "${box}/no-salt.txt" \
+      --tree "${box}/decoy-hit"
+  printf '# Salt: discipline-hygiene-v1\n' > "${box}/no-rows.txt"
+  expect_exit "a digest table with no rows is not a pass" 2 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "${box}/no-rows.txt" \
+      --tree "${box}/decoy-hit"
+
+  # ONE BYTE THAT IS NOT UTF-8 USED TO DROP THE WHOLE FILE. The scan caught a
+  # `UnicodeDecodeError`, skipped the file, and justified it by saying the
+  # pattern half covered it -- which is the one thing that cannot be true
+  # here, because patterns reach strings that have a shape and this half is
+  # for the strings that do not. The literal below sits in plain ASCII; only
+  # the curly quote beside it is undecodable.
+  mkdir -p "${box}/not-utf8"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='cp1252').write('owned by ' + sys.argv[2] + ', it\u2019s theirs\n')
+" "${box}/not-utf8/notes.txt" "$decoy"
+  expect_exit "a literal in a file with one undecodable byte is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/not-utf8"
+
+  # And the control, so the assertion above is about the ENCODING and not
+  # about the literal being present: the same undecodable byte, no literal.
+  mkdir -p "${box}/not-utf8-clean"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='cp1252').write('nothing here, it\u2019s fine\n')
+" "${box}/not-utf8-clean/notes.txt"
+  expect_exit "an undecodable byte alone is not a hit" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/not-utf8-clean"
+
+  # A CHARACTER WITH NO VISUAL WIDTH IS NOT A SEPARATOR. A zero-width space
+  # inside the literal is invisible in review and invisible in `git diff`, and
+  # a tokeniser that split on it handed back two tokens that hash to nothing
+  # and reported the file clean. Ruled 2026-09-11 as IN SCOPE: this gate
+  # guards against mistakes and against a careless commit later tidied, and an
+  # invisible byte a tidy-up left behind is exactly that -- the one evasion
+  # that survives a human reading the diff.
+  mkdir -p "${box}/zero-width"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2][:5] + '​' + sys.argv[2][5:] + ' staff\n')
+" "${box}/zero-width/ls.txt" "$decoy"
+  expect_exit "a literal split by a zero-width space is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/zero-width"
+
+  # The control, so the assertion above is about the CHARACTER and not about
+  # the literal being present: the same zero-width space, no literal. Without
+  # it, "dropped the character" and "found the literal" are confounded and a
+  # scanner that fired on everything would satisfy the pair.
+  mkdir -p "${box}/zero-width-clean"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write('nothing​ here at all\n')
+" "${box}/zero-width-clean/notes.txt"
+  expect_exit "a zero-width space alone is not a hit" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/zero-width-clean"
+
+  # The other half of the rule, and it is a DIFFERENT category: a combining
+  # accent is `Mn` where the zero-width space is `Cf`. Both are dropped, and
+  # asserting only one leaves the other a branch nothing reaches -- which is
+  # how a guard ends up unable to fire.
+  mkdir -p "${box}/combining"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2][:5] + '́' + sys.argv[2][5:] + ' staff\n')
+" "${box}/combining/ls.txt" "$decoy"
+  expect_exit "a literal split by a combining mark is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/combining"
+
+  # THE SIBLING ONE STEP SIDEWAYS, and the reason the strip is a PROPERTY now
+  # rather than a list of categories. `U+3164 HANGUL FILLER` is category `Lo`
+  # and `isalnum()` is TRUE for it, so it does not split the token -- it welds
+  # INTO it, and no set of categories could ever have reached it while the
+  # docstring promised "a character of no visual width is still caught"
+  # without qualification. Ruled 2026-09-12: strip Unicode
+  # `Default_Ignorable_Code_Point`, which names exactly the code points that
+  # render as nothing, the four alphanumeric fillers among them.
+  mkdir -p "${box}/filler"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2][:5] + '\u3164' + sys.argv[2][5:] + ' staff\n')
+" "${box}/filler/ls.txt" "$decoy"
+  expect_exit "a literal welded by a hangul filler is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/filler"
+
+  # Its control, for the same reason the other two have one.
+  mkdir -p "${box}/filler-clean"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write('nothing\u3164 here at all\n')
+" "${box}/filler-clean/notes.txt"
+  expect_exit "a hangul filler alone is not a hit" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/filler-clean"
+
+  # THE DECLARED LIMIT, asserted rather than only written down. A visible
+  # lookalike -- Cyrillic `e` where a Latin one belongs -- is NOT caught, and
+  # that is the line the ruling drew: invisible to a reader is in scope, a
+  # confusable is not. An undeclared non-catch is the vacuous class; this one
+  # is declared, and pinned, so a later change that quietly starts folding
+  # confusables has to come here and say so.
+  mkdir -p "${box}/confusable"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2].replace('e', '\u0435', 1) + ' staff\n')
+" "${box}/confusable/ls.txt" "$decoy"
+  expect_exit "a visible lookalike is the declared limit, not a hit" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/confusable"
+
+  # ...and the control that stops the row above from passing because the decoy
+  # has no `o` in it to replace. Same file, same shape, the Latin letter left
+  # alone: that one must fire.
+  mkdir -p "${box}/confusable-control"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2] + ' staff\n')
+" "${box}/confusable-control/ls.txt" "$decoy"
+  expect_exit "and the same line with the Latin letter is a hit" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/confusable-control"
+
+  # NO TABLE IS NO SCAN. The strip reads `default-ignorable.tsv` beside the
+  # decoder, and without it the tokeniser does not know which characters are
+  # invisible -- which makes it exactly as blind as the defect it exists to
+  # catch. Exit 2, like a missing salt and a missing decoder, because `clean`
+  # from a blind scan is the vacuous class.
+  mkdir -p "${box}/tableless"
+  cp "${ROOT}/scripts/check-hashes.py" "${ROOT}/scripts/decoding.py" "${box}/tableless/"
+  expect_exit "a decoder with no invisible-character table is broken, not clean" 2 \
+    python3 "${box}/tableless/check-hashes.py" --table "$table" \
+      --tree "${box}/decoy-hit"
+  # The control: the same copied pair, WITH the table, finds the same hit the
+  # real scanner does. Without it the row above passes on any copy that fails
+  # for any reason at all.
+  cp "${ROOT}/scripts/default-ignorable.tsv" "${box}/tableless/"
+  expect_exit "and the same copy, with the table beside it, finds the literal" 1 \
+    python3 "${box}/tableless/check-hashes.py" --table "$table" \
+      --tree "${box}/decoy-hit"
+
+  # ESCAPED TWICE IS STILL ESCAPED. Parsing JSON spends one level, so content
+  # a tool logged from another tool's JSON output arrives with `\` and `n`
+  # still welded to the front of a token one layer down. The decoder runs to a
+  # fixed point and spends the escapes at each layer; before it did, this file
+  # was reported clean.
+  mkdir -p "${box}/twice-wrapped"
+  python3 -c "
+import json, sys
+inner = json.dumps({'out': 'ls -l\\n' + sys.argv[2] + ' staff 42'})
+open(sys.argv[1], 'w').write(json.dumps({'log': inner}) + '\n')
+" "${box}/twice-wrapped/nested.jsonl" "$decoy"
+  expect_exit "a literal wrapped in JSON twice is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/twice-wrapped"
+
+  # THREE GUARDS THE FIXTURE ABOVE DOES NOT REACH, each one measured by
+  # neutering the code it names and watching the whole suite stay green.
+  # Its input is nested JSON, so "parsed another layer" and "spent the
+  # escapes" are confounded in the one case that touches both -- and the two
+  # halves of the decoder that only one of those exercises had no fixture at
+  # all. A fixture that proves nothing the first one didn't is not a fixture;
+  # a guard nothing reaches is worse than no guard.
+
+  # 1. THE ESCAPE-SPENDING HALF, ALONE. A JSON string whose PARSED value still
+  # holds a literal backslash-n -- two backslashes in the file -- welded to
+  # the token. There is no second JSON layer here, so parsing cannot recover
+  # it and only `_unescaped` can. Measured with `_unescaped` made the identity
+  # function: the view loses its second half and this file reads clean.
+  mkdir -p "${box}/escape-only"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    '{\"stdout\":\"ran' + chr(92) + chr(92) + 'n' + sys.argv[2] + ' regressed\"}' + chr(10))
+" "${box}/escape-only/run.jsonl" "$decoy"
+  expect_exit "a token welded one layer under the parse is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/escape-only"
+  # Its control, and it is about TOKENS rather than about the substring: the
+  # decoy is right there in the bytes -- what is missing is a separator to its
+  # left, because the character before it is the `n` of an escaped newline.
+  # A boundary-aware search of the raw file finds nothing, which is exactly
+  # the silence the decoded view exists to break.
+  expect_exit "and the raw bytes hold no such token" 1 \
+    grep -qE "(^|[^A-Za-z0-9])${decoy}([^A-Za-z0-9]|$)" \
+      "${box}/escape-only/run.jsonl"
+
+  # 2. MORE THAN ONE PASS. `MAX_PASSES` was reachable by nothing: the decoy is
+  # recovered at one pass in every nested case, because spending the escapes
+  # collapses arbitrary depth in a single go. A UNICODE escape is the case it
+  # cannot: `_unescaped` spends `\n`, `\t` and `\r` and not `\u0009`, so
+  # only a SECOND JSON PARSE separates the token. Measured: one pass reads
+  # this clean, two find it.
+  mkdir -p "${box}/two-passes"
+  python3 -c "
+import json, sys
+inner = '{\"stdout\":\"ran' + chr(92) + 'u0009' + sys.argv[2] + ' x\"}'
+open(sys.argv[1], 'w', encoding='utf-8').write(json.dumps({'log': inner}) + chr(10))
+" "${box}/two-passes/nested.jsonl" "$decoy"
+  expect_exit "a token only a second parse can separate is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/two-passes"
+
+  # 3. SPLIT ON EVERY NON-ALPHANUMERIC. The tokeniser's central rule, and the
+  # reason this function exists rather than a regex at each call site: the
+  # obvious class keeps `owner.example.net` whole, so a digest of the bare
+  # name never matches it. The decoy carries no dot, so every fixture above
+  # passes with the rule reverted. This one does not.
+  mkdir -p "${box}/dotted"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'proxy: ' + sys.argv[2] + '.example.net:8080' + chr(10))
+" "${box}/dotted/hosts.txt" "$decoy"
+  expect_exit "a literal joined by dots to more text is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/dotted"
+  # Its control, and the one that says the row above is about the SPLITTING:
+  # the same file with the decoy standing alone must fire too, so a failure
+  # here is never "the decoy stopped being in the table".
+  mkdir -p "${box}/dotted-control"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write('proxy: ' + sys.argv[2] + chr(10))
+" "${box}/dotted-control/hosts.txt" "$decoy"
+  expect_exit "and the same decoy standing alone is a hit" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/dotted-control"
+
+  # 4. SOMETHING IN FRONT OF THE JSON. Not the token -- the WHOLE VIEW. The
+  # decoder required the first character of a line to open a JSON value, so
+  # one byte of preamble meant no decoded view for the file at all, and the
+  # welded token went unseen while the gate printed clean. Both forms are
+  # accidents rather than evasions, which is this gate's stated threat model:
+  # PowerShell's `Out-File` writes a BOM by default, and every timestamped
+  # log line ever written has a prefix.
+  mkdir -p "${box}/bom" "${box}/log-prefix"
+  python3 -c "
+import sys
+d = sys.argv[3]
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    '\ufeff{\"stdout\":\"ran' + chr(92) + 'n' + d + ' x\"}' + chr(10))
+open(sys.argv[2], 'w', encoding='utf-8').write(
+    '2026-01-01T00:00:00Z INFO {\"stdout\":\"ran' + chr(92) + 'n' + d + ' x\"} (ok)' + chr(10))
+" "${box}/bom/run.jsonl" "${box}/log-prefix/run.jsonl" "$decoy"
+  expect_exit "a byte-order mark in front of the JSON does not blind the view" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" --tree "${box}/bom"
+  expect_exit "a log prefix in front of the JSON does not blind the view" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/log-prefix"
+  # The control both rows need: neither file holds the decoy as a token in its
+  # raw bytes, so each hit came from a view the preamble used to prevent.
+  expect_exit "and neither file's raw bytes hold such a token" 1 \
+    grep -qE "(^|[^A-Za-z0-9])${decoy}([^A-Za-z0-9]|$)" \
+      "${box}/bom/run.jsonl" "${box}/log-prefix/run.jsonl"
+  # ...and the other control, which stops the pair from passing on a decoder
+  # that returns a view for ANY line: prose with a stray brace is not JSON and
+  # must still decode to nothing.
+  mkdir -p "${box}/brace-prose"
+  printf 'a sentence with a { brace and no JSON in it at all\n' \
+    > "${box}/brace-prose/notes.txt"
+  expect_exit "a stray brace in prose is not a document" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/brace-prose"
+
+  # THE DECODER MISSING IS NOT A FINDING. `sys.exit(message)` exits one, which
+  # is this scanner's code for "ran, and found something" -- so an operator
+  # error would have been reported as a forbidden literal.
+  mkdir -p "${box}/lonely"
+  cp "${ROOT}/scripts/check-hashes.py" "${box}/lonely/check-hashes.py"
+  expect_exit "a scanner with no decoder beside it is broken, not dirty" 2 \
+    python3 "${box}/lonely/check-hashes.py" --table "$table" \
+      --tree "${box}/decoy-hit"
+  cp "${ROOT}/scripts/hygiene-decode.py" "${box}/lonely/hygiene-decode.py"
+  expect_exit "and the decoder's own driver says so the same way" 2 \
+    bash -c "printf '' | python3 '${box}/lonely/hygiene-decode.py' --into '${box}/lonely/mirror'"
 
   # A dot-prefixed directory under a results root is linted, not skipped.
   #
@@ -5077,6 +5579,75 @@ prove_mechanics() {
     env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
         GITHUB_EVENT_PATH="${fake}/push-new-branch.json" \
       python3 "${fake}/repo/scripts/check-history.py"
+
+  # A SECRET IN A PATH GIT WILL NOT DIFF. Without `--text`, `git show` prints
+  # `Binary files a/x and b/x differ` for a path its NUL heuristic calls
+  # binary AND for a plain-text path marked `-diff` in .gitattributes -- so
+  # the content never reaches the scan. Added-then-removed is the hole this
+  # check exists to close, and it stayed open for exactly the content the
+  # pattern table singles out with its `b` flag: "a secret in a .pack or an
+  # image is exactly as committed as one in a text file".
+  #
+  # The `-diff` form is used here rather than the NUL form because it is the
+  # worse one: an attribute committed to the tree under scan decided what the
+  # history scan was allowed to see.
+  local fake_undiffable
+  (
+    cd "${fake}/repo"
+    printf 'hidden.txt -diff\n' > .gitattributes
+    printf 'ticket %s%s, in a path git will not diff\n' 'DIE' '-4242' \
+      > hidden.txt
+    git add --all && seed_commit --message 'a path marked -diff'
+  )
+  fake_undiffable="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_head" "$fake_undiffable" > "${fake}/pr-undiffable.json"
+  expect_exit "history: a secret git renders as binary is still found" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-undiffable.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+  # The control. git really does hide it: if this stops finding the `Binary
+  # files` line, the assertion above has stopped testing `--text` and is
+  # passing on an ordinary text diff.
+  expect_exit "and git really does hide that path without --text" 0 \
+    bash -c "git -C '${fake}/repo' show --format= --patch '${fake_undiffable}' \
+      | grep -q '^Binary files'"
+
+  # A COMMITTED BYTE THAT IS NOT UTF-8. `text=True` decodes the patch as
+  # strict UTF-8 and RAISES on the first byte that is not -- and `git show
+  # --patch` pulls raw file content into that decode. The traceback exits 1,
+  # which is this repository's code for "the scan ran and found something".
+  # A crash is not a finding: it reddens the lane over history nothing can
+  # edit, and no content change clears it.
+  local fake_undecodable
+  (
+    cd "${fake}/repo"
+    printf 'caf\xe9, in cp1252\n' > bytes.txt
+    git add --all && seed_commit --message 'a byte that is not UTF-8'
+  )
+  fake_undecodable="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_undiffable" "$fake_undecodable" > "${fake}/pr-undecodable.json"
+  expect_exit "history: a committed non-UTF-8 byte is survived, not reported" 0 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-undecodable.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+  # The control, and this one is load-bearing: without it the assertion above
+  # is satisfied by any clean range, and says nothing about the decoding.
+  cat > "${fake}/strict.py" <<'STRICT'
+import subprocess, sys
+try:
+    subprocess.run(
+        ["git", "-C", sys.argv[1], "show", "--format=", "--patch", "--text",
+         sys.argv[2]],
+        capture_output=True, text=True,
+    )
+except UnicodeDecodeError:
+    sys.exit(0)
+sys.exit(1)
+STRICT
+  expect_exit "and a strict decode of that same patch really does raise" 0 \
+    python3 "${fake}/strict.py" "${fake}/repo" "$fake_undecodable"
 
   # The CI aggregator's comparison. A skipped job is not a failed job, and
   # GitHub's own `!failure()` idiom passes on skipped, so the one thing this
@@ -5404,6 +5975,8 @@ selftest() {
     'matches the line naming its own scope'
   seeded_case "a forbidden id in a commit message"    history  inject_history \
     'hygiene: internal-ticket-id:'
+  seeded_case "content added and then removed"        history  inject_history_added_then_removed \
+    'hygiene: private-ipv4: .*patch-'
   seeded_case "history with an undeterminable base"   history  inject_history_no_base \
     'an undeterminable base is a failure, not an empty scan'
   seeded_case "an ask wired to another class's question" test inject_router_ask_class_untuned \

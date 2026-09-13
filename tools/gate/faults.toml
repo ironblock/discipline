@@ -34,8 +34,8 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 312
-mechanics_assertions = 56
+red_faults = 315
+mechanics_assertions = 98
 migrated = 0
 
 
@@ -1121,6 +1121,24 @@ pattern = "windows-user-path"
 migrated = false
 
 [[fault]]
+id = "hygiene.session-scratchpad-path"
+kind = "pattern-class"
+check = "hygiene"
+label = "session-scratchpad-path"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "session-scratchpad-path"
+migrated = false
+
+[[fault]]
+id = "hygiene.ssh-user-at-host"
+kind = "pattern-class"
+check = "hygiene"
+label = "ssh-user-at-host"
+failure_class = "hygiene.forbidden-pattern"
+pattern = "ssh-user-at-host"
+migrated = false
+
+[[fault]]
 id = "hygiene.internal-ticket-id"
 kind = "pattern-class"
 check = "hygiene"
@@ -1479,6 +1497,42 @@ kind = "mechanics"
 check = "-"
 label = "history: a faked new-branch push resolves a base"
 failure_class = "history.clean"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.history-a-secret-git-renders-as-binary-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "history: a secret git renders as binary is still found"
+failure_class = "history.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.and-git-really-does-hide-that-path-without-text"
+kind = "mechanics"
+check = "-"
+label = "and git really does hide that path without --text"
+failure_class = "history.control"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.history-a-committed-non-utf-8-byte-is-survived-not-reported"
+kind = "mechanics"
+check = "-"
+label = "history: a committed non-UTF-8 byte is survived, not reported"
+failure_class = "history.clean"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.and-a-strict-decode-of-that-same-patch-really-does-raise"
+kind = "mechanics"
+check = "-"
+label = "and a strict decode of that same patch really does raise"
+failure_class = "history.control"
 expected_exit = "0"
 migrated = false
 [[fault]]
@@ -2560,6 +2614,151 @@ failure_class = "results.provenance-escapes-the-directory"
 migrated = false
 
 [[fault]]
+id = "mech.an-address-only-a-decoded-view-can-see-is-caught"
+kind = "mechanics"
+check = "hygiene"
+label = "an address only a decoded view can see is caught"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.the-same-address-unread-is-not-a-hit"
+kind = "mechanics"
+check = "hygiene"
+label = "the same address, unread, is not a hit"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.an-escape-welded-token-is-caught-through-the-decoding"
+kind = "mechanics"
+check = "hygiene"
+label = "an escape-welded token is caught through the decoding"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.the-same-bytes-unread-are-not-a-hit"
+kind = "mechanics"
+check = "hygiene"
+label = "the same bytes, unread, are not a hit"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-weld-survives-one-byte-that-is-not-utf-8"
+kind = "mechanics"
+check = "hygiene"
+label = "a weld survives one byte that is not UTF-8"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.and-that-file-really-is-undecodable-as-utf-8"
+kind = "mechanics"
+check = "hygiene"
+label = "and that file really is undecodable as UTF-8"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.and-its-raw-bytes-unread-are-not-a-hit"
+kind = "mechanics"
+check = "hygiene"
+label = "and its raw bytes, unread, are not a hit"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-pattern-beginning-with-a-dash-is-a-pattern-not-an-option"
+kind = "mechanics"
+check = "hygiene"
+label = "a pattern beginning with a dash is a pattern, not an option"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-digest-row-catches-its-literal"
+kind = "mechanics"
+check = "hygiene"
+label = "a digest row catches its literal"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-digest-row-catches-an-escape-welded-literal"
+kind = "mechanics"
+check = "hygiene"
+label = "a digest row catches an escape-welded literal"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-substring-of-the-literal-is-not-the-literal"
+kind = "mechanics"
+check = "hygiene"
+label = "a substring of the literal is not the literal"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-hit-names-its-label-not-what-it-matched"
+kind = "mechanics"
+check = "hygiene"
+label = "a hit names its label, not what it matched"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.the-hygiene-gate-runs-the-digest-half"
+kind = "mechanics"
+check = "hygiene"
+label = "the hygiene gate runs the digest half"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-digest-table-naming-no-salt-is-refused"
+kind = "mechanics"
+check = "hygiene"
+label = "a digest table naming no salt is refused"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-digest-table-with-no-rows-is-not-a-pass"
+kind = "mechanics"
+check = "hygiene"
+label = "a digest table with no rows is not a pass"
+failure_class = "hygiene.scanner-mechanics"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "history.history_added_then_removed"
+kind = "seeded-gate"
+check = "history"
+target = "history"
+label = "content added and then removed"
+failure_class = "hygiene.forbidden-pattern"
+legacy_signature = "hygiene: private-ipv4: .*patch-"
+migrated = false
+
+[[fault]]
 id = "mech.every-results-fixture-emits-the-class-its-fault-declares"
 kind = "mechanics"
 check = "results"
@@ -3325,6 +3524,212 @@ legacy_signature = "states no .historical_reason."
 migrated = false
 
 [[fault]]
+id = "mech.a-literal-in-a-file-with-one-undecodable-byte-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "a literal in a file with one undecodable byte is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.an-undecodable-byte-alone-is-not-a-hit"
+kind = "mechanics"
+check = "-"
+label = "an undecodable byte alone is not a hit"
+failure_class = "hygiene.clean"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.a-literal-split-by-a-zero-width-space-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "a literal split by a zero-width space is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-zero-width-space-alone-is-not-a-hit"
+kind = "mechanics"
+check = "-"
+label = "a zero-width space alone is not a hit"
+failure_class = "hygiene.clean"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.a-literal-split-by-a-combining-mark-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "a literal split by a combining mark is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-literal-welded-by-a-hangul-filler-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "a literal welded by a hangul filler is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-hangul-filler-alone-is-not-a-hit"
+kind = "mechanics"
+check = "-"
+label = "a hangul filler alone is not a hit"
+failure_class = "hygiene.clean"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.a-visible-lookalike-is-the-declared-limit-not-a-hit"
+kind = "mechanics"
+check = "-"
+label = "a visible lookalike is the declared limit, not a hit"
+failure_class = "hygiene.declared-limit"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.and-the-same-line-with-the-latin-letter-is-a-hit"
+kind = "mechanics"
+check = "-"
+label = "and the same line with the Latin letter is a hit"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-decoder-with-no-invisible-character-table-is-broken-not-clean"
+kind = "mechanics"
+check = "-"
+label = "a decoder with no invisible-character table is broken, not clean"
+failure_class = "hygiene.scanner-cannot-run"
+expected_exit = "2"
+migrated = false
+
+[[fault]]
+id = "mech.and-the-same-copy-with-the-table-beside-it-finds-the-literal"
+kind = "mechanics"
+check = "-"
+label = "and the same copy, with the table beside it, finds the literal"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-literal-wrapped-in-json-twice-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "a literal wrapped in JSON twice is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-token-welded-one-layer-under-the-parse-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "a token welded one layer under the parse is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.and-the-raw-bytes-hold-no-such-token"
+kind = "mechanics"
+check = "-"
+label = "and the raw bytes hold no such token"
+failure_class = "hygiene.control"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-token-only-a-second-parse-can-separate-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "a token only a second parse can separate is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-literal-joined-by-dots-to-more-text-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "a literal joined by dots to more text is still found"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.and-the-same-decoy-standing-alone-is-a-hit"
+kind = "mechanics"
+check = "-"
+label = "and the same decoy standing alone is a hit"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-byte-order-mark-in-front-of-the-json-does-not-blind-the-view"
+kind = "mechanics"
+check = "-"
+label = "a byte-order mark in front of the JSON does not blind the view"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-log-prefix-in-front-of-the-json-does-not-blind-the-view"
+kind = "mechanics"
+check = "-"
+label = "a log prefix in front of the JSON does not blind the view"
+failure_class = "hygiene.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.and-neither-file-s-raw-bytes-hold-such-a-token"
+kind = "mechanics"
+check = "-"
+label = "and neither file's raw bytes hold such a token"
+failure_class = "hygiene.control"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-stray-brace-in-prose-is-not-a-document"
+kind = "mechanics"
+check = "-"
+label = "a stray brace in prose is not a document"
+failure_class = "hygiene.clean"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.a-scanner-with-no-decoder-beside-it-is-broken-not-dirty"
+kind = "mechanics"
+check = "-"
+label = "a scanner with no decoder beside it is broken, not dirty"
+failure_class = "hygiene.unusable"
+expected_exit = "2"
+migrated = false
+
+[[fault]]
+id = "mech.and-the-decoder-s-own-driver-says-so-the-same-way"
+kind = "mechanics"
+check = "-"
+label = "and the decoder's own driver says so the same way"
+failure_class = "hygiene.unusable"
+expected_exit = "2"
+migrated = false
+[[fault]]
 id = "test.record_substrate_reference_inferred_from_a_count"
 kind = "seeded-gate"
 check = "test"
@@ -3362,33 +3767,6 @@ label = "a literal the scan cannot place"
 failure_class = "gate.injection-literal-unplaceable"
 legacy_signature = "builds a Ground: declared in 3 places"
 migrated = false
-[[fault]]
-id = "mech.a-grammar-changed-under-a-binary-with-no-dep-info-is-stale"
-kind = "mechanics"
-check = "regimen"
-label = "a grammar changed under a binary with no dep-info is stale"
-failure_class = "provenance.embedded-set-unknowable"
-legacy_signature = ""
-migrated = false
-
-[[fault]]
-id = "mech.and-a-binary-with-no-dep-info-over-an-untouched-tree-resolves"
-kind = "mechanics"
-check = "regimen"
-label = "and a binary with no dep-info over an untouched tree resolves"
-failure_class = "provenance.rule-did-not-apply"
-legacy_signature = ""
-migrated = false
-
-[[fault]]
-id = "mech.a-dep-info-that-does-narrow-still-narrows"
-kind = "mechanics"
-check = "regimen"
-label = "a dep-info that does narrow still narrows"
-failure_class = "provenance.wrong-artifact"
-legacy_signature = ""
-migrated = false
-
 [[fault]]
 id = "mech.a-resolver-suite-that-collected-nothing-is-not-a-pass"
 kind = "mechanics"
@@ -3434,6 +3812,33 @@ label = "a shared body written out under another name"
 failure_class = "grammar.terminal-defined-twice"
 legacy_signature = "has a shared terminal.s body written out again"
 migrated = false
+[[fault]]
+id = "mech.a-grammar-changed-under-a-binary-with-no-dep-info-is-stale"
+kind = "mechanics"
+check = "regimen"
+label = "a grammar changed under a binary with no dep-info is stale"
+failure_class = "provenance.embedded-set-unknowable"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.and-a-binary-with-no-dep-info-over-an-untouched-tree-resolves"
+kind = "mechanics"
+check = "regimen"
+label = "and a binary with no dep-info over an untouched tree resolves"
+failure_class = "provenance.rule-did-not-apply"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.a-dep-info-that-does-narrow-still-narrows"
+kind = "mechanics"
+check = "regimen"
+label = "a dep-info that does narrow still narrows"
+failure_class = "provenance.wrong-artifact"
+legacy_signature = ""
+migrated = false
+
 [[fault]]
 id = "mech.a-half-merged-verify-sh-is-refused-rather-than-counted"
 kind = "mechanics"

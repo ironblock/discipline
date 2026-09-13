@@ -10,6 +10,22 @@
 # /usr/bin/git, and a gate that cries wolf on every binary is a gate
 # people switch off.
 #
+# WHAT A PATTERN HERE DOES NOT SEE, and this is the place to say it because
+# this is the file somebody opens when they add a credential shape.
+#
+# The rows here are matched BY SHAPE, against the file's text and its decoded
+# view. They do NOT go through `scripts/decoding.py`'s `tokens()`, so the
+# invisible-character strip that protects the DIGEST half does not protect
+# these. Measured: an AWS-key-shaped literal broken by a zero-width space
+# scans clean, while the same key without it is caught.
+#
+# So a shaped secret split by a character that renders as nothing evades
+# every row in this file. That is declared at `decoding.py`'s `tokens()` too,
+# and it was declared ONLY there until a fresh instance pointed out that a
+# maintainer adding a row reads this header and not that docstring. Closing
+# it means deciding what the shape patterns are allowed to see, which is a
+# rule about this table rather than a scanner change -- open on #72.
+#
 # `scripts/hygiene.sh` fails the build if any tracked file matches any
 # pattern here. This file is the only file the scan skips: it is the one
 # place forbidden shapes are meant to be written down.
@@ -18,14 +34,21 @@
 # `scripts/seed-hygiene-fault.sh` at the same time, so that every pattern
 # has been seen catch something.
 
+# A row's regex is passed to grep with `-e`. A pattern beginning with `-`
+# would otherwise be read as an OPTION, and grep would report every row after
+# it as absent -- a whole class silently unguarded while the scan prints the
+# same green. Seeded, so the hazard has been seen.
+
 # --- environments that are not this repository ---
 private-ipv4	-	(^|[^0-9A-Za-z.-])(10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3})([^0-9A-Za-z.-]|$)
 internal-hostname	i	[A-Za-z0-9][A-Za-z0-9-]*\.(local|internal|lan|corp|intranet)([^A-Za-z0-9.-]|$)
-personal-home-path	-	(/Users/|/home/)[A-Za-z0-9._-]+/
+personal-home-path	-	(/Users/|/home/)[A-Za-z0-9._-]+
+session-scratchpad-path	-	(/private)?/tmp/claude-[0-9]+/
+ssh-user-at-host	i	(^|[^A-Za-z0-9._-])([A-Za-z0-9._-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+:|(ssh|scp|rsync)[[:space:]]+[A-Za-z0-9._-]+@[A-Za-z0-9-]+)
 windows-user-path	i	[a-z]:\\+Users\\+
 
 # --- identifiers from a tracker this repository does not use ---
-internal-ticket-id	b	(^|[^A-Za-z0-9])DIE-[0-9]+
+internal-ticket-id	ib	(^|[^A-Za-z0-9])DIE-?[0-9]+
 
 # --- credentials ---
 aws-access-key-id	b	(^|[^A-Z0-9])(A(KIA|SIA|GPA|IDA|ROA|NPA|NVA|BIA|CCA))[A-Z0-9]{16}([^A-Z0-9]|$)
