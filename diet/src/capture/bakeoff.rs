@@ -644,6 +644,29 @@ consumed = [
     if row.get("record") == "claim"
     for artifact in row.get("consumes", [])
 ]
+# A CHECK OF NOTHING IS NOT A PASS, and gate 0 says so itself rather than
+# leaving it to a linter one layer out. Ruled 2026-09-13.
+#
+# A directory whose claim consumes NOTHING re-derives every one of its zero
+# artefacts and reports success, which is how a gate comes to run over nothing
+# while reporting that it ran. Paired with `reproducible-by-config` it is a
+# contradiction on its face: there is no evidence committed beside the record
+# to reproduce it FROM.
+#
+# This is EXIT 1, not 2. The script read everything it needed and reached a
+# verdict; the verdict is that this directory does not support the claim its
+# front-matter makes. `check-results.py` refuses the same state through a
+# different rule -- a claim that names no artefact could produce a bound but
+# never a number -- so `verify.sh` was already red. It was `check-recompute.py`
+# ALONE, which is the sandboxed way this script is actually run, that counted
+# such a directory as "recomputed". Found by a fresh instance.
+if not consumed and front.get("kind") == "reproducible-by-config":
+    sys.exit(
+        "this directory declares `reproducible-by-config` and its claim "
+        "consumes nothing, so there is no evidence here to re-derive from; "
+        "a recompute of zero artefacts is not a recompute"
+    )
+
 matched = 0
 for artifact in consumed:
     found = digest(artifact["path"])
@@ -844,6 +867,40 @@ fn regimen_of(regime: &Regime) -> String {
 /// The report: front-matter the directory linter accepts, then the sections it
 /// requires, in the order it requires them.
 ///
+/// What a directory may claim about itself, decided from the record.
+///
+/// A hosted substrate's weights can change under a re-firing, so a directory
+/// whose record names one may not claim to be reproducible by config -- ruled
+/// 2026-09-08, and enforced by `check-results.py`. Decided HERE, from the
+/// record, rather than left to whoever edits the file: the one place the
+/// question is answered is the place that can see the answer.
+///
+/// The kind and the caveat come back together because they are one decision
+/// said twice, once for the linter and once for the reader. Separating them
+/// is how they come to disagree.
+fn kind_and_caveat(regime: &Regime) -> (&'static str, String) {
+    let hosted = regime.hosted_substrate_ids();
+    if hosted.is_empty() {
+        (
+            "reproducible-by-config",
+            "Every input is committed beside this file at the digest the record \
+             consumed, so the same command over the same bytes produces the same \
+             numbers."
+                .to_owned(),
+        )
+    } else {
+        (
+            "historical-observation",
+            format!(
+                "The run being recomputed was served by hosted weights ({}), which can \
+                 change under a re-firing, so this is a historical observation rather \
+                 than something reproducible by config.",
+                hosted.join(", ")
+            ),
+        )
+    }
+}
+
 /// THE PRE-REGISTERED ENDPOINTS ARE STRINGS HERE AND THE NUMBERS ARE NOT.
 /// `check-results.py` walks every number in the front-matter outside `[regime]`
 /// and requires it to appear in the summary row -- that is the prose-against-
@@ -864,33 +921,11 @@ fn report_of(regime: &Regime, product_sha256: &str, checked: u32) -> String {
         .into_iter()
         .map(|id| format!("{id:?}"))
         .collect();
-    // A hosted substrate's weights can change under a re-firing, so a
-    // directory whose record names one may not claim to be reproducible by
-    // config -- ruled 2026-09-08, and enforced by `check-results.py`. Decided
-    // here from the record rather than left to whoever edits the file.
-    let hosted = regime.hosted_substrate_ids();
-    let kind = if hosted.is_empty() {
-        "reproducible-by-config"
-    } else {
-        "historical-observation"
-    };
-    let caveat = if hosted.is_empty() {
-        "Every input is committed beside this file at the digest the record \
-         consumed, so the same command over the same bytes produces the same \
-         numbers."
-            .to_owned()
-    } else {
-        format!(
-            "The run being recomputed was served by hosted weights ({}), which can \
-             change under a re-firing, so this is a historical observation rather \
-             than something reproducible by config.",
-            hosted.join(", ")
-        )
-    };
+    let (kind, caveat) = kind_and_caveat(regime);
     format!(
         "+++\n\
          hypothesis = {:?}\n\
-         result = \"inconclusive\"\n\
+         result = \"unadjudicated\"\n\
          kind = {kind:?}\n\
          product_sha256 = {product_sha256:?}\n\
          controls_run = [\"scoring-extremes\", \"shuffled-label-null\"]\n\
@@ -942,11 +977,22 @@ fn report_of(regime: &Regime, product_sha256: &str, checked: u32) -> String {
          \n\
          ## Conclusion\n\
          \n\
-         `inconclusive`, and written that way by the program rather than\n\
-         decided: this verb computes the endpoints, it does not test them\n\
-         against a threshold. A reader who has read `report.json` may change\n\
-         it; a program that wrote `supported` here would be making a claim it\n\
-         cannot make.\n\
+         `unadjudicated`, which is not a verdict and does not pretend to be.\n\
+         Ruled 2026-09-13: `inconclusive` is a SCIENTIFIC verdict -- the data\n\
+         did not decide -- and a directory whose numbers are decisive while\n\
+         its front-matter says `inconclusive` states a falsehood a reader has\n\
+         to catch. `unadjudicated` states what is true: no one has applied a\n\
+         decision rule.\n\
+         \n\
+         And the reason none has been applied is a gap in the PRE-REGISTRATION,\n\
+         not in this verb: it names endpoints and no rule that turns them into\n\
+         a verdict. The rule going forward is that a pre-registration carries\n\
+         its decision rule, written before the data like every other endpoint;\n\
+         when it does, this assembler applies it mechanically and writes\n\
+         `supported`, `refuted` or `inconclusive`, because applying a\n\
+         PRE-REGISTERED rule after seeing numbers is not choosing after seeing\n\
+         them. Until this claim's pre-registration carries one, the answer is\n\
+         `unadjudicated`.\n\
          \n\
          {caveat}\n",
         PRE_REGISTRATION.primary,
@@ -1361,6 +1407,131 @@ mod tests {
             Some(1),
             "a product that does not match its digest is a finding, not an \
              inability: {said}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A recompute of zero artefacts is not a recompute, and gate 0 says so.
+    ///
+    /// Ruled 2026-09-13 with the front-matter choices. A fresh instance built
+    /// a directory whose claim consumes `[]` with its counts consistently
+    /// zero, and `check-recompute.py` reported `1 recomputed`, exit 0 —
+    /// against its own docstring's warning that a directory declaring nothing
+    /// "is neither checked nor counted as skipped, which is how a gate comes
+    /// to run over nothing while reporting success".
+    ///
+    /// `check-results.py` refused the same directory, but through a DIFFERENT
+    /// rule in the record format — a claim naming no artefact could produce a
+    /// bound and never a number — so `verify.sh` was already red and the hole
+    /// was invisible there. It is `check-recompute.py` alone, which is the
+    /// sandboxed way this script actually runs, that miscounted. Gate 0 now
+    /// refuses it itself.
+    ///
+    /// THE CONTROL IS THE SECOND HALF. A refusal that fired on every
+    /// directory would satisfy the first assertion and destroy the verb, so
+    /// the untouched assembly must still re-derive.
+    #[test]
+    fn a_recompute_of_no_evidence_is_refused_by_gate_zero() {
+        let dir = scratch("no-evidence");
+        let path = write_run(&dir);
+        let into = dir.join("2026-01-01-a-sense-bakeoff");
+        assemble(&path, &into).expect("the assembly");
+
+        let run_it = || {
+            let run = std::process::Command::new("bash")
+                .arg("recompute.sh")
+                .current_dir(&into)
+                .output()
+                .expect("recompute.sh runs");
+            let said = format!(
+                "{}{}",
+                String::from_utf8_lossy(&run.stdout),
+                String::from_utf8_lossy(&run.stderr)
+            );
+            (run.status.code(), said)
+        };
+
+        // THE CONTROL, first: evidence present, and it re-derives.
+        let (code, said) = run_it();
+        assert_eq!(
+            code,
+            Some(0),
+            "an untouched assembly did not re-derive: {said}"
+        );
+
+        // Now strip the claim's evidence, and take EVERY count that describes
+        // it down with it -- the summary row's and the front-matter's alike.
+        // That second half is not decoration. Leave either count where it was
+        // and the script still exits 1, but on the count/rows disagreement
+        // instead, and this test would pass with gate 0 deleted: a fixture
+        // graded RED for the wrong reason. What is left is the honest shape
+        // the gate is for -- a directory that says, consistently throughout,
+        // that it consumes nothing.
+        //
+        // The counts are run out digit by digit rather than written in here,
+        // so a fixture that grows a third target cannot quietly re-open that
+        // hole; `zero_after` panics when the key it is given is not there.
+        let zero_after = |line: &str, key: &str| -> String {
+            let at = line
+                .find(key)
+                .unwrap_or_else(|| panic!("no `{key}` in: {line}"));
+            let start = at + key.len();
+            // The count runs to the first non-digit, or to end of line: TOML
+            // ends the line where JSON puts a comma.
+            let end = line[start..]
+                .find(|c: char| !c.is_ascii_digit())
+                .map_or(line.len(), |over| start + over);
+            format!("{}0{}", &line[..start], &line[end..])
+        };
+
+        let readme = into.join("README.md");
+        let front = std::fs::read_to_string(&readme).expect("the front-matter");
+        let front: String = front
+            .lines()
+            .map(|line| {
+                if line.starts_with("targets_checked = ") {
+                    zero_after(line, "targets_checked = ")
+                } else {
+                    line.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&readme, front + "\n").expect("the zeroed front-matter");
+
+        let record = into.join("run.jsonl");
+        let text = std::fs::read_to_string(&record).expect("the record");
+        let emptied: String = text
+            .lines()
+            .map(|line| {
+                if line.contains(r#""record":"claim""#) {
+                    let open = line.find(r#""consumes":["#).expect("the consumes list");
+                    let start = open + r#""consumes":["#.len();
+                    let close = line[start..].find(']').expect("its close") + start;
+                    format!("{}{}", &line[..start], &line[close..])
+                } else if line.contains(r#""record":"summary""#) {
+                    zero_after(
+                        &zero_after(line, r#""targets_checked":"#),
+                        r#""targets_matched":"#,
+                    )
+                } else {
+                    line.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&record, emptied + "\n").expect("the emptied record");
+
+        let (code, said) = run_it();
+        assert_eq!(
+            code,
+            Some(1),
+            "a directory consuming nothing re-derived and reported success: {said}"
+        );
+        assert!(
+            said.contains("not a recompute"),
+            "the refusal does not name what is wrong: {said}"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
