@@ -2819,6 +2819,15 @@ inject_ci_scoped_test() {
   edit_in_place 's|^\( *\)\./verify\.sh "\${args\[@\]}"$|\1./verify.sh "${args[@]}" --scope lib|' \
     .github/workflows/pkg-diet.yml
 }
+# The same defect through the flag added for #81's reproduction. `--range`
+# makes the history check scan a slice the caller names instead of the one the
+# event names, which is why it exists for a person at a terminal -- and why a
+# gating workflow may not spell it. A gate that scans a range somebody chose
+# reports on history nobody pushed.
+inject_ci_ranged_history() {
+  edit_in_place 's|^\( *\)\./verify\.sh "\${args\[@\]}"$|\1./verify.sh "${args[@]}" --range HEAD~1..HEAD|' \
+    .github/workflows/pkg-repo.yml
+}
 # A subshell run against the shell's own state. `cd a; (cd b; ls); pwd` then
 # ends in `b`, and every relative path after it resolves against a directory
 # the session was never in.
@@ -6072,6 +6081,8 @@ selftest() {
     'carries .branches: \[main\]. and is reached'
   seeded_case "CI narrowing the test check"           ci       inject_ci_scoped_test \
     'passes .--scope. to verify\.sh'
+  seeded_case "CI narrowing the history check"        ci       inject_ci_ranged_history \
+    'passes .--range. to verify\.sh'
   seeded_case "the trunk gated by no push run"        ci       inject_ci_push_ungated \
     'and has no .push:. trigger'
   seeded_case "one workflow renaming the trunk"       ci       inject_ci_trunk_typo \
