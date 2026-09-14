@@ -39,6 +39,7 @@ import tempfile
 from pathlib import Path
 
 FUNC = re.compile(r"^(inject_[a-z0-9_]+)\(\) \{", re.M)
+FUNC_BODY = re.compile(r"^(inject_[a-z0-9_]+)\(\) \{\n(.*?)^\}\n", re.M | re.S)
 # The injection a seeded case names. A case naming one that is not defined is
 # the failure this script could not see until it looked: it enumerates
 # DEFINITIONS, so a definition deleted outright is invisible to it -- there is
@@ -49,6 +50,201 @@ FUNC = re.compile(r"^(inject_[a-z0-9_]+)\(\) \{", re.M)
 HELPERS = re.compile(r"^(?:seed_commit)\(\) \{\n.*?^\}\n", re.M | re.S)
 
 GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
+
+# A field line inside a struct body or a struct-like enum variant: an optional
+# visibility, a name, a colon, a type. Attributes, doc comments and blank
+# lines are not fields and are skipped by not matching.
+FIELD = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?([a-z_][a-z0-9_]*)\s*:\s*[^,]", re.M)
+TYPE_DECL = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(struct|enum)\s+([A-Z][A-Za-z0-9_]*)\s*\{", re.M)
+VARIANT = re.compile(r"^\s{4,}([A-Z][A-Za-z0-9_]*)\s*\{", re.M)
+
+
+def brace_span(text: str, opened: int) -> int | None:
+    """Where the block opened by the `{` at `opened` closes, or None.
+
+    None is a real answer: an injection may replace a PREFIX of a literal,
+    leaving the file to supply the rest. That is not a whole literal, so it
+    cannot be missing a field, and the matcher running off the end is what
+    says so.
+    """
+    depth, cursor = 0, opened
+    while cursor < len(text):
+        if text[cursor] == "{":
+            depth += 1
+        elif text[cursor] == "}":
+            depth -= 1
+            if depth == 0:
+                return cursor
+        cursor += 1
+    return None
+
+
+USE_LINE = re.compile(r"^\s*(?:pub\s+)?use\s+([A-Za-z_][A-Za-z0-9_:]*)::(?:\{([^}]*)\}|([A-Za-z_][A-Za-z0-9_]*))", re.M)
+# Both roots, because a resolver that cannot SEE a declaration is a resolver
+# that places a literal against the wrong one. `Ground` is declared in
+# diet/tests/drive_cli.rs beside two diet/src modules, so reading only src
+# meant the scan knew two of the three and could not know it was short.
+EDITS = re.compile(r"\b(diet/(?:src|tests)/[A-Za-z0-9_/]+\.rs)\b")
+
+
+def module_file(root: Path, path: str) -> Path | None:
+    """The file a `use crate::a::b` path names, if it is one."""
+    parts = [p for p in path.split("::") if p not in ("crate", "self", "super")]
+    if not parts:
+        return None
+    for candidate in (root.joinpath(*parts).with_suffix(".rs"),
+                      root.joinpath(*parts) / "mod.rs"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def declared_types(*roots: Path) -> dict[str, list[str]]:
+    """Every braced type in the crate, by the name a literal spells, with the
+    fields a literal of it must name.
+
+    Structs AND struct-like enum variants. The variants matter: the record's
+    `Event::Summary { .. }` is built inside an injection, and a scan that read
+    only `pub struct` would have watched #47's items 3 and 4 rewrite exactly
+    that variant without a word.
+
+    A variant is keyed both ways -- `Event::Summary` and `Summary` -- because
+    an injection may spell either, and both are the same obligation.
+
+    Keyed by name AND by the file that declares it, because TWENTY-THREE
+    names here are declared in more than one place -- measured, after a
+    disclosure claimed five and was never re-asked -- and one of them is
+    `Provenance` -- the type whose growth invalidated an injection on #43 and
+    the reason this scan exists. A map from bare names to one field list would
+    have compared that injection against the wrong `Provenance` and reported
+    nine failures on a clean tree, which is how a scan gets switched off.
+    """
+    found: dict[str, dict[Path, list[str]]] = {}
+    for path in sorted(p for root in roots for p in root.rglob("*.rs")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for decl in TYPE_DECL.finditer(text):
+            kind, name = decl.group(1), decl.group(2)
+            opened = text.index("{", decl.start())
+            end = brace_span(text, opened)
+            if end is None:
+                continue
+            body = text[opened + 1 : end]
+            if kind == "struct":
+                found.setdefault(name, {})[path] = FIELD.findall(body)
+                continue
+            for variant in VARIANT.finditer(body):
+                inner_end = brace_span(body, variant.end() - 1)
+                if inner_end is None:
+                    continue
+                fields = FIELD.findall(body[variant.end() : inner_end])
+                found.setdefault(f"{name}::{variant.group(1)}", {})[path] = fields
+                found.setdefault(variant.group(1), {})[path] = fields
+    return found
+
+
+def incomplete_literals(
+    source: str, types: dict, crate: Path, repo: Path
+) -> list[str]:
+    """Injections whose replacement text builds a literal missing a field.
+
+    THE COMPILER CANNOT SEE INSIDE AN INJECTION. Its replacement text is a
+    string in verify.sh, so a merge that adds a field to a struct silently
+    invalidates every injection that writes a whole literal of it, and the
+    tree still builds. The selftest catches it -- as "red for the wrong
+    reason", which is the only way it is catchable there at all -- forty
+    minutes into CI. This asks the same question in a second.
+
+    Written from a demonstration rather than from a theory. The first version
+    of this scan skipped any injection body containing `..`, meaning to skip
+    functional updates like `..other.provenance`. But the very injection that
+    had gone red on CI contains `..Effect::default()` -- a functional update
+    of a DIFFERENT struct, several lines away -- so the scan skipped it and
+    reported all clear. `..` is therefore honoured only INSIDE the literal it
+    belongs to, which is why the span is brace-matched rather than guessed.
+    """
+    stale: list[str] = []
+    unresolved: list[str] = []
+    for match in FUNC_BODY.finditer(source):
+        name, body = match.group(1), match.group(2)
+        # Repository-relative, because an injection may now edit diet/tests as
+        # well as diet/src and the two do not share a prefix to strip.
+        edits = [repo / p for p in EDITS.findall(body)]
+        for spelling, where in types.items():
+            for opened in literal_starts(body, spelling):
+                brace = opened + len(spelling) + 1
+                end = brace_span(body, brace)
+                if end is None:
+                    continue  # a prefix of a literal, not a whole one
+                inner = body[brace + 1 : end]
+                if ".." in inner:
+                    continue  # this literal's own functional update supplies the rest
+                fields, why = resolve(spelling, where, edits, crate)
+                if fields is None:
+                    unresolved.append(f"{name}  builds a {spelling}: {why}")
+                    continue
+                if not fields:
+                    continue
+                # `Word { text, literal }` names its fields by shorthand and
+                # there is no colon to find. A scan that wanted one reported
+                # every shorthand literal as missing everything.
+                missing = [
+                    f for f in fields
+                    if not re.search(rf"\b{f}\s*(?::|,|\}}|$)", inner)
+                ]
+                if missing:
+                    stale.append(
+                        f"{name}  builds a {spelling} without {', '.join(missing)}"
+                    )
+    return stale + [f"{line}" for line in unresolved]
+
+
+def literal_starts(body: str, spelling: str):
+    """Where `spelling {` begins in `body`, as a whole word.
+
+    Whole-word so that `Provenance {` does not also match inside
+    `object::Provenance {` -- the qualified spelling is a key of its own and
+    reporting both would name one literal twice.
+    """
+    at = 0
+    needle = spelling + " {"
+    while (opened := body.find(needle, at)) >= 0:
+        at = opened + len(needle)
+        before = body[opened - 1] if opened else " "
+        if before.isalnum() or before in "_:":
+            continue
+        yield opened
+
+
+def resolve(spelling: str, where: dict, edits: list, root: Path):
+    """Which declaration of `spelling` a literal in this injection means.
+
+    One name, several declarations, is the ordinary case in a crate of any
+    size, and picking the first is how a scan compares an injection against a
+    type it has never heard of. So: the file the injection EDITS, then what
+    that file imports, then a tree-wide answer only if there is exactly one.
+    Anything else is unresolved and SAID so -- a scan that guesses here fails
+    on a clean tree, and a scan that fails on a clean tree gets deleted.
+    """
+    if len(where) == 1:
+        return next(iter(where.values())), ""
+    for edited in edits:
+        if edited in where:
+            return where[edited], ""
+    bare = spelling.split("::")[-1]
+    for edited in edits:
+        if not edited.is_file():
+            continue
+        for imported in USE_LINE.finditer(edited.read_text(encoding="utf-8", errors="replace")):
+            names = (imported.group(2) or imported.group(3) or "")
+            if bare not in {n.strip().split(" as ")[0] for n in names.split(",")}:
+                continue
+            target = module_file(root, imported.group(1))
+            if target in where:
+                return where[target], ""
+    return None, (
+        f"declared in {len(where)} places with different fields and the "
+        f"injection names none of them"
+    )
 
 
 def tracked_files(root: Path) -> list[str]:
@@ -210,6 +406,25 @@ def main() -> int:
             print(f"  {name}  named by a seeded case, defined nowhere", file=sys.stderr)
         return 1
 
+    # The third question, and the cheapest: does every struct literal an
+    # injection writes still name every field its type declares? Asked
+    # statically, before a single box is built, because the answer is in two
+    # texts and needs no tree at all.
+    crate_root = root / "diet" / "src"
+    tests_root = root / "diet" / "tests"
+    stale = incomplete_literals(
+        text, declared_types(crate_root, tests_root), crate_root, root
+    )
+    if stale:
+        print(
+            f"check-injections: {len(stale)} injection(s) build a literal the "
+            f"compiler never sees, and it no longer names every field:",
+            file=sys.stderr,
+        )
+        for line in stale:
+            print(f"  {line}", file=sys.stderr)
+        return 1
+
     tracked = tracked_files(root)
     helpers = "\n".join(match.group(0) for match in HELPERS.finditer(text))
 
@@ -249,7 +464,10 @@ def main() -> int:
     finally:
         shutil.rmtree(box, ignore_errors=True)
 
-    print(f"check-injections: {len(names)} injection(s), {len(inert)} change nothing")
+    print(
+        f"check-injections: {len(names)} injection(s), {len(inert)} change nothing; "
+        f"every struct literal inside one names every field its type declares"
+    )
     for name, code, err in inert:
         print(f"  {name}  exit={code}  {err}")
     return 1 if inert else 0

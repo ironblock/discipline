@@ -51,6 +51,47 @@ RELOCATING = {"subset-fixture"}
 # both derive from this, and they used to be two lists that agreed by hand.
 SELFTEST_KINDS = ("seeded-gate", "results-fixture", "pattern-class")
 
+# A line git writes into a file it could not merge. `=======` alone is not
+# one: it is a plausible separator in ordinary prose, and a checker that
+# refused it would refuse files nobody is merging. The two arrow markers are
+# not plausible as anything else.
+CONFLICTED = re.compile(r"^(<{7} |>{7} )", re.M)
+
+
+def refuse_conflicted(path: pathlib.Path, text: str) -> None:
+    """Exit 2 if a file still carries conflict markers.
+
+    Both of this gate's two inputs go through here, for one reason: what a
+    checker reads out of a half-merged file is the union of both sides, or
+    neither side, depending on where the markers fell, and either way it
+    looks like an answer.
+
+    THE COUNT IS DERIVED FROM verify.sh. So a `--count-red` taken while
+    verify.sh is still half-merged hands back a number about a file nobody
+    wrote. The tool that asked is mid-merge and about to write that number
+    into the manifest, which is the one moment nothing is watching.
+
+    AND THE MANIFEST IS THE FILE BEING MERGED. `faults.toml` conflicts on
+    essentially every merge in a stack -- `merge-gate.py --union` exists for
+    exactly that -- so a half-merged manifest is the ordinary state of this
+    file during ordinary work, not a corruption. It reached `tomllib` and
+    came back "not TOML", exit 1, which reads as a finding about the
+    manifest when the truth is that the caller is mid-merge.
+
+    Exit 2 rather than 1: this is "I was asked something I cannot answer",
+    the code every other refusal in this gate uses for that.
+    """
+    if CONFLICTED.search(text):
+        found = CONFLICTED.findall(text)
+        print(
+            f"{path}: still carries {len(found)} conflict marker(s). Nothing is "
+            f"read from a half-merged file -- what is in one is the union of both "
+            f"sides, or neither side. Resolve it, then ask again.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+
 MECH = re.compile(r'expect_exit\s+"([^"]+)"\s+(\d+)')
 # The line check_test prints before it runs anything, taken from verify.sh so
 # that this file holds no second copy of it. Captured with its `%s` and `%d`
@@ -69,6 +110,7 @@ DETAILS: dict[str, dict[str, str]] = {}
 def observed() -> dict[str, set[str]]:
     """What verify.sh proves, read out of verify.sh rather than assumed."""
     s = VERIFY.read_text(encoding="utf-8")
+    refuse_conflicted(VERIFY, s)
     seen: dict[str, set[str]] = {k: set() for k in
                                  ("seeded-gate", "mechanics", "results-fixture",
                                   "pattern-class", "subset-fixture")}
@@ -139,8 +181,14 @@ def main() -> int:
     # and a second one in the shell would be free to disagree with it.
     if listing_fixtures:
         try:
-            entries = tomllib.loads(MANIFEST.read_text(encoding="utf-8"))["fault"]
-        except (OSError, ValueError, KeyError) as err:
+            text = MANIFEST.read_text(encoding="utf-8")
+        except OSError as err:
+            print(f"cannot read the manifest: {err}", file=sys.stderr)
+            return 1
+        refuse_conflicted(MANIFEST, text)
+        try:
+            entries = tomllib.loads(text)["fault"]
+        except (ValueError, KeyError) as err:
             print(f"cannot read the manifest: {err}", file=sys.stderr)
             return 1
         for entry in entries:
@@ -153,9 +201,35 @@ def main() -> int:
     if not MANIFEST.is_file():
         print(f"{MANIFEST}: missing", file=sys.stderr)
         return 1
+    # THE MANIFEST IS REFUSED MID-MERGE, and not merely reported as bad TOML.
+    # `faults.toml` conflicts on essentially every merge in a stack -- it is
+    # what `merge-gate.py --union` exists for -- so a half-merged one is the
+    # ordinary state of this file during the ordinary operation, not a
+    # corruption. `tomllib` fails on the markers and the old message said
+    # "not TOML", exit 1: a finding about the manifest, when the truth was
+    # that the caller is mid-merge and this gate could not answer. The
+    # reasoning `refuse_conflicted` already carries for `verify.sh` is the
+    # same reasoning here, so it is the same call.
+    #
+    # A TOML error that is NOT a conflict marker stays 1. The manifest is a
+    # checked artefact of this repository and a malformed one is a finding
+    # about it; only the mid-merge case is "I was asked something I cannot
+    # answer". The two are told apart by the markers and by nothing else.
+    #
+    # And this is HERE, not up with the counting modes, on purpose. The
+    # counting modes answer before the manifest is read at all, precisely so
+    # that `merge-gate.py` can ask for a count while holding a conflicted
+    # manifest it is about to rewrite. Refusing up there would break the one
+    # caller this refusal is about.
     try:
-        doc = tomllib.loads(MANIFEST.read_bytes().decode("utf-8"))
-    except (ValueError, UnicodeDecodeError) as err:
+        text = MANIFEST.read_bytes().decode("utf-8")
+    except UnicodeDecodeError as err:
+        print(f"{MANIFEST}: not TOML: {err}", file=sys.stderr)
+        return 1
+    refuse_conflicted(MANIFEST, text)
+    try:
+        doc = tomllib.loads(text)
+    except ValueError as err:
         print(f"{MANIFEST}: not TOML: {err}", file=sys.stderr)
         return 1
 
