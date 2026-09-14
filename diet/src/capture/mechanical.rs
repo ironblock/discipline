@@ -831,7 +831,10 @@ impl Lane {
             | Event::Seam { .. }
             | Event::Rejected { .. }
             | Event::Claim { .. }
-            | Event::Summary { .. } => {}
+            | Event::Summary { .. }
+            // A row no adapter could map carries no tool call, so it moves
+            // nothing here. Listed rather than wildcarded, like the rest.
+            | Event::Unknown { .. } => {}
         }
     }
 

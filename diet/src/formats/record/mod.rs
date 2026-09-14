@@ -346,6 +346,17 @@ vocabulary! {
         Claim => "claim",
         /// The session's totals.
         Summary => "summary",
+        /// A row this library kept without having a kind for it.
+        ///
+        /// Written only by an adapter over a foreign harness's log (#28). A
+        /// census is a count of what was lost, not the content -- a claim
+        /// about rows that are not there, which a replay viewer cannot
+        /// render. This kind is how a row survives the crossing: the
+        /// source's own word for it, and the row verbatim.
+        ///
+        /// Refused in a record whose `start` declares `source = live`, where
+        /// there is no foreign log for it to have come from.
+        Unknown => "unknown",
     }
 }
 
@@ -617,6 +628,17 @@ pub enum Event {
         /// schema. Ruled (a) on #68.
         product_sha256: String,
     },
+    /// A row an adapter could not map, carried rather than counted.
+    Unknown {
+        /// What the source called this row, in the source's own spelling.
+        ///
+        /// Not normalised and not folded: it is evidence about a format this
+        /// library does not know, and the only honest thing to do with it is
+        /// repeat it.
+        source_kind: String,
+        /// The row as it appeared, verbatim.
+        raw: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -700,6 +722,7 @@ impl Event {
             Self::Rejected { .. } => Kind::Rejected,
             Self::Claim { .. } => Kind::Claim,
             Self::Summary { .. } => Kind::Summary,
+            Self::Unknown { .. } => Kind::Unknown,
         }
     }
 
@@ -715,7 +738,10 @@ impl Event {
             | Self::ToolCall { id, .. }
             | Self::Rejected { id, .. }
             | Self::Claim { id, .. } => Some(id),
-            Self::Start { .. } | Self::Turn { .. } | Self::Summary { .. } => None,
+            Self::Start { .. }
+            | Self::Turn { .. }
+            | Self::Summary { .. }
+            | Self::Unknown { .. } => None,
         }
     }
 }
@@ -1363,6 +1389,10 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             // reader that took it per-kind would have to be told twice.
             product_sha256: take_string(&mut members, of, "product_sha256")?,
         },
+        Kind::Unknown => Event::Unknown {
+            source_kind: take_string(&mut members, of, "source_kind")?,
+            raw: take_string(&mut members, of, "raw")?,
+        },
     };
 
     // Anything left is a key this schema does not define. A typo'd key that is
@@ -1968,7 +1998,9 @@ impl<'a> Seen<'a> {
                 summary,
                 product_sha256,
             } => self.admit_summary(summary, product_sha256)?,
-            Event::Start { .. } => {}
+            // Neither links to anything nor is linked to: an unmapped row
+            // is evidence, not a participant in the record's own structure.
+            Event::Start { .. } | Event::Unknown { .. } => {}
         }
         Ok(())
     }
@@ -2269,8 +2301,8 @@ impl Members {
 /// completeness, and anything long for another reason -- helpers inlined,
 /// formatting repeated per kind -- gets split instead.
 ///
-/// Measured against that criterion before claiming it. Eleven arms for the
-/// eleven `Event` variants and no wildcard, so adding a kind fails to compile
+/// Measured against that criterion before claiming it. Twelve arms for the
+/// twelve `Event` variants and no wildcard, so adding a kind fails to compile
 /// until someone says how it is written. The shared work is hoisted OUT of
 /// the match -- `record` and `id` are written once above it -- so it is not
 /// formatting repeated per kind. The three structures with any depth to them
@@ -2378,6 +2410,10 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             summary,
             product_sha256,
         } => summary_value(summary, product_sha256, &mut members),
+        Event::Unknown { source_kind, raw } => {
+            members.put_text("source_kind", source_kind);
+            members.put_text("raw", raw);
+        }
     }
     members.0
 }
