@@ -430,6 +430,20 @@ vocabulary! {
         Refuted => "refuted",
         /// The evidence does neither, which is a result and not a failure.
         Inconclusive => "inconclusive",
+        /// NOBODY HAS APPLIED A DECISION RULE. Not a verdict, and it does not
+        /// pretend to be one -- which is the whole reason it is separate from
+        /// `Inconclusive`. Ruled 2026-09-14.
+        ///
+        /// `inconclusive` is a SCIENTIFIC verdict: the data were examined
+        /// against a rule and did not decide. A directory whose numbers are
+        /// decisive while its claim says `inconclusive` states a falsehood a
+        /// reader has to catch. `unadjudicated` states what is true when a
+        /// pre-registration names endpoints and no rule that turns them into
+        /// a verdict, which is where `diet bakeoff` sits until one does.
+        ///
+        /// A program may write this. A program may not write the other three
+        /// without applying a rule that was pre-registered before the data.
+        Unadjudicated => "unadjudicated",
     }
 }
 

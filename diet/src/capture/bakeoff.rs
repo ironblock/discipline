@@ -104,6 +104,19 @@ pub enum RunError {
         /// The directory.
         path: String,
     },
+    /// `pre-registration.json` was written and its bytes changed before the
+    /// scores were.
+    ///
+    /// The endpoints have to be fixed before the numbers, or they are not a
+    /// pre-registration; the digest in the front-matter is what says they
+    /// were. If the file moved between being written and being pinned, the
+    /// digest would name bytes nobody scored against.
+    PreRegistrationMoved {
+        /// The digest written into the front-matter.
+        declared: String,
+        /// What the file hashes to now.
+        found: String,
+    },
     /// A file the assembly had to write could not be written.
     Write {
         /// The file.
@@ -120,6 +133,12 @@ impl fmt::Display for RunError {
                 f,
                 "{path} already holds a README.md: assembling over somebody's results is not \
                  an assembly step, and a directory is cheap to name differently"
+            ),
+            Self::PreRegistrationMoved { declared, found } => write!(
+                f,
+                "pre-registration.json was written as {declared} and now hashes to \
+                 {found}; the endpoints have to be fixed before the numbers, and a \
+                 digest naming bytes nobody scored against pins nothing"
             ),
             Self::Write { path, reason } => write!(
                 f,
@@ -400,8 +419,13 @@ fn computed(path: &Path) -> Result<Computed, RunError> {
         return Err(RunError::NoRegister { set });
     }
 
+    // THE PRE-REGISTRATION IS NOT IN HERE. Ruled 2026-09-14: it is written
+    // beside this file as `pre-registration.json` and pinned by the
+    // front-matter's `pre_registration_sha256`. Keeping a copy here as well
+    // would be the same object in two files with nothing comparing them --
+    // the defect this rung fixed twice already this week, minted fresh in the
+    // commit that fixes it.
     let report = Value::Object(BTreeMap::from([
-        ("pre_registration".to_owned(), PRE_REGISTRATION.value()),
         ("regime".to_owned(), regime_ids(record.regime())),
         (
             "embedders".to_owned(),
@@ -743,6 +767,29 @@ pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
         write(&landing, &bytes)?;
     }
 
+    // THE PRE-REGISTRATION, FIRST, AND HASHED FROM THE BYTES ON DISK.
+    //
+    // Ruled 2026-09-14. Hashing the pre-registration as a BLOCK inside
+    // `report.json` would have forced `check-results.py` to reproduce this
+    // program's serialisation to check it -- a second canonicaliser of record
+    // data, disagreeing by one decimal digit and reporting it as tampering.
+    // A file has bytes, and bytes are what `digest_of` already hashes for
+    // every other artefact in the directory.
+    //
+    // THE HONEST LIMIT, because the ruling says "before any score exists" and
+    // this is as close as this verb can get: scoring happens in `computed()`
+    // above, before the directory is created at all, so nothing can write a
+    // file into it earlier than this. What IS enforced is that the digest in
+    // the front-matter is of the bytes that ended up on disk, and that those
+    // bytes are still there, unchanged, at the moment the scores are written
+    // -- re-read below rather than trusted from the variable.
+    let mut pre_registration = String::new();
+    json::render(&PRE_REGISTRATION.value(), &mut pre_registration);
+    pre_registration.push('\n');
+    let pre_registration_path = into.join("pre-registration.json");
+    write(&pre_registration_path, pre_registration.as_bytes())?;
+    let pre_registration_sha256 = sha256_hex(pre_registration.as_bytes());
+
     let regime = done.record.regime().clone();
     let record = crate::formats::record::Record {
         events: vec![
@@ -752,13 +799,22 @@ pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
             Event::Claim {
                 id: "c1".to_owned(),
                 hypothesis: PRE_REGISTRATION.primary.to_owned(),
-                // A recompute of an endpoint is not a verdict on it. The verb
-                // computes numbers; whether they support the pre-registered
-                // hypothesis is read off them by a person, and a program that
-                // wrote `supported` here would be making a claim it cannot
-                // make. Inconclusive is the honest machine answer, and it is
-                // the one a reader may change after reading the numbers.
-                result: crate::formats::record::Verdict::Inconclusive,
+                // THE SAME WORD THE FRONT-MATTER USES, and it has to be:
+                // ruled 2026-09-14, after this row said `inconclusive` while
+                // the README said `unadjudicated` and nothing compared them.
+                // They are not two measurements, they are one statement
+                // written twice, and `check-results.py` now refuses a
+                // directory where they disagree.
+                //
+                // `unadjudicated` rather than `inconclusive` because
+                // `inconclusive` is a VERDICT -- the data were held against a
+                // rule and did not decide -- and this verb applies no rule.
+                // It computes the endpoints; the pre-registration names them
+                // and does not say what turns them into an answer. A program
+                // that wrote `supported` here would be making a claim it
+                // cannot make, and one that writes `inconclusive` is making a
+                // smaller one it also cannot make.
+                result: crate::formats::record::Verdict::Unadjudicated,
                 consumes: artifacts
                     .iter()
                     .map(|artifact| (*artifact).clone())
@@ -786,11 +842,26 @@ pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
         &into.join("run.jsonl"),
         crate::formats::record::render(&record).as_bytes(),
     )?;
+    // Re-read, not re-used: the point of the digest is the file, so the file
+    // is what is hashed again. Same refusal shape as a cache whose bytes are
+    // not the bytes the record declared -- the scores do not get written over
+    // a pre-registration that moved under them.
+    let landed = std::fs::read(&pre_registration_path).map_err(|err| RunError::Write {
+        path: pre_registration_path.display().to_string(),
+        reason: err.to_string(),
+    })?;
+    let found = sha256_hex(&landed);
+    if found != pre_registration_sha256 {
+        return Err(RunError::PreRegistrationMoved {
+            declared: pre_registration_sha256,
+            found,
+        });
+    }
     write(&into.join("report.json"), product.as_bytes())?;
     write(&into.join("regimen.toml"), regimen_of(&regime).as_bytes())?;
     write(
         &into.join("README.md"),
-        report_of(&regime, &product_sha256, checked).as_bytes(),
+        report_of(&regime, &product_sha256, &pre_registration_sha256, checked).as_bytes(),
     )?;
     write(&into.join("recompute.sh"), RECOMPUTE.as_bytes())?;
     executable(&into.join("recompute.sh"))?;
@@ -915,7 +986,12 @@ fn kind_and_caveat(regime: &Regime) -> (&'static str, String) {
 /// `check-recompute.py`'s tamper probe perturbs: that probe bumps an integer
 /// in the report and requires `recompute.sh` to notice, so a report with no
 /// number in it would make the probe vacuous.
-fn report_of(regime: &Regime, product_sha256: &str, checked: u32) -> String {
+fn report_of(
+    regime: &Regime,
+    product_sha256: &str,
+    pre_registration_sha256: &str,
+    checked: u32,
+) -> String {
     let ids: Vec<String> = regime
         .substrate_ids()
         .into_iter()
@@ -928,6 +1004,7 @@ fn report_of(regime: &Regime, product_sha256: &str, checked: u32) -> String {
          result = \"unadjudicated\"\n\
          kind = {kind:?}\n\
          product_sha256 = {product_sha256:?}\n\
+         pre_registration_sha256 = {pre_registration_sha256:?}\n\
          controls_run = [\"scoring-extremes\", \"shuffled-label-null\"]\n\
          known_defects = []\n\
          targets_checked = {checked}\n\
@@ -1627,7 +1704,18 @@ mod tests {
             !report_keys.contains_key("budget"),
             "the report still carries a single budget beside the pre-registered ladder"
         );
-        let Value::Array(budgets) = field(field(&report, "pre_registration"), "budgets") else {
+        // AND THE LADDER LIVES IN `pre-registration.json`, which is the file
+        // the front-matter pins by digest since 2026-09-14. It used to be a
+        // block inside the report; read from the constant here it would prove
+        // only that the constant is itself, so it is read back off disk out
+        // of an assembled directory — the same bytes a reader gets.
+        let assembled = dir.join("2026-01-01-a-sense-bakeoff-ladder");
+        assemble(&path, &assembled).expect("the assembly");
+        let pinned = std::fs::read_to_string(assembled.join("pre-registration.json"))
+            .expect("the pre-registration is written beside the report");
+        let pinned = crate::formats::record::json::line(pinned.trim_end())
+            .expect("the pre-registration is JSON this crate can read");
+        let Some(Value::Array(budgets)) = pinned.get("budgets") else {
             panic!("the pre-registration names its budgets")
         };
         assert_eq!(
