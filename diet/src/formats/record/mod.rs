@@ -259,6 +259,17 @@ vocabulary! {
         /// and a record that cannot express the difference cannot explain the
         /// result.
         Suppressed => "suppressed",
+        /// Nobody said, and this record is not in a position to know.
+        ///
+        /// For a record ADAPTED from a foreign harness's log (#28), where the
+        /// log never carried the setting. The other three are measurements;
+        /// this one is the absence of a measurement, and it exists so that an
+        /// adapter does not have to pick one of them and be wrong silently.
+        ///
+        /// `check-record` refuses it in a record whose `start` declares
+        /// `source = live`: a session this library drove knows what it asked
+        /// for, so "nobody said" there is a bug, not a fact.
+        Undeclared => "undeclared",
     }
 }
 
