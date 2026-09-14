@@ -895,7 +895,9 @@ mod tests {
         ]
         .join("\n");
 
-        let adapted = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("the fixture adapts");
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
         let turns = adapted
             .events
             .iter()
@@ -930,7 +932,9 @@ mod tests {
         ]
         .join("\n");
 
-        let adapted = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("the fixture adapts");
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
         for event in &adapted.events {
             let Event::ToolCall {
                 id, output, exit, ..
@@ -969,7 +973,9 @@ mod tests {
         ]
         .join("\n");
 
-        let adapted = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("the fixture adapts");
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
         let Some(Event::Turn { prefill_tokens, .. }) = adapted
             .events
             .iter()
@@ -1016,7 +1022,9 @@ mod tests {
     #[test]
     fn a_renamed_field_on_a_mapped_kind_is_refused_rather_than_guessed_at() {
         let log = "{\"type\":\"user\",\"msg\":{\"role\":\"user\",\"content\":\"go\"}}";
-        let refused = ClaudeCode.adapt(log, A_SUBSTRATE).expect_err("the format moved");
+        let refused = ClaudeCode
+            .adapt(log, A_SUBSTRATE)
+            .expect_err("the format moved");
         assert!(
             matches!(&refused, Drift::MissingField { kind, field, at_row }
                 if kind == "user" && field == "message" && *at_row == 1),
@@ -1059,7 +1067,9 @@ mod tests {
             ),
         ]
         .join("\n");
-        let adapted = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("the fixture adapts");
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
         assert_eq!(
             adapted.census.translated.get("Read -> read_file").copied(),
             Some(1)
@@ -1093,7 +1103,9 @@ mod tests {
             ),
         ]
         .join("\n");
-        let adapted = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("the fixture adapts");
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
         assert_eq!(
             adapted.census.dropped.get("assistant/thinking").copied(),
             Some(1),
@@ -1133,7 +1145,10 @@ mod tests {
             ),
         ]
         .join("\n");
-        let census = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("it adapts").census;
+        let census = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("it adapts")
+            .census;
         assert_eq!(
             census.translated.get("BASH -> bash"),
             Some(&1),
@@ -1346,7 +1361,10 @@ mod tests {
         ]
         .join("\n");
         assert!(
-            matches!(ClaudeCode.adapt(&log, A_SUBSTRATE), Err(Drift::Unrepresentable { .. })),
+            matches!(
+                ClaudeCode.adapt(&log, A_SUBSTRATE),
+                Err(Drift::Unrepresentable { .. })
+            ),
             "a prefill sum that overflows is a refusal, not a wrap or a panic"
         );
     }
@@ -1376,7 +1394,10 @@ mod tests {
         for (what, row) in moved {
             let log = [user_says("go").as_str(), row].join("\n");
             assert!(
-                matches!(ClaudeCode.adapt(&log, A_SUBSTRATE), Err(Drift::MissingField { .. })),
+                matches!(
+                    ClaudeCode.adapt(&log, A_SUBSTRATE),
+                    Err(Drift::MissingField { .. })
+                ),
                 "{what}: a declared field that moved is a refusal"
             );
         }
@@ -1425,7 +1446,10 @@ mod tests {
             ]
             .join("\n");
             assert!(
-                matches!(ClaudeCode.adapt(&log, A_SUBSTRATE), Err(Drift::Unrepresentable { .. })),
+                matches!(
+                    ClaudeCode.adapt(&log, A_SUBSTRATE),
+                    Err(Drift::Unrepresentable { .. })
+                ),
                 "{why} is refused by name rather than coerced into a string"
             );
         }

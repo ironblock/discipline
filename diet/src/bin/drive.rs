@@ -100,9 +100,9 @@ fn main() -> ExitCode {
 
     let (regime, isolation_policy, seam_policy) =
         match declared(regimen_path, args.get(3).is_some()) {
-        Ok(three) => three,
-        Err((code, why)) => return fail(code, &why),
-    };
+            Ok(three) => three,
+            Err((code, why)) => return fail(code, &why),
+        };
     let confinement = match isolation::open(&isolation_policy) {
         Ok(confinement) => confinement,
         Err(why) => return fail(EXIT_HALT, &why.to_string()),

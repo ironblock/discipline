@@ -431,7 +431,10 @@ mod tests {
         .join("\n");
         let lines = log.lines().filter(|line| !line.trim().is_empty()).count() as u64;
 
-        let census = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("it adapts").census;
+        let census = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("it adapts")
+            .census;
         assert_eq!(
             census.rows(),
             lines,
