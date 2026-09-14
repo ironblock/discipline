@@ -6,6 +6,7 @@
 #   verify.sh                 run every check
 #   verify.sh --only CHECK    run one check (repeatable)
 #   verify.sh --only test --scope SPEC   narrow the test check (selftest only)
+#   verify.sh --only history --range A..B   scan an explicit range, to repro
 #   verify.sh --list          name the checks, in order
 #   verify.sh --selftest      prove the gate goes red on seeded faults
 #   verify.sh --selftest --shard K/N    run this job's share of the faults
@@ -318,10 +319,30 @@ check_pages() {
 # does not depend on, a path filter that turns a skip into a pass.
 check_ci() { python3 scripts/check-ci-coverage.py; }
 
+# What `--range` hands the history check, and empty unless it was given.
+#
+# Empty means the script INFERS the range from the event, which is what CI
+# gets and what a bare local run gets. The inferred range is `origin/<default>
+# ..HEAD`, which is EMPTY on a checkout that matches the trunk -- so a red
+# that CI found on a push cannot be replayed locally by the default. A gate
+# whose verdict nobody can reproduce is a verdict nobody can check, so the
+# range is askable, and only ever explicitly. Ruled 2026-09-14 on #81.
+#
+# A flag rather than an environment variable, for `--scope`'s reason: a range
+# exported once would narrow every history run beneath it, silently.
+VERIFY_HISTORY_RANGE=""
+
 # Commit messages, and a pull request's title and body, against the same
 # pattern table the file gate uses. A file carrying a forbidden shape can be
 # fixed with a commit; a commit message carrying one is permanent.
-check_history() { python3 scripts/check-history.py; }
+#
+# The MESSAGE, and not the author or committer line. Those are metadata the
+# platform publishes on every commit page, and scanning them through a table
+# built for content reddened this trunk once for no content at all -- #81.
+check_history() {
+  python3 scripts/check-history.py \
+    ${VERIFY_HISTORY_RANGE:+--range "$VERIFY_HISTORY_RANGE"}
+}
 
 # Every injection in this file changes the tree it is run against. A verdict
 # is worth what the fault behind it cost, so an injection is proven to change
@@ -5676,6 +5697,65 @@ STRICT
   expect_exit "and a strict decode of that same patch really does raise" 0 \
     python3 "${fake}/strict.py" "${fake}/repo" "$fake_undecodable"
 
+  # AN AUTHOR LINE IS METADATA, NOT CONTENT -- ruled 2026-09-14 on #81, and
+  # the PAIR is what says so. The same literal is planted twice: once in a
+  # commit body, where it is a finding, and once in the author line of a
+  # commit whose body and patch are both clean, where it is not.
+  #
+  # Neither half asserts anything alone. Delete the pattern from the table
+  # and the second still passes; go back to scanning `%an <%ae>` and the
+  # first still passes. Only together do they pin WHERE the table applies.
+  #
+  # Assembled from pieces, because this file is itself read by the tree gate
+  # and a literal written whole here would be a finding about verify.sh --
+  # the trap `inject_injection_needs_gnu_sed` documents, one lint along.
+  local handle; handle="$(printf '%s%s' 'cor' 'ey')"
+  local fake_body fake_author
+  (
+    cd "${fake}/repo"
+    printf 'd\n' > d.txt && git add --all
+    seed_commit --message "a message naming ${handle}, which is content"
+  )
+  fake_body="$(git -C "${fake}/repo" rev-parse HEAD)"
+  (
+    cd "${fake}/repo"
+    printf 'e\n' > e.txt && git add --all
+    git -c "user.email=${handle}@example.invalid" -c "user.name=${handle}" \
+      commit --quiet --message 'a clean message, and an author line that is not'
+  )
+  fake_author="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_undecodable" "$fake_body" > "${fake}/pr-in-body.json"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_body" "$fake_author" > "${fake}/pr-in-author.json"
+  expect_exit "history: a listed literal in a commit body is a finding" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-in-body.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+  expect_exit "history: the same literal in an author line is not content" 0 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-in-author.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+
+  # `--range` REACHES THE CHECK, AND BEATS THE INFERRED ANSWER. A flag that
+  # is accepted and dropped would leave the reproduction finding open while
+  # looking closed, so the two rows are chosen to disagree with the default:
+  # this repository's inferred range is `origin/<default>..HEAD`, which here
+  # spans every commit above and is DIRTY, so a dropped `--range` gives 1 on
+  # a slice whose verdict is 0.
+  #
+  # Copied in after the commits, so that no `git add --all` above sweeps it
+  # into the history under scan.
+  cp "${ROOT}/verify.sh" "${fake}/repo/verify.sh"
+  expect_exit "history: an explicit range is honoured, not the inferred one" 0 \
+    bash "${fake}/repo/verify.sh" --only history --range "${fake_body}..${fake_author}"
+  expect_exit "history: and an explicit range that is dirty is still a finding" 1 \
+    bash "${fake}/repo/verify.sh" --only history --range "${fake_undecodable}..${fake_body}"
+  # A range narrows one check, so a loose one is a misuse and not a verdict --
+  # `--scope`'s rule, for a check that INFERS what it scans when unasked.
+  expect_exit "a range without --only history is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --range "${fake_body}..${fake_author}"
+
   # The CI aggregator's comparison. A skipped job is not a failed job, and
   # GitHub's own `!failure()` idiom passes on skipped, so the one thing this
   # must get right is that only the literal 'success' passes.
@@ -6893,6 +6973,15 @@ while [ "$#" -gt 0 ]; do
       VERIFY_TEST_SCOPE="$2"
       shift 2
       ;;
+    --range)
+      [ "$#" -ge 2 ] || { echo "verify: --range needs A..B" >&2; exit "$EXIT_MISUSE"; }
+      case "$2" in
+        *..*) ;;
+        *) echo "verify: --range wants A..B, not '$2'" >&2; exit "$EXIT_MISUSE" ;;
+      esac
+      VERIFY_HISTORY_RANGE="$2"
+      shift 2
+      ;;
     --shard)
       [ "$#" -ge 2 ] || { echo "verify: --shard needs K/N" >&2; exit "$EXIT_MISUSE"; }
       shard_arg="$2"
@@ -6954,6 +7043,17 @@ if [ -n "$VERIFY_TEST_SCOPE" ] &&
    { [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ] ||
      [ "${selected[0]-}" != "test" ]; }; then
   echo "verify: --scope narrows the test check, so it needs exactly --only test" >&2
+  exit "$EXIT_MISUSE"
+fi
+
+# A range narrows ONE check, the same way a scope does, and for a sharper
+# reason: `history` INFERS its range when none is given, so a `--range` left
+# loose would read as "everything was scanned" over a run in which fifteen
+# checks ignored it and the sixteenth scanned a slice somebody else chose.
+if [ -n "$VERIFY_HISTORY_RANGE" ] &&
+   { [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ] ||
+     [ "${selected[0]-}" != "history" ]; }; then
+  echo "verify: --range narrows the history check, so it needs exactly --only history" >&2
   exit "$EXIT_MISUSE"
 fi
 

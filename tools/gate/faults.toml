@@ -35,7 +35,7 @@
 [meta]
 source = "verify.sh"
 red_faults = 319
-mechanics_assertions = 98
+mechanics_assertions = 103
 migrated = 0
 
 
@@ -1534,6 +1534,51 @@ check = "-"
 label = "and a strict decode of that same patch really does raise"
 failure_class = "history.control"
 expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.history-a-listed-literal-in-a-commit-body-is-a-finding"
+kind = "mechanics"
+check = "-"
+label = "history: a listed literal in a commit body is a finding"
+failure_class = "history.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.history-the-same-literal-in-an-author-line-is-not-content"
+kind = "mechanics"
+check = "-"
+label = "history: the same literal in an author line is not content"
+failure_class = "history.clean"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.history-an-explicit-range-is-honoured-not-the-inferred-one"
+kind = "mechanics"
+check = "-"
+label = "history: an explicit range is honoured, not the inferred one"
+failure_class = "history.clean"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.history-and-an-explicit-range-that-is-dirty-is-still-a-finding"
+kind = "mechanics"
+check = "-"
+label = "history: and an explicit range that is dirty is still a finding"
+failure_class = "history.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-range-without-only-history-is-a-misuse"
+kind = "mechanics"
+check = "-"
+label = "a range without --only history is a misuse"
+failure_class = "history.range-loose"
+expected_exit = "2"
 migrated = false
 [[fault]]
 id = "mech.the-gate-accepts-a-run-where-every-job-succeeded"
