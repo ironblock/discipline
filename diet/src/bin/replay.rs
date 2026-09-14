@@ -142,7 +142,10 @@ fn main() -> ExitCode {
     let regime = match std::fs::read_to_string(&parsed.regimen)
         .map_err(|why| format!("{}: {why}", parsed.regimen))
         .and_then(|text| regimen::parse(&text).map_err(|why| why.to_string()))
-        .and_then(|declared| regime_of(&declared))
+        // Replay never has an endpoint: it calls no model, and
+        // `adapters_a_replay_takes_no_endpoint_and_the_binary_holds_no_transport`
+        // asserts that against the artifact rather than in a comment.
+        .and_then(|declared| regime_of(&declared, false))
     {
         Ok(regime) => regime,
         Err(why) => {
@@ -155,7 +158,11 @@ fn main() -> ExitCode {
         }
     };
 
-    let read = match adapter.adapt(&log) {
+    // The regimen declares exactly one substrate and the log names none, so
+    // this is the id every adapted row is filed against. Reading it off the
+    // regime rather than naming it here keeps one statement of what served.
+    let substrate = regime.substrates[0].id.clone();
+    let read = match adapter.adapt(&log, &substrate) {
         Ok(read) => read,
         Err(drift) => {
             eprintln!("{drift}");

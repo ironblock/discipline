@@ -389,11 +389,25 @@ pub trait Adapter {
     ///
     /// [`Drift`] where the log is not the format this adapter reads, or where
     /// a row it maps is missing a field the mapping needs.
-    fn adapt(&self, log: &str) -> Result<Adapted, Drift>;
+    /// Read `log`, filing every request against the declared `substrate`.
+    ///
+    /// The substrate is NOT read out of the log -- a foreign harness records
+    /// what answered only by accident, and this one does not record it at all.
+    /// It is the id the operator declared in the regimen, passed in here so
+    /// that the rows name a substrate somebody stated rather than one this
+    /// adapter guessed. Required since #68 item 3: a row that may omit it is a
+    /// row whose substrate was decided somewhere else.
+    fn adapt(&self, log: &str, substrate: &str) -> Result<Adapted, Drift>;
 }
 
 #[cfg(test)]
 mod tests {
+
+    /// The substrate id these tests file rows against.
+    ///
+    /// Any declared id would do: what is being tested is that the row names
+    /// the one it was GIVEN, never one read out of the log.
+    const A_SUBSTRATE: &str = "claude-code";
 
     use super::{Adapter, Census, Drift, claude_code::ClaudeCode};
 
@@ -417,7 +431,7 @@ mod tests {
         .join("\n");
         let lines = log.lines().filter(|line| !line.trim().is_empty()).count() as u64;
 
-        let census = ClaudeCode.adapt(&log).expect("it adapts").census;
+        let census = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("it adapts").census;
         assert_eq!(
             census.rows(),
             lines,

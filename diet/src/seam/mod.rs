@@ -557,21 +557,26 @@ mod tests {
         Ask, Blocked, Controller, Ratification, Ratifier, Reason, Seam, SeamError, pinned_ask,
         render,
     };
-    use crate::formats::record::{Reasoning, Regime, Substrate};
+    use crate::formats::record::{Engine, Reasoning, Regime, Substrate, Weights};
     use crate::formats::regimen;
     use crate::object::{EntryId, Patch, Provenance, WorkingObject};
 
     fn regime() -> Regime {
         Regime {
             arm: "an-arm".to_owned(),
-            substrate: Substrate {
-                name: "a-substrate".to_owned(),
-                model: "a-model".to_owned(),
-                quantization: "q8".to_owned(),
-                sampler: BTreeMap::new(),
+            substrates: vec![Substrate {
+                id: "a-substrate".to_owned(),
+                engine: Engine {
+                    name: "a-stack".to_owned(),
+                    version_or_digest: "1.2.3".to_owned(),
+                },
+                weights: Weights::Digest(
+                    "0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
+                ),
+                hardware_fingerprint: "a-box".to_owned(),
+                sampler_card: BTreeMap::new(),
                 reasoning: Reasoning::Off,
-                hardware: "a-box".to_owned(),
-            },
+            }],
             dogma_version: 1,
         }
     }

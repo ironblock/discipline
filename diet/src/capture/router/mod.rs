@@ -1584,6 +1584,7 @@ mod tests {
         router.observe(&Event::Request {
             id: "q1".to_owned(),
             lane: "main".to_owned(),
+            substrate: "local".to_owned(),
             retry_of: None,
             text: None,
         });
@@ -1613,6 +1614,7 @@ mod tests {
         aside.observe(&Event::Request {
             id: "q2".to_owned(),
             lane: "interview".to_owned(),
+            substrate: "local".to_owned(),
             retry_of: None,
             text: None,
         });

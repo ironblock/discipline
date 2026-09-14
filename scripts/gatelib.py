@@ -26,6 +26,11 @@ class Case(NamedTuple):
     check: str
     injection: str
     signature: str | None
+    # The fifth word: which test binaries and tests the case's `test` check
+    # runs. Parsed here rather than by whoever wants it, for the same reason
+    # the rest of the call is: a scope one reader sees and another does not is
+    # a fault that runs somewhere nobody is counting.
+    scope: str | None
 
 
 def logical_lines(text: str):
@@ -65,6 +70,12 @@ def seeded_cases(text: str) -> list[Case]:
         if len(parts) < 4 or not parts[3].startswith("inject_"):
             continue
         found.append(
-            Case(parts[1], parts[2], parts[3], parts[4] if len(parts) > 4 else None)
+            Case(
+                parts[1],
+                parts[2],
+                parts[3],
+                parts[4] if len(parts) > 4 else None,
+                parts[5] if len(parts) > 5 else None,
+            )
         )
     return found

@@ -1,0 +1,94 @@
+# The surface-tag table: what a tag may be written as, and what it means.
+#
+# Format: tag<TAB>position<TAB>kind
+#   position: `line`   -- opens a field; the grammar admits it
+#             `inline` -- a SECOND field on another tag's line; the grammar
+#                         must NOT admit it, and the reason is below
+#   kind:     the FieldKind it means, by canonical tag; `-` for inline
+#
+# WHY A TABLE AND NOT A MATCH. The vocabulary has three readers -- this file,
+# the grammar's `tag_word`, and the dogma's templates -- and the one thing
+# that must never happen is for them to disagree quietly. So the disagreement
+# is checked: `no_dogma_tag_is_missing_from_the_table` reads every template
+# and fails on a tag that is not here, and `the_table_and_the_grammar_admit_the_same_tags`
+# fails when a `line` row is absent from the grammar or a grammar alternative
+# is absent here. Add a tag to a template and two tests go red until it is
+# named here and admitted there.
+#
+# WHY INLINE TAGS ARE NOT IN THE GRAMMAR. `GOTCHA: <what> — IMPLICATION: <what>`
+# is one field with two parts. Admitting IMPLICATION as a tag would end the
+# GOTCHA field at the em-dash and open a new one, which is the continuation
+# bug the grammar's own header records losing 71 of 630 archived answers to.
+# They are listed here so the drift lint can tell "a tag nobody declared" from
+# "a tag deliberately not a tag".
+#
+# `UNRELATED` joined them when the lint learned the DASH register. SUPERSEDE's
+# template writes `... | CONTRADICTS | UNRELATED — followed, if not UNRELATED,
+# by CORRECTED: <...>`, where it is a verdict VALUE in a list and the em-dash
+# is punctuation -- tag-shaped, deliberately not a tag, one line along from
+# `CORRECTED`, which is here for the same reason and was only visible before
+# because it is followed by a colon. Its siblings `REPLACES`, `RESOLVES` and
+# `CONTRADICTS` are followed by `|`, which is not a separator, so they are not
+# tag-shaped and are not listed. If that line is ever rewritten to put a dash
+# after one of them, the lint will say so.
+#
+# WHY THE OLD SPELLINGS STAY. `decision`, `evidence`, `learned`, `plan`,
+# `stuck` are what 630 archived answers and 22,220 generated ones are written
+# in. A vocabulary that stopped admitting them would not be a narrower
+# vocabulary, it would be a corpus that no longer parses.
+
+# --- the dogma's tags ---
+SURFACE	line	api_surface
+GOTCHA	line	gotcha
+FOLLOWUP	line	followup
+EXCERPT	line	evidence
+POINTER	line	pointer
+PLAN_IMPACT	line	plan_impact
+PLAN_DELTA	line	plan_impact
+CONSTRAINT	line	constraint
+DECISION	line	decision
+RATIONALE	line	rationale
+FACT	line	fact
+MAP	line	map
+DARK	line	dark
+NEXT	line	plan
+OPEN	line	open
+NOTE	line	note
+SUPERSEDE	line	supersede
+RECORDED	line	recorded
+LATEST	line	latest
+VERDICT	line	verdict
+
+# --- the registers the archived corpus is written in ---
+API_SURFACE	line	api_surface
+API SURFACE	line	api_surface
+API-SURFACE	line	api_surface
+EVIDENCE	line	evidence
+LEARNED	line	learned
+PLAN	line	plan
+STUCK	line	stuck
+
+# --- second fields, deliberately not tags ---
+WHY	inline	-
+IMPLICATION	inline	-
+ANCHORS	inline	-
+CORRECTED	inline	-
+UNRELATED	inline	-
+# One letter each, inside an audit's UPDATE answer:
+#   UPDATE: Q: <question> — A: <answer>
+# The lint counts a run of one uppercase letter as a tag on purpose. A rule
+# that only saw three-letter tags would have let these two through unnamed,
+# and "the lint did not look" reads exactly like "there was nothing to find".
+Q	inline	-
+A	inline	-
+
+# --- the audit verdict family; its own enum, not a field kind ---
+#
+# An audit answer is a VERDICT on a note somebody else wrote, not a field the
+# turn is reporting. `KEEP` and `REMOVE` are written without a colon
+# (`<n>. KEEP`), so the drift lint would never see them; they are here so the
+# family is one list rather than two.
+ADD	audit	add
+KEEP	audit	keep
+REMOVE	audit	remove
+UPDATE	audit	update

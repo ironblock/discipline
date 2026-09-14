@@ -23,6 +23,7 @@ use crate::formats::record::json::Decimal;
 
 #[derive(Parser)]
 #[grammar = "../formats/regimen/grammar.pest"]
+#[grammar = "../formats/number.pest"]
 struct RegimenParser;
 
 /// A value a regimen may hold.

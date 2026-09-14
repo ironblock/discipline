@@ -1,0 +1,7 @@
+#47 item 4: a recompute summary carries `targets_checked`, `targets_matched`
+and digests -- and no `turns`. This is the issue's own acceptance row.
+
+`turns: 0` is the honest spelling of the sentinel the ruling refuses: a
+recompute counted no turns, so any number here means "not applicable" and
+reads as a count. It is refused as an unknown key rather than by a check for
+0 or -1, because the way to refuse a sentinel is to leave nowhere to put one.

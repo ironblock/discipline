@@ -98,7 +98,8 @@ fn main() -> ExitCode {
         return ExitCode::from(EXIT_USAGE);
     }
 
-    let (regime, isolation_policy, seam_policy) = match declared(regimen_path) {
+    let (regime, isolation_policy, seam_policy) =
+        match declared(regimen_path, args.get(3).is_some()) {
         Ok(three) => three,
         Err((code, why)) => return fail(code, &why),
     };
@@ -171,12 +172,15 @@ fn main() -> ExitCode {
 }
 
 /// Everything the regimen at `path` declares that a drive needs.
-fn declared(path: &str) -> Result<(Regime, IsolationPolicy, SeamPolicy), (u8, String)> {
+fn declared(
+    path: &str,
+    endpoint_given: bool,
+) -> Result<(Regime, IsolationPolicy, SeamPolicy), (u8, String)> {
     let text = std::fs::read_to_string(path)
         .map_err(|why| (EXIT_INPUT, format!("{path} could not be read: {why}")))?;
     let regimen = regimen::parse(&text)
         .map_err(|why| (EXIT_INPUT, format!("{path} is not a regimen: {why:?}")))?;
-    let regime = regime_of(&regimen).map_err(|why| (EXIT_INPUT, why))?;
+    let regime = regime_of(&regimen, endpoint_given).map_err(|why| (EXIT_INPUT, why))?;
     let isolation_policy = IsolationPolicy::from_regimen(&regimen)
         .map_err(|why| (EXIT_INPUT, format!("its isolation policy: {why}")))?;
     let seam_policy = SeamPolicy::from_regimen(&regimen)
@@ -308,7 +312,11 @@ fn fail(code: u8, why: &str) -> ExitCode {
 /// The request every call is a variation of.
 fn shape(regime: &Regime) -> RequestShape {
     RequestShape {
-        model: regime.substrate.model.clone(),
+        // Per #68 item 3 the substrate's identity is typed and there is no
+        // prose model name to send; this program drives the canned server,
+        // which answers whatever it is asked. `regime_of` names the wire model
+        // in its refusal for the day a real endpoint is drivable again.
+        model: regime.substrates[0].id.clone(),
         messages: vec![Message::new(Role::User, "replaced per call")],
         // Nothing pinned. A drive that pinned a sampler setting the regimen
         // declares would be pinning it twice -- once in the regime it records

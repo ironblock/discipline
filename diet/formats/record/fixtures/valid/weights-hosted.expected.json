@@ -1,0 +1,23 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"an-endpoint\",\"version_or_digest\":\"2026-08-01\"},\"hardware_fingerprint\":\"not-ours\",\"id\":\"served\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"hosted\",\"model_id\":\"a-model-4\",\"provider\":\"a-provider\",\"version_or_date_observed\":\"2026-09-08\"}},{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"one-gpu\",\"id\":\"local\",\"reasoning\":\"off\",\"sampler_card\":{\"seed\":7,\"temperature\":0.0},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]}}\n{\"index\":1,\"prefill_tokens\":1024,\"record\":\"turn\"}\n{\"id\":\"q1\",\"lane\":\"main\",\"record\":\"request\",\"substrate\":\"served\",\"text\":\"Find where the parser drops a line.\"}\n{\"id\":\"a1\",\"output_tokens\":40,\"record\":\"response\",\"text\":\"In the caller.\",\"to_request\":\"q1\"}\n{\"id\":\"f1\",\"lane\":\"interview\",\"of_turn\":1,\"record\":\"fork\",\"substrate\":\"local\"}\n{\"entries\":2,\"from_fork\":\"f1\",\"id\":\"p1\",\"record\":\"capture\"}\n{\"kind\":\"drive\",\"prefill_tokens_total\":1024,\"product_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"record\":\"summary\",\"turns\":1}\n",
+  "kinds": [
+    "start",
+    "turn",
+    "request",
+    "response",
+    "fork",
+    "capture",
+    "summary"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "hosted_substrates": [
+      "served"
+    ],
+    "substrates": [
+      "served",
+      "local"
+    ]
+  }
+}

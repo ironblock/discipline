@@ -229,9 +229,9 @@ impl Adapter for ClaudeCode {
         MAPS
     }
 
-    fn adapt(&self, log: &str) -> Result<Adapted, Drift> {
+    fn adapt(&self, log: &str, substrate: &str) -> Result<Adapted, Drift> {
         let rows = parse(log)?;
-        let mut run = Run::new(self.name());
+        let mut run = Run::new(self.name(), substrate);
         for (at, (at_row, row)) in rows.iter().enumerate() {
             run.row(*at_row, row, rows.get(at + 1..).unwrap_or(&[]))?;
         }
@@ -273,6 +273,12 @@ fn parse(log: &str) -> Result<Vec<(usize, serde_json::Value)>, Drift> {
 struct Run {
     events: Vec<Event>,
     census: Census,
+    /// The declared substrate every request row names.
+    ///
+    /// Carried rather than looked up, because there is nowhere to look it up:
+    /// the log does not record what answered. It comes from the regimen the
+    /// operator wrote.
+    substrate: String,
     /// The turn a person most recently opened. Zero means none yet.
     turn: u32,
     /// `tool_use_id` -> where its [`Event::ToolCall`] sits in `events`, so the
@@ -282,13 +288,14 @@ struct Run {
 }
 
 impl Run {
-    fn new(adapter: &str) -> Self {
+    fn new(adapter: &str, substrate: &str) -> Self {
         Self {
             events: Vec::new(),
             census: Census {
                 adapter: adapter.to_owned(),
                 ..Census::default()
             },
+            substrate: substrate.to_owned(),
             turn: 0,
             awaiting: BTreeMap::new(),
         }
@@ -402,6 +409,8 @@ impl Run {
         self.events.push(Event::Request {
             id: format!("u/{}", self.turn),
             lane: "main".to_owned(),
+            // Declared, never inferred: the log does not say what answered.
+            substrate: self.substrate.clone(),
             retry_of: None,
             text: Some(said),
         });
@@ -840,6 +849,12 @@ fn value_of(at_row: usize, field: &str, raw: &serde_json::Value) -> Result<Value
 #[cfg(test)]
 mod tests {
 
+    /// The substrate id these tests file rows against.
+    ///
+    /// Any declared id would do: what is being tested is that the row names
+    /// the one it was GIVEN, never one read out of the log.
+    const A_SUBSTRATE: &str = "claude-code";
+
     use super::{Block, ClaudeCode, MAPS, Row, native_tool};
     use crate::adapters::{Adapter, Drift};
     use crate::formats::record::Event;
@@ -880,7 +895,7 @@ mod tests {
         ]
         .join("\n");
 
-        let adapted = ClaudeCode.adapt(&log).expect("the fixture adapts");
+        let adapted = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("the fixture adapts");
         let turns = adapted
             .events
             .iter()
@@ -915,7 +930,7 @@ mod tests {
         ]
         .join("\n");
 
-        let adapted = ClaudeCode.adapt(&log).expect("the fixture adapts");
+        let adapted = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("the fixture adapts");
         for event in &adapted.events {
             let Event::ToolCall {
                 id, output, exit, ..
@@ -954,7 +969,7 @@ mod tests {
         ]
         .join("\n");
 
-        let adapted = ClaudeCode.adapt(&log).expect("the fixture adapts");
+        let adapted = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("the fixture adapts");
         let Some(Event::Turn { prefill_tokens, .. }) = adapted
             .events
             .iter()
@@ -978,7 +993,7 @@ mod tests {
             "{\"type\":\"a-kind-nobody-has-seen\",\"payload\":\"x\"}"
         );
         let adapted = ClaudeCode
-            .adapt(log)
+            .adapt(log, A_SUBSTRATE)
             .expect("an unknown kind is not a refusal");
         assert_eq!(
             adapted
@@ -1001,7 +1016,7 @@ mod tests {
     #[test]
     fn a_renamed_field_on_a_mapped_kind_is_refused_rather_than_guessed_at() {
         let log = "{\"type\":\"user\",\"msg\":{\"role\":\"user\",\"content\":\"go\"}}";
-        let refused = ClaudeCode.adapt(log).expect_err("the format moved");
+        let refused = ClaudeCode.adapt(log, A_SUBSTRATE).expect_err("the format moved");
         assert!(
             matches!(&refused, Drift::MissingField { kind, field, at_row }
                 if kind == "user" && field == "message" && *at_row == 1),
@@ -1044,7 +1059,7 @@ mod tests {
             ),
         ]
         .join("\n");
-        let adapted = ClaudeCode.adapt(&log).expect("the fixture adapts");
+        let adapted = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("the fixture adapts");
         assert_eq!(
             adapted.census.translated.get("Read -> read_file").copied(),
             Some(1)
@@ -1078,7 +1093,7 @@ mod tests {
             ),
         ]
         .join("\n");
-        let adapted = ClaudeCode.adapt(&log).expect("the fixture adapts");
+        let adapted = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("the fixture adapts");
         assert_eq!(
             adapted.census.dropped.get("assistant/thinking").copied(),
             Some(1),
@@ -1118,7 +1133,7 @@ mod tests {
             ),
         ]
         .join("\n");
-        let census = ClaudeCode.adapt(&log).expect("it adapts").census;
+        let census = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("it adapts").census;
         assert_eq!(
             census.translated.get("BASH -> bash"),
             Some(&1),
@@ -1202,7 +1217,7 @@ mod tests {
         ]
         .join("\n");
 
-        let adapted = ClaudeCode.adapt(&log).expect("it adapts");
+        let adapted = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("it adapts");
         let spent: Vec<(u64, Option<&str>)> = adapted
             .events
             .iter()
@@ -1240,7 +1255,7 @@ mod tests {
     fn an_assistant_row_before_any_turn_names_no_request_and_is_counted() {
         let log = assistant("[{\"type\":\"text\",\"text\":\"resumed\"}]", 9, [1, 0, 0]);
 
-        let adapted = ClaudeCode.adapt(&log).expect("it adapts");
+        let adapted = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("it adapts");
         assert!(
             !adapted
                 .events
@@ -1275,7 +1290,7 @@ mod tests {
         ]
         .join("\n");
 
-        let adapted = ClaudeCode.adapt(&log).expect("it adapts");
+        let adapted = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("it adapts");
         let prefills: Vec<u64> = adapted
             .events
             .iter()
@@ -1314,7 +1329,7 @@ mod tests {
         .join("\n");
         assert!(
             matches!(
-                ClaudeCode.adapt(&log),
+                ClaudeCode.adapt(&log, A_SUBSTRATE),
                 Err(Drift::Unrepresentable { field, .. }) if field.contains("output_tokens")
             ),
             "an output count past the cap is named, not silently zeroed"
@@ -1331,7 +1346,7 @@ mod tests {
         ]
         .join("\n");
         assert!(
-            matches!(ClaudeCode.adapt(&log), Err(Drift::Unrepresentable { .. })),
+            matches!(ClaudeCode.adapt(&log, A_SUBSTRATE), Err(Drift::Unrepresentable { .. })),
             "a prefill sum that overflows is a refusal, not a wrap or a panic"
         );
     }
@@ -1361,7 +1376,7 @@ mod tests {
         for (what, row) in moved {
             let log = [user_says("go").as_str(), row].join("\n");
             assert!(
-                matches!(ClaudeCode.adapt(&log), Err(Drift::MissingField { .. })),
+                matches!(ClaudeCode.adapt(&log, A_SUBSTRATE), Err(Drift::MissingField { .. })),
                 "{what}: a declared field that moved is a refusal"
             );
         }
@@ -1381,7 +1396,7 @@ mod tests {
             ]
             .join("\n");
             assert!(
-                ClaudeCode.adapt(&log).is_err(),
+                ClaudeCode.adapt(&log, A_SUBSTRATE).is_err(),
                 "a call whose arguments moved is refused, not read as a call \
                  with none: {input}"
             );
@@ -1410,7 +1425,7 @@ mod tests {
             ]
             .join("\n");
             assert!(
-                matches!(ClaudeCode.adapt(&log), Err(Drift::Unrepresentable { .. })),
+                matches!(ClaudeCode.adapt(&log, A_SUBSTRATE), Err(Drift::Unrepresentable { .. })),
                 "{why} is refused by name rather than coerced into a string"
             );
         }
@@ -1432,7 +1447,7 @@ mod tests {
         .join("\n");
         assert!(
             matches!(
-                ClaudeCode.adapt(&log),
+                ClaudeCode.adapt(&log, A_SUBSTRATE),
                 Err(Drift::MissingField { at_row: 3, .. })
             ),
             "the bad row is on line three of the file, not row one of the vector"
@@ -1465,7 +1480,7 @@ mod tests {
         ]
         .join("\n");
 
-        let adapted = ClaudeCode.adapt(&log).expect("it adapts");
+        let adapted = ClaudeCode.adapt(&log, A_SUBSTRATE).expect("it adapts");
         let answered = adapted.events.iter().find_map(|event| match event {
             Event::ToolCall { output, exit, .. } => Some((output.clone(), *exit)),
             _ => None,
@@ -1528,7 +1543,7 @@ mod tests {
         for (name, expected) in EXPECTED {
             let log = std::fs::read_to_string(dir.join(format!("{name}.jsonl")))
                 .unwrap_or_else(|why| panic!("{name}: {why}"));
-            match (ClaudeCode.adapt(&log), expected) {
+            match (ClaudeCode.adapt(&log, A_SUBSTRATE), expected) {
                 (Ok(adapted), Some((rows, unmapped, dropped))) => {
                     assert_eq!(adapted.census.rows(), *rows, "{name}: rows");
                     assert_eq!(

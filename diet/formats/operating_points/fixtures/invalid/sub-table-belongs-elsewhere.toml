@@ -1,0 +1,7 @@
+[alpha]
+match       = "alpha"
+nothink_ops = ["extraction"]
+[beta.sampler]
+temperature = 0.3
+[alpha.gate]
+votes = 1

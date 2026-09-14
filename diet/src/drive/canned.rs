@@ -129,6 +129,82 @@ pub fn acts() -> Vec<Act> {
     .collect()
 }
 
+/// The sha256 of the replies this server plays, as the record spells a digest.
+///
+/// A canned server serves no weights, and that is not the same as serving
+/// nothing identifiable: its answers ARE these bytes, in this order. So this
+/// is the substrate's weights identity -- COMPUTED from the artifact that
+/// decided every reply rather than asserted about it, which is what
+/// `Weights::Digest` means. It is also why a canned drive is reproducible by
+/// config rather than a historical observation: replay it and the same acts
+/// play again, byte for byte.
+///
+/// What it does NOT cover is how the stub plays them. A change there is a
+/// change to this program, not to the substrate, and folding the two into one
+/// digest would make every edit to the serving loop look like a different
+/// substrate.
+///
+/// Every variant, and no fallback, for the reason `diet-drive`'s regimen
+/// crossing has none: an act this function did not think of would otherwise
+/// hash to whatever the acts it replaced hashed to, and a digest that cannot
+/// tell two servers apart is not an identity. Each field is written with its
+/// own length in front, so no two act lists can render to the same bytes by
+/// agreeing across a separator.
+#[must_use]
+pub fn acts_digest() -> String {
+    digest_of(&acts())
+}
+
+/// The digest of any act list, which is what makes [`acts_digest`] checkable.
+///
+/// Split out because a digest that ignored its input would move the record and
+/// every test that reads it TOGETHER, and pass: both sides would be asking the
+/// same function. Taking the acts as an argument is what lets a test hand it
+/// two different lists and require two different answers, which is the only
+/// form of "this is an identity" that can fail.
+#[must_use]
+pub fn digest_of(acts: &[Act]) -> String {
+    use std::fmt::Write as _;
+
+    let mut canonical = String::new();
+    let piece = |out: &mut String, text: &str| {
+        let _ = write!(out, "{}:{text};", text.len());
+    };
+    for act in acts {
+        match act {
+            Act::Answer(body) => {
+                canonical.push_str("answer;");
+                piece(&mut canonical, body);
+            }
+            Act::Status(code, body) => {
+                let _ = write!(canonical, "status;{code};");
+                piece(&mut canonical, body);
+            }
+            Act::Stall(wait, body) => {
+                let _ = write!(canonical, "stall;{};", wait.as_nanos());
+                piece(&mut canonical, body);
+            }
+            Act::Chunked(chunks) => {
+                let _ = write!(canonical, "chunked;{};", chunks.len());
+                for chunk in chunks {
+                    piece(&mut canonical, chunk);
+                }
+            }
+            Act::AnswerAndHold(body, held) => {
+                let _ = write!(canonical, "answer-and-hold;{};", held.as_nanos());
+                piece(&mut canonical, body);
+            }
+            Act::Undercount(body, announced) => {
+                let _ = write!(canonical, "undercount;{announced};");
+                piece(&mut canonical, body);
+            }
+            Act::Hangup => canonical.push_str("hangup;"),
+        }
+        canonical.push('\n');
+    }
+    crate::digest::sha256_hex(canonical.as_bytes())
+}
+
 /// One reply in the shape a llama.cpp-dialect server sends.
 ///
 /// Rendered here rather than read from a fixture file because it is six
@@ -168,3 +244,83 @@ pub fn calls(script: &Script) -> usize {
 /// lane that ran from anywhere else, and a fixture nothing reads is a fixture
 /// that rots.
 pub const DEV_LOOP: &str = include_str!("../../drive/dev-loop.toml");
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{Act, acts, acts_digest, digest_of};
+
+    #[test]
+    fn the_digest_the_record_carries_is_the_digest_of_the_acts_that_were_played() {
+        assert_eq!(
+            acts_digest(),
+            digest_of(&acts()),
+            "the wiring, and the only reason a caller may take one for the other"
+        );
+    }
+
+    #[test]
+    fn a_digest_that_does_not_move_with_the_acts_is_not_an_identity() {
+        // The failure this exists for: `digest_of` returning a constant, or
+        // hashing something other than what it was handed. Both leave every
+        // other test in this repository passing, because the record and the
+        // test that reads it would ask the SAME function and get the same
+        // wrong answer.
+        let played = acts();
+        let mut one_reply_different = played.clone();
+        one_reply_different[0] = Act::Answer("something else entirely".to_owned());
+        assert_ne!(
+            digest_of(&played),
+            digest_of(&one_reply_different),
+            "a server that answers differently is a different server"
+        );
+
+        assert_ne!(
+            digest_of(&played),
+            digest_of(&[]),
+            "and a server with no acts at all is not this one"
+        );
+    }
+
+    #[test]
+    fn the_order_the_acts_are_played_in_is_part_of_the_identity() {
+        let played = acts();
+        let mut swapped = played.clone();
+        swapped.swap(0, 1);
+        assert_ne!(
+            digest_of(&played),
+            digest_of(&swapped),
+            "the acts are played IN ORDER, so two orders are two servers"
+        );
+    }
+
+    #[test]
+    fn a_body_that_spells_the_separators_is_still_one_act() {
+        // What the length prefix is for, and the case that shows it. An
+        // earlier version of this test compared `["ab", "c"]` with
+        // `["a", "bc"]`; both survive without the prefix, because the act
+        // terminator already falls between them -- it was a guard that could
+        // not fire, and dropping the prefix proved it by passing.
+        //
+        // A body containing the delimiters is the collision. Without the
+        // length in front, ONE act whose text spells the end of an act and the
+        // start of the next renders to exactly the bytes that TWO acts do.
+        assert_ne!(
+            digest_of(&[Act::Answer("x;\nanswer;y".to_owned())]),
+            digest_of(&[Act::Answer("x".to_owned()), Act::Answer("y".to_owned())]),
+            "a server that answers once and a server that answers twice"
+        );
+        // And across variants, whose payloads are written into the same field
+        // positions: a status body and an answer body are different acts.
+        assert_ne!(
+            digest_of(&[Act::Answer("x".to_owned())]),
+            digest_of(&[Act::Status(200, "x".to_owned())]),
+        );
+        assert_ne!(
+            digest_of(&[Act::Stall(Duration::from_secs(1), "x".to_owned())]),
+            digest_of(&[Act::Stall(Duration::from_secs(2), "x".to_owned())]),
+            "a wait is a property of the act, not decoration on it"
+        );
+    }
+}

@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
-"""Scan commit messages -- and a pull request's title and body -- for the
-shapes scripts/hygiene-patterns.tsv forbids.
+"""Scan a range's commit messages AND ITS PATCH TEXT -- and a pull request's
+title and body -- for the shapes scripts/hygiene-patterns.tsv forbids.
 
-`hygiene.sh` scans files. A file carrying a private hostname or an internal
-ticket identifier can be fixed with a commit; a commit MESSAGE carrying one is
-permanent, so the ungated path is the more damaging of the two.
+`hygiene.sh` scans files: the tree as it stands. This scanned messages. Between
+them was a hole neither could see: **content added in one commit and removed in
+a later one is scanned by nothing, ever**, and stays recoverable from history
+for as long as the repository exists. Measured on merged `main` -- 32
+occurrences of a private tracker token in patch text, zero in the tree, the
+gate green over both. `git log -p` hands them to anyone.
+
+So the patch text of the range is scanned with the same table. A token that
+enters a diff fails before it enters history. Ruled 2026-09-08 on #54: history
+is the write a fix cannot reach.
+
+A file carrying a private hostname or an internal ticket identifier can be
+fixed with a commit; a commit MESSAGE, or a diff, carrying one is permanent,
+so the ungated path is the more damaging of the two.
 
 There is exactly one pattern definition and exactly one scanner. This script
 determines what to read and materialises it, then hands the result to
@@ -52,9 +63,27 @@ class Undeterminable(Exception):
 
 
 def git(*args: str, check: bool = True) -> str:
+    # BYTES, then decode with `errors="replace"`. `text=True` decodes as
+    # strict UTF-8 and RAISES on the first byte that is not -- and `git show
+    # --patch` pulls raw file content into that decode, so one committed
+    # non-UTF-8 file killed the whole scan with a traceback and exit 1.
+    #
+    # Exit 1 is this repository's code for "the scan ran and found something".
+    # A crash is not a finding. It reddened the lane over history nothing
+    # could edit, and no content change could clear it.
+    #
+    # Six such files are already committed here, so the range that reaches
+    # them is not exotic -- a branch cut from an older point, a force-push
+    # whose merge base is older, or a pull_request whose base.sha predates
+    # them all do it. Measured on 8acb58b, which is in origin/main:
+    #
+    #   text=True          UnicodeDecodeError, 0xff at 14023   exit 1
+    #   errors="replace"   1 commit message(s) and 1 patch(es)  exit 0
     done = subprocess.run(
-        ["git", "-C", str(ROOT), *args], capture_output=True, text=True
+        ["git", "-C", str(ROOT), *args], capture_output=True
     )
+    done.stdout = done.stdout.decode("utf-8", errors="replace")
+    done.stderr = done.stderr.decode("utf-8", errors="replace")
     if check and done.returncode != 0:
         raise Undeterminable(f"`git {' '.join(args)}` failed: {done.stderr.strip()}")
     return done.stdout.strip()
@@ -79,6 +108,17 @@ def default_branch() -> str:
         "no origin/HEAD, origin/main or origin/master to compare against; "
         "pass --range explicitly"
     )
+
+
+def reachable(name: str) -> bool:
+    """Whether `name` is a commit this checkout holds.
+
+    Separate from [`resolve`] because the two questions have different
+    answers on a force-push: the pre-rewrite head is a perfectly good sha
+    that this clone does not have, and asking "is it here" is not the same
+    as demanding it be.
+    """
+    return bool(git("rev-parse", "--verify", "--quiet", f"{name}^{{commit}}", check=False))
 
 
 def resolve(name: str) -> str:
@@ -111,15 +151,33 @@ def determine() -> tuple[str, str, str, list[tuple[str, str]]]:
         after = (payload.get("after") or "").strip() or os.environ.get("GITHUB_SHA", "")
         if not after:
             raise Undeterminable("the push payload carries no after sha")
-        if before and before != ZERO:
+        if before and before != ZERO and reachable(before):
             return resolve(before), resolve(after), "push before..after", []
-        # A new branch: nothing was there before, so compare with the trunk.
+        # Two ways to arrive here, and they want the same scan.
+        #
+        # A NEW BRANCH: `before` is the zero sha, nothing was there, so the
+        # trunk is what to compare against.
+        #
+        # A FORCE-PUSH: `before` names the pre-rewrite head, which the rewrite
+        # ORPHANED -- so it is absent from CI's fresh checkout and resolves to
+        # nothing. That is not a broken payload; it is the expected shape of a
+        # legitimate operation, and this repository's own rules require it: the
+        # merge protocol mandates stack-order rebases and #54's ruling mandates
+        # rebuilding a branch when identity has entered it. Both are
+        # force-pushes, so the check was guaranteed to redden the lane that
+        # gates the merge, on a branch whose content is fine.
+        #
+        # The merge base with the trunk is a SUPERSET of the new commits, which
+        # is safe for a check whose job is to find what should not be in a
+        # message: scanning more than the push introduced can only find more.
+        # `undeterminable` is kept for the case where even that fails.
+        how = "push, new branch" if not before or before == ZERO else "push, force-push"
         merge_base = git("merge-base", default_branch(), after, check=False)
         if not merge_base:
             raise Undeterminable(
-                "a new branch with no merge base against the default branch"
+                f"{how}: no merge base against the default branch"
             )
-        return merge_base, resolve(after), "push, new branch: merge-base..after", []
+        return merge_base, resolve(after), f"{how}: merge-base..after", []
 
     base = default_branch()
     merge_base = git("merge-base", base, "HEAD", check=False)
@@ -165,14 +223,62 @@ def main(argv: list[str]) -> int:
 
     with tempfile.TemporaryDirectory() as work:
         out = pathlib.Path(work)
+        patches = 0
         for sha in shas:
             body = git("log", "-1", "--format=%B%n%an <%ae>", sha)
             (out / f"commit-{sha[:12]}.txt").write_text(body + "\n", encoding="utf-8")
+            # `--format=` so the message is not scanned twice, and NO `-m`.
+            #
+            # A CORRECTION. This comment used to say a merge commit
+            # "contributes no patch". That is wrong, and the truth is better:
+            # without `-m`, git shows a merge as a COMBINED diff, which holds
+            # the hunks that differ from EVERY parent -- that is, exactly the
+            # content a conflict resolution invented and neither side had.
+            # Measured on merges built for the purpose:
+            #
+            #   ordinary merge, no conflict                    0 bytes
+            #   conflicted merge resolved as one parent's text 0 bytes
+            #   EVIL merge, resolution in neither parent       the diff, and
+            #                                                  the token in it
+            #
+            # So the two things this range must not do are both already true:
+            # content a merge merely carries forward is not scanned twice --
+            # it is in the commits being merged, and every one of those is in
+            # this range -- while content the RESOLUTION introduced, which is
+            # in no other commit and is the only way a secret enters through a
+            # merge, is scanned exactly once.
+            #
+            # `-m` would break that: it shows the merge against each parent
+            # separately, which reports every carried-forward hit once per
+            # parent. The old reasoning would have justified changing this
+            # line; the behaviour it describes is the one to keep.
+            # `--text`, because without it git renders a binary path as
+            # `Binary files a/x and b/x differ` and a `-diff` path the same
+            # way -- and the pattern table carries a `b` flag precisely
+            # because a secret in a .pack or an image is as committed as one
+            # in a text file. Added-then-removed was the hole this check was
+            # written to close, and without `--text` it stayed open for
+            # exactly the content the tree gate treats as most dangerous.
+            #
+            # Measured on a two-file commit -- one path binary by git's NUL
+            # heuristic, one path plain text marked `-diff` in .gitattributes
+            # -- each carrying a decoy of `aws-access-key-id` shape:
+            #
+            #   git show --patch          0 occurrences, 2 `Binary files` lines
+            #   git show --patch --text   2 occurrences, 0 `Binary files` lines
+            #
+            # The `-diff` half matters on its own: an attribute in the tree
+            # under scan decided what the history scan could see.
+            patch = git("show", "--format=", "--patch", "--text", sha, check=False)
+            if patch:
+                (out / f"patch-{sha[:12]}.txt").write_text(patch + "\n", encoding="utf-8")
+                patches += 1
         for label, text in extra:
             (out / f"{label}.txt").write_text(text + "\n", encoding="utf-8")
 
         print(f"check-history: {how}")
         print(f"check-history: {len(shas)} commit message(s)"
+              f" and {patches} patch(es)"
               f"{' + ' + ', '.join(l for l, _ in extra) if extra else ''}"
               f", scanned with the same table as the file gate")
 
@@ -182,7 +288,11 @@ def main(argv: list[str]) -> int:
         return 0
     if done.returncode == EXIT_DIRTY:
         print("check-history: history cannot be edited after it is pushed; "
-              "rewrite the offending commits before merging", file=sys.stderr)
+              "rewrite the offending commits before merging. A hit in a "
+              "`patch-*` file is content the diff ADDS OR REMOVES: removing it "
+              "in a later commit does not remove it from history, so the "
+              "commit that introduced it is the one to rewrite.",
+              file=sys.stderr)
         return EXIT_DIRTY
     return EXIT_BROKEN
 

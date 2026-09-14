@@ -1,0 +1,16 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"one-gpu\",\"id\":\"local\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]}}\n{\"consumes\":[{\"path\":\"run.jsonl\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"},{\"path\":\"regrade.jsonl\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}],\"hypothesis\":\"the reported rate re-derives from the run\",\"id\":\"c1\",\"record\":\"claim\",\"result\":\"supported\"}\n{\"digests\":[\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"kind\":\"recompute\",\"product_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"record\":\"summary\",\"targets_checked\":2,\"targets_matched\":2}\n",
+  "kinds": [
+    "start",
+    "claim",
+    "summary"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "hosted_substrates": [],
+    "substrates": [
+      "local"
+    ]
+  }
+}

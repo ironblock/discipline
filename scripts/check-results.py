@@ -84,7 +84,7 @@ REQUIRED_KEYS: dict[str, type | tuple[type, ...]] = {
 
 REQUIRED_REGIME_KEYS: dict[str, type | tuple[type, ...]] = {
     "arm": str,
-    "substrate": str,
+    "substrates": list,
     "dogma_version": int,
 }
 
@@ -95,6 +95,7 @@ SECTIONS = ["Observation", "Hypothesis", "Test", "Results", "Conclusion"]
 # decides what to run; a directory whose kind neither reader knows would
 # otherwise be caught by neither.
 KINDS = ("reproducible-by-config", "historical-observation")
+REPRODUCIBLE = KINDS[0]
 
 REQUIRED_FILES = ["run.jsonl", "regimen.toml", "README.md"]
 
@@ -356,6 +357,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
     verdict = record_verdict(directory / "run.jsonl")
     summary: dict | None = None
     recorded_regime: dict | None = None
+    claims: list[dict] = []
     if not verdict.ok:
         fail(
             "results.record-refused",
@@ -374,6 +376,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
         else:
             summary = summaries[0]
         recorded_regime = value.get("regime")
+        claims = [r for r in rows if r.get("record") == "claim"]
         check_consumed(directory, rows, fail)
 
     # --- regimen.toml ----------------------------------------------------
@@ -460,6 +463,110 @@ def check_run(directory: pathlib.Path) -> list[str]:
     kind = front.get("kind")
     if isinstance(kind, str) and kind not in KINDS:
         fail("results.kind-undeclared", f"front-matter `kind` is {kind!r}, which is neither {' nor '.join(KINDS)}")
+
+    # A hosted substrate is one whose weights can change under you: the
+    # provider re-points a tag and the same config serves different weights.
+    # Gate 0 does not care -- re-deriving numbers from committed artefacts is
+    # indifferent to what produced them -- but a directory declaring
+    # `reproducible-by-config` is promising a RE-FIRING, and that is the
+    # promise nobody can keep here. Such a run is a real result and its kind is
+    # `historical-observation`. Ruled 2026-09-08.
+    #
+    # The list comes from diet, which is the only reader of the record; this
+    # script asking `canonical` which weights each substrate carries would be
+    # a second opinion about the format.
+    if kind == REPRODUCIBLE and recorded_regime is not None:
+        hosted = recorded_regime.get("hosted_substrates") or []
+        if hosted:
+            fail(
+                "results.hosted-cannot-be-reproducible",
+                f"front-matter `kind` is {REPRODUCIBLE!r} but the record is "
+                f"served by hosted weights ({', '.join(sorted(hosted))}), which "
+                f"can change under a re-firing; this is {KINDS[1]!r}",
+            )
+
+    # THE FRONT-MATTER'S VERDICT AND THE RECORD'S ARE ONE STATEMENT WRITTEN
+    # TWICE. Ruled 2026-09-14, after `diet bakeoff` wrote `unadjudicated` in
+    # the README and `inconclusive` on the claim row of the same directory
+    # for a day, with nothing in this script comparing them: `result` is a
+    # free string in the front-matter schema and `Verdict` is a closed
+    # vocabulary in the record, so neither reader could see the other's copy.
+    #
+    # They are not two measurements taken differently. `inconclusive` is a
+    # verdict -- the evidence was held against a rule and did not decide --
+    # and `unadjudicated` is the absence of one. A directory that says both
+    # is a directory whose reader has to guess which half to believe.
+    #
+    # A directory with no claim row is not this check's business: the record
+    # format decides whether one is required, and a results directory with no
+    # claim is already refused upstream by the rule that a claim must name the
+    # artefacts it consumed. More than one claim row and every one must agree
+    # with the front-matter, because the front-matter has one `result` field
+    # and cannot mean different things to different rows.
+    stated = front.get("result")
+    if isinstance(stated, str):
+        for claim in claims:
+            recorded = claim.get("result")
+            if recorded is not None and recorded != stated:
+                fail(
+                    "results.verdict-disagrees-with-record",
+                    f"front-matter `result` is {stated!r} but claim "
+                    f"{claim.get('id')!r} carries {recorded!r}; the report and the "
+                    f"record are one statement written twice and must agree"
+                )
+
+    # THE PRE-REGISTRATION IS PINNED BY THE DIGEST OF A FILE, not by a hash of
+    # a block inside `report.json`. Ruled 2026-09-14.
+    #
+    # The block version would have made this script a SECOND canonicaliser of
+    # record data: to hash a sub-object it would have to serialise it, and
+    # serialising means deciding key order, separators and -- since the
+    # pre-registration carries the attainable p floor and the budget ladder --
+    # decimal formatting. A second canonicaliser that disagrees with `diet` by
+    # one digit reports a mismatch that looks exactly like tampering. This
+    # script hashes whole files and delegates every structural question, and
+    # that is the property being kept.
+    #
+    # BICONDITIONAL, so neither half can be dropped to escape it: a directory
+    # with the file must declare the digest, and a directory declaring the
+    # digest must have the file. An optional pin is a pin nobody has to carry.
+    #
+    # Whether a results directory must HAVE a pre-registration is a different
+    # question and is not decided here -- a recompute-confirmed row that never
+    # pre-registered anything is a real shape, and this check is about the two
+    # halves agreeing, not about requiring one.
+    declared_pre = front.get("pre_registration_sha256")
+    pre_file = directory / "pre-registration.json"
+    if declared_pre is not None and not isinstance(declared_pre, str):
+        fail("results.key-mistyped", "front-matter `pre_registration_sha256` is not a string")
+    elif isinstance(declared_pre, str) and not SHA256.fullmatch(declared_pre):
+        fail(
+            "results.sha-malformed",
+            "front-matter `pre_registration_sha256` is not 64 lowercase hex characters",
+        )
+    elif isinstance(declared_pre, str) and not pre_file.is_file():
+        fail(
+            "results.pre-registration-absent",
+            "front-matter declares `pre_registration_sha256` and there is no "
+            "`pre-registration.json` here; a digest of a file that is not in the "
+            "directory pins nothing",
+        )
+    elif isinstance(declared_pre, str):
+        found_pre = digest_of(pre_file)
+        if found_pre != declared_pre:
+            fail(
+                "results.pre-registration-digest",
+                f"`pre-registration.json` hashes to {found_pre} and the front-matter "
+                f"declares {declared_pre}; the endpoints a run was scored against are "
+                f"not the endpoints committed beside it",
+            )
+    elif pre_file.is_file():
+        fail(
+            "results.pre-registration-unpinned",
+            "`pre-registration.json` is here and the front-matter declares no "
+            "`pre_registration_sha256`; endpoints nothing pins can be edited after "
+            "the numbers, which is what pre-registering them is against",
+        )
 
     sha = front.get("product_sha256")
     if isinstance(sha, str):

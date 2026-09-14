@@ -1,0 +1,18 @@
+Every summary carries `product_sha256`, including a recompute's. Ruled (a) on
+#68, 2026-09-11.
+
+The digest is BINARY PROVENANCE and provenance is universal: a recompute
+record was produced by a `diet` binary exactly as a drive record was, and the
+ruling that made the digest mandatory at the boundary did not exempt one of
+them.
+
+It lived inside the drive's own variant until this fixture existed, and the
+cost was not abstract. `check-results.py` requires `product_sha256` in every
+results directory's front-matter and requires it to equal the summary row's --
+so a directory whose record was a recompute could not be linted at all, and
+nothing in the tree noticed, because `results/` held no such directory and no
+fixture crossed the schema and the directory linter.
+
+This is the fixture that crosses them. A recompute summary with every field
+its kind declares and no digest of the product it produced is refused here,
+by the same rule that refuses a drive summary without one.

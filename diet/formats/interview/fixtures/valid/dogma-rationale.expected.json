@@ -1,0 +1,15 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "the deleted mode was removed rather than repaired \u2014 ANCHORS: keeping a second path to the same answer preserves the chance somebody takes it"
+      },
+      "raw": "the deleted mode was removed rather than repaired \u2014 ANCHORS: keeping a second path to the same answer preserves the chance somebody takes it",
+      "tag": {
+        "as_written": "RATIONALE:",
+        "kind": "rationale"
+      }
+    }
+  ]
+}

@@ -7,30 +7,46 @@
 //! defect class this repository keeps finding in itself.
 
 use crate::formats::record::json::Value;
-use crate::formats::record::{Reasoning, Regime, Substrate};
+use crate::formats::record::{Engine, Reasoning, Regime, Substrate, Weights};
 use crate::formats::regimen::{self, Regimen};
 
-/// The regimen keys that describe what served, beyond its name.
+/// The keys this program reads for the regime facts a regimen v1 has no place
+/// for, named after the record's own field paths.
 ///
-/// Named here rather than at each use so that a key added to the regime has
-/// one place to be added, and the program that reports a regimen's shape and
-/// the program that reads it cannot disagree about what the shape is.
-pub const SUBSTRATE_KEYS: &[&str] = &[
-    "substrate_model",
-    "substrate_quantization",
-    "substrate_reasoning",
-    "substrate_hardware",
-];
+/// `substrate_model` and `substrate_quantization` used to be here and are not
+/// any more. Item 3 made a substrate's identity TYPED -- a sha256 of the
+/// weights, or a named hosted model with a version -- and a model's prose name
+/// beside a quantization label is neither. Reading them and calling the result
+/// an identity is the one thing the ruling excludes, so this program stopped
+/// reading them rather than keep two keys whose only use was to be misread.
+pub const SUBSTRATE_KEYS: &[&str] = &["substrate_reasoning", "substrate_hardware"];
 
 /// The regime `regimen` declares, or the list of what it is missing.
 ///
 /// # Errors
 ///
-/// A sentence naming every key the regimen does not carry, or the one value
-/// it carries that is not a value of its type. Never a default: a regime tag
-/// a program invented makes every result under it incomparable with every
-/// other, which is what the tags are for.
-pub fn regime_of(regimen: &Regimen) -> Result<Regime, String> {
+/// Returns the complaint as a sentence when the regimen omits a key the
+/// regime requires, when a value is the wrong shape, or when an endpoint was
+/// given -- regimen v1 cannot say which weights sit behind one, and this
+/// crossing will not invent an identity it was not told.
+pub fn regime_of(regimen: &Regimen, endpoint_given: bool) -> Result<Regime, String> {
+    // WHAT ACTUALLY SERVED decides this, not what the regimen says served.
+    // A regimen naming a substrate is a declaration; a run against the canned
+    // server is a fact, and the identity written into the record has to be the
+    // second. This is the same argument as `substrate` coming from the caller
+    // in `client::journal::project`, one level up.
+    if endpoint_given {
+        return Err(
+            "an endpoint was given, and regimen v1 cannot say WHICH weights are behind it. \
+             Item 3 made a substrate's identity typed -- `weights` is a sha256 of the weights \
+             or a hosted `provider`/`model_id`/`version_or_date_observed` -- and this program \
+             will not invent either from a prose model name. The registry that resolves a \
+             substrate id to those facts lands with the equipment registry; until it does, \
+             `diet-drive` runs against its own canned server, whose identity it can compute"
+                .to_owned(),
+        );
+    }
+
     let mut missing = Vec::new();
     let mut text = |key: &'static str| match regimen.get(key) {
         Some(regimen::Value::String(value)) if !value.is_empty() => value.clone(),
@@ -41,11 +57,9 @@ pub fn regime_of(regimen: &Regimen) -> Result<Regime, String> {
     };
 
     let arm = text("arm");
-    let name = text("substrate");
-    let model = text(SUBSTRATE_KEYS[0]);
-    let quantization = text(SUBSTRATE_KEYS[1]);
-    let reasoning_written = text(SUBSTRATE_KEYS[2]);
-    let hardware = text(SUBSTRATE_KEYS[3]);
+    let id = text("substrate");
+    let reasoning_written = text(SUBSTRATE_KEYS[0]);
+    let hardware_fingerprint = text(SUBSTRATE_KEYS[1]);
 
     let Some(regimen::Value::Integer(dogma_version)) = regimen.get("dogma_version") else {
         missing.push("dogma_version");
@@ -91,16 +105,35 @@ pub fn regime_of(regimen: &Regimen) -> Result<Regime, String> {
         ));
     };
 
+    // ONE substrate, because this program serves one. A regime may now carry
+    // several -- a drive whose interview fork runs on a small local model while
+    // the main lane runs a large one is the arrangement this repository exists
+    // to measure -- and `diet-drive` makes every call to the same server, so a
+    // second entry here would be a substrate nothing was put to.
     Ok(Regime {
         arm,
-        substrate: Substrate {
-            name,
-            model,
-            quantization,
-            sampler,
+        substrates: vec![Substrate {
+            id,
+            // The canned server IS this program, and what it plays is the acts.
+            // Naming the same artifact twice is the truth about it; giving the
+            // engine a version of its own would be inventing a second fact to
+            // fill a second field.
+            engine: Engine {
+                name: "diet-drive canned".to_owned(),
+                version_or_digest: crate::drive::canned::acts_digest(),
+            },
+            // Computed, not declared, and its OWN kind rather than a digest
+            // wearing `Digest`'s name. A canned server serves no weights, and
+            // saying so with the variant is what lets gate 1 compare a replay
+            // exactly instead of re-firing it within a band meant for sampling
+            // and hardware that cannot move here. Ruled 2026-09-11.
+            weights: Weights::Canned {
+                acts_sha256: crate::drive::canned::acts_digest(),
+            },
+            hardware_fingerprint,
+            sampler_card: sampler,
             reasoning,
-            hardware,
-        },
+        }],
         dogma_version,
     })
 }

@@ -5,8 +5,41 @@
 #
 #   verify.sh                 run every check
 #   verify.sh --only CHECK    run one check (repeatable)
+#   verify.sh --only test --scope SPEC   narrow the test check (selftest only)
 #   verify.sh --list          name the checks, in order
 #   verify.sh --selftest      prove the gate goes red on seeded faults
+#   verify.sh --selftest --shard K/N    run this job's share of the faults
+#   verify.sh --selftest --census PATH  write what this run ran, for the sum
+#   verify.sh --selftest --derive-scopes DIR   re-harvest the test cases' scopes
+#
+# THE SCOPES ARE A HARVEST, NOT A LIST. Every `test` case declares which tests
+# it needs, and there are 181 of them; a flag that makes the gate run LESS is a
+# hazard, and 181 hand-maintained declarations are 181 chances at a scope that
+# was right when it was written and wrong after a rename. So they are derived
+# rather than kept, and the derivation is re-runnable:
+#
+#   ./verify.sh --selftest --derive-scopes /tmp/harvest
+#   python3 scripts/derive-scopes.py --index /tmp/harvest/derive-scopes.tsv
+#   python3 scripts/derive-scopes.py --index /tmp/harvest/... --emit
+#
+# The run is UNSCOPED on purpose -- every test case runs the whole workspace,
+# which is the cost the scopes exist to avoid -- so that what each seeded fault
+# breaks is read from a run the declarations did not already narrow. It takes
+# as long as the scopes save, which is the point of not doing it in CI.
+#
+# What the check asks of a declaration is that it SELECT SOMETHING THE FAULT
+# BREAKS -- not everything. One failing test fails a run, so a scope naming one
+# of thirty-three failures is as red as one naming all of them; it is more
+# fragile, and the check says so, but a narrow blast radius is the entire
+# reason `--scope` exists and calling it a defect would be calling the feature
+# a defect. Selecting NOTHING is the defect: those tests all pass, the run
+# exits 0, and a seeded fault reports green. Ruled 2026-09-11 as the condition
+# on keeping `--scope`.
+#
+# The reader itself is not trusted on its own word. `verify.sh --only derive`
+# runs its fixture suite in a second, because a tool whose only input is a
+# forty-minute harvest is a tool nobody runs, and the first defect in it was
+# exactly that kind.
 #
 # Three rules this script exists to keep:
 #
@@ -32,7 +65,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results recompute regimen metadata hygiene pages ci history injections resolver parity)
+readonly CHECKS=(fmt clippy test library results recompute regimen metadata hygiene pages ci history injections resolver derive parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -40,7 +73,8 @@ readonly CHECKS=(fmt clippy test library results recompute regimen metadata hygi
 # Every class, not only the ones the brief names: otherwise a pattern and its
 # seeded class can be deleted together and the selftest still reports success.
 readonly REQUIRED_HYGIENE_CLASSES=(
-  private-ipv4 internal-hostname personal-home-path windows-user-path
+  private-ipv4 internal-hostname personal-home-path session-scratchpad-path
+  ssh-user-at-host windows-user-path
   internal-ticket-id aws-access-key-id github-token slack-token
   private-key-block anthropic-api-key openai-api-key assigned-secret
 )
@@ -59,11 +93,110 @@ check_fmt() { cargo fmt --all --check; }
 
 check_clippy() { cargo clippy --workspace --all-targets -- -D warnings; }
 
+# What `--scope` narrows the `test` check to: which test binaries are built,
+# and which tests inside them run. Empty means the whole workspace, which is
+# what a contributor gets and what CI's package job runs.
+#
+# It exists for the selftest. A seeded case mutates one file and asks whether
+# one gate fires; building and running the whole workspace to answer that was
+# most of what remained of the selftest's wall clock once the sandbox stopped
+# recompiling from scratch. The saving is mostly in the BINARIES NOT BUILT --
+# a fault in the library does not need tests/cli.rs and tests/conformance.rs
+# linked -- and only secondarily in the tests not run.
+#
+# A flag rather than an environment variable, deliberately. An environment
+# variable is inherited by everything started under it, so a scope exported
+# once in CI would narrow every `test` run beneath it, silently and for good;
+# a gate that runs less than it says is the failure this repository exists to
+# refuse. A flag is on the command line of the one process that carries it,
+# and scripts/check-ci-coverage.py refuses the spelling in any workflow the
+# gate depends on.
+VERIFY_TEST_SCOPE=""
+
+# SPEC is TARGET or TARGET/FILTER.
+#   lib            the library's own tests
+#   bins           the binaries' tests
+#   test:NAME      the integration target tests/NAME.rs
+#   all            the whole workspace, for a fault no one target catches
+# FILTER is passed to the test harness, so it is a substring of a test's path.
+#
+# Sets SCOPE_ARGS (cargo's, selecting targets) and SCOPE_FILTER (the test
+# harness's). Kept apart because they go on opposite sides of `--`, and the
+# control below needs to put `--list` there too: one flat list would spell
+# `-- FILTER -- --list`, which the harness reads as two filters.
+#
+# Returns 1 if the spec is not one of those, because a spec nobody recognises
+# must not quietly become "everything" -- that is the shape of a filter which
+# has silently stopped filtering.
+SCOPE_ARGS=()
+SCOPE_FILTER=""
+scope_args() {
+  local spec="$1" target
+  SCOPE_FILTER=""
+  case "$spec" in
+    */*) target="${spec%%/*}"; SCOPE_FILTER="${spec#*/}" ;;
+    *)   target="$spec" ;;
+  esac
+  case "$target" in
+    lib)    SCOPE_ARGS=(--lib) ;;
+    bins)   SCOPE_ARGS=(--bins) ;;
+    all)    SCOPE_ARGS=() ;;
+    test:*) SCOPE_ARGS=(--test "${target#test:}") ;;
+    *) return 1 ;;
+  esac
+  return 0
+}
+
 # `--no-fail-fast` because cargo otherwise stops at the first test binary that
 # fails, and the failures it then never prints are the ones a seeded case has
 # to recognise: a broken unit test in the library would hide every conformance
 # failure behind it, and the log would say the gate fired for the wrong reason.
-check_test() { cargo test --workspace --no-fail-fast; }
+check_test() {
+  # SCOPE_ARGS and SCOPE_FILTER are set once, by the argument parser, and are
+  # empty when no scope was given. Deriving them again here would put a
+  # SECOND reader on the spelling -- and it also put the refusal in the wrong
+  # place: a check that returns EXIT_MISUSE still leaves the script exiting
+  # EXIT_FAIL, because a failed check is a failed check. A misused flag is not
+  # a failed gate, and this repository already seeds a fault for exactly that
+  # confusion one layer down, in the diet CLI.
+  local -a args=(--workspace --no-fail-fast ${SCOPE_ARGS+"${SCOPE_ARGS[@]}"})
+
+  # THE SELECTED-COUNT CONTROL.
+  #
+  # `cargo test` with a filter that matches no test prints `running 0 tests`
+  # and EXITS 0. So a scope with a typo in it, or one left behind after the
+  # module it named was renamed, is a check that ran nothing and passed --
+  # which is the whole failure this repository refuses, arriving through the
+  # door that was opened to make the gate faster.
+  #
+  # So the scope is asked what it selects BEFORE anything runs. `--list` is
+  # the harness's own answer to that question rather than a count scraped out
+  # of a run's output, and asking first means a bad scope is refused without
+  # running a single test.
+  #
+  # This runs unscoped too. An unscoped workspace run cannot select nothing
+  # today, but "cannot today" is how a guard becomes decoration; the cost is
+  # one cargo invocation against an already-built tree.
+  local listing rc=0
+  listing="$(cargo test "${args[@]}" -- --list ${SCOPE_FILTER:+"$SCOPE_FILTER"} 2>&1)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    # Not the control's failure: the tree did not build, or the target does
+    # not exist. Hand back what cargo said, and its status.
+    printf '%s\n' "$listing"
+    return "$rc"
+  fi
+  local selected=0
+  selected="$(grep -c ': test$' <<< "$listing")" || selected=0
+  if [ "$selected" -eq 0 ]; then
+    printf 'verify: the test scope %s selected no tests, and a check of nothing is not a pass\n' \
+      "${VERIFY_TEST_SCOPE:-<the whole workspace>}" >&2
+    return "$EXIT_FAIL"
+  fi
+  printf 'test scope: %s (%d test(s) selected)\n' \
+    "${VERIFY_TEST_SCOPE:-the whole workspace}" "$selected"
+
+  cargo test "${args[@]}" ${SCOPE_FILTER:+-- "$SCOPE_FILTER"}
+}
 
 # Two rules about the library saying what it says. Field kinds, verdicts and
 # outcome classes are enums with exhaustive matches -- the compiler enforces
@@ -203,6 +336,15 @@ check_injections() { python3 scripts/check-injections.py; }
 # at once, each in a behaviour no command had ever executed.
 check_resolver() { python3 scripts/check-merge-gate.py; }
 
+# The scope derivation, exercised on fixtures before it is trusted to grade a
+# declaration. `derive-scopes.py` reads a forty-minute unscoped harvest, which
+# is exactly the shape of tool that is never run against a case it has not
+# already seen: its first defect -- a compile-failure pattern anchored without
+# re.MULTILINE, so every build-breaking fault came back as "the derivation
+# broke" -- survived being written, reviewed and read, and was found only by a
+# harvest. The fixtures cost a second and the harvest does not.
+check_derive() { python3 scripts/derive-scopes.py --selftest; }
+
 # The fault-migration manifest defines what parity means for the replacement
 # gate. A manifest that has drifted from this script defines the wrong parity.
 check_parity() { python3 scripts/check-fault-manifest.py; }
@@ -243,6 +385,51 @@ usage() {
 SELFTEST_SCRATCH=()
 SELFTEST_BROKEN=()
 SEEDED_CHECKS=()
+SELFTEST_CASES=0
+SELFTEST_LOGS=""
+
+# Where `--derive-scopes` writes its index, and empty when that mode is off.
+#
+# The mode runs every `test` case with NO scope, so that what the seeded fault
+# breaks is read from a run that was not already narrowed by the answer. A
+# derivation that ran under the declaration it is checking would confirm
+# whatever the declaration said.
+SELFTEST_DERIVE=""
+
+# --- the shard ------------------------------------------------------------
+#
+# `--selftest --shard K/N` runs every Nth fault starting at the Kth, so N jobs
+# between them run each fault exactly once. Round-robin rather than blocks:
+# the Rust-class faults are the expensive ones and they are declared in runs,
+# so a block split would put nearly all of them in one shard.
+#
+# This is NOT fault selection. Nothing here decides that a fault need not run;
+# it decides which JOB runs it, and scripts/check-selftest-census.py proves
+# after the fact that the shards between them ran every one. Selecting faults
+# by what changed is the thing this repository refuses, and the difference is
+# that a shard's absence is a failure rather than a silence: a missing census
+# is a missing shard, and the aggregate refuses.
+#
+# 0 means unsharded -- one job runs the lot, which is what a contributor gets.
+SELFTEST_SHARD=0
+SELFTEST_SHARDS=1
+SELFTEST_UNITS=0
+SELFTEST_RAN=()
+SELFTEST_CENSUS=""
+
+# Whether the next counted fault belongs to this shard, counting it either
+# way. Every counted fault calls this exactly once, in declaration order, so
+# the ordinals are the same in every shard and the union of the shards is the
+# whole list -- which is the claim the census script checks rather than trusts.
+in_shard() {
+  SELFTEST_UNITS=$(( SELFTEST_UNITS + 1 ))
+  if [ "$SELFTEST_SHARD" -eq 0 ] ||
+     [ "$(( (SELFTEST_UNITS - 1) % SELFTEST_SHARDS + 1 ))" -eq "$SELFTEST_SHARD" ]; then
+    SELFTEST_RAN+=("$SELFTEST_UNITS")
+    return 0
+  fi
+  return 1
+}
 
 selftest_cleanup() {
   local path
@@ -279,7 +466,20 @@ scratch() {
 # how a seeded case ends up red for another case's fault.
 sandbox() {
   local dest="$1" path
+  # Cleared, not merely written into. The path is reused across cases (see
+  # SELFTEST_BOX), so anything a fault created -- a file, a directory, a
+  # committed ref -- would otherwise be part of the next case's tree, and a
+  # case that passes because its predecessor left something behind proves
+  # nothing about the gate.
+  rm -rf -- "$dest"
   mkdir -p "$dest"
+
+  # The list first, so the check below is a shell builtin per file rather than
+  # a process. This loop used to run `mkdir` and `cp` per path -- two forks
+  # times a thousand files times two hundred cases. Measured on this tree,
+  # back to back: 7.4s and 7.7s for the fork-per-file loop, 0.52s and 0.50s
+  # for one batched `cp`. It cost as much as the compile it existed to feed.
+  local -a files=()
   while IFS= read -r -d '' path; do
     # -f after dereference: a broken symlink, or one pointing at a directory,
     # would make `cp` fail mid-copy and leave a half-built sandbox.
@@ -287,9 +487,29 @@ sandbox() {
       echo "selftest: ${path} is not a regular file (missing, or a symlink to one)" >&2
       return 1
     fi
-    mkdir -p "${dest}/$(dirname -- "$path")"
-    cp -L -- "${ROOT}/${path}" "${dest}/${path}"
+    files+=("$path")
   done < <(git -C "$ROOT" ls-files -z --cached --others --exclude-standard)
+  if [ "${#files[@]}" -eq 0 ]; then
+    echo "selftest: git names no files to copy; a sandbox of nothing proves nothing" >&2
+    return 1
+  fi
+
+  # `--parents` rebuilds each path's directories under dest, and -L matches
+  # the dereference the check above tests for. Still deliberately NOT `-p`:
+  # preserving mtimes would make a box's sources look older than artifacts
+  # left in the shared cargo target by the case before it, so cargo would
+  # declare them fresh and run the wrong binary.
+  #
+  # The pipeline's status is `cp`'s: `set -o pipefail` is in force and xargs
+  # exits non-zero if any `cp` it spawns does. Nothing here reads a status
+  # through a filter -- the rule this script opens with is about `| grep` and
+  # `| tee` standing in for a command's own exit code.
+  ( cd "$ROOT" && printf '%s\0' "${files[@]}" |
+      xargs -0 cp -L --parents -t "$dest" ) || {
+    echo "selftest: the sandbox tree could not be copied" >&2
+    return 1
+  }
+
   git -C "$dest" init --quiet
   git -C "$dest" add --all
 }
@@ -312,6 +532,32 @@ sandbox_state() {
   git -C "$box" show-ref 2> /dev/null || true
 }
 
+# ONE sandbox path, reused by every case, created once by selftest().
+#
+# Deliberately NOT a fresh `mktemp -d` per case, which is what this was.
+# Cargo's incremental cache is keyed by the path the crate was compiled from,
+# so a fault compiled at /tmp/tmp.AAA and the next one at /tmp/tmp.BBB shared
+# a target directory in which neither could reuse the other's incremental
+# state: every Rust-class case paid a full recompile of the crate, and the
+# cases alternated paths, so no case ever benefited from the one before it.
+#
+# Measured on this tree, same shared target, same freshly copied source:
+#
+#   fresh path each case   14.8s  14.8s
+#   one path reused        15.5s   4.4s   4.7s      (the first primes it)
+#
+# Most of the faults below are Rust-class -- every `test` case, and the fmt,
+# clippy and library cases besides -- so that difference was most of the
+# selftest's wall clock and all of the reason it read fifty-two minutes in CI.
+# No count is written here on purpose: this line carried one, it was wrong the
+# day it was written, and nothing reads a comment closely enough to notice.
+#
+# Isolation is unchanged, because what is reused is the PATH and not the
+# CONTENT: sandbox() removes the tree and copies it again from ROOT for every
+# case. The fingerprint taken either side of the injection is what proves it,
+# and it is taken after the copy.
+SELFTEST_BOX=""
+
 # Run `verify.sh --only CHECK` inside a sandbox carrying one seeded fault.
 #
 # EXPECT is an extended regex the sandbox's log must carry. The exit code is
@@ -322,10 +568,52 @@ sandbox_state() {
 # a signature: `cargo test` prints it on success too, so matching it would
 # certify a dead gate. Match the failure text instead.
 seeded_case() {
-  local label="$1" check="$2" inject="$3" expect="$4"
-  local box
-  scratch; box="$SCRATCH"
+  local label="$1" check="$2" inject="$3" expect="$4" scope="${5-}"
+  local box="$SELFTEST_BOX"
+  local started="$SECONDS"
+  # Recorded before the shard is consulted. This list answers "has every check
+  # been seen red", which is a question about what the gate DECLARES, and the
+  # answer must not depend on which shard is asking.
   SEEDED_CHECKS+=("$check")
+  in_shard || return 0
+  SELFTEST_CASES=$(( SELFTEST_CASES + 1 ))
+
+  # A `test` case says which tests it needs; anything else says nothing,
+  # because `--scope` narrows that one check and verify.sh refuses it
+  # elsewhere. Both halves are reported here rather than left to become a
+  # confusing exit 2 from inside the box, and scripts/check-fault-manifest.py
+  # refuses the same two states before a run ever starts.
+  local -a scoped=()
+  # UNSCOPED ON PURPOSE in derive mode: the point is to see everything this
+  # fault breaks, including whatever the declaration currently excludes. A
+  # derivation run under the declaration it is checking would confirm whatever
+  # that declaration said.
+  if [ "$check" = "test" ] && [ -n "$SELFTEST_DERIVE" ]; then
+    :
+  elif [ "$check" = "test" ]; then
+    if [ -z "$scope" ]; then
+      printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- NO TEST SCOPE DECLARED\n' \
+        "$(( SECONDS - started ))" "$check" "$label"
+      SELFTEST_BROKEN+=("${label}: a test case must name the tests it needs")
+      return
+    fi
+    scoped=(--scope "$scope")
+  elif [ -n "$scope" ]; then
+    printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- A SCOPE ON A CHECK THAT TAKES NONE\n' \
+      "$(( SECONDS - started ))" "$check" "$label"
+    SELFTEST_BROKEN+=("${label}: only the test check takes a scope")
+    return
+  fi
+  # One log per case, kept for the run, because the box itself is overwritten
+  # by the case after this one and a failure is read after the fact.
+  local log="${SELFTEST_LOGS}/$(printf '%03d' "$SELFTEST_CASES").log"
+  # The index the derivation reads: which log, which case, and what that case
+  # currently declares. Written here rather than beside the scope decision
+  # above, where `log` does not exist yet -- `set -u` caught that on the first
+  # run, which is the reason this file has `set -u`.
+  if [ "$check" = "test" ] && [ -n "$SELFTEST_DERIVE" ]; then
+    printf '%s\t%s\t%s\n' "$log" "$label" "$scope" >> "${SELFTEST_LOGS}/derive-scopes.tsv"
+  fi
 
   # `cd ""` succeeds and stays put, so an empty box would run the injection in
   # the real working tree. Refuse rather than seed faults into the repository.
@@ -338,8 +626,8 @@ seeded_case() {
   # it calls, so a failed `sandbox` used to return 1 into a caller that carried
   # on regardless -- into a directory that was never even `git init`-ed.
   if ! sandbox "$box"; then
-    printf 'BROKEN verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE BUILT\n' \
-      "$check" "$label"
+    printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE BUILT\n' \
+      "$(( SECONDS - started ))" "$check" "$label"
     SELFTEST_BROKEN+=("${label}: the sandbox could not be built")
     return
   fi
@@ -350,27 +638,40 @@ seeded_case() {
   # reported as a gate that did not fire. That is the right verdict for the
   # wrong reason, and it costs a debugging session every time. Fingerprint the
   # sandbox instead, and say which of the two actually happened.
-  local state_before state_after
+  #
+  # AND THE INJECTION'S OWN EXIT STATUS IS EVIDENCE. It used to be discarded,
+  # and then an injection that did half its work -- `cp -r` a directory, then
+  # raise KeyError on a field the schema had renamed -- was graded on the tree
+  # it left behind. The tree HAD changed, so the fingerprint was satisfied;
+  # the check then passed on a copy of a valid directory and the case read
+  # GREEN, THE GATE DID NOT FIRE. It is not the gate that did not fire. Found
+  # by running it: item 3 renamed `substrate` to `substrates` and this case
+  # accused the gate of a fault that was in the injection.
+  local state_before state_after injected=0
   state_before="$(sandbox_state "$box")"
-  ( cd "$box" && "$inject" )
+  ( cd "$box" && "$inject" ) || injected=$?
   state_after="$(sandbox_state "$box")"
   case "${state_before}${state_after}" in
     *"${STATE_UNREADABLE}"*)
-      printf 'BROKEN verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE READ\n' \
-        "$check" "$label"
+      printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE READ\n' \
+        "$(( SECONDS - started ))" "$check" "$label"
       SELFTEST_BROKEN+=("${label}: the sandbox's state could not be read")
       return
       ;;
   esac
   # Every sandbox shares SELFTEST_TARGET, and a test binary bakes its
-  # CARGO_MANIFEST_DIR in at compile time. So a binary cargo judges fresh and
-  # reuses reads the FIXTURES OF THE BOX IT WAS BUILT IN -- a stale-artifact
-  # false receipt, one directory over from the one this selftest already
-  # carries a comment about. It is safe today only because every injection
-  # happens to edit Rust source and so forces a rebuild; one that touched only
-  # a fixture would silently test the wrong tree. Touching a source file after
-  # the fingerprint is taken removes the coincidence. `git write-tree` hashes
-  # content, so this does not disturb the comparison above.
+  # CARGO_MANIFEST_DIR in at compile time. When each case had a path of its
+  # own, a binary cargo judged fresh and reused read the FIXTURES OF THE BOX
+  # IT WAS BUILT IN -- a stale-artifact false receipt one directory over. One
+  # reused path retires that hazard outright: the baked-in directory is always
+  # this case's box, so a reused binary reads this case's fixtures.
+  #
+  # The line stays for the half that survives. sandbox() copies without -p, so
+  # every source in the box is newer than any artifact built from the case
+  # before it and cargo rebuilds regardless; this makes that invariant local
+  # to the one file whose staleness would be silent, rather than resting on
+  # the copy's mtimes alone. `git write-tree` hashes content, so it does not
+  # disturb the comparison above.
   #
   # IN THE BOX. The first version of this line was relative, and only the
   # injection above runs inside the box -- so it touched the repository's own
@@ -379,9 +680,19 @@ seeded_case() {
   # afterwards. The results-fixture loop below found that out.
   touch "${box}/diet/src/lib.rs" 2> /dev/null || true
 
+  # Before the fingerprint, because "the injection exited 1" says more than
+  # "the injection changed nothing" and a half-applied injection can satisfy
+  # the fingerprint while proving nothing.
+  if [ "$injected" -ne 0 ]; then
+    printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE INJECTION EXITED %d\n' \
+      "$(( SECONDS - started ))" "$check" "$label" "$injected"
+    SELFTEST_BROKEN+=("${label}: ${inject} exited ${injected}, so whatever it left is not the fault")
+    return
+  fi
+
   if [ "$state_before" = "$state_after" ]; then
-    printf 'BROKEN verify.sh --only %-8s          %s  <-- THE INJECTION CHANGED NOTHING\n' \
-      "$check" "$label"
+    printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE INJECTION CHANGED NOTHING\n' \
+      "$(( SECONDS - started ))" "$check" "$label"
     SELFTEST_BROKEN+=("${label}: ${inject} changed nothing, so the case proves nothing")
     return
   fi
@@ -392,23 +703,54 @@ seeded_case() {
   # behave differently there than a contributor would ever see.
   local rc=0
   ( cd "$box" && bash "${ROOT}/scripts/hermetic.sh" \
-      env CARGO_TARGET_DIR="${SELFTEST_TARGET}" bash ./verify.sh --only "$check" ) \
-    > "${box}.log" 2>&1 || rc=$?
+      env CARGO_TARGET_DIR="${SELFTEST_TARGET}" \
+      bash ./verify.sh --only "$check" ${scoped+"${scoped[@]}"} ) \
+    > "$log" 2>&1 || rc=$?
 
   if [ "$rc" -eq 0 ]; then
-    printf 'GREEN verify.sh --only %-8s exit %-3d  %s  <-- THE GATE DID NOT FIRE\n' \
-      "$check" "$rc" "$label"
+    printf 'GREEN  %4ds verify.sh --only %-8s exit %-3d  %s  <-- THE GATE DID NOT FIRE\n' \
+      "$(( SECONDS - started ))" "$check" "$rc" "$label"
     SELFTEST_BROKEN+=("${label}: the gate did not fire")
-    sed -n '1,40p' "${box}.log" >&2
-  elif ! grep -qE -- "$expect" "${box}.log"; then
-    printf 'WRONG verify.sh --only %-8s exit %-3d  %s  <-- RED, BUT NOT FOR ITS OWN FAULT\n' \
-      "$check" "$rc" "$label"
+    sed -n '1,40p' "$log" >&2
+  elif ! grep -qE -- "$expect" "$log"; then
+    printf 'WRONG  %4ds verify.sh --only %-8s exit %-3d  %s  <-- RED, BUT NOT FOR ITS OWN FAULT\n' \
+      "$(( SECONDS - started ))" "$check" "$rc" "$label"
     printf '      the log carries no match for: %s\n' "$expect"
     SELFTEST_BROKEN+=("${label}: red for the wrong reason")
-    sed -n '1,40p' "${box}.log" >&2
+    sed -n '1,40p' "$log" >&2
   else
-    printf 'RED   verify.sh --only %-8s exit %-3d  %s\n' "$check" "$rc" "$label"
+    printf 'RED    %4ds verify.sh --only %-8s exit %-3d  %s\n' \
+      "$(( SECONDS - started ))" "$check" "$rc" "$label"
   fi
+}
+
+# Apply one `sed` expression to each file, in place, portably.
+#
+# `sed -i` IS NOT PORTABLE AND THIS GATE MUST NOT DEPEND ON WHICH SED IS
+# INSTALLED. GNU sed takes the suffix as an optional argument attached to the
+# flag; BSD sed takes it as the NEXT argument, so `sed -i 's/a/b/' f` there
+# means suffix `s/a/b/` with `f` as the script -- and the errors that come
+# back are about the script, not about the flag, which is why they read as
+# nonsense. Twenty-eight injections were inert on a Mac and passing in CI for
+# that reason (#50), and an inert injection is a case that proves nothing
+# while reporting the same green.
+#
+# The portable form is no `-i` at all: read the file, write a temporary, and
+# move it over only if sed succeeded. A failed edit that has already truncated
+# the file leaves a sandbox in a state neither side asked for.
+edit_in_place() {
+  local expression="$1"; shift
+  local file temporary
+  for file in "$@"; do
+    temporary="${file}.edit-in-place"
+    if sed "$expression" "$file" > "$temporary"; then
+      mv -- "$temporary" "$file"
+    else
+      rm -f -- "$temporary"
+      echo "edit_in_place: sed refused ${expression} on ${file}" >&2
+      return 1
+    fi
+  done
 }
 
 inject_fmt() {
@@ -447,7 +789,7 @@ EOF
 # `^none\b` matcher does and why English declines and decline-shaped content
 # were both mis-read for a year.
 inject_decline_unanchored() {
-  sed -i \
+  edit_in_place \
     's/^document = { SOI ~ ws\* ~ decline ~ ws\* ~ EOI }$/document = { SOI ~ ws* ~ decline ~ ANY* }/' \
     diet/formats/decline/grammar.pest
 }
@@ -462,7 +804,7 @@ inject_conformance() {
 # and shipped its own regression, which is why the corpus rather than the
 # tolerance is the gate.
 inject_interview_drops_continuations() {
-  sed -i 's|^    let joined = value.join("\\n");$|    let joined = value.first().cloned().unwrap_or_default();|' \
+  edit_in_place 's|^    let joined = value.join("\\n");$|    let joined = value.first().cloned().unwrap_or_default();|' \
     diet/src/formats/interview.rs
 }
 
@@ -545,7 +887,255 @@ EOF
 # The depth limit removed. Recursive descent then runs out of stack and aborts
 # the process, and an abort is not a verdict.
 inject_record_depth_unbounded() {
-  sed -i 's|^    if depth > MAX_DEPTH {$|    if false {|' diet/src/formats/record/mod.rs
+  edit_in_place 's|^    if depth > MAX_DEPTH {$|    if false {|' diet/src/formats/record/mod.rs
+}
+
+# The kind's own fields made advisory. `turns` is drained and thrown away on a
+# recompute summary, so the row is accepted and the number nobody can compute
+# is simply not there afterwards -- which is exactly the "tolerate the stray
+# field" change somebody makes when a producer emits one, and exactly what
+# #47's acceptance row exists to refuse.
+inject_record_summary_kind_fields_advisory() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """        SummaryKind::Recompute => Summary::Recompute {
+            targets_checked: take_u32(members, of, "targets_checked")?,"""
+new = """        SummaryKind::Recompute => Summary::Recompute {
+            targets_checked: {
+                members.remove("turns");
+                take_u32(members, of, "targets_checked")?
+            },"""
+if source.count(old) != 1:
+    raise SystemExit(f"the recompute arm appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# The one total a recompute summary can contradict on its own, left unchecked.
+# Nothing counts a recompute's targets, so this is the only rule that can tell
+# a summary that cannot be true of itself from one that merely surprises you.
+inject_record_summary_impossible_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = """                if targets_matched > targets_checked {"""
+new = """                if false && targets_matched > targets_checked {"""
+if source.count(old) != 1:
+    raise SystemExit(f"the impossible-total check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# A reference that resolves to whatever it names. `declares` answers yes for
+# every id, so a row served by a substrate the run never declared reads as a
+# row served by one it did -- and the regime the result is attributed to is a
+# regime nothing in the file describes. The reference is the whole mechanism:
+# without the check it is a string somebody typed.
+# An injection written in a form only GNU sed accepts. It applies here and is
+# inert on a Mac, so the tree's verdict depends on the machine -- twenty-eight
+# of them did, and CI was green the whole time (#50).
+#
+# The flag is ASSEMBLED rather than written: the lint this seeds scans
+# verify.sh line by line, so a literal in this body would make the clean tree
+# fail the check it exists to prove fires on a dirty one.
+inject_injection_needs_gnu_sed() {
+  python3 - <<'EOF'
+import pathlib
+import re
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+# The injection is found by NAME and its helper call swapped for the GNU form.
+# Neither the anchor nor the flag is written literally: the lint this seeds
+# scans verify.sh line by line, so a literal in this body would make the clean
+# tree fail the check it exists to prove fires on a dirty one -- and an anchor
+# written literally would appear twice, here and there, which is how the first
+# version of this refused to run.
+body = re.search(
+    r"^inject_record_depth_unbounded\(\) \{\n.*?^\}\n", source, re.M | re.S
+)
+if body is None:
+    raise SystemExit("inject_record_depth_unbounded is not there to make unportable")
+was = body.group(0)
+if "edit_in_place" not in was:
+    raise SystemExit("that injection no longer uses the portable helper")
+now = was.replace("edit_in_place", "sed" + " -" + "i", 1)
+path.write_text(source.replace(was, now, 1), encoding="utf-8")
+EOF
+}
+
+# The runner's digest comparison made advisory. The cache is still read, the
+# scores are still computed, and they are the scores of whatever bytes happen
+# to be on disk rather than of the bytes the record consumed -- which is a
+# recompute that recomputes something else.
+inject_bakeoff_digest_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/bakeoff.rs")
+source = path.read_text(encoding="utf-8")
+old = "    if found != artifact.sha256 {"
+new = "    if false && found != artifact.sha256 {"
+if source.count(old) != 1:
+    raise SystemExit(f"the digest comparison appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# The precision fixture pinned back to a remembered size instead of built from
+# the pre-registered ladder. The widest budget the bakeoff reports at is then a
+# budget the instrument has never been seen fail at, so `Reported::take`
+# refuses it -- correctly, and a bakeoff that reports nothing is not the defect
+# being seeded. The defect is the one the 2026-09-10 ruling named: a fixture's
+# shape capping the instrument's parameter space, which is how the budget came
+# to be eight in the first place. Eight was never chosen; it was the widest the
+# fixture allowed.
+inject_bakeoff_budget_unfixtured() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/sense.rs")
+source = path.read_text(encoding="utf-8")
+old = "Metric::PrecisionAtK => (widest_budget(), Label::Negative, vec![Label::Positive; 2]),"
+new = "Metric::PrecisionAtK => (8, Label::Negative, vec![Label::Positive; 2]),"
+if source.count(old) != 1:
+    raise SystemExit(f"the precision fixture's width appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# The product digest made the drive's business again -- read per kind, checked
+# per kind -- which is where it lived until 2026-09-11 and is the defect that
+# ruling closed. A recompute summary is then accepted carrying no digest of
+# the product it produced, and every results directory whose record is a
+# recompute becomes unlintable: `check-results.py` requires `product_sha256`
+# in the front-matter and requires it to equal the summary's, and there is
+# nothing there to equal. Nothing in the tree noticed for a day, because no
+# fixture crossed the schema and the directory linter.
+inject_record_recompute_digest_optional() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+
+read_now = """        Kind::Summary => Event::Summary {
+            summary: summary(&mut members, of)?,
+"""
+read_then = """        Kind::Summary => {
+            let summary = summary(&mut members, of)?;
+            let product_sha256 = match summary.kind() {
+                SummaryKind::Drive => take_string(&mut members, of, "product_sha256")?,
+                SummaryKind::Recompute => String::new(),
+            };
+            Event::Summary {
+                summary,
+"""
+check_now = """        if !digest_ok(product_sha256) {
+            return Err(StructureError::BadDigest(product_sha256.to_owned()).into());
+        }
+"""
+check_then = """        if matches!(summary, Summary::Drive { .. }) && !digest_ok(product_sha256) {
+            return Err(StructureError::BadDigest(product_sha256.to_owned()).into());
+        }
+"""
+for old in (read_now, check_now):
+    if source.count(old) != 1:
+        raise SystemExit(f"the anchor appears {source.count(old)} times")
+source = source.replace(read_now, read_then, 1).replace(check_now, check_then, 1)
+
+# The arm's tail, now one brace deeper.
+tail_now = """            product_sha256: take_string(&mut members, of, "product_sha256")?,
+        },
+    };
+"""
+tail_then = """                product_sha256,
+            }
+        }
+    };
+"""
+if source.count(tail_now) != 1:
+    raise SystemExit(f"the arm's tail appears {source.count(tail_now)} times")
+path.write_text(source.replace(tail_now, tail_then, 1), encoding="utf-8")
+EOF
+}
+# The evidence left where it was instead of copied in. The assembled directory
+# then names inputs that are not beside it, and a results directory is a claim
+# with its evidence ATTACHED -- evidence that lives somewhere else is a link,
+# and a link is what a reader cannot check. `check-results.py` says so:
+# "claim `c1` consumes X, which is not a file here". Seeded because the verb
+# is the only writer of these directories now, so a verb that writes a
+# directory the gates reject is a verb producing a shape nobody can land.
+inject_bakeoff_evidence_not_attached() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/bakeoff.rs")
+source = path.read_text(encoding="utf-8")
+# ANCHORED ON THE LOOP HEADER ALONE, not on the body beneath it. The first cut
+# of this injection carried two lines, and `cargo fmt` rewrapped the second one
+# the moment the function around it changed -- so the anchor matched nothing and
+# the injection went INERT, which `check-injections.py` caught on the next run.
+# A one-line anchor is a smaller thing for a formatter to move.
+old = "    for artifact in &artifacts {"
+new = "    for artifact in artifacts.iter().take(0) {"
+if source.count(old) != 1:
+    raise SystemExit(f"the copy loop appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+inject_record_substrate_reference_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "        self.substrates.iter().any(|s| s.id == id)"
+new = "        let _ = id;\n        true"
+if source.count(old) != 1:
+    raise SystemExit(f"`declares` body appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# The reference made optional, resolved to the only declared substrate. Every
+# record in the corpus still parses -- they all declare one -- which is what
+# makes it the tempting change and what makes it worth a seeded fault: the
+# same three lines then mean something different in a two-substrate run, and
+# nothing in the row says so.
+inject_record_substrate_defaults_when_alone() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            substrate: take_string(&mut members, of, "substrate")?,\n            retry_of:'
+new = ('            substrate: take_optional_string(&mut members, of, "substrate")?\n'
+       '                .unwrap_or_else(|| "local".to_owned()),\n'
+       '            retry_of:')
+if source.count(old) != 1:
+    raise SystemExit(f"the request arm appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+inject_record_weights_named_not_digested() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            let text = take_string(&mut members, of, "sha256")?;\n            if !digest_ok(&text) {'
+new = '            let text = take_string(&mut members, of, "sha256")?;\n            if false && !digest_ok(&text) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the weights check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
 }
 
 inject_record_substrate_optional() {
@@ -554,24 +1144,49 @@ import pathlib
 
 path = pathlib.Path("diet/src/formats/record/mod.rs")
 source = path.read_text(encoding="utf-8")
-old = '    let mut substrate_members = take_object(members, of, "substrate")?;'
-new = """    let mut substrate_members = take_object(members, of, "substrate").unwrap_or_else(|_| {
-        BTreeMap::from([
-            ("name".to_owned(), Value::String("unknown".to_owned())),
-            ("model".to_owned(), Value::String("unknown".to_owned())),
-            ("quantization".to_owned(), Value::String("unknown".to_owned())),
+old = """    let Some(value) = members.remove("substrates") else {
+        return Err(SchemaError::MissingField {
+            of,
+            field: "substrates",
+        }
+        .into());
+    };"""
+new = """    let value = members.remove("substrates").unwrap_or_else(|| {
+        Value::Array(vec![Value::Object(BTreeMap::from([
+            ("id".to_owned(), Value::String("unknown".to_owned())),
             (
-                "sampler".to_owned(),
+                "engine".to_owned(),
+                Value::Object(BTreeMap::from([
+                    ("name".to_owned(), Value::String("unknown".to_owned())),
+                    (
+                        "version_or_digest".to_owned(),
+                        Value::String("unknown".to_owned()),
+                    ),
+                ])),
+            ),
+            (
+                "weights".to_owned(),
+                Value::Object(BTreeMap::from([
+                    ("kind".to_owned(), Value::String("digest".to_owned())),
+                    ("sha256".to_owned(), Value::String("0".repeat(64))),
+                ])),
+            ),
+            (
+                "hardware_fingerprint".to_owned(),
+                Value::String("unknown".to_owned()),
+            ),
+            (
+                "sampler_card".to_owned(),
                 Value::Object(BTreeMap::from([(
                     "seed".to_owned(),
                     Value::Integer(0),
                 )])),
             ),
             ("reasoning".to_owned(), Value::String("off".to_owned())),
-            ("hardware".to_owned(), Value::String("unknown".to_owned())),
-        ])
+        ]))])
     });"""
-assert old in source
+if source.count(old) != 1:
+    raise SystemExit(f"the substrates guard appears {source.count(old)} times")
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
@@ -603,11 +1218,11 @@ EOF
 # A floor of zero, which every lane meets. The per-lane rule switched off by a
 # value that looks like a setting.
 inject_grounded_zero_floor() {
-  sed -i 's|^        if grounded == 0 {$|        if false {|' diet/src/capture/grounded.rs
+  edit_in_place 's|^        if grounded == 0 {$|        if false {|' diet/src/capture/grounded.rs
 }
 
 inject_grounded_floor_inert() {
-  sed -i 's|^    let outcome = if score.meets(floor) {$|    let outcome = if true {|' \
+  edit_in_place 's|^    let outcome = if score.meets(floor) {$|    let outcome = if true {|' \
     diet/src/capture/grounded.rs
 }
 
@@ -615,7 +1230,7 @@ inject_grounded_floor_inert() {
 # gate that does it rejects legitimate content -- the failure that made the
 # scoping a ruling rather than an implementation detail.
 inject_grounded_gates_judgment() {
-  sed -i 's|^        !matches!(self, Self::Judgment)$|        let _ = self; true|' \
+  edit_in_place 's|^        !matches!(self, Self::Judgment)$|        let _ = self; true|' \
     diet/src/capture/grounded.rs
 }
 
@@ -623,7 +1238,7 @@ inject_grounded_gates_judgment() {
 # 1.000 that meant nothing was a real score, computed by real code, on a probe
 # where fabrication was structurally impossible.
 inject_grounded_undemonstrated() {
-  sed -i 's|^        if demonstrated_failure.outcome != LaneOutcome::Rejected {$|        if false {|' \
+  edit_in_place 's|^        if demonstrated_failure.outcome != LaneOutcome::Rejected {$|        if false {|' \
     diet/src/capture/grounded.rs
 }
 
@@ -638,7 +1253,7 @@ inject_stringly_predicate() {
 # nowhere, and `cargo test -- object` selects nothing and exits 0 -- which is
 # how five hundred lines and eleven tests went unrun with the gate green.
 inject_orphaned_module() {
-  sed -i '/^pub mod object;$/d' diet/src/lib.rs
+  edit_in_place '/^pub mod object;$/d' diet/src/lib.rs
 }
 
 # The same module lost the ordinary way: commented OUT rather than deleted.
@@ -671,8 +1286,20 @@ inject_stringly_or_pattern() {
 # without wiring it. Every exhaustive match over FieldKind stops compiling,
 # which is the whole reason the predicate is an enum.
 inject_field_kind_variant() {
-  sed -i 's|^    Stuck,$|    Stuck,\n    /// Seeded: a variant nothing covers.\n    Seeded,|' \
-    diet/src/formats/interview.rs
+  # Not `sed`: a `\n` in the replacement is a GNU extension, and POSIX wants a
+  # literal backslash-newline. The python form every other multi-line
+  # injection uses says what it does instead of encoding it.
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/interview.rs")
+source = path.read_text(encoding="utf-8")
+old = "    Stuck,\n"
+new = "    Stuck,\n    /// Seeded: a variant nothing covers.\n    Seeded,\n"
+if source.count(old) != 1:
+    raise SystemExit(f"`Stuck,` appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
 }
 
 # A supersede that deletes what it replaced. Claim atomicity at the object
@@ -857,14 +1484,23 @@ EOF
 
 # The sign let back onto a zero. `-0.0` is then a second spelling of `0.0`,
 # and a banked sampler temperature reads back as a number nobody wrote.
+#
+# The lesion is in `number.pest` because that is where the rule went on
+# 2026-09-12; before that it was in the record's own grammar. The move
+# CHANGED WHAT THIS FAULT PROVES, and the change is the point: widening the
+# shared terminal widens `regimen::float` and `record::decimal` together, so
+# the parity test between them stays green -- both readers agree, and both
+# are wrong. What catches it is the record's refusal fixture, one level down
+# from the agreement. A shared terminal removes the divergence class and
+# leaves the widening class exactly where it was; this case is what says so.
 inject_record_negative_zero_decimal() {
   python3 - <<'EOF'
 import pathlib
 
-path = pathlib.Path("diet/formats/record/grammar.pest")
+path = pathlib.Path("diet/formats/number.pest")
 source = path.read_text(encoding="utf-8")
-old = """decimal = @{ ("-" ~ negative_decimal) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
-new = """decimal = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
+old = """fraction = @{ ("-" ~ negative_fraction) | (int_part ~ "." ~ ASCII_DIGIT+) }"""
+new = """fraction = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }"""
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -1010,7 +1646,7 @@ EOF
 # and orders the turn, so a name the record does not already have is a second
 # name for what the tangent in the provenance already says.
 inject_tangent_closing_lane_coined() {
-  sed -i 's|^const CLOSING_LANE: &str = "main";$|const CLOSING_LANE: \&str = "tangent-closure";|' \
+  edit_in_place 's|^const CLOSING_LANE: &str = "main";$|const CLOSING_LANE: \&str = "tangent-closure";|' \
     diet/src/object/tangent.rs
 }
 
@@ -1082,7 +1718,7 @@ EOF
 # of the object, and two states rendering the same word read as one to
 # everyone who arrives later.
 inject_object_park_renders_as_retired() {
-  sed -i 's|^            Self::Parked => "parked",$|            Self::Parked => "retired",|' \
+  edit_in_place 's|^            Self::Parked => "parked",$|            Self::Parked => "retired",|' \
     diet/src/object.rs
 }
 
@@ -1104,7 +1740,7 @@ path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
 inject_cli_usage_exit() {
-  sed -i 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
+  edit_in_place 's|^const EXIT_USAGE: u8 = 2;$|const EXIT_USAGE: u8 = 0;|' diet/src/bin/diet.rs
 }
 
 inject_cli_wrong_format() {
@@ -1123,7 +1759,7 @@ EOF
 }
 
 inject_cli_silent() {
-  sed -i 's|^    println!("{rendered}");$||' diet/src/bin/diet.rs
+  edit_in_place 's|^    println!("{rendered}");$||' diet/src/bin/diet.rs
 }
 
 inject_object_self_void() {
@@ -1262,7 +1898,7 @@ EOF
 }
 
 inject_object_no_dedup() {
-  sed -i 's|^        if let Some(held) = self.by_content.get(&key).cloned() {$|        if let Some(held) = None::<EntryId> {|' \
+  edit_in_place 's|^        if let Some(held) = self.by_content.get(&key).cloned() {$|        if let Some(held) = None::<EntryId> {|' \
     diet/src/object.rs
 }
 
@@ -1273,19 +1909,31 @@ inject_results() {
 # A run.jsonl whose start row has lost its substrate. The report is fine; the
 # record is not a session record, and only diet says so -- the linter must
 # relay that verdict and reach none of its own.
-inject_results_no_substrate() {
-  cp -r results/_template results/2026-01-30-no-substrate
-  python3 - <<'EOF'
-import json, pathlib
+# Take the declared substrates out of a record's `start` row.
+#
+# ONE READER, because there were two and they went stale one at a time. The
+# seeded case and the mechanics assertion below both need this exact edit --
+# the case makes it inside a sandbox, the assertion inside a scratch relay --
+# and each carried its own copy of the four lines. Item 3 renamed the field,
+# the copies were fixed one run apart, and the second cost a whole selftest to
+# find. The edit is spelled here now and both call it.
+strip_substrates() {
+  python3 - "$1" <<'EOF'
+import json, pathlib, sys
 
-path = pathlib.Path("results/2026-01-30-no-substrate/run.jsonl")
+path = pathlib.Path(sys.argv[1])
 lines = path.read_text(encoding="utf-8").split("\n")
 row = json.loads(lines[0])
-assert row["record"] == "start"
-del row["regime"]["substrate"]
+assert row["record"] == "start", "the first row of a record is its start"
+del row["regime"]["substrates"]
 lines[0] = json.dumps(row, separators=(",", ":"))
 path.write_text("\n".join(lines), encoding="utf-8")
 EOF
+}
+
+inject_results_no_substrate() {
+  cp -r results/_template results/2026-01-30-no-substrate
+  strip_substrates results/2026-01-30-no-substrate/run.jsonl
 }
 
 # A run directory inside a run directory. Every walker is one level deep, so
@@ -1306,7 +1954,7 @@ inject_results_nested_directory() {
 # run to a specific build being a silent no-op is how four instruments banked
 # numbers through a release binary seven days behind its source.
 inject_diet_bin_ignored() {
-  sed -i 's|^    pinned = os.environ.get("DIET_BIN")$|    pinned = None|' \
+  edit_in_place 's|^    pinned = os.environ.get("DIET_BIN")$|    pinned = None|' \
     scripts/resolve-diet.py
 }
 
@@ -1334,7 +1982,7 @@ inject_toml_subset() {
 }
 
 inject_metadata() {
-  sed -i 's/"name": "claim"/"name": "claim-renamed"/' .github/labels.json
+  edit_in_place 's/"name": "claim"/"name": "claim-renamed"/' .github/labels.json
 }
 
 inject_hygiene() {
@@ -1359,6 +2007,27 @@ inject_history() {
   printf 'x\n' >> pages/index.html
   git add --all
   seed_commit --message "carries $(printf '%s%s' 'DIE' '-9001') forward"
+}
+
+# Content that enters a diff and leaves again in the next commit. The tree is
+# clean at the end and every commit message is clean throughout, so the file
+# gate and the message gate both pass -- and `git log -p` still hands the
+# token to anyone. Measured on merged `main` before this was gated: 32
+# occurrences in patch text, zero in the tree, both checks green.
+inject_history_added_then_removed() {
+  git add --all
+  seed_commit --message 'a base commit'
+  git update-ref refs/remotes/origin/main HEAD
+  # The copy lives under .git/, which git never tracks: a scratch file beside
+  # the source would be committed by the `git add --all` below and then
+  # deleted, putting a second file in the very patches this case reads.
+  cp pages/index.html .git/index.html.before
+  printf 'host = %s%s\n' '192.168' '.4.9' >> pages/index.html
+  git add --all
+  seed_commit --message 'add a line'
+  cp .git/index.html.before pages/index.html
+  git add --all
+  seed_commit --message 'and take it out again'
 }
 
 # An injection that changes nothing. This is the whole failure the
@@ -1435,13 +2104,36 @@ EOF
 # The regimen's float rule widened past the record's decimal. `-0.0` is then
 # a regimen float and not a record decimal, so the same digits are a value or
 # an error depending on which side of the format you ask.
+#
+# Since 2026-09-12 the two names alias one shared rule, so there is no longer
+# a second copy to widen: the ONLY way back to a divergence is to stop
+# aliasing and write a body out again under the old name. That is what this
+# lesion does.
+#
+# ONE GATE SEES IT, NOT TWO. The shared-terminal guard in tests/conformance.rs
+# compares bodies, and this body is not a copy of the shared one -- it is a
+# WIDER one, so the comparison finds no match and the guard stays green.
+# Measured, after writing the opposite here first.
+#
+# The two gates divide the class cleanly, and each is blind where the other
+# sees:
+#
+#   * A body copied EXACTLY under another name leaves the two formats still
+#     agreeing, so the parity test is green; the conformance guard catches it.
+#     Seeded as `a shared body written out under another name`.
+#   * A body written out WIDER, as here, has already diverged, so the
+#     conformance guard has nothing to match; the parity test catches it.
+#
+# Neither of them alone is the gate. That is why the widening half is scoped
+# to the regimen tests below and the copying half is scoped to conformance:
+# each case runs the gate that can actually see it.
 inject_regimen_float_rule_widened() {
   python3 - <<'EOF'
 import pathlib
 
 path = pathlib.Path("diet/formats/regimen/grammar.pest")
 source = path.read_text(encoding="utf-8")
-old = 'float     = @{ ("-" ~ negative_float) | (int_part ~ "." ~ ASCII_DIGIT+) }\n'
+old = 'float     = @{ fraction }\n'
 new = 'float     = @{ "-"? ~ int_part ~ "." ~ ASCII_DIGIT+ }\n'
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
@@ -1465,8 +2157,8 @@ report.write_text(source.replace("turns = 2\n", "turns = 3\n", 1), encoding="utf
 
 record = pathlib.Path("results/_template/run.jsonl")
 source = record.read_text(encoding="utf-8")
-old = '{"record":"summary","turns":2,'
-new = '{"record":"summary","turns":3,'
+old = '{"record":"summary","kind":"drive","turns":2,'
+new = '{"record":"summary","kind":"drive","turns":3,'
 assert old in source
 record.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -1486,6 +2178,46 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 echo "recompute: 3 recorded value(s) re-derived from the artefacts"
 exit 0
 SH
+}
+
+# THE PROBE DISENGAGED BY A TRAILING COMMENT, which is how the vacuity check
+# came to have a vacuity of its own. It located the integer to perturb with
+# `^(\w+) = (\d+)$` -- a TOML reader written in a hurry -- so
+# `dogma_version = 0  # ...` did not match, the probe returned None, and the
+# caller read None as "passed" and counted the directory as RECOMPUTED. A
+# script reading nothing and comparing nothing, counted as one recomputed
+# result, by the gate whose docstring says a check of nothing is not a pass.
+#
+# The field is chosen by `tomllib` now -- the same reader `front_matter` uses,
+# which is the only one this repository is supposed to have -- and the edit is
+# RE-PARSED before the probe is trusted. This fault puts a comment on every
+# front-matter integer AND makes the script vacuous: under the old reader the
+# tree passes with the directory counted, under the new one the script is
+# named. Ruled 2026-09-12.
+inject_recompute_probe_blinded_by_a_comment() {
+  cat > results/_template/recompute.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+echo "recompute: 3 recorded value(s) re-derived from the artefacts"
+exit 0
+SH
+  python3 - <<'PY'
+import pathlib, re
+
+report = pathlib.Path("results/_template/README.md")
+text = report.read_text(encoding="utf-8")
+_, fence, rest = text.partition("+++\n")
+front, closing, tail = rest.partition("+++\n")
+front, count = re.subn(
+    r"^([A-Za-z0-9_-]+ = \d+)(?=\s*$)",
+    r"\1  # the comment that used to blind the probe",
+    front,
+    flags=re.M,
+)
+assert count, "no front-matter integer to comment; this fault would prove nothing"
+report.write_text(fence + front + closing + tail, encoding="utf-8")
+PY
 }
 
 # A recompute.sh that makes the comparison true instead of finding it true.
@@ -1563,20 +2295,27 @@ inject_recompute_script_missing() {
 # Every directory declared historical, so gate 0 has nothing to run. A census
 # reading "0 recomputed, N historical, 0 undeclared" is a gate over nothing,
 # and the tripwire for it is the reason exit 2 exists.
-inject_recompute_nothing_recomputable() {
-  sed -i 's/^kind = "reproducible-by-config"$/kind = "historical-observation"/' \
+inject_recompute_template_opts_out() {
+  edit_in_place 's/^kind = "reproducible-by-config"$/kind = "historical-observation"/' \
     results/_template/README.md
 }
 
 inject_recompute_kind_undeclared() {
   python3 - <<'EOF'
 import pathlib
+import shutil
 
-path = pathlib.Path("results/_template/README.md")
-source = path.read_text(encoding="utf-8")
-old = 'kind = "reproducible-by-config"\n'
-assert old in source
-path.write_text(source.replace(old, "", 1), encoding="utf-8")
+# A RESULTS directory, not the template. The census counts the template
+# separately and it never satisfies the check, so emptying the template's kind
+# proves something about the template rather than about an undeclared result --
+# which is what this case's label has always said it was for.
+seeded = pathlib.Path("results/2026-01-30-seeded-undeclared")
+shutil.copytree(pathlib.Path("results/_template"), seeded)
+readme = seeded / "README.md"
+source = readme.read_text(encoding="utf-8")
+row = 'kind = "reproducible-by-config"\n'
+assert row in source
+readme.write_text(source.replace(row, "", 1), encoding="utf-8")
 EOF
 }
 
@@ -1669,9 +2408,395 @@ inject_parity() {
   rm -rf tests/fixtures/results-bad/2026-01-14-bad-sha
 }
 
+# An injection that writes a literal of an AMBIGUOUS type while editing a file
+# that knows none of its declarations. Twenty-three names in this crate are
+# declared in more than one place -- measured on 2026-09-11, after a disclosure
+# claimed five and had never been re-asked -- and the scan places a literal by
+# the file the injection edits, then that file's imports, then a tree-wide
+# answer only if there is exactly one. None of the three applies here.
+#
+# RULED 2026-09-11: that turns the injections lane RED rather than being
+# skipped, because a scan that guesses places a literal against the wrong
+# declaration, and one that skips reports a pass over something it never read.
+# This is the case that proves the branch fires; before it, the branch had
+# never been seen red, which is the condition this repository refuses.
+#
+# `Ground` is the literal because it is declared THREE times -- twice under
+# diet/src and once in diet/tests/drive_cli.rs -- so it also proves the scan
+# now reads the tests root. `diet/src/lib.rs` names Ground nowhere, which is
+# what makes the edited file no help in placing it.
+inject_injections_literal_unplaceable() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+anchor = "inject_injections_struct_grew() {\n"
+assert source.count(anchor) == 1, "the anchor is not where this fault expects it"
+seeded = (
+    "inject_seeded_unplaceable_ground() {\n"
+    "  edit_in_place 's/^/ /' diet/src/lib.rs\n"
+    # ASSEMBLED FROM PIECES, and it has to be. The scan looks for the two
+    # tokens written together, and this fault's own body is scanned like any
+    # other: written whole, it made the CLEAN tree fail the check this fault
+    # exists to prove fires on a dirty one. Caught by running it -- the fault
+    # fired, and named itself alongside the injection it plants. The same
+    # trap `inject_injection_needs_gnu_sed` documents, one lint along.
+    "  # " + "Ground" + " { tree: PathBuf::new() }\n"
+    "}\n\n"
+)
+path.write_text(source.replace(anchor, seeded + anchor, 1), encoding="utf-8")
+EOF
+}
+
+# A merge that adds a field to a struct. Every injection that writes a WHOLE
+# literal of that struct is now invalid text -- and the tree still builds,
+# because an injection's replacement text is a string the compiler never sees.
+# This went red on CI once, as "red for the wrong reason", forty minutes in.
+inject_injections_struct_grew() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/object.rs")
+source = path.read_text(encoding="utf-8")
+opened = "pub struct Provenance {\n"
+assert source.count(opened) == 1
+path.write_text(
+    source.replace(
+        opened,
+        opened + "    /// Seeded fault: a field a merge added.\n"
+        "    pub cohort: Option<String>,\n",
+        1,
+    ),
+    encoding="utf-8",
+)
+EOF
+}
+
+# A tag the dogma writes and the vocabulary does not carry. The interview
+# parser reads it as prose, silently, on every answer that carries it -- the
+# continuation bug in a new dress, and the reason the table is checked against
+# the templates rather than trusted beside them.
+#
+# An INLINE row, deliberately, and the two obvious choices were tried first: a
+# tag added to a template also trips the dogma's digest pin, and a `line` row
+# removed from the table also trips the grammar/table agreement test. Both
+# would go red for two reasons at once, and a signature that fires for two
+# faults grades neither.
+inject_interview_tag_undeclared() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/interview/tags.tsv")
+source = path.read_text(encoding="utf-8")
+row = "IMPLICATION\tinline\t-\n"
+assert row in source, "the row this injection removes is not in the table"
+path.write_text(source.replace(row, "", 1), encoding="utf-8")
+EOF
+}
+
+# The operating points sorted. A table sorts, which is why this format projects
+# to an array -- and sorted, `qwen3` precedes `qwen3.6`, so the id `qwen3.6`
+# matches the entry whose `thinking_kwarg` is false, while the entry that
+# should have won says true and carries the receipt that the soft switch is
+# dead on that model. The wrong control, silently, and reachable.
+inject_operating_points_sorted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/operating_points.rs")
+source = path.read_text(encoding="utf-8")
+anchor = "    Ok(entries)\n"
+assert source.count(anchor) == 1, "the projection's return moved"
+path.write_text(
+    source.replace(anchor, "    entries.sort_by(|a, b| a.key.cmp(&b.key));\n" + anchor, 1),
+    encoding="utf-8",
+)
+EOF
+}
+
+# The shadowing refusal switched off, so the dogma's own retired spelling is
+# accepted again.
+#
+# `qwen3` is a substring of `qwen3.6`. Unmarked, whichever is written first
+# wins, and an operating point -- a transcribed measurement -- is decided by a
+# line number. Enabled 2026-09-13 with the respell, and the fixture it refuses
+# is the dogma as it was actually written until that day, not a document
+# invented to fail.
+#
+# Skips the loop rather than deleting it: a deleted loop is an unused-variable
+# warning away from being a compile error, and a case that fails to build
+# grades BROKEN rather than RED.
+inject_shadowing_admitted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/operating_points.rs")
+source = path.read_text(encoding="utf-8")
+anchor = "    for wider in &entries {\n        if wider.fallback {\n"
+assert source.count(anchor) == 1, "the shadowing loop moved"
+path.write_text(
+    source.replace(anchor, "    for wider in &entries {\n        if true {\n", 1),
+    encoding="utf-8",
+)
+EOF
+}
+
+# A grammar that grew its own integer terminal while the others go on sharing
+# one.
+#
+# The obvious injection is wrong and running it is how that was found:
+# re-inlining `integer` into the regimen grammar breaks the RECORD parser --
+# eighteen compile errors, and the guard never runs, so the case would prove
+# the compiler works. Leaving the shared copy in place as well is a duplicate
+# rule, which pest rejects: also a build error. The drift that actually
+# COMPILES is a third grammar growing a copy of its own, unused, which pest is
+# perfectly happy with and nothing but this guard would say a word about.
+inject_number_terminal_regrown() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/decline/grammar.pest")
+path.write_text(
+    path.read_text(encoding="utf-8")
+    + '\ninteger = @{ ("-" ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*) | "0" }\n',
+    encoding="utf-8",
+)
+EOF
+}
+
+# The same drift wearing a name nobody is looking for. The guard above this
+# one asks "is a shared rule defined outside the shared file", which reads
+# NAMES -- and a copy called something else walks straight past it. That is
+# why the guard grew a body comparison, and this is the case that says the
+# comparison works: `nonzero`'s body, written out again as `counter`.
+#
+# `nonzero` rather than `fraction` because the body has to COMPILE where it
+# lands: `fraction` is built out of `int_part` and `negative_fraction`, which
+# the decline grammar has never heard of, and a build error would prove the
+# compiler works rather than the guard. `nonzero`'s body stands alone.
+#
+# The name is deliberately innocuous. A drift that announced itself would not
+# need a gate.
+inject_number_terminal_body_regrown() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/formats/decline/grammar.pest")
+path.write_text(
+    path.read_text(encoding="utf-8")
+    + "\ncounter = _{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }\n",
+    encoding="utf-8",
+)
+EOF
+}
+
+# Declared unreproducible and recomputable at once. The way a red result would
+# escape gate 0 is by ACQUIRING the tag rather than by losing the script, so
+# the two together are a contradiction and not a skip.
+inject_recompute_historical_with_a_script() {
+  python3 - <<'EOF'
+import pathlib
+import shutil
+
+template = pathlib.Path("results/_template")
+seeded = pathlib.Path("results/2026-01-30-seeded-historical")
+shutil.copytree(template, seeded)
+readme = seeded / "README.md"
+text = readme.read_text(encoding="utf-8")
+text = text.replace(
+    'kind = "reproducible-by-config"',
+    'kind = "historical-observation"\nhistorical_reason = "the capture lane dropped substrate ids"',
+    1,
+)
+readme.write_text(text, encoding="utf-8")
+EOF
+}
+
+# A tag with no reason behind it, which is the opt-out every red result reaches
+# for. Which capture-side flaw, or why the inputs cannot exist.
+inject_recompute_historical_without_a_reason() {
+  python3 - <<'EOF'
+import pathlib
+import shutil
+
+template = pathlib.Path("results/_template")
+seeded = pathlib.Path("results/2026-01-30-seeded-unreasoned")
+shutil.copytree(template, seeded)
+(seeded / "recompute.sh").unlink()
+readme = seeded / "README.md"
+readme.write_text(
+    readme.read_text(encoding="utf-8").replace(
+        'kind = "reproducible-by-config"', 'kind = "historical-observation"', 1
+    ),
+    encoding="utf-8",
+)
+EOF
+}
+
+# The reason present and EMPTY. `historical-observation` is the opt-out from
+# gate 0, so what it costs is a sentence saying which part of the world made
+# the run unreproducible. Two quotes is not that sentence -- it is the tag
+# acquired for free, which is what every red result reaches for.
+#
+# Its own case because the sibling above deletes the KEY, and the two are
+# different code paths: one is `reason is None`, this one is a string that is
+# there and says nothing. A fresh instance found that removing `.strip()`
+# from the check left the absent-key case still red and this one green, so
+# the sibling was never testing this line.
+inject_recompute_historical_reason_blank() {
+  python3 - <<'EOF'
+import pathlib
+import shutil
+
+template = pathlib.Path("results/_template")
+seeded = pathlib.Path("results/2026-01-31-seeded-blank-reason")
+shutil.copytree(template, seeded)
+(seeded / "recompute.sh").unlink()
+readme = seeded / "README.md"
+readme.write_text(
+    readme.read_text(encoding="utf-8").replace(
+        'kind = "reproducible-by-config"',
+        'kind = "historical-observation"\nhistorical_reason = "   "',
+        1,
+    ),
+    encoding="utf-8",
+)
+EOF
+}
+
+# Results present and none of them recomputed, with the template excluded from
+# the count. A check of nothing is not a pass, applied to results -- and the
+# directory this leaves behind is entirely LEGAL, which is the point: the
+# census goes red on the shape of the tree, not on a defect in the directory.
+inject_recompute_only_the_template_recomputes() {
+  python3 - <<'EOF'
+import pathlib
+import shutil
+
+template = pathlib.Path("results/_template")
+seeded = pathlib.Path("results/2026-01-30-seeded-only-historical")
+shutil.copytree(template, seeded)
+(seeded / "recompute.sh").unlink()
+readme = seeded / "README.md"
+readme.write_text(
+    readme.read_text(encoding="utf-8").replace(
+        'kind = "reproducible-by-config"',
+        'kind = "historical-observation"\nhistorical_reason = "the substrate no longer exists"',
+        1,
+    ),
+    encoding="utf-8",
+)
+EOF
+}
+
 inject_ci() {
   # Take a check's owner away: it then runs in no workflow, while CI is green.
-  sed -i '/^hygiene\t/d' .github/check-owners.tsv
+  edit_in_place '/^hygiene\t/d' .github/check-owners.tsv
+}
+
+# A branch filter on the PULL-REQUEST trigger. On `push` the same filter is
+# what stops one sha being gated twice, once per event; here it leaves every
+# pull request against another branch with no run at all and its required
+# checks pending forever. Two spellings a line apart, opposite verdicts --
+# which is why the rule is mechanical and not a comment.
+inject_ci_pr_branch_filter() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/verify.yml")
+source = path.read_text(encoding="utf-8")
+path.write_text(
+    source.replace("  pull_request:\n", "  pull_request:\n    branches: [main]\n", 1),
+    encoding="utf-8",
+)
+EOF
+}
+
+# A signature loosened until the line naming its own scope satisfies it.
+#
+# check_test announces `test scope: lib/capture::router::tests (18 test(s)
+# selected)` before it runs anything, and the selftest greps the whole log for
+# the case's signature. A signature that is only the module path is therefore
+# in the log whether the gate fired or not: the case can still read RED or
+# GREEN, because the exit code is the verdict, but it can no longer read
+# WRONG -- and WRONG is the verdict a signature exists to make reachable.
+#
+# Both files are staled together, because a signature that moved in only one
+# of them is a different fault with a different refusal, and a seeded case
+# that fires for the neighbouring reason proves the neighbour.
+inject_parity_scope_signature() {
+  python3 - <<'EOF'
+import pathlib
+import tomllib
+
+# The signature to stale is LOOKED UP, not spelled. Spelling it here would put
+# a second copy of it in verify.sh, and the replacement below -- which insists
+# on finding exactly one -- would refuse on the copy this injection had just
+# added. An injection that cannot run is an injection that proves nothing.
+TARGET = "test.router_ask_class_untuned"
+NEW = "capture::router::tests"
+
+manifest = pathlib.Path("tools/gate/faults.toml")
+doc = tomllib.loads(manifest.read_text(encoding="utf-8"))
+entry = next((f for f in doc.get("fault", []) if f.get("id") == TARGET), None)
+if entry is None or not entry.get("legacy_signature"):
+    raise SystemExit(f"{TARGET}: no such fault, or it carries no signature to stale")
+old = entry["legacy_signature"]
+
+for path in (pathlib.Path("verify.sh"), manifest):
+    source = path.read_text(encoding="utf-8")
+    if source.count(old) != 1:
+        raise SystemExit(f"{path}: the signature to stale appears {source.count(old)} times")
+    path.write_text(source.replace(old, NEW), encoding="utf-8")
+EOF
+}
+
+# The push trigger deleted. Every pull request still runs the whole gate and
+# still goes green, so nothing looks different -- and `pull_request` grades
+# `refs/pull/N/merge`, a preview commit computed at run time. Under a squash
+# or a rebase merge the sha that lands on the trunk is one no pull-request run
+# ever saw. Delete this trigger and the tree that actually ships is graded by
+# nothing, which is the failure this whole file exists to make impossible.
+inject_ci_push_ungated() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/verify.yml")
+source = path.read_text(encoding="utf-8")
+old = "  push:\n    branches: [main]\n"
+if source.count(old) != 1:
+    raise SystemExit("verify.yml: no single `push:` trigger to remove")
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# Both corroborating namers stripped of their branch filter. Nothing is
+# broken today: verify.yml still says `branches: [main]`, the gate still runs
+# on the trunk, and every check passes. What is gone is the second opinion. The
+# rule that grades the NAME has only corroboration to grade it with, so with
+# one namer left it quietly stops grading anything while still reporting a
+# pass -- which is the shape of both defects this whole file was extended for.
+inject_ci_trunk_uncorroborated() {
+  edit_in_place '/^    branches: \[main\]$/d' \
+    .github/workflows/pages.yml .github/workflows/repo-metadata.yml
+}
+
+# One character of the trunk's name, in the gating workflow only. `mian` is a
+# branch nobody pushes to, so the push trigger fires for nothing and the gate
+# watches a branch that does not exist -- and every pull request is still
+# green, because the pull-request trigger is untouched. Nothing in this file
+# knows what the trunk is called; the other workflows that name it do, and
+# they are what catches this.
+inject_ci_trunk_typo() {
+  edit_in_place 's|^    branches: \[main\]$|    branches: [mian]|' .github/workflows/verify.yml
+}
+
+# A gating workflow that narrows the test check to part of the suite. The job
+# is green, the run is faster, and most of the tests did not happen.
+inject_ci_scoped_test() {
+  edit_in_place 's|^\( *\)\./verify\.sh "\${args\[@\]}"$|\1./verify.sh "${args[@]}" --scope lib|' \
+    .github/workflows/pkg-diet.yml
 }
 # A subshell run against the shell's own state. `cd a; (cd b; ls); pwd` then
 # ends in `b`, and every relative path after it resolves against a directory
@@ -2507,6 +3632,40 @@ assert old in source
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
+# The compile-failure pattern anchored `^` with no re.MULTILINE. It then
+# matches only a log that BEGINS with the error, and every real log begins
+# with `Compiling`, so a fault that breaks the BUILD reads as "no failing test
+# and no build failure" -- exit 2, the derivation refusing to run over a case
+# that is perfectly readable. This is the defect the file actually had.
+inject_derive_build_failure_unread() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/derive-scopes.py")
+source = path.read_text(encoding="utf-8")
+old = ', re.MULTILINE\n)'
+new = '\n)'
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The selection forgetting which target ran a failure. Every declared scope
+# then "selects" every failure in the log, whichever harness produced it, and
+# the one thing this check exists to refuse -- a case scoped past its own
+# failure, which runs tests that all pass and reports GREEN over a seeded
+# fault -- is accepted by the grader written to catch it.
+inject_derive_accepts_a_fast_green() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/derive-scopes.py")
+source = path.read_text(encoding="utf-8")
+old = '        if target not in ("all", ran_in):\n            continue\n        hit |='
+new = '        hit |='
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
 # The resolver keying a block on the first injection name anywhere inside it,
 # rationale comment included. A comment reading "the deliberate pair of
 # inject_alpha" then keys the block that introduces inject_beta as
@@ -3145,21 +4304,21 @@ EOF
 # is true. The 454-entry fabrication came through a lane that was also
 # confident, also well-formed, and also sure of itself.
 inject_tools_ungrounded() {
-  sed -i 's|^    let kept = !report.kept().is_empty();$|    let kept = true;|' \
+  edit_in_place 's|^    let kept = !report.kept().is_empty();$|    let kept = true;|' \
     diet/src/capture/tools.rs
 }
 # The reminder that never comes round. Every model eventually stops recording;
 # a cadence that cannot fire turns the forget rate this lane exists to survive
 # into a silence nobody counts.
 inject_tools_reminder_silent() {
-  sed -i 's|^        if self.since < self.cadence.interval() {$|        if true {|' \
+  edit_in_place 's|^        if self.since < self.cadence.interval() {$|        if true {|' \
     diet/src/capture/tools.rs
 }
 # A harness tool call accepted as a capture. Another system's tool output then
 # becomes a fact about this session, written with capture authority, and the
 # provenance says the model recorded it.
 inject_tools_foreign_call() {
-  sed -i 's|^        return Err(ToolError::NotACaptureTool(tool.clone()));$|        return Ok(Effect::default());|' \
+  edit_in_place 's|^        return Err(ToolError::NotACaptureTool(tool.clone()));$|        return Ok(Effect::default());|' \
     diet/src/capture/tools.rs
 }
 # A phase-transition proposal that writes. The tool was the most successful
@@ -3230,7 +4389,7 @@ EOF
 # entry being certified against turn-9's output -- evidence that did not exist
 # when the model wrote.
 inject_tools_future_output() {
-  sed -i 's|^            Ordering::Greater => return,$|            Ordering::Greater => \&mut self.source,|' \
+  edit_in_place 's|^            Ordering::Greater => return,$|            Ordering::Greater => \&mut self.source,|' \
     diet/src/capture/tools.rs
 }
 # A superseding entry whose id is minted from a counter. The entry that
@@ -3254,7 +4413,7 @@ EOF
 # A verdict that resolves somebody else's entry. The one patch a verdict alone
 # is allowed to justify, pointed at an entry the model never named.
 inject_tools_resolve_elsewhere() {
-  sed -i 's|^            target: entry.clone(),$|            target: EntryId::new("somebody/else").map_err(ToolError::BadEntry)?,|' \
+  edit_in_place 's|^            target: entry.clone(),$|            target: EntryId::new("somebody/else").map_err(ToolError::BadEntry)?,|' \
     diet/src/capture/tools.rs
 }
 # The asks, reworded to nothing. What this lane says out loud is its whole
@@ -3295,7 +4454,7 @@ EOF
 # nowhere, and the enumeration over `ALL` certifies the enum rather than the
 # caller that was supposed to use it.
 inject_tools_sweep_kind() {
-  sed -i 's|^                kind: AskKind::Sweep,$|                kind: AskKind::Reminder,|' \
+  edit_in_place 's|^                kind: AskKind::Sweep,$|                kind: AskKind::Reminder,|' \
     diet/src/capture/tools.rs
 }
 # The model's own spelling of a closed choice, kept. Case is then decided
@@ -3317,14 +4476,14 @@ EOF
 # A phase proposal with no reason. The tool is a request for a ruling, and the
 # why is the whole of what it carries into one.
 inject_tools_proposal_reasonless() {
-  sed -i 's|^            reason: text_argument(&args, "reason"),$|            reason: String::new(),|' \
+  edit_in_place 's|^            reason: text_argument(&args, "reason"),$|            reason: String::new(),|' \
     diet/src/capture/tools.rs
 }
 # A reminder that drops what the router put off. The deferral then reaches only
 # the post-drive sweep, and the cadence half of the join with the router is
 # dead while every test stays green.
 inject_tools_reminder_deferral_dropped() {
-  sed -i 's|^            about: self.deferred.get(&turn).cloned(),$|            about: None,|' \
+  edit_in_place 's|^            about: self.deferred.get(&turn).cloned(),$|            about: None,|' \
     diet/src/capture/tools.rs
 }
 # Every tool description reduced to one character. These bytes are what a
@@ -3384,7 +4543,7 @@ EOF
 # is invited to say `abandoned`, the harness constrains its argument to it, and
 # `apply` then refuses the answer it asked for.
 inject_tools_verdict_list_open() {
-  sed -i 's|"of":\["done","not_this","partial","superseded"\]|"of":["abandoned","done","not_this","partial","superseded"]|' \
+  edit_in_place 's|"of":\["done","not_this","partial","superseded"\]|"of":["abandoned","done","not_this","partial","superseded"]|' \
     diet/src/capture/tools/contract.jsonl
 }
 # The depth limit on the record reader's other door. `objects` is a second
@@ -3412,7 +4571,7 @@ EOF
 # A turn that recorded in the end, swept anyway. The sweep then asks about a
 # fact the model did record, which teaches that recording changes nothing.
 inject_tools_silent_kept() {
-  sed -i 's|^            self.silent.remove(&turn);$||' diet/src/capture/tools.rs
+  edit_in_place 's|^            self.silent.remove(&turn);$||' diet/src/capture/tools.rs
 }
 # The one corpus case that drives a tool other than `update_record`, cut back
 # to `update_record` alone. The corpus then covers the tool whose calls its
@@ -3694,6 +4853,90 @@ assert source.count(old) == 1
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
 EOF
 }
+# A lane free to change substrate mid-run. Then a `rejected` row, which
+# carries a lane and no substrate, has two answers to inherit from -- and the
+# one that answers is whichever the lookup happens to find first.
+inject_record_lane_may_change_substrate() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            if let Some(was) = lanes.insert(lane.as_str(), id.as_str())\n                && was != id\n'
+new = '            if let Some(was) = lanes.insert(lane.as_str(), id.as_str())\n                && false\n                && was != id\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the lane check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+inject_record_substrate_reference_inferred_from_a_count() {
+  python3 - <<'EOF'
+import pathlib
+
+# THE REFERENCE, RESOLVED BY COUNTING. Enforcing it only when the run declares
+# more than one substrate is the plausible edit -- with one declared there is
+# nothing to choose between, so the check looks like a formality. It is not:
+# the field exists so that a row's substrate is never inferred from how many
+# there are, and this is the shape that inference takes.
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            if let Some(known) = regime.as_ref()\n                && !known.declares(id)\n'
+new = (
+    '            if let Some(known) = regime.as_ref()\n'
+    '                && known.substrate_ids().len() > 1\n'
+    '                && !known.declares(id)\n'
+)
+if source.count(old) != 1:
+    raise SystemExit(f"the declares check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+inject_record_a_fork_names_no_substrate() {
+  python3 - <<'EOF'
+import pathlib
+
+# THE FORK ARM, DROPPED. A fork is how a run reaches a second substrate, so it
+# is the row most able to name one nothing declared -- and both substrate
+# rules read request and fork rows through the same match. Removing the fork
+# arm leaves every request-shaped fixture passing.
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Event::Fork {\n                lane, substrate, ..\n            } => Some(("fork", lane, substrate)),\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the fork arm appears {source.count(old)} times")
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+# Weights identified by whatever string is there. A name is prose: two runs
+# can spell the same weights differently and a third can spell different
+# weights the same, and then a regime comparison compares strings.
+# A canned substrate that may decline to identify itself. The acts are the
+# whole identity a server with no weights has, so a `canned` kind that does
+# not have to carry them is the null the typed identity was adopted to remove,
+# wearing the new kind's name.
+inject_record_canned_acts_optional() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+# BOTH halves, or the injection is inert. Making only the read optional leaves
+# the empty string failing `digest_ok`, so the fixture is still refused -- with
+# a different message and the same verdict, which the selftest grades GREEN
+# because the gate never stopped firing. It did, on the first attempt.
+old = """            let text = take_string(&mut members, of, "acts_sha256")?;
+            if !digest_ok(&text) {
+                return Err(StructureError::BadDigest(text).into());
+            }
+            Weights::Canned { acts_sha256: text }"""
+new = """            Weights::Canned {
+                acts_sha256: take_string(&mut members, of, "acts_sha256").unwrap_or_default(),
+            }"""
+if source.count(old) != 1:
+    raise SystemExit(f"the canned acts block appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
 
 # Every pattern in a table, shown catching its own class. A pattern that has
 # never caught anything is a guess.
@@ -3712,10 +4955,16 @@ prove_patterns() {
   scratch; seed="$SCRATCH"
   bash "${ROOT}/${seeder}" "$seed" > /dev/null
 
+  local escaped=false
+  if find "$seed" -name '*.jsonl' -print -quit | grep -q .; then escaped=true; fi
+
   while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
     case "$label" in ''|\#*) continue ;; esac
     [ -n "${regex:-}" ] || continue
+    # Before the shard: whether the brief's required classes are in the table
+    # is a question about the table, not about this job's share of it.
     defined+=("$label")
+    in_shard || continue
 
     dir="${seed}/${label}"
     if [ ! -d "$dir" ]; then
@@ -3724,10 +4973,74 @@ prove_patterns() {
       continue
     fi
 
+    # A corpus that carries escaped twins requires one for EVERY class, and
+    # requires each class to fire on it. A class that guards prose and not
+    # logs is a guard over the half of the surface where the artefacts are
+    # not. Derived from the corpus rather than passed in: a table whose seeder
+    # stops writing twins loses the requirement, and a table that never had
+    # them (the published surface is HTML and CSS, never a JSON string) is not
+    # asked for one.
+    #
+    # A CORRECTION. This comment used to add "and the twin reaches the pattern
+    # only through the decoded view, so this is also what keeps that view
+    # load-bearing". IT DID NOT. `json.dumps` puts the escaped newline at the
+    # END of the line, so nothing is welded to the forbidden string's left and
+    # the raw bytes match it anyway -- measured, with the mirror removed, 13
+    # of 14 classes still fired on their twin. The twin proved the pattern and
+    # said nothing about the view.
+    #
+    # The WELDED file is what does that job, and it is required too: the
+    # fragment alone, immediately after an escaped newline, which is the shape
+    # the decoder exists for. With the mirror removed it silences the four
+    # classes whose match may begin with an alphanumeric; the other ten are
+    # anchored on a character that is never a token character (`/home/`,
+    # `-----BEGIN `, `C:\`, `sk-ant-`) and cannot be welded shut at all. See
+    # seed-hygiene-fault.sh for the measurement and the list.
+    if [ "$escaped" = true ]; then
+      local missing=""
+      [ -f "${dir}/${label}.jsonl" ] || missing="escaped twin"
+      [ -f "${dir}/${label}.welded.jsonl" ] || missing="${missing:+${missing} and }welded twin"
+      if [ -n "$missing" ]; then
+        printf 'UNSEEDED %s pattern %s  <-- NO %s TO PROVE IT AGAINST\n' \
+          "$kind" "$label" "$(printf '%s' "$missing" | tr '[:lower:]' '[:upper:]')"
+        SELFTEST_BROKEN+=("${kind} pattern ${label} has no ${missing}")
+        continue
+      fi
+    fi
+
     rc=0
     out="$(bash "${ROOT}/scripts/hygiene.sh" --patterns "${ROOT}/${table}" --tree "$dir" 2>&1)" || rc=$?
-    if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "hygiene: ${label}:"; then
+    local plain=false twin=false welded=false
+    # The PROSE form is "a hit in neither twin", not "a hit in `${label}.txt`":
+    # the pages corpus writes `.html`, `.css` and `.js`, and naming one
+    # extension made every one of those classes report prose=false. Caught by
+    # this suite on the first run after the welded form was added, which is
+    # the corpus doing its job -- but the fix is to exclude both twins by
+    # name, since with three files "not the plain twin" is no longer enough.
+    printf '%s\n' "$out" | grep "hygiene: ${label}:" \
+      | grep -v "${label}\.welded\.jsonl" \
+      | grep -qv "${label}\.jsonl" && plain=true
+    if [ "$escaped" = true ]; then
+      # `${label}.jsonl` matches only the plain twin: the welded file is
+      # `${label}.welded.jsonl`, which does not contain that string.
+      printf '%s\n' "$out" | grep -q "hygiene: ${label}:.*${label}\.jsonl" && twin=true
+      printf '%s\n' "$out" | grep -q "hygiene: ${label}:.*${label}\.welded\.jsonl" && welded=true
+    else
+      twin=true
+      welded=true
+    fi
+
+    if [ "$rc" -eq 1 ] && [ "$plain" = true ] && [ "$twin" = true ] \
+       && [ "$welded" = true ]; then
       printf 'RED   hygiene.sh exit %-3d  %s\n' "$rc" "$label"
+    elif [ "$rc" -eq 1 ] \
+         && { [ "$plain" = true ] || [ "$twin" = true ] || [ "$welded" = true ]; }; then
+      printf 'GREEN hygiene.sh exit %-3d  %s  <-- FIRED ON %s%s%s, NOT ALL THREE\n' \
+        "$rc" "$label" \
+        "$([ "$plain" = true ] && printf 'prose ' || true)" \
+        "$([ "$twin" = true ] && printf 'twin ' || true)" \
+        "$([ "$welded" = true ] && printf 'welded' || true)"
+      SELFTEST_BROKEN+=("${kind} pattern ${label}: not every form")
     else
       printf 'GREEN hygiene.sh exit %-3d  %s  <-- PATTERN DID NOT FIRE\n' "$rc" "$label"
       SELFTEST_BROKEN+=("${kind} pattern ${label}")
@@ -3798,6 +5111,419 @@ prove_mechanics() {
   expect_exit "the last pattern in an unterminated table still fires" 1 \
     bash "${ROOT}/scripts/hygiene.sh" --patterns "${box}/unterminated-patterns.tsv" \
       --tree "${box}/last-line"
+
+  # --- content as a reader would see it -------------------------------------
+  #
+  # An address that exists ONLY inside a JSON string, immediately after an
+  # escaped newline. `private-ipv4` requires a non-alphanumeric to its left;
+  # in the bytes on disk the character to its left is the `n` of `\n`, so the
+  # raw scan reads the escaping and calls the content clean. This is how a
+  # private path reached a replay log unflagged.
+  mkdir -p "${box}/escaped"
+  printf '{"stdout":"up\\n%s%s ok\\n"}\n' '192.168' '.4.9' \
+    > "${box}/escaped/run.jsonl"
+  expect_exit "an address only a decoded view can see is caught" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/escaped"
+  # The control. Without it the assertion above passes on a file whose bytes
+  # match anyway, and proves nothing about the decoding.
+  expect_exit "the same address, unread, is not a hit" 1 \
+    grep -qE "(^|[^0-9A-Za-z.-])192\\.168\\.[0-9]{1,3}\\.[0-9]{1,3}" \
+      "${box}/escaped/run.jsonl"
+
+  # THE WELDED CASE, which is the one the boundary misses rather than the one
+  # the escaping hides. `\n` puts a literal `n` immediately left of the token,
+  # so `(^|[^A-Za-z0-9])` does not match there -- the raw bytes are searched
+  # and found clean while the content is not. This is the defect the data seat
+  # reported: a pattern that guards prose does not guard logs.
+  mkdir -p "${box}/welded"
+  printf '{"stdout":"ran\\n%s%s regressed\\n"}\n' 'die' '45' \
+    > "${box}/welded/run.jsonl"
+  expect_exit "an escape-welded token is caught through the decoding" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/welded"
+  # ...and the control that makes the assertion above mean something: the same
+  # bytes, matched directly, are NOT a hit. If this ever exits 0 the case
+  # above has stopped testing the decoding and started testing the pattern.
+  expect_exit "the same bytes, unread, are not a hit" 1 \
+    grep -qiE "(^|[^A-Za-z0-9])DIE-?[0-9]+" "${box}/welded/run.jsonl"
+
+  # THE SAME WELD, in a file carrying one byte that is not UTF-8. The decoder
+  # skipped the WHOLE FILE on UnicodeDecodeError, so one cp1252 quote anywhere
+  # in a log meant no decoded view for ANY of it -- the weld above went unseen
+  # and the gate printed `clean`. Six such files are already tracked here, one
+  # of them a JSONL record fixture, so the combination is not exotic.
+  #
+  # `errors="replace"` keeps the view. U+FFFD is not alphanumeric, so it
+  # separates like any other non-token byte: it can split a token that spanned
+  # the bad byte, and it cannot invent one that was not there.
+  mkdir -p "${box}/welded-undecodable"
+  printf '{"stdout":"ran\\n%s%s regressed\\n"}\n' 'die' '45' \
+    > "${box}/welded-undecodable/run.jsonl"
+  printf '{"note":"caf\xe9"}\n' >> "${box}/welded-undecodable/run.jsonl"
+  expect_exit "a weld survives one byte that is not UTF-8" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/welded-undecodable"
+  # Two controls, because this assertion has two ways to pass for the wrong
+  # reason. The file must really be undecodable...
+  expect_exit "and that file really is undecodable as UTF-8" 1 \
+    python3 -c 'import sys; open(sys.argv[1], encoding="utf-8").read()' \
+      "${box}/welded-undecodable/run.jsonl"
+  # ...and its raw bytes must really be clean, so the hit came from the view.
+  expect_exit "and its raw bytes, unread, are not a hit" 1 \
+    grep -qiE "(^|[^A-Za-z0-9])DIE-?[0-9]+" "${box}/welded-undecodable/run.jsonl"
+
+  # A pattern beginning with `-`. grep would read it as an OPTION and report
+  # every row after it absent -- a whole class silently unguarded, printing
+  # the same green. The scanner passes each regex with `-e`.
+  mkdir -p "${box}/dash-lead"
+  printf 'value = %s%s\n' '-forbid' 'den-shape' > "${box}/dash-lead/hit.txt"
+  printf 'dash-leading\t-\t-forbidden-shape\n' > "${box}/dash-patterns.tsv"
+  expect_exit "a pattern beginning with a dash is a pattern, not an option" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --patterns "${box}/dash-patterns.tsv" \
+      --tree "${box}/dash-lead"
+
+  # --- literals that have no shape ------------------------------------------
+  #
+  # A digest row cannot be seeded the way a pattern row is: assembling the
+  # literal from fragments would still BE the literal, in a public repository,
+  # which is what the row exists to avoid. A DECOY token and a scratch table
+  # prove the mechanism end to end without the real value ever being written.
+  local decoy table
+  decoy="$(printf '%s%s%s' 'zz' 'subject' 'zz')"
+  table="${box}/decoy-hashes.txt"
+  printf '# Salt: discipline-hygiene-v1\n' > "$table"
+  python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+    --emit "$decoy" decoy-username >> "$table"
+
+  mkdir -p "${box}/decoy-hit"
+  printf 'drwx 3 %s staff\n' "$decoy" > "${box}/decoy-hit/ls.txt"
+  expect_exit "a digest row catches its literal" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" --tree "${box}/decoy-hit"
+
+  # The same token welded to an escape. A regex can be given a looser
+  # boundary to reach through one; a digest cannot be given a looser hash, so
+  # this half needs the decoding more than the other half does.
+  mkdir -p "${box}/decoy-welded"
+  printf '{"stdout":"total 4\\n%s ok\\n"}\n' "$decoy" \
+    > "${box}/decoy-welded/run.jsonl"
+  expect_exit "a digest row catches an escape-welded literal" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" --tree "${box}/decoy-welded"
+
+  # A SUBSTRING IS NOT THE TOKEN. Without this the row would fire on every
+  # word that contains the literal, and a gate that cries wolf gets switched
+  # off -- the same failure mode as an over-loose pattern, arrived at by
+  # hashing instead of by matching.
+  mkdir -p "${box}/decoy-miss"
+  printf '%sx and x%s and someone-else\n' "$decoy" "$decoy" \
+    > "${box}/decoy-miss/near.txt"
+  expect_exit "a substring of the literal is not the literal" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" --tree "${box}/decoy-miss"
+
+  # THE REPORT NAMES THE LABEL AND NEVER THE TOKEN. A scanner that printed
+  # what it found would publish the value on every CI log that caught one.
+  expect_exit "a hit names its label, not what it matched" 0 \
+    bash -c "out=\$(python3 '${ROOT}/scripts/check-hashes.py' --table '$table' \
+      --tree '${box}/decoy-hit' 2>&1; true) \
+      && grep -q 'decoy-username' <<<\"\$out\" \
+      && ! grep -q '$decoy' <<<\"\$out\""
+
+  # THE WIRING, not just the scanner. Every assertion above runs
+  # `check-hashes.py` directly, so all of them would still pass with the call
+  # removed from `hygiene.sh` -- and then `--only hygiene` would be a pattern
+  # scan wearing a digest scan's green.
+  expect_exit "the hygiene gate runs the digest half" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --hashes "$table" --tree "${box}/decoy-hit"
+
+  # A table with no salt cannot be computed against, and a table with no rows
+  # checks nothing. Neither is a pass.
+  printf 'c3cfd25a52f47a385452ff4098ace911eb0c4b44e7eebfc39c29fb38dcee408a  x\n' \
+    > "${box}/no-salt.txt"
+  expect_exit "a digest table naming no salt is refused" 2 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "${box}/no-salt.txt" \
+      --tree "${box}/decoy-hit"
+  printf '# Salt: discipline-hygiene-v1\n' > "${box}/no-rows.txt"
+  expect_exit "a digest table with no rows is not a pass" 2 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "${box}/no-rows.txt" \
+      --tree "${box}/decoy-hit"
+
+  # ONE BYTE THAT IS NOT UTF-8 USED TO DROP THE WHOLE FILE. The scan caught a
+  # `UnicodeDecodeError`, skipped the file, and justified it by saying the
+  # pattern half covered it -- which is the one thing that cannot be true
+  # here, because patterns reach strings that have a shape and this half is
+  # for the strings that do not. The literal below sits in plain ASCII; only
+  # the curly quote beside it is undecodable.
+  mkdir -p "${box}/not-utf8"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='cp1252').write('owned by ' + sys.argv[2] + ', it\u2019s theirs\n')
+" "${box}/not-utf8/notes.txt" "$decoy"
+  expect_exit "a literal in a file with one undecodable byte is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/not-utf8"
+
+  # And the control, so the assertion above is about the ENCODING and not
+  # about the literal being present: the same undecodable byte, no literal.
+  mkdir -p "${box}/not-utf8-clean"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='cp1252').write('nothing here, it\u2019s fine\n')
+" "${box}/not-utf8-clean/notes.txt"
+  expect_exit "an undecodable byte alone is not a hit" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/not-utf8-clean"
+
+  # A CHARACTER WITH NO VISUAL WIDTH IS NOT A SEPARATOR. A zero-width space
+  # inside the literal is invisible in review and invisible in `git diff`, and
+  # a tokeniser that split on it handed back two tokens that hash to nothing
+  # and reported the file clean. Ruled 2026-09-11 as IN SCOPE: this gate
+  # guards against mistakes and against a careless commit later tidied, and an
+  # invisible byte a tidy-up left behind is exactly that -- the one evasion
+  # that survives a human reading the diff.
+  mkdir -p "${box}/zero-width"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2][:5] + '​' + sys.argv[2][5:] + ' staff\n')
+" "${box}/zero-width/ls.txt" "$decoy"
+  expect_exit "a literal split by a zero-width space is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/zero-width"
+
+  # The control, so the assertion above is about the CHARACTER and not about
+  # the literal being present: the same zero-width space, no literal. Without
+  # it, "dropped the character" and "found the literal" are confounded and a
+  # scanner that fired on everything would satisfy the pair.
+  mkdir -p "${box}/zero-width-clean"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write('nothing​ here at all\n')
+" "${box}/zero-width-clean/notes.txt"
+  expect_exit "a zero-width space alone is not a hit" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/zero-width-clean"
+
+  # The other half of the rule, and it is a DIFFERENT category: a combining
+  # accent is `Mn` where the zero-width space is `Cf`. Both are dropped, and
+  # asserting only one leaves the other a branch nothing reaches -- which is
+  # how a guard ends up unable to fire.
+  mkdir -p "${box}/combining"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2][:5] + '́' + sys.argv[2][5:] + ' staff\n')
+" "${box}/combining/ls.txt" "$decoy"
+  expect_exit "a literal split by a combining mark is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/combining"
+
+  # THE SIBLING ONE STEP SIDEWAYS, and the reason the strip is a PROPERTY now
+  # rather than a list of categories. `U+3164 HANGUL FILLER` is category `Lo`
+  # and `isalnum()` is TRUE for it, so it does not split the token -- it welds
+  # INTO it, and no set of categories could ever have reached it while the
+  # docstring promised "a character of no visual width is still caught"
+  # without qualification. Ruled 2026-09-12: strip Unicode
+  # `Default_Ignorable_Code_Point`, which names exactly the code points that
+  # render as nothing, the four alphanumeric fillers among them.
+  mkdir -p "${box}/filler"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2][:5] + '\u3164' + sys.argv[2][5:] + ' staff\n')
+" "${box}/filler/ls.txt" "$decoy"
+  expect_exit "a literal welded by a hangul filler is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/filler"
+
+  # Its control, for the same reason the other two have one.
+  mkdir -p "${box}/filler-clean"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write('nothing\u3164 here at all\n')
+" "${box}/filler-clean/notes.txt"
+  expect_exit "a hangul filler alone is not a hit" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/filler-clean"
+
+  # THE DECLARED LIMIT, asserted rather than only written down. A visible
+  # lookalike -- Cyrillic `e` where a Latin one belongs -- is NOT caught, and
+  # that is the line the ruling drew: invisible to a reader is in scope, a
+  # confusable is not. An undeclared non-catch is the vacuous class; this one
+  # is declared, and pinned, so a later change that quietly starts folding
+  # confusables has to come here and say so.
+  mkdir -p "${box}/confusable"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2].replace('e', '\u0435', 1) + ' staff\n')
+" "${box}/confusable/ls.txt" "$decoy"
+  expect_exit "a visible lookalike is the declared limit, not a hit" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/confusable"
+
+  # ...and the control that stops the row above from passing because the decoy
+  # has no `o` in it to replace. Same file, same shape, the Latin letter left
+  # alone: that one must fire.
+  mkdir -p "${box}/confusable-control"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'drwx 3 ' + sys.argv[2] + ' staff\n')
+" "${box}/confusable-control/ls.txt" "$decoy"
+  expect_exit "and the same line with the Latin letter is a hit" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/confusable-control"
+
+  # NO TABLE IS NO SCAN. The strip reads `default-ignorable.tsv` beside the
+  # decoder, and without it the tokeniser does not know which characters are
+  # invisible -- which makes it exactly as blind as the defect it exists to
+  # catch. Exit 2, like a missing salt and a missing decoder, because `clean`
+  # from a blind scan is the vacuous class.
+  mkdir -p "${box}/tableless"
+  cp "${ROOT}/scripts/check-hashes.py" "${ROOT}/scripts/decoding.py" "${box}/tableless/"
+  expect_exit "a decoder with no invisible-character table is broken, not clean" 2 \
+    python3 "${box}/tableless/check-hashes.py" --table "$table" \
+      --tree "${box}/decoy-hit"
+  # The control: the same copied pair, WITH the table, finds the same hit the
+  # real scanner does. Without it the row above passes on any copy that fails
+  # for any reason at all.
+  cp "${ROOT}/scripts/default-ignorable.tsv" "${box}/tableless/"
+  expect_exit "and the same copy, with the table beside it, finds the literal" 1 \
+    python3 "${box}/tableless/check-hashes.py" --table "$table" \
+      --tree "${box}/decoy-hit"
+
+  # ESCAPED TWICE IS STILL ESCAPED. Parsing JSON spends one level, so content
+  # a tool logged from another tool's JSON output arrives with `\` and `n`
+  # still welded to the front of a token one layer down. The decoder runs to a
+  # fixed point and spends the escapes at each layer; before it did, this file
+  # was reported clean.
+  mkdir -p "${box}/twice-wrapped"
+  python3 -c "
+import json, sys
+inner = json.dumps({'out': 'ls -l\\n' + sys.argv[2] + ' staff 42'})
+open(sys.argv[1], 'w').write(json.dumps({'log': inner}) + '\n')
+" "${box}/twice-wrapped/nested.jsonl" "$decoy"
+  expect_exit "a literal wrapped in JSON twice is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/twice-wrapped"
+
+  # THREE GUARDS THE FIXTURE ABOVE DOES NOT REACH, each one measured by
+  # neutering the code it names and watching the whole suite stay green.
+  # Its input is nested JSON, so "parsed another layer" and "spent the
+  # escapes" are confounded in the one case that touches both -- and the two
+  # halves of the decoder that only one of those exercises had no fixture at
+  # all. A fixture that proves nothing the first one didn't is not a fixture;
+  # a guard nothing reaches is worse than no guard.
+
+  # 1. THE ESCAPE-SPENDING HALF, ALONE. A JSON string whose PARSED value still
+  # holds a literal backslash-n -- two backslashes in the file -- welded to
+  # the token. There is no second JSON layer here, so parsing cannot recover
+  # it and only `_unescaped` can. Measured with `_unescaped` made the identity
+  # function: the view loses its second half and this file reads clean.
+  mkdir -p "${box}/escape-only"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    '{\"stdout\":\"ran' + chr(92) + chr(92) + 'n' + sys.argv[2] + ' regressed\"}' + chr(10))
+" "${box}/escape-only/run.jsonl" "$decoy"
+  expect_exit "a token welded one layer under the parse is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/escape-only"
+  # Its control, and it is about TOKENS rather than about the substring: the
+  # decoy is right there in the bytes -- what is missing is a separator to its
+  # left, because the character before it is the `n` of an escaped newline.
+  # A boundary-aware search of the raw file finds nothing, which is exactly
+  # the silence the decoded view exists to break.
+  expect_exit "and the raw bytes hold no such token" 1 \
+    grep -qE "(^|[^A-Za-z0-9])${decoy}([^A-Za-z0-9]|$)" \
+      "${box}/escape-only/run.jsonl"
+
+  # 2. MORE THAN ONE PASS. `MAX_PASSES` was reachable by nothing: the decoy is
+  # recovered at one pass in every nested case, because spending the escapes
+  # collapses arbitrary depth in a single go. A UNICODE escape is the case it
+  # cannot: `_unescaped` spends `\n`, `\t` and `\r` and not `\u0009`, so
+  # only a SECOND JSON PARSE separates the token. Measured: one pass reads
+  # this clean, two find it.
+  mkdir -p "${box}/two-passes"
+  python3 -c "
+import json, sys
+inner = '{\"stdout\":\"ran' + chr(92) + 'u0009' + sys.argv[2] + ' x\"}'
+open(sys.argv[1], 'w', encoding='utf-8').write(json.dumps({'log': inner}) + chr(10))
+" "${box}/two-passes/nested.jsonl" "$decoy"
+  expect_exit "a token only a second parse can separate is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/two-passes"
+
+  # 3. SPLIT ON EVERY NON-ALPHANUMERIC. The tokeniser's central rule, and the
+  # reason this function exists rather than a regex at each call site: the
+  # obvious class keeps `owner.example.net` whole, so a digest of the bare
+  # name never matches it. The decoy carries no dot, so every fixture above
+  # passes with the rule reverted. This one does not.
+  mkdir -p "${box}/dotted"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'proxy: ' + sys.argv[2] + '.example.net:8080' + chr(10))
+" "${box}/dotted/hosts.txt" "$decoy"
+  expect_exit "a literal joined by dots to more text is still found" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/dotted"
+  # Its control, and the one that says the row above is about the SPLITTING:
+  # the same file with the decoy standing alone must fire too, so a failure
+  # here is never "the decoy stopped being in the table".
+  mkdir -p "${box}/dotted-control"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write('proxy: ' + sys.argv[2] + chr(10))
+" "${box}/dotted-control/hosts.txt" "$decoy"
+  expect_exit "and the same decoy standing alone is a hit" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/dotted-control"
+
+  # 4. SOMETHING IN FRONT OF THE JSON. Not the token -- the WHOLE VIEW. The
+  # decoder required the first character of a line to open a JSON value, so
+  # one byte of preamble meant no decoded view for the file at all, and the
+  # welded token went unseen while the gate printed clean. Both forms are
+  # accidents rather than evasions, which is this gate's stated threat model:
+  # PowerShell's `Out-File` writes a BOM by default, and every timestamped
+  # log line ever written has a prefix.
+  mkdir -p "${box}/bom" "${box}/log-prefix"
+  python3 -c "
+import sys
+d = sys.argv[3]
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    '\ufeff{\"stdout\":\"ran' + chr(92) + 'n' + d + ' x\"}' + chr(10))
+open(sys.argv[2], 'w', encoding='utf-8').write(
+    '2026-01-01T00:00:00Z INFO {\"stdout\":\"ran' + chr(92) + 'n' + d + ' x\"} (ok)' + chr(10))
+" "${box}/bom/run.jsonl" "${box}/log-prefix/run.jsonl" "$decoy"
+  expect_exit "a byte-order mark in front of the JSON does not blind the view" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" --tree "${box}/bom"
+  expect_exit "a log prefix in front of the JSON does not blind the view" 1 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/log-prefix"
+  # The control both rows need: neither file holds the decoy as a token in its
+  # raw bytes, so each hit came from a view the preamble used to prevent.
+  expect_exit "and neither file's raw bytes hold such a token" 1 \
+    grep -qE "(^|[^A-Za-z0-9])${decoy}([^A-Za-z0-9]|$)" \
+      "${box}/bom/run.jsonl" "${box}/log-prefix/run.jsonl"
+  # ...and the other control, which stops the pair from passing on a decoder
+  # that returns a view for ANY line: prose with a stray brace is not JSON and
+  # must still decode to nothing.
+  mkdir -p "${box}/brace-prose"
+  printf 'a sentence with a { brace and no JSON in it at all\n' \
+    > "${box}/brace-prose/notes.txt"
+  expect_exit "a stray brace in prose is not a document" 0 \
+    python3 "${ROOT}/scripts/check-hashes.py" --table "$table" \
+      --tree "${box}/brace-prose"
+
+  # THE DECODER MISSING IS NOT A FINDING. `sys.exit(message)` exits one, which
+  # is this scanner's code for "ran, and found something" -- so an operator
+  # error would have been reported as a forbidden literal.
+  mkdir -p "${box}/lonely"
+  cp "${ROOT}/scripts/check-hashes.py" "${box}/lonely/check-hashes.py"
+  expect_exit "a scanner with no decoder beside it is broken, not dirty" 2 \
+    python3 "${box}/lonely/check-hashes.py" --table "$table" \
+      --tree "${box}/decoy-hit"
+  cp "${ROOT}/scripts/hygiene-decode.py" "${box}/lonely/hygiene-decode.py"
+  expect_exit "and the decoder's own driver says so the same way" 2 \
+    bash -c "printf '' | python3 '${box}/lonely/hygiene-decode.py' --into '${box}/lonely/mirror'"
 
   # A dot-prefixed directory under a results root is linted, not skipped.
   #
@@ -3881,6 +5607,75 @@ prove_mechanics() {
         GITHUB_EVENT_PATH="${fake}/push-new-branch.json" \
       python3 "${fake}/repo/scripts/check-history.py"
 
+  # A SECRET IN A PATH GIT WILL NOT DIFF. Without `--text`, `git show` prints
+  # `Binary files a/x and b/x differ` for a path its NUL heuristic calls
+  # binary AND for a plain-text path marked `-diff` in .gitattributes -- so
+  # the content never reaches the scan. Added-then-removed is the hole this
+  # check exists to close, and it stayed open for exactly the content the
+  # pattern table singles out with its `b` flag: "a secret in a .pack or an
+  # image is exactly as committed as one in a text file".
+  #
+  # The `-diff` form is used here rather than the NUL form because it is the
+  # worse one: an attribute committed to the tree under scan decided what the
+  # history scan was allowed to see.
+  local fake_undiffable
+  (
+    cd "${fake}/repo"
+    printf 'hidden.txt -diff\n' > .gitattributes
+    printf 'ticket %s%s, in a path git will not diff\n' 'DIE' '-4242' \
+      > hidden.txt
+    git add --all && seed_commit --message 'a path marked -diff'
+  )
+  fake_undiffable="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_head" "$fake_undiffable" > "${fake}/pr-undiffable.json"
+  expect_exit "history: a secret git renders as binary is still found" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-undiffable.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+  # The control. git really does hide it: if this stops finding the `Binary
+  # files` line, the assertion above has stopped testing `--text` and is
+  # passing on an ordinary text diff.
+  expect_exit "and git really does hide that path without --text" 0 \
+    bash -c "git -C '${fake}/repo' show --format= --patch '${fake_undiffable}' \
+      | grep -q '^Binary files'"
+
+  # A COMMITTED BYTE THAT IS NOT UTF-8. `text=True` decodes the patch as
+  # strict UTF-8 and RAISES on the first byte that is not -- and `git show
+  # --patch` pulls raw file content into that decode. The traceback exits 1,
+  # which is this repository's code for "the scan ran and found something".
+  # A crash is not a finding: it reddens the lane over history nothing can
+  # edit, and no content change clears it.
+  local fake_undecodable
+  (
+    cd "${fake}/repo"
+    printf 'caf\xe9, in cp1252\n' > bytes.txt
+    git add --all && seed_commit --message 'a byte that is not UTF-8'
+  )
+  fake_undecodable="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_undiffable" "$fake_undecodable" > "${fake}/pr-undecodable.json"
+  expect_exit "history: a committed non-UTF-8 byte is survived, not reported" 0 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-undecodable.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+  # The control, and this one is load-bearing: without it the assertion above
+  # is satisfied by any clean range, and says nothing about the decoding.
+  cat > "${fake}/strict.py" <<'STRICT'
+import subprocess, sys
+try:
+    subprocess.run(
+        ["git", "-C", sys.argv[1], "show", "--format=", "--patch", "--text",
+         sys.argv[2]],
+        capture_output=True, text=True,
+    )
+except UnicodeDecodeError:
+    sys.exit(0)
+sys.exit(1)
+STRICT
+  expect_exit "and a strict decode of that same patch really does raise" 0 \
+    python3 "${fake}/strict.py" "${fake}/repo" "$fake_undecodable"
+
   # The CI aggregator's comparison. A skipped job is not a failed job, and
   # GitHub's own `!failure()` idiom passes on skipped, so the one thing this
   # must get right is that only the literal 'success' passes.
@@ -3925,6 +5720,29 @@ prove_mechanics() {
 selftest() {
   trap selftest_cleanup EXIT
   scratch; SELFTEST_TARGET="${SCRATCH}/target"
+  scratch; SELFTEST_LOGS="$SCRATCH"
+  # DERIVE MODE KEEPS ITS LOGS. `selftest_cleanup` removes every scratch it
+  # registered, so an index written there would name files that no longer
+  # exist by the time anybody read it. The operator names a directory instead
+  # and it is not registered for cleanup.
+  if [ -n "$SELFTEST_DERIVE" ]; then
+    mkdir -p "$SELFTEST_DERIVE" || {
+      echo "selftest: --derive-scopes ${SELFTEST_DERIVE} could not be made" >&2
+      exit "$EXIT_MISUSE"
+    }
+    SELFTEST_LOGS="$SELFTEST_DERIVE"
+    # Truncated, never appended to. An index carrying rows from two runs is a
+    # derivation over a tree that never existed.
+    : > "${SELFTEST_LOGS}/derive-scopes.tsv"
+  fi
+  # The one sandbox path every case is built into and torn down from. Made
+  # here rather than per case; see SELFTEST_BOX for the measurement that says
+  # why.
+  scratch; SELFTEST_BOX="${SCRATCH}/box"
+  # Made here, not by the first case, so that seeded_case's refusal to inject
+  # into a box that is not a directory keeps its meaning: an unset or removed
+  # box is a misuse, not a first run.
+  mkdir -p "$SELFTEST_BOX"
 
   # sandbox(), seed_commit and the fake-repository builder all run git in THIS
   # process, outside scripts/hermetic.sh, so they need the same protection from
@@ -3942,141 +5760,163 @@ selftest() {
   seeded_case "clippy lint violation"                 clippy   inject_clippy \
     'ptr_arg'
   seeded_case "failing unit test"                     test     inject_test \
-    'seeded_fault::seeded_failure \.\.\. FAILED'
+    'seeded_fault::seeded_failure \.\.\. FAILED' 'lib/seeded_fault'
   seeded_case "non-conforming format fixture"         test     inject_conformance \
-    'conformance failure\(s\)'
+    'conformance failure\(s\)' 'test:conformance/formats::regimen'
   seeded_case "FORMATS emptied, harness covers none"  test     inject_formats_empty \
-    'FORMATS is empty'
+    'FORMATS is empty' 'test:conformance'
   seeded_case "decline grammar loses its end anchor"  test     inject_decline_unanchored \
-    'coordinated-with-and\.txt: accepted as'
+    'coordinated-with-and\.txt: accepted as' 'test:conformance/formats::decline'
   seeded_case "interview drops continuation lines"    test     inject_interview_drops_continuations \
-    'multi-line-continuation\.txt: parsed to'
+    'multi-line-continuation\.txt: parsed to' 'test:conformance/formats::interview'
   seeded_case "interview blind to truncation"         test     inject_interview_truncation_blind \
-    'truncated-unterminated-fence\.txt: parsed to'
+    'truncated-unterminated-fence\.txt: parsed to' 'test:conformance/formats::interview'
   seeded_case "interview discards trailing content"   test     inject_interview_discards_trailing \
-    'content lost parsing'
+    'content lost parsing' 'lib/formats::interview::tests'
   seeded_case "an event kind with no fixture"         test     inject_record_unfixtured_kind \
-    'no fixture.*spurious'
+    'no fixture.*spurious' 'lib/formats::record::tests'
   seeded_case "record substrate made optional"        test     inject_record_substrate_optional \
-    'regime-missing-substrate\.jsonl: accepted as'
+    'regime-missing-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a summary kind's fields made advisory" test     inject_record_summary_kind_fields_advisory \
+    'recompute-summary-carries-turns\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a recompute summary with no product digest" test inject_record_recompute_digest_optional \
+    'recompute-summary-without-its-product-digest\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a summary that cannot be true of itself" test   inject_record_summary_impossible_unchecked \
+    'recompute-matched-exceeds-checked\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a substrate reference that resolves to anything" test inject_record_substrate_reference_unchecked \
+    'lane-names-an-undeclared-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a substrate reference defaulted when alone" test inject_record_substrate_defaults_when_alone \
+    'request-with-no-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "weights identified by name"            test     inject_record_weights_named_not_digested \
+    'weights-named-not-digested\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "an injection only GNU sed accepts"     injections inject_injection_needs_gnu_sed \
+    'sed forms only GNU accepts'
+  seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \
+    'an edited cache was not refused' 'lib/capture::bakeoff'
+  seeded_case "the assembled directory's evidence is elsewhere" test inject_bakeoff_evidence_not_attached \
+    'a cache the record consumed was not committed beside it' 'lib/capture::bakeoff'
+  seeded_case "a budget no fixture demonstrates"      test     inject_bakeoff_budget_unfixtured \
+    'its fixture does not demonstrate failure there' 'lib/capture::sense'
   seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
-    'retry-of-itself\.jsonl: accepted as'
+    'retry-of-itself\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "record nesting left unbounded"         test     inject_record_depth_unbounded \
-    'deep-nesting\.jsonl: accepted as'
+    'deep-nesting\.jsonl: accepted as' 'test:conformance/formats::record'
   seeded_case "grounding floor made inert"            test     inject_grounded_floor_inert \
-    'a lane that mostly fabricated must be rejected whole'
+    'a lane that mostly fabricated must be rejected whole' 'lib/capture::grounded::tests'
   seeded_case "grounding gates a judgment field"      test     inject_grounded_gates_judgment \
-    'the gate touched a judgment-class field'
+    'the gate touched a judgment-class field' 'lib/capture'
   seeded_case "a score with no demonstrated failure"  test     inject_grounded_undemonstrated \
-    'a measurement was handed back whose instrument never failed'
+    'a measurement was handed back whose instrument never failed' 'lib/capture::grounded::tests'
   seeded_case "grounding loosened to recombination"   test     inject_grounded_loose_matching \
-    'a sentence the source never said was scored as present in it'
+    'a sentence the source never said was scored as present in it' 'lib/capture::grounded::tests'
   seeded_case "a floor of zero"                       test     inject_grounded_zero_floor \
-    'a floor of zero was accepted, and every lane meets it'
+    'a floor of zero was accepted, and every lane meets it' 'lib/capture::grounded::tests'
   seeded_case "supersede deletes what it replaced"    test     inject_object_supersede_deletes \
-    'the voided entry is still here'
+    'the voided entry is still here' 'lib'
   seeded_case "the reconciler stops deduping"         test     inject_object_no_dedup \
-    'the same fact, wrapped differently, is the same fact'
+    'the same fact, wrapped differently, is the same fact' 'lib/object'
   seeded_case "a correction that restates what it voids" test   inject_object_self_void \
-    'an entry was voided by itself'
+    'an entry was voided by itself' 'lib/object::tests'
   seeded_case "a state change over a supersede link"  test     inject_object_state_overwrite \
-    'a correction was erased by a later state change'
+    'a correction was erased by a later state change' 'lib/object::tests'
   seeded_case "a no-op patch that claims an entry"    test     inject_object_false_attribution \
-    'the patch claimed entries no diff can support'
+    'the patch claimed entries no diff can support' 'lib/object::tests'
   seeded_case "a usage error that exits zero"         test     inject_cli_usage_exit \
-    'a usage error must be distinguishable from a bad document'
+    'a usage error must be distinguishable from a bad document' 'test:cli'
   seeded_case "a verb wired to the wrong format"      test     inject_cli_wrong_format \
-    'a valid fixture of its own format did not read'
+    'a valid fixture of its own format did not read' 'test:cli'
   seeded_case "a CLI that prints no result"           test     inject_cli_silent \
-    'stdout is not JSON'
+    'stdout is not JSON' 'test:cli'
   seeded_case "the regime moves under a patch"        test     inject_object_regime_mutable \
-    'moved the regime the object was opened under'
+    'moved the regime the object was opened under' 'lib/object::tests'
   seeded_case "dedup rebinds instead of aliasing"     test     inject_object_no_alias \
-    'a lane was told the object had never heard of the id it chose'
+    'a lane was told the object had never heard of the id it chose' 'lib/object::tests'
   seeded_case "a turn applied in arrival order"       test     inject_object_unsorted_turn \
-    'the outcome of a turn depended on the order its patches arrived in'
+    'the outcome of a turn depended on the order its patches arrived in' 'lib/object::tests'
   seeded_case "a self-supersede through an alias"     test     inject_object_alias_self_void \
-    'was not named as one'
+    'was not named as one' 'lib/object::tests'
   seeded_case "a field kind nothing covers"           test     inject_field_kind_variant \
-    'non-exhaustive patterns'
+    'non-exhaustive patterns' 'lib'
   seeded_case "a subshell read as a group"            test     inject_shell_subshell_as_group \
-    'the bracketed list was not read as a subshell'
+    'the bracketed list was not read as a subshell' 'lib'
   seeded_case "a stderr pipe read as a plain pipe"    test     inject_shell_stderr_pipe_flat \
-    'did not become the duplication it abbreviates'
+    'did not become the duplication it abbreviates' 'lib/formats::shell::tests'
   seeded_case "an expanding word reported literal"    test     inject_shell_expansion_literal \
-    'a word the shell would expand was reported literal'
+    'a word the shell would expand was reported literal' 'lib'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
-    'an empty answer is a recorded answer, not a missing one'
+    'an empty answer is a recorded answer, not a missing one' 'lib/formats::record::tests'
   seeded_case "a tangent drop that deletes"           test     inject_tangent_drop_removes \
-    'a drop evicts to the archive and never deletes'
+    'a drop evicts to the archive and never deletes' 'lib/object::tangent::tests'
 
   seeded_case "a parked entry that still renders"     test     inject_tangent_park_renders \
-    'a parked entry still speaks for the object'
+    'a parked entry still speaks for the object' 'lib/object::tangent::tests'
 
   seeded_case "a tangent scoped by recency"           test     inject_tangent_scope_by_recency \
-    'scope is by provenance, not by recency'
+    'scope is by provenance, not by recency' 'lib/object::tangent::tests'
 
   seeded_case "a tangent closed leaving an entry unruled" test  inject_tangent_undisposed_ignored \
-    'closure is total: a tangent-born entry was left undisposed'
+    'closure is total: a tangent-born entry was left undisposed' 'lib/object::tangent::tests'
 
   seeded_case "a prefix claimed intact, not compared" test     inject_tangent_prefix_asserted \
-    'the prefix was reported intact after the trunk moved'
+    'the prefix was reported intact after the trunk moved' 'lib/object::tangent::tests'
 
   seeded_case "a tangent id opened twice"             test     inject_tangent_id_reused \
-    'a tangent id the record already carries was opened again'
+    'a tangent id the record already carries was opened again' 'lib/object::tangent::tests'
 
   seeded_case "a tangent that dates a fact at the fork" test   inject_tangent_provenance_ignores_turn \
-    'a tangent dated a patch at a turn other than the one it was made at'
+    'a tangent dated a patch at a turn other than the one it was made at' 'lib/object::tangent::tests'
 
   seeded_case "a closure ruling dated at the fork"    test     inject_tangent_ruling_dated_at_fork \
-    'the closure filed its ruling at a turn it did not close at'
+    'the closure filed its ruling at a turn it did not close at' 'lib/object::tangent::tests'
 
   seeded_case "a closure under a coined lane"         test     inject_tangent_closing_lane_coined \
-    'the closure filed its ruling under a lane the record does not already have'
+    'the closure filed its ruling under a lane the record does not already have' 'lib/object::tangent::tests'
 
   seeded_case "a disposition missing from the list"   test     inject_tangent_disposition_missing_from_all \
-    'the dispositions a closure can rule with are not the three the record names'
+    'the dispositions a closure can rule with are not the three the record names' 'lib/object::tangent::tests'
 
   seeded_case "a tangent that offers a settled fact again" test inject_tangent_scope_offers_a_ruled_entry \
-    'the tangent offered a fact the record had already ruled on for disposition a second time'
+    'the tangent offered a fact the record had already ruled on for disposition a second time' 'lib/object::tangent::tests'
 
   seeded_case "a prefix that counts dead trunk rows"  test     inject_tangent_prefix_counts_dead_rows \
-    'a trunk row that was already dead at the fork was counted into the prefix'
+    'a trunk row that was already dead at the fork was counted into the prefix' 'lib/object::tangent::tests'
 
   seeded_case "a prefix called intact whenever it only grew" test inject_tangent_prefix_only_grew \
-    'the prefix was reported unmoved after the trunk wrote a fact of its own'
+    'the prefix was reported unmoved after the trunk wrote a fact of its own' 'lib/object::tangent::tests'
 
   seeded_case "a parked entry that reads as retired"  test     inject_object_park_renders_as_retired \
-    'a state renders under a name the dump does not promise'
+    'a state renders under a name the dump does not promise' 'lib/object::tests'
 
   seeded_case "a park with no tangent behind it"      test     inject_object_park_needs_no_tangent \
-    'an entry was parked under no tangent, so it left the live set'
+    'an entry was parked under no tangent, so it left the live set' 'lib/object::tests'
 
   seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
-    'was constructed, and the grammar would not read it back'
+    'was constructed, and the grammar would not read it back' 'lib'
   seeded_case "the producer read as the last command" test     inject_shell_producer_is_last_written \
-    'produces its output with'
+    'produces its output with' 'lib/formats::shell::tests'
   seeded_case "an operator dropped from the table"    test     inject_shell_operator_table_row_dropped \
-    'the table gained or lost an operator'
+    'the table gained or lost an operator' 'lib/formats::shell::tests'
   seeded_case "a stripping heredoc that keeps tabs"   test     inject_shell_heredoc_strip_keeps_tabs \
-    'did not strip the tabs the shell strips'
+    'did not strip the tabs the shell strips' 'lib/formats::shell::tests'
   seeded_case "the command word read as an operand"   test     inject_shell_command_word_is_an_operand \
-    'the command word is not one of its own operands'
+    'the command word is not one of its own operands' 'lib'
   seeded_case "a regimen float rendered as a string"  test     inject_regimen_float_as_a_string \
-    'a float projected as something other than a decimal'
+    'a float projected as something other than a decimal' 'lib/formats::regimen::tests'
   seeded_case "a table header that opens nothing"     test     inject_regimen_table_scope_flattened \
-    'its keys are not the document.s'
+    'its keys are not the document.s' 'lib/formats::regimen::tests'
   seeded_case "a header comment read as a table"      test     inject_regimen_header_comment_is_a_table \
-    'a comment after a table header is not a table the header opened'
+    'a comment after a table header is not a table the header opened' 'lib/formats::regimen::tests'
   seeded_case "two tables of one name accepted"       test     inject_regimen_table_collision_unchecked \
-    'a table opened twice was not refused'
+    'a table opened twice was not refused' 'lib/formats::regimen::tests'
   seeded_case "the float rule widened past the record" test    inject_regimen_float_rule_widened \
-    'the regimen grammar and the record.s decimal disagree'
+    'the regimen grammar and the record.s decimal disagree' 'lib/formats::regimen::tests'
   seeded_case "a summary the rows do not carry"       recompute inject_recompute_summary_not_derived \
     'the report does not re-derive'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
-    '0 recomputed, 0 declared historical, 1 undeclared'
+    'front-matter .kind. is None'
   seeded_case "a recompute that cannot fail"          recompute inject_recompute_cannot_fail \
+    'does not compare the report to the artefacts'
+  seeded_case "a probe blinded by a trailing comment"  recompute inject_recompute_probe_blinded_by_a_comment \
     'does not compare the report to the artefacts'
   seeded_case "a recompute that edits what it checks"  recompute inject_recompute_tampers \
     'tampering, not recomputation'
@@ -4088,16 +5928,20 @@ selftest() {
     'which is not a file here'
   seeded_case "reproducible, with nothing to run"      recompute inject_recompute_script_missing \
     'carries no recompute.sh'
-  seeded_case "a gate 0 with nothing recomputable"     recompute inject_recompute_nothing_recomputable \
-    'nothing was recomputed'
+  seeded_case "the template carrying the opt-out"      recompute inject_recompute_template_opts_out \
+    'the template declares .historical-observation.'
   seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
     'but the committed file hashes to'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing'
   seeded_case "a nested table flattened"              test     inject_regimen_nested_table_flattened \
-    'holds its own binding and the table below it'
+    'holds its own binding and the table below it' 'lib/formats::regimen::tests'
   seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
-    'an array item was read by something other than the value reader'
+    'an array item was read by something other than the value reader' 'lib/formats::regimen::tests'
+  seeded_case "a merged field an injection cannot see" injections inject_injections_struct_grew \
+    'builds a Provenance without cohort'
+  seeded_case "a literal the scan cannot place"       injections inject_injections_literal_unplaceable \
+    'builds a Ground: declared in 3 places'
   seeded_case "a case naming no injection"            injections inject_case_without_an_injection \
     'named by a seeded case, defined nowhere'
   seeded_case "a stringly predicate in the library"   library  inject_stringly_predicate \
@@ -4108,8 +5952,8 @@ selftest() {
     'object.rs: no .mod. declaration reaches it'
   seeded_case "a stringly predicate cargo fmt wrapped" library inject_stringly_or_pattern \
     'a_decision_tag_that_is_quite_long_indeed'
-  seeded_case "a record missing its substrate"        results  inject_results_no_substrate \
-    'says diet check-record: a .start. row is missing its required .substrate.'
+  seeded_case "a record missing its substrates"       results  inject_results_no_substrate \
+    'says diet check-record: a .start. row is missing its required .substrates.'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
     'front-matter `turns` states 3 but the summary record binds'
   seeded_case "regimen.toml that is not a regimen"    regimen  inject_regimen \
@@ -4124,260 +5968,304 @@ selftest() {
     'hygiene: internal-ticket-id:'
   seeded_case "external subresource on the site"      pages    inject_pages \
     'hygiene: external-subresource:'
+  seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
+    'dogma tag\(s\) absent from diet/formats/interview/tags\.tsv' 'lib/formats::interview'
+  seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \
+    "the projection lost the file's order" 'lib/formats::operating_points'
+  seeded_case "an unmarked entry that shadows another is admitted" test  inject_shadowing_admitted \
+    "the retired spelling is refused" 'lib/formats::operating_points'
+  seeded_case "an integer terminal grown a second time" test     inject_number_terminal_regrown \
+    'it belongs in number\.pest and nowhere else' 'test:conformance/the_integer_terminal'
+  seeded_case "a shared body written out under another name" test inject_number_terminal_body_regrown \
+    'has a shared terminal.s body written out again' 'test:conformance/the_integer_terminal'
+  seeded_case "historical, and carrying a recompute"   recompute inject_recompute_historical_with_a_script \
+    'declares .historical-observation. and carries a recompute\.sh'
+  seeded_case "historical with no reason stated"       recompute inject_recompute_historical_without_a_reason \
+    'states no .historical_reason.'
+  seeded_case "historical with a reason that says nothing" recompute inject_recompute_historical_reason_blank \
+    'states no .historical_reason.'
+  seeded_case "only the template recomputes"           recompute inject_recompute_only_the_template_recomputes \
+    'results are present and none recomputed'
   seeded_case "a check no workflow runs"              ci       inject_ci \
     'has no owner in check-owners\.tsv'
+  seeded_case "pull requests filtered by branch"      ci       inject_ci_pr_branch_filter \
+    'carries .branches: \[main\]. and is reached'
+  seeded_case "CI narrowing the test check"           ci       inject_ci_scoped_test \
+    'passes .--scope. to verify\.sh'
+  seeded_case "the trunk gated by no push run"        ci       inject_ci_push_ungated \
+    'and has no .push:. trigger'
+  seeded_case "one workflow renaming the trunk"       ci       inject_ci_trunk_typo \
+    'disagree about which branch is the trunk'
+  seeded_case "the trunk's name left uncorroborated"  ci       inject_ci_trunk_uncorroborated \
+    'is the only workflow naming the trunk'
   seeded_case "parity drifts from what is proven"     parity   inject_parity \
     'which verify\.sh does not prove'
+  seeded_case "a signature its own scope line matches" parity  inject_parity_scope_signature \
+    'matches the line naming its own scope'
   seeded_case "a forbidden id in a commit message"    history  inject_history \
     'hygiene: internal-ticket-id:'
+  seeded_case "content added and then removed"        history  inject_history_added_then_removed \
+    'hygiene: private-ipv4: .*patch-'
   seeded_case "history with an undeterminable base"   history  inject_history_no_base \
     'an undeterminable base is a failure, not an empty scan'
   seeded_case "an ask wired to another class's question" test inject_router_ask_class_untuned \
-    'the ask does not ask its own question'
+    'the ask does not ask its own question' 'lib/capture::router::tests'
   seeded_case "a template without the imperative"     test     inject_router_ask_imperative_dropped \
-    'the ask does not carry the fork-local imperative'
+    'the ask does not carry the fork-local imperative' 'lib/capture::router::tests'
   seeded_case "a census that miscounts which classes fired" test inject_router_census_class_miscounted \
-    'the census does not say which classes fired'
+    'the census does not say which classes fired' 'lib/capture::router::tests'
   seeded_case "a route verb answering with a hollow census" test inject_router_route_census_hollow \
-    'where the drive spends'
+    'where the drive spends' 'test:cli'
   seeded_case "a table row that can never fire"       test     inject_router_table_row_shadowed \
-    'can never fire'
+    'can never fire' 'lib/capture::router::tests'
   seeded_case "a corpus that stops covering a class"  test     inject_router_corpus_class_uncovered \
-    'call\(s\) in the corpus, fewer than'
+    'call\(s\) in the corpus, fewer than' 'lib/capture::router::tests'
   seeded_case "a table row skipped, not refused"      test     inject_router_table_row_skipped \
-    'was skipped rather than refused'
+    'was skipped rather than refused' 'lib/capture::router::tests'
   seeded_case "an intent taken from any lane"         test     inject_router_intent_lane_ignored \
-    'did not quote back what the model said it was about to do'
+    'did not quote back what the model said it was about to do' 'lib/capture::router::tests'
   seeded_case "the first stated intent, not the last" test     inject_router_intent_first_not_last \
-    'quoted an intent the model had already moved past'
+    'quoted an intent the model had already moved past' 'lib/capture::router::tests'
   seeded_case "an intent marker lost from the table"  test     inject_router_intent_marker_lost \
-    'a marker was added or lost without a sentence that reaches it'
+    'a marker was added or lost without a sentence that reaches it' 'lib/capture::router::tests'
   seeded_case "an unclassified call nobody can look up" test   inject_router_unclassified_unattributed \
-    'must name the call, its turn, its tool and its word'
+    'must name the call, its turn, its tool and its word' 'lib/capture::router::tests'
   seeded_case "the declared default out of the vocabulary" test inject_router_class_vocabulary_shortened \
-    'left the vocabulary without leaving the tests that walk it'
+    'left the vocabulary without leaving the tests that walk it' 'lib/capture::router::tests'
   seeded_case "a quoted substitution descended into"  test     inject_mechanical_quoted_substitution \
-    'a single-quoted substitution was descended into'
+    'a single-quoted substitution was descended into' 'lib'
   seeded_case "the declared default replaced by silence" test   inject_router_unknown_silent \
-    'an unknown pattern must route to the declared default, never to silence'
+    'an unknown pattern must route to the declared default, never to silence' 'lib/capture::router::tests'
   seeded_case "a judgment ask released mid-turn"      test     inject_router_judgment_mid_turn \
-    'a judgment ask fired in the middle of a turn'
+    'a judgment ask fired in the middle of a turn' 'lib/capture::router::tests'
   seeded_case "a row of the routing table lost"       test     inject_router_table_row_lost \
-    'misrouted call'
+    'misrouted call' 'lib/capture::router::tests'
   seeded_case "an unknown call routed but not recorded" test   inject_router_unclassified_silent \
-    'an unknown pattern must be a typed event'
+    'an unknown pattern must be a typed event' 'lib/capture::router::tests'
   seeded_case "a reduction claimed, not computed"     test     inject_router_reduction_claimed \
-    'the reduction is not the number its own counts give'
+    'the reduction is not the number its own counts give' 'lib/capture::router::tests'
   seeded_case "a subshell that shares the parent state" test   inject_mechanical_subshell_leaks \
-    'the subshell cd leaked into the parent'
+    'the subshell cd leaked into the parent' 'lib/capture::mechanical::tests'
   seeded_case "a failed cd applied anyway"            test     inject_mechanical_failed_cd_applied \
-    'a failed cd moved the working directory'
+    'a failed cd moved the working directory' 'lib/capture::mechanical::tests'
   seeded_case "popd on an empty stack ignored"        test     inject_mechanical_popd_empty_ignored \
-    'popd on an empty stack was silently ignored'
+    'popd on an empty stack was silently ignored' 'lib/capture::mechanical::tests'
   seeded_case "the mechanical-noun table emptied"     test     inject_mechanical_lint_table_emptied \
-    'a question about a mechanical fact went unflagged'
+    'a question about a mechanical fact went unflagged' 'lib/capture::mechanical::tests'
   seeded_case "a mechanical entry sent through the gate" test  inject_mechanical_entry_grounded \
-    'a mechanical entry was dropped as if it needed grounding'
+    'a mechanical entry was dropped as if it needed grounding' 'lib/capture::mechanical::tests'
   seeded_case "a cosine that forgot its second norm"  test     inject_sense_cosine_unnormalised \
-    'cosine of a vector with itself was not one'
+    'cosine of a vector with itself was not one' 'lib/capture'
   seeded_case "contrastive scoring that ignores the negative sense" test inject_sense_contrastive_ignores_negative \
-    'the contrastive score ignored the negative sense'
+    'the contrastive score ignored the negative sense' 'lib/capture::sense::tests'
   seeded_case "a null whose labels are never shuffled" test   inject_sense_null_labels_unshuffled \
-    'd-prime on a shuffled-label null was far from zero'
+    'd-prime on a shuffled-label null was far from zero' 'lib/capture::sense::tests'
   seeded_case "a bootstrap p with no attainable floor" test   inject_sense_p_without_floor \
-    'a bootstrap p-value came without its attainable floor'
+    'a bootstrap p-value came without its attainable floor' 'lib/capture::sense::tests'
   seeded_case "a metric whose failure fixture is gone" test   inject_sense_metric_fixture_removed \
-    'no failure fixture, so it can never be reported'
+    'no failure fixture, so it can never be reported' 'lib/capture::sense::tests'
   seeded_case "a register mislabelled at its source" test     inject_sense_register_source_mislabelled \
-    'and a row says otherwise'
+    'and a row says otherwise' 'lib/capture::sense::tests'
   seeded_case "a file in the register naming nothing"  test     inject_sense_register_unnamed_file \
-    'not a declared sidecar'
+    'not a declared sidecar' 'lib/capture::sense::tests'
   seeded_case "a mined row nobody can trace"          test     inject_sense_provenance_join_dropped \
-    'a row nobody can trace was accepted'
+    'a row nobody can trace was accepted' 'lib/capture::sense::tests'
   seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
-    'two lines were read as one, and the second was lost'
+    'two lines were read as one, and the second was lost' 'lib/formats::record::json::tests'
   seeded_case "controls that never look at the register" test inject_sense_controls_ignore_register \
-    'a register row reached the top control and the controls passed'
+    'a register row reached the top control and the controls passed' 'lib/capture::sense::tests'
   seeded_case "a bootstrap that never resamples"      test     inject_sense_bootstrap_never_resamples \
-    'every resample was the observed difference'
+    'every resample was the observed difference' 'lib/capture::sense::tests'
   seeded_case "a failure reading off the worst reading" test   inject_sense_failure_reading_moved \
-    'is the worst the metric can say'
+    'is the worst the metric can say' 'lib/capture::sense::tests'
   seeded_case "a pre-registration with nothing in it" test     inject_sense_pre_registration_emptied \
-    'the primary endpoint is not the endpoint that was registered'
+    'the primary endpoint is not the endpoint that was registered' 'lib/capture::sense::tests'
   seeded_case "a lexical gate asked about the id"     test     inject_sense_gate_reads_the_id \
-    'the gate did not decide on the row'
+    'the gate did not decide on the row' 'lib/capture::sense::tests'
   seeded_case "a separation over one class spread"    test     inject_sense_d_prime_unpooled \
-    'd-prime was standardised by one class'
+    'd-prime was standardised by one class' 'lib/capture::sense::tests'
   seeded_case "a null band widened past a finding"    test     inject_sense_null_band_widened \
-    'bands are not the numbers they were registered as'
+    'bands are not the numbers they were registered as' 'lib/capture::sense::tests'
   seeded_case "a reported metric that reports a constant" test inject_sense_reported_value_constant \
-    'the record of a metric is not the numbers the metric produced'
+    'the record of a metric is not the numbers the metric produced' 'lib/capture::sense::tests'
   seeded_case "the mechanical lane renamed"           test     inject_mechanical_lane_renamed \
-    'the lane was renamed'
+    'the lane was renamed' 'lib/capture::mechanical::tests'
   seeded_case "an option word read as a directory"    test     inject_mechanical_option_is_a_directory \
-    'an option word was read as the directory it names'
+    'an option word was read as the directory it names' 'lib/capture::mechanical::tests'
   seeded_case "a flag value read as a file"           test     inject_mechanical_flag_value_is_a_file \
-    'the lane read a file out of a flag.s value'
+    'the lane read a file out of a flag.s value' 'lib/capture::mechanical::tests'
   seeded_case "an entry with the wrong verb"          test     inject_mechanical_entry_verb_swapped \
-    'the entry used the wrong verb for what happened to the file'
+    'the entry used the wrong verb for what happened to the file' 'lib/capture::mechanical::tests'
   seeded_case "a pipeline whose members never run"    test     inject_mechanical_pipeline_skipped \
-    'nothing in the pipeline ran'
+    'nothing in the pipeline ran' 'lib/capture::mechanical::tests'
   seeded_case "a write lost to a read of the same path" test   inject_mechanical_write_lost_to_a_read \
-    'a write was lost to a read of the same path in the same call'
+    'a write was lost to a read of the same path in the same call' 'lib/capture::mechanical::tests'
   seeded_case "the resolver keying on a comment"       resolver inject_keyed_by_a_comment \
     'keyed as .*inject_alpha'
+  seeded_case "a build failure read as a broken derivation" derive inject_derive_build_failure_unread \
+    'the wrecked target read as'
+  seeded_case "a scope past its own failure accepted"  derive   inject_derive_accepts_a_fast_green \
+    'a scope naming another target selected something'
   seeded_case "a run directory inside a run directory" results inject_results_nested_directory \
     'a run directory inside a run directory'
   seeded_case "a verdict read by prefix"               test     inject_verdict_prefix_accepted \
-    'verdict-as-a-prefix\.txt: accepted as'
+    'verdict-as-a-prefix\.txt: accepted as' 'test:conformance/formats::verdict'
   seeded_case "an identifier in a reason read as a verdict" test inject_verdict_identifier_read_as_a_verdict \
-    'reason-naming-an-identifier\.txt: rejected'
+    'reason-naming-an-identifier\.txt: rejected' 'test:conformance/formats::verdict'
   seeded_case "a second verdict in a reason accepted"  test     inject_verdict_second_verdict_accepted \
-    'two-verdicts\.txt: accepted as'
+    'two-verdicts\.txt: accepted as' 'test:conformance/formats::verdict'
   seeded_case "an anchor matched inside a longer word"  test     inject_collector_substring_match \
-    'an anchor matched inside a longer word'
+    'an anchor matched inside a longer word' 'lib/capture::collector::literal::tests'
   seeded_case "an English word made an anchor"         test     inject_collector_english_anchor \
-    'an English word became an anchor'
+    'an English word became an anchor' 'lib/capture::collector::literal::tests'
   seeded_case "an entry nominated by its own turn"     test     inject_collector_self_nomination \
-    'an entry nominated itself'
+    'an entry nominated itself' 'lib/capture::collector::literal::tests'
   seeded_case "a supersession that adds without voiding" test   inject_reconcile_supersede_without_voiding \
-    'the old entry was not voided'
+    'the old entry was not voided' 'lib/capture::collector::reconcile::tests'
   seeded_case "a verdict that settles nothing settling"  test   inject_reconcile_partial_applies_a_patch \
-    'PARTIAL produced a patch'
+    'PARTIAL produced a patch' 'lib/capture::collector::reconcile::tests'
   seeded_case "an uncalibrated nomination policy accepted" test inject_collector_uncalibrated_policy \
-    'the fixture policy was accepted by the door that ships'
+    'the fixture policy was accepted by the door that ships' 'lib/capture::collector::sense::tests'
   seeded_case "a nomination budget ignored"           test     inject_collector_budget_ignored \
-    'the budget did not bind'
+    'the budget did not bind' 'lib/capture::collector::sense::tests'
   seeded_case "a turn that nominates only its first entry" test inject_collector_one_nomination_per_turn \
-    'a turn that named two anchors nominated fewer than two entries'
+    'a turn that named two anchors nominated fewer than two entries' 'lib/capture::collector::literal::tests'
   seeded_case "a voided entry nominated by tier 0" test inject_collector_voided_entry_renominated \
-    'a voided entry was nominated again by the literal tier'
+    'a voided entry was nominated again by the literal tier' 'lib/capture::collector::literal::tests'
   seeded_case "a hit that says nothing about where" test inject_collector_hit_offset_lost \
-    'the hits did not say where the anchor recurred'
+    'the hits did not say where the anchor recurred' 'lib/capture::collector::literal::tests'
   seeded_case "an overlapping anchor scan" test inject_collector_overlapping_scan \
-    'an anchor that overlaps itself was counted at every shifted position'
+    'an anchor that overlaps itself was counted at every shifted position' 'lib/capture::collector::literal::tests'
   seeded_case "a double-quoted span that is not an anchor" test inject_collector_quoted_anchor_delimiter \
-    'a double-quoted span was not anchored'
+    'a double-quoted span was not anchored' 'lib/capture::collector::literal::tests'
   seeded_case "a two-byte shape read as an anchor" test inject_collector_short_shape_anchored \
-    'a two-byte shape was anchored'
+    'a two-byte shape was anchored' 'lib/capture::collector::literal::tests'
   seeded_case "a module path that is not an identifier" test inject_collector_module_path_shape \
-    'a path through the module tree was not anchored'
+    'a path through the module tree was not anchored' 'lib/capture::collector::literal::tests'
   seeded_case "a sentence word read as a file extension" test inject_collector_extension_window \
-    'a dotted word whose tail is a word was read as a file name'
+    'a dotted word whose tail is a word was read as a file name' 'lib/capture::collector::literal::tests'
   seeded_case "an anchor with the sentence still on it" test inject_collector_token_untrimmed \
-    'the punctuation prose hung on a token was kept as part of the anchor'
+    'the punctuation prose hung on a token was kept as part of the anchor' 'lib/capture::collector::literal::tests'
   seeded_case "anchor kinds that swapped their names" test inject_collector_anchor_kind_permuted \
-    'the anchor kind vocabulary is not what it promises'
+    'the anchor kind vocabulary is not what it promises' 'lib/capture::collector::tests'
   seeded_case "a source vocabulary with no members" test inject_collector_source_vocabulary_emptied \
-    'the source vocabulary is not what it promises'
+    'the source vocabulary is not what it promises' 'lib/capture::collector::tests'
   seeded_case "a nomination that names the other tier" test inject_collector_tier_name_swapped \
-    'a nomination named the wrong tier'
+    'a nomination named the wrong tier' 'lib/capture::collector::tests'
   seeded_case "registers that swapped their names" test inject_collector_register_permuted \
-    'the register vocabulary is not what it promises'
+    'the register vocabulary is not what it promises' 'lib/capture::collector::tests'
   seeded_case "a lexical pre-gate the tier ignores" test inject_collector_gate_ignored \
-    'a turn carrying no seed was scored by a gated policy anyway'
+    'a turn carrying no seed was scored by a gated policy anyway' 'lib/capture::collector::sense::tests'
   seeded_case "a turn-level threshold never compared" test inject_collector_turn_threshold_ignored \
-    'an unremarkable turn nominated'
+    'an unremarkable turn nominated' 'lib/capture::collector::sense::tests'
   seeded_case "a per-entry threshold never compared" test inject_collector_entry_threshold_ignored \
-    'the tier nominated an entry the turn was not about'
+    'the tier nominated an entry the turn was not about' 'lib/capture::collector::sense::tests'
   seeded_case "a turn scored against the wrong sense set" test inject_collector_wrong_sense_set \
-    'a turn about a mistaken assumption was scored as a reversal'
+    'a turn about a mistaken assumption was scored as a reversal' 'lib/capture::collector::sense::tests'
   seeded_case "an intent register that reads the prose" test inject_collector_intent_register_reads_the_prose \
-    'the tier measured the prose of the turn where it should have measured the stated intent'
+    'the tier measured the prose of the turn where it should have measured the stated intent' 'lib/capture::collector::sense::tests'
   seeded_case "a budget spent on the worst candidates" test inject_collector_budget_takes_the_worst \
-    'the budget was spent on the entries that scored lowest'
+    'the budget was spent on the entries that scored lowest' 'lib/capture::collector::sense::tests'
   seeded_case "a nomination score nothing measured" test inject_collector_score_not_measured \
-    'a nomination carried a score nothing measured'
+    'a nomination carried a score nothing measured' 'lib/capture::collector::sense::tests'
   seeded_case "an entry nominated by its own turn at tier 1" test inject_collector_sense_self_nomination \
-    'an entry born in this turn nominated itself'
+    'an entry born in this turn nominated itself' 'lib/capture::collector::sense::tests'
   seeded_case "a voided entry nominated by tier 1" test inject_collector_sense_voided_entry_renominated \
-    'a voided entry was nominated again by the sense tier'
+    'a voided entry was nominated again by the sense tier' 'lib/capture::collector::sense::tests'
   seeded_case "a report that drops half its policy" test inject_collector_report_drops_the_policy \
-    'the report did not say which scoring produced it'
+    'the report did not say which scoring produced it' 'lib/capture::collector::sense::tests'
   seeded_case "a calibration that names no run" test inject_collector_policy_names_no_run \
-    'was read as a calibration'
+    'was read as a calibration' 'lib/capture::collector::sense::tests'
   seeded_case "a supersession that writes a constant" test inject_reconcile_supersede_writes_a_constant \
-    'the superseding entry does not say what superseded the old one'
+    'the superseding entry does not say what superseded the old one' 'lib/capture::collector::reconcile::tests'
   seeded_case "a supersession with no fork behind it" test inject_reconcile_supersede_loses_its_fork \
-    'the superseding entry does not say which fork produced it'
+    'the superseding entry does not say which fork produced it' 'lib/capture::collector::reconcile::tests'
   seeded_case "a patch the reconciler never hands back" test inject_reconcile_patch_never_handed_back \
-    'a verdict that produced a patch did not hand it back'
+    'a verdict that produced a patch did not hand it back' 'lib/capture::collector::reconcile::tests'
   seeded_case "a PARTIAL counted as a false nomination" test inject_reconcile_partial_read_as_a_false_nomination \
-    'a fork that said the prose bears on the entry was read as a false nomination'
+    'a fork that said the prose bears on the entry was read as a false nomination' 'lib/capture::collector::reconcile::tests'
   seeded_case "a mention applied as a supersession" test inject_reconcile_mention_superseded \
-    'NOT_THIS produced a patch'
+    'NOT_THIS produced a patch' 'lib/capture::collector::reconcile::tests'
   seeded_case "self-capture exempt from grounding"    test     inject_tools_ungrounded \
-    'modality does not exempt a lane from grounding'
+    'modality does not exempt a lane from grounding' 'lib/capture::tools::tests'
   seeded_case "a reminder cadence that never fires"   test     inject_tools_reminder_silent \
-    'ten silent turns must be reminded at every third turn'
+    'ten silent turns must be reminded at every third turn' 'lib/capture::tools::tests'
   seeded_case "a harness tool call read as a capture" test     inject_tools_foreign_call \
-    'a harness tool call is not a capture tool and writes nothing'
+    'a harness tool call is not a capture tool and writes nothing' 'lib/capture::tools::tests'
   seeded_case "a phase proposal that writes a fact"   test     inject_tools_proposal_writes \
-    'a phase-transition proposal is advisory and writes nothing'
+    'a phase-transition proposal is advisory and writes nothing' 'lib/capture::tools::tests'
   seeded_case "a capture grounded in its own echo"   test     inject_tools_self_echo \
-    'a harness that repeats a capture back grounded the capture in itself'
+    'a harness that repeats a capture back grounded the capture in itself' 'lib/capture::tools::tests'
   seeded_case "a capture grounded in a later turn"   test     inject_tools_future_output \
-    'a turn-1 capture was grounded in a turn-2 tool output'
+    'a turn-1 capture was grounded in a turn-2 tool output' 'lib/capture::tools::tests'
   seeded_case "a superseding entry with a minted id" test     inject_tools_supersede_minted \
-    'a superseding entry id must be derived from the row that carried it'
+    'a superseding entry id must be derived from the row that carried it' 'lib/capture::tools::tests'
   seeded_case "a verdict that resolves elsewhere"    test     inject_tools_resolve_elsewhere \
-    'a verdict resolved an entry the model never named'
+    'a verdict resolved an entry the model never named' 'lib/capture::tools::tests'
   seeded_case "the asks reworded to nothing"         test     inject_tools_ask_words \
-    'the words this lane says out loud are the only product it has'
+    'the words this lane says out loud are the only product it has' 'lib/capture::tools::tests'
   seeded_case "an ask that drops its own question"   test     inject_tools_ask_question_dropped \
-    'an ask carrying a deferral is the question and then the deferral'
+    'an ask carrying a deferral is the question and then the deferral' 'lib/capture::tools::tests'
   seeded_case "the sweep asking as the cadence"      test     inject_tools_sweep_kind \
-    'the sweep and the cadence are one ask wearing two names'
+    'the sweep and the cadence are one ask wearing two names' 'lib/capture::tools::tests'
   seeded_case "a closed choice left in its own case" test     inject_tools_choice_uncanonical \
-    'a harness may shout a closed choice back at us'
+    'a harness may shout a closed choice back at us' 'lib/capture::tools::tests'
   seeded_case "a phase proposal with no reason"      test     inject_tools_proposal_reasonless \
-    'the reason is the whole of what it carries into one'
+    'the reason is the whole of what it carries into one' 'lib/capture::tools::tests'
   seeded_case "a reminder that drops the deferral"   test     inject_tools_reminder_deferral_dropped \
-    'the cadence reminded without what the router put off in that turn'
+    'the cadence reminded without what the router put off in that turn' 'lib/capture::tools::tests'
   seeded_case "tools described in one character"     test     inject_tools_description_thin \
-    'a foreign harness registers this text verbatim'
+    'a foreign harness registers this text verbatim' 'lib/capture::tools::tests'
   seeded_case "an offered tool the contract omits"   test     inject_tools_contract_undescribed \
-    'an offered tool with no row is refused before a harness ever sees it'
+    'an offered tool with no row is refused before a harness ever sees it' 'lib/capture::tools::tests'
   seeded_case "one tool described twice"             test     inject_tools_contract_duplicate \
-    'one tool described twice leaves the harness to the order of the file'
+    'one tool described twice leaves the harness to the order of the file' 'lib/capture::tools::tests'
   seeded_case "a verdict the lane cannot honour"     test     inject_tools_verdict_list_open \
-    'this lane refuses it at runtime: the model is invited to say a word'
+    'this lane refuses it at runtime: the model is invited to say a word' 'lib/capture::tools::tests'
   seeded_case "a turn swept after it recorded"       test     inject_tools_silent_kept \
-    'a turn the model did record in the end was swept anyway'
+    'a turn the model did record in the end was swept anyway' 'lib/capture::tools::tests'
   seeded_case "the object reader with no limit"      test     inject_record_objects_undepthed \
-    'one level past the limit must be a verdict from `objects`'
+    'one level past the limit must be a verdict from `objects`' 'lib/formats::record::tests'
   seeded_case "a corpus that drives one tool"       test     inject_tools_corpus_one_tool \
-    'is offered to the model and no corpus case ever calls it'
+    'is offered to the model and no corpus case ever calls it' 'lib/capture::tools::tests'
   seeded_case "the ablation's control arm dropped"     test     inject_ablation_no_control \
-    'the control arm is missing: an ablation with no sentence-removed arm'
+    'the control arm is missing: an ablation with no sentence-removed arm' 'lib/capture::ablation::tests'
   seeded_case "silence counted as engagement"          test     inject_ablation_silence_engages \
-    'counted as engagement and as silence at once'
+    'counted as engagement and as silence at once' 'lib/capture::ablation::tests'
   seeded_case "a p reported without its floor"         test     inject_ablation_p_floor_dropped \
-    'a p reported without its attainable floor'
+    'a p reported without its attainable floor' 'lib/capture::ablation::tests'
   seeded_case "a resample that draws once"            test     inject_ablation_resample_single_draw \
-    'the resamples no longer draw one outcome for every fork'
+    'the resamples no longer draw one outcome for every fork' 'lib/capture::ablation::tests'
   seeded_case "a generator that never advances"       test     inject_ablation_frozen_generator \
-    'a seeded draw did not reach every fork in 64 tries'
+    'a seeded draw did not reach every fork in 64 tries' 'lib/capture::ablation::tests'
   seeded_case "each arm credited with the other's"    test     inject_ablation_rates_swapped \
-    'the first arm held on 5 of these 6 forks and the bootstrap counted'
+    'the first arm held on 5 of these 6 forks and the bootstrap counted' 'lib/capture::ablation::tests'
   seeded_case "the silence endpoint unregistered"     test     inject_ablation_endpoint_dropped \
-    'the pre-registration no longer carries two endpoints'
+    'the pre-registration no longer carries two endpoints' 'lib/capture::ablation::tests'
   seeded_case "one imperative for every arm"          test     inject_ablation_plan_one_imperative \
-    'the plan does not pair the arm'
+    'the plan does not pair the arm' 'lib/capture::ablation::tests'
   seeded_case "two arms under one name"               test     inject_ablation_arm_names_collide \
-    'two arms of the ablation are reported under one name'
+    'two arms of the ablation are reported under one name' 'lib/capture::ablation::tests'
   seeded_case "an arm's clauses run together"         test     inject_ablation_clauses_run_together \
-    'the imperative an arm puts in the fork is not its clauses separated by one'
+    'the imperative an arm puts in the fork is not its clauses separated by one' 'lib/capture::ablation::tests'
   seeded_case "a placeholder nobody counts"           test     inject_ablation_placeholder_word_dropped \
-    'the-placeholder-words-nobody-replaced: graded .engaged. where the corpus says .inert.'
+    'the-placeholder-words-nobody-replaced: graded .engaged. where the corpus says .inert.' 'lib/capture::ablation::tests'
   seeded_case "a blank clause text admitted"          test     inject_ablation_blank_clause_allowed \
-    'a clause table with a blank clause text was not refused for that reason'
+    'a clause table with a blank clause text was not refused for that reason' 'lib/capture::ablation::tests'
   seeded_case "a grading case quietly dropped"        test     inject_ablation_corpus_case_dropped \
-    'the corpus holds a case with no expectation or an expectation with no case'
+    'the corpus holds a case with no expectation or an expectation with no case' 'lib/capture::ablation::tests'
   seeded_case "an untagged decline read as content"   test     inject_ablation_untagged_decline_engages \
-    'an-untagged-decline: graded .engaged. where the corpus says .inert.'
+    'an-untagged-decline: graded .engaged. where the corpus says .inert.' 'lib/capture::ablation::tests'
   seeded_case "the second reader left unbounded"      test     inject_json_objects_unbounded \
-    'a JSON Lines reader that does not bound its nesting'
+    'a JSON Lines reader that does not bound its nesting' 'lib/formats::record::json::tests'
+  seeded_case "a lane free to change substrate"       test     inject_record_lane_may_change_substrate \
+    'lane-changes-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a substrate reference inferred from a count" test inject_record_substrate_reference_inferred_from_a_count \
+    'one-substrate-and-a-request-elsewhere\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a fork that names no substrate"         test     inject_record_a_fork_names_no_substrate \
+    'fork-names-an-undeclared-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+  seeded_case "a canned substrate that need not say which acts" test inject_record_canned_acts_optional \
+    'canned-with-no-acts-digest\.jsonl: accepted as' 'test:conformance/formats::record'
 
   echo
   echo "--- results fixtures, checked directly ---"
@@ -4399,6 +6287,7 @@ selftest() {
     [ -n "$name" ] && WANT["$name"]="$want"
   done < <(cd "${ROOT}" && python3 scripts/check-fault-manifest.py --fixture-classes)
   for dir in "${ROOT}"/tests/fixtures/results-bad/*/; do
+    in_shard || continue
     rc=0; name="$(basename "$dir")"
     out="$(python3 "${ROOT}/scripts/check-results.py" "$dir" 2>&1)" || rc=$?
     want="${WANT[$name]-}"
@@ -4428,22 +6317,214 @@ selftest() {
   # remove.
   local relay; scratch; relay="$SCRATCH"
   cp -r "${ROOT}/results/_template" "${relay}/2026-01-30-no-substrate"
-  python3 - "${relay}/2026-01-30-no-substrate/run.jsonl" <<'EOF'
-import json, pathlib, sys
-
-path = pathlib.Path(sys.argv[1])
-lines = path.read_text(encoding="utf-8").split("\n")
-row = json.loads(lines[0])
-del row["regime"]["substrate"]
-lines[0] = json.dumps(row, separators=(",", ":"))
-path.write_text("\n".join(lines), encoding="utf-8")
-EOF
+  strip_substrates "${relay}/2026-01-30-no-substrate/run.jsonl"
   expect_exit "a record diet refuses gets no verdict from the linter" 0 \
     bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
       && out=\$(python3 scripts/check-results.py '${relay}/2026-01-30-no-substrate' 2>&1; true) \
-      && grep -q 'says diet check-record: a .start. row is missing its required .substrate.' <<<\"\$out\" \
+      && grep -q 'says diet check-record: a .start. row is missing its required .substrates.' <<<\"\$out\" \
       && ! grep -qE 'front-matter|summary row|product_sha256' <<<\"\$out\" \
       && grep -q 'record verdicts from .* sha256=' <<<\"\$out\""
+
+  # --- #50: the three defects a Mac seat found, each asserted here ---
+  #
+  # Every one of them was a verdict that depended on the machine or on the
+  # operation, and every one was invisible on the machine that had the
+  # forgiving behaviour. That is the class these assertions exist for.
+
+  # A force-push orphans the sha the push payload names as `before`, so it is
+  # absent from CI's fresh checkout. That is the EXPECTED shape of a
+  # legitimate operation -- this repository's own rules mandate rebases, so
+  # the check was guaranteed to redden the lane that gates the merge on a
+  # branch whose content is fine.
+  # IN A REPOSITORY OF THEIR OWN, not in this one. These ran against `$ROOT`
+  # and passed on every full clone; `actions/checkout` takes a SHALLOW one, so
+  # in CI `HEAD~1` did not resolve and `origin/main` did not exist, and both
+  # assertions failed for reasons that had nothing to do with what they test.
+  # An assertion whose subject is "the checkout you happen to have" is the
+  # same defect as the one it was written for -- a verdict that depends on the
+  # machine -- so it builds the shape it needs instead.
+  local pushes; scratch; pushes="$SCRATCH"
+  (
+    cd "$pushes" && git init -q .
+    git -c user.email=gate@example.invalid -c user.name=gate \
+      commit -q --allow-empty -m "a trunk commit"
+    git update-ref refs/remotes/origin/main HEAD
+    git -c user.email=gate@example.invalid -c user.name=gate \
+      commit -q --allow-empty -m "one"
+    git -c user.email=gate@example.invalid -c user.name=gate \
+      commit -q --allow-empty -m "two"
+  ) > /dev/null 2>&1
+  cp -r "${ROOT}/scripts" "${pushes}/scripts"
+  printf '{"before":"0123456789012345678901234567890123456789","after":"%s"}' \
+    "$(git -C "$pushes" rev-parse HEAD)" > "${pushes}/force.json"
+  printf '{"before":"%s","after":"%s"}' \
+    "$(git -C "$pushes" rev-parse HEAD~1)" "$(git -C "$pushes" rev-parse HEAD)" \
+    > "${pushes}/ordinary.json"
+  expect_exit "a force-push is scanned, not refused" 0 \
+    bash -c "cd '${pushes}' && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
+      GITHUB_EVENT_PATH='${pushes}/force.json' python3 scripts/check-history.py \
+      | grep -q 'push, force-push: merge-base..after'"
+  expect_exit "an ordinary push still scans before..after" 0 \
+    bash -c "cd '${pushes}' && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
+      GITHUB_EVENT_PATH='${pushes}/ordinary.json' python3 scripts/check-history.py \
+      | grep -q 'push before..after'"
+
+  # A base that is genuinely undeterminable is still a failure. The fallback
+  # above must not have turned "I cannot tell what to scan" into "scan the
+  # trunk", which would be an empty scan wearing a verdict.
+  local lonely; scratch; lonely="$SCRATCH"
+  ( cd "$lonely" && git init -q . \
+    && git -c user.email=gate@example.invalid -c user.name=gate \
+         commit -q --allow-empty -m "only commit" ) > /dev/null 2>&1
+  cp -r "${ROOT}/scripts" "${lonely}/scripts"
+  printf '{"before":"0123456789012345678901234567890123456789","after":"HEAD"}' \
+    > "${lonely}/event.json"
+  expect_exit "no trunk to fall back to is still undeterminable" 2 \
+    bash -c "cd '${lonely}' && GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
+      GITHUB_EVENT_PATH='${lonely}/event.json' \
+      GITHUB_SHA=\$(git rev-parse HEAD) python3 scripts/check-history.py"
+
+  # `resolve-diet` decides staleness by asking the source what it EMBEDS. A
+  # grammar and a dogma template are compiled in; a conformance fixture and a
+  # register corpus are data the binary reads at test time. Before this, the
+  # whole of `diet/` counted, so editing a fixture made `--only regimen` exit
+  # 2 until the binary was relinked -- and `cargo build` did not clear it,
+  # because cargo correctly rebuilds nothing.
+  #
+  # EACH PUTS THE TREE BACK. These two touch a real file and then ask about
+  # the real binary, so an assertion that left the binary stale would hand
+  # every assertion after it a tree it did not make -- which is what happened:
+  # `a pin spelled with ./ is the same pin` read exit 2 from a grammar this
+  # block had touched three lines earlier.
+  expect_exit "a grammar makes the binary stale" 2 \
+    bash -c "cd '${ROOT}' && touch diet/src/lib.rs && cargo build --quiet --bin diet \
+      && touch diet/formats/record/grammar.pest \
+      ; python3 scripts/resolve-diet.py > /dev/null 2>&1; rc=\$? \
+      ; touch diet/src/lib.rs && cargo build --quiet --bin diet; exit \$rc"
+  expect_exit "a conformance fixture does not" 0 \
+    bash -c "cd '${ROOT}' && touch diet/src/lib.rs && cargo build --quiet --bin diet \
+      && touch diet/formats/record/fixtures/valid/minimal.expected.json \
+      ; python3 scripts/resolve-diet.py > /dev/null 2>&1; rc=\$? \
+      ; touch diet/src/lib.rs && cargo build --quiet --bin diet; exit \$rc"
+
+  # A BINARY WHOSE DEP-INFO CANNOT SAY WHAT IT EMBEDS IS NOT THEREBY FRESH.
+  #
+  # The narrowing above reads `target/debug/diet.d` for the embedded set.
+  # When there is none to read, `embedded()` used to return an empty list
+  # under a comment calling that "a smaller list, not a wrong one". Both
+  # halves of its reasoning were true and the conclusion was not: the answer
+  # this feeds is a NEGATIVE one -- nothing is newer than the binary -- and a
+  # list with the grammars missing produces that answer for a binary whose
+  # grammars have changed.
+  #
+  # Every binary pinned through `DIET_BIN` carries no `.d`, so the embedded
+  # half of rule three was switched off for exactly the case the rule was
+  # written about: a build handed in from somewhere else. It now falls back
+  # to the whole of `diet/`.
+  #
+  # Synthetic roots, not this one. The question is what the resolver does
+  # with a tree it cannot narrow, and building that state here would mean
+  # deleting dep-info from a real build the rest of this run depends on.
+  local depless; scratch; depless="$SCRATCH"
+  python3 - "$depless" <<'PYEOF'
+import os
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+# Fixed stamps rather than offsets from now, so the three cases differ by
+# years and no clock skew can reorder them.
+OLD, BUILT, NEW = 1577836800, 1609459200, 1767225600  # 2020, 2021, 2026
+CASES = ("a-grammar-it-embeds", "nothing-newer", "dep-info-narrows")
+TREE = (
+    "Cargo.toml",
+    "Cargo.lock",
+    "rust-toolchain.toml",
+    "diet/Cargo.toml",
+    "diet/src/lib.rs",
+    "diet/formats/record/grammar.pest",
+    "diet/formats/record/fixtures/one.json",
+)
+
+
+def stamp(path, when):
+    os.utime(path, (when, when))
+
+
+for case in CASES:
+    here = root / case
+    for name in TREE:
+        path = here / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x\n", encoding="utf-8")
+        stamp(path, OLD)
+    binary = here / "diet-bin"
+    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    binary.chmod(0o755)
+    stamp(binary, BUILT)
+
+# THE CASE: a grammar the binary embeds, changed after it was built. There is
+# no dep-info to say it is embedded, and it is under `diet/`.
+stamp(root / CASES[0] / "diet/formats/record/grammar.pest", NEW)
+
+# THE CONTROL is `nothing-newer`, left exactly as built above. It is what
+# keeps the case about a STALE binary rather than about pinning one: a
+# fallback that refused every dep-info-less binary would satisfy the first
+# assertion and break every pinned build.
+
+# AND THE NARROWING, still applying wherever cargo did write a list. This
+# `.d` names `diet/src/lib.rs` and nothing else, and the file made newer is
+# a test fixture the binary does not embed. Widening when there is no list
+# must not become widening when there is one.
+narrows = root / CASES[2]
+(narrows / "diet-bin.d").write_text(
+    f"{narrows / 'diet-bin'}: diet/src/lib.rs\n", encoding="utf-8"
+)
+stamp(narrows / "diet-bin.d", BUILT)
+stamp(narrows / "diet/formats/record/fixtures/one.json", NEW)
+PYEOF
+  expect_exit "a grammar changed under a binary with no dep-info is stale" 2 \
+    bash -c "cd '${depless}/a-grammar-it-embeds' \
+      && DIET_BIN='${depless}/a-grammar-it-embeds/diet-bin' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+  expect_exit "and a binary with no dep-info over an untouched tree resolves" 0 \
+    bash -c "cd '${depless}/nothing-newer' \
+      && DIET_BIN='${depless}/nothing-newer/diet-bin' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+  expect_exit "a dep-info that does narrow still narrows" 0 \
+    bash -c "cd '${depless}/dep-info-narrows' \
+      && DIET_BIN='${depless}/dep-info-narrows/diet-bin' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+
+  # --- the resolver's own suite cannot report a pass it did not measure ---
+  #
+  # 0 from `check-merge-gate.py` is the only thing standing between a lane
+  # merge and a resolver that guesses, and 0 is indistinguishable from "not
+  # asked" to CI, to verify.sh, and to a person reading a log. Both of the
+  # ways it can fail to ask are exercised here, because the suite that guards
+  # the resolver was itself guarded by nothing.
+  local suite; scratch; suite="$SCRATCH"
+  cat > "${suite}/empty.py" <<'PYEOF'
+import importlib.util, pathlib, sys
+spec = importlib.util.spec_from_file_location("cm", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module.FIXTURES.clear()
+sys.exit(module.main())
+PYEOF
+  expect_exit "a resolver suite that collected nothing is not a pass" 2 \
+    python3 "${suite}/empty.py" "${ROOT}/scripts/check-merge-gate.py"
+  # ...and the control, which is what makes the assertion above about the
+  # EMPTY list rather than about the driver: the same driver, without the
+  # clear, runs the real suite and passes.
+  sed 's/^module.FIXTURES.clear()$//' "${suite}/empty.py" > "${suite}/full.py"
+  expect_exit "and the same driver, with the fixtures left in place, passes" 0 \
+    python3 "${suite}/full.py" "${ROOT}/scripts/check-merge-gate.py"
+  # Every fixture drives a real repository, so no git is no verdict.
+  mkdir -p "${suite}/nogit"
+  ln -sf "$(command -v python3)" "${suite}/nogit/python3"
+  expect_exit "a resolver suite with no git has no verdict to give" 2 \
+    env PATH="${suite}/nogit" python3 "${ROOT}/scripts/check-merge-gate.py"
 
   # --- binary provenance at the boundary ---
   #
@@ -4514,13 +6595,181 @@ EOF
       python3 '${ROOT}/scripts/resolve-diet.py'"
 
   # A pin honoured is not a pin ignored, whatever spelling it arrived in.
+  #
+  # WITH A SOURCE TO CHECK IT AGAINST. This used to run in a directory whose
+  # only content was a file named `diet`, and the staleness check took THAT as
+  # the crate -- `diet/` was a source root, `is_file()` matched, and the binary
+  # was compared against itself. The assertion passed for a reason that had
+  # nothing to do with pins, and it passed right beside a sibling asserting
+  # that a directory with no sources is a REFUSAL. It surfaced when `diet/`
+  # stopped being a source root (#50); it was resting on the coincidence the
+  # whole time.
+  local spelled; scratch; spelled="$SCRATCH"
+  mkdir -p "${spelled}/diet/src" "${spelled}/build"
+  : > "${spelled}/diet/src/lib.rs"
+  : > "${spelled}/Cargo.toml"
+  printf '#!/bin/sh\nexit 0\n' > "${spelled}/build/diet"
+  chmod +x "${spelled}/build/diet"
   expect_exit "a pin spelled with ./ is the same pin" 0 \
-    bash -c "cd '${pin}' && CARGO_TARGET_DIR= DIET_BIN=./diet \
-      python3 '${ROOT}/scripts/resolve-diet.py' --expect ./diet"
+    bash -c "cd '${spelled}' && CARGO_TARGET_DIR= DIET_BIN=./build/diet \
+      python3 '${ROOT}/scripts/resolve-diet.py' --expect ./build/diet"
 
   expect_exit "a file that cannot be run is not a build" 2 \
     bash -c "cd '${builds}' && CARGO_TARGET_DIR= DIET_BIN='${builds}/diet/src/main.rs' \
       python3 '${ROOT}/scripts/resolve-diet.py'"
+
+  # --- the shard census ---
+  #
+  # Sharding the selftest divides the labour; the one way it could become
+  # fault SELECTION is a shard that ran less than it was assigned and exited 0
+  # like every other one. No shard can detect that about itself, so the claim
+  # is checked afterwards from the ordinals each shard writes down. These are
+  # the states that must be refused, and the first is the state that must not.
+  local census; scratch; census="$SCRATCH"
+  python3 - "$census" \
+    "$(python3 "${ROOT}/scripts/check-fault-manifest.py" --count-selftest-red)" <<'EOF'
+import pathlib
+import sys
+
+root, total = pathlib.Path(sys.argv[1]), int(sys.argv[2])
+SHARDS = 4
+
+
+def share(shard, n=None, of=SHARDS):
+    n = total if n is None else n
+    return [i for i in range(1, n + 1) if (i - 1) % of + 1 == shard]
+
+
+def write(case, shard, ordinals, said_total=None, said_shards=None):
+    # Each shard's artifact arrives in a directory of its own, as
+    # download-artifact leaves them.
+    where = root / case / f"shard-{shard}"
+    where.mkdir(parents=True, exist_ok=True)
+    (where / "census.tsv").write_text(
+        f"shard\t{shard}\n"
+        f"shards\t{SHARDS if said_shards is None else said_shards}\n"
+        f"total\t{total if said_total is None else said_total}\n"
+        + "".join(f"ordinal\t{n}\n" for n in ordinals),
+        encoding="utf-8",
+    )
+
+
+# The state where download-artifact found nothing: no shard reported at all.
+(root / "none").mkdir(parents=True, exist_ok=True)
+
+for k in range(1, SHARDS + 1):
+    write("whole", k, share(k))
+    write("skipped", k, share(k)[1:] if k == 2 else share(k))
+    if k != 3:
+        write("missing", k, share(k))
+    write("wrong-total", k, share(k, n=total - 1), said_total=total - 1)
+    write("twice", k, share(k) + ([share(2)[0]] if k == 1 else []))
+    # HOW MANY SHARDS THERE ARE is the shards' own claim, so they must agree
+    # on it. One shard believing it is one of five while the rest believe four
+    # means they partitioned against different divisors -- the ordinals can
+    # still add up, and the run still proved less than it says.
+    write("disagree-count", k, share(k), said_shards=(SHARDS + 1 if k == 2 else SHARDS))
+    # A COMPLETE PARTITION PLUS A FAULT THAT DOES NOT EXIST. Every ordinal in
+    # 1..total is accounted for, so every count is right; one shard also
+    # reports running something outside the list. A census that can report an
+    # ordinal nobody assigned is a census whose numbers are not about the
+    # manifest.
+    write("stray-ordinal", k, share(k) + ([total + 9999] if k == 1 else []))
+    write("impossible-shard", k, share(k))
+
+# A CENSUS CLAIMING AN ORDINAL NO SHARD COULD HAVE. The four real shards
+# partition the list correctly; a fifth file says it is shard nine of four.
+# Written after the loop because it is an extra file rather than a variant of
+# one, and `shard-9` is not in `range(1, SHARDS + 1)`.
+(root / "impossible-shard" / "shard-9").mkdir(parents=True, exist_ok=True)
+(root / "impossible-shard" / "shard-9" / "census.tsv").write_text(
+    f"shard\t9\nshards\t{SHARDS}\ntotal\t{total}\n", encoding="utf-8"
+)
+EOF
+  expect_exit "shards that between them ran every fault are a whole" 0 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/whole"
+  expect_exit "a shard that skipped a fault it was assigned" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/skipped"
+  expect_exit "a shard that filed no census at all" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/missing"
+  expect_exit "a census that adds up to the wrong manifest" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/wrong-total"
+  expect_exit "one fault claimed by two shards" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/twice"
+  expect_exit "no shard reporting at all is not a pass" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/none"
+  expect_exit "shards that disagree about how many there are" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/disagree-count"
+  expect_exit "an ordinal outside the manifest's range" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/stray-ordinal"
+  expect_exit "a census claiming to be a shard that cannot exist" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/impossible-shard"
+
+  # --- nothing is read from a half-merged file ---
+  #
+  # This gate has two inputs and both of them conflict routinely: `faults.toml`
+  # conflicts on essentially every merge in a stack, which is what
+  # `merge-gate.py --union` exists for, and `verify.sh` conflicts whenever two
+  # branches both seed a case. What a checker reads out of a half-merged file
+  # is the union of both sides, or neither side, depending on where the markers
+  # fell -- and either way it looks like an answer. So it refuses, exit 2, "I
+  # was asked something I cannot answer".
+  #
+  # Neither refusal had ever been seen fire. The manifest side did not exist:
+  # a conflicted `faults.toml` reached `tomllib`, came back "not TOML", exit 1,
+  # a finding about the manifest when the truth was that the caller is
+  # mid-merge.
+  #
+  # Run against COPIES of this repository rather than against it. The check
+  # locates its inputs from its own path, so the only way to hand it a
+  # conflicted file is to hand it a different root; and the scripts are copied
+  # rather than symlinked because that path is resolved before it is used.
+  local halfmerged side; scratch; halfmerged="$SCRATCH"
+  for side in verify manifest; do
+    mkdir -p "${halfmerged}/${side}/scripts" "${halfmerged}/${side}/tools/gate"
+    cp "${ROOT}/scripts/check-fault-manifest.py" "${ROOT}/scripts/gatelib.py" \
+      "${halfmerged}/${side}/scripts/"
+    cp "${ROOT}/verify.sh" "${halfmerged}/${side}/verify.sh"
+    cp "${ROOT}/tools/gate/faults.toml" "${halfmerged}/${side}/tools/gate/faults.toml"
+  done
+  # One marker apiece, of the kind git writes, on the file whose turn it is.
+  # `=======` alone is deliberately not enough to trip this -- it is a
+  # plausible separator in ordinary prose -- so each case carries an arrow.
+  printf '<%s HEAD\n' '<<<<<<' | cat - "${ROOT}/verify.sh" \
+    > "${halfmerged}/verify/verify.sh.half"
+  mv "${halfmerged}/verify/verify.sh.half" "${halfmerged}/verify/verify.sh"
+  printf '>%s theirs\n' '>>>>>>' >> "${halfmerged}/manifest/tools/gate/faults.toml"
+
+  # The manifest side needs its `verify.sh` to parse cleanly, because the
+  # refusal it is about fires after `observed()` has read one.
+  expect_exit "a half-merged verify.sh is refused rather than counted" 2 \
+    python3 "${halfmerged}/verify/scripts/check-fault-manifest.py"
+  expect_exit "a half-merged manifest is a refusal and not a finding" 2 \
+    python3 "${halfmerged}/manifest/scripts/check-fault-manifest.py"
+  # And the same manifest asked for a COUNT still answers, because that is the
+  # one caller holding a conflicted manifest on purpose: `merge-gate.py` is
+  # mid-merge and about to rewrite it with the number it is asking for. A
+  # refusal hoisted up to the top of the script would break exactly it.
+  expect_exit "a count is still answered over a manifest being merged" 0 \
+    python3 "${halfmerged}/manifest/scripts/check-fault-manifest.py" --count-red
+
+  # --- the scope's own control ---
+  #
+  # `cargo test` with a filter matching no test prints `running 0 tests` and
+  # EXITS 0. Every scoped case in the list above therefore rests on this: a
+  # scope that has gone stale -- a module renamed under it, a typo -- must be
+  # a failure and not a fast green. Through SELFTEST_TARGET so it costs an
+  # incremental build rather than a cold one.
+  expect_exit "a test scope that selects nothing is not a pass" 1 \
+    env CARGO_TARGET_DIR="${SELFTEST_TARGET}" \
+    bash "${ROOT}/verify.sh" --only test --scope lib/a_test_this_repository_does_not_have
+  expect_exit "a scope spelling nobody defined is a misuse, not everything" 2 \
+    env CARGO_TARGET_DIR="${SELFTEST_TARGET}" \
+    bash "${ROOT}/verify.sh" --only test --scope 'whatever'
+  expect_exit "a scope without exactly --only test is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --scope lib
+  expect_exit "a shard outside 1..N is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --selftest --shard 9/8
 
   prove_patterns "hygiene" scripts/hygiene-patterns.tsv scripts/seed-hygiene-fault.sh \
     "${REQUIRED_HYGIENE_CLASSES[@]}"
@@ -4540,12 +6789,71 @@ EOF
   done
   [ "${#missing[@]}" -eq 0 ] || SELFTEST_BROKEN+=("checks with no seeded fault: ${missing[*]}")
 
+  # --- the census ---
+  #
+  # What this run RAN, by ordinal, so that N shards can be added up afterwards
+  # and the sum compared against the manifest. A shard that passes having run
+  # a subset of what it was assigned is the one way sharding could quietly
+  # become fault selection, and it is the reason this is emitted as data
+  # rather than asserted here: a shard cannot certify itself.
+  echo
+  printf 'selftest-census: shard %d of %d ran %d of %d fault(s)\n' \
+    "$(( SELFTEST_SHARD == 0 ? 1 : SELFTEST_SHARD ))" \
+    "$SELFTEST_SHARDS" "${#SELFTEST_RAN[@]}" "$SELFTEST_UNITS"
+  if [ -n "$SELFTEST_CENSUS" ]; then
+    {
+      printf 'shard\t%d\n' "$(( SELFTEST_SHARD == 0 ? 1 : SELFTEST_SHARD ))"
+      printf 'shards\t%d\n' "$SELFTEST_SHARDS"
+      printf 'total\t%d\n' "$SELFTEST_UNITS"
+      printf 'ordinal\t%s\n' ${SELFTEST_RAN+"${SELFTEST_RAN[@]}"}
+    } > "$SELFTEST_CENSUS" || {
+      echo "selftest: the census could not be written to ${SELFTEST_CENSUS}" >&2
+      SELFTEST_BROKEN+=("the census could not be written")
+    }
+  fi
+
   echo
   if [ "${#SELFTEST_BROKEN[@]}" -gt 0 ]; then
     printf 'selftest: %d gate(s) failed to fire, or fired for the wrong reason:\n' \
       "${#SELFTEST_BROKEN[@]}"
     printf '  - %s\n' "${SELFTEST_BROKEN[@]}"
     return "$EXIT_FAIL"
+  fi
+  # A CHECK OF NOTHING IS NOT A PASS, and this line is the one place the
+  # selftest says otherwise. `--shard 275/1000` selects no case at all: the
+  # `1 <= K <= N` bound admits it, every loop below runs zero times, nothing
+  # lands in SELFTEST_BROKEN, and the run prints "every gate was seen red on
+  # its own seeded fault" and exits 0. Every word of that sentence is false
+  # about a run that saw no gate.
+  #
+  # Found by a fresh instance, reproduced live. Not reachable through CI --
+  # the matrix is eight against a fault list far longer, and the census
+  # refuses an incomplete union whatever any single shard claims -- so this
+  # is a foot-gun for a person running --shard by hand, and a comment that
+  # overclaimed what the bound guards against. Both are the same defect: the
+  # thing that made it safe was somewhere else, and nothing said so here.
+  #
+  # THIS GUARD HAS NO SEEDED FAULT AND NO MECHANICS ASSERTION, which by this
+  # repository's own law makes it a gate nothing has seen red -- so here is
+  # why, rather than a silence somebody has to rediscover. Both are run from
+  # inside `selftest`: a seeded case runs one `verify.sh --only <check>`, and
+  # `prove_mechanics` runs unconditionally in every shard. An assertion that
+  # invoked `verify.sh --selftest` to watch this line refuse would re-enter
+  # the function containing it, and the inner run would do the same. Covering
+  # it needs a re-entry flag, which is a change to how the selftest is
+  # invoked and not a fixture.
+  #
+  # It was proved by hand in both directions, and the commit that added it
+  # records the transcript: `--shard 275/1000` exits 2 naming the empty
+  # shard, `--shard 1/8` runs 35 of 274 and still declares the pass. That is
+  # weaker than a fixture and it is what there is.
+  if [ "${#SELFTEST_RAN[@]}" -eq 0 ]; then
+    echo "selftest: this run selected no seeded case, so it proves nothing" >&2
+    if [ "$SELFTEST_SHARD" -ne 0 ]; then
+      echo "selftest: shard ${SELFTEST_SHARD} of ${SELFTEST_SHARDS} is empty; \
+there are ${SELFTEST_UNITS} case(s) to divide" >&2
+    fi
+    return "$EXIT_MISUSE"
   fi
   echo "selftest: every gate was seen red on its own seeded fault."
 }
@@ -4556,6 +6864,7 @@ EOF
 
 selected=()
 mode="all"
+shard_arg=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -4569,6 +6878,57 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --selftest) mode="selftest"; shift ;;
+    --derive-scopes)
+      [ "$#" -ge 2 ] || { echo "verify: --derive-scopes needs a directory" >&2; exit "$EXIT_MISUSE"; }
+      SELFTEST_DERIVE="$2"
+      shift 2
+      ;;
+    --scope)
+      [ "$#" -ge 2 ] || { echo "verify: --scope needs a spec" >&2; exit "$EXIT_MISUSE"; }
+      scope_args "$2" || {
+        echo "verify: --scope '$2': want lib, bins, all or test:NAME, each" \
+             "optionally followed by /FILTER" >&2
+        exit "$EXIT_MISUSE"
+      }
+      VERIFY_TEST_SCOPE="$2"
+      shift 2
+      ;;
+    --shard)
+      [ "$#" -ge 2 ] || { echo "verify: --shard needs K/N" >&2; exit "$EXIT_MISUSE"; }
+      shard_arg="$2"
+      case "$shard_arg" in
+        *[!0-9/]*|*/*/*|/*|*/) shard_arg="" ;;
+        */*) ;;
+        *) shard_arg="" ;;
+      esac
+      [ -n "$shard_arg" ] || {
+        echo "verify: --shard wants K/N in decimal, not '$2'" >&2
+        exit "$EXIT_MISUSE"
+      }
+      SELFTEST_SHARD="${shard_arg%%/*}"
+      SELFTEST_SHARDS="${shard_arg##*/}"
+      # 1 <= K <= N, and N >= 1. A K of 0 would run nothing while reporting a
+      # shard, and a K above N would run nothing while the sum still looked
+      # like N shards -- both are a job that passes having done nothing, which
+      # is the failure this whole issue is about not introducing.
+      if [ "$SELFTEST_SHARDS" -lt 1 ] || [ "$SELFTEST_SHARD" -lt 1 ] ||
+         [ "$SELFTEST_SHARD" -gt "$SELFTEST_SHARDS" ]; then
+        echo "verify: --shard ${2}: needs 1 <= K <= N and N >= 1" >&2
+        exit "$EXIT_MISUSE"
+      fi
+      shift 2
+      ;;
+    --census)
+      [ "$#" -ge 2 ] || { echo "verify: --census needs a path" >&2; exit "$EXIT_MISUSE"; }
+      # Resolved here, against the directory the caller is in. Parsing
+      # happens before the `cd "$ROOT"` below, so a relative path left alone
+      # would land somewhere the caller never named.
+      case "$2" in
+        /*) SELFTEST_CENSUS="$2" ;;
+        *)  SELFTEST_CENSUS="$(pwd)/$2" ;;
+      esac
+      shift 2
+      ;;
     --list) printf '%s\n' "${CHECKS[@]}"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "verify: unknown argument '$1'" >&2; usage >&2; exit "$EXIT_MISUSE" ;;
@@ -4577,9 +6937,43 @@ done
 
 cd "$ROOT"
 
+# `--shard` and `--census` describe a selftest run. Silently ignoring them on
+# an ordinary run would let a workflow think it had sharded a gate that in
+# fact ran whole, or ran nothing.
+if [ "$mode" != "selftest" ] &&
+   { [ "$SELFTEST_SHARD" -ne 0 ] || [ -n "$SELFTEST_CENSUS" ]; }; then
+  echo "verify: --shard and --census are for --selftest" >&2
+  exit "$EXIT_MISUSE"
+fi
+
+# A scope narrows ONE check, so it may only be given when that check is the
+# only one asked for. `verify.sh --scope lib` on its own would otherwise read
+# as "run everything" while running a fraction of the tests, and read that way
+# in a workflow, where nobody would see it.
+if [ -n "$VERIFY_TEST_SCOPE" ] &&
+   { [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ] ||
+     [ "${selected[0]-}" != "test" ]; }; then
+  echo "verify: --scope narrows the test check, so it needs exactly --only test" >&2
+  exit "$EXIT_MISUSE"
+fi
+
+# `--derive-scopes` re-runs the selftest's test cases unscoped and is nothing
+# on its own: without --selftest there is no run to derive from, and
+# SELFTEST_LOGS is unset, so the index would be written to the filesystem root.
+if [ -n "$SELFTEST_DERIVE" ] && [ "$mode" != "selftest" ]; then
+  echo "verify: --derive-scopes derives from a selftest run, so it needs --selftest" >&2
+  exit "$EXIT_MISUSE"
+fi
+
 if [ "$mode" = "selftest" ]; then
   rc=0
   selftest || rc=$?
+  if [ -n "$SELFTEST_DERIVE" ]; then
+    printf '\nderive-scopes: the index is %s\n' "${SELFTEST_LOGS}/derive-scopes.tsv"
+    printf 'derive-scopes: read it with\n'
+    printf '  python3 scripts/derive-scopes.py --index %s\n' \
+      "${SELFTEST_LOGS}/derive-scopes.tsv"
+  fi
   exit "$rc"
 fi
 

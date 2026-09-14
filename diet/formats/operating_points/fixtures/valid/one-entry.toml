@@ -1,0 +1,10 @@
+# The smallest document that says anything: one model, one operating point.
+[local]
+match          = "local"
+nothink_ops    = []
+thinking_kwarg = false
+[local.sampler]
+temperature = 0.0
+[local.gate]
+temperature = 0.0
+votes       = 1

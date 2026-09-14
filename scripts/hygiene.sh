@@ -11,6 +11,19 @@
 #                                (cached + untracked, minus .gitignore)
 #   hygiene.sh --tree DIR        scan every file under DIR instead
 #   hygiene.sh --patterns FILE   use a different pattern table
+#   hygiene.sh --hashes FILE     use a different digest table
+#
+# CONTENT IS SCANNED AS A READER WOULD SEE IT, not only as it is stored. The
+# artefacts this gate exists for arrive JSON-escaped, where a newline is the
+# two characters `\` and `n` -- so a token right after one has a literal `n`
+# welded to its left and walks past a pattern anchored on a word boundary. So
+# every file that carries encoded strings is mirrored, decoded, under a
+# temporary directory, and the same table runs over the mirror. A hit there is
+# reported as `(decoded)` against the file it came from.
+#
+# The literals that have no shape are checked here too, by salted digest:
+# `scripts/check-hashes.py` runs over the same file list. One gate, so
+# `--only hygiene` and `check-history.py` both get both halves.
 #
 # Exits 0 if nothing matched, 1 if anything did, 2 if the scan itself failed.
 # A scan that finds no files to read is an error, not a pass.
@@ -29,9 +42,11 @@ readonly MAX_REPORT=200
 
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly DEFAULT_PATTERNS="${here}/hygiene-patterns.tsv"
+readonly DEFAULT_HASHES="${here}/hygiene-hashes.txt"
 
 tree=""
 patterns_file="$DEFAULT_PATTERNS"
+hashes_file="$DEFAULT_HASHES"
 # `# scan: all` in a table means every file must be scannable text and every
 # pattern runs over every file. Splitting text from binary is right for the
 # genesis table, whose loose environment heuristics match inside ordinary
@@ -45,6 +60,11 @@ while [ "$#" -gt 0 ]; do
     --patterns)
       [ "$#" -ge 2 ] || { echo "hygiene: --patterns needs a file" >&2; exit "$EXIT_BROKEN"; }
       patterns_file="$2"
+      shift 2
+      ;;
+    --hashes)
+      [ "$#" -ge 2 ] || { echo "hygiene: --hashes needs a file" >&2; exit "$EXIT_BROKEN"; }
+      hashes_file="$2"
       shift 2
       ;;
     --tree)
@@ -99,6 +119,25 @@ if [ "${#scanned[@]}" -eq 0 ]; then
   exit "$EXIT_BROKEN"
 fi
 
+# --- the decoded view ---------------------------------------------------------
+# Written beside the tree, never instead of it: the bytes on disk are still
+# scanned, and this is a second view of the same files. A file carrying no
+# encoded strings has no view and no mirror file, so the mirror is small.
+mirror="$(mktemp -d)" || { echo "hygiene: mktemp -d failed" >&2; exit "$EXIT_BROKEN"; }
+trap 'rm -rf -- "$mirror"' EXIT
+
+decoded_count=0
+if ! decoded_count="$(printf '%s\0' "${scanned[@]}" \
+      | python3 "${here}/hygiene-decode.py" --into "$mirror")"; then
+  echo "hygiene: the decoded view could not be built; a scan that skips it is" \
+       "a scan of the escaping, not of the content" >&2
+  exit "$EXIT_BROKEN"
+fi
+
+decoded_files=()
+while IFS= read -r -d '' path; do decoded_files+=("$path"); done \
+  < <(find "$mirror" ! -type d -print0)
+
 # Check readability once, up front. Otherwise the first pattern's grep fails,
 # its stderr is discarded, and the scan dies with a status and no filename.
 for path in "${scanned[@]}"; do
@@ -116,6 +155,9 @@ done
 # credential-scanned, which is all it could ever carry.
 text_files=()
 binary_files=()
+for path in ${decoded_files+"${decoded_files[@]}"}; do
+  text_files+=("$path")
+done
 for path in "${scanned[@]}"; do
   if grep -Iq . -- "$path" 2>/dev/null || [ ! -s "$path" ]; then
     text_files+=("$path")
@@ -177,6 +219,12 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
       0)
         while IFS= read -r line; do
           [ -n "$line" ] || continue
+          # A hit in the mirror is a hit in the file it was decoded from, and
+          # says so. Reporting the temporary path would name a file that is
+          # gone by the time anyone reads the message.
+          case "$line" in
+            "$mirror"/*) line="(decoded) ${line#"$mirror"/}" ;;
+          esac
           echo "hygiene: ${label}: ${line:0:MAX_REPORT}" >&2
           hits=$((hits + 1))
         done < <(tr -d '\0' < "$matchfile")
@@ -201,11 +249,29 @@ if [ "$hits" -gt 0 ]; then
   exit "$EXIT_DIRTY"
 fi
 
+# --- the literals that have no shape ------------------------------------------
+# Run over the same list, and over each file's decoded view, which the scanner
+# derives itself. A pattern can be given a looser boundary to reach through an
+# escape; a digest cannot, so this half needs the decoding more than the other.
+digests=0
+printf '%s\0' "${scanned[@]}" \
+  | python3 "${here}/check-hashes.py" --table "$hashes_file" || digests=$?
+case "$digests" in
+  0) : ;;
+  1) exit "$EXIT_DIRTY" ;;
+  *)
+    echo "hygiene: check-hashes.py exited ${digests}; a literal scan that did" \
+         "not run is not a literal scan that passed" >&2
+    exit "$EXIT_BROKEN"
+    ;;
+esac
+
 if [ "$scan_all" = true ]; then
   echo "hygiene: ${#scanned[@]} file(s) clean against ${patterns} pattern(s)" \
        "(every pattern over every file; this table sets 'scan: all')"
 else
   echo "hygiene: ${#scanned[@]} file(s) clean against ${patterns} pattern(s)" \
-       "(${#text_files[@]} text, ${#binary_files[@]} binary, the latter searched" \
-       "only for credential shapes)"
+       "($((${#text_files[@]} - decoded_count)) text, ${#binary_files[@]} binary," \
+       "the latter searched only for credential shapes;" \
+       "${decoded_count} decoded view(s) scanned beside them)"
 fi
