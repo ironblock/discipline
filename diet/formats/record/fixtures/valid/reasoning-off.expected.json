@@ -1,5 +1,5 @@
 {
-  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"one-gpu\",\"id\":\"local\",\"reasoning\":\"off\",\"sampler_card\":{\"seed\":0},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]}}\n",
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"one-gpu\",\"id\":\"local\",\"reasoning\":\"off\",\"sampler_card\":{\"seed\":0},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]},\"source\":{\"kind\":\"live\"}}\n",
   "kinds": [
     "start"
   ],
@@ -10,5 +10,8 @@
     "substrates": [
       "local"
     ]
+  },
+  "source": {
+    "kind": "live"
   }
 }

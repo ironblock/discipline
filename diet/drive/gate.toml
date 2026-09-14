@@ -496,12 +496,16 @@ expect_exit = 101
 anchor = '''
     let mut events = vec![Event::Start {
         regime: Box::new(script.regime.clone()),
+        // This function IS the live path: it drove the turns and wrote these
+        // rows as they happened. Nothing else in this crate may say `Live`.
+        source: Source::Live,
     }];'''
 becomes = '''
     let mut regime = script.regime.clone();
     regime.arm = "a-regime-nobody-ran-under".to_owned();
     let mut events = vec![Event::Start {
         regime: Box::new(regime),
+        source: Source::Live,
     }];'''
 catches = [
     "drive::tests::every_row_the_drive_writes_is_true_of_the_run_that_produced_it",
