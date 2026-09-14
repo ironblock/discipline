@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 313
+red_faults = 316
 mechanics_assertions = 56
 migrated = 0
 
@@ -3470,3 +3470,27 @@ label = "an unmarked entry that shadows another is admitted"
 failure_class = "operating-points.shadowed-unmarked"
 legacy_signature = "the retired spelling is refused"
 migrated = false
+[[fault]]
+id = "results.2026-01-30-verdict-disagrees-with-record"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-30-verdict-disagrees-with-record"
+failure_class = "results.verdict-disagrees-with-record"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-31-pre-registration-digest"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-31-pre-registration-digest"
+failure_class = "results.pre-registration-digest"
+migrated = false
+
+[[fault]]
+id = "results.2026-02-01-pre-registration-unpinned"
+kind = "results-fixture"
+check = "results"
+label = "2026-02-01-pre-registration-unpinned"
+failure_class = "results.pre-registration-unpinned"
+migrated = false
+

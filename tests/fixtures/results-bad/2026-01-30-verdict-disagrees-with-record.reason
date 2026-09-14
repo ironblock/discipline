@@ -1,0 +1,16 @@
+The front-matter says `unadjudicated` and the claim row says `inconclusive`.
+
+One statement written twice. `inconclusive` is a VERDICT -- the evidence was
+held against a rule and did not decide -- and `unadjudicated` is the absence of
+one, so a directory saying both leaves its reader to guess which half to
+believe. Ruled 2026-09-14, after `diet bakeoff` shipped exactly this pair for a
+day: the assembler wrote `unadjudicated` into the README and
+`Verdict::Inconclusive` onto the claim row of the same directory, and nothing
+compared them, because `result` is a free string in the front-matter schema and
+`Verdict` is a closed vocabulary in the record. Neither reader could see the
+other's copy.
+
+The base is `2026-01-29-hosted-weights-called-reproducible` with its own defect
+REMOVED -- `kind` is `historical-observation` here, which is what hosted weights
+are entitled to claim -- so this directory is refused for the verdict and for
+nothing else.
