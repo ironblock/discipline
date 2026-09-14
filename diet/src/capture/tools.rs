@@ -2040,6 +2040,7 @@ mod tests {
         Event::Request {
             id: id.to_owned(),
             lane: lane.to_owned(),
+            substrate: "local".to_owned(),
             retry_of: None,
             text: None,
         }

@@ -43,7 +43,25 @@ pub fn render(object: &WorkingObject, phase: Option<&str>) -> String {
     out.push_str("arm: ");
     out.push_str(&regime.arm);
     out.push_str("\nsubstrate: ");
-    out.push_str(&regime.substrate.name);
+    // THE DECLARED IDS, in declaration order, and all of them. A regime can
+    // now carry several -- a drive whose interview fork runs on a small local
+    // model while the main lane runs a large one is the arrangement this
+    // repository exists to measure -- so a frame naming one of them would be
+    // naming whichever happened to be first.
+    //
+    // This CHANGES THE RENDERED BYTES of every seam, and there was no option
+    // that did not: the field this line used to read, `substrate.name`, no
+    // longer exists. Prose identity was what the digest replaced. The frame's
+    // shape is unchanged -- one line, one label, one value -- which is what
+    // the byte-identity claim below is about.
+    out.push_str(
+        &regime
+            .substrates
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
     out.push_str("\ndogma_version: ");
     out.push_str(&regime.dogma_version.to_string());
     out.push_str("\nphase: ");

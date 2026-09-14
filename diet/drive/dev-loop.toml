@@ -16,15 +16,39 @@
 arm = "dev-loop"
 dogma_version = 0
 
-# The substrate. `substrate` is the name record v0 tags every row with; the
-# four `substrate_*` keys are the rest of what a `regime` needs and regimen v1
-# has no place for. Their names are `diet-drive`'s convention, disclosed as
-# one -- whether they belong in the regimen format is the format owner's call.
+# The substrate. `substrate` is the id every row references; the two
+# `substrate_*` keys are the rest of what a `regime` needs and regimen v1 has
+# no place for. Their names are `diet-drive`'s convention, disclosed as one --
+# whether they belong in the regimen format is the format owner's call.
+#
+# `substrate_model = "a-model"` and `substrate_quantization = "none"` used to
+# be here. They were a placeholder and a "none", which is what naming a model
+# looks like when there is no model: this regimen's whole point is that the
+# canned server serves no weights. Item 3 made the identity typed and this
+# program now COMPUTES it -- the sha256 of the acts the canned server plays,
+# which is the artifact that decides every reply -- so there is nothing left
+# for a prose model name to say, and a placeholder that reached a record as an
+# identity would say something false.
 substrate = "canned"
-substrate_model = "a-model"
-substrate_quantization = "none"
 substrate_reasoning = "off"
-substrate_hardware = "canned-loopback"
+
+# CITED FROM THE REGISTRY, not invented here. `canned-loopback` was a sentinel
+# string sitting in a field defined as a registry digest -- the same defect as
+# a canned digest read through `Digest`, one field over, and ruled the same way
+# on 2026-09-11.
+#
+# This is the `hardware_fingerprint` of equipment `canned-loopback` in
+# `substrates/registry.toml`: the sha256 of exactly the two fields its
+# `canned-server` entry type declares, `serves` and `acts_sha256`. Recomputed
+# here from those two published values before it was copied, and it agrees.
+#
+# A CITATION IS NOT A DERIVATION, and this one is not checked yet. If the acts
+# change, `canned::acts_digest()` moves, the registry entry goes stale, and
+# nothing here notices -- the registry's coverage check compares a fingerprint
+# to its own declared fields, not those fields to this crate's code. The
+# consumer that resolves a record's substrate to its registry entry is where
+# that comparison belongs; it lands with the registry.
+substrate_hardware = "fc96af4713f9aaa26f2b7bda27720b497ec3d30c6edd9292da5fa8be8e0c37b0"
 
 # Unconfined, and declared. The drive's own commands are two `echo`s into the
 # working tree and the lane runs on a runner with no `bubblewrap`, so the

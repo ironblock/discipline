@@ -68,7 +68,7 @@ use crate::client::transport::Transport;
 use crate::client::{Client, IdSource, Outcome, wire};
 use crate::formats::interview;
 use crate::formats::record::json::Value;
-use crate::formats::record::{Count, Event, ParseError, Record, render};
+use crate::formats::record::{Count, Event, ParseError, Record, Summary, render};
 use crate::isolation::{Confinement, NotRun, Policy as IsolationPolicy, Unavailable};
 use crate::object::{Applied, EntryId, ObjectError, Patch, Provenance, WorkingObject};
 use crate::seam::policy::Policy as SeamPolicy;
@@ -472,6 +472,26 @@ fn fold(
 /// fold the object refused. Never a record with a hole in it.
 #[allow(clippy::too_many_lines)]
 pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Halt> {
+    // WHICH SUBSTRATE THESE CALLS GO TO, named once and referenced on every
+    // row that names an ask. A drive's script declares one; the schema
+    // requires each `request` and `fork` row to say which, and requires it
+    // even when there is exactly one, so that a row's meaning never depends
+    // on a count somewhere else in the file.
+    //
+    // A drive whose interview fork runs on a different substrate than its
+    // main lane is expressible in the record and NOT yet in a `Script`, which
+    // declares a regime and no per-lane assignment. Both lanes therefore name
+    // the same id here. Disclosed rather than silently one-substrate.
+    let substrate = script
+        .regime
+        .substrates
+        .first()
+        .ok_or(Halt::Unmeasured {
+            turn: 0,
+            what: "regime.substrates",
+        })?
+        .id
+        .clone();
     let mut object = WorkingObject::open(script.regime.clone());
     let mut controller = Controller::open(
         gym.seam.clone(),
@@ -536,7 +556,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             prefill_tokens: prefill,
         });
         prefill_total = prefill_total.saturating_add(prefill);
-        archive(&call, index, &mut events, &mut unspellable)?;
+        archive(&call, index, &substrate, &mut events, &mut unspellable)?;
 
         // The commands. Each is a tool call, run under the confinement, with
         // its exit status and output as the row says.
@@ -581,9 +601,10 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             events.push(Event::Fork {
                 id: fork_id.clone(),
                 lane: INTERVIEW.to_owned(),
+                substrate: substrate.clone(),
                 of_turn: index,
             });
-            archive(&forked, index, &mut events, &mut unspellable)?;
+            archive(&forked, index, &substrate, &mut events, &mut unspellable)?;
 
             let (patches, census) =
                 fold(&text, index, INTERVIEW, Some(&fork_id)).map_err(|why| Halt::Unreadable {
@@ -669,7 +690,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                     outcome: Box::new(one.outcome.clone()),
                 });
             }
-            archive(one, index, &mut events, &mut unspellable)?;
+            archive(one, index, &substrate, &mut events, &mut unspellable)?;
         }
         if let Some(seam) = settled {
             // No `unwrap_or_default()`. A render this module could not
@@ -705,8 +726,10 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
     // names something a reader can recompute with `sha256sum`.
     let product = dump(&object);
     events.push(Event::Summary {
-        turns,
-        prefill_tokens_total: prefill_total,
+        summary: Summary::Drive {
+            turns,
+            prefill_tokens_total: prefill_total,
+        },
         product_sha256: crate::digest::sha256_hex(product.as_bytes()),
     });
 
@@ -743,6 +766,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
 fn archive(
     call: &crate::client::Call,
     turn: u32,
+    substrate: &str,
     events: &mut Vec<Event>,
     unspellable: &mut Vec<Unspellable>,
 ) -> Result<(), Halt> {
@@ -763,7 +787,7 @@ fn archive(
             what: "response.output_tokens",
         });
     }
-    let projected = journal::project(&call.journal);
+    let projected = journal::project(&call.journal, substrate);
     let answered = call.outcome.answer();
     for mut event in projected.events {
         match &mut event {
@@ -831,7 +855,9 @@ mod tests {
     use crate::client::stub::{Act, Stub};
     use crate::client::transport::{Endpoint, Http};
     use crate::formats::record::json::Value;
-    use crate::formats::record::{Event, Kind, Reasoning, Regime, Substrate};
+    use crate::formats::record::{
+        Engine, Event, Kind, Reasoning, Regime, Substrate, Summary, Weights,
+    };
     use crate::isolation::{Confinement, Policy as IsolationPolicy};
     use crate::seam::policy::Policy as SeamPolicy;
 
@@ -868,20 +894,27 @@ mod tests {
     fn regime() -> Regime {
         Regime {
             arm: "dev-loop".to_owned(),
-            substrate: Substrate {
-                name: "canned".to_owned(),
-                model: "a-model".to_owned(),
-                quantization: "none".to_owned(),
-                // Not empty: the schema refuses a blank `substrate.sampler`,
+            substrates: vec![Substrate {
+                id: "canned".to_owned(),
+                engine: Engine {
+                    name: "diet-drive canned".to_owned(),
+                    version_or_digest: canned::acts_digest(),
+                },
+                // The same identity `diet-drive` computes, from the same
+                // function. A test that wrote a digest of its own would pass
+                // while the program under it wrote a different one, and the
+                // one thing this field has to be is the same in both.
+                weights: Weights::Digest(canned::acts_digest()),
+                hardware_fingerprint: "the-runner".to_owned(),
+                // Not empty: the schema refuses a blank `sampler_card`,
                 // because "nobody wrote the settings down" and "the settings
                 // were these" are different facts about a run.
-                sampler: BTreeMap::from([(
+                sampler_card: BTreeMap::from([(
                     "seed".to_owned(),
                     crate::formats::record::json::Value::Integer(7),
                 )]),
                 reasoning: Reasoning::Off,
-                hardware: "the-runner".to_owned(),
-            },
+            }],
             dogma_version: 0,
         }
     }
@@ -1192,7 +1225,11 @@ mod tests {
             .collect();
         let drive = against(&script, acts, &ground).expect("the drive ran");
 
-        let Some(Event::Summary { turns, .. }) = drive.record.events.last() else {
+        let Some(Event::Summary {
+            summary: Summary::Drive { turns, .. },
+            ..
+        }) = drive.record.events.last()
+        else {
             panic!("the last row is the summary")
         };
         assert_eq!(*turns, 2);
@@ -1206,12 +1243,12 @@ mod tests {
         // a `rendered` string nothing had read, and the first thing to notice
         // would be a red lane.
         //
-        // A regime with an empty `substrate.sampler` is the case: the schema
+        // A regime with an empty `sampler_card` is the case: the schema
         // refuses a blank field, and this drive found that defect in its own
         // first fixture rather than in CI.
         let ground = Ground::make("unrecordable");
         let mut script = three_turns();
-        script.regime.substrate.sampler = BTreeMap::new();
+        script.regime.substrates[0].sampler_card = BTreeMap::new();
         let halt = against(&script, canned::acts(), &ground)
             .expect_err("a record the format refuses is not a drive that succeeded");
         assert!(matches!(&halt, Halt::Unrecordable { .. }), "{halt:?}");
@@ -1250,8 +1287,11 @@ mod tests {
         let drive = against(&three_turns(), canned::acts(), &ground).expect("the drive ran");
 
         let Some(Event::Summary {
-            turns,
-            prefill_tokens_total,
+            summary:
+                Summary::Drive {
+                    turns,
+                    prefill_tokens_total,
+                },
             product_sha256,
         }) = drive.record.events.last()
         else {
@@ -1883,15 +1923,18 @@ mod tests {
         );
         SeamPolicy::from_regimen(&regimen).expect("its seam policy");
 
-        // The four keys `diet-drive` reads for the regime facts regimen v1
-        // has no place for. Named here so that a rename in the binary that
-        // did not reach the fixture fails in this crate rather than in CI.
+        // The keys `diet-drive` reads for the regime facts regimen v1 has no
+        // place for. Named here so that a rename in the binary that did not
+        // reach the fixture fails in this crate rather than in CI.
+        //
+        // `substrate_model` and `substrate_quantization` were on this list and
+        // are gone from both sides: a prose model name is not the typed
+        // identity item 3 requires, and the canned substrate's identity is
+        // computed from `canned::acts_digest` instead of declared.
         for key in [
             "arm",
             "dogma_version",
             "substrate",
-            "substrate_model",
-            "substrate_quantization",
             "substrate_reasoning",
             "substrate_hardware",
         ] {
@@ -1907,6 +1950,15 @@ mod tests {
             ),
             "and a sampler, which the record refuses to leave blank"
         );
+        // The other half of the same claim. A list that only shrank would let
+        // the fixture keep declaring a model this program no longer reads --
+        // a dead key that reads like a fact about the run.
+        for gone in ["substrate_model", "substrate_quantization"] {
+            assert!(
+                regimen.get(gone).is_none(),
+                "`{gone}` names weights this substrate does not have, and                  nothing reads it any more"
+            );
+        }
     }
 
     #[test]

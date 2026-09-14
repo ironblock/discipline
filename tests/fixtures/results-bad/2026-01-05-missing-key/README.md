@@ -9,7 +9,7 @@ prefill_tokens_total = 2048
 
 [regime]
 arm = "baseline"
-substrate = "local"
+substrates = ["local"]
 dogma_version = 0
 +++
 

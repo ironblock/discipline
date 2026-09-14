@@ -85,26 +85,161 @@ macro_rules! vocabulary {
 // the regime
 // ---------------------------------------------------------------------------
 
-/// Which substrate produced a session.
+vocabulary! {
+    /// How a substrate's weights are identified.
+    ///
+    /// TWO WAYS, TYPED, because there are two and the difference decides what
+    /// a result may claim. Never one field that is sometimes a digest and
+    /// sometimes a name: that is identity spelled two ways in one place, and
+    /// the reader cannot tell which it got.
+    WeightsKind {
+        /// Weights on disk, identified by what they are.
+        Digest => "digest",
+        /// Weights behind an endpoint, identified by who serves them and what
+        /// they are called.
+        Hosted => "hosted",
+        /// No weights at all: a canned server replaying authored acts,
+        /// identified by the digest of the acts it plays.
+        Canned => "canned",
+    }
+}
+
+/// Which weights a substrate ran, and how they are identified.
+///
+/// A HOSTED MODEL IS A SUBSTRATE WHOSE WEIGHTS CAN CHANGE UNDER YOU -- the
+/// engine's re-pointed tag, at scale -- so the variants are not spellings of
+/// one thing. Gate 0 re-derives a result from committed artifacts and is
+/// indifferent to which this is; gate 1 re-fires it on a declared substrate
+/// and cannot, so [`Weights::is_reproducible`] is what `check-results.py`
+/// asks before letting a directory call itself `reproducible-by-config`.
+///
+/// THE THREE ARE REPRODUCED BY DIFFERENT MECHANISMS, which is why a kind is
+/// not decoration on a digest:
+///
+/// - [`Weights::Digest`] is re-fired on the declared hardware and compared
+///   within a pre-registered band, because sampling and hardware move.
+/// - [`Weights::Canned`] is REPLAYED, and compared exactly. There is no band,
+///   because there is nothing to vary: the same acts play again, byte for
+///   byte. It is the strongest form of reproducible-by-config and not the
+///   same claim as parity.
+/// - [`Weights::Hosted`] is neither. It may be observed and never certified.
+///
+/// Ruled 2026-09-08, and extended 2026-09-11. The alternative refused twice
+/// is one field whose meaning depends on what happens to be in it: first a
+/// `weights_digest` that also accepts a name, then a canned server's acts
+/// digest read through `Digest`. The second is the subtler one -- it makes
+/// `Digest` mean weights OR replay acts, told apart only by knowing the
+/// engine's name, which is a label standing in for a value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Weights {
+    /// Weights on disk, by sha256.
+    Digest(String),
+    /// Weights behind an endpoint.
+    Hosted {
+        /// Who serves them.
+        provider: String,
+        /// What they call the model.
+        model_id: String,
+        /// The version if the provider publishes one, else the date the run
+        /// observed. Either way it is what a later reader compares against;
+        /// neither is a guarantee, which is the point.
+        version_or_date_observed: String,
+    },
+    /// No weights: a canned server replaying acts written in advance.
+    Canned {
+        /// The digest of the acts it plays, which is its whole identity.
+        ///
+        /// A canned server has no weights and that is not the same as having
+        /// nothing identifiable: the acts decided every reply, they are an
+        /// artifact somebody can hold, and this is their sha256.
+        acts_sha256: String,
+    },
+}
+
+impl Weights {
+    /// Which kind these are.
+    #[must_use]
+    pub fn kind(&self) -> WeightsKind {
+        match self {
+            Self::Digest(_) => WeightsKind::Digest,
+            Self::Hosted { .. } => WeightsKind::Hosted,
+            Self::Canned { .. } => WeightsKind::Canned,
+        }
+    }
+
+    /// Whether a run on these weights can be re-fired and expected to match.
+    ///
+    /// False for hosted weights, and that is the whole reason this type is a
+    /// vocabulary rather than a string. A provider can re-point a tag without
+    /// telling anyone, so parity on a hosted substrate is a claim nobody can
+    /// keep -- a result under one may be `historical-observation` and never
+    /// `reproducible-by-config`.
+    #[must_use]
+    pub fn is_reproducible(&self) -> bool {
+        // Canned is reproducible BY REPLAY rather than by re-firing, and it is
+        // the stronger of the two: the acts play again exactly. See
+        // [`Weights::is_replayed`] for the half that decides HOW a gate
+        // compares, which is a different question from whether it may.
+        matches!(self, Self::Digest(_) | Self::Canned { .. })
+    }
+
+    /// Whether reproducing this means replaying acts rather than re-firing.
+    ///
+    /// Gate 1 compares a replay EXACTLY and a re-firing within a band. Asking
+    /// this rather than reading the engine's name is the whole reason the kind
+    /// exists.
+    #[must_use]
+    pub fn is_replayed(&self) -> bool {
+        matches!(self, Self::Canned { .. })
+    }
+}
+
+/// The stack that served a substrate's weights.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Engine {
+    /// The serving stack, as it calls itself.
+    pub name: String,
+    /// Which build of it. A version when the stack publishes one, a digest
+    /// when it does not -- #47's own spelling, and the reason the field is
+    /// named for both rather than for the one that happened to be available.
+    pub version_or_digest: String,
+}
+
+/// One thing a run was served by, declared once and referenced by id.
+///
+/// Was a single `substrate` on the regime. It is a list now because a run can
+/// have more than one -- a drive whose interview fork is served by a small
+/// local model while the main lane is served by a large one is the case this
+/// repository is built to measure, and a single substrate could not say it.
+///
+/// Identity is the WEIGHTS, typed, not a name. A name is prose: two runs can
+/// spell the same weights differently and a third can spell different weights
+/// the same, and then a regime comparison compares strings. A digest cannot do
+/// either, and the hosted variant does not pretend to -- it says who served
+/// them and declines to claim more, which is why nothing under it may claim
+/// parity. See [`Weights`].
 ///
 /// Every field is required. An optional substrate field is a substrate field
 /// that will be absent exactly when it matters -- the run whose result
 /// surprises someone is the run nobody thought to tag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Substrate {
-    /// The short name the substrate is known by. This is the string a report's
-    /// front-matter carries as `regime.substrate`.
-    pub name: String,
-    /// The model, as the serving stack names it.
-    pub model: String,
-    /// The quantization, as the serving stack names it.
-    pub quantization: String,
+    /// What rows reference. Unique within a run; nothing outside it.
+    pub id: String,
+    /// What served the weights.
+    pub engine: Engine,
+    /// Which weights, and how they are identified.
+    pub weights: Weights,
+    /// A fingerprint for the hardware it was served from.
+    pub hardware_fingerprint: String,
     /// Sampler settings, exactly as they were set.
-    pub sampler: BTreeMap<String, Value>,
+    pub sampler_card: BTreeMap<String, Value>,
     /// Whether reasoning was on, and whether it came back.
+    ///
+    /// Not in #47's list of substrate fields and kept anyway: it is a property
+    /// of how these weights were run, two valid fixtures pin it, and dropping
+    /// it would be a distinction the schema stopped being able to make.
     pub reasoning: Reasoning,
-    /// A fingerprint for the hardware the run was served from.
-    pub hardware: String,
 }
 
 vocabulary! {
@@ -129,8 +264,8 @@ vocabulary! {
 pub struct Regime {
     /// Which arm of the experiment.
     pub arm: String,
-    /// What served it.
-    pub substrate: Substrate,
+    /// What served it, declared once. At least one, ids unique.
+    pub substrates: Vec<Substrate>,
     /// Which version of the dogma was in force.
     pub dogma_version: u32,
 }
@@ -141,7 +276,40 @@ impl Regime {
     /// Named here rather than in the report linter so that the schema is the
     /// definition and the report is the mirror, which is the direction the
     /// two are supposed to run in.
-    pub const TAGS: &'static [&'static str] = &["arm", "substrate", "dogma_version"];
+    pub const TAGS: &'static [&'static str] = &["arm", "substrates", "dogma_version"];
+
+    /// Whether this run declared a substrate under that id.
+    #[must_use]
+    pub fn declares(&self, id: &str) -> bool {
+        self.substrates.iter().any(|s| s.id == id)
+    }
+
+    /// Every declared id, in declaration order.
+    #[must_use]
+    pub fn substrate_ids(&self) -> Vec<&str> {
+        self.substrates.iter().map(|s| s.id.as_str()).collect()
+    }
+
+    /// The declared substrates nothing can re-fire, by id.
+    ///
+    /// Empty for a run served entirely by weights on disk. Non-empty is what
+    /// stops a results directory calling itself `reproducible-by-config`: the
+    /// provider can re-point a tag without telling anyone, so parity under
+    /// one of these is a claim nobody can keep. Gate 0 does not read this --
+    /// re-deriving numbers from committed artifacts is indifferent to what
+    /// served them. Ruled 2026-09-08.
+    #[must_use]
+    pub fn hosted_substrate_ids(&self) -> Vec<&str> {
+        self.substrates
+            .iter()
+            // MATCHED, not inferred from `!is_reproducible()`. With two
+            // variants those were the same set; with three they are only the
+            // same until a fourth, and this list is named for hosted
+            // substrates rather than for whatever is left over.
+            .filter(|s| matches!(s.weights, Weights::Hosted { .. }))
+            .map(|s| s.id.as_str())
+            .collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +454,15 @@ pub enum Event {
         id: String,
         /// Which lane sent it.
         lane: String,
+        /// Which declared substrate it was put to, by id.
+        ///
+        /// Required, and required even when the run declares exactly one:
+        /// a row that may omit it is a row whose substrate was decided
+        /// somewhere else, which is the thing declaring them exists to end.
+        /// A `response` inherits this through its `to_request`, and a retry
+        /// is a new request row, so a retry served by a different substrate
+        /// is already expressible without a second place to say so.
+        substrate: String,
         /// The request this one retries, if it is a retry. A retry is a new
         /// request that names its predecessor; it is not an annotation on the
         /// old one, because the old one already happened.
@@ -321,6 +498,12 @@ pub enum Event {
         id: String,
         /// Which lane it belongs to.
         lane: String,
+        /// Which declared substrate the fork was served by, by id.
+        ///
+        /// The field that makes the point of declaring substrates: a fork
+        /// served by a small local model while the main lane runs a large one
+        /// is the arrangement this repository is built to measure.
+        substrate: String,
         /// The turn it forked from.
         of_turn: u32,
     },
@@ -371,6 +554,12 @@ pub enum Event {
         /// This rejection's identifier.
         id: String,
         /// Which lane was rejected.
+        ///
+        /// And, by reference, which substrate: a lane is a role on a
+        /// substrate and cannot change it mid-run, so [`Record::substrate_of`]
+        /// answers for this row. No `substrate` field here on purpose -- it
+        /// would be the lane's fact written a second time, in the one place
+        /// that could contradict it. Ruled 2026-09-08.
         lane: String,
         /// The turn it happened in. Every id-bearing row links to something
         /// already seen, and this is the anchor for a lane that need not
@@ -394,15 +583,91 @@ pub enum Event {
         /// The claim this one supersedes, if it is a correction.
         supersedes: Option<String>,
     },
-    /// The session's totals.
+    /// What the run amounted to, in the terms its own kind is measured in.
     Summary {
+        /// Which kind of run this was, and the totals that kind has.
+        summary: Summary,
+        /// The digest of the product the run produced.
+        ///
+        /// HERE AND NOT IN A KIND, because binary provenance is universal: a
+        /// recompute record was produced by a `diet` binary exactly as a drive
+        /// record was, and the ruling that made the digest mandatory at the
+        /// boundary did not exempt one of them. It lived inside
+        /// [`Summary::Drive`] until 2026-09-11, which made every results
+        /// directory whose record was a recompute impossible to lint --
+        /// `check-results.py` requires `product_sha256` in every front-matter
+        /// and requires it to equal the summary's, and a recompute summary had
+        /// nowhere to put one. Duplicating the field across variants would
+        /// have been one name meaning a thing in two places; teaching the
+        /// linter which kinds carry it would have been a second reader of this
+        /// schema. Ruled (a) on #68.
+        product_sha256: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// summaries
+// ---------------------------------------------------------------------------
+
+vocabulary! {
+    /// What a run was, which decides what its summary can say.
+    ///
+    /// `replay` is named by #47 and is deliberately NOT here: the issue says
+    /// its fields are "to be stated", and a variant with no stated fields is
+    /// either a guess about what a replay measures or a variant nothing can
+    /// construct. Both are worse than refusing the word until it means
+    /// something, and refusing is the direction this format is allowed to
+    /// grow in.
+    SummaryKind {
+        /// A session that drove a model: turns, prefill, and a product.
+        Drive => "drive",
+        /// A re-derivation: how many targets were checked, how many matched,
+        /// and the digests that say so.
+        Recompute => "recompute",
+    }
+}
+
+/// A run's totals, in the terms of the kind of run it was.
+///
+/// An enum with per-kind fields rather than one struct with optionals, for
+/// the reason `Patch` gives one module over: a summary that could be any of
+/// these depending on which fields happen to be set is a summary whose
+/// meaning is decided at the call site rather than by the schema.
+///
+/// This is also what refuses a sentinel. #47 asks for "sentinel numbers
+/// meaning 'not applicable'" to be refused, and the way to refuse them is not
+/// to check for -1: it is to leave nowhere to put one. A recompute summary
+/// has no `turns` field, so `turns: -1` is an unknown key and the schema
+/// already refuses those by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Summary {
+    /// A session that drove a model.
+    Drive {
         /// How many turns.
         turns: u32,
         /// Prefill tokens across the session.
         prefill_tokens_total: Count,
-        /// The digest of the product the session produced.
-        product_sha256: String,
     },
+    /// A re-derivation of a result that already exists.
+    Recompute {
+        /// How many targets the recompute set out to check.
+        targets_checked: u32,
+        /// How many of them matched. Never more than were checked.
+        targets_matched: u32,
+        /// The digests it compared, in the order it compared them.
+        digests: Vec<String>,
+    },
+}
+
+impl Summary {
+    /// Which kind this summary is.
+    #[must_use]
+    pub fn kind(&self) -> SummaryKind {
+        match self {
+            Self::Drive { .. } => SummaryKind::Drive,
+            Self::Recompute { .. } => SummaryKind::Recompute,
+        }
+    }
 }
 
 impl Event {
@@ -472,6 +737,34 @@ impl Record {
     pub fn kinds(&self) -> BTreeSet<Kind> {
         self.events.iter().map(Event::kind).collect()
     }
+
+    /// Which substrate served `lane`, if any row named one.
+    ///
+    /// A LANE IS A ROLE ON A SUBSTRATE, and [`validate`] refuses a record
+    /// whose rows say otherwise, so there is at most one answer and this
+    /// cannot pick. It is what a `rejected` row's substrate IS: the row does
+    /// not carry the field, it inherits it from its lane, and the inheritance
+    /// is this function rather than a sentence each reader implements again.
+    ///
+    /// Ruled 2026-09-08. The alternative was a `substrate` on `rejected`,
+    /// which is the same fact written twice and therefore a fact that can
+    /// disagree with itself.
+    #[must_use]
+    pub fn substrate_of(&self, lane: &str) -> Option<&str> {
+        self.events.iter().find_map(|event| match event {
+            Event::Request {
+                lane: on,
+                substrate,
+                ..
+            }
+            | Event::Fork {
+                lane: on,
+                substrate,
+                ..
+            } if on == lane => Some(substrate.as_str()),
+            _ => None,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -480,13 +773,13 @@ impl Record {
 
 /// The deepest nesting a record may carry.
 ///
-/// A record's own deepest legitimate shape is four -- `regime.substrate.
-/// sampler.<setting>` -- so this is generous by an order of magnitude and
+/// A record's own deepest legitimate shape is five -- `regime.substrates[].
+/// sampler_card.<setting>` -- so this is generous by an order of magnitude and
 /// still far below where recursive descent runs out of stack. Without it a
 /// 2 KB file of nested objects ABORTS the process, and this format's own
 /// corpus says, in `invalid/not-utf8.reason`, that a format must return a
-/// verdict on arbitrary bytes rather than crash on them. `Substrate.sampler`
-/// is the arrival vector: the one untyped, arbitrarily-nested field here.
+/// verdict on arbitrary bytes rather than crash on them. The sampler card is
+/// the arrival vector: the one untyped, arbitrarily-nested field here.
 pub const MAX_DEPTH: usize = 32;
 
 /// Why a text is not a session record.
@@ -620,6 +913,44 @@ pub enum StructureError {
         /// What the rows add up to.
         counted: u64,
     },
+    /// A summary whose two totals cannot both be true of each other.
+    ///
+    /// Deliberately not [`Self::SummaryDisagrees`], which means "you said X
+    /// and I counted Y". Nothing counts a recompute's targets -- the reader
+    /// sees no target rows -- so borrowing that variant would print "the rows
+    /// above it add up to 1" about a 1 that came from the same row, and a
+    /// message that names the wrong evidence sends the next reader to the
+    /// wrong place.
+    SummaryImpossible {
+        /// The total that cannot be that large.
+        field: &'static str,
+        /// What it claims.
+        says: u64,
+        /// The field that bounds it.
+        bound: &'static str,
+        /// What that field claims.
+        limit: u64,
+    },
+    /// Two substrates declared under one id.
+    SubstrateDeclaredTwice(String),
+    /// A lane whose rows name two different substrates.
+    LaneChangedSubstrate {
+        /// The lane that changed.
+        lane: String,
+        /// What its first row named.
+        was: String,
+        /// What this row names.
+        now: String,
+    },
+    /// A row naming a substrate the run never declared.
+    UndeclaredSubstrate {
+        /// The row that names it.
+        row: &'static str,
+        /// The id it names.
+        id: String,
+        /// What the run did declare, so the reader can see the typo.
+        declared: Vec<String>,
+    },
     /// A turn index a link names that no turn ever had.
     UnknownTurn(u32),
     /// Turn indices that do not run 1, 2, 3.
@@ -726,6 +1057,42 @@ impl fmt::Display for StructureError {
                 f,
                 "the summary's `{field}` says {says}, but the rows above it add \
                  up to {counted}"
+            ),
+            Self::SummaryImpossible {
+                field,
+                says,
+                bound,
+                limit,
+            } => write!(
+                f,
+                "the summary's `{field}` says {says} of the {limit} its \
+                 `{bound}` says were looked at"
+            ),
+            Self::SubstrateDeclaredTwice(id) => write!(
+                f,
+                "two substrates are declared as `{id}`, so every row naming it \
+                 would have to be read as one of them"
+            ),
+            Self::LaneChangedSubstrate { lane, was, now } => write!(
+                f,
+                "the `{lane}` lane is served by `{was}` and then by `{now}`, \
+                 and a lane is a role on a substrate: a lane that changes \
+                 substrate is two lanes, and a row that inherits its lane's \
+                 substrate would have two answers"
+            ),
+            Self::UndeclaredSubstrate { row, id, declared } => write!(
+                f,
+                "a `{row}` row is served by `{id}`, which this run does not \
+                 declare; it declares {}",
+                if declared.is_empty() {
+                    "none".to_owned()
+                } else {
+                    declared
+                        .iter()
+                        .map(|d| format!("`{d}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
             ),
             Self::UnknownTurn(index) => write!(f, "a row names turn {index}, which never happened"),
             Self::TurnOutOfOrder { want, found } => {
@@ -920,6 +1287,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
         Kind::Request => Event::Request {
             id: take_string(&mut members, of, "id")?,
             lane: take_string(&mut members, of, "lane")?,
+            substrate: take_string(&mut members, of, "substrate")?,
             retry_of: take_optional_string(&mut members, of, "retry_of")?,
             text: take_optional_text(&mut members, of, "text")?,
         },
@@ -932,6 +1300,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
         Kind::Fork => Event::Fork {
             id: take_string(&mut members, of, "id")?,
             lane: take_string(&mut members, of, "lane")?,
+            substrate: take_string(&mut members, of, "substrate")?,
             of_turn: take_u32(&mut members, of, "of_turn")?,
         },
         Kind::Capture => Event::Capture {
@@ -974,8 +1343,10 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             supersedes: take_optional_string(&mut members, of, "supersedes")?,
         },
         Kind::Summary => Event::Summary {
-            turns: take_u32(&mut members, of, "turns")?,
-            prefill_tokens_total: take_u64(&mut members, of, "prefill_tokens_total")?,
+            summary: summary(&mut members, of)?,
+            // Read here rather than inside `summary`, because it belongs to
+            // the row and not to the kind: every summary carries it, and a
+            // reader that took it per-kind would have to be told twice.
             product_sha256: take_string(&mut members, of, "product_sha256")?,
         },
     };
@@ -992,47 +1363,39 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
     Ok(built)
 }
 
+/// A summary, from a `summary` row's members.
+///
+/// `kind` first, then only that kind's fields. Anything else is left in
+/// `members` and refused by the caller as an unknown key -- which is what
+/// makes `turns` on a recompute summary an error rather than a number nobody
+/// reads. Its own function rather than an arm of [`event`] because the arm is
+/// the only one that dispatches on a second vocabulary, and a reader looking
+/// for what a summary may say should not have to read ten other kinds first.
+fn summary(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Summary, ParseError> {
+    let tag = take_string(members, of, "kind")?;
+    let kind = SummaryKind::from_tag(&tag).ok_or(SchemaError::BadValue {
+        of,
+        field: "kind",
+        found: tag,
+    })?;
+    Ok(match kind {
+        SummaryKind::Drive => Summary::Drive {
+            turns: take_u32(members, of, "turns")?,
+            prefill_tokens_total: take_u64(members, of, "prefill_tokens_total")?,
+        },
+        SummaryKind::Recompute => Summary::Recompute {
+            targets_checked: take_u32(members, of, "targets_checked")?,
+            targets_matched: take_u32(members, of, "targets_matched")?,
+            digests: take_digests(members, of)?,
+        },
+    })
+}
+
 /// The regime, from a `start` row's `regime` object.
 fn regime(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Regime, ParseError> {
     let arm = take_string(members, of, "arm")?;
     let dogma_version = take_u32(members, of, "dogma_version")?;
-    let mut substrate_members = take_object(members, of, "substrate")?;
-    let substrate = Substrate {
-        name: take_string(&mut substrate_members, of, "name")?,
-        model: take_string(&mut substrate_members, of, "model")?,
-        quantization: take_string(&mut substrate_members, of, "quantization")?,
-        sampler: {
-            // A substrate whose sampler settings are the empty object records
-            // that the run had settings and declines to say which. The issue
-            // names sampler settings as one of the substrate's facets, and an
-            // empty map satisfies the type while satisfying nothing else.
-            let settings = take_object(&mut substrate_members, of, "sampler")?;
-            if settings.is_empty() {
-                return Err(SchemaError::BlankField {
-                    of,
-                    field: "substrate.sampler",
-                }
-                .into());
-            }
-            settings
-        },
-        reasoning: {
-            let text = take_string(&mut substrate_members, of, "reasoning")?;
-            Reasoning::from_tag(&text).ok_or(SchemaError::BadValue {
-                of,
-                field: "reasoning",
-                found: text,
-            })?
-        },
-        hardware: take_string(&mut substrate_members, of, "hardware")?,
-    };
-    if let Some(field) = substrate_members.keys().next() {
-        return Err(SchemaError::UnknownField {
-            of,
-            field: format!("substrate.{field}"),
-        }
-        .into());
-    }
+    let substrates = substrates(members, of)?;
     if let Some(field) = members.keys().next() {
         return Err(SchemaError::UnknownField {
             of,
@@ -1042,9 +1405,187 @@ fn regime(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Reg
     }
     Ok(Regime {
         arm,
-        substrate,
+        substrates,
         dogma_version,
     })
+}
+
+/// The substrates a run declares, from the regime's `substrates` list.
+///
+/// A single-substrate run declares a list of one. Not a shorthand for it: a
+/// run whose rows may omit the reference when there is only one is a run
+/// whose rows mean different things depending on a count elsewhere in the
+/// file, and the reference is what this whole item exists to make explicit.
+fn substrates(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Vec<Substrate>, ParseError> {
+    let Some(value) = members.remove("substrates") else {
+        return Err(SchemaError::MissingField {
+            of,
+            field: "substrates",
+        }
+        .into());
+    };
+    let Value::Array(items) = value else {
+        return Err(SchemaError::WrongType {
+            of,
+            field: "substrates".to_owned(),
+            want: "a list of substrates",
+        }
+        .into());
+    };
+    // A run served by nothing is not a run. The empty list satisfies the type
+    // and says nothing, which is the shape the empty sampler card was refused
+    // for one field down.
+    if items.is_empty() {
+        return Err(SchemaError::BlankField {
+            of,
+            field: "regime.substrates",
+        }
+        .into());
+    }
+    let mut declared: Vec<Substrate> = Vec::with_capacity(items.len());
+    for item in items {
+        let Value::Object(mut fields) = item else {
+            return Err(SchemaError::WrongType {
+                of,
+                field: "substrates[]".to_owned(),
+                want: "a substrate",
+            }
+            .into());
+        };
+        let one = substrate(&mut fields, of)?;
+        // Two substrates under one id would make every reference to it
+        // ambiguous, and the reader would have to pick. It refuses instead.
+        if declared.iter().any(|s| s.id == one.id) {
+            return Err(StructureError::SubstrateDeclaredTwice(one.id).into());
+        }
+        declared.push(one);
+    }
+    Ok(declared)
+}
+
+/// Which weights a substrate ran, from its `weights` object.
+///
+/// KIND FIRST, then only that kind's fields -- the shape [`summary`] uses,
+/// and for the same reason: a field that belongs to the other variant is left
+/// in `fields` and refused by the caller as unknown, so a hosted substrate
+/// carrying a `sha256` is an error rather than a digest nobody reads.
+fn weights(fields: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Weights, ParseError> {
+    let mut members = take_object(fields, of, "weights")?;
+    let tag = take_string(&mut members, of, "kind")?;
+    let kind = WeightsKind::from_tag(&tag).ok_or(SchemaError::BadValue {
+        of,
+        field: "weights.kind",
+        found: tag,
+    })?;
+    let built = match kind {
+        WeightsKind::Digest => {
+            // Identity, so it is checked as a digest rather than accepted as
+            // a name. This is the variant that says what the weights ARE, and
+            // a string that is not a digest cannot say it.
+            let text = take_string(&mut members, of, "sha256")?;
+            if !digest_ok(&text) {
+                return Err(StructureError::BadDigest(text).into());
+            }
+            Weights::Digest(text)
+        }
+        // Not checked as a digest, because there is nothing to digest. Three
+        // required strings and no identity claim: what a later reader has is
+        // who served it and what they called it, which is why nothing under
+        // these weights may claim parity.
+        WeightsKind::Hosted => Weights::Hosted {
+            provider: take_string(&mut members, of, "provider")?,
+            model_id: take_string(&mut members, of, "model_id")?,
+            version_or_date_observed: take_string(&mut members, of, "version_or_date_observed")?,
+        },
+        // Checked as a digest, like `Digest` and for the same reason: it is
+        // an identity claim about an artifact, and a string that is not a
+        // digest cannot make one. What it digests is the acts rather than
+        // weights, which is exactly why it is not spelled `sha256` here --
+        // two kinds sharing a field name is how the reader stops being able
+        // to say which it got.
+        WeightsKind::Canned => {
+            let text = take_string(&mut members, of, "acts_sha256")?;
+            if !digest_ok(&text) {
+                return Err(StructureError::BadDigest(text).into());
+            }
+            Weights::Canned { acts_sha256: text }
+        }
+    };
+    if let Some(field) = members.keys().next() {
+        return Err(SchemaError::UnknownField {
+            of,
+            field: format!("substrates[].weights.{field}"),
+        }
+        .into());
+    }
+    Ok(built)
+}
+
+/// One substrate, from its object.
+fn substrate(
+    fields: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Substrate, ParseError> {
+    let id = take_string(fields, of, "id")?;
+    if id.trim().is_empty() {
+        return Err(SchemaError::BlankField {
+            of,
+            field: "substrates[].id",
+        }
+        .into());
+    }
+    let mut engine_fields = take_object(fields, of, "engine")?;
+    let engine = Engine {
+        name: take_string(&mut engine_fields, of, "name")?,
+        version_or_digest: take_string(&mut engine_fields, of, "version_or_digest")?,
+    };
+    if let Some(field) = engine_fields.keys().next() {
+        return Err(SchemaError::UnknownField {
+            of,
+            field: format!("substrates[].engine.{field}"),
+        }
+        .into());
+    }
+    let built = Substrate {
+        id,
+        engine,
+        weights: weights(fields, of)?,
+        hardware_fingerprint: take_string(fields, of, "hardware_fingerprint")?,
+        sampler_card: {
+            // A substrate whose sampler card is the empty object records that
+            // the run had settings and declines to say which. The issue names
+            // the card as one of the substrate's facets, and an empty map
+            // satisfies the type while satisfying nothing else.
+            let settings = take_object(fields, of, "sampler_card")?;
+            if settings.is_empty() {
+                return Err(SchemaError::BlankField {
+                    of,
+                    field: "substrates[].sampler_card",
+                }
+                .into());
+            }
+            settings
+        },
+        reasoning: {
+            let text = take_string(fields, of, "reasoning")?;
+            Reasoning::from_tag(&text).ok_or(SchemaError::BadValue {
+                of,
+                field: "reasoning",
+                found: text,
+            })?
+        },
+    };
+    if let Some(field) = fields.keys().next() {
+        return Err(SchemaError::UnknownField {
+            of,
+            field: format!("substrates[].{field}"),
+        }
+        .into());
+    }
+    Ok(built)
 }
 
 fn take_artifacts(
@@ -1090,6 +1631,54 @@ fn take_artifacts(
         artifacts.push(artifact);
     }
     Ok(artifacts)
+}
+
+/// A `digests` list, with every entry checked to be one.
+///
+/// Modelled on `take_artifacts`. The per-entry check is here rather than in
+/// the structural pass because a digest that is not a digest is a SHAPE
+/// error: nothing downstream can compare it, and reporting it as a
+/// disagreement about a number would name the wrong defect.
+fn take_digests(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Vec<String>, ParseError> {
+    let Some(value) = members.remove("digests") else {
+        return Err(SchemaError::MissingField {
+            of,
+            field: "digests",
+        }
+        .into());
+    };
+    let Value::Array(items) = value else {
+        return Err(SchemaError::WrongType {
+            of,
+            field: "digests".to_owned(),
+            want: "a list of sha256 digests",
+        }
+        .into());
+    };
+    let mut digests = Vec::with_capacity(items.len());
+    for item in items {
+        let Value::String(text) = item else {
+            return Err(SchemaError::WrongType {
+                of,
+                field: "digests[]".to_owned(),
+                want: "a sha256 digest",
+            }
+            .into());
+        };
+        if !digest_ok(&text) {
+            return Err(SchemaError::BadValue {
+                of,
+                field: "digests",
+                found: text,
+            }
+            .into());
+        }
+        digests.push(text);
+    }
+    Ok(digests)
 }
 
 fn take_string(
@@ -1362,10 +1951,9 @@ impl<'a> Seen<'a> {
                 ..
             } => self.admit_claim(id, consumes, supersedes.as_deref())?,
             Event::Summary {
-                turns,
-                prefill_tokens_total,
+                summary,
                 product_sha256,
-            } => self.admit_summary(*turns, *prefill_tokens_total, product_sha256)?,
+            } => self.admit_summary(summary, product_sha256)?,
             Event::Start { .. } => {}
         }
         Ok(())
@@ -1407,31 +1995,64 @@ impl<'a> Seen<'a> {
     /// because a report's front-matter numbers are verified against THIS row
     /// rather than against the rows themselves. An inconsistent summary would
     /// launder a wrong number into a green results gate.
-    fn admit_summary(
-        &self,
-        turns: u32,
-        prefill_tokens_total: Count,
-        product_sha256: &str,
-    ) -> Result<(), ParseError> {
+    /// What a summary must agree with, in the terms of its own kind.
+    ///
+    /// The cross-checks were written when there was one kind of summary and
+    /// they are about a DRIVE: `turns` against the turns this reader counted,
+    /// `prefill_tokens_total` against the prefill it added up. A recompute
+    /// counted no turns and consumed no prefill, so running those checks
+    /// against it would compare a number to nothing and call the answer a
+    /// disagreement. Splitting the summary into kinds is what makes that
+    /// impossible to write rather than merely wrong.
+    fn admit_summary(&self, summary: &Summary, product_sha256: &str) -> Result<(), ParseError> {
+        // The digest is checked once, before the kinds, because every kind
+        // carries it. It was checked inside the drive arm until 2026-09-11,
+        // which is how a recompute summary came to have no digest to check.
         if !digest_ok(product_sha256) {
             return Err(StructureError::BadDigest(product_sha256.to_owned()).into());
         }
-        let counted = self.next_turn - 1;
-        if turns != counted {
-            return Err(StructureError::SummaryDisagrees {
-                field: "turns",
-                says: u64::from(turns),
-                counted: u64::from(counted),
+        match summary {
+            Summary::Drive {
+                turns,
+                prefill_tokens_total,
+            } => {
+                let counted = self.next_turn - 1;
+                if *turns != counted {
+                    return Err(StructureError::SummaryDisagrees {
+                        field: "turns",
+                        says: u64::from(*turns),
+                        counted: u64::from(counted),
+                    }
+                    .into());
+                }
+                if *prefill_tokens_total != self.prefill_tokens {
+                    return Err(StructureError::SummaryDisagrees {
+                        field: "prefill_tokens_total",
+                        says: prefill_tokens_total.get(),
+                        counted: self.prefill_tokens.get(),
+                    }
+                    .into());
+                }
             }
-            .into());
-        }
-        if prefill_tokens_total != self.prefill_tokens {
-            return Err(StructureError::SummaryDisagrees {
-                field: "prefill_tokens_total",
-                says: prefill_tokens_total.get(),
-                counted: self.prefill_tokens.get(),
+            Summary::Recompute {
+                targets_checked,
+                targets_matched,
+                ..
+            } => {
+                // More matched than were checked is not a disagreement with
+                // something this reader counted -- it is a claim that cannot
+                // be true of itself, and it is the shape a "not applicable"
+                // sentinel would arrive in if one were still possible here.
+                if targets_matched > targets_checked {
+                    return Err(StructureError::SummaryImpossible {
+                        field: "targets_matched",
+                        says: u64::from(*targets_matched),
+                        bound: "targets_checked",
+                        limit: u64::from(*targets_checked),
+                    }
+                    .into());
+                }
             }
-            .into());
         }
         Ok(())
     }
@@ -1447,6 +2068,10 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
     let mut regime = None;
     let mut seen = Seen::new();
     let mut summary_seen = false;
+    // Which substrate each lane has been served by, so far. Not on `Seen`:
+    // that one holds what LINKS resolve against, and this is not a link -- it
+    // is the lane's own identity accumulating.
+    let mut lanes: BTreeMap<&str, &str> = BTreeMap::new();
 
     for (position, event) in events.iter().enumerate() {
         if summary_seen {
@@ -1463,6 +2088,49 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
             Event::Start { regime: found } => regime = Some((**found).clone()),
             _ if position == 0 => return Err(StructureError::StartNotFirst.into()),
             _ => {}
+        }
+        // Checked against the regime ALREADY SEEN, like every other link here.
+        // `start` is first or the loop has already refused the record, so the
+        // declarations are in hand by the time any row can name one, and a
+        // record can be walked as it is written.
+        let named = match event {
+            Event::Request {
+                lane, substrate, ..
+            } => Some(("request", lane, substrate)),
+            Event::Fork {
+                lane, substrate, ..
+            } => Some(("fork", lane, substrate)),
+            _ => None,
+        };
+        if let Some((row, lane, id)) = named {
+            if let Some(known) = regime.as_ref()
+                && !known.declares(id)
+            {
+                return Err(StructureError::UndeclaredSubstrate {
+                    row,
+                    id: id.clone(),
+                    declared: known
+                        .substrate_ids()
+                        .into_iter()
+                        .map(ToOwned::to_owned)
+                        .collect(),
+                }
+                .into());
+            }
+            // A LANE IS A ROLE ON A SUBSTRATE. Fixed for the run, so a lane
+            // that changes substrate is two lanes and should be spelled as
+            // two -- and so a `rejected` row, which carries no substrate of
+            // its own, has exactly one to inherit. Ruled 2026-09-08.
+            if let Some(was) = lanes.insert(lane.as_str(), id.as_str())
+                && was != id
+            {
+                return Err(StructureError::LaneChangedSubstrate {
+                    lane: lane.clone(),
+                    was: was.to_owned(),
+                    now: id.clone(),
+                }
+                .into());
+            }
         }
         seen.admit(event)?;
         seen.claim_id(event)?;
@@ -1579,6 +2247,22 @@ impl Members {
 /// The identifier is written once, from [`Event::id`], rather than in every
 /// arm that has one: that method is already the single statement of which
 /// kinds carry an id, and a second copy here could disagree with it.
+///
+/// EXHAUSTIVE OVER EVERY EVENT KIND; SPLITTING SCATTERS THE MATCH. That is
+/// the wording the 2026-09-12 ruling requires of this suppression, and the
+/// ruling is a criterion rather than a grant: an `#[allow]` is acceptable for
+/// exactly one shape, an exhaustive `match` over an enum whose length IS its
+/// completeness, and anything long for another reason -- helpers inlined,
+/// formatting repeated per kind -- gets split instead.
+///
+/// Measured against that criterion before claiming it. Eleven arms for the
+/// eleven `Event` variants and no wildcard, so adding a kind fails to compile
+/// until someone says how it is written. The shared work is hoisted OUT of
+/// the match -- `record` and `id` are written once above it -- so it is not
+/// formatting repeated per kind. The three structures with any depth to them
+/// delegate to `regime_value`, `artifacts_value` and `summary_value`, so it
+/// is not helpers inlined. What is left is the vocabulary, one arm each.
+#[allow(clippy::too_many_lines)]
 fn event_value(event: &Event) -> BTreeMap<String, Value> {
     let mut members = Members(BTreeMap::new());
     members.put_text("record", event.kind().tag());
@@ -1594,11 +2278,13 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
         }
         Event::Request {
             lane,
+            substrate,
             retry_of,
             text,
             ..
         } => {
             members.put_text("lane", lane);
+            members.put_text("substrate", substrate);
             members.put_optional("retry_of", retry_of.clone().map(Value::String));
             members.put_optional("text", text.clone().map(Value::String));
         }
@@ -1612,8 +2298,14 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put_count("output_tokens", *output_tokens);
             members.put_optional("text", text.clone().map(Value::String));
         }
-        Event::Fork { lane, of_turn, .. } => {
+        Event::Fork {
+            lane,
+            substrate,
+            of_turn,
+            ..
+        } => {
             members.put_text("lane", lane);
+            members.put_text("substrate", substrate);
             members.put_u32("of_turn", *of_turn);
         }
         Event::Capture {
@@ -1669,16 +2361,56 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put_optional("supersedes", supersedes.clone().map(Value::String));
         }
         Event::Summary {
+            summary,
+            product_sha256,
+        } => summary_value(summary, product_sha256, &mut members),
+    }
+    members.0
+}
+
+/// A summary ROW into the value space: the fields every kind carries, and then
+/// the fields of the kind this one is.
+///
+/// `kind` always, then the product digest every kind carries, then that kind's
+/// own fields and no others -- so what comes back out is what the schema would
+/// accept going in.
+///
+/// The digest is passed in rather than reached for, because [`Summary`] has no
+/// field for it: it sits on [`Event::Summary`], where a fact about the row
+/// rather than about the kind belongs. The reading side is the same shape --
+/// [`summary`] returns the kind's part and the digest is taken beside it --
+/// and the two are paired deliberately, so that a field added to one of them
+/// has an obvious home in the other.
+fn summary_value(summary: &Summary, product_sha256: &str, members: &mut Members) {
+    members.put_text("kind", summary.kind().tag());
+    members.put_text("product_sha256", product_sha256);
+    match summary {
+        Summary::Drive {
             turns,
             prefill_tokens_total,
-            product_sha256,
         } => {
             members.put_u32("turns", *turns);
             members.put_count("prefill_tokens_total", *prefill_tokens_total);
-            members.put_text("product_sha256", product_sha256);
+        }
+        Summary::Recompute {
+            targets_checked,
+            targets_matched,
+            digests,
+        } => {
+            members.put_u32("targets_checked", *targets_checked);
+            members.put_u32("targets_matched", *targets_matched);
+            members.put(
+                "digests",
+                Value::Array(
+                    digests
+                        .iter()
+                        .cloned()
+                        .map(Value::String)
+                        .collect::<Vec<_>>(),
+                ),
+            );
         }
     }
-    members.0
 }
 
 /// The artifacts a claim consumes, as the value space.
@@ -1696,41 +2428,80 @@ fn artifacts_value(consumes: &[Artifact]) -> Value {
     )
 }
 
+/// A substrate's weights as a record value.
+///
+/// Kind first and then only that kind's fields, so what the writer emits is
+/// what [`weights`] accepts. A round trip through the other spelling would be
+/// a second reader for the same bytes.
+fn weights_value(weights: &Weights) -> Value {
+    let mut members = BTreeMap::from([(
+        "kind".to_owned(),
+        Value::String(weights.kind().tag().to_owned()),
+    )]);
+    match weights {
+        Weights::Digest(sha256) => {
+            members.insert("sha256".to_owned(), Value::String(sha256.clone()));
+        }
+        Weights::Hosted {
+            provider,
+            model_id,
+            version_or_date_observed,
+        } => {
+            members.insert("provider".to_owned(), Value::String(provider.clone()));
+            members.insert("model_id".to_owned(), Value::String(model_id.clone()));
+            members.insert(
+                "version_or_date_observed".to_owned(),
+                Value::String(version_or_date_observed.clone()),
+            );
+        }
+        Weights::Canned { acts_sha256 } => {
+            members.insert("acts_sha256".to_owned(), Value::String(acts_sha256.clone()));
+        }
+    }
+    Value::Object(members)
+}
+
 /// The regime as a record value.
 ///
 /// Crate-visible because the object's dump carries it: the dump is the only
 /// durable half of a working object, and a dump that does not say which
 /// regime produced it cannot be compared with one from another arm.
 pub(crate) fn regime_value(regime: &Regime) -> Value {
-    let substrate = BTreeMap::from([
-        (
-            "name".to_owned(),
-            Value::String(regime.substrate.name.clone()),
-        ),
-        (
-            "model".to_owned(),
-            Value::String(regime.substrate.model.clone()),
-        ),
-        (
-            "quantization".to_owned(),
-            Value::String(regime.substrate.quantization.clone()),
-        ),
-        (
-            "sampler".to_owned(),
-            Value::Object(regime.substrate.sampler.clone()),
-        ),
-        (
-            "reasoning".to_owned(),
-            Value::String(regime.substrate.reasoning.tag().to_owned()),
-        ),
-        (
-            "hardware".to_owned(),
-            Value::String(regime.substrate.hardware.clone()),
-        ),
-    ]);
+    let substrates = regime
+        .substrates
+        .iter()
+        .map(|s| {
+            Value::Object(BTreeMap::from([
+                ("id".to_owned(), Value::String(s.id.clone())),
+                (
+                    "engine".to_owned(),
+                    Value::Object(BTreeMap::from([
+                        ("name".to_owned(), Value::String(s.engine.name.clone())),
+                        (
+                            "version_or_digest".to_owned(),
+                            Value::String(s.engine.version_or_digest.clone()),
+                        ),
+                    ])),
+                ),
+                ("weights".to_owned(), weights_value(&s.weights)),
+                (
+                    "hardware_fingerprint".to_owned(),
+                    Value::String(s.hardware_fingerprint.clone()),
+                ),
+                (
+                    "sampler_card".to_owned(),
+                    Value::Object(s.sampler_card.clone()),
+                ),
+                (
+                    "reasoning".to_owned(),
+                    Value::String(s.reasoning.tag().to_owned()),
+                ),
+            ]))
+        })
+        .collect();
     Value::Object(BTreeMap::from([
         ("arm".to_owned(), Value::String(regime.arm.clone())),
-        ("substrate".to_owned(), Value::Object(substrate)),
+        ("substrates".to_owned(), Value::Array(substrates)),
         (
             "dogma_version".to_owned(),
             Value::Integer(i64::from(regime.dogma_version)),
@@ -1760,8 +2531,37 @@ pub fn project(source: &str) -> Result<Value, String> {
                     Value::Object(BTreeMap::from([
                         ("arm".to_owned(), Value::String(parsed.regime().arm.clone())),
                         (
-                            "substrate".to_owned(),
-                            Value::String(parsed.regime().substrate.name.clone()),
+                            // The declared ids, in declaration order. What a
+                            // report's front-matter mirrors, and what a row's
+                            // `substrate` must be one of -- so the mirror and
+                            // the references are the same list of names.
+                            "substrates".to_owned(),
+                            Value::Array(
+                                parsed
+                                    .regime()
+                                    .substrate_ids()
+                                    .into_iter()
+                                    .map(|id| Value::String(id.to_owned()))
+                                    .collect(),
+                            ),
+                        ),
+                        (
+                            // The subset of those ids served by weights that
+                            // can change under you. A gate that certifies
+                            // parity refuses a directory whose run names any
+                            // of these; gate 0 ignores the key entirely.
+                            // Carried here rather than derived by each reader
+                            // from `canonical`, because a second reader of the
+                            // record is a second opinion about it.
+                            "hosted_substrates".to_owned(),
+                            Value::Array(
+                                parsed
+                                    .regime()
+                                    .hosted_substrate_ids()
+                                    .into_iter()
+                                    .map(|id| Value::String(id.to_owned()))
+                                    .collect(),
+                            ),
                         ),
                         (
                             "dogma_version".to_owned(),
@@ -1790,11 +2590,11 @@ mod tests {
     use super::json::Value;
     use super::{
         Count, Event, Kind, MAX_DEPTH, ParseError, Reasoning, Regime, SchemaError, StructureError,
-        Verdict, objects, parse, regime_value, render,
+        Verdict, Weights, WeightsKind, objects, parse, regime_value, render,
     };
 
     /// A `start` line whose regime is complete, as every record needs one.
-    const START: &str = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"a-model","quantization":"q4","sampler":{"seed":7,"temperature":0.7},"reasoning":"on","hardware":"one-gpu"}}}"#;
+    const START: &str = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"one-gpu","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on"}]}}"#;
 
     fn record(rest: &str) -> String {
         format!("{START}\n{rest}")
@@ -1804,8 +2604,8 @@ mod tests {
     fn the_regime_comes_from_the_required_start() {
         let parsed = parse(&record("")).expect("a record");
         assert_eq!(parsed.regime().arm, "baseline");
-        assert_eq!(parsed.regime().substrate.name, "local");
-        assert_eq!(parsed.regime().substrate.reasoning, Reasoning::On);
+        assert_eq!(parsed.regime().substrates[0].id, "local");
+        assert_eq!(parsed.regime().substrates[0].reasoning, Reasoning::On);
     }
 
     // The acceptance case: provenance is not optional, and a record that omits
@@ -1842,9 +2642,9 @@ mod tests {
     #[test]
     fn a_retry_names_the_request_it_replaces() {
         let source = record(concat!(
-            r#"{"record":"request","id":"r1","lane":"main"}"#,
+            r#"{"record":"request","id":"r1","lane":"main","substrate":"local"}"#,
             "\n",
-            r#"{"record":"request","id":"r2","lane":"main","retry_of":"r1"}"#,
+            r#"{"record":"request","id":"r2","lane":"main","substrate":"local","retry_of":"r1"}"#,
             "\n",
             r#"{"record":"response","id":"a1","to_request":"r2","output_tokens":12}"#,
             "\n",
@@ -1873,7 +2673,7 @@ mod tests {
         let source = record(concat!(
             r#"{"record":"turn","index":1,"prefill_tokens":10}"#,
             "\n",
-            r#"{"record":"fork","id":"f1","lane":"interview","of_turn":1}"#,
+            r#"{"record":"fork","id":"f1","lane":"interview","substrate":"local","of_turn":1}"#,
             "\n",
             r#"{"record":"response","id":"a1","to_request":"f1","output_tokens":3}"#,
             "\n",
@@ -1984,7 +2784,7 @@ mod tests {
         let source = record(concat!(
             r#"{"record":"turn","index":1,"prefill_tokens":10}"#,
             "\n",
-            r#"{"record":"request","id":"q1","lane":"main","text":"list the tree"}"#,
+            r#"{"record":"request","id":"q1","lane":"main","substrate":"local","text":"list the tree"}"#,
             "\n",
             r#"{"record":"response","id":"a1","to_request":"q1","output_tokens":0,"text":""}"#,
             "\n",
@@ -2048,7 +2848,7 @@ mod tests {
         ] {
             let source = record(&format!(
                 "{{\"record\":\"turn\",\"index\":1,\"prefill_tokens\":10}}\n\
-                 {{\"record\":\"request\",\"id\":\"q1\",\"lane\":\"main\"}}\n{row}\n"
+                 {{\"record\":\"request\",\"id\":\"q1\",\"lane\":\"main\",\"substrate\":\"local\"}}\n{row}\n"
             ));
             assert!(
                 matches!(
@@ -2065,9 +2865,9 @@ mod tests {
         let digest = "b".repeat(64);
         let source = record(&format!(
             "{{\"record\":\"turn\",\"index\":1,\"prefill_tokens\":1024}}\n\
-             {{\"record\":\"fork\",\"id\":\"f1\",\"lane\":\"interview\",\"of_turn\":1}}\n\
+             {{\"record\":\"fork\",\"id\":\"f1\",\"lane\":\"interview\",\"substrate\":\"local\",\"of_turn\":1}}\n\
              {{\"record\":\"capture\",\"id\":\"p1\",\"from_fork\":\"f1\",\"entries\":3}}\n\
-             {{\"record\":\"summary\",\"turns\":1,\"prefill_tokens_total\":1024,\
+             {{\"record\":\"summary\",\"kind\":\"drive\",\"turns\":1,\"prefill_tokens_total\":1024,\
              \"product_sha256\":\"{digest}\"}}\n"
         ));
         let once = parse(&source).expect("a record");
@@ -2081,12 +2881,119 @@ mod tests {
         for state in Reasoning::ALL {
             let source = format!(
                 "{{\"record\":\"start\",\"regime\":{{\"arm\":\"a\",\"dogma_version\":0,\
-                 \"substrate\":{{\"name\":\"n\",\"model\":\"m\",\"quantization\":\"q\",\
-                 \"sampler\":{{\"seed\":0}},\"reasoning\":\"{}\",\"hardware\":\"h\"}}}}}}\n",
+                 \"substrates\":[{{\"id\":\"n\",\"engine\":{{\"name\":\"a-runtime\",\
+                 \"version_or_digest\":\"1.0\"}},\"weights\":{{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\
+                 \"hardware_fingerprint\":\"h\",\"sampler_card\":{{\"seed\":0}},\
+                 \"reasoning\":\"{}\"}}]}}}}\n",
                 state.tag()
             );
             let parsed = parse(&source).expect("a record");
-            assert_eq!(parsed.regime().substrate.reasoning, *state);
+            assert_eq!(parsed.regime().substrates[0].reasoning, *state);
+        }
+    }
+
+    // Both weights kinds have to survive a rendering, because the writer is
+    // the only thing that puts a record back on disk and a variant it cannot
+    // spell is a variant that silently becomes the other one.
+    #[test]
+    fn every_weights_kind_round_trips() {
+        for weights in [
+            r#"{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#,
+            r#"{"kind":"hosted","provider":"a-provider","model_id":"a-model-4","version_or_date_observed":"2026-09-08"}"#,
+        ] {
+            let source = format!(
+                "{{\"record\":\"start\",\"regime\":{{\"arm\":\"a\",\"dogma_version\":0,\
+                 \"substrates\":[{{\"id\":\"n\",\"engine\":{{\"name\":\"a-runtime\",\
+                 \"version_or_digest\":\"1.0\"}},\"weights\":{weights},\
+                 \"hardware_fingerprint\":\"h\",\"sampler_card\":{{\"seed\":0}},\
+                 \"reasoning\":\"on\"}}]}}}}\n"
+            );
+            let once = parse(&source).unwrap_or_else(|err| panic!("{weights}: {err}"));
+            let twice = parse(&render(&once)).expect("a rendering is itself a record");
+            assert_eq!(once, twice, "{weights} did not survive a rendering");
+        }
+    }
+
+    // A rejected lane has a substrate, and it is the lane's. The rule that
+    // makes the lookup total is the one `validate` enforces; this is the half
+    // that shows a reader getting an answer out of it.
+    #[test]
+    fn a_rejected_lanes_substrate_is_its_lanes() {
+        let source = record(concat!(
+            r#"{"record":"turn","index":1,"prefill_tokens":10}"#,
+            "\n",
+            r#"{"record":"fork","id":"f1","lane":"reformat","substrate":"local","of_turn":1}"#,
+            "\n",
+            r#"{"record":"rejected","id":"x1","lane":"reformat","at_turn":1,"grounded":3,"of":30}"#,
+            "\n",
+        ));
+        let parsed = parse(&source).expect("a record");
+        assert_eq!(parsed.substrate_of("reformat"), Some("local"));
+        assert_eq!(parsed.substrate_of("a-lane-nothing-ran"), None);
+    }
+
+    // A lane that changes substrate is two lanes. Without this the reference
+    // above has two answers and `substrate_of` picks one.
+    #[test]
+    fn a_lane_cannot_change_substrate() {
+        let source = format!(
+            "{}\n{}\n{}\n{}\n",
+            r#"{"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"big","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"},{"id":"small","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#,
+            r#"{"record":"turn","index":1,"prefill_tokens":10}"#,
+            r#"{"record":"request","id":"q1","lane":"main","substrate":"big"}"#,
+            r#"{"record":"request","id":"q2","lane":"main","substrate":"small"}"#,
+        );
+        assert!(matches!(
+            parse(&source),
+            Err(ParseError::Structure(
+                StructureError::LaneChangedSubstrate { .. }
+            ))
+        ));
+        // The same two requests on two lanes are two lanes, and fine.
+        let two_lanes = source.replace(r#""id":"q2","lane":"main""#, r#""id":"q2","lane":"aside""#);
+        parse(&two_lanes).expect("two lanes, two substrates");
+    }
+
+    // The whole reason the identity is typed: gate 1 asks these questions, and
+    // a kind added later that nobody classified would answer them by accident.
+    // Enumerating the vocabulary means a new kind fails to COMPILE here, which
+    // is how `Canned` came to be classified rather than defaulted: adding it
+    // broke this match, and a variant that cannot be added silently is the
+    // point of spelling the match out instead of writing a wildcard.
+    #[test]
+    fn every_weights_kind_answers_gate_one_the_way_its_mechanism_does() {
+        for kind in WeightsKind::ALL {
+            let weights = match kind {
+                WeightsKind::Digest => Weights::Digest("a".repeat(64)),
+                WeightsKind::Hosted => Weights::Hosted {
+                    provider: "a-provider".to_owned(),
+                    model_id: "a-model-4".to_owned(),
+                    version_or_date_observed: "2026-09-08".to_owned(),
+                },
+                WeightsKind::Canned => Weights::Canned {
+                    acts_sha256: "b".repeat(64),
+                },
+            };
+            assert_eq!(weights.kind(), *kind, "{} mislabels itself", kind.tag());
+
+            // MAY it be reproduced. Digest by re-firing, Canned by replay;
+            // Hosted by neither, because the weights can change under you.
+            assert_eq!(
+                weights.is_reproducible(),
+                matches!(kind, WeightsKind::Digest | WeightsKind::Canned),
+                "{} answers gate 1 wrongly about whether it may be reproduced",
+                kind.tag()
+            );
+
+            // HOW. A replay is compared exactly and a re-firing within a band,
+            // so a gate that confused them would apply a tolerance meant for
+            // sampling and hardware to a run where neither can vary.
+            assert_eq!(
+                weights.is_replayed(),
+                matches!(kind, WeightsKind::Canned),
+                "{} answers gate 1 wrongly about how it is reproduced",
+                kind.tag()
+            );
         }
     }
 
@@ -2232,7 +3139,7 @@ mod tests {
     #[test]
     fn nothing_can_link_to_itself() {
         let retry = record(concat!(
-            r#"{"record":"request","id":"q1","lane":"main","retry_of":"q1"}"#,
+            r#"{"record":"request","id":"q1","lane":"main","substrate":"local","retry_of":"q1"}"#,
             "\n"
         ));
         assert!(matches!(
@@ -2307,12 +3214,12 @@ mod tests {
     // typing two quotes buys presence rather than provenance.
     #[test]
     fn a_required_string_that_says_nothing_is_absent() {
-        let blank = r#"{"record":"start","regime":{"arm":"","dogma_version":0,"substrate":{"name":"n","model":"m","quantization":"q","sampler":{"seed":0},"reasoning":"on","hardware":"h"}}}"#;
+        let blank = r#"{"record":"start","regime":{"arm":"","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
         assert!(matches!(
             parse(blank),
             Err(ParseError::Schema(SchemaError::BlankField { .. }))
         ));
-        let no_settings = r#"{"record":"start","regime":{"arm":"a","dogma_version":0,"substrate":{"name":"n","model":"m","quantization":"q","sampler":{},"reasoning":"on","hardware":"h"}}}"#;
+        let no_settings = r#"{"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{},"reasoning":"on"}]}}"#;
         assert!(
             matches!(
                 parse(no_settings),
@@ -2330,7 +3237,7 @@ mod tests {
         let digest = "b".repeat(64);
         let source = record(&format!(
             "{{\"record\":\"turn\",\"index\":1,\"prefill_tokens\":10}}\n\
-             {{\"record\":\"summary\",\"turns\":99,\"prefill_tokens_total\":10,\
+             {{\"record\":\"summary\",\"kind\":\"drive\",\"turns\":99,\"prefill_tokens_total\":10,\
              \"product_sha256\":\"{digest}\"}}\n"
         ));
         assert!(matches!(
