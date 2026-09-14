@@ -508,8 +508,8 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
 
     let mut events = vec![Event::Start {
         regime: Box::new(script.regime.clone()),
-        // This function IS the live path: it drove the turns and wrote these
-        // rows as they happened. Nothing else in this crate may say `Live`.
+        // This function IS the live path: it drove the turns and wrote
+        // these rows as they happened.
         source: Source::Live,
     }];
     let mut unspellable: Vec<Unspellable> = Vec::new();

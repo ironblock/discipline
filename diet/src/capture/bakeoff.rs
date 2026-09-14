@@ -34,7 +34,7 @@ use crate::capture::sense::{
 };
 use crate::digest::sha256_hex;
 use crate::formats::record::json::{self, Value};
-use crate::formats::record::{Artifact, Event, Regime, Summary};
+use crate::formats::record::{Artifact, Event, Regime, Source, Summary};
 
 /// The seed every resampling in a run is drawn from.
 ///
@@ -795,6 +795,12 @@ pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
         events: vec![
             Event::Start {
                 regime: Box::new(regime.clone()),
+                // A recompute is not adapted: there is no foreign log and no
+                // adapter, so `adapted` would assert a source that does not
+                // exist. It re-derives numbers from artifacts this library
+                // already wrote, which is the nearest true thing the ruled
+                // vocabulary has.
+                source: Source::Live,
             },
             Event::Claim {
                 id: "c1".to_owned(),
@@ -1210,7 +1216,7 @@ mod tests {
     }
 
     const START: &str = concat!(
-        r#"{"record":"start","regime":{"arm":"bakeoff","dogma_version":0,"substrates":[{"id":"#,
+        r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"bakeoff","dogma_version":0,"substrates":[{"id":"#,
         r#""processor","engine":{"name":"none","version_or_digest":"0"},"weights":{"kind":"#,
         r#""digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"#,
         r#""hardware_fingerprint":"one-cpu","sampler_card":{"seed":0},"reasoning":"off"}]}}"#
