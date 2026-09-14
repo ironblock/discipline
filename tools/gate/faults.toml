@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 312
+red_faults = 315
 mechanics_assertions = 48
 migrated = 0
 
@@ -3236,6 +3236,30 @@ kind = "results-fixture"
 check = "results"
 label = "2026-01-29-hosted-weights-called-reproducible"
 failure_class = "results.hosted-cannot-be-reproducible"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-30-verdict-disagrees-with-record"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-30-verdict-disagrees-with-record"
+failure_class = "results.verdict-disagrees-with-record"
+migrated = false
+
+[[fault]]
+id = "results.2026-01-31-pre-registration-digest"
+kind = "results-fixture"
+check = "results"
+label = "2026-01-31-pre-registration-digest"
+failure_class = "results.pre-registration-digest"
+migrated = false
+
+[[fault]]
+id = "results.2026-02-01-pre-registration-unpinned"
+kind = "results-fixture"
+check = "results"
+label = "2026-02-01-pre-registration-unpinned"
+failure_class = "results.pre-registration-unpinned"
 migrated = false
 
 [[fault]]
