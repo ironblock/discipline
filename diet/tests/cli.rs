@@ -47,7 +47,7 @@ const BAKEOFF_REGISTER: &str = include_str!("../capture/sense/register/authored-
 
 /// The `start` row of the bakeoff fixture's run record.
 const BAKEOFF_START: &str = concat!(
-    r#"{"record":"start","regime":{"arm":"bakeoff","dogma_version":0,"substrates":[{"id":"#,
+    r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"bakeoff","dogma_version":0,"substrates":[{"id":"#,
     r#""processor","engine":{"name":"none","version_or_digest":"0"},"weights":{"kind":"#,
     r#""digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"#,
     r#""hardware_fingerprint":"one-cpu","sampler_card":{"seed":0},"reasoning":"off"}]}}"#
