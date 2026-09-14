@@ -48,10 +48,54 @@ FUNC_BODY = re.compile(r"^(inject_[a-z0-9_]+)\(\) \{\n(.*?)^\}\n", re.M | re.S)
 # Every helper an injection may call, sourced alongside it. Extracted by name
 # rather than by sourcing verify.sh, which would run the gate.
 HELPERS = re.compile(
-    r"^(?:seed_commit|strip_substrates)\(\) \{\n.*?^\}\n", re.M | re.S
+    r"^(?:seed_commit|strip_substrates|edit_in_place)\(\) \{\n.*?^\}\n", re.M | re.S
 )
 
 GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
+
+# `sed -i` with the suffix attached to the flag, and a `\n` in a replacement.
+# Both are GNU extensions, and both are silent on the platform that has them.
+#
+# BSD sed takes `-i`'s suffix as the NEXT ARGUMENT, so `sed -i 's/a/b/' f`
+# there means suffix `s/a/b/` with `f` as the script; the error is about the
+# script and reads as nonsense. Twenty-eight injections were inert on a Mac
+# and passing in CI for that reason (#50) -- the tree's verdict depended on
+# the machine, and an inert injection is a case that proves nothing while
+# reporting the same green.
+#
+# Two rules, and the STRUCTURAL one is the one that holds.
+#
+# Naming the GNU-only spellings is a blocklist, and a blocklist over a tool
+# with GNU's option surface is a list of the ones somebody thought of:
+# `sed --in-place=''` is the same defect as `sed -i''`, written the long way,
+# and it walked straight past the pattern below. So an injection body may not
+# invoke `sed` AT ALL -- `edit_in_place` is the one spelling, it is defined
+# once, and one definition is a thing that can be made portable. The patterns
+# stay for the rest of `verify.sh`, which is not injections and where a raw
+# `sed` is not a mistake.
+#
+# COMMAND POSITION ONLY. `sed` is also a word, and the injection that proves
+# this very lint fires builds the string `"sed" + " -" + "i"` in a Python
+# heredoc to plant the unportable form. A rule that matched the letters
+# anywhere reported that fault as the defect it exists to catch -- which is
+# the lint failing on its own regression test, and would have been read as the
+# lint working.
+RAW_SED = re.compile(r"(?:^|[|;&(`]|\$\(|&&|\|\|)\s*(?:g?sed)(?![\w./-])")
+# BOTH SPELLINGS OF THE FLAG. This knew only `-i` until a fresh instance ran
+# `--in-place=''` through `find -exec`, `xargs` and `eval` and got exit 0 from
+# all three: the structural rule below does not see a `sed` that is not in
+# command position, and this backstop -- which scans the whole file and would
+# have caught them -- was looking for a spelling they did not use. The long
+# option is the same GNU extension written out, and it walked past the rule
+# whose own comment says a two-spelling blocklist is what it must not be.
+GNU_SED = re.compile(r"\bg?sed +(?:-i(?![A-Za-z0-9._])|--in-place)")
+# `S=sed; $S -i ...`. A name bound to the command and then run through the
+# name is the cheapest indirection there is, and no scan of command position
+# can see it -- so the BINDING is what is refused, which a scan can see.
+SED_BOUND_TO_A_NAME = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*=(?:'|\")?g?sed\b")
+GNU_REPLACEMENT = re.compile(
+    r"s(?P<d>[|/#])(?:(?!(?P=d))[^\n])*(?P=d)(?:(?!(?P=d))[^\n])*\\n"
+)
 
 # A field line inside a struct body or a struct-like enum variant: an optional
 # visibility, a name, a colon, a type. Attributes, doc comments and blank
@@ -425,6 +469,84 @@ def main() -> int:
         )
         for line in stale:
             print(f"  {line}", file=sys.stderr)
+        return 1
+
+    # The portability lint, before anything is run: a body that only one
+    # platform's sed accepts is a body whose verdict depends on the machine,
+    # and that is worth saying before spending a minute finding out.
+    unportable = []
+    for number, line in enumerate(text.split("\n"), start=1):
+        if line.lstrip().startswith("#"):
+            continue
+        if GNU_SED.search(line):
+            unportable.append(
+                (number, "an in-place `sed`, in either spelling of the flag", line.strip())
+            )
+        elif SED_BOUND_TO_A_NAME.search(line):
+            unportable.append(
+                (number, "`sed` bound to a name, which runs it out of command position", line.strip())
+            )
+        elif GNU_REPLACEMENT.search(line):
+            unportable.append((number, "a `\\n` in a sed replacement", line.strip()))
+
+    # And the rule a blocklist cannot state: inside an injection, a `sed` in
+    # COMMAND POSITION is refused whatever its flags.
+    #
+    # WHAT THIS DOES NOT CATCH, because a fresh instance got six spellings
+    # past the version that claimed it caught everything. The claim was:
+    # "there is no spelling of sed that is this script's business to approve".
+    # That was false, and the six are recorded on #70 rather than paraphrased.
+    # Five of them ran the long flag through `find -exec`, `xargs`, `eval` or
+    # a shell variable, and they are closed above -- the whole-file backstop
+    # now knows `--in-place`, and binding the command to a name is refused
+    # outright.
+    #
+    # THE SIXTH IS NOT CLOSED AND CANNOT BE, BY ANY SCAN OF THIS KIND:
+    #
+    #     "s""ed" --in-place='' 's/x/y/' f
+    #
+    # The shell concatenates adjacent strings, so the command's NAME does not
+    # appear in the file. No regex over the text can see a word that is not
+    # written in it, and a scanner that tried would have to interpret shell
+    # quoting -- which is a shell, not a lint.
+    #
+    # This is the same technique `inject_injection_needs_gnu_sed` uses to
+    # plant its own fault without tripping the lint while editing it, and the
+    # reviewer's sharpest point is that its presence in this tree proves the
+    # authors knew text scanning is defeatable this way. What actually closes
+    # it is running the corpus under BSD semantics -- #75 -- and until that
+    # exists, this residue is declared and not defended.
+    offset = {}
+    running = 1
+    for piece in text.split("\n"):
+        offset[running] = piece
+        running += 1
+    for match in FUNC_BODY.finditer(text):
+        name, body = match.group(1), match.group(2)
+        first = text[: match.start()].count("\n") + 1
+        for index, line in enumerate(body.split("\n"), start=1):
+            if line.lstrip().startswith("#") or not RAW_SED.search(line):
+                continue
+            unportable.append(
+                (
+                    first + index,
+                    f"`sed` inside {name}; the portable spelling is the only spelling",
+                    line.strip(),
+                )
+            )
+    if unportable:
+        print(
+            f"check-injections: verify.sh uses sed forms only GNU accepts, so its "
+            f"verdict depends on the machine it runs on:",
+            file=sys.stderr,
+        )
+        for number, what, line in unportable:
+            print(f"  verify.sh:{number}: {what}: {line[:90]}", file=sys.stderr)
+        print(
+            "  the portable form is `edit_in_place EXPRESSION FILE...`, defined in "
+            f"verify.sh, which writes a temporary and moves it over",
+            file=sys.stderr,
+        )
         return 1
 
     tracked = tracked_files(root)

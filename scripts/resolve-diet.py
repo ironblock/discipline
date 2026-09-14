@@ -35,6 +35,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import sys
 import tomllib
 
@@ -82,12 +83,117 @@ def candidates() -> tuple[pathlib.Path, ...]:
 
 # What the binary is supposed to reflect. A change to any of these that the
 # binary predates means the binary is not the code.
+# The roots that are unambiguously sources of the binary.
+#
+# `diet/` AS A WHOLE IS NOT ONE, and used to be. It holds the conformance
+# fixtures and the capture corpora, which the binary READS AT TEST TIME and
+# never compiles in -- so editing a fixture made `--only regimen` and
+# `--only results` exit 2 until the binary was relinked, and `cargo build` did
+# not clear it, because cargo correctly rebuilds nothing when no source
+# changed. The workaround was `touch diet/src/lib.rs && cargo build`, which is
+# a strange thing to have to know and was reported as such (#50).
 SOURCES = (
-    pathlib.Path("diet"),
+    pathlib.Path("diet/src"),
+    pathlib.Path("diet/Cargo.toml"),
     pathlib.Path("Cargo.toml"),
     pathlib.Path("Cargo.lock"),
     pathlib.Path("rust-toolchain.toml"),
 )
+
+# What the crate embeds, ASKED OF THE COMPILER rather than inferred.
+#
+# A grammar and a dogma template ARE compiled in, so a change to one really
+# does make the binary stale -- and they live under `diet/` beside the
+# fixtures that are not. The difference is not visible from the path.
+#
+# It is also not reliably visible from the SOURCE. A previous version of this
+# read `include_str!` and `#[grammar]` out of `diet/src/**/*.rs` with a regex
+# and called that "the compiler's own list". It is not: a regex cannot see
+# `#[cfg(test)]`, so every fixture a test embeds counted as a source of the
+# binary. Touching one made `diet` look stale when `cargo build` would not
+# recompile it at all -- the same false positive this narrowing was written to
+# remove, arriving through a different door.
+#
+# `target/debug/diet.d` is the real list. Cargo writes it beside the binary on
+# every build, in Make's format -- one line, `<target>: <dep> <dep> ...` -- and
+# it holds exactly what rustc read to produce THAT artifact: no test-only
+# embed, and every grammar. There is no second reader to drift from.
+DEP_TARGET = re.compile(r"^(?P<target>(?:[^:\\]|\\.)+):\s*(?P<deps>.*)$")
+
+
+# What a binary embeds when its dep-info cannot say. Not a guess at the set:
+# the directory that contains it, whole.
+UNNARROWED = pathlib.Path("diet")
+
+
+def embedded(binary: pathlib.Path) -> list[pathlib.Path]:
+    """Every file compiled into `binary`, from cargo's dep-info beside it.
+
+    `UNNARROWED` when there is no dep-info to read, or when what is there
+    names nothing inside this checkout -- a binary built by something that
+    did not write dep-info, or built from a different tree.
+
+    THAT FALLBACK IS THE POINT, and this returned an empty list until
+    2026-09-13. "A smaller list, not a wrong one" was the claim, and the
+    reasoning given for it was that the walk over `SOURCES` still covers
+    every `.rs` file, so an absent `.d` loses only the embedded non-Rust
+    files. Both halves are true. The conclusion does not follow: the answer
+    this function feeds is "nothing is newer than the binary", and a list
+    with the grammars missing produces that answer for a binary whose
+    grammars have changed. A smaller list makes a WRONG ANSWER here, because
+    the answer is a negative one.
+
+    Every binary a caller pins through `DIET_BIN` carries no `.d`. So the
+    narrowing had quietly switched the embedded half of rule three off for
+    exactly the case the rule was written about -- a build handed in from
+    somewhere else. Measured before the fix: a `DIET_BIN` five years older
+    than a grammar under `diet/formats/` resolved clean, exit 0, reporting
+    `checked_against` a file in `diet/src`.
+
+    Widening is not the pre-narrowing bug returning. That bug was `diet/`
+    counting when cargo's list was AVAILABLE and said otherwise; a fixture
+    would make `--only regimen` exit 2 that `cargo build` could not clear.
+    Here there is no list to be narrower than. What is lost by widening is
+    precision on a foreign binary -- a fixture under `diet/` newer than a
+    pinned build now refuses -- and that is a false positive a person can
+    clear by rebuilding, against a false negative nothing can catch.
+    """
+    depinfo = binary.parent / f"{binary.name}.d"
+    try:
+        text = depinfo.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return [UNNARROWED]
+
+    here = pathlib.Path.cwd()
+    found: set[pathlib.Path] = set()
+    for line in text.splitlines():
+        match = DEP_TARGET.match(line)
+        if not match:
+            continue
+        # Make escapes a space in a path as `\ `, so splitting on bare
+        # whitespace would cut such a path in two and leave two names that
+        # exist nowhere -- which fails SILENTLY here, as a dependency that
+        # never makes anything look stale.
+        deps = re.split(r"(?<!\\) ", match.group("deps").strip())
+        for dep in deps:
+            dep = dep.replace("\\ ", " ").strip()
+            if not dep:
+                continue
+            try:
+                found.add(pathlib.Path(dep).resolve().relative_to(here))
+            except ValueError:
+                # Outside the checkout: the registry sources of a dependency
+                # crate. A change there arrives through `Cargo.lock`, which is
+                # in SOURCES.
+                continue
+    # Dep-info that resolves to nothing in this tree is dep-info about some
+    # other tree, and it narrows this one to nothing at all. Same fallback,
+    # for the same reason: a list that cannot be trusted to be complete
+    # cannot be trusted to say that nothing changed. An unparseable file
+    # lands here too -- no line matches, `found` stays empty.
+    if not found:
+        return [UNNARROWED]
+    return sorted(found)
 
 EXIT_REFUSED = 2
 
@@ -105,10 +211,14 @@ def digest(path: pathlib.Path) -> str:
     return sha.hexdigest()
 
 
-def newest_source() -> tuple[float, str] | None:
-    """The most recently modified source file, and its path."""
+def newest_source(binary: pathlib.Path) -> tuple[float, str] | None:
+    """The most recently modified source file, and its path.
+
+    `binary` is not itself a source; it names the dep-info beside it, which is
+    where the embedded files come from.
+    """
     newest: tuple[float, str] | None = None
-    for root in SOURCES:
+    for root in (*SOURCES, *embedded(binary)):
         if root.is_file():
             paths = [root]
         elif root.is_dir():
@@ -163,7 +273,7 @@ def main() -> int:
         )
 
     binary_stamp = path.stat().st_mtime
-    newest = newest_source()
+    newest = newest_source(path)
     if newest is None:
         # Rule three is stated without conditions, so it cannot quietly not
         # apply. Off the repository root none of SOURCES exists, the scan

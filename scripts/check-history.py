@@ -81,6 +81,17 @@ def default_branch() -> str:
     )
 
 
+def reachable(name: str) -> bool:
+    """Whether `name` is a commit this checkout holds.
+
+    Separate from [`resolve`] because the two questions have different
+    answers on a force-push: the pre-rewrite head is a perfectly good sha
+    that this clone does not have, and asking "is it here" is not the same
+    as demanding it be.
+    """
+    return bool(git("rev-parse", "--verify", "--quiet", f"{name}^{{commit}}", check=False))
+
+
 def resolve(name: str) -> str:
     sha = git("rev-parse", "--verify", "--quiet", f"{name}^{{commit}}", check=False)
     if not sha:
@@ -111,15 +122,33 @@ def determine() -> tuple[str, str, str, list[tuple[str, str]]]:
         after = (payload.get("after") or "").strip() or os.environ.get("GITHUB_SHA", "")
         if not after:
             raise Undeterminable("the push payload carries no after sha")
-        if before and before != ZERO:
+        if before and before != ZERO and reachable(before):
             return resolve(before), resolve(after), "push before..after", []
-        # A new branch: nothing was there before, so compare with the trunk.
+        # Two ways to arrive here, and they want the same scan.
+        #
+        # A NEW BRANCH: `before` is the zero sha, nothing was there, so the
+        # trunk is what to compare against.
+        #
+        # A FORCE-PUSH: `before` names the pre-rewrite head, which the rewrite
+        # ORPHANED -- so it is absent from CI's fresh checkout and resolves to
+        # nothing. That is not a broken payload; it is the expected shape of a
+        # legitimate operation, and this repository's own rules require it: the
+        # merge protocol mandates stack-order rebases and #54's ruling mandates
+        # rebuilding a branch when identity has entered it. Both are
+        # force-pushes, so the check was guaranteed to redden the lane that
+        # gates the merge, on a branch whose content is fine.
+        #
+        # The merge base with the trunk is a SUPERSET of the new commits, which
+        # is safe for a check whose job is to find what should not be in a
+        # message: scanning more than the push introduced can only find more.
+        # `undeterminable` is kept for the case where even that fails.
+        how = "push, new branch" if not before or before == ZERO else "push, force-push"
         merge_base = git("merge-base", default_branch(), after, check=False)
         if not merge_base:
             raise Undeterminable(
-                "a new branch with no merge base against the default branch"
+                f"{how}: no merge base against the default branch"
             )
-        return merge_base, resolve(after), "push, new branch: merge-base..after", []
+        return merge_base, resolve(after), f"{how}: merge-base..after", []
 
     base = default_branch()
     merge_base = git("merge-base", base, "HEAD", check=False)
