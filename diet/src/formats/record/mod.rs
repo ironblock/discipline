@@ -469,6 +469,76 @@ vocabulary! {
     }
 }
 
+vocabulary! {
+    /// Which way a record's rows came to exist.
+    SourceKind {
+        /// This library drove the session and wrote each row as it happened.
+        Live => "live",
+        /// Read out of a foreign harness's log after the fact.
+        Adapted => "adapted",
+    }
+}
+
+vocabulary! {
+    /// Whether the log a record was adapted from can be read again.
+    ///
+    /// A digest pins WHICH file was read; it does not make that file
+    /// reachable. An operator's own session transcript is unscrubbed and
+    /// cannot enter the repository, so "pinned by digest" there means the
+    /// claim is checkable only by whoever still has the file. Saying so is
+    /// what stops a record implying its source is recoverable when it is not.
+    Availability {
+        /// The source is in this repository, beside the record.
+        Committed => "committed",
+        /// Pinned by digest, and nowhere a later reader can reach.
+        PinnedOnly => "pinned_only",
+    }
+}
+
+/// Where a record's rows came from.
+///
+/// Required on `start`, and required even for a session this library drove
+/// itself. An absent field meaning `live` would be absence used as a value --
+/// the shape the typed weights and typed verdicts already refused -- and it
+/// is worse here than elsewhere, because the reader that assumes `live`
+/// assumes exactly the thing an adapted record exists to deny.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Source {
+    /// Driven by this library, written as it happened.
+    Live,
+    /// Read out of a foreign harness's log.
+    Adapted {
+        /// Which adapter read it.
+        adapter: String,
+        /// The sha256 of the log that was read.
+        ///
+        /// Spelled `source_digest` rather than `sha256` for the reason
+        /// `Weights::Canned` spells its digest `acts_sha256`: two kinds
+        /// sharing a field name is how a reader stops being able to say
+        /// which it got.
+        source_digest: String,
+        /// Whether that log can be read again.
+        source_available: Availability,
+    },
+}
+
+impl Source {
+    /// Which kind this is.
+    #[must_use]
+    pub fn kind(&self) -> SourceKind {
+        match self {
+            Self::Live => SourceKind::Live,
+            Self::Adapted { .. } => SourceKind::Adapted,
+        }
+    }
+
+    /// Whether this library drove the session itself.
+    #[must_use]
+    pub fn is_live(&self) -> bool {
+        matches!(self, Self::Live)
+    }
+}
+
 /// One row of a session record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -476,6 +546,8 @@ pub enum Event {
     Start {
         /// The regime every later event in this record ran under.
         regime: Box<Regime>,
+        /// Where this record's rows came from. Required; see [`Source`].
+        source: Source,
     },
     /// A turn happened.
     Turn {
@@ -778,7 +850,19 @@ impl Record {
     #[must_use]
     pub fn regime(&self) -> &Regime {
         match self.events.first() {
-            Some(Event::Start { regime }) => regime,
+            Some(Event::Start { regime, .. }) => regime,
+            _ => unreachable!("validate() refuses a record whose first event is not a start"),
+        }
+    }
+
+    /// Where this record's rows came from.
+    ///
+    /// Read from the required `start` row, like [`Record::regime`], so there
+    /// is only ever one copy to be right.
+    #[must_use]
+    pub fn source(&self) -> &Source {
+        match self.events.first() {
+            Some(Event::Start { source, .. }) => source,
             _ => unreachable!("validate() refuses a record whose first event is not a start"),
         }
     }
@@ -1013,6 +1097,19 @@ pub enum StructureError {
     },
     /// Two `summary` rows, or one that is not last.
     SummaryNotLast,
+    /// A `live` record declaring a reasoning state nobody measured.
+    ///
+    /// `Reasoning::Undeclared` exists for a record ADAPTED from a log that
+    /// never carried the setting. A session this library drove knows what it
+    /// asked for, so "nobody said" in a live record is a bug in the writer,
+    /// not a fact about the run.
+    UndeclaredInLiveRecord(String),
+    /// A `live` record carrying a row nothing could map.
+    ///
+    /// `Kind::Unknown` is what an adapter writes for a foreign row it has no
+    /// word for. A live record's rows were written by this library, which has
+    /// a word for every row it writes.
+    UnknownRowInLiveRecord(String),
 }
 
 impl fmt::Display for ParseError {
@@ -1146,6 +1243,16 @@ impl fmt::Display for StructureError {
                 }
             ),
             Self::UnknownTurn(index) => write!(f, "a row names turn {index}, which never happened"),
+            Self::UndeclaredInLiveRecord(id) => write!(
+                f,
+                "substrate `{id}` declares `undeclared` reasoning in a record whose source is \
+                 `live`, and a session this library drove knows what it asked for"
+            ),
+            Self::UnknownRowInLiveRecord(kind) => write!(
+                f,
+                "a row of source kind `{kind}` is unmapped in a record whose source is `live`, \
+                 and a live record's rows were written by this library"
+            ),
             Self::TurnOutOfOrder { want, found } => {
                 write!(f, "turn {found} follows where turn {want} was expected")
             }
@@ -1330,6 +1437,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
     let built = match kind {
         Kind::Start => Event::Start {
             regime: Box::new(regime(&mut take_object(&mut members, of, "regime")?, of)?),
+            source: source(&mut members, of)?,
         },
         Kind::Turn => Event::Turn {
             index: take_u32(&mut members, of, "index")?,
@@ -1527,6 +1635,53 @@ fn substrates(
 /// and for the same reason: a field that belongs to the other variant is left
 /// in `fields` and refused by the caller as unknown, so a hosted substrate
 /// carrying a `sha256` is an error rather than a digest nobody reads.
+/// The `source` a `start` row declares.
+///
+/// A tagged object for BOTH kinds, never a bare string for one and an object
+/// for the other: one field that is sometimes a word and sometimes a
+/// structure is the shape this schema refuses in `weights`, and it is the
+/// same defect here.
+fn source(fields: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Source, ParseError> {
+    let mut members = take_object(fields, of, "source")?;
+    let tag = take_string(&mut members, of, "kind")?;
+    let kind = SourceKind::from_tag(&tag).ok_or(SchemaError::BadValue {
+        of,
+        field: "source.kind",
+        found: tag,
+    })?;
+    let built = match kind {
+        SourceKind::Live => Source::Live,
+        SourceKind::Adapted => {
+            // Checked as a digest, like every other identity claim here: a
+            // string that is not a digest cannot pin which file was read.
+            let digest = take_string(&mut members, of, "source_digest")?;
+            if !digest_ok(&digest) {
+                return Err(StructureError::BadDigest(digest).into());
+            }
+            let written = take_string(&mut members, of, "source_available")?;
+            let available =
+                Availability::from_tag(&written).ok_or(SchemaError::BadValue {
+                    of,
+                    field: "source.source_available",
+                    found: written,
+                })?;
+            Source::Adapted {
+                adapter: take_string(&mut members, of, "adapter")?,
+                source_digest: digest,
+                source_available: available,
+            }
+        }
+    };
+    if let Some(field) = members.keys().next() {
+        return Err(SchemaError::UnknownField {
+            of,
+            field: format!("source.{field}"),
+        }
+        .into());
+    }
+    Ok(built)
+}
+
 fn weights(fields: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Weights, ParseError> {
     let mut members = take_object(fields, of, "weights")?;
     let tag = take_string(&mut members, of, "kind")?;
@@ -2125,6 +2280,8 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
     let mut regime = None;
     let mut seen = Seen::new();
     let mut summary_seen = false;
+    // Set by the `start` row, which the walk refuses to proceed without.
+    let mut live = false;
     // Which substrate each lane has been served by, so far. Not on `Seen`:
     // that one holds what LINKS resolve against, and this is not a link -- it
     // is the lane's own identity accumulating.
@@ -2142,7 +2299,29 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
                     StructureError::StartNotFirst.into()
                 });
             }
-            Event::Start { regime: found } => regime = Some((**found).clone()),
+            Event::Start {
+                regime: found,
+                source: declared,
+            } => {
+                // A live record is one this library wrote as it went, so the
+                // two states that exist only for adapted records are refused
+                // here rather than left to read as measurements.
+                if declared.is_live()
+                    && let Some(substrate) = found
+                        .substrates
+                        .iter()
+                        .find(|s| s.reasoning == Reasoning::Undeclared)
+                {
+                    return Err(
+                        StructureError::UndeclaredInLiveRecord(substrate.id.clone()).into()
+                    );
+                }
+                live = declared.is_live();
+                regime = Some((**found).clone());
+            }
+            Event::Unknown { source_kind, .. } if live => {
+                return Err(StructureError::UnknownRowInLiveRecord(source_kind.clone()).into());
+            }
             _ if position == 0 => return Err(StructureError::StartNotFirst.into()),
             _ => {}
         }
@@ -2325,7 +2504,10 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
     members.put_text("record", event.kind().tag());
     members.put_optional("id", event.id().map(|id| Value::String(id.to_owned())));
     match event {
-        Event::Start { regime } => members.put("regime", regime_value(regime)),
+        Event::Start { regime, source } => {
+            members.put("regime", regime_value(regime));
+            members.put("source", source_value(source));
+        }
         Event::Turn {
             index,
             prefill_tokens,
@@ -2494,6 +2676,32 @@ fn artifacts_value(consumes: &[Artifact]) -> Value {
 /// Kind first and then only that kind's fields, so what the writer emits is
 /// what [`weights`] accepts. A round trip through the other spelling would be
 /// a second reader for the same bytes.
+fn source_value(source: &Source) -> Value {
+    let mut members = BTreeMap::from([(
+        "kind".to_owned(),
+        Value::String(source.kind().tag().to_owned()),
+    )]);
+    match source {
+        Source::Live => {}
+        Source::Adapted {
+            adapter,
+            source_digest,
+            source_available,
+        } => {
+            members.insert("adapter".to_owned(), Value::String(adapter.clone()));
+            members.insert(
+                "source_digest".to_owned(),
+                Value::String(source_digest.clone()),
+            );
+            members.insert(
+                "source_available".to_owned(),
+                Value::String(source_available.tag().to_owned()),
+            );
+        }
+    }
+    Value::Object(members)
+}
+
 fn weights_value(weights: &Weights) -> Value {
     let mut members = BTreeMap::from([(
         "kind".to_owned(),
@@ -2640,7 +2848,11 @@ pub fn project(source: &str) -> Result<Value, String> {
                             .collect(),
                     ),
                 ),
-                ("canonical".to_owned(), Value::String(render(&parsed))),
+                // Projected for the same reason `hosted_substrates` is: a reader
+        // deciding what a results directory may call itself must not have to
+        // parse `canonical` and become a second opinion about this format.
+        ("source".to_owned(), source_value(parsed.source())),
+        ("canonical".to_owned(), Value::String(render(&parsed))),
             ]))
         })
         .map_err(|err| err.to_string())
@@ -2655,7 +2867,7 @@ mod tests {
     };
 
     /// A `start` line whose regime is complete, as every record needs one.
-    const START: &str = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"one-gpu","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on"}]}}"#;
+    const START: &str = r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"one-gpu","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on"}]}}"#;
 
     fn record(rest: &str) -> String {
         format!("{START}\n{rest}")
@@ -2673,7 +2885,7 @@ mod tests {
     // it does not become a Record at all.
     #[test]
     fn a_regime_missing_its_substrate_does_not_parse() {
-        let source = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0}}"#;
+        let source = r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"baseline","dogma_version":0}}"#;
         let err = parse(source).expect_err("a regime without a substrate is not a regime");
         assert!(
             format!("{err}").contains("substrate"),
@@ -2940,13 +3152,31 @@ mod tests {
     #[test]
     fn every_reasoning_state_round_trips() {
         for state in Reasoning::ALL {
+            // `Undeclared` is the absence of a measurement, and `check-record`
+            // refuses it in a live record. So each state round-trips under the
+            // source it is legal in -- the rule, rather than something to
+            // route around by only testing the states that are easy.
+            let declared = if *state == Reasoning::Undeclared {
+                concat!(
+                    r#"{"kind":"adapted","adapter":"a-harness","source_digest":"#,
+                    r#""bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","#,
+                    r#""source_available":"pinned_only"}"#,
+                )
+            } else {
+                r#"{"kind":"live"}"#
+            };
             let source = format!(
-                "{{\"record\":\"start\",\"regime\":{{\"arm\":\"a\",\"dogma_version\":0,\
-                 \"substrates\":[{{\"id\":\"n\",\"engine\":{{\"name\":\"a-runtime\",\
-                 \"version_or_digest\":\"1.0\"}},\"weights\":{{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\
-                 \"hardware_fingerprint\":\"h\",\"sampler_card\":{{\"seed\":0}},\
-                 \"reasoning\":\"{}\"}}]}}}}\n",
-                state.tag()
+                concat!(
+                    r#"{{"source":{declared},"record":"start","regime":{{"arm":"a","#,
+                    r#""dogma_version":0,"substrates":[{{"id":"n","engine":{{"#,
+                    r#""name":"a-runtime","version_or_digest":"1.0"}},"weights":{{"#,
+                    r#""kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"#,
+                    r#"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"hardware_fingerprint":"h","#,
+                    r#""sampler_card":{{"seed":0}},"reasoning":"{tag}"}}]}}}}"#,
+                    "\n",
+                ),
+                declared = declared,
+                tag = state.tag(),
             );
             let parsed = parse(&source).expect("a record");
             assert_eq!(parsed.regime().substrates[0].reasoning, *state);
@@ -2963,7 +3193,7 @@ mod tests {
             r#"{"kind":"hosted","provider":"a-provider","model_id":"a-model-4","version_or_date_observed":"2026-09-08"}"#,
         ] {
             let source = format!(
-                "{{\"record\":\"start\",\"regime\":{{\"arm\":\"a\",\"dogma_version\":0,\
+                "{{\"source\":{{\"kind\":\"live\"}},\"record\":\"start\",\"regime\":{{\"arm\":\"a\",\"dogma_version\":0,\
                  \"substrates\":[{{\"id\":\"n\",\"engine\":{{\"name\":\"a-runtime\",\
                  \"version_or_digest\":\"1.0\"}},\"weights\":{weights},\
                  \"hardware_fingerprint\":\"h\",\"sampler_card\":{{\"seed\":0}},\
@@ -2999,7 +3229,7 @@ mod tests {
     fn a_lane_cannot_change_substrate() {
         let source = format!(
             "{}\n{}\n{}\n{}\n",
-            r#"{"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"big","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"},{"id":"small","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#,
+            r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"big","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"},{"id":"small","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#,
             r#"{"record":"turn","index":1,"prefill_tokens":10}"#,
             r#"{"record":"request","id":"q1","lane":"main","substrate":"big"}"#,
             r#"{"record":"request","id":"q2","lane":"main","substrate":"small"}"#,
@@ -3225,7 +3455,7 @@ mod tests {
     #[test]
     fn a_deeply_nested_document_is_a_verdict_and_not_a_crash() {
         let deep = format!(
-            "{{\"record\":\"start\",\"regime\":{}1{}}}\n",
+            "{{\"source\":{{\"kind\":\"live\"}},\"record\":\"start\",\"regime\":{}1{}}}\n",
             "{\"a\":".repeat(5000),
             "}".repeat(5000)
         );
@@ -3275,12 +3505,12 @@ mod tests {
     // typing two quotes buys presence rather than provenance.
     #[test]
     fn a_required_string_that_says_nothing_is_absent() {
-        let blank = r#"{"record":"start","regime":{"arm":"","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
+        let blank = r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
         assert!(matches!(
             parse(blank),
             Err(ParseError::Schema(SchemaError::BlankField { .. }))
         ));
-        let no_settings = r#"{"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{},"reasoning":"on"}]}}"#;
+        let no_settings = r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{},"reasoning":"on"}]}}"#;
         assert!(
             matches!(
                 parse(no_settings),
@@ -3326,7 +3556,7 @@ mod tests {
 
     #[test]
     fn a_raw_newline_inside_a_string_does_not_parse() {
-        let source = "{\"record\":\"start\",\"regime\":{\"arm\":\"a\nb\"}}";
+        let source = "{\"source\":{\"kind\":\"live\"},\"record\":\"start\",\"regime\":{\"arm\":\"a\nb\"}}";
         assert!(parse(source).is_err(), "one event, one line");
     }
 }

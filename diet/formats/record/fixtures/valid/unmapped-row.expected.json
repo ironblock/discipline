@@ -1,5 +1,5 @@
 {
-  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"one-gpu\",\"id\":\"local\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]}}\n{\"raw\":\"{\\\"type\\\":\\\"queue-operation\\\",\\\"op\\\":\\\"enqueue\\\",\\\"uuid\\\":\\\"b3f1\\\"}\",\"record\":\"unknown\",\"source_kind\":\"queue-operation\"}\n",
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"one-gpu\",\"id\":\"local\",\"reasoning\":\"undeclared\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]},\"source\":{\"adapter\":\"claude-code\",\"kind\":\"adapted\",\"source_available\":\"pinned_only\",\"source_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}}\n{\"raw\":\"{\\\"type\\\":\\\"queue-operation\\\",\\\"op\\\":\\\"enqueue\\\",\\\"uuid\\\":\\\"b3f1\\\"}\",\"record\":\"unknown\",\"source_kind\":\"queue-operation\"}\n",
   "kinds": [
     "start",
     "unknown"
@@ -11,5 +11,11 @@
     "substrates": [
       "local"
     ]
+  },
+  "source": {
+    "adapter": "claude-code",
+    "kind": "adapted",
+    "source_available": "pinned_only",
+    "source_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
   }
 }

@@ -358,6 +358,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
     summary: dict | None = None
     recorded_regime: dict | None = None
     claims: list[dict] = []
+    recorded_source: dict | None = None
     if not verdict.ok:
         fail(
             "results.record-refused",
@@ -377,6 +378,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
             summary = summaries[0]
         recorded_regime = value.get("regime")
         claims = [r for r in rows if r.get("record") == "claim"]
+        recorded_source = value.get("source")
         check_consumed(directory, rows, fail)
 
     # --- regimen.toml ----------------------------------------------------
@@ -566,6 +568,30 @@ def check_run(directory: pathlib.Path) -> list[str]:
             "`pre-registration.json` is here and the front-matter declares no "
             "`pre_registration_sha256`; endpoints nothing pins can be edited after "
             "the numbers, which is what pre-registering them is against",
+        )
+
+    # A record ADAPTED from a log nobody else can read cannot promise a
+    # re-firing either, and for a nearer reason than hosted weights: the input
+    # itself is gone. `pinned_only` says the digest names a file that is not in
+    # this repository and cannot be -- an operator's own session transcript,
+    # unscrubbed. Pinning WHICH file was read is not the same as making it
+    # readable, and `reproducible-by-config` promises the second. `committed`
+    # is fine: the source is right there beside the record.
+    #
+    # Read from diet's projection rather than from `canonical`, for the reason
+    # the hosted check above gives: this script must not become a second
+    # opinion about the record format.
+    if (
+        kind == REPRODUCIBLE
+        and recorded_source is not None
+        and recorded_source.get("source_available") == "pinned_only"
+    ):
+        fail(
+            "results.pinned-only-cannot-be-reproducible",
+            f"front-matter `kind` is {REPRODUCIBLE!r} but the record is adapted "
+            f"from a source pinned by digest and not reachable "
+            f"({recorded_source.get('adapter')!r}), so nothing can re-fire it; "
+            f"this is {KINDS[1]!r}",
         )
 
     sha = front.get("product_sha256")

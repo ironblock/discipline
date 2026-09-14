@@ -68,7 +68,7 @@ use crate::client::transport::Transport;
 use crate::client::{Client, IdSource, Outcome, wire};
 use crate::formats::interview;
 use crate::formats::record::json::Value;
-use crate::formats::record::{Count, Event, ParseError, Record, Summary, render};
+use crate::formats::record::{Count, Event, ParseError, Record, Source, Summary, render};
 use crate::isolation::{Confinement, NotRun, Policy as IsolationPolicy, Unavailable};
 use crate::object::{Applied, EntryId, ObjectError, Patch, Provenance, WorkingObject};
 use crate::seam::policy::Policy as SeamPolicy;
@@ -508,6 +508,9 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
 
     let mut events = vec![Event::Start {
         regime: Box::new(script.regime.clone()),
+        // This function IS the live path: it drove the turns and wrote these
+        // rows as they happened. Nothing else in this crate may say `Live`.
+        source: Source::Live,
     }];
     let mut unspellable: Vec<Unspellable> = Vec::new();
     let mut uncaptured: Vec<Uncaptured> = Vec::new();
