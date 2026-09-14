@@ -294,7 +294,15 @@ fn every_drive_refusal_has_its_own_exit_code() {
                 ground.out(),
                 "https://example.invalid/v1/chat/completions".to_owned(),
             ],
-            "not an endpoint",
+            // NOT "not an endpoint" any more, and the change is #68 item 3
+            // rather than a weakened test. A substrate's identity is typed
+            // now, regimen v1 cannot say which weights sit behind a URL, and
+            // `diet-drive` refuses ANY endpoint before it ever looks at the
+            // URL's shape. The malformed-URL refusal still exists in
+            // `client`; it is simply unreachable from this command line until
+            // the equipment registry lands, and asserting an unreachable
+            // message here would be asserting a path nothing takes.
+            "regimen v1 cannot say WHICH weights",
         ),
     ];
     for (args, says) in cases {
