@@ -85,13 +85,28 @@ fn usage() -> String {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let [command, path] = args.as_slice() else {
+    // The verb is read first and its operands separately, rather than
+    // destructuring the whole line as `[command, path]`. Every verb in the
+    // table today takes exactly one path and still does -- `operands` below
+    // is the same refusal, moved one step later. What changes is that the
+    // arity is now the OPERATION's to state, because the table is about to
+    // hold a verb that takes more than a path (`replay`, ruled on #76: an
+    // adapter and a regimen as well as a log), and a fixed-arity
+    // destructure here would have made that verb unrepresentable rather
+    // than merely unwritten.
+    let [command, rest @ ..] = args.as_slice() else {
         eprint!("{}", usage());
         return ExitCode::from(EXIT_USAGE);
     };
 
     let Some((_, operation)) = COMMANDS.iter().find(|(verb, _)| verb == command) else {
         eprintln!("diet: `{command}` is not a command\n");
+        eprint!("{}", usage());
+        return ExitCode::from(EXIT_USAGE);
+    };
+
+    // Every operation the table carries today reads one document.
+    let [path] = rest else {
         eprint!("{}", usage());
         return ExitCode::from(EXIT_USAGE);
     };
