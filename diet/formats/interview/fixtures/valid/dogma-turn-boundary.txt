@@ -1,0 +1,5 @@
+MAP: the resolver reads the gate files by name, and the union is the only mode left
+DARK: whether a criss-cross merge base changes what the union should take
+NEXT: run the injections proof against the assembled tree
+NEXT: recount red_faults from the file rather than from the deltas
+SUPERSEDE: the note saying base-plus-deltas was settled

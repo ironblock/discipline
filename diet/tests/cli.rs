@@ -27,6 +27,7 @@ use std::process::Command;
 const VERBS: &[(&str, &str)] = &[
     ("classify-decline", "decline"),
     ("parse-interview", "interview"),
+    ("check-operating-points", "operating_points"),
     ("check-record", "record"),
     ("check-regimen", "regimen"),
     ("parse-shell", "shell"),

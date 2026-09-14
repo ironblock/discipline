@@ -64,7 +64,17 @@ pub mod vocabulary;
 /// * 1, 2026-09-04: the operating points and the trigger vocabulary joined
 ///   the templates under this number; a record at 0 ran under the templates
 ///   alone, with neither pinned.
-pub const VERSION: u32 = 1;
+/// * 2, 2026-09-13: `fallback` respelled. The operating points' `qwen3` entry
+///   is marked `fallback = true` instead of relying on being written below
+///   the two entries it shadows, and `operating_points::parse` now refuses an
+///   unmarked entry that shadows another. Serving-invariant: the entry every
+///   harvested name reaches is unchanged, held by the pinned table in
+///   `formats::operating_points::tests`. Carried in the same bump because it
+///   is the same file: case-folding in `serves` was a BUG FIX, not an
+///   invariance — 316 occurrences of `Qwen3.6-27B` in the mined provenance
+///   record, the most frequent model id in the corpus, served no entry at all
+///   and now serve `qwen3_6`.
+pub const VERSION: u32 = 2;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -99,7 +109,7 @@ const OPERATING_POINTS_TEXT: &str = include_str!("../../dogma/operating-points.t
 /// Public where the text is not: a run reports the pin it ran under, and
 /// [`operating_points`] holds the text against this number before a byte of
 /// it is handed out.
-pub const OPERATING_POINTS_DIGEST: &str = "ae5e3496eb1976df";
+pub const OPERATING_POINTS_DIGEST: &str = "d4782474e9880963";
 
 /// The manifest, exactly as pinned: one line per template, `name`, digest
 /// and byte length, tab-separated, after the comment lines.
@@ -882,7 +892,17 @@ mod tests {
     #[test]
     fn the_operating_points_have_one_reader() {
         let constant = format!("{}{}", "OPERATING_POINTS", "_TEXT");
-        let file = format!("{}-{}", "operating", "points");
+        // The needle is the dogma's FILE, path and extension included, not the
+        // bare phrase. It was the bare phrase, and the phrase is not the
+        // subject: this guard is about the TEXT being embedded once and handed
+        // out only after the digest check, and `diet/formats/operating_points/`
+        // is a grammar directory that embeds none of it. Under the old needle
+        // a `#[grammar]` attribute pointing at that directory failed a gate
+        // about digest-checked dogma, and so would a comment mentioning the
+        // format by name. Same class of coverage, same acknowledged limit -- a
+        // path assembled from pieces still evades both -- and it no longer
+        // fires on something it is not about.
+        let file = format!("dogma/{}-{}.toml", "operating", "points");
         let declaration = format!("const {constant}:");
         let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let this = Path::new("dogma/mod.rs");

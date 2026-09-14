@@ -1,0 +1,27 @@
+An unmarked entry whose `match` is a proper substring of another's, so which
+of the two serves depends on where the lines sit.
+
+This is `duplicate-match.toml` one step sideways, and the step is the whole
+finding: two entries matching the SAME substring were already refused, and two
+entries where one match CONTAINS the other were not, though the consequence is
+identical. Every id `qwen3.6` is about, `qwen3` matches too. First-match-in-
+file-order picks the winner, and an operating point is a transcribed
+measurement, not something a line number should decide.
+
+THIS IS THE DOGMA'S OWN RETIRED SPELLING, byte for byte, with nothing removed
+but the `fallback = true` line the respell added. That is the point of it. The
+rule was being broken by the one file it exists to protect, for as long as the
+file has existed, and what stood in for the rule was a comment above the tables
+explaining that `qwen3` had to be written below `qwen3.6` and `qwen3.5`. A
+consumer that read the tables into an unordered map -- which that comment
+warned against, in prose, having no way to refuse it -- got `qwen3` for a 3.6
+model, whose `thinking_kwarg = false` is the control that does not work on that
+family.
+
+Refused since 2026-09-13, with the dogma's respell, and the two had to land in
+one commit: enabling the refusal first would have refused the dogma, and
+respelling first would have left the rule optional.
+
+The detector folds case, because `serves` folds and `duplicate-match-by-case`
+is the fixture for what happens when a detector does not: `Qwen3` shadowing
+`qwen3.6` is the same defect wearing the same disguise that one already caught.

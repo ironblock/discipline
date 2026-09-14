@@ -1,31 +1,25 @@
-# Per-model operating points: part of the dogma.
+# THE RETIRED SPELLING of the per-model operating points. REFUSED, on purpose.
 #
-# These are TRANSCRIBED MEASUREMENTS, not preferences. Each entry exists
-# because a run measured it, and the receipt beside it says what was measured.
-# Do not tune one without a fact-key evaluation; a changed value here changes
-# what every future fire does and makes results before and after
-# non-comparable. Changing one is a dogma version bump.
+# This is the dogma as it was written until 2026-09-13, kept because the
+# document that motivated a rule is the best fixture for it. `qwen3` is a
+# substring of `qwen3.6` and of `qwen3.5` and carries no `fallback = true`, so
+# which entry serves `qwen3.6-27b` depends on the order the three tables happen
+# to be written in. The file was correct only because `qwen3` was written last,
+# and a comment above the tables explained the ordering to whoever edited it.
 #
-# Matched by substring against the served model id: the first UNMARKED table
-# whose `match` is a substring of the id wins, and only if none does are the
-# tables marked `fallback = true` tried, in file order. Case is folded on both
-# sides before the comparison.
+# A comment is not a rule. A consumer reading these tables into an unordered
+# map -- which the old header explicitly warned against, in prose -- got the
+# other answer and no error, and `qwen3`'s `thinking_kwarg = false` is the
+# control that does not work on the 3.6 family.
 #
-# `qwen3` is a substring of `qwen3.6` and `qwen3.5`, and it is MARKED. Until
-# 2026-09-13 it was unmarked and safe only because it was written below both,
-# with this comment explaining the ordering -- which meant a consumer reading
-# these tables into an unordered map got a different answer and no error. The
-# mark says what the entry is, so where it sits no longer decides anything,
-# and `operating_points::parse` now REFUSES a document that shadows without
-# marking. The comment stopped being load-bearing and became a description.
+# `operating_points::parse` now refuses this shape outright. The dogma carries
+# the mark, so the ordering stopped being load-bearing, and this file is what
+# holds that refusal to something that actually happened rather than to a
+# document invented to fail.
 #
-# The tables are the research program's, byte for byte; the receipts are
-# restated here as content, since they pointed at that program's tickets and
-# documents. The pinned digest covers this whole file, comments included: an
-# edit to a comment is an edit to the dogma's file and is bumped like one.
-#
-# `nothink_ops` = operations safe to run with thinking suppressed. Everything
-# not listed keeps thinking.
+# Nothing reads it at run time. The measurements, receipts, samplers and gates
+# below are the dogma's own, unchanged, so that the ONLY thing wrong with this
+# file is the missing mark.
 
 [qwen3_6]
 match           = "qwen3.6"
@@ -59,7 +53,6 @@ votes       = 1
 
 [qwen3]
 match          = "qwen3"          # the original Qwen3 honours /no_think
-fallback       = true             # shadows qwen3.6 and qwen3.5; tried last
 nothink_ops    = ["extraction"]
 thinking_kwarg = false
 [qwen3.sampler]

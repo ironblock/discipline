@@ -21,6 +21,7 @@
 
 pub mod decline;
 pub mod interview;
+pub mod operating_points;
 pub mod record;
 pub mod regimen;
 pub mod shell;
@@ -63,6 +64,11 @@ pub const FORMATS: &[Format] = &[
         name: "interview",
         case_extension: "txt",
         project: interview::project,
+    },
+    Format {
+        name: "operating_points",
+        case_extension: "toml",
+        project: operating_points::project,
     },
     Format {
         name: "record",

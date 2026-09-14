@@ -372,7 +372,15 @@ mod formats {
     use super::FORMATS;
     use std::collections::BTreeSet;
 
-    per_format!(decline, interview, record, regimen, shell, verdict);
+    per_format!(
+        decline,
+        interview,
+        operating_points,
+        record,
+        regimen,
+        shell,
+        verdict
+    );
 
     /// A format in [`FORMATS`] with no module here is a format nobody can run
     /// on its own, and -- worse -- `cargo test -- formats::<name>` for it
@@ -402,6 +410,262 @@ fn the_harness_covers_at_least_one_format() {
         !FORMATS.is_empty(),
         "FORMATS is empty, so this harness covers nothing"
     );
+}
+
+/// The integer terminal is defined once, and both grammars that need one
+/// include that definition rather than spelling it again.
+///
+/// Two spellings admitting the same strings is the state `regimen` and
+/// `record` were in, with a comment in one of them asserting the agreement --
+/// and a comment is not a check. Sharing the text removes the divergence;
+/// this removes the way it could come back, which is somebody re-inlining
+/// the rule into one grammar and leaving the shared file sitting there
+/// unread. The parts travel with the terminal because the fractional rules
+/// are built out of them.
+#[test]
+fn the_integer_terminal_is_defined_once_and_shared() {
+    const SHARED: &str = "number.pest";
+    let root = formats_dir();
+    // EVERY `.pest` FILE, not `<dir>/grammar.pest`.
+    //
+    // The first version joined the literal name, and all eight grammars
+    // happened to follow that convention -- so a complete second copy of the
+    // three rules, written into `verdict/numbers.pest`, was invisible to this
+    // guard and to `cargo test --workspace`, which stayed at 582 passed.
+    // Latent rather than live, but only because nobody had added a second
+    // `#[grammar]` file yet, and `operating_points.rs` already carries three.
+    //
+    // The unused second copy is exactly the shape the divergence comes back
+    // in: the shared text still sits there, unread, while a grammar spells
+    // the rule again.
+    let mut grammars: Vec<PathBuf> = files_in_or_empty(&root)
+        .into_iter()
+        .flat_map(|path| {
+            if path.is_dir() {
+                files_in_or_empty(&path)
+            } else {
+                vec![path]
+            }
+        })
+        .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "pest"))
+        .collect();
+    grammars.retain(|path| *path != root.join(SHARED));
+    grammars.sort();
+    let shared = root.join(SHARED);
+    assert!(
+        shared.is_file(),
+        "{} is missing, so there is nowhere for the terminal to be defined once",
+        shared.display()
+    );
+    grammars.push(shared.clone());
+    assert!(
+        grammars.len() > 1,
+        "only one grammar was found, so this compares nothing"
+    );
+
+    let mut failures = Vec::new();
+    let mut users = 0;
+    // BOTH TERMINALS. `fraction` and `negative_fraction` joined the shared
+    // file on 2026-09-12: `regimen::float` and `record::decimal` were
+    // byte-identical modulo the rule name, with not even a comment claiming
+    // they agreed. Naming only the integer three here would have left the
+    // half that just moved unguarded — which is how the divergence came back
+    // the first time.
+    for rule in [
+        "integer",
+        "int_part",
+        "nonzero",
+        "fraction",
+        "negative_fraction",
+    ] {
+        let defined: Vec<&PathBuf> = grammars
+            .iter()
+            .filter(|path| defines(&std::fs::read_to_string(path).unwrap_or_default(), rule))
+            .collect();
+        match defined.as_slice() {
+            [only] if **only == shared => {}
+            [] => failures.push(format!("`{rule}` is defined in no grammar at all")),
+            found => failures.push(format!(
+                "`{rule}` is defined in {}; it belongs in {SHARED} and nowhere else",
+                found
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        }
+    }
+    // AND THE SAME QUESTION ASKED OF THE BODIES, because a copy under a new
+    // name is not a copy the name check can see. Measured: re-inline the
+    // shared fractional rule into the regimen grammar as `negative_float` and
+    // the loop above stays green — it is looking for `negative_fraction`.
+    let shared_bodies: BTreeSet<String> =
+        rules_of(&std::fs::read_to_string(&shared).unwrap_or_default())
+            .into_iter()
+            .map(|(_, body)| body)
+            .collect();
+    assert!(
+        !shared_bodies.is_empty(),
+        "no rule was read out of {SHARED}, so the body comparison below \
+         compares against nothing"
+    );
+
+    for path in &grammars {
+        if *path == shared {
+            continue;
+        }
+        let text = std::fs::read_to_string(path).unwrap_or_default();
+        for (name, body) in rules_of(&text) {
+            if shared_bodies.contains(&body) {
+                failures.push(format!(
+                    "`{name}` in {} has a shared terminal's body written out again; \
+                     name it `= @{{ <the shared rule> }}` instead, or the divergence \
+                     is back under a new name",
+                    path.display()
+                ));
+            }
+        }
+        if text
+            .lines()
+            .any(|line| line.contains("integer") || line.contains("fraction"))
+        {
+            users += 1;
+        }
+    }
+    assert!(
+        users >= 2,
+        "fewer than two grammars reference the shared terminal, so sharing it \
+         is a file nobody reads"
+    );
+    report(&failures);
+}
+
+/// Whether a grammar line is the DEFINITION of `rule`, rather than a use of
+/// it or a mention in a comment.
+/// Whether `grammar` defines `rule`, anywhere in it.
+///
+/// OVER THE WHOLE TEXT, NOT LINE BY LINE. This read one line at a time and
+/// asked whether the name and the `=` were both on it -- so
+///
+///     integer
+///       = @{ ("-" ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*) | "0" }
+///
+/// was a definition pest compiles and this guard could not see. A fresh
+/// instance found it by writing exactly that and watching all fifteen checks
+/// pass over a tree carrying a second, independently-compiling copy of the
+/// terminal this test exists to keep single-sourced. Pest does not care where
+/// the newlines are, so neither may the thing that polices it.
+///
+/// Comments are removed first rather than skipped per line, for the same
+/// reason: `// integer` on one line and `= @{ ... }` on the next must not
+/// join up into a definition that is not there.
+/// Every rule a `.pest` file defines, as `(name, body)` with the body's
+/// whitespace collapsed and its comments stripped.
+///
+/// Bodies, because NAMES ARE NOT ENOUGH. The first version of the shared-
+/// terminal guard asked "is this rule defined anywhere but the shared file",
+/// which a re-inlined copy under a DIFFERENT NAME walks straight past: put
+/// `negative_float` back into the regimen grammar with the shared rule's
+/// exact body and nothing notices, because the guard is looking for
+/// `negative_fraction`. Measured — the lesion passed the suite.
+///
+/// That is the same hole this test was hardened for once already, one level
+/// along: it globbed one filename, so a copy in `numbers.pest` was invisible;
+/// now it named one set of rules, so a copy under a new name was. A guard
+/// that enumerates what it knows misses whatever it was not told about, and
+/// the body is the thing that actually duplicates.
+fn rules_of(grammar: &str) -> Vec<(String, String)> {
+    let mut source = String::with_capacity(grammar.len());
+    for line in grammar.lines() {
+        source.push_str(line.split("//").next().unwrap_or(""));
+        source.push('\n');
+    }
+    let mut found = Vec::new();
+    let bytes: Vec<char> = source.chars().collect();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] != '=' {
+            at += 1;
+            continue;
+        }
+        // The name is the token to the left of the `=`.
+        let mut start = at;
+        while start > 0 && bytes[start - 1].is_whitespace() {
+            start -= 1;
+        }
+        let end = start;
+        while start > 0 && (bytes[start - 1].is_alphanumeric() || bytes[start - 1] == '_') {
+            start -= 1;
+        }
+        if start == end {
+            at += 1;
+            continue;
+        }
+        let name: String = bytes[start..end].iter().collect();
+        // Then the modifier, then the braced body.
+        let mut open = at + 1;
+        while open < bytes.len() && bytes[open] != '{' {
+            if !bytes[open].is_whitespace() && !"@_$!".contains(bytes[open]) {
+                break;
+            }
+            open += 1;
+        }
+        if open >= bytes.len() || bytes[open] != '{' {
+            at += 1;
+            continue;
+        }
+        let mut depth = 0;
+        let mut close = open;
+        while close < bytes.len() {
+            match bytes[close] {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            close += 1;
+        }
+        if close >= bytes.len() {
+            break;
+        }
+        let body: String = bytes[open + 1..close].iter().collect();
+        found.push((name, body.split_whitespace().collect::<Vec<_>>().join(" ")));
+        at = close + 1;
+    }
+    found
+}
+
+fn defines(grammar: &str, rule: &str) -> bool {
+    let mut source = String::with_capacity(grammar.len());
+    for line in grammar.lines() {
+        source.push_str(line.split("//").next().unwrap_or(""));
+        source.push('\n');
+    }
+    let mut rest = source.as_str();
+    while let Some(at) = rest.find(rule) {
+        let (before, after) = rest.split_at(at);
+        let after = &after[rule.len()..];
+        // A rule name is a whole token: `int_part` must not be found inside
+        // `signed_int_part`, and `integer` must not be found inside
+        // `integers`.
+        let boundary_left = before
+            .chars()
+            .next_back()
+            .is_none_or(|c| !c.is_alphanumeric() && c != '_');
+        let boundary_right = after
+            .chars()
+            .next()
+            .is_none_or(|c| !c.is_alphanumeric() && c != '_');
+        if boundary_left && boundary_right && after.trim_start().starts_with('=') {
+            return true;
+        }
+        rest = &rest[at + rule.len()..];
+    }
+    false
 }
 
 /// A format directory on disk that `FORMATS` does not name is a format with

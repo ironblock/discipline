@@ -1,0 +1,15 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "union_file, repair, inert_injections"
+      },
+      "raw": "union_file, repair, inert_injections",
+      "tag": {
+        "as_written": "API-SURFACE:",
+        "kind": "api_surface"
+      }
+    }
+  ]
+}

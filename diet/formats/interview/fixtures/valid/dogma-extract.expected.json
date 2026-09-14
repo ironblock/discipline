@@ -1,0 +1,25 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "red_faults = 203 in tools/gate/faults.toml"
+      },
+      "raw": "red_faults = 203 in tools/gate/faults.toml",
+      "tag": {
+        "as_written": "FACT:",
+        "kind": "fact"
+      }
+    },
+    {
+      "outcome": {
+        "value": "the manifest defines parity as red in --selftest plus red per run plus mechanics assertions"
+      },
+      "raw": "the manifest defines parity as red in --selftest plus red per run plus mechanics assertions",
+      "tag": {
+        "as_written": "FACT:",
+        "kind": "fact"
+      }
+    }
+  ]
+}

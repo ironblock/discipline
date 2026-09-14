@@ -1,0 +1,63 @@
+// The number terminals, defined once.
+//
+// Two grammars need it -- `regimen` and `record` -- and for a while each
+// spelled it out for itself. The two spellings admitted the same strings and
+// a comment in one of them said so, which is the two-readers class at the
+// terminal level: nothing executed the claim, so nothing would notice the day
+// one of them was widened and the other was not. A regime is identified by
+// the settings that name it, so a number one reader accepts and the other
+// refuses is two regimes wearing one name.
+//
+// Included by both grammars through a second `#[grammar]` attribute rather
+// than copied into them, so there is one text to change and no second place
+// to forget.
+//
+// `-0` is not here, deliberately: it and `0` project to the same value, so two
+// byte-different documents would name one regime. Narrowing is the permitted
+// direction, and this is where the narrowing lives.
+integer  = @{ ("-" ~ nonzero) | int_part }
+
+// The parts travel with it. Sharing `integer` alone and leaving each grammar
+// its own `int_part` would move the divergence rather than remove it -- the
+// fractional rules are built out of these too.
+int_part = _{ "0" | nonzero }
+nonzero  = _{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
+
+// AND THE FRACTIONAL TERMINAL, for the same reason and by the same ruling --
+// 2026-09-12. `regimen::float` and `record::decimal` were byte-identical
+// modulo the rule name, and so were their negative halves, with not even a
+// comment claiming they agreed. The `-0` ruling named the INTEGER terminal
+// because that was the divergence in front of it; the rule was never
+// integer-specific.
+//
+// Each grammar keeps its own NAME -- `float` there, `decimal` here -- as an
+// ATOMIC alias of this rule. Atomic matters: `@` suppresses inner tokens, so
+// `Rule::float` and `Rule::decimal` still carry the whole span and no child,
+// exactly as they did when each spelled the digits out. The readers that
+// match on those rules are untouched.
+//
+// AN EXACT DECIMAL, never a binary float: the digits as written. A binary
+// float would read `0.6` back as `0.59999999999999998`, and a regime
+// identified by its settings cannot have a value that changes when it is
+// round-tripped.
+//
+// `-0.0` is refused. One spelling per value, and negative zero is a second
+// spelling of zero -- the same narrowing `-0` gets above, and in the same
+// direction: `regimen/fixtures/invalid/negative-zero.toml` and
+// `negative-zero-float.toml` are the pair that refuse them, so neither half
+// of the narrowing rests on this comment. (An earlier draft of this comment
+// claimed `-0` was still accepted as an integer, as an asymmetry a later
+// version should settle. It said that of the rule three lines above it, which
+// refuses it. There is no asymmetry and there is nothing to settle.)
+//
+// No exponent. `7e-1` is a second spelling of `0.7`.
+fraction = @{ ("-" ~ negative_fraction) | (int_part ~ "." ~ ASCII_DIGIT+) }
+
+// `ASCII_NONZERO_DIGIT` in the second alternative is a RESTATEMENT, not the
+// enforcement: `"0"*` is greedy and pest does not backtrack a repetition, so
+// whatever follows it is already not a zero. It is spelled out because the
+// rule is about which digit may be nonzero, and a reader who narrowed `"0"*`
+// to `"0"?` with `ASCII_DIGIT` there would reopen the hole in silence.
+negative_fraction = _{
+    (nonzero ~ "." ~ ASCII_DIGIT+) | ("0" ~ "." ~ "0"* ~ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
+}
