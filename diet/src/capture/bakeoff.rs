@@ -86,7 +86,17 @@ pub enum RunError {
     Set(SetError),
     /// A row the gate admitted could not be scored.
     Score(ScoreError),
-    /// A control did not land where it must.
+    /// A control row could not be scored at all -- a cache miss, which is a
+    /// fact about the inputs and not a reading about the embedder.
+    ///
+    /// The OTHER control failures are not here. A control that lands in the
+    /// wrong place is a per-cell result, written into the report as
+    /// `control_failed` with its readings and no metrics over that cell, and
+    /// the run proceeds to the next cell. Ruled on #24 (2026-09-15): the verb
+    /// was written against a fixture embedder whose controls land at their
+    /// extremes by construction; real embedders fail individually, and a run
+    /// that stopped at the first (embedder, scoring) failure could not report
+    /// the reading that stopped it.
     Control {
         /// Which embedder.
         embedder: String,
@@ -95,8 +105,19 @@ pub enum RunError {
         /// What went wrong.
         failure: ControlFailure,
     },
-    /// A metric could not be reported.
-    Metric(sense::MetricError),
+    /// A metric could not be reported, in a named cell.
+    Metric {
+        /// Which embedder.
+        embedder: String,
+        /// Which set.
+        set: SenseSet,
+        /// Which scoring.
+        scoring: Scoring,
+        /// Which gate.
+        gate: Gate,
+        /// Why.
+        error: sense::MetricError,
+    },
     /// The paired bootstrap could not run.
     Bootstrap(sense::BootstrapError),
     /// The directory to assemble into already holds a report.
@@ -179,7 +200,19 @@ impl fmt::Display for RunError {
                 scoring,
                 failure,
             } => write!(f, "{embedder} under {}: {failure}", scoring.tag()),
-            Self::Metric(err) => write!(f, "{err}"),
+            Self::Metric {
+                embedder,
+                set,
+                scoring,
+                gate,
+                error,
+            } => write!(
+                f,
+                "{embedder}/{}/{}/{}: {error}",
+                set.tag(),
+                scoring.tag(),
+                gate.tag()
+            ),
             Self::Bootstrap(err) => write!(f, "{err}"),
         }
     }
@@ -292,14 +325,117 @@ fn gather(dir: &Path, events: &[Event]) -> Result<Inputs, RunError> {
     Ok(Inputs { caches, register })
 }
 
-/// One cell's report.
+/// One cell's report: scored, with its metrics -- and, typed beside them, the
+/// metrics that had no value on this cell's rows.
+///
+/// A metric undefined on the subject is a fact about the cell, not about the
+/// instrument: a gate that drops every row of a set puts them all at the
+/// scoring's floor, and a separation over no spread is not a number. It is
+/// reported as that, per metric and budget, with its cause, and the cell keeps
+/// the metrics that did compute and its scores for the comparisons. The same
+/// class as a control failure one metric over, and handled the same way, so
+/// that a run over real embedders reports what it found rather than stopping
+/// at the first cell with nothing to standardise by. A metric undefined on
+/// its own FAILURE FIXTURE stays a refusal: that is the instrument, not the
+/// cell.
 struct CellReport {
     embedder: String,
     set: SenseSet,
     scoring: Scoring,
     gate: Gate,
     reported: Vec<Reported>,
+    undefined: Vec<(Metric, usize, sense::UndefinedCause)>,
     scores: Vec<f64>,
+}
+
+/// A cell whose controls did not land where they must, reported as that.
+///
+/// The controls are checked per (embedder, set, scoring), ungated, so one
+/// failure covers both gates of that scoring and no metric is computed for
+/// either. The readings are the failure's own: which control, what it scored,
+/// which row displaced it and what that row scored. This is a RESULT -- the
+/// over-firing the instrument exists to see, when a positive sinks below
+/// random words -- and not a refusal of the run. Ruled on #24 (2026-09-15).
+struct ControlFailed {
+    embedder: String,
+    set: SenseSet,
+    scoring: Scoring,
+    failure: ControlFailure,
+}
+
+/// What a cell came to: numbers, or the control reading that stopped them.
+enum Outcome {
+    Scored(CellReport),
+    ControlFailed(ControlFailed),
+}
+
+impl Outcome {
+    fn value(&self) -> Value {
+        match self {
+            Self::Scored(cell) => cell.value(),
+            Self::ControlFailed(cell) => cell.value(),
+        }
+    }
+}
+
+impl ControlFailed {
+    fn value(&self) -> Value {
+        let mut members = BTreeMap::from([
+            ("embedder".to_owned(), Value::String(self.embedder.clone())),
+            ("set".to_owned(), Value::String(self.set.tag().to_owned())),
+            (
+                "scoring".to_owned(),
+                Value::String(self.scoring.tag().to_owned()),
+            ),
+            (
+                "result".to_owned(),
+                Value::String("control_failed".to_owned()),
+            ),
+            (
+                "failure".to_owned(),
+                Value::String(self.failure.to_string()),
+            ),
+        ]);
+        let readings = match &self.failure {
+            ControlFailure::NotAtTop {
+                control,
+                score,
+                row,
+                other,
+            }
+            | ControlFailure::NotAtBottom {
+                control,
+                score,
+                row,
+                other,
+            } => {
+                members.insert(
+                    "control".to_owned(),
+                    Value::String(control.tag().to_owned()),
+                );
+                BTreeMap::from([
+                    ("control_score".to_owned(), decimal(*score, 8)),
+                    ("row".to_owned(), Value::String(row.clone())),
+                    ("row_score".to_owned(), decimal(*other, 8)),
+                ])
+            }
+            ControlFailure::Inverted { top, bottom } => BTreeMap::from([
+                ("top_score".to_owned(), decimal(*top, 8)),
+                ("bottom_score".to_owned(), decimal(*bottom, 8)),
+            ]),
+            ControlFailure::Missing { control } => {
+                members.insert(
+                    "control".to_owned(),
+                    Value::String(control.tag().to_owned()),
+                );
+                BTreeMap::new()
+            }
+            // Never built: a cache miss is a refusal of the run, above.
+            ControlFailure::Unscorable(_) => BTreeMap::new(),
+        };
+        members.insert("readings".to_owned(), Value::Object(readings));
+        Value::Object(members)
+    }
 }
 
 impl CellReport {
@@ -312,9 +448,28 @@ impl CellReport {
                 Value::String(self.scoring.tag().to_owned()),
             ),
             ("gate".to_owned(), Value::String(self.gate.tag().to_owned())),
+            ("result".to_owned(), Value::String("scored".to_owned())),
             (
                 "metrics".to_owned(),
                 Value::Array(self.reported.iter().map(Reported::record).collect()),
+            ),
+            (
+                "undefined".to_owned(),
+                Value::Array(
+                    self.undefined
+                        .iter()
+                        .map(|(metric, budget, cause)| {
+                            Value::Object(BTreeMap::from([
+                                ("metric".to_owned(), Value::String(metric.tag().to_owned())),
+                                (
+                                    "budget".to_owned(),
+                                    Value::Integer(i64::try_from(*budget).unwrap_or(i64::MAX)),
+                                ),
+                                ("cause".to_owned(), Value::String(cause.to_string())),
+                            ]))
+                        })
+                        .collect(),
+                ),
             ),
         ]))
     }
@@ -371,47 +526,7 @@ fn computed(path: &Path) -> Result<Computed, RunError> {
             let Some(rows) = inputs.register.get(&set) else {
                 continue;
             };
-            let embedded = EmbeddedSet::embed(&senses, set, cached).map_err(RunError::Set)?;
-            for scoring in Scoring::ALL.iter().copied() {
-                sense::controls(rows, &embedded, cached, scoring).map_err(|failure| {
-                    RunError::Control {
-                        embedder: cached.id().to_owned(),
-                        scoring,
-                        failure,
-                    }
-                })?;
-                for gate in Gate::ALL.iter().copied() {
-                    let cell = Cell { scoring, gate };
-                    let scored = sense::score_rows(rows, &embedded, cached, cell)
-                        .map_err(RunError::Score)?;
-                    // EVERY PRE-REGISTERED BUDGET, not one. The budget was a
-                    // `const` here set to eight, and eight was not chosen: it
-                    // was the widest the precision fixture happened to
-                    // demonstrate. A cell now carries the ladder, because a
-                    // single number is a sweep nobody can do afterwards --
-                    // rerunning at another budget means rerunning the bakeoff.
-                    let reported = sense::BUDGETS
-                        .iter()
-                        .copied()
-                        .flat_map(|budget| {
-                            Metric::ALL
-                                .iter()
-                                .copied()
-                                .map(move |metric| (metric, budget))
-                        })
-                        .map(|(metric, budget)| Reported::take(metric, budget, &scored))
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(RunError::Metric)?;
-                    cells.push(CellReport {
-                        embedder: cached.id().to_owned(),
-                        set,
-                        scoring,
-                        gate,
-                        reported,
-                        scores: scored.iter().map(|row| row.score).collect(),
-                    });
-                }
-            }
+            cells.extend(cells_of(cached, rows, set, &senses)?);
         }
     }
     if cells.is_empty() {
@@ -425,6 +540,16 @@ fn computed(path: &Path) -> Result<Computed, RunError> {
     // would be the same object in two files with nothing comparing them --
     // the defect this rung fixed twice already this week, minted fresh in the
     // commit that fixes it.
+    // The comparisons and the null are over the cells that produced numbers;
+    // a cell whose controls failed has none to compare. The decision rule's
+    // "at least one cell" clause evaluates over these too.
+    let scored: Vec<&CellReport> = cells
+        .iter()
+        .filter_map(|cell| match cell {
+            Outcome::Scored(report) => Some(report),
+            Outcome::ControlFailed(_) => None,
+        })
+        .collect();
     let report = Value::Object(BTreeMap::from([
         ("regime".to_owned(), regime_ids(record.regime())),
         (
@@ -439,10 +564,14 @@ fn computed(path: &Path) -> Result<Computed, RunError> {
         ),
         (
             "cells".to_owned(),
-            Value::Array(cells.iter().map(CellReport::value).collect()),
+            Value::Array(cells.iter().map(Outcome::value).collect()),
         ),
-        ("comparisons".to_owned(), comparisons(&cells)?),
-        ("null".to_owned(), null_over(&cells)),
+        (
+            "control_failed".to_owned(),
+            Value::Integer(i64::try_from(cells.len() - scored.len()).unwrap_or(i64::MAX)),
+        ),
+        ("comparisons".to_owned(), comparisons(&scored)?),
+        ("null".to_owned(), null_over(&scored)),
         (
             "resolved_blockers".to_owned(),
             Value::Array(
@@ -458,6 +587,93 @@ fn computed(path: &Path) -> Result<Computed, RunError> {
         record,
         dir,
     })
+}
+
+/// Every cell of one embedder over one set: a scored cell per (scoring, gate),
+/// or one `control_failed` per scoring whose controls did not land.
+fn cells_of(
+    cached: &Cached,
+    rows: &[Row],
+    set: SenseSet,
+    senses: &[sense::Sense],
+) -> Result<Vec<Outcome>, RunError> {
+    let mut cells = Vec::new();
+    let embedded = EmbeddedSet::embed(senses, set, cached).map_err(RunError::Set)?;
+    for scoring in Scoring::ALL.iter().copied() {
+        match sense::controls(rows, &embedded, cached, scoring) {
+            Ok(()) => {}
+            // A row the embedder could not place is a fact about the
+            // inputs, and the run cannot say anything over them.
+            Err(failure @ ControlFailure::Unscorable(_)) => {
+                return Err(RunError::Control {
+                    embedder: cached.id().to_owned(),
+                    scoring,
+                    failure,
+                });
+            }
+            // A control in the wrong place is a reading about this
+            // cell. It goes in the report as what it is, no metric is
+            // computed over the cell, and the run goes on.
+            Err(failure) => {
+                cells.push(Outcome::ControlFailed(ControlFailed {
+                    embedder: cached.id().to_owned(),
+                    set,
+                    scoring,
+                    failure,
+                }));
+                continue;
+            }
+        }
+        for gate in Gate::ALL.iter().copied() {
+            let cell = Cell { scoring, gate };
+            let scored =
+                sense::score_rows(rows, &embedded, cached, cell).map_err(RunError::Score)?;
+            // EVERY PRE-REGISTERED BUDGET, not one. The budget was a
+            // `const` here set to eight, and eight was not chosen: it
+            // was the widest the precision fixture happened to
+            // demonstrate. A cell now carries the ladder, because a
+            // single number is a sweep nobody can do afterwards --
+            // rerunning at another budget means rerunning the bakeoff.
+            let mut reported = Vec::new();
+            let mut undefined = Vec::new();
+            for budget in sense::BUDGETS.iter().copied() {
+                for metric in Metric::ALL.iter().copied() {
+                    match Reported::take(metric, budget, &scored) {
+                        Ok(taken) => reported.push(taken),
+                        // The subject had no value for this metric: a fact
+                        // about this cell's rows, kept beside the metrics that
+                        // did compute.
+                        Err(sense::MetricError::Undefined {
+                            on: sense::MetricSubject::Subject,
+                            cause,
+                            ..
+                        }) => undefined.push((metric, budget, cause)),
+                        // The instrument's own fixture did not fail, or had no
+                        // value: not this cell's fact, and not a result.
+                        Err(error) => {
+                            return Err(RunError::Metric {
+                                embedder: cached.id().to_owned(),
+                                set,
+                                scoring,
+                                gate,
+                                error,
+                            });
+                        }
+                    }
+                }
+            }
+            cells.push(Outcome::Scored(CellReport {
+                embedder: cached.id().to_owned(),
+                set,
+                scoring,
+                gate,
+                reported,
+                undefined,
+                scores: scored.iter().map(|row| row.score).collect(),
+            }));
+        }
+    }
+    Ok(cells)
 }
 
 /// Which of the pre-registration's blockers this run cleared by running.
@@ -496,7 +712,7 @@ fn regime_ids(regime: &Regime) -> Value {
 }
 
 /// Every embedder against every other, within a cell, Holm-corrected.
-fn comparisons(cells: &[CellReport]) -> Result<Value, RunError> {
+fn comparisons(cells: &[&CellReport]) -> Result<Value, RunError> {
     let mut by_cell: BTreeMap<String, Vec<&CellReport>> = BTreeMap::new();
     for cell in cells {
         by_cell.entry(cell.key()).or_default().push(cell);
@@ -537,7 +753,7 @@ fn comparisons(cells: &[CellReport]) -> Result<Value, RunError> {
 }
 
 /// The shuffled-label null, over the first cell that can carry one.
-fn null_over(cells: &[CellReport]) -> Value {
+fn null_over(cells: &[&CellReport]) -> Value {
     let names: BTreeSet<&str> = cells.iter().map(|cell| cell.embedder.as_str()).collect();
     Value::Object(BTreeMap::from([
         (
@@ -1160,6 +1376,17 @@ mod tests {
     /// One run directory, written under `dir`, with every digest computed from
     /// the bytes actually written.
     fn write_run(dir: &Path) -> PathBuf {
+        write_run_with(dir, &[])
+    }
+
+    /// A cache built from [`Fixture`] with one text's vector rewritten, so a
+    /// test can put one row where a real embedder might: below the noise
+    /// floor, in a signed space the fixture never reaches on its own.
+    type Rewrite = (&'static str, fn(&str) -> Option<Vec<f64>>);
+
+    /// [`write_run`], plus one extra cache per rewrite, consumed by the record
+    /// like the two fixture caches.
+    fn write_run_with(dir: &Path, extra: &[Rewrite]) -> PathBuf {
         std::fs::create_dir_all(dir).expect("a directory");
         let senses = sense::shipped_senses().expect("the shipped senses");
         let rows = sense::register(&register_source()).expect("the shipped register");
@@ -1180,11 +1407,32 @@ mod tests {
         texts.sort();
         texts.dedup();
 
-        let files = [
-            ("authored-mistake.jsonl", register_source()),
-            ("even.vectors.jsonl", cache(&texts, &register_texts, false)),
-            ("lean.vectors.jsonl", cache(&texts, &register_texts, true)),
+        let mut files = vec![
+            ("authored-mistake.jsonl".to_owned(), register_source()),
+            (
+                "even.vectors.jsonl".to_owned(),
+                cache(&texts, &register_texts, false),
+            ),
+            (
+                "lean.vectors.jsonl".to_owned(),
+                cache(&texts, &register_texts, true),
+            ),
         ];
+        for (name, rewrite) in extra {
+            let mut out = String::new();
+            for text in &texts {
+                let vector = rewrite(text).unwrap_or_else(|| Fixture.embed(text));
+                let spelled: Vec<String> =
+                    vector.iter().map(|value| format!("{value:.8}")).collect();
+                let _ = writeln!(
+                    out,
+                    "{{\"text\":{},\"vector\":[{}]}}",
+                    quoted(text),
+                    spelled.join(",")
+                );
+            }
+            files.push((format!("{name}.vectors.jsonl"), out));
+        }
         let mut consumes = Vec::new();
         for (name, body) in &files {
             std::fs::write(dir.join(name), body).expect("a written input");
@@ -1744,6 +1992,185 @@ mod tests {
     // this ever goes green WITH the digest check present, the digest check has
     // a hole, and that is worth learning here rather than after a bakeoff
     // banks a number over a cache nobody verified.
+    /// A cell whose control fails is a RESULT, typed, and the run goes on.
+    ///
+    /// Ruled on #24 (2026-09-15) after the first invocation on four real
+    /// embedders: every one failed a control, the run stopped at the first,
+    /// and the reading that stopped it -- a mined positive below random
+    /// words, which is the over-firing the instrument exists to see -- could
+    /// not appear in any report. Here a third cache puts one positive
+    /// register row at the negation of the positive sense, so under raw
+    /// cosine it sits at -1, under the unrelated-words control at 0.
+    #[test]
+    fn a_cell_whose_control_fails_is_a_typed_result_and_the_run_proceeds() {
+        fn sink_one_positive(text: &str) -> Option<Vec<f64>> {
+            let rows = sense::register(&register_source()).expect("the shipped register");
+            let sunk = rows
+                .iter()
+                .find(|row| row.label.is_positive())
+                .expect("a positive row");
+            if sunk.text != text {
+                return None;
+            }
+            let senses = sense::shipped_senses().expect("the shipped senses");
+            let set = sense::EmbeddedSet::embed(&senses, sense::SenseSet::Mistake, &Fixture)
+                .expect("an embeddable set");
+            let positive = &set.literal(sense::Polarity::Positive).vector;
+            // Negated, without minting a negative zero: the cache format
+            // refuses `-0.00000000`, and the fixture's vectors are mostly
+            // zeros.
+            Some(
+                positive
+                    .iter()
+                    .map(|v| if *v == 0.0 { 0.0 } else { -v })
+                    .collect(),
+            )
+        }
+        let dir = scratch("control-failed");
+        let path = write_run_with(&dir, &[("sunk", sink_one_positive)]);
+        let report = run(&path).unwrap_or_else(|err| panic!("the run did not report: {err}"));
+
+        let Value::Array(cells) = field(&report, "cells") else {
+            panic!("cells is not a list")
+        };
+        let mut failed = 0;
+        let mut scored_sunk = 0;
+        for cell in cells {
+            let (Value::String(embedder), Value::String(result)) =
+                (field(cell, "embedder"), field(cell, "result"))
+            else {
+                panic!("a cell names its embedder and its result")
+            };
+            // Compared, not matched: the library rule refuses a match arm on
+            // a string literal, and these are the report's own tags.
+            if result == "scored" {
+                assert!(matches!(field(cell, "metrics"), Value::Array(_)));
+                if embedder == "sunk" {
+                    scored_sunk += 1;
+                }
+            } else {
+                assert_eq!(
+                    result, "control_failed",
+                    "a cell result this test does not know"
+                );
+                {
+                    failed += 1;
+                    assert_eq!(embedder, "sunk", "only the sunk cache fails a control");
+                    assert_eq!(
+                        field(cell, "control"),
+                        &Value::String("unrelated_words".to_owned()),
+                        "the bottom control under a scoring that ignores the negative"
+                    );
+                    let Value::Object(readings) = field(cell, "readings") else {
+                        panic!("a failed cell carries its readings")
+                    };
+                    assert!(
+                        readings.contains_key("row") && readings.contains_key("row_score"),
+                        "the readings name the row that sank and where it sat"
+                    );
+                    assert!(
+                        !matches!(cell, Value::Object(members) if members.contains_key("metrics")),
+                        "no metric is computed over a cell whose control failed"
+                    );
+                }
+            }
+        }
+        assert!(failed >= 1, "the sunk positive tripped no control");
+        assert_eq!(
+            field(&report, "control_failed"),
+            &Value::Integer(failed),
+            "the report counts its failed cells"
+        );
+        // The two fixture caches still score every cell, and comparisons are
+        // over scored cells only: sixteen cells for those two, and a pair per
+        // cell key where two or more embedders scored.
+        let scored_total = i64::try_from(cells.len()).expect("a count") - failed;
+        assert_eq!(scored_total, 2 * 4 * 2 + scored_sunk);
+        let Value::Array(comparisons) = field(&report, "comparisons") else {
+            panic!("comparisons is not a list")
+        };
+        for comparison in comparisons {
+            let (Value::String(a), Value::String(b)) =
+                (field(comparison, "a"), field(comparison, "b"))
+            else {
+                panic!("a comparison names two embedders")
+            };
+            assert!(a != b);
+        }
+        // Every pair of the two fixture caches is there; a failed sunk cell
+        // never is.
+        assert!(comparisons.len() >= 4 * 2);
+    }
+
+    /// A metric undefined on a cell's rows is reported on that cell, typed,
+    /// beside the metrics that did compute; the run goes on.
+    ///
+    /// A cache that places every register row at one vector makes every
+    /// scoring flat over the register: precision and over-firing still count
+    /// (ties are ties), the AUC is one half, and d' has no spread to divide
+    /// by. Before this, the first such cell refused the whole run with
+    /// `d_prime is undefined on the subject` and nothing else in it.
+    #[test]
+    fn a_metric_undefined_on_a_cell_is_reported_on_that_cell_and_the_run_proceeds() {
+        fn flatten_register(text: &str) -> Option<Vec<f64>> {
+            let rows = sense::register(&register_source()).expect("the shipped register");
+            if !rows.iter().any(|row| row.text == text) {
+                return None;
+            }
+            // One vector for every register row: a token no sense uses, so
+            // every row sits at the same cosine to every sense.
+            Some(Fixture.embed("zebra"))
+        }
+        let dir = scratch("flat");
+        let path = write_run_with(&dir, &[("flat", flatten_register)]);
+        let report = run(&path).unwrap_or_else(|err| panic!("the run did not report: {err}"));
+        let Value::Array(cells) = field(&report, "cells") else {
+            panic!("cells is not a list")
+        };
+        let mut flat_with_undefined = 0;
+        for cell in cells {
+            let Value::String(embedder) = field(cell, "embedder") else {
+                panic!("a cell names its embedder")
+            };
+            let Value::Array(undefined) = field(cell, "undefined") else {
+                panic!("a scored cell lists what was undefined on it")
+            };
+            if embedder != "flat" {
+                assert!(
+                    undefined.is_empty(),
+                    "a fixture cell had an undefined metric"
+                );
+                continue;
+            }
+            if undefined.is_empty() {
+                continue;
+            }
+            flat_with_undefined += 1;
+            for entry in undefined {
+                assert_eq!(
+                    field(entry, "metric"),
+                    &Value::String("d_prime".to_owned()),
+                    "only d' has a spread to lack"
+                );
+                let Value::String(cause) = field(entry, "cause") else {
+                    panic!("an undefined metric says why")
+                };
+                assert!(cause.contains("no spread"), "{cause}");
+            }
+            let Value::Array(metrics) = field(cell, "metrics") else {
+                panic!("metrics is not a list")
+            };
+            assert!(
+                !metrics.is_empty(),
+                "the metrics that did compute are kept beside the undefined ones"
+            );
+        }
+        assert!(
+            flat_with_undefined >= 1,
+            "a flat register left d' defined somewhere it cannot be"
+        );
+    }
+
     #[test]
     fn a_cache_the_record_did_not_consume_is_refused() {
         let dir = scratch("digest");
