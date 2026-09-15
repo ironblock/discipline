@@ -101,8 +101,9 @@ Two consumers are needed, and both live in directories this seat does not own:
 Until then the two results directories on their way in do something weaker, and
 they do two *different* weaker things, which is worth stating exactly:
 
-Both name their instance in the record's start row — the substrate's `hardware`
-string — and both carry a `known_defects` entry saying the instance is an
+Both name their instance in the report's Test section — the record's start row
+declares the substrate by this registry's id, and the schema has no instance
+field yet — and both carry a `known_defects` entry saying the instance is an
 **inference**, because neither fire has a substrate capture of its own:
 
 - `results/2026-07-29-confabulation-on-nulls` is instance `2026-07-25`, inferred
