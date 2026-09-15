@@ -123,9 +123,6 @@
             "string": "-cram"
           }
         ]
-      },
-      "flags": {
-        "table": {}
       }
     }
   },

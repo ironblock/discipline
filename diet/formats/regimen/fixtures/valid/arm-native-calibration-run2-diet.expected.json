@@ -63,9 +63,6 @@
             "string": "-cram"
           }
         ]
-      },
-      "flags": {
-        "table": {}
       }
     }
   },

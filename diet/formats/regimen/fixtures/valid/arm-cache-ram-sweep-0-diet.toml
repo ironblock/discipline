@@ -53,6 +53,8 @@ rationale = false
 # the parity regimen for this sweep (a DECLARED deviation, not undeclared
 # drift). The parity preamble's live check verifies the live server
 # actually has --cache-ram=0 in force before any drive fires.
-[serving]
+# The arm declared a bare [serving] header above [serving.flags]. It is not
+# carried: a header with no binding under it is refused by v1 since 2026-09-15
+# (ruled on #51), and [serving.flags] opens `serving` on its own.
 [serving.flags]
 --cache-ram = 0

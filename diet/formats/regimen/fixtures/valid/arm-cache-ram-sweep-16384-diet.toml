@@ -64,6 +64,8 @@ rationale = false
 #
 # The [serving] table is kept as the arm opens it, and the flag under
 # [serving.flags] is carried (see the header).
-[serving]
+# The arm declared a bare [serving] header above [serving.flags]. It is not
+# carried: a header with no binding under it is refused by v1 since 2026-09-15
+# (ruled on #51), and [serving.flags] opens `serving` on its own.
 [serving.flags]
 --cache-ram = 16384

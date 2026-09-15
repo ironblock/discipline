@@ -32,7 +32,9 @@ tool_timeout_s = 120
 # Sweep cell 2: --cache-ram DECLARED explicit at 0 MiB. See
 # the diet arm of this cell's [serving] comment — same declared deviation,
 # same deviation entry in the parity record covers both arms of this cell.
-[serving]
+# The arm declared a bare [serving] header above [serving.flags]. It is not
+# carried: a header with no binding under it is refused by v1 since 2026-09-15
+# (ruled on #51), and [serving.flags] opens `serving` on its own.
 [serving.flags]
 --cache-ram = 0
 

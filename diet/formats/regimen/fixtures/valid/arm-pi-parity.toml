@@ -180,12 +180,12 @@ extraction_minimal_prefix = false  # pinned — this is the Pi-matching warm-27B
 [serving]
 expected_absent = ["--cache-ram", "-cram"]
 
-[serving.flags]
-# Empty at Run 1 / Run 2 — nothing beyond the compiled defaults is pinned by this
-# reference. A later arm (the cache-RAM sweep) declares explicit values here per
-# cell, each backed by a [[deviation]] entry. The header is carried empty because
-# the arm opens it empty; the grammar admits both the header and the array above
-# since the schema batch.
+# [serving.flags] is empty at Run 1 / Run 2 — nothing beyond the compiled
+# defaults is pinned by this reference. A later arm (the cache-RAM sweep)
+# declares explicit values there per cell, each backed by a [[deviation]] entry.
+# The header is not carried: a header with no binding under it is refused by v1
+# since 2026-09-15 (ruled on #51), and an empty header said only that the flags
+# are the compiled defaults.
 
 # Observed arrival profile (the thing to match, not the raw thresholds), carried
 # in the arm's own [reference.profile] sub-table.

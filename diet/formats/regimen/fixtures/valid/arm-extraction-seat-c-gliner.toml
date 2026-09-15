@@ -48,4 +48,7 @@ rationale = false
 #   states something false about the normative file beside it.
 [serving]
 expected_absent = ["--cache-ram", "-cram"]
-[serving.flags]
+# The arm opens [serving.flags] and binds nothing under it. The header is not
+# carried: a header with no binding under it is refused by v1 since 2026-09-15
+# (ruled on #51); the arm's serving flags are the compiled defaults, which is
+# what an empty header said.
