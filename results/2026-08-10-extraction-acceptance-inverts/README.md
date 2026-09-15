@@ -4,13 +4,13 @@ result = "supported"
 kind = "reproducible-by-config"
 product_sha256 = "f99a8c5c92ee619088a06313dc27bf95daeee0ed28af817a7d68d2b4ec48a083"
 controls_run = ["seat C, an encoder extracting spans offline from the same sources, as the model-free comparator", "byte-identity of every replayed main-lane request against the drive's own record, asserted per request by the grader's warmth table"]
-known_defects = ["The record's regime names one substrate, the drive's; the bakeoff compares three seats on three substrates (the 27B on the accelerator, a 1.7B on the same host's CPU cores, an encoder offline), which the start row cannot carry. The seats' substrates are stated in the hardware field and the claims until the schema has a shape for a comparison across substrates.", "The raw accepted counts are inflated by a fact-parser defect of that era (untagged lines and multi-line quotes counted as facts); the grader reports raw and deduped side by side and lists the two degenerate forks, and the claims cite the deduped figures.", "The judgment axis, whether an accepted fact is true of the mechanism, was not run; only the mechanical axes are graded.", "Identifiers in the three seats' logs and in seat C's summary are ALIASES, not the strings the run wrote: the research program's ticket tokens were renamed to the public names for the same things; seat C's `source_log`, formerly a path in that program's repository which a reader here could not open, is now a registry-style id; and the operator's account name -- 268 occurrences, the owner column of `ls -l` output captured in the seats' tool-exec logs -- is a five-character alias of the same width, so the listings' column alignment is unchanged. The two classes were handled differently on purpose, per the ruling on #54: the ticket tokens are POINTERS and were aliased in a commit whose diff shows both sides, while the account name and the private path are IDENTITY and were never committed unaliased at all -- this branch was rebuilt so they appear in no diff, blob or message. Both substitutions are measurement-invariant by the same proof: the recompute reproduces all 80 report fields and `report.json` hashes identically. The map is private. Nothing else was touched -- the recompute reproduces all 80 report fields from the aliased artifacts, and `report.json` is byte-identical to the pre-scrub product, which is what shows the substitution changed identifiers and not measurements.", "No substrate capture was taken for this fire, so the substrate INSTANCE is an inference. It is 2026-08-13's configuration -- deployment 44.20260802, kernel 7.1.5, one serving slot -- inferred from that capture's 473814-second uptime, which places its boot on 2026-08-07 or 2026-08-08 and uninterrupted since, and corroborated by the archive dating that deployment and kernel into service on 2026-08-07. Two earlier revisions of this record were wrong about it in opposite directions: the first asserted the 2026-07-25 configuration as fact, and the second called the instance undetermined between two candidates when the archive excludes the earlier one.", "The README's PROSE figures are not bound to the product. `recompute.sh` re-derives every number the front matter states and reads nothing else, so the rates and counts in the body -- the numbers a reader actually takes away -- could drift from `report.json` and every gate would stay green; a review demonstrated exactly that. Closing it needs a declaration this schema does not have: the directory naming which product fields its prose cites, checked the way the front matter now is.", "A recompute over an archive has no session turns; turns and prefill_tokens_total are zero because the schema offers no other shape for a summary whose subject is a recompute."]
-turns = 0
-prefill_tokens_total = 0
+known_defects = ["The record's regime declares one substrate, the drive's, and the bakeoff compares three seats: the 27B on the accelerator, a 1.7B on the same host's CPU cores, and an encoder offline. The schema can carry more than one substrate now, and by the ruling on #68 (2026-09-10) it does not here: `start.substrates` says what the record was fired on, and the seats are the experiment's design, stated in the claims and in this report, not the record's regime.", "The raw accepted counts are inflated by a fact-parser defect of that era (untagged lines and multi-line quotes counted as facts); the grader reports raw and deduped side by side and lists the two degenerate forks, and the claims cite the deduped figures.", "The judgment axis, whether an accepted fact is true of the mechanism, was not run; only the mechanical axes are graded.", "Identifiers in the three seats' logs and in seat C's summary are ALIASES, not the strings the run wrote: the research program's ticket tokens were renamed to the public names for the same things; seat C's `source_log`, formerly a path in that program's repository which a reader here could not open, is now a registry-style id; and the operator's account name -- 268 occurrences, the owner column of `ls -l` output captured in the seats' tool-exec logs -- is a five-character alias of the same width, so the listings' column alignment is unchanged. The two classes were handled differently on purpose, per the ruling on #54: the ticket tokens are POINTERS and were aliased in a commit whose diff shows both sides, while the account name and the private path are IDENTITY and were never committed unaliased at all -- this branch was rebuilt so they appear in no diff, blob or message. Both substitutions are measurement-invariant by the same proof: the recompute reproduces all 80 report fields and `report.json` hashes identically. The map is private. Nothing else was touched -- the recompute reproduces all 80 report fields from the aliased artifacts, and `report.json` is byte-identical to the pre-scrub product, which is what shows the substitution changed identifiers and not measurements.", "No substrate capture was taken for this fire, so the substrate INSTANCE is an inference. It is 2026-08-13's configuration -- deployment 44.20260802, kernel 7.1.5, one serving slot -- inferred from that capture's 473814-second uptime, which places its boot on 2026-08-07 or 2026-08-08 and uninterrupted since, and corroborated by the archive dating that deployment and kernel into service on 2026-08-07. Two earlier revisions of this record were wrong about it in opposite directions: the first asserted the 2026-07-25 configuration as fact, and the second called the instance undetermined between two candidates when the archive excludes the earlier one.", "The README's PROSE figures are not bound to the product. `recompute.sh` re-derives every number the front matter states and reads nothing else, so the rates and counts in the body -- the numbers a reader actually takes away -- could drift from `report.json` and every gate would stay green; a review demonstrated exactly that. Closing it needs a declaration this schema does not have: the directory naming which product fields its prose cites, checked the way the front matter now is.", "The substrate's engine is identified by record, not by measurement: `engine.version_or_digest` is the sha256 of the release tarball the serving binary was unpacked from, which the registry carries for this substrate, and the archive's note that the server ran from that unpacked directory is what ties the two. The running binary was not hashed at this fire; its digest was first measured on 2026-09-05, on a later instance of the same substrate, and by the ruling on the registry it does not attach to this one."]
+targets_checked = 10
+targets_matched = 10
 
 [regime]
 arm = "extraction-seat-bakeoff"
-substrate = "accel24-beellama-qwen27b-q4kxl"
+substrates = ["accel24-beellama-qwen27b-q4kxl"]
 dogma_version = 0
 +++
 
@@ -46,9 +46,10 @@ same value this directory's `product_sha256` states. Identifiers changed;
 measurements did not.
 
 The engine's name is deliberately **not** scrubbed. It is a declared factor of
-the science, carried as a substrate's `engine` field with the binary digest as
-its identity, and a factor the record is required to state cannot also be a
-token the export removes.
+the science, carried as a substrate's `engine` field with a digest as its
+identity -- the release tarball's, by record, since the running binary was not
+hashed at this fire (see `known_defects`) -- and a factor the record is
+required to state cannot also be a token the export removes.
 
 ## Observation
 
@@ -70,8 +71,13 @@ against the drive's own record), with the extraction seat varied: seat A, the
 27B on the accelerator off the warm full prefix; seat B, a 1.7B Q4_K_M on the host's
 CPU answering the same ask carried in full with no prefix; seat C, an encoder
 (gliner_small-v2.1, threshold 0.5, seven labels) over the same sources
-offline. Sampler for the model seats: temperature 0.6, top_k 20, top_p 1.0,
-max_tokens 4096, thinking off. The encoder's parameters are read from its
+offline. The record's start row declares the drive's substrate by its registry
+id, `accel24-beellama-qwen27b-q4kxl`: the 27B at UD-Q4_K_XL served by the
+beellama engine on the accelerator host, its weights by digest, its hardware by
+the registry's fingerprint of that host; the instance is the registry's
+`2026-08-13`, inferred rather than captured (see `known_defects`). Sampler for
+the model seats: temperature 0.6, top_k 20, top_p 1.0, max_tokens 4096,
+thinking off. The encoder's parameters are read from its
 summary, which the record consumes by digest; the report does not derive from
 them, so they are attested, not reproduced. `grade.py` tallies facts offered against
 facts the grounding gate accepted, raw and deduped, and the containment of
@@ -79,8 +85,9 @@ one seat's accepted items in another's. `report.json` is the committed
 result.
 
 Re-run: `bash recompute.sh` checks every consumed artifact's digest, runs
-the grader, and exits 0 when all 80 fields reproduce. A recompute over an
-archive has no session turns, so the summary carries zero.
+the grader, and exits 0 when all 80 fields reproduce. The record's summary is
+a `recompute`, not a drive: ten targets checked, ten matched, and the ten
+digests it compared, in path order -- the same ten every claim consumes.
 
 ## Results
 
