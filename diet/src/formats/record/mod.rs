@@ -230,7 +230,10 @@ pub struct Substrate {
     pub engine: Engine,
     /// Which weights, and how they are identified.
     pub weights: Weights,
-    /// A fingerprint for the hardware it was served from.
+    /// A fingerprint for the hardware it was served from: the registry's
+    /// digest over the equipment entry's declared hardware fields, 64 lowercase
+    /// hex characters, and refused otherwise. A name here is prose in an
+    /// identity field, which is the sentinel class the registry keeps catching.
     pub hardware_fingerprint: String,
     /// Sampler settings, exactly as they were set.
     pub sampler_card: BTreeMap<String, Value>,
@@ -1567,7 +1570,24 @@ fn substrate(
         id,
         engine,
         weights: weights(fields, of)?,
-        hardware_fingerprint: take_string(fields, of, "hardware_fingerprint")?,
+        hardware_fingerprint: {
+            // Checked as a digest, like `weights.sha256` and `acts_sha256`
+            // and for the same reason: the field is defined as a registry
+            // digest -- sha256 over exactly the hardware fields an equipment
+            // entry's type declares -- and a string that is not a digest
+            // cannot be one. It was an unconstrained string, which is why a
+            // sentinel (`canned-loopback`) sat in it for a while and why every
+            // fixture carried prose (`one-gpu`) where an identity belonged:
+            // nothing refused either. Ruled on #68 (2026-09-11), sequenced
+            // with the migration of the two results directories because a
+            // tightening that refuses the whole committed corpus is a
+            // migration by definition.
+            let text = take_string(fields, of, "hardware_fingerprint")?;
+            if !digest_ok(&text) {
+                return Err(StructureError::BadDigest(text).into());
+            }
+            text
+        },
         sampler_card: {
             // A substrate whose sampler card is the empty object records that
             // the run had settings and declines to say which. The issue names
@@ -2608,7 +2628,7 @@ mod tests {
     };
 
     /// A `start` line whose regime is complete, as every record needs one.
-    const START: &str = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"one-gpu","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on"}]}}"#;
+    const START: &str = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on"}]}}"#;
 
     fn record(rest: &str) -> String {
         format!("{START}\n{rest}")
@@ -2897,7 +2917,7 @@ mod tests {
                 "{{\"record\":\"start\",\"regime\":{{\"arm\":\"a\",\"dogma_version\":0,\
                  \"substrates\":[{{\"id\":\"n\",\"engine\":{{\"name\":\"a-runtime\",\
                  \"version_or_digest\":\"1.0\"}},\"weights\":{{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\
-                 \"hardware_fingerprint\":\"h\",\"sampler_card\":{{\"seed\":0}},\
+                 \"hardware_fingerprint\":\"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123\",\"sampler_card\":{{\"seed\":0}},\
                  \"reasoning\":\"{}\"}}]}}}}\n",
                 state.tag()
             );
@@ -2919,7 +2939,7 @@ mod tests {
                 "{{\"record\":\"start\",\"regime\":{{\"arm\":\"a\",\"dogma_version\":0,\
                  \"substrates\":[{{\"id\":\"n\",\"engine\":{{\"name\":\"a-runtime\",\
                  \"version_or_digest\":\"1.0\"}},\"weights\":{weights},\
-                 \"hardware_fingerprint\":\"h\",\"sampler_card\":{{\"seed\":0}},\
+                 \"hardware_fingerprint\":\"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123\",\"sampler_card\":{{\"seed\":0}},\
                  \"reasoning\":\"on\"}}]}}}}\n"
             );
             let once = parse(&source).unwrap_or_else(|err| panic!("{weights}: {err}"));
@@ -2952,7 +2972,7 @@ mod tests {
     fn a_lane_cannot_change_substrate() {
         let source = format!(
             "{}\n{}\n{}\n{}\n",
-            r#"{"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"big","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"},{"id":"small","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#,
+            r#"{"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"big","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123","sampler_card":{"seed":0},"reasoning":"on"},{"id":"small","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"hardware_fingerprint":"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123","sampler_card":{"seed":0},"reasoning":"on"}]}}"#,
             r#"{"record":"turn","index":1,"prefill_tokens":10}"#,
             r#"{"record":"request","id":"q1","lane":"main","substrate":"big"}"#,
             r#"{"record":"request","id":"q2","lane":"main","substrate":"small"}"#,
@@ -3228,12 +3248,12 @@ mod tests {
     // typing two quotes buys presence rather than provenance.
     #[test]
     fn a_required_string_that_says_nothing_is_absent() {
-        let blank = r#"{"record":"start","regime":{"arm":"","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
+        let blank = r#"{"record":"start","regime":{"arm":"","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
         assert!(matches!(
             parse(blank),
             Err(ParseError::Schema(SchemaError::BlankField { .. }))
         ));
-        let no_settings = r#"{"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{},"reasoning":"on"}]}}"#;
+        let no_settings = r#"{"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"n","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123","sampler_card":{},"reasoning":"on"}]}}"#;
         assert!(
             matches!(
                 parse(no_settings),

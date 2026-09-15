@@ -7,7 +7,7 @@
 #   verify.sh --only CHECK    run one check (repeatable)
 #   verify.sh --only test --scope SPEC   narrow the test check (selftest only)
 #   verify.sh --list          name the checks, in order
-#   verify.sh --selftest      prove the gate goes red on seeded faults
+#   verify.sh --selftest      prove the gate goes red on seeded faults (bash 4+)
 #   verify.sh --selftest --shard K/N    run this job's share of the faults
 #   verify.sh --selftest --census PATH  write what this run ran, for the sum
 #   verify.sh --selftest --derive-scopes DIR   re-harvest the test cases' scopes
@@ -300,7 +300,10 @@ check_regimen() {
 # and is counted as skipped. `results` checks that the report agrees with the
 # record; both were written by the same run, so agreement between them is not
 # derivation. Zero recomputable directories is exit 2, not a pass.
-check_recompute() { python3 scripts/check-recompute.py; }
+# --root is the check's own parameter and `results` is its default; it is
+# spelled out because a seeded case below depends on this being the root the
+# check reads.
+check_recompute() { python3 scripts/check-recompute.py --root results; }
 
 check_metadata() { python3 scripts/check-repo-metadata.py; }
 
@@ -1172,8 +1175,15 @@ new = """    let value = members.remove("substrates").unwrap_or_else(|| {
                 ])),
             ),
             (
+                // DIGEST-SHAPED, like the weights above. The field is checked
+                // as a digest since the fingerprint tightening, so a prose
+                // placeholder here would be refused by THAT check and the
+                // fixture this fault is meant to let through would stay
+                // rejected -- for the wrong reason, with this case reading
+                // green. The fault is "substrates made optional", and nothing
+                // else about the fabricated default may be refusable.
                 "hardware_fingerprint".to_owned(),
-                Value::String("unknown".to_owned()),
+                Value::String("0".repeat(64)),
             ),
             (
                 "sampler_card".to_owned(),
@@ -2669,7 +2679,24 @@ EOF
 # the count. A check of nothing is not a pass, applied to results -- and the
 # directory this leaves behind is entirely LEGAL, which is the point: the
 # census goes red on the shape of the tree, not on a defect in the directory.
+# The case below states its expectation as an exact census -- results present,
+# none recomputed, gate 0's exit 2 -- and an exact census is only exact over a
+# known set of directories. What `results/` holds is the science, which the
+# gate does not own. The first real reproducible-by-config directory turns the
+# case green: the seeded historical directory is still there, but so is a real
+# one that recomputes, and once one is on `main` this fault could never fire
+# again. So the case runs over a scratch results root holding only the
+# template, whatever the repository contains. The box is already a scratch
+# copy of the tree: the injector first reduces the box's results root to the
+# template, then seeds its fault, and check_recompute reads that root through
+# the check's own --root. Files at the results root (AGENTS.md, README.md)
+# stay; the check walks directories. The reduction is spelled out in the
+# injector rather than shared, because check-injections runs every injector on
+# its own and would report a helper-calling one inert. Ruled on #39
+# (2026-09-11), for the two cases that then read the census; the other has
+# since been rewritten to seed its own directory and no longer needs it.
 inject_recompute_only_the_template_recomputes() {
+  find results -mindepth 1 -maxdepth 1 -type d ! -name _template -exec rm -r -- {} +
   python3 - <<'EOF'
 import pathlib
 import shutil
@@ -5718,6 +5745,20 @@ STRICT
 }
 
 selftest() {
+  # DECLARED REQUIREMENT, checked before anything runs. The results-fixture
+  # loop below keys its expectations in an associative array (`local -A`),
+  # which is bash 4. The bash a stock Mac ships is 3.2, where `local -A` is a
+  # usage error and the next expansion aborts the run under `set -u` -- after
+  # every seeded case has run and before the tally -- and the status bash 3.2
+  # reports for that abort is not the abort's: with the EXIT trap installed it
+  # is the trap's (0 in a full run here; `return 3` reads 3 in reduction). So a
+  # stock Mac got a green selftest that proved nothing, the vacuous pass at the
+  # gate's own front door. Refuse first, name the version, exit 2. The ordinary
+  # gate has no such requirement and runs on 3.2. Ruled on #39 (2026-09-11).
+  if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+    echo "selftest: needs bash 4 or later (associative arrays); this is bash ${BASH_VERSION}" >&2
+    exit "$EXIT_MISUSE"
+  fi
   trap selftest_cleanup EXIT
   scratch; SELFTEST_TARGET="${SCRATCH}/target"
   scratch; SELFTEST_LOGS="$SCRATCH"

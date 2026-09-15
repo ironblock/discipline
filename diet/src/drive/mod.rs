@@ -905,7 +905,8 @@ mod tests {
                 // while the program under it wrote a different one, and the
                 // one thing this field has to be is the same in both.
                 weights: Weights::Digest(canned::acts_digest()),
-                hardware_fingerprint: "the-runner".to_owned(),
+                hardware_fingerprint:
+                    "7a42c854bf784d24d1f5f418b9235c431dbd755c9431559152b70f3dcb3db7d9".to_owned(),
                 // Not empty: the schema refuses a blank `sampler_card`,
                 // because "nobody wrote the settings down" and "the settings
                 // were these" are different facts about a run.
