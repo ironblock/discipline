@@ -34,8 +34,8 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 320
-mechanics_assertions = 103
+red_faults = 443
+mechanics_assertions = 115
 migrated = 0
 
 
@@ -1579,6 +1579,114 @@ check = "-"
 label = "a range without --only history is a misuse"
 failure_class = "history.range-loose"
 expected_exit = "2"
+migrated = false
+
+[[fault]]
+id = "mech.ssh-user-at-host-a-forge-remote-form-is-a-declared-exception"
+kind = "mechanics"
+check = "-"
+label = "ssh-user-at-host: a forge remote form is a declared exception"
+failure_class = "hygiene.exception-clean"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.ssh-user-at-host-a-private-host-is-not-exempted-by-any-declared-form"
+kind = "mechanics"
+check = "-"
+label = "ssh-user-at-host: a private host is not exempted by any declared form"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.ssh-user-at-host-a-private-host-beside-an-exempt-one-still-fires"
+kind = "mechanics"
+check = "-"
+label = "ssh-user-at-host: a private host beside an exempt one still fires"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.check-hashes-the-nfc-spelling-matches-its-own-row"
+kind = "mechanics"
+check = "-"
+label = "check-hashes: the NFC spelling matches its own row"
+failure_class = "hashes.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.check-hashes-the-nfd-spelling-of-the-same-name-matches-too"
+kind = "mechanics"
+check = "-"
+label = "check-hashes: the NFD spelling of the same name matches too"
+failure_class = "hashes.forbidden-literal"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.check-hashes-emit-refuses-a-decomposed-literal"
+kind = "mechanics"
+check = "-"
+label = "check-hashes: --emit refuses a decomposed literal"
+failure_class = "hashes.emit-not-nfc"
+expected_exit = "2"
+migrated = false
+
+[[fault]]
+id = "mech.a-lane-registry-naming-one-present-manifest-is-clean"
+kind = "mechanics"
+check = "-"
+label = "a lane registry naming one present manifest is clean"
+failure_class = "lanes.clean"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.a-registry-entry-naming-no-manifest-is-a-finding"
+kind = "mechanics"
+check = "-"
+label = "a registry entry naming no manifest is a finding"
+failure_class = "lanes.registry-names-no-manifest"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-manifest-on-disk-with-no-registry-entry-is-a-finding"
+kind = "mechanics"
+check = "-"
+label = "a manifest on disk with no registry entry is a finding"
+failure_class = "lanes.manifest-not-registered"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-registry-of-nothing-pins-nothing-and-cannot-run"
+kind = "mechanics"
+check = "-"
+label = "a registry of nothing pins nothing, and cannot run"
+failure_class = "lanes.empty-registry"
+expected_exit = "2"
+migrated = false
+
+[[fault]]
+id = "mech.a-registered-lane-whose-own-command-fails-is-a-finding"
+kind = "mechanics"
+check = "-"
+label = "a registered lane whose own command fails is a finding"
+failure_class = "lanes.not-green"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-command-the-shell-cannot-find-is-still-a-finding-not-broken"
+kind = "mechanics"
+check = "-"
+label = "a command the shell cannot find is still a finding, not broken"
+failure_class = "lanes.not-green"
+expected_exit = "1"
 migrated = false
 [[fault]]
 id = "mech.the-gate-accepts-a-run-where-every-job-succeeded"
@@ -3952,3 +4060,994 @@ label = "2026-02-01-pre-registration-unpinned"
 failure_class = "results.pre-registration-unpinned"
 migrated = false
 
+# --- lane-declared faults, generated -- never hand-typed ---
+#
+# One block per fault `apply-lane-faults.py --list` prints, in the order
+# it prints them. Regenerate rather than edit: any hand change here drifts
+# from the lane manifest it describes on the lane's very next edit, which
+# is the failure mode `check-fault-manifest.py`'s comparison against
+# `--list`'s own output exists to catch.
+
+[[fault]]
+id = "client.mismatch-ignored"
+kind = "lane-fault"
+check = "lanes"
+label = "client.mismatch-ignored"
+failure_class = "client.mismatch-ignored"
+migrated = false
+
+[[fault]]
+id = "client.unreported-is-agreed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.unreported-is-agreed"
+failure_class = "client.unreported-is-agreed"
+migrated = false
+
+[[fault]]
+id = "client.retry-unlinked"
+kind = "lane-fault"
+check = "lanes"
+label = "client.retry-unlinked"
+failure_class = "client.retry-unlinked"
+migrated = false
+
+[[fault]]
+id = "client.strip-unrecorded"
+kind = "lane-fault"
+check = "lanes"
+label = "client.strip-unrecorded"
+failure_class = "client.strip-unrecorded"
+migrated = false
+
+[[fault]]
+id = "client.timeout-as-empty-answer"
+kind = "lane-fault"
+check = "lanes"
+label = "client.timeout-as-empty-answer"
+failure_class = "client.timeout-as-empty-answer"
+migrated = false
+
+[[fault]]
+id = "client.retries-unbounded"
+kind = "lane-fault"
+check = "lanes"
+label = "client.retries-unbounded"
+failure_class = "client.retries-unbounded"
+migrated = false
+
+[[fault]]
+id = "client.pin-through-a-float"
+kind = "lane-fault"
+check = "lanes"
+label = "client.pin-through-a-float"
+failure_class = "client.pin-through-a-float"
+migrated = false
+
+[[fault]]
+id = "client.cache-sniffed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.cache-sniffed"
+failure_class = "client.cache-sniffed"
+migrated = false
+
+[[fault]]
+id = "client.timeout-projects-a-response"
+kind = "lane-fault"
+check = "lanes"
+label = "client.timeout-projects-a-response"
+failure_class = "client.timeout-projects-a-response"
+migrated = false
+
+[[fault]]
+id = "client.timeout-projects-a-response-row"
+kind = "lane-fault"
+check = "lanes"
+label = "client.timeout-projects-a-response-row"
+failure_class = "client.timeout-projects-a-response-row"
+migrated = false
+
+[[fault]]
+id = "client.content-length-ignored"
+kind = "lane-fault"
+check = "lanes"
+label = "client.content-length-ignored"
+failure_class = "client.content-length-ignored"
+migrated = false
+
+[[fault]]
+id = "client.chunked-not-decoded"
+kind = "lane-fault"
+check = "lanes"
+label = "client.chunked-not-decoded"
+failure_class = "client.chunked-not-decoded"
+migrated = false
+
+[[fault]]
+id = "client.header-gives-up-on-the-status-line"
+kind = "lane-fault"
+check = "lanes"
+label = "client.header-gives-up-on-the-status-line"
+failure_class = "client.header-gives-up-on-the-status-line"
+migrated = false
+
+[[fault]]
+id = "client.chunk-size-overflow"
+kind = "lane-fault"
+check = "lanes"
+label = "client.chunk-size-overflow"
+failure_class = "client.chunk-size-overflow"
+migrated = false
+
+[[fault]]
+id = "client.truncation-clamped"
+kind = "lane-fault"
+check = "lanes"
+label = "client.truncation-clamped"
+failure_class = "client.truncation-clamped"
+migrated = false
+
+[[fault]]
+id = "client.call-budget-ignored"
+kind = "lane-fault"
+check = "lanes"
+label = "client.call-budget-ignored"
+failure_class = "client.call-budget-ignored"
+migrated = false
+
+[[fault]]
+id = "client.complaint-is-the-whole-body"
+kind = "lane-fault"
+check = "lanes"
+label = "client.complaint-is-the-whole-body"
+failure_class = "client.complaint-is-the-whole-body"
+migrated = false
+
+[[fault]]
+id = "client.two-named-settings-guesses"
+kind = "lane-fault"
+check = "lanes"
+label = "client.two-named-settings-guesses"
+failure_class = "client.two-named-settings-guesses"
+migrated = false
+
+[[fault]]
+id = "client.strip-without-the-card-bound"
+kind = "lane-fault"
+check = "lanes"
+label = "client.strip-without-the-card-bound"
+failure_class = "client.strip-without-the-card-bound"
+migrated = false
+
+[[fault]]
+id = "client.refusals-out-of-order"
+kind = "lane-fault"
+check = "lanes"
+label = "client.refusals-out-of-order"
+failure_class = "client.refusals-out-of-order"
+migrated = false
+
+[[fault]]
+id = "client.max-tokens-is-not-a-cap"
+kind = "lane-fault"
+check = "lanes"
+label = "client.max-tokens-is-not-a-cap"
+failure_class = "client.max-tokens-is-not-a-cap"
+migrated = false
+
+[[fault]]
+id = "client.reply-cap-ignored"
+kind = "lane-fault"
+check = "lanes"
+label = "client.reply-cap-ignored"
+failure_class = "client.reply-cap-ignored"
+migrated = false
+
+[[fault]]
+id = "client.count-too-large-saturates"
+kind = "lane-fault"
+check = "lanes"
+label = "client.count-too-large-saturates"
+failure_class = "client.count-too-large-saturates"
+migrated = false
+
+[[fault]]
+id = "client.issued-is-recorded-only-on-success"
+kind = "lane-fault"
+check = "lanes"
+label = "client.issued-is-recorded-only-on-success"
+failure_class = "client.issued-is-recorded-only-on-success"
+migrated = false
+
+[[fault]]
+id = "digest.drops-the-zero-pad"
+kind = "lane-fault"
+check = "lanes"
+label = "digest.drops-the-zero-pad"
+failure_class = "digest.drops-the-zero-pad"
+migrated = false
+
+[[fault]]
+id = "digest.uppercases-the-hex"
+kind = "lane-fault"
+check = "lanes"
+label = "digest.uppercases-the-hex"
+failure_class = "digest.uppercases-the-hex"
+migrated = false
+
+[[fault]]
+id = "digest.the-dependency-returns-something-else"
+kind = "lane-fault"
+check = "lanes"
+label = "digest.the-dependency-returns-something-else"
+failure_class = "digest.the-dependency-returns-something-else"
+migrated = false
+
+[[fault]]
+id = "digest.the-high-bit-is-dropped"
+kind = "lane-fault"
+check = "lanes"
+label = "digest.the-high-bit-is-dropped"
+failure_class = "digest.the-high-bit-is-dropped"
+migrated = false
+
+[[fault]]
+id = "digest.a-committed-answer-is-wrong"
+kind = "lane-fault"
+check = "lanes"
+label = "digest.a-committed-answer-is-wrong"
+failure_class = "digest.a-committed-answer-is-wrong"
+migrated = false
+
+[[fault]]
+id = "digest.a-distinctive-vector-is-swapped-out"
+kind = "lane-fault"
+check = "lanes"
+label = "digest.a-distinctive-vector-is-swapped-out"
+failure_class = "digest.a-distinctive-vector-is-swapped-out"
+migrated = false
+
+[[fault]]
+id = "digest.the-case-set-drops-a-group"
+kind = "lane-fault"
+check = "lanes"
+label = "digest.the-case-set-drops-a-group"
+failure_class = "digest.the-case-set-drops-a-group"
+migrated = false
+
+[[fault]]
+id = "digest.the-repeat-count-is-off-by-one"
+kind = "lane-fault"
+check = "lanes"
+label = "digest.the-repeat-count-is-off-by-one"
+failure_class = "digest.the-repeat-count-is-off-by-one"
+migrated = false
+
+[[fault]]
+id = "drive.the-product-digest-is-of-nothing"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-product-digest-is-of-nothing"
+failure_class = "drive.the-product-digest-is-of-nothing"
+migrated = false
+
+[[fault]]
+id = "drive.the-turn-count-is-a-constant"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-turn-count-is-a-constant"
+failure_class = "drive.the-turn-count-is-a-constant"
+migrated = false
+
+[[fault]]
+id = "drive.a-byte-count-stands-in-for-a-token-count"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-byte-count-stands-in-for-a-token-count"
+failure_class = "drive.a-byte-count-stands-in-for-a-token-count"
+migrated = false
+
+[[fault]]
+id = "drive.the-ratifier-never-learns-the-turn"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-ratifier-never-learns-the-turn"
+failure_class = "drive.the-ratifier-never-learns-the-turn"
+migrated = false
+
+[[fault]]
+id = "drive.the-record-keeps-no-payloads"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-record-keeps-no-payloads"
+failure_class = "drive.the-record-keeps-no-payloads"
+migrated = false
+
+[[fault]]
+id = "drive.the-request-body-is-whichever-attempt-was-last"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-request-body-is-whichever-attempt-was-last"
+failure_class = "drive.the-request-body-is-whichever-attempt-was-last"
+migrated = false
+
+[[fault]]
+id = "drive.a-call-that-did-not-answer-continues"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-call-that-did-not-answer-continues"
+failure_class = "drive.a-call-that-did-not-answer-continues"
+migrated = false
+
+[[fault]]
+id = "drive.a-command-that-never-ran-is-recorded-as-exiting-zero"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-command-that-never-ran-is-recorded-as-exiting-zero"
+failure_class = "drive.a-command-that-never-ran-is-recorded-as-exiting-zero"
+migrated = false
+
+[[fault]]
+id = "drive.the-record-is-never-parsed-back"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-record-is-never-parsed-back"
+failure_class = "drive.the-record-is-never-parsed-back"
+migrated = false
+
+[[fault]]
+id = "drive.the-fold-keeps-declines-as-facts"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-fold-keeps-declines-as-facts"
+failure_class = "drive.the-fold-keeps-declines-as-facts"
+migrated = false
+
+[[fault]]
+id = "drive.the-census-counts-patches-as-regions"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-census-counts-patches-as-regions"
+failure_class = "drive.the-census-counts-patches-as-regions"
+migrated = false
+
+[[fault]]
+id = "drive.output-tokens-are-fabricated-as-zero"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.output-tokens-are-fabricated-as-zero"
+failure_class = "drive.output-tokens-are-fabricated-as-zero"
+migrated = false
+
+[[fault]]
+id = "drive.the-audit-is-folded-with-the-interview-grammar"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-audit-is-folded-with-the-interview-grammar"
+failure_class = "drive.the-audit-is-folded-with-the-interview-grammar"
+migrated = false
+
+[[fault]]
+id = "drive.an-unreadable-answer-is-an-empty-one"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.an-unreadable-answer-is-an-empty-one"
+failure_class = "drive.an-unreadable-answer-is-an-empty-one"
+migrated = false
+
+[[fault]]
+id = "drive.capture-entries-counts-patches"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.capture-entries-counts-patches"
+failure_class = "drive.capture-entries-counts-patches"
+migrated = false
+
+[[fault]]
+id = "drive.the-two-entry-counts-are-one-number"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-two-entry-counts-are-one-number"
+failure_class = "drive.the-two-entry-counts-are-one-number"
+migrated = false
+
+[[fault]]
+id = "drive.the-record-carries-the-created-count"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-record-carries-the-created-count"
+failure_class = "drive.the-record-carries-the-created-count"
+migrated = false
+
+[[fault]]
+id = "drive.a-ratify-call-that-did-not-answer-is-ignored"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-ratify-call-that-did-not-answer-is-ignored"
+failure_class = "drive.a-ratify-call-that-did-not-answer-is-ignored"
+migrated = false
+
+[[fault]]
+id = "drive.a-truncated-answer-is-a-whole-one"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-truncated-answer-is-a-whole-one"
+failure_class = "drive.a-truncated-answer-is-a-whole-one"
+migrated = false
+
+[[fault]]
+id = "drive.the-seams-render-never-reaches-the-model"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-seams-render-never-reaches-the-model"
+failure_class = "drive.the-seams-render-never-reaches-the-model"
+migrated = false
+
+[[fault]]
+id = "drive.the-turns-ask-is-not-what-the-script-said"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-turns-ask-is-not-what-the-script-said"
+failure_class = "drive.the-turns-ask-is-not-what-the-script-said"
+migrated = false
+
+[[fault]]
+id = "drive.the-forks-question-is-not-what-the-script-asked"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-forks-question-is-not-what-the-script-asked"
+failure_class = "drive.the-forks-question-is-not-what-the-script-asked"
+migrated = false
+
+[[fault]]
+id = "drive.the-audit-ask-is-not-the-one-the-dogma-pinned"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-audit-ask-is-not-the-one-the-dogma-pinned"
+failure_class = "drive.the-audit-ask-is-not-the-one-the-dogma-pinned"
+migrated = false
+
+[[fault]]
+id = "drive.a-tool-call-always-exited-zero"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-tool-call-always-exited-zero"
+failure_class = "drive.a-tool-call-always-exited-zero"
+migrated = false
+
+[[fault]]
+id = "drive.a-tool-call-is-shown-a-paraphrase"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-tool-call-is-shown-a-paraphrase"
+failure_class = "drive.a-tool-call-is-shown-a-paraphrase"
+migrated = false
+
+[[fault]]
+id = "drive.a-tool-calls-argv-is-invented"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-tool-calls-argv-is-invented"
+failure_class = "drive.a-tool-calls-argv-is-invented"
+migrated = false
+
+[[fault]]
+id = "drive.every-row-claims-turn-one"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.every-row-claims-turn-one"
+failure_class = "drive.every-row-claims-turn-one"
+migrated = false
+
+[[fault]]
+id = "drive.a-fork-claims-the-main-lane"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-fork-claims-the-main-lane"
+failure_class = "drive.a-fork-claims-the-main-lane"
+migrated = false
+
+[[fault]]
+id = "drive.the-regime-is-not-the-one-declared"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-regime-is-not-the-one-declared"
+failure_class = "drive.the-regime-is-not-the-one-declared"
+migrated = false
+
+[[fault]]
+id = "drive.the-seam-reports-a-render-it-did-not-make"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-seam-reports-a-render-it-did-not-make"
+failure_class = "drive.the-seam-reports-a-render-it-did-not-make"
+migrated = false
+
+[[fault]]
+id = "drive.an-entry-claims-the-lane-that-did-not-write-it"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.an-entry-claims-the-lane-that-did-not-write-it"
+failure_class = "drive.an-entry-claims-the-lane-that-did-not-write-it"
+migrated = false
+
+[[fault]]
+id = "drive.an-entry-carries-a-tag-the-answer-never-used"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.an-entry-carries-a-tag-the-answer-never-used"
+failure_class = "drive.an-entry-carries-a-tag-the-answer-never-used"
+migrated = false
+
+[[fault]]
+id = "drive.the-unspellable-list-repeats-itself"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-unspellable-list-repeats-itself"
+failure_class = "drive.the-unspellable-list-repeats-itself"
+migrated = false
+
+[[fault]]
+id = "drive.the-product-drops-the-entry-ids"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-product-drops-the-entry-ids"
+failure_class = "drive.the-product-drops-the-entry-ids"
+migrated = false
+
+[[fault]]
+id = "drive.the-worktree-is-the-operators-directory"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-worktree-is-the-operators-directory"
+failure_class = "drive.the-worktree-is-the-operators-directory"
+migrated = false
+
+[[fault]]
+id = "drive.the-output-path-is-claimed-last"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-output-path-is-claimed-last"
+failure_class = "drive.the-output-path-is-claimed-last"
+migrated = false
+
+[[fault]]
+id = "drive.the-census-reports-a-count-no-run-produced"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-census-reports-a-count-no-run-produced"
+failure_class = "drive.the-census-reports-a-count-no-run-produced"
+migrated = false
+
+[[fault]]
+id = "drive.the-census-reports-the-unrepresentable-sentinel"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-census-reports-the-unrepresentable-sentinel"
+failure_class = "drive.the-census-reports-the-unrepresentable-sentinel"
+migrated = false
+
+[[fault]]
+id = "drive.the-sampler-crosses-as-a-debug-rendering"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-sampler-crosses-as-a-debug-rendering"
+failure_class = "drive.the-sampler-crosses-as-a-debug-rendering"
+migrated = false
+
+[[fault]]
+id = "drive.the-call-count-ignores-the-seams"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-call-count-ignores-the-seams"
+failure_class = "drive.the-call-count-ignores-the-seams"
+migrated = false
+
+[[fault]]
+id = "drive.the-canned-server-reports-no-usage"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-canned-server-reports-no-usage"
+failure_class = "drive.the-canned-server-reports-no-usage"
+migrated = false
+
+[[fault]]
+id = "drive.the-shipped-regimen-declares-the-sandbox"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-shipped-regimen-declares-the-sandbox"
+failure_class = "drive.the-shipped-regimen-declares-the-sandbox"
+migrated = false
+
+[[fault]]
+id = "isolation.vm-falls-back-to-the-sandbox"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.vm-falls-back-to-the-sandbox"
+failure_class = "isolation.vm-falls-back-to-the-sandbox"
+migrated = false
+
+[[fault]]
+id = "isolation.macos-uses-the-linux-sandbox"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.macos-uses-the-linux-sandbox"
+failure_class = "isolation.macos-uses-the-linux-sandbox"
+migrated = false
+
+[[fault]]
+id = "isolation.default-is-unconfined"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.default-is-unconfined"
+failure_class = "isolation.default-is-unconfined"
+migrated = false
+
+[[fault]]
+id = "isolation.remount-ro-before-the-binds"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.remount-ro-before-the-binds"
+failure_class = "isolation.remount-ro-before-the-binds"
+migrated = false
+
+[[fault]]
+id = "isolation.no-remount-at-all"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.no-remount-at-all"
+failure_class = "isolation.no-remount-at-all"
+migrated = false
+
+[[fault]]
+id = "isolation.dev-and-shm-stay-writable"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.dev-and-shm-stay-writable"
+failure_class = "isolation.dev-and-shm-stay-writable"
+migrated = false
+
+[[fault]]
+id = "isolation.network-always-shared"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.network-always-shared"
+failure_class = "isolation.network-always-shared"
+migrated = false
+
+[[fault]]
+id = "isolation.every-line-is-a-denial"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.every-line-is-a-denial"
+failure_class = "isolation.every-line-is-a-denial"
+migrated = false
+
+[[fault]]
+id = "isolation.absent-is-unambiguous"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.absent-is-unambiguous"
+failure_class = "isolation.absent-is-unambiguous"
+migrated = false
+
+[[fault]]
+id = "isolation.setup-failure-read-as-a-command-result"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.setup-failure-read-as-a-command-result"
+failure_class = "isolation.setup-failure-read-as-a-command-result"
+migrated = false
+
+[[fault]]
+id = "isolation.execvp-read-as-a-setup-failure"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.execvp-read-as-a-setup-failure"
+failure_class = "isolation.execvp-read-as-a-setup-failure"
+migrated = false
+
+[[fault]]
+id = "isolation.the-record-is-a-constant"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.the-record-is-a-constant"
+failure_class = "isolation.the-record-is-a-constant"
+migrated = false
+
+[[fault]]
+id = "isolation.network-under-none-is-recorded"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.network-under-none-is-recorded"
+failure_class = "isolation.network-under-none-is-recorded"
+migrated = false
+
+[[fault]]
+id = "isolation.a-relative-worktree-is-accepted"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.a-relative-worktree-is-accepted"
+failure_class = "isolation.a-relative-worktree-is-accepted"
+migrated = false
+
+[[fault]]
+id = "isolation.the-note-is-attached-to-every-denial"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.the-note-is-attached-to-every-denial"
+failure_class = "isolation.the-note-is-attached-to-every-denial"
+migrated = false
+
+[[fault]]
+id = "isolation.an-empty-command-runs-the-runner"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.an-empty-command-runs-the-runner"
+failure_class = "isolation.an-empty-command-runs-the-runner"
+migrated = false
+
+[[fault]]
+id = "isolation.the-model-sees-a-paraphrase"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.the-model-sees-a-paraphrase"
+failure_class = "isolation.the-model-sees-a-paraphrase"
+migrated = false
+
+[[fault]]
+id = "isolation.an-unknown-mechanism-is-the-default"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.an-unknown-mechanism-is-the-default"
+failure_class = "isolation.an-unknown-mechanism-is-the-default"
+migrated = false
+
+[[fault]]
+id = "isolation.a-relative-path-is-accepted"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.a-relative-path-is-accepted"
+failure_class = "isolation.a-relative-path-is-accepted"
+migrated = false
+
+[[fault]]
+id = "isolation.the-escape-census-under-reports"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.the-escape-census-under-reports"
+failure_class = "isolation.the-escape-census-under-reports"
+migrated = false
+
+[[fault]]
+id = "seam.cadence-fires-always"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.cadence-fires-always"
+failure_class = "seam.cadence-fires-always"
+migrated = false
+
+[[fault]]
+id = "seam.prefix-rebuilt-every-turn"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.prefix-rebuilt-every-turn"
+failure_class = "seam.prefix-rebuilt-every-turn"
+migrated = false
+
+[[fault]]
+id = "seam.refusal-moves-the-session"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.refusal-moves-the-session"
+failure_class = "seam.refusal-moves-the-session"
+migrated = false
+
+[[fault]]
+id = "seam.graph-allows-any-pair"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.graph-allows-any-pair"
+failure_class = "seam.graph-allows-any-pair"
+migrated = false
+
+[[fault]]
+id = "seam.precedence-reversed"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.precedence-reversed"
+failure_class = "seam.precedence-reversed"
+migrated = false
+
+[[fault]]
+id = "seam.also-dropped"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.also-dropped"
+failure_class = "seam.also-dropped"
+migrated = false
+
+[[fault]]
+id = "seam.budget-borrows-the-cadence-ask"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.budget-borrows-the-cadence-ask"
+failure_class = "seam.budget-borrows-the-cadence-ask"
+migrated = false
+
+[[fault]]
+id = "seam.empty-set-is-audited"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.empty-set-is-audited"
+failure_class = "seam.empty-set-is-audited"
+migrated = false
+
+[[fault]]
+id = "seam.render-drops-the-phase"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.render-drops-the-phase"
+failure_class = "seam.render-drops-the-phase"
+migrated = false
+
+[[fault]]
+id = "seam.budget-counts-entries"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.budget-counts-entries"
+failure_class = "seam.budget-counts-entries"
+migrated = false
+
+[[fault]]
+id = "seam.duplicate-phase-accepted"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.duplicate-phase-accepted"
+failure_class = "seam.duplicate-phase-accepted"
+migrated = false
+
+[[fault]]
+id = "seam.zero-cadence-accepted"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.zero-cadence-accepted"
+failure_class = "seam.zero-cadence-accepted"
+migrated = false
+
+[[fault]]
+id = "seam.unknown-phase-edge-accepted"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.unknown-phase-edge-accepted"
+failure_class = "seam.unknown-phase-edge-accepted"
+migrated = false
+
+[[fault]]
+id = "seam.operator-does-not-outrank"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.operator-does-not-outrank"
+failure_class = "seam.operator-does-not-outrank"
+migrated = false
+
+[[fault]]
+id = "seam.operator-fires-forever"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.operator-fires-forever"
+failure_class = "seam.operator-fires-forever"
+migrated = false
+
+[[fault]]
+id = "seam.operator-borrows-the-cadence-ask"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.operator-borrows-the-cadence-ask"
+failure_class = "seam.operator-borrows-the-cadence-ask"
+migrated = false
+
+[[fault]]
+id = "seam.frame-version-unstated"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.frame-version-unstated"
+failure_class = "seam.frame-version-unstated"
+migrated = false
+
+[[fault]]
+id = "seam.ratified-transition-discarded"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.ratified-transition-discarded"
+failure_class = "seam.ratified-transition-discarded"
+migrated = false
+
+[[fault]]
+id = "seam.commit-before-the-fallible-steps"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.commit-before-the-fallible-steps"
+failure_class = "seam.commit-before-the-fallible-steps"
+migrated = false
+
+[[fault]]
+id = "seam.diff-predicate-always-true"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.diff-predicate-always-true"
+failure_class = "seam.diff-predicate-always-true"
+migrated = false
+
+[[fault]]
+id = "seam.phase-borrows-the-cadence-ask"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.phase-borrows-the-cadence-ask"
+failure_class = "seam.phase-borrows-the-cadence-ask"
+migrated = false
+
+[[fault]]
+id = "seam.working-set-off-by-a-proportion"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.working-set-off-by-a-proportion"
+failure_class = "seam.working-set-off-by-a-proportion"
+migrated = false
+
+[[fault]]
+id = "seam.render-does-not-escape"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.render-does-not-escape"
+failure_class = "seam.render-does-not-escape"
+migrated = false
+
+[[fault]]
+id = "seam.the-ask-does-not-escape"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.the-ask-does-not-escape"
+failure_class = "seam.the-ask-does-not-escape"
+migrated = false
+
+[[fault]]
+id = "seam.cadence-clamped-not-refused"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.cadence-clamped-not-refused"
+failure_class = "seam.cadence-clamped-not-refused"
+migrated = false
+
+[[fault]]
+id = "seam.no-graph-collapses-to-not-a-phase"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.no-graph-collapses-to-not-a-phase"
+failure_class = "seam.no-graph-collapses-to-not-a-phase"
+migrated = false
+
+[[fault]]
+id = "seam.two-seams-in-one-turn"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.two-seams-in-one-turn"
+failure_class = "seam.two-seams-in-one-turn"
+migrated = false
+
+[[fault]]
+id = "seam.turn-zero-fires-a-seam"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.turn-zero-fires-a-seam"
+failure_class = "seam.turn-zero-fires-a-seam"
+migrated = false
+
+[[fault]]
+id = "seam.object-version-unrecorded"
+kind = "lane-fault"
+check = "lanes"
+label = "seam.object-version-unrecorded"
+failure_class = "seam.object-version-unrecorded"
+migrated = false

@@ -39,6 +39,7 @@ VERIFY = ROOT / "verify.sh"
 MANIFEST = ROOT / "tools" / "gate" / "faults.toml"
 FIXTURES = ROOT / "tests" / "fixtures" / "results-bad"
 REGIMEN_INVALID = ROOT / "diet" / "formats" / "regimen" / "fixtures" / "invalid"
+APPLY_LANE_FAULTS = ROOT / "scripts" / "apply-lane-faults.py"
 
 # A fixture whose .reason opens with this pins the TOML-subset agreement: both
 # readers must reject it. Those are the entries that relocate when the second
@@ -49,7 +50,13 @@ RELOCATING = {"subset-fixture"}
 # The kinds `verify.sh --selftest` proves red itself, and so the kinds a shard
 # can be assigned. Named once: the census script and the report at the bottom
 # both derive from this, and they used to be two lists that agreed by hand.
-SELFTEST_KINDS = ("seeded-gate", "results-fixture", "pattern-class")
+# "lane-fault" joins this tuple, not "seeded-gate": a lane fault does not
+# come through `gatelib.seeded_cases()` at all -- see the note in
+# `observed()` -- so folding it into the kind that reader owns would credit
+# gatelib with cases it has never seen. It still runs inside `--selftest`,
+# through the same `seeded_case`/`in_shard` machinery every other kind uses,
+# which is what earns it a place in this tuple.
+SELFTEST_KINDS = ("seeded-gate", "results-fixture", "pattern-class", "lane-fault")
 
 # A line git writes into a file it could not merge. `=======` alone is not
 # one: it is a plausible separator in ordinary prose, and a checker that
@@ -113,7 +120,7 @@ def observed() -> dict[str, set[str]]:
     refuse_conflicted(VERIFY, s)
     seen: dict[str, set[str]] = {k: set() for k in
                                  ("seeded-gate", "mechanics", "results-fixture",
-                                  "pattern-class", "subset-fixture")}
+                                  "pattern-class", "subset-fixture", "lane-fault")}
     for label, check, inject, sig, scope in gatelib.seeded_cases(s):
         ident = f"{check}.{inject.removeprefix('inject_')}"
         seen["seeded-gate"].add(ident)
@@ -130,6 +137,32 @@ def observed() -> dict[str, set[str]]:
         prefix = kind.lower()
         for cls in body.split():
             seen["pattern-class"].add(f"{prefix}.{cls}")
+    # LANE FAULTS DO NOT COME THROUGH gatelib AT ALL. Every other kind above
+    # is read as a LITERAL out of verify.sh's own source text -- a
+    # `seeded_case "label" check inject 'sig'` call gatelib can point at.
+    # 123 lane faults are declared through ONE loop that generates that call
+    # at runtime, from `apply-lane-faults.py --list`, and a static reader of
+    # verify.sh's text sees that loop as a single block, not 123 cases.
+    #
+    # So this is the one kind whose declaration source is a PROGRAM'S OUTPUT
+    # rather than a grep. `apply-lane-faults.py` is the one reader of the
+    # lane manifests and the root registry; running it is what "what
+    # verify.sh proves" means for this kind, the same way running `diet
+    # check-record` is what a format check means elsewhere in this gate.
+    lane_faults = subprocess.run(
+        [sys.executable, str(APPLY_LANE_FAULTS), "--list"],
+        capture_output=True, text=True, cwd=ROOT,
+    )
+    if lane_faults.returncode not in (0, 1):
+        print(
+            f"{APPLY_LANE_FAULTS.name}: could not list lane faults (exit "
+            f"{lane_faults.returncode}): {lane_faults.stderr.strip()}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    for line in lane_faults.stdout.splitlines():
+        _lane, fault_id, _signature, _cls = line.split("	")
+        seen["lane-fault"].add(fault_id)
     if FIXTURES.is_dir():
         for d in FIXTURES.iterdir():
             if d.is_dir():

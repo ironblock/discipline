@@ -66,7 +66,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results recompute regimen metadata hygiene pages ci history injections resolver derive parity)
+readonly CHECKS=(fmt clippy test library results recompute regimen lanes metadata hygiene pages ci history injections resolver derive parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -302,6 +302,23 @@ check_regimen() {
 # record; both were written by the same run, so agreement between them is not
 # derivation. Zero recomputable directories is exit 2, not a pass.
 check_recompute() { python3 scripts/check-recompute.py; }
+
+# Lane-declared seeded faults, applied for real. Nine lanes write their own
+# `diet/<lane>/gate.toml` beside the code that emits it -- ruling 1 on #59 --
+# and until this check existed nothing ran a single one of them: 123 faults
+# declared, proven once by hand, applied by nothing CI runs. `--verify`
+# confirms the root registry (`tools/gate/lanes.toml`) matches what is on
+# disk in both directions and that every registered lane's own command is
+# currently green.
+#
+# GREEN HERE on an ordinary run is not the interesting case -- the crate is
+# already built by `check_test` moments earlier, so a lane's own scoped
+# `cargo test` is an incremental rerun of tests already compiled, not a
+# second build. The interesting case is a SEEDED one: this same check, run
+# inside a sandbox where one lane fault has been applied, is what proves that
+# fault still breaks the thing it says it breaks. Those cases are generated
+# from `apply-lane-faults.py --list`, below, rather than declared by hand.
+check_lanes() { python3 scripts/apply-lane-faults.py --verify; }
 
 check_metadata() { python3 scripts/check-repo-metadata.py; }
 
@@ -772,6 +789,32 @@ edit_in_place() {
       return 1
     fi
   done
+}
+
+# One generic injection for every lane-declared fault, rather than one bash
+# function per fault -- 123 of them today. `LANE_FAULT_LANE`/`LANE_FAULT_ID`
+# are set by the loop that calls `seeded_case` for each row
+# `apply-lane-faults.py --list` prints, immediately before the call; a plain
+# (non-exported) variable set in this shell is visible to the subshell
+# `seeded_case` runs the injection in, the same way every other injection's
+# closure already reaches variables set above it.
+#
+# RELATIVE PATH, DELIBERATELY. `seeded_case` runs this after `cd "$box"`, and
+# `apply-lane-faults.py` resolves its own root from where IT is loaded from
+# -- so a relative path here means the script that mutates is the box's own
+# copy, mutating the box's own files. The absolute `$ROOT` this script
+# otherwise uses throughout would mutate the real checkout instead.
+inject_lane_fault() {
+  local lane="${LANE_FAULT_LANE:-}" id="${LANE_FAULT_ID:-}"
+  if [ -z "$lane" ] || [ -z "$id" ]; then
+    # check-injections.py calls every inject_* function alone, with none of
+    # the per-case context the loop above supplies -- so, exactly like every
+    # other injection here, this one must prove BY ITSELF that it changes
+    # something. Default to the first row `--list` prints, sorted, so the
+    # choice is reproducible rather than whichever fault happened to run last.
+    read -r lane id _ < <(python3 scripts/apply-lane-faults.py --list | sort | head -1)
+  fi
+  python3 scripts/apply-lane-faults.py --apply-only "$lane" "$id"
 }
 
 inject_fmt() {
@@ -5788,6 +5831,55 @@ STRICT
     bash "${ROOT}/scripts/hygiene.sh" --patterns "${ROOT}/scripts/pages-patterns.tsv" \
       --tree "${box}/utf16"
 
+  # A DECLARED EXCEPTION SUBTRACTS A FORM, NOT A PATTERN -- ruled 2026-09-12
+  # on #72. `ssh-user-at-host` keeps its exact shape; a public forge's own
+  # SSH remote is carved out by name in `hygiene-exceptions.tsv`, and a
+  # private host beside it, or instead of it, still fires.
+  mkdir -p "${box}/forge-alone" "${box}/private-host" "${box}/forge-and-private"
+  printf 'deploy_key = %s\n' "$(printf '%s' 'git@github.com:owner/repo.git')" \
+    > "${box}/forge-alone/remote.txt"
+  printf 'scp %s%s:/var/log/run.log .\n' 'someone@' 'box.example.net' \
+    > "${box}/private-host/remote.txt"
+  printf 'clone %s and warn %s%s\n' "$(printf '%s' 'git@github.com:owner/repo.git')" \
+    'someone@' 'evil.example.net:' > "${box}/forge-and-private/remote.txt"
+  expect_exit "ssh-user-at-host: a forge remote form is a declared exception" 0 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/forge-alone"
+  expect_exit "ssh-user-at-host: a private host is not exempted by any declared form" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/private-host"
+  expect_exit "ssh-user-at-host: a private host beside an exempt one still fires" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/forge-and-private"
+
+  # BOTH SPELLINGS OF ONE LITERAL, ONE DIGEST -- ruled 2026-09-12 on #72.
+  # `--emit` computes the row from the NFC form; a file carrying the NFD
+  # spelling of the SAME name must be caught by that same row, because
+  # `decoding.normalized` composes before it tokenises. A synthetic table,
+  # never the real `hygiene-hashes.txt`: this proves the mechanism, not a
+  # claim about what this repository's own digests happen to guard.
+  local nfc_name nfd_name nfc_row salt_line table
+  nfc_name="$(python3 -c 'import unicodedata; print(unicodedata.normalize("NFC", "café"))')"
+  nfd_name="$(python3 -c 'import unicodedata; print(unicodedata.normalize("NFD", "café"))')"
+  [ "$nfc_name" != "$nfd_name" ] || {
+    echo "verify: the NFC/NFD probe strings collapsed to one spelling" >&2
+    exit "$EXIT_FAIL"
+  }
+  nfc_row="$(python3 "${ROOT}/scripts/check-hashes.py" --emit "$nfc_name" probe-name)"
+  table="${box}/nfc-nfd-hashes.txt"
+  {
+    echo "# Salt: discipline-hygiene-v1"
+    echo "$nfc_row"
+  } > "$table"
+  mkdir -p "${box}/nfc-form" "${box}/nfd-form"
+  printf 'owner: %s\n' "$nfc_name" > "${box}/nfc-form/owner.txt"
+  printf 'owner: %s\n' "$nfd_name" > "${box}/nfd-form/owner.txt"
+  expect_exit "check-hashes: the NFC spelling matches its own row" 1 \
+    bash -c "printf '%s\0' '${box}/nfc-form/owner.txt' \
+      | python3 '${ROOT}/scripts/check-hashes.py' --table '$table'"
+  expect_exit "check-hashes: the NFD spelling of the same name matches too" 1 \
+    bash -c "printf '%s\0' '${box}/nfd-form/owner.txt' \
+      | python3 '${ROOT}/scripts/check-hashes.py' --table '$table'"
+  expect_exit "check-hashes: --emit refuses a decomposed literal" 2 \
+    python3 "${ROOT}/scripts/check-hashes.py" --emit "$nfd_name" probe-name
+
   # The results-fixture loop grades on the class the manifest declares, so the
   # emission is load-bearing: a `failure_class` nothing prints is a field the
   # grader cannot read, and the loop silently falls back to "exited 1" -- which
@@ -6397,6 +6489,58 @@ selftest() {
     fi
   done
 
+  # LANE-DECLARED FAULTS, ONE `seeded_case` PER FAULT, GENERATED RATHER THAN
+  # WRITTEN OUT. `apply-lane-faults.py --list` is the one reader of the lane
+  # manifests and the root registry; a hand-maintained list of 123 rows here
+  # would be exactly the thing this repository refuses everywhere else --
+  # a list nobody can re-derive is a list that was right when it was
+  # written. `LANE_FAULT_LANE`/`LANE_FAULT_ID` are read by `inject_lane_fault`
+  # in the subshell `seeded_case` runs it in.
+  #
+  # The signature is the fault's OWN FIRST `catches` NAME, read out of the
+  # manifest -- never typed here -- so a case cannot go WRONG by drifting
+  # from prose nobody re-checks against a run. `check` is always `lanes`:
+  # every lane fault is proven through the one check that runs every
+  # registered lane's own command, whichever lane the fault belongs to.
+  # The signature is used verbatim as an ERE against the fault's own log --
+  # not escaped, because every one is a Rust path (`mod::mod::tests::name`),
+  # and a colon or underscore is not a metacharacter. The seeded fixtures
+  # below prove the wiring; the shape of the data is what makes that safe.
+  # `sc_inject`, NOT the literal `inject_lane_fault`, at the call site below.
+  # `gatelib.seeded_cases()` -- the shared static reader `check-fault-
+  # manifest.py` and `check-injections.py` both trust -- finds a case by
+  # `shlex.split`-ing each line and checking whether its THIRD WORD starts
+  # with `inject_`, with no bash evaluation at all. A literal `inject_
+  # lane_fault` in this loop's own source line would satisfy that test on
+  # the GENERATOR's one line of code, adding a phantom `lanes.lane_fault`
+  # seeded-gate case nothing runs and the manifest cannot describe -- caught
+  # by running `check-fault-manifest.py` against this loop's first draft, not
+  # foreseen. A variable reference is identical at RUN TIME, since bash
+  # expands it before `seeded_case` ever sees the value, and invisible to a
+  # reader that never evaluates anything.
+  #
+  # `sc_call`, NOT the literal `seeded_case`, for the same reason one layer
+  # up. `scripts/check-merge-gate.py` holds a second, cruder census of its
+  # own -- "the shared reader agrees with verify.sh's own count of cases" --
+  # that counts every line STARTING WITH THE WORD `seeded_case` and compares
+  # that count against how many `gatelib.seeded_cases()` actually parses, to
+  # catch a reader that silently drops a real case. This loop's one call
+  # site is not a real case to either reader (its arguments are template
+  # variables, not the case gatelib rejects above), but its source line
+  # still spelled the literal word `seeded_case`, so the crude counter
+  # counted it while the careful one, correctly, did not -- 250 spelled
+  # against 249 parsed, caught by `check-merge-gate.py`'s own fixture, not
+  # foreseen either. Indirecting the call word too removes it from both
+  # counts equally, which is the only count this generator should ever be
+  # in: zero.
+  sc_call="seeded_case"
+  sc_inject="inject_lane_fault"
+  while IFS=$'\t' read -r lane fault_id signature failure_class || [ -n "${lane:-}" ]; do
+    [ -n "$lane" ] || continue
+    LANE_FAULT_LANE="$lane" LANE_FAULT_ID="$fault_id"
+    "$sc_call" "lane: ${lane}.${fault_id}" lanes "$sc_inject" "$signature"
+  done < <(python3 "${ROOT}/scripts/apply-lane-faults.py" --list)
+
   prove_mechanics
 
   # --- the linter dispatches; it does not judge the format ---
@@ -6796,6 +6940,79 @@ EOF
   expect_exit "a census claiming to be a shard that cannot exist" 1 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/impossible-shard"
 
+  # THE LANE-GATE APPLIER'S OWN THREE RULES, ruled on #76: a registry entry
+  # naming no manifest, a manifest on disk with no registry entry, and (its
+  # own guard against a truly EMPTY registry, since a registry of nothing
+  # pins nothing and would call any tree clean). Over a SYNTHETIC root, never
+  # this repository's own -- the point is the mechanism, and the real
+  # `tools/gate/lanes.toml` is exercised for real by `check_lanes` on every
+  # ordinary run.
+  local lanes_root; scratch; lanes_root="$SCRATCH"
+  mkdir -p "${lanes_root}/present/tools/gate" "${lanes_root}/present/diet/alpha"
+  cat > "${lanes_root}/present/tools/gate/lanes.toml" <<'EOF'
+[lanes]
+alpha = "diet/alpha/gate.toml"
+EOF
+  cat > "${lanes_root}/present/diet/alpha/gate.toml" <<'EOF'
+[package]
+name = "synthetic-alpha"
+check = "test"
+command = "true"
+faults = 0
+EOF
+  expect_exit "a lane registry naming one present manifest is clean" 0 \
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/present" --verify
+
+  mkdir -p "${lanes_root}/absent/tools/gate"
+  cat > "${lanes_root}/absent/tools/gate/lanes.toml" <<'EOF'
+[lanes]
+alpha = "diet/nowhere/gate.toml"
+EOF
+  expect_exit "a registry entry naming no manifest is a finding" 1 \
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/absent" --verify
+
+  mkdir -p "${lanes_root}/orphan/tools/gate" "${lanes_root}/orphan/diet/alpha" \
+    "${lanes_root}/orphan/diet/beta"
+  cp "${lanes_root}/present/tools/gate/lanes.toml" "${lanes_root}/orphan/tools/gate/lanes.toml"
+  cp "${lanes_root}/present/diet/alpha/gate.toml" "${lanes_root}/orphan/diet/alpha/gate.toml"
+  cp "${lanes_root}/present/diet/alpha/gate.toml" "${lanes_root}/orphan/diet/beta/gate.toml"
+  expect_exit "a manifest on disk with no registry entry is a finding" 1 \
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/orphan" --verify
+
+  mkdir -p "${lanes_root}/empty/tools/gate"
+  printf '[lanes]\n' > "${lanes_root}/empty/tools/gate/lanes.toml"
+  expect_exit "a registry of nothing pins nothing, and cannot run" 2 \
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/empty" --verify
+
+  mkdir -p "${lanes_root}/broken/tools/gate" "${lanes_root}/broken/diet/alpha"
+  cp "${lanes_root}/present/tools/gate/lanes.toml" "${lanes_root}/broken/tools/gate/lanes.toml"
+  cat > "${lanes_root}/broken/diet/alpha/gate.toml" <<'EOF'
+[package]
+name = "synthetic-alpha"
+check = "test"
+command = "false"
+faults = 0
+EOF
+  expect_exit "a registered lane whose own command fails is a finding" 1 \
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/broken" --verify
+
+  # `shell=True` means "the shell could not find the program" is an ordinary
+  # nonzero exit FROM THE SHELL (127), not a Python-level failure to launch
+  # anything at all -- so this is still the DIRTY path, exit 1, and the case
+  # says so rather than assuming a spelling mistake in a manifest is somehow
+  # a different class of failure from a test that fails.
+  mkdir -p "${lanes_root}/wrecked/tools/gate" "${lanes_root}/wrecked/diet/alpha"
+  cp "${lanes_root}/present/tools/gate/lanes.toml" "${lanes_root}/wrecked/tools/gate/lanes.toml"
+  cat > "${lanes_root}/wrecked/diet/alpha/gate.toml" <<'EOF'
+[package]
+name = "synthetic-alpha"
+check = "test"
+command = "exit-not-a-real-binary-xyz"
+faults = 0
+EOF
+  expect_exit "a command the shell cannot find is still a finding, not broken" 1 \
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/wrecked" --verify
+
   # --- nothing is read from a half-merged file ---
   #
   # This gate has two inputs and both of them conflict routinely: `faults.toml`
@@ -6818,10 +7035,19 @@ EOF
   local halfmerged side; scratch; halfmerged="$SCRATCH"
   for side in verify manifest; do
     mkdir -p "${halfmerged}/${side}/scripts" "${halfmerged}/${side}/tools/gate"
+    # `apply-lane-faults.py` and its registry, alongside the two scripts
+    # already copied: `observed()` now shells out to `--list` to count lane
+    # faults into the red total, so a copy missing either one made `--count-
+    # red` exit 2 -- BROKEN, not the tolerated mid-merge answer -- over a
+    # dependency this fixture predates. The registry's own five lanes are not
+    # copied, so `--list` reports each as a missing manifest and answers zero
+    # lane faults; that undercounts the total this synthetic copy prints, but
+    # the case below asks only whether the count is ANSWERED, not what it is.
     cp "${ROOT}/scripts/check-fault-manifest.py" "${ROOT}/scripts/gatelib.py" \
-      "${halfmerged}/${side}/scripts/"
+      "${ROOT}/scripts/apply-lane-faults.py" "${halfmerged}/${side}/scripts/"
     cp "${ROOT}/verify.sh" "${halfmerged}/${side}/verify.sh"
     cp "${ROOT}/tools/gate/faults.toml" "${halfmerged}/${side}/tools/gate/faults.toml"
+    cp "${ROOT}/tools/gate/lanes.toml" "${halfmerged}/${side}/tools/gate/lanes.toml"
   done
   # One marker apiece, of the kind git writes, on the file whose turn it is.
   # `=======` alone is deliberately not enough to trip this -- it is a
