@@ -86,10 +86,17 @@ start = next((r for r in rows if r.get("record") == "start"), None)
 if start is None:
     print("recompute: the record has no start row"); sys.exit(1)
 
-# A recompute over an archive conducts no session, so its turn count and its
-# prefill total are whatever the record's own turn rows come to. Counted, not
-# asserted: the zeroes are a measurement of this record and not a convention.
-turns = [row for row in rows if row.get("record") == "turn"]
+# A recompute's summary counts targets, not turns: how many artefacts the
+# claims consume, and how many of them hash as the record says. Both are
+# re-derived here from the files rather than read back from the summary --
+# the record's self-agreement is the thing this step exists to distrust.
+consumed = {}
+for row in rows:
+    for artifact in row.get("consumes") or []:
+        consumed[artifact["path"]] = artifact["sha256"]
+targets = sorted(consumed)
+matched = [path for path in targets
+           if hashlib.sha256((here / path).read_bytes()).hexdigest() == consumed[path]]
 # `dogma_version` comes from the ARM, not from the record. Reading it out of
 # the record's own start row would be a restatement dressed as a derivation --
 # the record's self-agreement is the thing this step exists to distrust -- and
@@ -98,8 +105,8 @@ turns = [row for row in rows if row.get("record") == "turn"]
 # row is checked against it below.
 regimen = tomllib.loads((here / "regimen.toml").read_text(encoding="utf-8"))
 derived = {
-    "turns": len(turns),
-    "prefill_tokens_total": sum(int(row.get("prefill_tokens") or 0) for row in turns),
+    "targets_checked": len(targets),
+    "targets_matched": len(matched),
     "regime.dogma_version": regimen["dogma_version"],
     "product_sha256": hashlib.sha256((here / product_name).read_bytes()).hexdigest(),
 }
@@ -156,10 +163,18 @@ for path in sorted(derived):
               f"the front matter does not state"); bad += 1
 summary = next((row for row in rows if row.get("record") == "summary"), None)
 if summary is not None:
-    for key in ("turns", "prefill_tokens_total", "product_sha256"):
+    if summary.get("kind") != "recompute":
+        print(f"recompute: the record's summary is a {summary.get('kind')!r}, not a "
+              f"recompute"); bad += 1
+    for key in ("targets_checked", "targets_matched", "product_sha256"):
         if not agrees(summary.get(key), derived[key]):
             print(f"recompute: the record's summary says `{key} = {summary.get(key)!r}`, "
                   f"the artefacts give {derived[key]!r}"); bad += 1
+    # The digests the summary says it compared are the consumed artefacts'
+    # digests, in the order this script compares them.
+    if summary.get("digests") != [consumed[path] for path in targets]:
+        print("recompute: the record's summary lists digests that are not the consumed "
+              "artefacts' digests in path order"); bad += 1
 if bad: sys.exit(1)
 print(f"recompute: {len(stated)} stated value(s) re-derive from the artefacts, and "
       f"every value the artefacts derive is stated")
