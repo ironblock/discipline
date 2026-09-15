@@ -145,7 +145,7 @@ reproducible from a parts list, and the manifest should not imply it is."""
 display_name = "ironblock's 2019 Mac Pro"
 entry_type = "x86-workstation"
 hardware_fingerprint = "f0efb982fe1e4793ba9cf832e32bf30759d358da42e0362251a023c095dc480a"
-role = "the data seat's workstation; a host, with no substrate beneath it"
+role = "the data seat's workstation; a host that serves no model, and the machine whose CPU cores ran the sense bakeoff's four encoder cells"
 measured = "2026-09-05"
 
 model_identifier = "MacPro7,1"
