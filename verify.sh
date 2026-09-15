@@ -3429,7 +3429,7 @@ old = """    let control_ids = [top.id(set.set()), bottom.id(set.set())];
                 other: row.score,
             });
         }
-        if row.score < bottom_score {
+        if row.label.is_positive() && row.score < bottom_score {
             return Err(ControlFailure::NotAtBottom {
                 control: bottom,
                 score: bottom_score,
@@ -3565,8 +3565,8 @@ import pathlib
 
 path = pathlib.Path("diet/src/capture/sense.rs")
 source = path.read_text(encoding="utf-8")
-old = "    let pooled = f64::midpoint(positive.variance, negative.variance).sqrt();\n"
-new = "    let pooled = positive.variance.sqrt();\n"
+old = "    let pooled = f64::midpoint(positive_moments.variance, negative_moments.variance).sqrt();\n"
+new = "    let pooled = positive_moments.variance.sqrt();\n"
 assert source.count(old) == 1
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
