@@ -573,7 +573,8 @@ mod tests {
                 weights: Weights::Digest(
                     "0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
                 ),
-                hardware_fingerprint: "a-box".to_owned(),
+                hardware_fingerprint:
+                    "c2f0719673bcb7b439c8bb569f2e8da4f8ee61babbbb12e1485dc480f2b405a7".to_owned(),
                 sampler_card: BTreeMap::new(),
                 reasoning: Reasoning::Off,
             }],
