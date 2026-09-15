@@ -301,7 +301,10 @@ check_regimen() {
 # and is counted as skipped. `results` checks that the report agrees with the
 # record; both were written by the same run, so agreement between them is not
 # derivation. Zero recomputable directories is exit 2, not a pass.
-check_recompute() { python3 scripts/check-recompute.py; }
+# --root is the check's own parameter and `results` is its default; it is
+# spelled out because a seeded case below depends on this being the root the
+# check reads.
+check_recompute() { python3 scripts/check-recompute.py --root results; }
 
 # Lane-declared seeded faults, applied for real. Nine lanes write their own
 # `diet/<lane>/gate.toml` beside the code that emits it -- ruling 1 on #59 --
@@ -2733,7 +2736,24 @@ EOF
 # the count. A check of nothing is not a pass, applied to results -- and the
 # directory this leaves behind is entirely LEGAL, which is the point: the
 # census goes red on the shape of the tree, not on a defect in the directory.
+# The case below states its expectation as an exact census -- results present,
+# none recomputed, gate 0's exit 2 -- and an exact census is only exact over a
+# known set of directories. What `results/` holds is the science, which the
+# gate does not own. The first real reproducible-by-config directory turns the
+# case green: the seeded historical directory is still there, but so is a real
+# one that recomputes, and once one is on `main` this fault could never fire
+# again. So the case runs over a scratch results root holding only the
+# template, whatever the repository contains. The box is already a scratch
+# copy of the tree: the injector first reduces the box's results root to the
+# template, then seeds its fault, and check_recompute reads that root through
+# the check's own --root. Files at the results root (AGENTS.md, README.md)
+# stay; the check walks directories. The reduction is spelled out in the
+# injector rather than shared, because check-injections runs every injector on
+# its own and would report a helper-calling one inert. Ruled on #39
+# (2026-09-11), for the two cases that then read the census; the other has
+# since been rewritten to seed its own directory and no longer needs it.
 inject_recompute_only_the_template_recomputes() {
+  find results -mindepth 1 -maxdepth 1 -type d ! -name _template -exec rm -r -- {} +
   python3 - <<'EOF'
 import pathlib
 import shutil
