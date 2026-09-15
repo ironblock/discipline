@@ -155,12 +155,13 @@ gpu = "AMD Radeon Pro W5700X, 16 GB, Metal 3"
 architecture = "x86_64"
 os = "macOS 26.5.2 (build 25F84)"
 not_measured = "storage devices and firmware; power supply."
-no_substrate_because = """
+no_served_substrate_because = """
 Nothing in this program serves a model on this machine: its GPU is not adept at \
-the workload. It is registered as a host with no substrate beneath it, which is \
-a truer record than inventing one. Worth stating that it is x86_64 with an AMD \
-GPU, because "runs on the Mac" is otherwise ambiguous between this machine and \
-the laptop, and the two share no acceleration path at all."""
+the workload. What runs on it is the sense bakeoff's four encoder cells, on the \
+CPU cores and with no server -- registered below as substrates so the record \
+that consumes their caches can name them. Worth stating that it is x86_64 with \
+an AMD GPU, because "runs on the Mac" is otherwise ambiguous between this \
+machine and the laptop, and the two share no acceleration path at all."""
 
 [equipment.macbook-pro-2021]
 display_name = "ironblock's 2021 MacBook Pro 16-inch"
@@ -405,6 +406,85 @@ weights_kind = "canned"
 weights_acts_sha256 = "8947e69543df56300d85ed571a6799d66b25a51c18c6d456193918864d7f5e9d"
 reproducible_by_config = true
 reproducible_because = "replay the acts and the same bytes play again; exact match, no band. Gate 1 compares a canned run exactly rather than re-firing it within a band meant for sampling and hardware that cannot move here."
+
+# The sense bakeoff's four embedder cells. A substrate here is an ENCODER RUN,
+# not a served model: no server, no sampler, a pinned library on this host's
+# CPU cores turning the register's texts and the senses into vectors once,
+# which the results directory then consumes by digest. They are registered so
+# that the record's `start.substrates` ids resolve to something, and under
+# `mac-pro-2019` because that is the machine whose CPU ran them -- the cache
+# metas name the environment that lives on it and record `device: cpu`, and
+# the caches were committed to the research archive from it on 2026-09-04.
+# Each cell is pinned the way its cache meta pins it: hub revision, the digest
+# of the weights file that was loaded, pooling, prefixes, and the library.
+
+[substrate.all-MiniLM-L6-v2]
+equipment = "mac-pro-2019"
+description = "sentence-transformers/all-MiniLM-L6-v2, the bakeoff's declared floor, run on the host's CPU by sentence-transformers 3.0.1"
+pinned = true
+engine_name = "sentence-transformers"
+engine_identity = "3.0.1"
+engine_identity_is = "the library version; torch 2.2.2, transformers 4.44.2, tokenizers 0.19.1, python 3.12.13"
+hub_id = "sentence-transformers/all-MiniLM-L6-v2"
+hub_revision = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+weights_main = "53aa51172d142c89d9012cce15ae4d6cc0ca6895895114379cacb4fab128d9db"
+weights_main_file = "model.safetensors"
+pooling = "mean over the attention mask, then L2-normalise (the model's shipped modules)"
+prefix_rows = ""
+prefix_senses = ""
+batch_size = 32
+role = "the declared floor: a symmetric-pair objective, the wrong one for asymmetric description-to-instance matching, kept as the control every reader knows"
+
+[substrate."bge-small-en-v1.5"]
+equipment = "mac-pro-2019"
+description = "BAAI/bge-small-en-v1.5, run on the host's CPU by sentence-transformers 3.0.1"
+pinned = true
+engine_name = "sentence-transformers"
+engine_identity = "3.0.1"
+engine_identity_is = "the library version; torch 2.2.2, transformers 4.44.2, tokenizers 0.19.1, python 3.12.13"
+hub_id = "BAAI/bge-small-en-v1.5"
+hub_revision = "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
+weights_main = "3c9f31665447c8911517620762200d2245a2518d6e7208acc78cd9db317e21ad"
+weights_main_file = "model.safetensors"
+pooling = "the CLS token, then L2-normalise (the model's shipped modules)"
+prefix_rows = ""
+prefix_senses = ""
+batch_size = 32
+
+[substrate.embeddinggemma-300m]
+equipment = "mac-pro-2019"
+description = "onnx-community/embeddinggemma-300m-ONNX, the quantised graph, run on the host's CPU by ONNX Runtime 1.23.2"
+pinned = true
+engine_name = "onnxruntime"
+engine_identity = "1.23.2"
+engine_identity_is = "the library version; tokenizers 0.23.2, numpy 2.5.2, python 3.12.13, CPUExecutionProvider with four intra-op threads"
+hub_id = "onnx-community/embeddinggemma-300m-ONNX"
+hub_revision = "5090578d9565bb06545b4552f76e6bc2c93e4a66"
+weights_main = "172efde319fe1542dc41f31be6154910b05b78f7a861c265c4600eec906bd6d8"
+weights_main_file = "onnx/model_quantized.onnx"
+weights_data = "705626e28e4c23c82ade34566b4197d97f534c12275fa406dfb71e9937d388c0"
+weights_data_file = "onnx/model_quantized.onnx_data"
+pooling = "the graph's own sentence_embedding output, then L2-normalise"
+prefix_rows = "title: none | text: "
+prefix_senses = "task: search result | query: "
+batch_size = 1
+
+[substrate."Qwen3-Embedding-0.6B"]
+equipment = "mac-pro-2019"
+description = "onnx-community/Qwen3-Embedding-0.6B-ONNX, the int8 graph, run on the host's CPU by ONNX Runtime 1.23.2"
+pinned = true
+engine_name = "onnxruntime"
+engine_identity = "1.23.2"
+engine_identity_is = "the library version; tokenizers 0.23.2, numpy 2.5.2, python 3.12.13, CPUExecutionProvider with four intra-op threads"
+hub_id = "onnx-community/Qwen3-Embedding-0.6B-ONNX"
+hub_revision = "c25a394dd583836952667c12f008335071b3f43d"
+weights_main = "6d0ea863f78b4a84afa3c7fcba1ec341572b5e28121aef77b7092b1dfdf679c7"
+weights_main_file = "onnx/model_int8.onnx"
+pooling = "the last token of last_hidden_state, the appended end-of-text, then L2-normalise"
+prefix_rows = ""
+prefix_senses = "Instruct: Given a description of a kind of statement made in a coding session, retrieve statements of that kind\nQuery: "
+prefix_senses_note = "the ruling's byte form of 2026-09-04, with a space after `Query:`; the model card's form has none, and changing the byte would be a new cell under a new ruling"
+batch_size = 1
 
 [substrate.apple32-omlx-gemma12b]
 equipment = "macbook-pro-2021"

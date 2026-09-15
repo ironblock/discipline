@@ -33,9 +33,11 @@ machine**: same hardware, different weights and different placement. A registry
 keyed by machine could not record that experiment. A registry keyed by substrate
 can.
 
-A machine may also have no substrate at all. `mac-pro-2019` has none — nothing
-in this program serves a model on it — and it is registered as a host with an
-empty shelf rather than given an invented one.
+A machine may also serve nothing. Nothing in this program serves a model on
+`mac-pro-2019`; what it holds are the sense bakeoff's four encoder cells, which
+run on its CPU cores with no server and are registered as substrates because a
+results directory consumes their caches and its record names what produced
+them. A substrate is what a result ran on, served or not.
 
 And a piece of equipment may not be a machine. The table is `[equipment.*]`,
 not `[machine.*]`, because `canned-loopback` — `diet-drive`'s own server,
