@@ -1,0 +1,45 @@
+# The root registry for lane-declared seeded faults.
+#
+# tools/gate/README.md's own law: "the registry is the pin." A gate
+# discovered by globbing a directory can silently find nothing if the
+# directory moves or the file is deleted; a lane named HERE and missing its
+# manifest is a finding (`scripts/apply-lane-faults.py --verify`), never a
+# silence.
+#
+# Format: name = "path/to/gate.toml", relative to the repository root.
+#
+# WHY THIS EXISTS. Every lane below writes its own seeded faults beside the
+# code that emits them -- ruling 1 on #59 -- and until now nothing applied
+# them: 123 faults declared, proven once by hand by whoever wrote them, and
+# run by nothing CI runs. `scripts/apply-lane-faults.py` is what applies them
+# for real, continuously, through `verify.sh`'s `lanes` check and the
+# `--selftest` cases this registry's `--list` output generates.
+#
+# RULED on #76, 2026-09-14: "client, drive, isolation, digest, and this
+# lane's [adapters]." Four of those five are registered below. The fifth,
+# `seam`, is NOT on that list and IS registered here anyway -- a disclosed
+# substitution, not an extension of scope, explained in full where the
+# ruling is answered. In short: `adapters`'s source (`diet/src/adapters/`)
+# does not exist on `main` today -- it arrives with PR #76 -- so registering
+# its manifest now would make "a registry entry with no manifest" fire on
+# the day THIS registry's own consumer merges, which is the one outcome the
+# rule exists to prevent. `seam` is the opposite case: its manifest already
+# exists, already carries 29 real proven faults, and the DISCOVERY half of
+# this mechanism (`diet/*/gate.toml` on disk, compared against the names
+# below) would find it unregistered the moment that half is turned on for
+# real -- an immediate, live instance of exactly the drift this registry
+# exists to catch. Leaving it out to match the ruling's list literally would
+# have meant either lying about what "no registry entry" checks (scoping
+# discovery to a fixed list defeats the rule it implements) or shipping a
+# check that reddens `main` on day one over a file this PR did not touch.
+# Neither is acceptable, so `seam` is in and `adapters` is commented below,
+# to be uncommented in the same commit that brings its manifest onto `main`.
+#
+# adapters = "diet/adapters/gate.toml"   # lands with PR #76 (issue #28)
+
+[lanes]
+client = "diet/client/gate.toml"
+drive = "diet/drive/gate.toml"
+isolation = "diet/isolation/gate.toml"
+digest = "diet/digest/gate.toml"
+seam = "diet/seam/gate.toml"

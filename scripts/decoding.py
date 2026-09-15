@@ -286,7 +286,9 @@ def ignorable() -> frozenset[int]:
 # legitimate content -- ligatures, full-width forms, superscripts -- to guard
 # against a case the threat model does not contain.
 #
-# THREE CONSEQUENCES, named rather than discovered later.
+# TWO CONSEQUENCES REMAIN. A third that stood here -- the NFC/NFD asymmetry
+# below -- is closed, per the 2026-09-12 ruling on #72 that this comment now
+# reports rather than merely proposes.
 #
 # 1. A FALSE POSITIVE, bought deliberately. Dropping `Mn` strips accents from
 #    decomposed text, so a decomposed `resume` with an acute on it tokenises
@@ -294,28 +296,64 @@ def ignorable() -> frozenset[int]:
 #    table whose rows are names and addresses rather than ordinary
 #    vocabulary.
 #
-# 2. A FALSE NEGATIVE, which is the same coin and was NOT declared until now.
-#    Dropping `Mn` is asymmetric across Unicode's two spellings of the same
-#    text, because only the decomposed one HAS an `Mn` to drop:
+# 2. STILL OUT, as above: a confusable is a different literal to the scanner
+#    on purpose, and NFC does nothing about that -- it composes two spellings
+#    of the SAME text, never two different ones that merely look alike.
 #
-#      NFC  "cafe" with a precomposed e-acute   -> one token, accent intact
-#      NFD  the same text, e + combining acute  -> one token, accent stripped
+# A CORRECTION, ruled and closed rather than left to be found. This comment
+# used to declare the asymmetry below as an open consequence and stop there:
 #
-#    So a row emitted from the NFD spelling matches only NFD content, and the
-#    NFC spelling of the very same name walks past it. macOS filesystem APIs
-#    hand back NFD; almost everything else emits NFC. `--emit` will produce
-#    such a row without complaint.
+#   "Dropping `Mn` is asymmetric across Unicode's two spellings of the same
+#    text, because only the decomposed one HAS an `Mn` to drop... NFC
+#    normalisation before tokenising would close it... That is NOT done
+#    here... Raised rather than chosen."
 #
-#    NFC normalisation before tokenising would close it -- both spellings
-#    compose to the same string, and nothing else changes. That is NOT done
-#    here: it changes what a row MEANS, which is a rule about the table, and
-#    the 2026-09-11 ruling that admitted this strip scoped normalisation
-#    narrowly on purpose. Raised rather than chosen; declared rather than
-#    left for someone to find.
+# and a second consequence beside it, that the pattern half of the gate --
+# `hygiene.sh`'s shaped literals, matched by `grep` -- never came through this
+# strip at all, so a credential broken by a zero-width space scanned clean
+# while the same credential intact did not.
 #
-# 3. THIS IS THE DIGEST HALF'S TOKENISER ONLY. The pattern half matches by
-#    shape and does not come through here, so a shaped literal broken by a
-#    zero-width space still evades it.
+# Both are closed by `normalized()`, below, which BOTH halves now call
+# through `hygiene-decode.py`'s mirror and this module's own `tokens()`. One
+# function, so the two cannot drift into scanning two different things and
+# calling that parity -- the same law as one reader, applied to a strip.
+
+
+def normalized(text: str) -> str:
+    """`text`, NFC-composed and with every ignorable or combining code point
+    REMOVED -- not skipped in a loop, gone from the string, which is what
+    lets a SHAPED pattern (matched by `grep`, never by this module) reach
+    across where one stood. The one view both halves of the gate scan: the
+    shaped literals in `hygiene-patterns.tsv`, and the shapeless ones in
+    `hygiene-hashes.txt`.
+
+    NFC first, so that a decomposed accent is COMPOSED before the strip below
+    ever asks whether it is a combining mark -- composing after stripping
+    would leave a bare base letter with nothing to compose against, which is
+    not what either spelling of the source text was.
+
+    # Raises
+
+    `NoTable` when the invisible-character table cannot be read. Callers turn
+    that into exit 2 rather than letting a blind scan print `clean`.
+    """
+    composed = unicodedata.normalize("NFC", text)
+    invisible = ignorable()
+    return "".join(
+        char
+        for char in composed
+        if ord(char) not in invisible and unicodedata.category(char) not in COMBINING
+    )
+
+
+def is_nfc(text: str) -> bool:
+    """Whether `text` is already in its own NFC form.
+
+    The one test the emitter and the scanner share, so a literal typed in
+    its decomposed spelling is refused at the door rather than silently
+    accepted and hashed under a composed form nobody typed.
+    """
+    return unicodedata.normalize("NFC", text) == text
 
 
 def tokens(text: str) -> list[str]:
@@ -326,22 +364,16 @@ def tokens(text: str) -> list[str]:
     the bare name never matches it -- measured, and the reason this function
     exists rather than a regex at each call site.
 
-    EXCEPT the characters with no width, which are dropped instead of split
-    on: see the note above `ignorable`.
+    Reads `normalized(text)`, not `text`: see the note above.
 
     # Raises
 
     `NoTable` when the invisible-character table cannot be read. Callers turn
     that into exit 2 rather than letting a blind scan print `clean`.
     """
-    invisible = ignorable()
     out: list[str] = []
     current: list[str] = []
-    for char in text:
-        if ord(char) in invisible or unicodedata.category(char) in COMBINING:
-            # Not a token character and not a boundary either: it is not
-            # there, as far as anything that reads the file is concerned.
-            continue
+    for char in normalized(text):
         if char.isalnum():
             current.append(char)
         elif current:
