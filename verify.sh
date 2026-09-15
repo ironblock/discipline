@@ -7,7 +7,7 @@
 #   verify.sh --only CHECK    run one check (repeatable)
 #   verify.sh --only test --scope SPEC   narrow the test check (selftest only)
 #   verify.sh --list          name the checks, in order
-#   verify.sh --selftest      prove the gate goes red on seeded faults
+#   verify.sh --selftest      prove the gate goes red on seeded faults (bash 4+)
 #   verify.sh --selftest --shard K/N    run this job's share of the faults
 #   verify.sh --selftest --census PATH  write what this run ran, for the sum
 #   verify.sh --selftest --derive-scopes DIR   re-harvest the test cases' scopes
@@ -5738,6 +5738,20 @@ STRICT
 }
 
 selftest() {
+  # DECLARED REQUIREMENT, checked before anything runs. The results-fixture
+  # loop below keys its expectations in an associative array (`local -A`),
+  # which is bash 4. The bash a stock Mac ships is 3.2, where `local -A` is a
+  # usage error and the next expansion aborts the run under `set -u` -- after
+  # every seeded case has run and before the tally -- and the status bash 3.2
+  # reports for that abort is not the abort's: with the EXIT trap installed it
+  # is the trap's (0 in a full run here; `return 3` reads 3 in reduction). So a
+  # stock Mac got a green selftest that proved nothing, the vacuous pass at the
+  # gate's own front door. Refuse first, name the version, exit 2. The ordinary
+  # gate has no such requirement and runs on 3.2. Ruled on #39 (2026-09-11).
+  if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+    echo "selftest: needs bash 4 or later (associative arrays); this is bash ${BASH_VERSION}" >&2
+    exit "$EXIT_MISUSE"
+  fi
   trap selftest_cleanup EXIT
   scratch; SELFTEST_TARGET="${SCRATCH}/target"
   scratch; SELFTEST_LOGS="$SCRATCH"
