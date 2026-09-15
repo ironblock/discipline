@@ -25,6 +25,8 @@ interview_thinking = true   # moot (no capture forks); set for consistency
 # max_steps = 30
 # turn_timeout_s = 2400
 # tool_timeout_s = 120
-[serving]
+# The arm declared a bare [serving] header above [serving.flags]. It is not
+# carried: a header with no binding under it is refused by v1 since 2026-09-15
+# (ruled on #51), and [serving.flags] opens `serving` on its own.
 [serving.flags]
 --cache-ram = 8192

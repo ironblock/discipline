@@ -79,9 +79,6 @@
             "string": "-cram"
           }
         ]
-      },
-      "flags": {
-        "table": {}
       }
     }
   }
