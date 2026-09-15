@@ -1239,8 +1239,15 @@ new = """    let value = members.remove("substrates").unwrap_or_else(|| {
                 ])),
             ),
             (
+                // DIGEST-SHAPED, like the weights above. The field is checked
+                // as a digest since the fingerprint tightening, so a prose
+                // placeholder here would be refused by THAT check and the
+                // fixture this fault is meant to let through would stay
+                // rejected -- for the wrong reason, with this case reading
+                // green. The fault is "substrates made optional", and nothing
+                // else about the fabricated default may be refusable.
                 "hardware_fingerprint".to_owned(),
-                Value::String("unknown".to_owned()),
+                Value::String("0".repeat(64)),
             ),
             (
                 "sampler_card".to_owned(),
