@@ -6,6 +6,7 @@
 #   verify.sh                 run every check
 #   verify.sh --only CHECK    run one check (repeatable)
 #   verify.sh --only test --scope SPEC   narrow the test check (selftest only)
+#   verify.sh --only history --range A..B   scan an explicit range, to repro
 #   verify.sh --list          name the checks, in order
 #   verify.sh --selftest      prove the gate goes red on seeded faults
 #   verify.sh --selftest --shard K/N    run this job's share of the faults
@@ -65,7 +66,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results recompute regimen metadata hygiene pages ci history injections resolver derive parity)
+readonly CHECKS=(fmt clippy test library results recompute regimen lanes metadata hygiene pages ci history injections resolver derive parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -302,6 +303,23 @@ check_regimen() {
 # derivation. Zero recomputable directories is exit 2, not a pass.
 check_recompute() { python3 scripts/check-recompute.py; }
 
+# Lane-declared seeded faults, applied for real. Nine lanes write their own
+# `diet/<lane>/gate.toml` beside the code that emits it -- ruling 1 on #59 --
+# and until this check existed nothing ran a single one of them: 123 faults
+# declared, proven once by hand, applied by nothing CI runs. `--verify`
+# confirms the root registry (`tools/gate/lanes.toml`) matches what is on
+# disk in both directions and that every registered lane's own command is
+# currently green.
+#
+# GREEN HERE on an ordinary run is not the interesting case -- the crate is
+# already built by `check_test` moments earlier, so a lane's own scoped
+# `cargo test` is an incremental rerun of tests already compiled, not a
+# second build. The interesting case is a SEEDED one: this same check, run
+# inside a sandbox where one lane fault has been applied, is what proves that
+# fault still breaks the thing it says it breaks. Those cases are generated
+# from `apply-lane-faults.py --list`, below, rather than declared by hand.
+check_lanes() { python3 scripts/apply-lane-faults.py --verify; }
+
 check_metadata() { python3 scripts/check-repo-metadata.py; }
 
 check_hygiene() { bash scripts/hygiene.sh; }
@@ -318,10 +336,30 @@ check_pages() {
 # does not depend on, a path filter that turns a skip into a pass.
 check_ci() { python3 scripts/check-ci-coverage.py; }
 
+# What `--range` hands the history check, and empty unless it was given.
+#
+# Empty means the script INFERS the range from the event, which is what CI
+# gets and what a bare local run gets. The inferred range is `origin/<default>
+# ..HEAD`, which is EMPTY on a checkout that matches the trunk -- so a red
+# that CI found on a push cannot be replayed locally by the default. A gate
+# whose verdict nobody can reproduce is a verdict nobody can check, so the
+# range is askable, and only ever explicitly. Ruled 2026-09-14 on #81.
+#
+# A flag rather than an environment variable, for `--scope`'s reason: a range
+# exported once would narrow every history run beneath it, silently.
+VERIFY_HISTORY_RANGE=""
+
 # Commit messages, and a pull request's title and body, against the same
 # pattern table the file gate uses. A file carrying a forbidden shape can be
 # fixed with a commit; a commit message carrying one is permanent.
-check_history() { python3 scripts/check-history.py; }
+#
+# The MESSAGE, and not the author or committer line. Those are metadata the
+# platform publishes on every commit page, and scanning them through a table
+# built for content reddened this trunk once for no content at all -- #81.
+check_history() {
+  python3 scripts/check-history.py \
+    ${VERIFY_HISTORY_RANGE:+--range "$VERIFY_HISTORY_RANGE"}
+}
 
 # Every injection in this file changes the tree it is run against. A verdict
 # is worth what the fault behind it cost, so an injection is proven to change
@@ -751,6 +789,32 @@ edit_in_place() {
       return 1
     fi
   done
+}
+
+# One generic injection for every lane-declared fault, rather than one bash
+# function per fault -- 123 of them today. `LANE_FAULT_LANE`/`LANE_FAULT_ID`
+# are set by the loop that calls `seeded_case` for each row
+# `apply-lane-faults.py --list` prints, immediately before the call; a plain
+# (non-exported) variable set in this shell is visible to the subshell
+# `seeded_case` runs the injection in, the same way every other injection's
+# closure already reaches variables set above it.
+#
+# RELATIVE PATH, DELIBERATELY. `seeded_case` runs this after `cd "$box"`, and
+# `apply-lane-faults.py` resolves its own root from where IT is loaded from
+# -- so a relative path here means the script that mutates is the box's own
+# copy, mutating the box's own files. The absolute `$ROOT` this script
+# otherwise uses throughout would mutate the real checkout instead.
+inject_lane_fault() {
+  local lane="${LANE_FAULT_LANE:-}" id="${LANE_FAULT_ID:-}"
+  if [ -z "$lane" ] || [ -z "$id" ]; then
+    # check-injections.py calls every inject_* function alone, with none of
+    # the per-case context the loop above supplies -- so, exactly like every
+    # other injection here, this one must prove BY ITSELF that it changes
+    # something. Default to the first row `--list` prints, sorted, so the
+    # choice is reproducible rather than whichever fault happened to run last.
+    read -r lane id _ < <(python3 scripts/apply-lane-faults.py --list | sort | head -1)
+  fi
+  python3 scripts/apply-lane-faults.py --apply-only "$lane" "$id"
 }
 
 inject_fmt() {
@@ -2798,6 +2862,15 @@ inject_ci_scoped_test() {
   edit_in_place 's|^\( *\)\./verify\.sh "\${args\[@\]}"$|\1./verify.sh "${args[@]}" --scope lib|' \
     .github/workflows/pkg-diet.yml
 }
+# The same defect through the flag added for #81's reproduction. `--range`
+# makes the history check scan a slice the caller names instead of the one the
+# event names, which is why it exists for a person at a terminal -- and why a
+# gating workflow may not spell it. A gate that scans a range somebody chose
+# reports on history nobody pushed.
+inject_ci_ranged_history() {
+  edit_in_place 's|^\( *\)\./verify\.sh "\${args\[@\]}"$|\1./verify.sh "${args[@]}" --range HEAD~1..HEAD|' \
+    .github/workflows/pkg-repo.yml
+}
 # A subshell run against the shell's own state. `cd a; (cd b; ls); pwd` then
 # ends in `b`, and every relative path after it resolves against a directory
 # the session was never in.
@@ -3356,7 +3429,7 @@ old = """    let control_ids = [top.id(set.set()), bottom.id(set.set())];
                 other: row.score,
             });
         }
-        if row.score < bottom_score {
+        if row.label.is_positive() && row.score < bottom_score {
             return Err(ControlFailure::NotAtBottom {
                 control: bottom,
                 score: bottom_score,
@@ -3492,8 +3565,8 @@ import pathlib
 
 path = pathlib.Path("diet/src/capture/sense.rs")
 source = path.read_text(encoding="utf-8")
-old = "    let pooled = f64::midpoint(positive.variance, negative.variance).sqrt();\n"
-new = "    let pooled = positive.variance.sqrt();\n"
+old = "    let pooled = f64::midpoint(positive_moments.variance, negative_moments.variance).sqrt();\n"
+new = "    let pooled = positive_moments.variance.sqrt();\n"
 assert source.count(old) == 1
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
@@ -5591,12 +5664,22 @@ open(sys.argv[2], 'w', encoding='utf-8').write(
     > "${fake}/push-new-branch.json"
   printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"carries %s%s forward"}}' \
     "$fake_base" "$fake_head" 'DIE' '-9001' > "${fake}/pr-dirty.json"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"carries %s%s forward","body":"clean"}}' \
+    "$fake_base" "$fake_head" 'DIE' '-9003' > "${fake}/pr-dirty-title.json"
   printf '{"before":"%s","after":"%s"}' "$fake_head" "$fake_head" \
     > "${fake}/push-empty.json"
 
   expect_exit "history: a faked pull request with a dirty body" 1 \
     env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
         GITHUB_EVENT_PATH="${fake}/pr-dirty.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+  # A fresh-instance review of #83 found the title half of this pair had no
+  # fixture at all: every history fixture in this file used a clean,
+  # constant `"title":"t"`, so deleting the two lines in check-history.py
+  # that read `pr["title"]` stayed green. The body half was already covered.
+  expect_exit "history: a faked pull request with a dirty title" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-dirty-title.json" \
       python3 "${fake}/repo/scripts/check-history.py"
   expect_exit "history: a faked push whose range is empty" 2 \
     env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
@@ -5676,6 +5759,83 @@ STRICT
   expect_exit "and a strict decode of that same patch really does raise" 0 \
     python3 "${fake}/strict.py" "${fake}/repo" "$fake_undecodable"
 
+  # AN AUTHOR LINE IS METADATA, NOT CONTENT -- ruled 2026-09-14 on #81, and
+  # the PAIR is what says so. The same literal is planted twice: once in a
+  # commit body, where it is a finding, and once in the author line of a
+  # commit whose body and patch are both clean, where it is not.
+  #
+  # Neither half asserts anything alone. Delete the pattern from the table
+  # and the second still passes; go back to scanning `%an <%ae>` and the
+  # first still passes. Only together do they pin WHERE the table applies.
+  #
+  # A CORRECTION. This planted the repository owner's own handle, on the
+  # THEN-current premise that it was a hashed literal in
+  # `scripts/hygiene-hashes.txt` -- which is what made it double as the
+  # thing an author line legitimately carries. Ruled separately on #58
+  # (2026-09-15, landed on `main` in 0c20052): the owner's handle firing on
+  # the owner's own prose was the wrong rule regardless of which field it
+  # scanned, and the entry was removed from the denylist outright. That
+  # left this fixture proving nothing -- the literal it plants was no
+  # longer listed, so planting it in a body was never going to be a
+  # finding, pattern table or not.
+  #
+  # A TICKET ID never depended on that entry and does not depend on
+  # whatever the denylist holds tomorrow: `internal-ticket-id` is a SHAPE
+  # in `hygiene-patterns.tsv`, not a hash of one string, so this pair is
+  # robust to the hashed list shrinking to nothing, which it very nearly
+  # has (one entry remains, and its plaintext belongs to nobody this
+  # fixture can cite).
+  #
+  # Assembled from pieces, because this file is itself read by the tree gate
+  # and a literal written whole here would be a finding about verify.sh --
+  # the trap `inject_injection_needs_gnu_sed` documents, one lint along.
+  local token; token="$(printf '%s%s' 'DIE' '-9002')"
+  local fake_body fake_author
+  (
+    cd "${fake}/repo"
+    printf 'd\n' > d.txt && git add --all
+    seed_commit --message "a message carrying ${token}, which is content"
+  )
+  fake_body="$(git -C "${fake}/repo" rev-parse HEAD)"
+  (
+    cd "${fake}/repo"
+    printf 'e\n' > e.txt && git add --all
+    git -c "user.email=${token}@example.invalid" -c "user.name=${token}" \
+      commit --quiet --message 'a clean message, and an author line that is not'
+  )
+  fake_author="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_undecodable" "$fake_body" > "${fake}/pr-in-body.json"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_body" "$fake_author" > "${fake}/pr-in-author.json"
+  expect_exit "history: a listed literal in a commit body is a finding" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-in-body.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+  expect_exit "history: the same literal in an author line is not content" 0 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-in-author.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+
+  # `--range` REACHES THE CHECK, AND BEATS THE INFERRED ANSWER. A flag that
+  # is accepted and dropped would leave the reproduction finding open while
+  # looking closed, so the two rows are chosen to disagree with the default:
+  # this repository's inferred range is `origin/<default>..HEAD`, which here
+  # spans every commit above and is DIRTY, so a dropped `--range` gives 1 on
+  # a slice whose verdict is 0.
+  #
+  # Copied in after the commits, so that no `git add --all` above sweeps it
+  # into the history under scan.
+  cp "${ROOT}/verify.sh" "${fake}/repo/verify.sh"
+  expect_exit "history: an explicit range is honoured, not the inferred one" 0 \
+    bash "${fake}/repo/verify.sh" --only history --range "${fake_body}..${fake_author}"
+  expect_exit "history: and an explicit range that is dirty is still a finding" 1 \
+    bash "${fake}/repo/verify.sh" --only history --range "${fake_undecodable}..${fake_body}"
+  # A range narrows one check, so a loose one is a misuse and not a verdict --
+  # `--scope`'s rule, for a check that INFERS what it scans when unasked.
+  expect_exit "a range without --only history is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --range "${fake_body}..${fake_author}"
+
   # The CI aggregator's comparison. A skipped job is not a failed job, and
   # GitHub's own `!failure()` idiom passes on skipped, so the one thing this
   # must get right is that only the literal 'success' passes.
@@ -5698,6 +5858,103 @@ STRICT
   expect_exit "an unscannable page is rejected, not called clean" 1 \
     bash "${ROOT}/scripts/hygiene.sh" --patterns "${ROOT}/scripts/pages-patterns.tsv" \
       --tree "${box}/utf16"
+
+  # A DECLARED EXCEPTION SUBTRACTS A FORM, NOT A PATTERN -- ruled 2026-09-12
+  # on #72. `ssh-user-at-host` keeps its exact shape; a public forge's own
+  # SSH remote is carved out by name in `hygiene-exceptions.tsv`, and a
+  # private host beside it, or instead of it, still fires.
+  mkdir -p "${box}/forge-alone" "${box}/private-host" "${box}/forge-and-private"
+  printf 'deploy_key = %s\n' "$(printf '%s' 'git@github.com:owner/repo.git')" \
+    > "${box}/forge-alone/remote.txt"
+  printf 'scp %s%s:/var/log/run.log .\n' 'someone@' 'box.example.net' \
+    > "${box}/private-host/remote.txt"
+  printf 'clone %s and warn %s%s\n' "$(printf '%s' 'git@github.com:owner/repo.git')" \
+    'someone@' 'evil.example.net:' > "${box}/forge-and-private/remote.txt"
+  expect_exit "ssh-user-at-host: a forge remote form is a declared exception" 0 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/forge-alone"
+  expect_exit "ssh-user-at-host: a private host is not exempted by any declared form" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/private-host"
+  expect_exit "ssh-user-at-host: a private host beside an exempt one still fires" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/forge-and-private"
+
+  # THE PATTERN HALF READS THE SAME NORMALISED VIEW AS THE HASH HALF -- ruled
+  # 2026-09-12 on #72: "the gate scans content as it would be read... [so]
+  # normalise once ... then run both halves over the result." A fresh-instance
+  # review of #83 found this specific claim uncovered: `hygiene-decode.py`'s
+  # raw-content mirror (`raw_normalized = decoding.normalized(text)`) had no
+  # fixture at all, so deleting the whole branch stayed green -- measured, and
+  # fixed here rather than only noted.
+  #
+  # A zero-width space between a private host's first label and its dot
+  # breaks the colon form's `(\.[A-Za-z0-9-]+)+:` requirement in the RAW
+  # bytes, and carries no ssh/scp/rsync keyword, so neither alternative in
+  # the pattern matches unread. `Default_Ignorable_Code_Point` is stripped
+  # before either half sees this file's decoded view, the shape re-forms,
+  # and the pattern half catches it there -- the digest half's zero-width
+  # case, over again for the half that matches by shape instead of by hash.
+  mkdir -p "${box}/private-host-zwsp"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'remote = someone@bo' + '​' + 'x.example.net:/var/log/run.log .\n')
+" "${box}/private-host-zwsp/remote.txt"
+  expect_exit "ssh-user-at-host: a host split by a zero-width space is still found" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/private-host-zwsp"
+  # The control: the SAME bytes, matched directly against the pattern's own
+  # shape, are not a hit. Without it the assertion above could pass because
+  # the pattern is loose, not because the mirror caught anything.
+  expect_exit "and the same zero-width host, unread, is not a hit" 1 \
+    grep -qiE '(^|[^A-Za-z0-9._-])([A-Za-z0-9._-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+:|(ssh|scp|rsync)[[:space:]]+[A-Za-z0-9._-]+@[A-Za-z0-9-]+)' \
+      "${box}/private-host-zwsp/remote.txt"
+
+  # A DECLARED EXCEPTION CONTAINING A SLASH IS A REFUSAL, NOT A FINDING. A
+  # fresh-instance review of #83 found `sed -E "s/${exception}//${sed_flags}"`
+  # breaks its own delimiter on an unescaped `/`, and under this file's
+  # `set -e`, the unchecked failure killed the whole scan with EXIT_DIRTY (1,
+  # "found something") before the line that tripped it was ever reported --
+  # so a malformed row in a maintainer's own table read as a commit to
+  # rewrite. A synthetic pattern and a slash-bearing exception, never the
+  # real tables.
+  mkdir -p "${box}/broken-exception"
+  printf 'custom-label\t-\tprivate@[a-z.]+:\n' > "${box}/broken-exception-patterns.tsv"
+  printf 'custom-label\tprivate@|https://forge\\.example\\.com/\n' \
+    > "${box}/broken-exception-exceptions.tsv"
+  printf 'remote = %s%s:/srv\n' 'private@host' '.example' \
+    > "${box}/broken-exception/remote.txt"
+  expect_exit "a declared exception with an unescaped slash is refused, not misreported" 2 \
+    bash "${ROOT}/scripts/hygiene.sh" --patterns "${box}/broken-exception-patterns.tsv" \
+      --tree "${box}/broken-exception"
+
+  # BOTH SPELLINGS OF ONE LITERAL, ONE DIGEST -- ruled 2026-09-12 on #72.
+  # `--emit` computes the row from the NFC form; a file carrying the NFD
+  # spelling of the SAME name must be caught by that same row, because
+  # `decoding.normalized` composes before it tokenises. A synthetic table,
+  # never the real `hygiene-hashes.txt`: this proves the mechanism, not a
+  # claim about what this repository's own digests happen to guard.
+  local nfc_name nfd_name nfc_row salt_line table
+  nfc_name="$(python3 -c 'import unicodedata; print(unicodedata.normalize("NFC", "café"))')"
+  nfd_name="$(python3 -c 'import unicodedata; print(unicodedata.normalize("NFD", "café"))')"
+  [ "$nfc_name" != "$nfd_name" ] || {
+    echo "verify: the NFC/NFD probe strings collapsed to one spelling" >&2
+    exit "$EXIT_FAIL"
+  }
+  nfc_row="$(python3 "${ROOT}/scripts/check-hashes.py" --emit "$nfc_name" probe-name)"
+  table="${box}/nfc-nfd-hashes.txt"
+  {
+    echo "# Salt: discipline-hygiene-v1"
+    echo "$nfc_row"
+  } > "$table"
+  mkdir -p "${box}/nfc-form" "${box}/nfd-form"
+  printf 'owner: %s\n' "$nfc_name" > "${box}/nfc-form/owner.txt"
+  printf 'owner: %s\n' "$nfd_name" > "${box}/nfd-form/owner.txt"
+  expect_exit "check-hashes: the NFC spelling matches its own row" 1 \
+    bash -c "printf '%s\0' '${box}/nfc-form/owner.txt' \
+      | python3 '${ROOT}/scripts/check-hashes.py' --table '$table'"
+  expect_exit "check-hashes: the NFD spelling of the same name matches too" 1 \
+    bash -c "printf '%s\0' '${box}/nfd-form/owner.txt' \
+      | python3 '${ROOT}/scripts/check-hashes.py' --table '$table'"
+  expect_exit "check-hashes: --emit refuses a decomposed literal" 2 \
+    python3 "${ROOT}/scripts/check-hashes.py" --emit "$nfd_name" probe-name
 
   # The results-fixture loop grades on the class the manifest declares, so the
   # emission is load-bearing: a `failure_class` nothing prints is a field the
@@ -5992,6 +6249,8 @@ selftest() {
     'carries .branches: \[main\]. and is reached'
   seeded_case "CI narrowing the test check"           ci       inject_ci_scoped_test \
     'passes .--scope. to verify\.sh'
+  seeded_case "CI narrowing the history check"        ci       inject_ci_ranged_history \
+    'passes .--range. to verify\.sh'
   seeded_case "the trunk gated by no push run"        ci       inject_ci_push_ungated \
     'and has no .push:. trigger'
   seeded_case "one workflow renaming the trunk"       ci       inject_ci_trunk_typo \
@@ -6305,6 +6564,62 @@ selftest() {
       printf 'RED   exit %-3d %-46s %s\n' "$rc" "$name" "$want"
     fi
   done
+
+  # LANE-DECLARED FAULTS, ONE `seeded_case` PER FAULT, GENERATED RATHER THAN
+  # WRITTEN OUT. `apply-lane-faults.py --list` is the one reader of the lane
+  # manifests and the root registry; a hand-maintained list of 123 rows here
+  # would be exactly the thing this repository refuses everywhere else --
+  # a list nobody can re-derive is a list that was right when it was
+  # written. `LANE_FAULT_LANE`/`LANE_FAULT_ID` are read by `inject_lane_fault`
+  # in the subshell `seeded_case` runs it in.
+  #
+  # The signature is the fault's OWN FIRST `catches` NAME, read out of the
+  # manifest -- never typed here -- so a case cannot go WRONG by drifting
+  # from prose nobody re-checks against a run. `check` is always `lanes`:
+  # every lane fault is proven through the one check that runs every
+  # registered lane's own command, whichever lane the fault belongs to.
+  # The signature is used verbatim as an ERE against the fault's own log --
+  # not escaped, because every one is a Rust path (`mod::mod::tests::name`),
+  # and a colon or underscore is not a metacharacter. The seeded fixtures
+  # below prove the wiring; the shape of the data is what makes that safe.
+  # `sc_inject`, NOT the literal `inject_lane_fault`, at the call site below.
+  # `gatelib.seeded_cases()` -- the shared static reader `check-fault-
+  # manifest.py` and `check-injections.py` both trust -- finds a case by
+  # `shlex.split`-ing each line and checking whether its THIRD WORD starts
+  # with `inject_`, with no bash evaluation at all. A literal `inject_
+  # lane_fault` in this loop's own source line would satisfy that test on
+  # the GENERATOR's one line of code, adding a phantom `lanes.lane_fault`
+  # seeded-gate case nothing runs and the manifest cannot describe -- caught
+  # by running `check-fault-manifest.py` against this loop's first draft, not
+  # foreseen. A variable reference is identical at RUN TIME, since bash
+  # expands it before `seeded_case` ever sees the value, and invisible to a
+  # reader that never evaluates anything.
+  #
+  # `sc_call`, NOT the literal `seeded_case`, for the same reason one layer
+  # up. `scripts/check-merge-gate.py` holds a second, cruder census of its
+  # own -- "the shared reader agrees with verify.sh's own count of cases" --
+  # that counts every line STARTING WITH THE WORD `seeded_case` and compares
+  # that count against how many `gatelib.seeded_cases()` actually parses, to
+  # catch a reader that silently drops a real case. This loop's one call
+  # site is not a real case to either reader (its arguments are template
+  # variables, not the case gatelib rejects above), but its source line
+  # still spelled the literal word `seeded_case`, so the crude counter
+  # counted it while the careful one, correctly, did not -- 250 spelled
+  # against 249 parsed, caught by `check-merge-gate.py`'s own fixture, not
+  # foreseen either. Indirecting the call word too removes it from both
+  # counts equally, which is the only count this generator should ever be
+  # in: zero.
+  sc_call="seeded_case"
+  sc_inject="inject_lane_fault"
+  while IFS=$'\t' read -r lane fault_id signature failure_class || [ -n "${lane:-}" ]; do
+    [ -n "$lane" ] || continue
+    LANE_FAULT_LANE="$lane" LANE_FAULT_ID="$fault_id"
+    # `fault_id` is already lane-prefixed (every gate.toml declares it that
+    # way), so `${lane}.` here duplicated it -- "lane: isolation.isolation.…"
+    # -- a fresh-instance review of #83 found this, cosmetic but repeated
+    # across all 123 generated cases.
+    "$sc_call" "lane: ${fault_id}" lanes "$sc_inject" "$signature"
+  done < <(python3 "${ROOT}/scripts/apply-lane-faults.py" --list)
 
   prove_mechanics
 
@@ -6705,6 +7020,79 @@ EOF
   expect_exit "a census claiming to be a shard that cannot exist" 1 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/impossible-shard"
 
+  # THE LANE-GATE APPLIER'S OWN THREE RULES, ruled on #76: a registry entry
+  # naming no manifest, a manifest on disk with no registry entry, and (its
+  # own guard against a truly EMPTY registry, since a registry of nothing
+  # pins nothing and would call any tree clean). Over a SYNTHETIC root, never
+  # this repository's own -- the point is the mechanism, and the real
+  # `tools/gate/lanes.toml` is exercised for real by `check_lanes` on every
+  # ordinary run.
+  local lanes_root; scratch; lanes_root="$SCRATCH"
+  mkdir -p "${lanes_root}/present/tools/gate" "${lanes_root}/present/diet/alpha"
+  cat > "${lanes_root}/present/tools/gate/lanes.toml" <<'EOF'
+[lanes]
+alpha = "diet/alpha/gate.toml"
+EOF
+  cat > "${lanes_root}/present/diet/alpha/gate.toml" <<'EOF'
+[package]
+name = "synthetic-alpha"
+check = "test"
+command = "true"
+faults = 0
+EOF
+  expect_exit "a lane registry naming one present manifest is clean" 0 \
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/present" --verify
+
+  mkdir -p "${lanes_root}/absent/tools/gate"
+  cat > "${lanes_root}/absent/tools/gate/lanes.toml" <<'EOF'
+[lanes]
+alpha = "diet/nowhere/gate.toml"
+EOF
+  expect_exit "a registry entry naming no manifest is a finding" 1 \
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/absent" --verify
+
+  mkdir -p "${lanes_root}/orphan/tools/gate" "${lanes_root}/orphan/diet/alpha" \
+    "${lanes_root}/orphan/diet/beta"
+  cp "${lanes_root}/present/tools/gate/lanes.toml" "${lanes_root}/orphan/tools/gate/lanes.toml"
+  cp "${lanes_root}/present/diet/alpha/gate.toml" "${lanes_root}/orphan/diet/alpha/gate.toml"
+  cp "${lanes_root}/present/diet/alpha/gate.toml" "${lanes_root}/orphan/diet/beta/gate.toml"
+  expect_exit "a manifest on disk with no registry entry is a finding" 1 \
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/orphan" --verify
+
+  mkdir -p "${lanes_root}/empty/tools/gate"
+  printf '[lanes]\n' > "${lanes_root}/empty/tools/gate/lanes.toml"
+  expect_exit "a registry of nothing pins nothing, and cannot run" 2 \
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/empty" --verify
+
+  mkdir -p "${lanes_root}/broken/tools/gate" "${lanes_root}/broken/diet/alpha"
+  cp "${lanes_root}/present/tools/gate/lanes.toml" "${lanes_root}/broken/tools/gate/lanes.toml"
+  cat > "${lanes_root}/broken/diet/alpha/gate.toml" <<'EOF'
+[package]
+name = "synthetic-alpha"
+check = "test"
+command = "false"
+faults = 0
+EOF
+  expect_exit "a registered lane whose own command fails is a finding" 1 \
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/broken" --verify
+
+  # `shell=True` means "the shell could not find the program" is an ordinary
+  # nonzero exit FROM THE SHELL (127), not a Python-level failure to launch
+  # anything at all -- so this is still the DIRTY path, exit 1, and the case
+  # says so rather than assuming a spelling mistake in a manifest is somehow
+  # a different class of failure from a test that fails.
+  mkdir -p "${lanes_root}/wrecked/tools/gate" "${lanes_root}/wrecked/diet/alpha"
+  cp "${lanes_root}/present/tools/gate/lanes.toml" "${lanes_root}/wrecked/tools/gate/lanes.toml"
+  cat > "${lanes_root}/wrecked/diet/alpha/gate.toml" <<'EOF'
+[package]
+name = "synthetic-alpha"
+check = "test"
+command = "exit-not-a-real-binary-xyz"
+faults = 0
+EOF
+  expect_exit "a command the shell cannot find is still a finding, not broken" 1 \
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/wrecked" --verify
+
   # --- nothing is read from a half-merged file ---
   #
   # This gate has two inputs and both of them conflict routinely: `faults.toml`
@@ -6727,10 +7115,19 @@ EOF
   local halfmerged side; scratch; halfmerged="$SCRATCH"
   for side in verify manifest; do
     mkdir -p "${halfmerged}/${side}/scripts" "${halfmerged}/${side}/tools/gate"
+    # `apply-lane-faults.py` and its registry, alongside the two scripts
+    # already copied: `observed()` now shells out to `--list` to count lane
+    # faults into the red total, so a copy missing either one made `--count-
+    # red` exit 2 -- BROKEN, not the tolerated mid-merge answer -- over a
+    # dependency this fixture predates. The registry's own five lanes are not
+    # copied, so `--list` reports each as a missing manifest and answers zero
+    # lane faults; that undercounts the total this synthetic copy prints, but
+    # the case below asks only whether the count is ANSWERED, not what it is.
     cp "${ROOT}/scripts/check-fault-manifest.py" "${ROOT}/scripts/gatelib.py" \
-      "${halfmerged}/${side}/scripts/"
+      "${ROOT}/scripts/apply-lane-faults.py" "${halfmerged}/${side}/scripts/"
     cp "${ROOT}/verify.sh" "${halfmerged}/${side}/verify.sh"
     cp "${ROOT}/tools/gate/faults.toml" "${halfmerged}/${side}/tools/gate/faults.toml"
+    cp "${ROOT}/tools/gate/lanes.toml" "${halfmerged}/${side}/tools/gate/lanes.toml"
   done
   # One marker apiece, of the kind git writes, on the file whose turn it is.
   # `=======` alone is deliberately not enough to trip this -- it is a
@@ -6893,6 +7290,15 @@ while [ "$#" -gt 0 ]; do
       VERIFY_TEST_SCOPE="$2"
       shift 2
       ;;
+    --range)
+      [ "$#" -ge 2 ] || { echo "verify: --range needs A..B" >&2; exit "$EXIT_MISUSE"; }
+      case "$2" in
+        *..*) ;;
+        *) echo "verify: --range wants A..B, not '$2'" >&2; exit "$EXIT_MISUSE" ;;
+      esac
+      VERIFY_HISTORY_RANGE="$2"
+      shift 2
+      ;;
     --shard)
       [ "$#" -ge 2 ] || { echo "verify: --shard needs K/N" >&2; exit "$EXIT_MISUSE"; }
       shard_arg="$2"
@@ -6954,6 +7360,17 @@ if [ -n "$VERIFY_TEST_SCOPE" ] &&
    { [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ] ||
      [ "${selected[0]-}" != "test" ]; }; then
   echo "verify: --scope narrows the test check, so it needs exactly --only test" >&2
+  exit "$EXIT_MISUSE"
+fi
+
+# A range narrows ONE check, the same way a scope does, and for a sharper
+# reason: `history` INFERS its range when none is given, so a `--range` left
+# loose would read as "everything was scanned" over a run in which fifteen
+# checks ignored it and the sixteenth scanned a slice somebody else chose.
+if [ -n "$VERIFY_HISTORY_RANGE" ] &&
+   { [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ] ||
+     [ "${selected[0]-}" != "history" ]; }; then
+  echo "verify: --range narrows the history check, so it needs exactly --only history" >&2
   exit "$EXIT_MISUSE"
 fi
 

@@ -29,6 +29,11 @@ Determining the range:
                 `before` is all zeros, the merge base with the default branch
   otherwise     origin/<default>..HEAD -- the history you have not published
 
+`--range A..B` overrides all three. It is how a CI red is reproduced on the
+machine that caused it: the inferred range is empty on a checkout that matches
+the trunk, so the default cannot replay a push's verdict. An explicit range is
+never inferred and never defaulted to.
+
 **A base that cannot be determined is a failure, never an empty scan.** That
 is the whole point: silently scanning nothing is how a gate reports success
 over history it never read. An empty RANGE is different and is fine locally --
@@ -225,7 +230,33 @@ def main(argv: list[str]) -> int:
         out = pathlib.Path(work)
         patches = 0
         for sha in shas:
-            body = git("log", "-1", "--format=%B%n%an <%ae>", sha)
+            # `%B` -- the BODY, and nothing from the identity fields.
+            #
+            # A CORRECTION, ruled on #81. This read `%B%n%an <%ae>`, appending
+            # the author line so that it went through the content table along
+            # with the message. That is a category error. The table's threat
+            # model is CONTENT -- a private path, an address, a name that
+            # lands in prose or in a log -- while a commit's author and
+            # committer are metadata the platform publishes on every commit
+            # page whatever this gate does, and the maintainer's handle is the
+            # repository's own owner string.
+            #
+            # It produced one red with three faces, which is how the single
+            # cause was found. A merge made through the platform's API stamps
+            # the authenticated account as the author and offers no way to set
+            # it, so the merge button reddened the trunk where a local client
+            # did not. 65 commits already on the default branch could not have
+            # passed a rule that was never meant to reach them. And none of it
+            # reproduced locally, because the inferred range is empty on a
+            # checkout that matches the trunk.
+            #
+            # Held by a PAIR of assertions in verify.sh, the same literal on
+            # both sides: in a commit BODY it is a finding, in the author line
+            # it is not. Neither alone says anything -- without the first,
+            # deleting the pattern from the table satisfies the second; without
+            # the second, scanning the identity fields again satisfies the
+            # first.
+            body = git("log", "-1", "--format=%B", sha)
             (out / f"commit-{sha[:12]}.txt").write_text(body + "\n", encoding="utf-8")
             # `--format=` so the message is not scanned twice, and NO `-m`.
             #

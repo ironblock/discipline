@@ -13,6 +13,10 @@
 #   hygiene.sh --patterns FILE   use a different pattern table
 #   hygiene.sh --hashes FILE     use a different digest table
 #
+# A pattern table FOO-patterns.tsv may carry a sibling FOO-exceptions.tsv --
+# see that file's own header. Optional: a table with no sibling has none, and
+# behaves exactly as it did before this existed.
+#
 # CONTENT IS SCANNED AS A READER WOULD SEE IT, not only as it is stored. The
 # artefacts this gate exists for arrive JSON-escaped, where a newline is the
 # two characters `\` and `n` -- so a token right after one has a literal `n`
@@ -82,6 +86,30 @@ done
 [ -f "$patterns_file" ] || {
   echo "hygiene: no pattern file at $patterns_file" >&2
   exit "$EXIT_BROKEN"
+}
+
+# The sibling exceptions file, by name, and only for a table spelled the
+# expected way -- a caller naming some other file gets no exceptions rather
+# than one derived from a guess at what it meant.
+exceptions_file=""
+case "$patterns_file" in
+  *-patterns.tsv) exceptions_file="${patterns_file%-patterns.tsv}-exceptions.tsv" ;;
+esac
+
+# The declared exception regex for pattern LABEL, or nothing if it has none.
+# Read fresh per call rather than cached in an associative array: this script
+# targets plain POSIX-ish bash rather than bash 4's associative arrays, and
+# the file is small and read once per PATTERN, not once per hit.
+exception_for() {
+  local want="$1" ex_label ex_regex
+  [ -n "$exceptions_file" ] && [ -f "$exceptions_file" ] || return 0
+  while IFS=$'\t' read -r ex_label ex_regex || [ -n "${ex_label:-}" ]; do
+    case "$ex_label" in ''|\#*) continue ;; esac
+    if [ "$ex_label" = "$want" ] && [ -n "${ex_regex:-}" ]; then
+      printf '%s' "$ex_regex"
+      return 0
+    fi
+  done < "$exceptions_file"
 }
 
 if grep -qE '^#[[:space:]]*scan:[[:space:]]*all[[:space:]]*$' -- "$patterns_file"; then
@@ -203,6 +231,13 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
   opts=(-n -a -H -E)
   case "${flags:-}" in *i*) opts+=(-i) ;; esac
 
+  # Read once per PATTERN, not once per hit. A declared exception does not
+  # touch $regex itself -- it is a subtraction applied to a matched LINE,
+  # below, so the pattern keeps the exact shape it was written with.
+  exception="$(exception_for "$label")"
+  sed_flags="g"
+  case "${flags:-}" in *i*) sed_flags="gI" ;; esac
+
   targets=("${text_files[@]}")
   case "${flags:-}" in
     *b*) targets+=(${binary_files+"${binary_files[@]}"}) ;;
@@ -219,6 +254,31 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
       0)
         while IFS= read -r line; do
           [ -n "$line" ] || continue
+          if [ -n "$exception" ]; then
+            # Remove every occurrence of the declared-safe form from the
+            # line, then ask the UNCHANGED pattern whether anything is left.
+            # If nothing is, every hit on this line was a forge's own remote
+            # form (or whatever else was declared) and the line is clean; a
+            # line carrying a private form beside a public one still has
+            # something left over and still fires below.
+            #
+            # THE EXIT STATUS IS CHECKED, not just the output. An exception
+            # regex containing an unescaped `/` breaks `sed -E "s/${exception}
+            # //${sed_flags}"`'s own delimiter -- a fresh-instance review of
+            # #83 reproduced it -- and unchecked, that failure did two wrong
+            # things at once under `set -e`: it killed the whole scan with
+            # EXIT_DIRTY (1, "found something") rather than EXIT_BROKEN (2,
+            # "could not run"), and it did so before the line that tripped it
+            # was ever reported, so the exit code that told an operator to go
+            # rewrite commits was raised by a malformed exception table, not
+            # by anything committed. Refused here, by name, instead.
+            if ! stripped="$(printf '%s' "$line" | sed -E "s/${exception}//${sed_flags}")"; then
+              echo "hygiene: the exception for '${label}' could not be applied" \
+                "to a matched line -- check it is a valid, slash-free POSIX ERE" >&2
+              exit "$EXIT_BROKEN"
+            fi
+            printf '%s' "$stripped" | grep -qE "$regex" || continue
+          fi
           # A hit in the mirror is a hit in the file it was decoded from, and
           # says so. Reporting the temporary path would name a file that is
           # gone by the time anyone reads the message.

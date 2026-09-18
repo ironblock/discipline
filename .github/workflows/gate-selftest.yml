@@ -42,6 +42,37 @@ jobs:
       - name: Resolve the pinned toolchain
         run: cargo --version
 
+      # The isolation lane's seeded faults need a sandbox to execute
+      # against, same as `pkg-diet.yml`'s own copy of these three steps --
+      # without `bwrap` the lane asserts a correct REFUSAL and passes, which
+      # is exactly what let `lane: isolation.isolation.the-escape-census-
+      # under-reports` fire GREEN here rather than RED (#83): #76's applier
+      # is what wires lane faults into `--selftest` at all, so this gap was
+      # unreachable before it and is this PR's to close. Every shard gets
+      # it, not just whichever one draws an isolation fault -- sharding is a
+      # division of labour, never a selection, per this file's own header,
+      # so which shard that lands on is not something to predict.
+      - name: Install the sandbox the isolation lane confines with
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
+      # THE ONE RELAXED CONTROL, NAMED, per `pkg-diet.yml` and its ruling on
+      # #74: Ubuntu 24.04 refuses unprivileged user namespaces, which is
+      # what `bwrap` builds every sandbox out of, so without this no
+      # composition starts and the isolation lane's seeded escapes cannot
+      # execute here either. Tolerant rather than fatal: if the sysctl
+      # cannot be set, the honest signal is the isolation tests failing
+      # with their own message about the mechanism, not this step erroring
+      # first and hiding it.
+      - name: Permit the user namespaces the sandbox is built from
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 \
+            || echo "::warning::the userns restriction could not be relaxed; the isolation tests will say so"
+
+      # And say so, which is what makes the refusal branch a failure HERE
+      # and nowhere a contributor's own machine lacks `bwrap`.
+      - name: Declare this a host where the sandbox is required
+        run: echo "DIET_REQUIRE_SANDBOX=1" >> "$GITHUB_ENV"
+
       - name: ./verify.sh --selftest --shard ${{ matrix.shard }}
         run: >-
           ./verify.sh --selftest

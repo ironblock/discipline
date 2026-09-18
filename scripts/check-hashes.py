@@ -31,7 +31,7 @@ invisible byte behind -- and not an adversary. Three consequences, stated so
 that none of them is later mistaken for an oversight:
 
   * A literal carrying a character of NO VISUAL WIDTH is still caught.
-    `decoding.tokens` drops every code point Unicode marks
+    `decoding.normalized` drops every code point Unicode marks
     `Default_Ignorable_Code_Point`, plus the combining marks, on the rule that
     a character nobody can see is not a separator. It is the one evasion that
     survives review and `git diff` unaided, so it is in scope even though it
@@ -43,6 +43,15 @@ that none of them is later mistaken for an oversight:
     filler is category `Lo` and `isalnum()` true: it welds INTO a token
     instead of splitting it, so no set of categories could reach it, and the
     promise above was unqualified while the code behind it was not.
+  * BOTH SPELLINGS OF THE SAME LITERAL ARE ONE DIGEST -- ruled 2026-09-12 on
+    #72. `decoding.normalized` composes to NFC before it strips, so a name
+    typed as a precomposed accent and the same name typed as a base letter
+    plus a combining one hash identically; before this, only the decomposed
+    spelling lost its accent to the strip above, and the composed spelling
+    walked past every row built from it. `--emit` REFUSES a literal that is
+    not already in its own NFC form, through `decoding.is_nfc` -- the same
+    test the scanner's tokeniser now applies via `normalized` -- so a row is
+    never written from a spelling the scanner would silently rewrite.
   * A literal spelled in CONFUSABLE characters -- a hostname transliterated
     into Cyrillic -- is NOT caught, and that is a decision rather than a gap.
     Anyone who can do it has commit access and can defeat any pattern too; a
@@ -55,7 +64,10 @@ that none of them is later mistaken for an oversight:
     honest; an undeclared one is the vacuous class.
 
 `--emit` still refuses a literal that is more than one token: a row matches
-one token, and every fix above is on the SCANNING side.
+one token. The NFC fix above touches `--emit` too, on purpose: a row is a
+promise about what the scanner will catch, and that promise is kept by both
+ends reading the same spelling rule rather than by the emitter guessing at
+the scanner's behaviour.
 
 Reads NUL-separated paths on stdin, or walks `--tree DIR`.
 
@@ -189,6 +201,16 @@ def main(argv: list[str]) -> int:
 
     if args.emit:
         literal, label = args.emit
+        if not decoding.is_nfc(literal):
+            print(
+                f"check-hashes: {literal!r} is not NFC; pass the composed "
+                f"spelling, since that is the one form the scanner's own "
+                f"normalisation cannot be mistaken for -- both hash the "
+                f"same either way, but a row is never written from a "
+                f"spelling nobody typed",
+                file=sys.stderr,
+            )
+            return EXIT_BROKEN
         tokenised = decoding.tokens(literal)
         if len(tokenised) != 1:
             print(

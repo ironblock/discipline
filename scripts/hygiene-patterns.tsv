@@ -10,21 +10,24 @@
 # /usr/bin/git, and a gate that cries wolf on every binary is a gate
 # people switch off.
 #
-# WHAT A PATTERN HERE DOES NOT SEE, and this is the place to say it because
-# this is the file somebody opens when they add a credential shape.
+# WHAT A PATTERN HERE SEES, and this is the place to say it because this is
+# the file somebody opens when they add a credential shape.
 #
-# The rows here are matched BY SHAPE, against the file's text and its decoded
-# view. They do NOT go through `scripts/decoding.py`'s `tokens()`, so the
-# invisible-character strip that protects the DIGEST half does not protect
-# these. Measured: an AWS-key-shaped literal broken by a zero-width space
-# scans clean, while the same key without it is caught.
+# The rows here are matched BY SHAPE, against the file's text AND a second
+# view `hygiene-decode.py` mirrors beside it: every string a JSON escape hid,
+# and the file's own content, both NFC-composed with every invisible or
+# combining code point removed -- `decoding.normalized()`, the same function
+# the digest half's tokeniser calls. Ruled 2026-09-12 on #72, closing what
+# this header used to declare as open: a shaped literal broken by a
+# zero-width space, or split across an accent's decomposed spelling, used to
+# scan clean here while the digest half already caught its shapeless cousin.
+# Measured before the close: an AWS-key-shaped literal with a zero-width
+# space inside scanned clean; after, it is caught the same as the intact key.
 #
-# So a shaped secret split by a character that renders as nothing evades
-# every row in this file. That is declared at `decoding.py`'s `tokens()` too,
-# and it was declared ONLY there until a fresh instance pointed out that a
-# maintainer adding a row reads this header and not that docstring. Closing
-# it means deciding what the shape patterns are allowed to see, which is a
-# rule about this table rather than a scanner change -- open on #72.
+# A row here may declare an EXCEPTION in the sibling `hygiene-exceptions.tsv`
+# -- a data-driven carve-out for a form this repository has decided is not
+# private (a public forge's own SSH remote), never a loosening of the
+# pattern's own shape. See that file's header.
 #
 # `scripts/hygiene.sh` fails the build if any tracked file matches any
 # pattern here. This file is the only file the scan skips: it is the one

@@ -21,6 +21,7 @@ clippy	diet
 test	diet
 library	diet
 regimen	diet
+lanes	diet
 
 # --- results: the claim-with-evidence invariant. Owned by diet since the
 # record's format verdict comes from `diet check-record`, and a job without

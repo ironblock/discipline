@@ -12,9 +12,11 @@ and each has bitten real projects:
     requests against every other branch then have no run at all. (The same
     filter on `push` is the opposite: it stops a sha being gated twice, once
     per event, and skips nothing a pull request covers.)
-  * A `--scope` passed to verify.sh from a gating workflow. It narrows the
-    test check to part of the suite, which is a gate running less than it says
-    while reporting the same green.
+  * A NARROWING FLAG passed to verify.sh from a gating workflow: `--scope`,
+    which runs part of the test suite, or `--range`, which scans part of the
+    history. Either is a gate running less than it says while reporting the
+    same green. They are refused by one rule and one table, because the next
+    such flag must be refused by adding a row rather than by remembering.
   * A `paths:` filter on a gate workflow. A skipped job is not a failed job:
     `!failure()` passes on skipped, and a whole workflow filtered out leaves
     its required check pending forever. Path filtering is therefore banned on
@@ -54,7 +56,18 @@ JOBS_BLOCK = re.compile(r"^jobs:\s*$", re.MULTILINE)
 NEEDS = re.compile(r"^\s*needs:\s*\[([^\]]*)\]\s*$", re.MULTILINE)
 PATH_FILTER = re.compile(r"^\s*paths(-ignore)?:\s*$", re.MULTILINE)
 WORKFLOW_CALL = re.compile(r"^\s*workflow_call:\s*$", re.MULTILINE)
-SCOPE_FLAG = re.compile(r"--scope\b")
+# Flags that make verify.sh do LESS, and what each one narrows. A workflow
+# that gates may spell none of them. One table so that a flag added to the
+# script is refused here by a row, not by whoever remembers this rule exists.
+NARROWING_FLAGS = (
+    ("--scope", re.compile(r"--scope\b"),
+     "narrows the test check to part of the suite; the selftest scopes its own "
+     "sandboxes and CI must not"),
+    ("--range", re.compile(r"--range\b"),
+     "narrows the history check to a slice somebody chose; the range CI must "
+     "scan is the one its event names, and a chosen one is a gate reading past "
+     "what was pushed"),
+)
 BRANCH_KEY = re.compile(r"^ {4,}branches:\s*(.*)$")
 BRANCH_IGNORE = re.compile(r"^ {4,}branches-ignore:")
 INLINE_LIST = re.compile(r"^\[([^\]]*)\]$")
@@ -251,18 +264,20 @@ def main() -> int:
                 f"A skipped job is not a failed job, and a filtered-out workflow leaves "
                 f"its required check pending forever"
             )
-        # `verify.sh --only test --scope SPEC` runs a fraction of the tests. It
-        # exists for the selftest's sandboxes, where one fault is being asked
-        # about one gate, and `--selftest` passes it per case from inside. A
-        # workflow that spells it is a gate running less than it says while
-        # reporting the same green, which is path filtering wearing a
-        # different hat.
-        if SCOPE_FLAG.search(text) and wf.name in gating:
-            failures.append(
-                f"{wf.name}: passes `--scope` to verify.sh and is reached from the "
-                f"gate's `needs`. That narrows the test check to part of the suite; "
-                f"the selftest scopes its own sandboxes and CI must not"
-            )
+        # `verify.sh --only test --scope SPEC` runs a fraction of the tests;
+        # `verify.sh --only history --range A..B` scans a fraction of the
+        # history. Both exist for a caller who already knows what they are
+        # asking about -- the selftest's sandboxes, and a person reproducing a
+        # CI verdict on their own machine. A workflow that spells either is a
+        # gate running less than it says while reporting the same green, which
+        # is path filtering wearing a different hat.
+        if wf.name in gating:
+            for flag, pattern, why in NARROWING_FLAGS:
+                if pattern.search(text):
+                    failures.append(
+                        f"{wf.name}: passes `{flag}` to verify.sh and is reached "
+                        f"from the gate's `needs`. That {why}"
+                    )
 
     # 5. no gating workflow may filter its pull-request trigger by branch
     for wf in sorted(WORKFLOWS.glob("*.yml")):

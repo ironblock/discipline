@@ -1,15 +1,32 @@
 #!/usr/bin/env python3
-"""Materialise the decoded view of every file that has one.
+"""Materialise the decoded, normalised view of every file that has one.
 
 `hygiene.sh` scans files with `grep`, and `grep` reads bytes. The bytes of a
 captured log are JSON-escaped, so a pattern that guards prose does not guard
 logs -- which is where the artefacts live. This writes a MIRROR: for every
-input file whose content carries encoded strings, a file under `--into`
-holding those strings decoded, at the same relative path.
+input file whose content carries encoded strings, or whose bytes are not
+already what `decoding.normalized` would make of them, a file under `--into`
+holding that content, at the same relative path.
+
+TWO THINGS GO IN THE SAME MIRROR, and both are ruled 2026-09-12 on #72:
+
+  * `decoding.decoded_text` -- every string a JSON escape hid, unwelding a
+    token that landed right after `\n` the way a captured log writes it.
+  * `decoding.normalized` -- NFC composition and the invisible-character
+    strip, applied to BOTH the decoded strings above and the file's own
+    content, so a shaped literal broken by a zero-width space, or split
+    across an accent's two spellings, reaches the pattern half exactly as it
+    already reached the digest half's tokeniser.
+
+Before this, the pattern half of the gate -- `hygiene.sh`'s shaped literals,
+matched by `grep` -- had NEITHER: it saw only the JSON-unescaped strings, not
+the file's own bytes, and neither view was normalised. `decoding.py`'s own
+comment named that a declared gap; this closes it, and the file's mirror
+picture is written from the same `normalized()` the digest half calls.
 
 The scanner then greps the mirror beside the tree and says `(decoded)` when it
 reports a hit, so one pattern table covers both views and no pattern has to be
-loosened to reach through an escape.
+loosened to reach through an escape or a stray invisible character.
 
 Reads NUL-separated paths on stdin, so a filename may hold anything a
 filename may hold. Prints how many views it wrote.
@@ -81,14 +98,44 @@ def main(argv: list[str]) -> int:
             # 409 before, 410 after, the difference being that fixture --
             # `diet/formats/record/fixtures/invalid/not-utf8.jsonl`, the file
             # whose whole purpose is to hold bytes a reader must survive.
-            text = path.read_text(encoding="utf-8", errors="replace")
+            name_bytes = path.read_bytes()
+            text = name_bytes.decode("utf-8", errors="replace")
         except OSError:
             # Unreadable is a different thing from undecodable, and stays a
             # skip: there are no bytes to make a view out of.
             continue
-        view = decoding.decoded_text(text)
-        if not view:
+        # DECODE FIRST, THEN NORMALISE. An escaped newline still welds a
+        # token in an NFC string, so normalising ahead of the JSON unescape
+        # would leave it welded; decoding ahead of normalising does not,
+        # because by the time a code point can be composed or stripped, the
+        # escape that hid it from `grep` is already gone.
+        decoded = decoding.decoded_text(text)
+        parts = []
+        if decoded:
+            parts.append(decoding.normalized(decoded))
+        # The file's OWN content, normalised -- but ONLY for a file that is
+        # TEXT to begin with. A true binary decoded with `errors="replace"`
+        # is not prose with one stray byte; it is noise `unicodedata` reads
+        # as thousands of code points, some of them, by chance, ignorable or
+        # combining. Normalising it anyway manufactured a NEW mirror of
+        # scanner-visible "text" out of `/dev/urandom` and an ordinary ELF
+        # binary, and one of hygiene-patterns.tsv's loose heuristics found a
+        # false positive in it -- caught by the fixture built for exactly
+        # this, `an ordinary binary does not false-positive`.
+        #
+        # The `\0` TEST, not a repeat of `grep -I`'s own heuristic: this
+        # runs before hygiene.sh's binary/text split even exists, on every
+        # scanned path at once, and a NUL byte is the one signal genuine
+        # prose never carries while true binary content almost always does
+        # inside any reasonably sized sample -- 64KB of uniform random bytes
+        # carries one with probability indistinguishable from 1.
+        if b"\0" not in name_bytes:
+            raw_normalized = decoding.normalized(text)
+            if raw_normalized != text:
+                parts.append(raw_normalized)
+        if not parts:
             continue
+        view = "\n".join(parts)
         # A relative path keeps its shape under the mirror so a report can
         # name the file it came from by stripping one prefix.
         mirror = into / str(path).lstrip("/")
