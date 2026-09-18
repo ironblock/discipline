@@ -25,9 +25,11 @@
 //! strings, string escapes, exponents, `+` before a number, leading zeros,
 //! and underscores in numbers.
 //!
-//! Three rules this grammar cannot state, which the parser therefore enforces:
+//! Four rules this grammar cannot state, which the parser therefore enforces:
 //! a key may appear at most once in its own table, a table header may appear
-//! at most once in a document, and an integer literal must fit in an `i64`.
+//! at most once in a document, an integer literal must fit in an `i64`, and a
+//! table header must bind at least one key before the next header or the end
+//! of the document -- a header over nothing is a placeholder or a mistake.
 //! A two-segment header's parent is created if the document has not declared
 //! it, and a header may not take the name of a key already bound.
 

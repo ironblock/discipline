@@ -120,6 +120,18 @@ pub enum ParseError {
         /// The parent segment that is bound to a scalar.
         parent: String,
     },
+    /// A table header with no binding under it before the next header or the
+    /// end of the document.
+    ///
+    /// A header that binds nothing is either a placeholder or a mistake, and
+    /// both should be loud: an arm that "declares" `[serving]` and says
+    /// nothing under it has declared nothing, and `[serving.flags]` opens
+    /// `serving` on its own. Ruled on #51 (2026-09-15); narrowing is the
+    /// direction a subset may take.
+    EmptyTable {
+        /// The header that bound nothing.
+        name: String,
+    },
     /// The document opens a table whose name a top-level key already holds.
     ///
     /// Its own variant rather than a second spelling of `DuplicateTable`:
@@ -184,6 +196,12 @@ impl fmt::Display for ParseError {
                 f,
                 "table `{name}` has the name of a key the document already binds"
             ),
+            Self::EmptyTable { name } => write!(
+                f,
+                "table `{name}` binds nothing; a header with no key under it is a \
+                 placeholder or a mistake, and a nested header opens its parent \
+                 on its own"
+            ),
             Self::FloatNotADecimal { key, literal } => write!(
                 f,
                 "float `{literal}` bound to `{key}` is not a decimal the record \
@@ -215,6 +233,7 @@ impl Error for ParseError {
             | Self::DuplicateTable { .. }
             | Self::ParentIsNotATable { .. }
             | Self::TableShadowsKey { .. }
+            | Self::EmptyTable { .. }
             | Self::FloatNotADecimal { .. }
             | Self::IntegerOutOfRange { .. }
             | Self::UnexpectedRule { .. } => None,
@@ -230,6 +249,8 @@ impl Error for ParseError {
 /// [`ParseError::DuplicateKey`] if a key is bound twice in one table,
 /// [`ParseError::DuplicateTable`] if a header arrives twice,
 /// [`ParseError::TableShadowsKey`] if a header takes a top-level key's name,
+/// [`ParseError::EmptyTable`] if a header binds nothing before the next one
+/// or the end,
 /// [`ParseError::IntegerOutOfRange`] if an integer literal
 /// overflows `i64`, [`ParseError::FloatNotADecimal`] if the record's decimal
 /// constructor refuses a float this grammar accepted, and
@@ -253,9 +274,20 @@ pub fn parse(input: &str) -> Result<Regimen, ParseError> {
     // TOML, where a key after `[sampler]` is `sampler`'s and not the
     // document's.
     let mut table: Option<Vec<String>> = None;
+    // Whether the open table has bound a key yet. Checked when the next
+    // header arrives and again at the end, so a header with nothing under
+    // it is refused wherever it sits.
+    let mut bound = false;
     for pair in file.into_inner() {
         match pair.as_rule() {
             Rule::table_header => {
+                if let Some(segments) = &table
+                    && !bound
+                {
+                    return Err(ParseError::EmptyTable {
+                        name: segments.join("."),
+                    });
+                }
                 // Only the keys. `comment` is a non-silent rule, so a
                 // header with a trailing comment yields it as one more
                 // child -- and taking every child as a segment made
@@ -273,9 +305,11 @@ pub fn parse(input: &str) -> Result<Regimen, ParseError> {
                     .collect();
                 open_table(&mut entries, &segments)?;
                 table = Some(segments);
+                bound = false;
             }
             Rule::pair => {
                 let (key, value) = binding(pair)?;
+                bound = true;
                 let scope = match &table {
                     None => &mut entries,
                     Some(segments) => scope_of(&mut entries, segments),
@@ -294,6 +328,13 @@ pub fn parse(input: &str) -> Result<Regimen, ParseError> {
             }
             _ => {}
         }
+    }
+    if let Some(segments) = &table
+        && !bound
+    {
+        return Err(ParseError::EmptyTable {
+            name: segments.join("."),
+        });
     }
     Ok(Regimen { entries })
 }

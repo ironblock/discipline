@@ -1,0 +1,27 @@
+{
+  "name": {
+    "string": "gemma-12b-floor-vertex-smoke"
+  },
+  "sampler": {
+    "table": {
+      "enable_thinking": {
+        "boolean": true
+      },
+      "max_tokens": {
+        "integer": 4096
+      },
+      "preserve_thinking": {
+        "boolean": false
+      },
+      "temperature": {
+        "float": 1.0
+      },
+      "top_k": {
+        "integer": 64
+      },
+      "top_p": {
+        "float": 0.95
+      }
+    }
+  }
+}
