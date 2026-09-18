@@ -261,7 +261,22 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
             # form (or whatever else was declared) and the line is clean; a
             # line carrying a private form beside a public one still has
             # something left over and still fires below.
-            stripped="$(printf '%s' "$line" | sed -E "s/${exception}//${sed_flags}")"
+            #
+            # THE EXIT STATUS IS CHECKED, not just the output. An exception
+            # regex containing an unescaped `/` breaks `sed -E "s/${exception}
+            # //${sed_flags}"`'s own delimiter -- a fresh-instance review of
+            # #83 reproduced it -- and unchecked, that failure did two wrong
+            # things at once under `set -e`: it killed the whole scan with
+            # EXIT_DIRTY (1, "found something") rather than EXIT_BROKEN (2,
+            # "could not run"), and it did so before the line that tripped it
+            # was ever reported, so the exit code that told an operator to go
+            # rewrite commits was raised by a malformed exception table, not
+            # by anything committed. Refused here, by name, instead.
+            if ! stripped="$(printf '%s' "$line" | sed -E "s/${exception}//${sed_flags}")"; then
+              echo "hygiene: the exception for '${label}' could not be applied" \
+                "to a matched line -- check it is a valid, slash-free POSIX ERE" >&2
+              exit "$EXIT_BROKEN"
+            fi
             printf '%s' "$stripped" | grep -qE "$regex" || continue
           fi
           # A hit in the mirror is a hit in the file it was decoded from, and

@@ -2102,6 +2102,101 @@ mod tests {
         assert!(comparisons.len() >= 4 * 2);
     }
 
+    /// A row the embedder never placed at all refuses the RUN, not the cell.
+    ///
+    /// A fresh-instance review of #83 found `cells_of`'s two refusal
+    /// branches -- `ControlFailure::Unscorable` becoming `RunError::Control`,
+    /// and a `MetricError` other than `Undefined{on: Subject}` becoming
+    /// `RunError::Metric` -- had no coverage: inverting either into a cell
+    /// fact left 609 of 609 tests green. This closes the reachable half.
+    /// [`MetricSubject::FailureFixture`] and `InstrumentNeverFailed` stay
+    /// undemonstrated here; both require a metric's own hardcoded
+    /// self-check to be broken, which no cache built from real rows can
+    /// provoke through this crate's public entry point -- a declared gap,
+    /// not a silent one.
+    ///
+    /// One cache missing a register row's line entirely -- `Cached::load`
+    /// admits a file with any subset of rows, so this differs from the
+    /// "sunk" cache above, which places the row somewhere scoreable. Missing
+    /// is what a real embedder does to a row it could not place at all.
+    #[test]
+    fn a_row_no_cache_ever_placed_refuses_the_run() {
+        let dir = scratch("gappy");
+        std::fs::create_dir_all(&dir).expect("a directory");
+        let senses = sense::shipped_senses().expect("the shipped senses");
+        let rows = sense::register(&register_source()).expect("the shipped register");
+        let register_texts: Vec<String> = rows.iter().map(|row| row.text.clone()).collect();
+        let mut texts = register_texts.clone();
+        texts.extend(senses.iter().map(|sense| sense.text.clone()));
+        for scoring in sense::Scoring::ALL {
+            let (top, bottom) = scoring.extremes();
+            for set in sense::SenseSet::ALL {
+                let embedded =
+                    sense::EmbeddedSet::embed(&senses, *set, &Fixture).expect("an embeddable set");
+                texts.push(top.row(&embedded).text);
+                texts.push(bottom.row(&embedded).text);
+            }
+        }
+        texts.sort();
+        texts.dedup();
+        let missing = register_texts.first().expect("a register row").clone();
+
+        let mut gappy = String::new();
+        for text in &texts {
+            if *text == missing {
+                continue;
+            }
+            let vector = Fixture.embed(text);
+            let spelled: Vec<String> = vector.iter().map(|value| format!("{value:.8}")).collect();
+            let _ = writeln!(
+                gappy,
+                "{{\"text\":{},\"vector\":[{}]}}",
+                quoted(text),
+                spelled.join(",")
+            );
+        }
+
+        let files = [
+            ("authored-mistake.jsonl".to_owned(), register_source()),
+            (
+                "even.vectors.jsonl".to_owned(),
+                cache(&texts, &register_texts, false),
+            ),
+            ("gappy.vectors.jsonl".to_owned(), gappy),
+        ];
+        let mut consumes = Vec::new();
+        for (name, body) in &files {
+            std::fs::write(dir.join(name), body).expect("a written input");
+            consumes.push(format!(
+                "{{\"path\":\"{name}\",\"sha256\":\"{}\"}}",
+                sha256_hex(body.as_bytes())
+            ));
+        }
+        let record = format!(
+            "{}\n{}\n{}\n",
+            START,
+            format_args!(
+                "{{\"record\":\"claim\",\"id\":\"c1\",\"hypothesis\":\"the cells are \
+                 comparable\",\"result\":\"supported\",\"consumes\":[{}]}}",
+                consumes.join(",")
+            ),
+            SUMMARY
+        );
+        let path = dir.join("run.jsonl");
+        std::fs::write(&path, record).expect("a written record");
+
+        match run(&path) {
+            Err(RunError::Control { embedder, .. }) => {
+                assert_eq!(
+                    embedder, "gappy",
+                    "the wrong embedder was blamed for a row it did place"
+                );
+            }
+            other => panic!("a cache missing a row entirely did not refuse the run: {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A metric undefined on a cell's rows is reported on that cell, typed,
     /// beside the metrics that did compute; the run goes on.
     ///

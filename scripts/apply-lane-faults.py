@@ -185,6 +185,22 @@ def cmd_verify(root: pathlib.Path, registry_path: pathlib.Path) -> int:
     return 0
 
 
+def failure_signature(test_path: str) -> str:
+    """The ERE that appears ONLY when `test_path` fails, never when it runs.
+
+    A fresh-instance review of #83 found the third column of `--list` was the
+    bare test path -- which `cargo test` also prints on a PASS
+    (`test <path> ... ok`), so the selftest's own stated rule
+    ("A test NAME is not a signature: cargo test prints it on success too")
+    was violated by every lane-generated case, 123 of them. `--verify` (and
+    the check the selftest drives, `--only lanes`) captures the lane's
+    `cargo test` output verbatim and prints it on a nonzero exit, so the
+    line to anchor on is cargo's own failure line: `<path> ... FAILED`,
+    which cargo emits for a failing test and never for a passing one.
+    """
+    return f"{re.escape(test_path)} \\.\\.\\. FAILED"
+
+
 def cmd_list(root: pathlib.Path, registry_path: pathlib.Path) -> int:
     try:
         found = Findings(root, registry_path)
@@ -200,13 +216,23 @@ def cmd_list(root: pathlib.Path, registry_path: pathlib.Path) -> int:
             catches = fault.get("catches") or []
             if not catches:
                 print(
-                    f"apply-lane-faults: {name}.{fault['id']} declares no catches",
+                    # `fault["id"]` is already lane-prefixed (every gate.toml
+                    # declares it that way, e.g. "isolation.…"), so `{name}.`
+                    # here duplicated the lane rather than naming it -- a
+                    # fresh-instance review of #83 found this cosmetic, but
+                    # it is the same string every message below repeats.
+                    f"apply-lane-faults: {fault['id']} declares no catches",
                     file=sys.stderr,
                 )
                 return EXIT_BROKEN
             print(
                 "\t".join(
-                    [name, fault["id"], catches[0], fault.get("failure_class", "")]
+                    [
+                        name,
+                        fault["id"],
+                        failure_signature(catches[0]),
+                        fault.get("failure_class", ""),
+                    ]
                 )
             )
     return 0
@@ -238,7 +264,7 @@ def cmd_apply_only(root: pathlib.Path, registry_path: pathlib.Path, lane: str, f
     count = text.count(fault["anchor"])
     if count != 1:
         print(
-            f"apply-lane-faults: {lane}.{fault_id}'s anchor appears {count} "
+            f"apply-lane-faults: {fault_id}'s anchor appears {count} "
             f"time(s) in {target}, not exactly once",
             file=sys.stderr,
         )

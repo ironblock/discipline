@@ -16,9 +16,14 @@
 # a forge remote AND a private one still fires.
 #
 # This is a data-driven carve-out, not a weaker pattern: the shape the
-# pattern names is unchanged, and a form not listed here still fires, which
-# is the whole reason `ssh-user-at-host` keeps matching `someone@somehost:`
-# after this file exists.
+# pattern names is unchanged, and a form not listed here still fires -- a
+# login at a DOTTED private host, colon-terminated, is the whole reason
+# `ssh-user-at-host` keeps matching after this file exists. (Not a bare,
+# dotless hostname: a fresh-instance review of #83 found an earlier example
+# here used one and never fired, since the pattern requires a dot --
+# pre-existing and unrelated to this file, corrected rather than repeated.
+# Not written as a literal instance again, for the same reason this row's
+# own regex is not written as the string it exempts.)
 #
 # Ruled 2026-09-12 on #72. `ssh-user-at-host` exists to catch a PRIVATE
 # remote a captured log carries by accident -- a build box, a personal

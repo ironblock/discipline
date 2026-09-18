@@ -5664,12 +5664,22 @@ open(sys.argv[2], 'w', encoding='utf-8').write(
     > "${fake}/push-new-branch.json"
   printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"carries %s%s forward"}}' \
     "$fake_base" "$fake_head" 'DIE' '-9001' > "${fake}/pr-dirty.json"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"carries %s%s forward","body":"clean"}}' \
+    "$fake_base" "$fake_head" 'DIE' '-9003' > "${fake}/pr-dirty-title.json"
   printf '{"before":"%s","after":"%s"}' "$fake_head" "$fake_head" \
     > "${fake}/push-empty.json"
 
   expect_exit "history: a faked pull request with a dirty body" 1 \
     env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
         GITHUB_EVENT_PATH="${fake}/pr-dirty.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+  # A fresh-instance review of #83 found the title half of this pair had no
+  # fixture at all: every history fixture in this file used a clean,
+  # constant `"title":"t"`, so deleting the two lines in check-history.py
+  # that read `pr["title"]` stayed green. The body half was already covered.
+  expect_exit "history: a faked pull request with a dirty title" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-dirty-title.json" \
       python3 "${fake}/repo/scripts/check-history.py"
   expect_exit "history: a faked push whose range is empty" 2 \
     env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
@@ -5866,6 +5876,54 @@ STRICT
     bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/private-host"
   expect_exit "ssh-user-at-host: a private host beside an exempt one still fires" 1 \
     bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/forge-and-private"
+
+  # THE PATTERN HALF READS THE SAME NORMALISED VIEW AS THE HASH HALF -- ruled
+  # 2026-09-12 on #72: "the gate scans content as it would be read... [so]
+  # normalise once ... then run both halves over the result." A fresh-instance
+  # review of #83 found this specific claim uncovered: `hygiene-decode.py`'s
+  # raw-content mirror (`raw_normalized = decoding.normalized(text)`) had no
+  # fixture at all, so deleting the whole branch stayed green -- measured, and
+  # fixed here rather than only noted.
+  #
+  # A zero-width space between a private host's first label and its dot
+  # breaks the colon form's `(\.[A-Za-z0-9-]+)+:` requirement in the RAW
+  # bytes, and carries no ssh/scp/rsync keyword, so neither alternative in
+  # the pattern matches unread. `Default_Ignorable_Code_Point` is stripped
+  # before either half sees this file's decoded view, the shape re-forms,
+  # and the pattern half catches it there -- the digest half's zero-width
+  # case, over again for the half that matches by shape instead of by hash.
+  mkdir -p "${box}/private-host-zwsp"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(
+    'remote = someone@bo' + '​' + 'x.example.net:/var/log/run.log .\n')
+" "${box}/private-host-zwsp/remote.txt"
+  expect_exit "ssh-user-at-host: a host split by a zero-width space is still found" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/private-host-zwsp"
+  # The control: the SAME bytes, matched directly against the pattern's own
+  # shape, are not a hit. Without it the assertion above could pass because
+  # the pattern is loose, not because the mirror caught anything.
+  expect_exit "and the same zero-width host, unread, is not a hit" 1 \
+    grep -qiE '(^|[^A-Za-z0-9._-])([A-Za-z0-9._-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+:|(ssh|scp|rsync)[[:space:]]+[A-Za-z0-9._-]+@[A-Za-z0-9-]+)' \
+      "${box}/private-host-zwsp/remote.txt"
+
+  # A DECLARED EXCEPTION CONTAINING A SLASH IS A REFUSAL, NOT A FINDING. A
+  # fresh-instance review of #83 found `sed -E "s/${exception}//${sed_flags}"`
+  # breaks its own delimiter on an unescaped `/`, and under this file's
+  # `set -e`, the unchecked failure killed the whole scan with EXIT_DIRTY (1,
+  # "found something") before the line that tripped it was ever reported --
+  # so a malformed row in a maintainer's own table read as a commit to
+  # rewrite. A synthetic pattern and a slash-bearing exception, never the
+  # real tables.
+  mkdir -p "${box}/broken-exception"
+  printf 'custom-label\t-\tprivate@[a-z.]+:\n' > "${box}/broken-exception-patterns.tsv"
+  printf 'custom-label\tprivate@|https://forge\\.example\\.com/\n' \
+    > "${box}/broken-exception-exceptions.tsv"
+  printf 'remote = %s%s:/srv\n' 'private@host' '.example' \
+    > "${box}/broken-exception/remote.txt"
+  expect_exit "a declared exception with an unescaped slash is refused, not misreported" 2 \
+    bash "${ROOT}/scripts/hygiene.sh" --patterns "${box}/broken-exception-patterns.tsv" \
+      --tree "${box}/broken-exception"
 
   # BOTH SPELLINGS OF ONE LITERAL, ONE DIGEST -- ruled 2026-09-12 on #72.
   # `--emit` computes the row from the NFC form; a file carrying the NFD
@@ -6556,7 +6614,11 @@ selftest() {
   while IFS=$'\t' read -r lane fault_id signature failure_class || [ -n "${lane:-}" ]; do
     [ -n "$lane" ] || continue
     LANE_FAULT_LANE="$lane" LANE_FAULT_ID="$fault_id"
-    "$sc_call" "lane: ${lane}.${fault_id}" lanes "$sc_inject" "$signature"
+    # `fault_id` is already lane-prefixed (every gate.toml declares it that
+    # way), so `${lane}.` here duplicated it -- "lane: isolation.isolation.…"
+    # -- a fresh-instance review of #83 found this, cosmetic but repeated
+    # across all 123 generated cases.
+    "$sc_call" "lane: ${fault_id}" lanes "$sc_inject" "$signature"
   done < <(python3 "${ROOT}/scripts/apply-lane-faults.py" --list)
 
   prove_mechanics

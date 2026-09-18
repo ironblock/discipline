@@ -35,7 +35,7 @@
 [meta]
 source = "verify.sh"
 red_faults = 443
-mechanics_assertions = 115
+mechanics_assertions = 119
 migrated = 0
 
 
@@ -1484,6 +1484,14 @@ failure_class = "history.forbidden-pattern"
 expected_exit = "1"
 migrated = false
 [[fault]]
+id = "mech.history-a-faked-pull-request-with-a-dirty-title"
+kind = "mechanics"
+check = "-"
+label = "history: a faked pull request with a dirty title"
+failure_class = "history.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+[[fault]]
 id = "mech.history-a-faked-push-whose-range-is-empty"
 kind = "mechanics"
 check = "-"
@@ -1606,6 +1614,33 @@ check = "-"
 label = "ssh-user-at-host: a private host beside an exempt one still fires"
 failure_class = "hygiene.forbidden-pattern"
 expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.ssh-user-at-host-a-host-split-by-a-zero-width-space-is-still-found"
+kind = "mechanics"
+check = "-"
+label = "ssh-user-at-host: a host split by a zero-width space is still found"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.and-the-same-zero-width-host-unread-is-not-a-hit"
+kind = "mechanics"
+check = "-"
+label = "and the same zero-width host, unread, is not a hit"
+failure_class = "hygiene.scanner-mechanics"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.a-declared-exception-with-an-unescaped-slash-is-refused-not-misreported"
+kind = "mechanics"
+check = "-"
+label = "a declared exception with an unescaped slash is refused, not misreported"
+failure_class = "hygiene.exception-malformed"
+expected_exit = "2"
 migrated = false
 
 [[fault]]
