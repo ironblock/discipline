@@ -5758,21 +5758,39 @@ STRICT
   # and the second still passes; go back to scanning `%an <%ae>` and the
   # first still passes. Only together do they pin WHERE the table applies.
   #
+  # A CORRECTION. This planted the repository owner's own handle, on the
+  # THEN-current premise that it was a hashed literal in
+  # `scripts/hygiene-hashes.txt` -- which is what made it double as the
+  # thing an author line legitimately carries. Ruled separately on #58
+  # (2026-09-15, landed on `main` in 0c20052): the owner's handle firing on
+  # the owner's own prose was the wrong rule regardless of which field it
+  # scanned, and the entry was removed from the denylist outright. That
+  # left this fixture proving nothing -- the literal it plants was no
+  # longer listed, so planting it in a body was never going to be a
+  # finding, pattern table or not.
+  #
+  # A TICKET ID never depended on that entry and does not depend on
+  # whatever the denylist holds tomorrow: `internal-ticket-id` is a SHAPE
+  # in `hygiene-patterns.tsv`, not a hash of one string, so this pair is
+  # robust to the hashed list shrinking to nothing, which it very nearly
+  # has (one entry remains, and its plaintext belongs to nobody this
+  # fixture can cite).
+  #
   # Assembled from pieces, because this file is itself read by the tree gate
   # and a literal written whole here would be a finding about verify.sh --
   # the trap `inject_injection_needs_gnu_sed` documents, one lint along.
-  local handle; handle="$(printf '%s%s' 'cor' 'ey')"
+  local token; token="$(printf '%s%s' 'DIE' '-9002')"
   local fake_body fake_author
   (
     cd "${fake}/repo"
     printf 'd\n' > d.txt && git add --all
-    seed_commit --message "a message naming ${handle}, which is content"
+    seed_commit --message "a message carrying ${token}, which is content"
   )
   fake_body="$(git -C "${fake}/repo" rev-parse HEAD)"
   (
     cd "${fake}/repo"
     printf 'e\n' > e.txt && git add --all
-    git -c "user.email=${handle}@example.invalid" -c "user.name=${handle}" \
+    git -c "user.email=${token}@example.invalid" -c "user.name=${token}" \
       commit --quiet --message 'a clean message, and an author line that is not'
   )
   fake_author="$(git -C "${fake}/repo" rev-parse HEAD)"
