@@ -1,4 +1,19 @@
 {
+  "alternatives": {
+    "best_cell_is_best_precision_and_every_tie_must_clear": {
+      "cells": [
+        "Qwen3-Embedding-0.6B/softmax/without_gate",
+        "bge-small-en-v1.5/softmax/without_gate"
+      ],
+      "verdict": "refuted"
+    },
+    "best_cell_is_best_precision_with_ties_broken_by_d_prime": {
+      "cells": [
+        "bge-small-en-v1.5/softmax/without_gate"
+      ],
+      "verdict": "inconclusive"
+    }
+  },
   "cells": [
     {
       "clears_supported": false,
@@ -200,6 +215,7 @@
     }
   ],
   "pre_gate": {
+    "alternative_every_pair_lower": "inconclusive",
     "because": "no cell improves by the margin and at least one is lower by it",
     "deltas": [
       {
@@ -272,8 +288,11 @@
     "worsened": 7
   },
   "readings": {
+    "best_cell": "the contender cell with the highest defined d_prime on the primary register",
+    "cell": "a (scoring, gate) pair as the pre-registration lists them, so a gate arm is its own cell",
     "floor_separation": "the floor's d_prime on the same (set, scoring, gate) cell",
-    "pre_gate_scope": "per contender (embedder, scoring) cell on the primary register at the budget",
+    "pre_gate_refuted": "no pair improves by the margin and at least one is lower by it",
+    "pre_gate_scope": "per contender (embedder, scoring) pair on the primary register at the budget",
     "primary_register": "the tripped-up register, the `mistake` set",
     "undefined_margin": "satisfies neither bound and is carried as null"
   },

@@ -2,8 +2,8 @@
 hypothesis = "Authored sense-descriptions match concrete transcript sentences sharply enough to prioritise capture without over-firing, and a lexical pre-gate improves precision at a fixed budget."
 result = "inconclusive"
 kind = "reproducible-by-config"
-product_sha256 = "42d0e5a1282283e2d3b74c57141e29ec994c0b8b3b30be454200546f6a7c0ed4"
-controls_run = ["declared-floor"]
+product_sha256 = "813afcc5f8093005db283d6d9e98b534d902e3cfc25fd8cbd1b4c81152cf2a92"
+controls_run = []
 known_defects = []
 targets_checked = 2
 targets_matched = 2
@@ -50,12 +50,18 @@ least the declared margin above the floor's, all on the same cell.
 precision ceiling, or the best cell's separation short of the floor's
 by the smaller margin. `inconclusive` otherwise.
 
-Three readings of the ratified text are taken and written on the
-verdict itself under `readings`: the primary register is the
-tripped-up register; the floor's separation is the floor's on the
-same (set, scoring, gate) cell; a margin that cannot be computed
-satisfies neither bound. The pre-gate sub-rule is applied per
-contender cell at the same budget.
+Seven readings of the ratified text are taken and written on the
+verdict itself under `readings`: which register is primary; whose
+cell the floor's separation is read from; what a margin that cannot
+be computed satisfies; which cell is "the best cell"; what a cell is;
+the pre-gate sub-rule's scope; and its quantifier. Where a reading
+turns the verdict, the verdict under the other reading is computed
+and carried under `alternatives`, so a ruling is a measured delta.
+
+The arithmetic ran under `Python 3.14.6` on the data seat's workstation,
+the registry's `mac-pro-2019` instance; the record's start row is the
+run being adjudicated, per the assembler's note in `regimen.toml`,
+and the machine that applied the rule is stated here, not there.
 
 ## Results
 
@@ -65,17 +71,26 @@ cells that reach the precision bound without over-firing do not put
 the declared margin between their separation and the floor's on the
 same cell. The best-separated cell is `bge-small-en-v1.5/softmax/without_gate`, and it
 does clear the smaller `refuted` margin over the floor, while many
-cells reach the precision ceiling, so neither `refuted` clause holds.
+cells reach the precision ceiling, so neither `refuted` clause holds
+under the reading that "the best cell" is the best-separated one.
+Under the reading that it is the best cell on the primary endpoint,
+two cells tie at the top precision and one of them sits under the
+floor: if every tied cell must clear the margin the verdict is
+`refuted`, and if the tie is broken by separation it is
+`inconclusive`. Which reading is the rule's is not decided here.
 
-The pre-gate sub-rule: 0 contender cell(s) improved
+The pre-gate sub-rule: 0 contender pair(s) improved
 by the margin, 7 were lower by it, out of
 9 pairs, so the sub-verdict is `refuted`
-(no cell improves by the margin and at least one is lower by it).
+(no cell improves by the margin and at least one is lower by it); under the reading that every pair must be lower
+it is `inconclusive`.
 
 ## Conclusion
 
-`inconclusive` under the rule as ratified: the data did not
-decide the primary claim. What is still unknown is stated on the
+`inconclusive` under the rule as read here: the data did not
+decide the primary claim, and one reading the ratified text leaves
+open would make it `refuted`, which is the maintainer's to rule.
+What is still unknown is stated on the
 verdict: the pre-gate sub-verdict is `refuted`, and the
 ratified text does not say how the two conjuncts of the hypothesis
 combine into one word, so this directory's `result` is the main

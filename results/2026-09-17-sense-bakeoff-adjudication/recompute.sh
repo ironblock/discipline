@@ -18,7 +18,6 @@ import hashlib
 import json
 import pathlib
 import sys
-import tomllib
 
 FENCE = "+++"
 
@@ -27,6 +26,14 @@ FENCE = "+++"
 def cannot_run(message):
     print(f"recompute: {message}", file=sys.stderr)
     raise SystemExit(2)
+
+
+# A Python without tomllib cannot read the rule, and that is a 2, not a
+# traceback that reads as "the numbers do not re-derive".
+try:
+    import tomllib
+except ImportError:
+    cannot_run(f"this needs Python 3.11 or later for tomllib; this is {sys.version.split()[0]}")
 
 
 def read(path):
@@ -111,9 +118,23 @@ for where, stated in (("front-matter", front["product_sha256"]),
 #      cannot lift a cell to `supported` and it cannot sink the best cell to
 #      `refuted`; it is carried as `null` where a number would be.
 #
-# The pre-gate sub-rule is applied per (embedder, scoring) cell on the same
+#   4. "the best cell" in the refuted clause is the best-SEPARATED contender
+#      cell -- the one with the highest defined d-prime -- because the clause
+#      is about separation. A fresh instance found this reading undisclosed
+#      and found that the verdict turns on it: read as the best cell on the
+#      primary endpoint, two cells tie at precision 1.0 and one of them sits
+#      under the floor, so the alternative is computed and carried under
+#      `alternatives` for the maintainer to rule on, not chosen here.
+#   5. A "cell" is what the pre-registration calls one: a (scoring, gate)
+#      pair, eight per embedder, so a gate arm is its own cell. The ruling's
+#      "(model x scoring) cell" is read as that, since it is the
+#      pre-registration the ruling adjudicates.
+#
+# The pre-gate sub-rule is applied per (embedder, scoring) pair on the same
 # register at the same budget, mirroring the main rule's "for at least one
-# cell". Its `supported` clause needs a paired-bootstrap p between the two
+# cell": `refuted` when no pair improves by the margin and at least one is
+# lower by it. The "every pair lower" reading is carried under
+# `alternatives` as well. Its `supported` clause needs a paired-bootstrap p between the two
 # gate arms, and `report.json` carries paired bootstraps ACROSS EMBEDDERS
 # only; so if some cell clears the margin, the sub-verdict is `unadjudicated`
 # with that stated, never `supported` on a p nobody computed.
@@ -128,10 +149,14 @@ PRIMARY_REGISTER = "mistake"
 
 
 def metric_at(cell, name, budget):
-    for reading in cell["metrics"]:
-        if reading["metric"] == name and reading["budget"] == budget:
-            return reading["value"]
-    return None
+    found = [
+        reading["value"]
+        for reading in cell["metrics"]
+        if reading["metric"] == name and reading["budget"] == budget
+    ]
+    if len(found) > 1:
+        raise ValueError(f"{name} at budget {budget} is read twice on one cell")
+    return found[0] if found else None
 
 
 def scored_cells(report, register):
@@ -209,10 +234,8 @@ def adjudicate(report, rule):
     defined = [e for e in evaluated if e["d_prime"] is not None]
     best = max(defined, key=lambda e: e["d_prime"]) if defined else None
     best_margin = best["d_prime_margin_over_floor"] if best else None
-    best_fails_floor = (
-        best_margin is not None
-        and best_margin < thresholds["refuted_d_prime_margin_over_floor"]
-    )
+    small = thresholds["refuted_d_prime_margin_over_floor"]
+    best_fails_floor = best_margin is not None and best_margin < small
 
     if supported_by:
         verdict = "supported"
@@ -220,6 +243,34 @@ def adjudicate(report, rule):
         verdict = "refuted"
     else:
         verdict = "inconclusive"
+
+    # THE ALTERNATIVES, computed and carried so that a ruling on any reading
+    # is a measured delta rather than a re-run. None of these is the verdict.
+    def under(best_cells):
+        fails = any(
+            e["d_prime_margin_over_floor"] is not None
+            and e["d_prime_margin_over_floor"] < small
+            for e in best_cells
+        )
+        if supported_by:
+            return "supported"
+        return "refuted" if (no_cell_reaches_ceiling or fails) else "inconclusive"
+
+    with_precision = [e for e in evaluated if e["precision_at_k"] is not None]
+    top = max(e["precision_at_k"] for e in with_precision) if with_precision else None
+    tied = [e for e in with_precision if e["precision_at_k"] == top]
+    tied_defined = [e for e in tied if e["d_prime"] is not None]
+    tie_broken = [max(tied_defined, key=lambda e: e["d_prime"])] if tied_defined else []
+    alternatives = {
+        "best_cell_is_best_precision_and_every_tie_must_clear": {
+            "cells": [f"{e['embedder']}/{e['scoring']}/{e['gate']}" for e in tied],
+            "verdict": under(tied),
+        },
+        "best_cell_is_best_precision_with_ties_broken_by_d_prime": {
+            "cells": [f"{e['embedder']}/{e['scoring']}/{e['gate']}" for e in tie_broken],
+            "verdict": under(tie_broken),
+        },
+    }
 
     pre_gate = thresholds["pre_gate"]
     by_arm = {}
@@ -241,6 +292,7 @@ def adjudicate(report, rule):
             )
     improved = [d for d in deltas if d["delta"] >= pre_gate["margin"]]
     worsened = [d for d in deltas if d["delta"] <= -pre_gate["margin"]]
+    every_lower = bool(deltas) and len(worsened) == len(deltas)
     if improved:
         pre_gate_verdict = "unadjudicated"
         pre_gate_because = (
@@ -267,8 +319,12 @@ def adjudicate(report, rule):
             "primary_register": "the tripped-up register, the `mistake` set",
             "floor_separation": "the floor's d_prime on the same (set, scoring, gate) cell",
             "undefined_margin": "satisfies neither bound and is carried as null",
-            "pre_gate_scope": "per contender (embedder, scoring) cell on the primary register at the budget",
+            "best_cell": "the contender cell with the highest defined d_prime on the primary register",
+            "cell": "a (scoring, gate) pair as the pre-registration lists them, so a gate arm is its own cell",
+            "pre_gate_scope": "per contender (embedder, scoring) pair on the primary register at the budget",
+            "pre_gate_refuted": "no pair improves by the margin and at least one is lower by it",
         },
+        "alternatives": alternatives,
         "cells": evaluated,
         "supported_by": supported_by,
         "refuted_by": {
@@ -289,6 +345,7 @@ def adjudicate(report, rule):
             "worsened": len(worsened),
             "verdict": pre_gate_verdict,
             "because": pre_gate_because,
+            "alternative_every_pair_lower": "refuted" if every_lower else "inconclusive",
         },
     }
 
