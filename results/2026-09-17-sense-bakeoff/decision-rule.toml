@@ -1,0 +1,32 @@
+# The pre-registered claim, floor and decision rule for the sense bakeoff,
+# written before any score existed and consumed by the record by digest so
+# that the numbers cannot have chosen them. Ratified on the claim's own issue
+# (#24): the floor's role and its directional prediction in the comments of
+# 2026-09-10 (5621377332, 5621465121); the decision rule proposed 2026-09-13
+# (5651886852) and ratified the same day (5654868940), "for this run the rule
+# is fixed", refinement later being a new claim and never an edit.
+
+[claim]
+hypothesis = "Authored sense-descriptions match concrete transcript sentences sharply enough to prioritise capture without over-firing, and a lexical pre-gate improves precision at a fixed budget."
+
+[floor]
+embedder = "all-MiniLM-L6-v2"
+role = "the declared floor, a control rather than a contender: 22M parameters trained on roughly a billion symmetric sentence pairs, which is precisely the wrong objective for this task's asymmetric abstract-description-to-concrete-instance matching"
+prediction = "directional: symmetric-pair training should separate authored sense-descriptions from concrete sentences WORSE than the instruction-tuned cells. If the floor matches at the same separation, the effect is not about instruction tuning; if it collapses, the delta is the finding."
+
+[rule]
+budget = 5
+supported = "for at least one (embedder x scoring) cell at budget k = 5: precision on the primary register >= 0.80, hard-negative false-positive rate <= 0.10, and the cell's separation (d') exceeds the floor's by >= 0.5 -- all three at once, on the same cell"
+supported_precision_at_5 = 0.80
+supported_over_firing_at_5 = 0.10
+supported_d_prime_margin_over_floor = 0.5
+refuted = "no cell at any pre-registered budget reaches precision >= 0.60 on the primary register, or the best cell's separation does not exceed the floor's by >= 0.2 -- either alone"
+refuted_precision_ceiling = 0.60
+refuted_d_prime_margin_over_floor = 0.2
+inconclusive = "otherwise"
+
+[rule.pre_gate]
+supported = "the pre-gated arm's precision at k = 5 exceeds the ungated arm's by >= 0.05 on the same cell, with paired bootstrap p below the attainable floor's declared threshold"
+refuted = "it is lower by the same margin"
+margin = 0.05
+inconclusive = "between"
