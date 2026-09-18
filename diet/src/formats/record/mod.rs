@@ -1662,12 +1662,11 @@ fn source(fields: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Sour
                 return Err(StructureError::BadDigest(digest).into());
             }
             let written = take_string(&mut members, of, "source_available")?;
-            let available =
-                Availability::from_tag(&written).ok_or(SchemaError::BadValue {
-                    of,
-                    field: "source.source_available",
-                    found: written,
-                })?;
+            let available = Availability::from_tag(&written).ok_or(SchemaError::BadValue {
+                of,
+                field: "source.source_available",
+                found: written,
+            })?;
             Source::Adapted {
                 adapter: take_string(&mut members, of, "adapter")?,
                 source_digest: digest,
@@ -2332,9 +2331,7 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
                         .iter()
                         .find(|s| s.reasoning == Reasoning::Undeclared)
                 {
-                    return Err(
-                        StructureError::UndeclaredInLiveRecord(substrate.id.clone()).into()
-                    );
+                    return Err(StructureError::UndeclaredInLiveRecord(substrate.id.clone()).into());
                 }
                 live = declared.is_live();
                 regime = Some((**found).clone());
@@ -2869,10 +2866,10 @@ pub fn project(source: &str) -> Result<Value, String> {
                     ),
                 ),
                 // Projected for the same reason `hosted_substrates` is: a reader
-        // deciding what a results directory may call itself must not have to
-        // parse `canonical` and become a second opinion about this format.
-        ("source".to_owned(), source_value(parsed.source())),
-        ("canonical".to_owned(), Value::String(render(&parsed))),
+                // deciding what a results directory may call itself must not have to
+                // parse `canonical` and become a second opinion about this format.
+                ("source".to_owned(), source_value(parsed.source())),
+                ("canonical".to_owned(), Value::String(render(&parsed))),
             ]))
         })
         .map_err(|err| err.to_string())
@@ -3577,7 +3574,8 @@ mod tests {
 
     #[test]
     fn a_raw_newline_inside_a_string_does_not_parse() {
-        let source = "{\"source\":{\"kind\":\"live\"},\"record\":\"start\",\"regime\":{\"arm\":\"a\nb\"}}";
+        let source =
+            "{\"source\":{\"kind\":\"live\"},\"record\":\"start\",\"regime\":{\"arm\":\"a\nb\"}}";
         assert!(parse(source).is_err(), "one event, one line");
     }
 }

@@ -1116,15 +1116,16 @@ for old in (read_now, check_now):
         raise SystemExit(f"the anchor appears {source.count(old)} times")
 source = source.replace(read_now, read_then, 1).replace(check_now, check_then, 1)
 
-# The arm's tail, now one brace deeper.
+# The arm's tail, now one brace deeper. Anchored to the arm's own close
+# rather than to the match's -- `Kind::Unknown` (#76) now sits between
+# `Kind::Summary` and the match's closing `};`, so the two braces no longer
+# abut it.
 tail_now = """            product_sha256: take_string(&mut members, of, "product_sha256")?,
         },
-    };
 """
 tail_then = """                product_sha256,
             }
         }
-    };
 """
 if source.count(tail_now) != 1:
     raise SystemExit(f"the arm's tail appears {source.count(tail_now)} times")
