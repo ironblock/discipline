@@ -506,7 +506,8 @@ mod tests {
                     version_or_digest: "1.0".to_owned(),
                 },
                 weights: Weights::Digest("a".repeat(64)),
-                hardware_fingerprint: "one-gpu".to_owned(),
+                hardware_fingerprint:
+                    "edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532".to_owned(),
                 sampler_card: BTreeMap::from([("seed".to_owned(), Value::Integer(7))]),
                 reasoning: Reasoning::On,
             }],
