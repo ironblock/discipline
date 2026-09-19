@@ -829,27 +829,7 @@ fn computed_pairs(
         ),
         (
             "registers".to_owned(),
-            Value::Object(BTreeMap::from([
-                (
-                    "intent".to_owned(),
-                    Value::Object(BTreeMap::from([
-                        ("pairs".to_owned(), count(inputs.pairs.len())),
-                        ("rows".to_owned(), count(intent_rows.len())),
-                        (
-                            "excluded_no_intent".to_owned(),
-                            count(inputs.pairs.len() - intent_rows.len()),
-                        ),
-                        ("by_label".to_owned(), pair_census(&intent_rows)),
-                    ])),
-                ),
-                (
-                    "sense".to_owned(),
-                    Value::Object(BTreeMap::from([(
-                        "rows".to_owned(),
-                        count(inputs.turns.len()),
-                    )])),
-                ),
-            ])),
+            registers_value(inputs, &intent_rows),
         ),
         (
             "cells".to_owned(),
@@ -868,6 +848,82 @@ fn computed_pairs(
         record,
         dir,
     })
+}
+
+/// Rows by drive and label: the counts an adjudication needs to say what
+/// precision the register's positive density lets a pooled budget attain --
+/// a drive holding two positives caps at two hits in its top five by
+/// arithmetic, and a bar above that ceiling is a rule defect, not a
+/// refutation (ruled on #17, 2026-09-19). Counts, not scores.
+fn by_drive<'a>(rows: impl Iterator<Item = (&'a str, sense::Label)>) -> Value {
+    let mut drives: BTreeMap<&str, BTreeMap<String, i64>> = BTreeMap::new();
+    for (drive, label) in rows {
+        let counts = drives.entry(drive).or_insert_with(|| {
+            sense::Label::ALL
+                .iter()
+                .map(|label| (label.tag().to_owned(), 0))
+                .collect()
+        });
+        *counts.entry(label.tag().to_owned()).or_insert(0) += 1;
+    }
+    Value::Object(
+        drives
+            .into_iter()
+            .map(|(drive, counts)| {
+                (
+                    drive.to_owned(),
+                    Value::Object(
+                        counts
+                            .into_iter()
+                            .map(|(label, n)| (label, Value::Integer(n)))
+                            .collect(),
+                    ),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// The registers, as counts: rows, exclusions, by label and source, by drive.
+fn registers_value(inputs: &Inputs, intent_rows: &[&pairs::Pair]) -> Value {
+    let count = |n: usize| Value::Integer(i64::try_from(n).unwrap_or(i64::MAX));
+    Value::Object(BTreeMap::from([
+        (
+            "intent".to_owned(),
+            Value::Object(BTreeMap::from([
+                ("pairs".to_owned(), count(inputs.pairs.len())),
+                ("rows".to_owned(), count(intent_rows.len())),
+                (
+                    "excluded_no_intent".to_owned(),
+                    count(inputs.pairs.len() - intent_rows.len()),
+                ),
+                ("by_label".to_owned(), pair_census(intent_rows)),
+                (
+                    "by_drive".to_owned(),
+                    by_drive(
+                        intent_rows
+                            .iter()
+                            .map(|row| (row.drive.as_str(), row.label)),
+                    ),
+                ),
+            ])),
+        ),
+        (
+            "sense".to_owned(),
+            Value::Object(BTreeMap::from([
+                ("rows".to_owned(), count(inputs.turns.len())),
+                (
+                    "by_drive".to_owned(),
+                    by_drive(
+                        inputs
+                            .turns
+                            .iter()
+                            .map(|row| (row.drive.as_str(), row.label)),
+                    ),
+                ),
+            ])),
+        ),
+    ]))
 }
 
 /// The intent register's rows by label and source: counts, not scores.
@@ -2901,6 +2957,11 @@ mod tests {
             product.contains("\"register\":\"intent\"")
                 && product.contains("\"register\":\"sense\""),
             "both registers produced cells"
+        );
+        assert!(
+            product.contains("\"by_drive\":{\"d1\":{"),
+            "the report carries rows by drive and label, so an adjudication can compute what the \
+             pooling lets a budget attain"
         );
         let readme = std::fs::read_to_string(into.join("README.md")).expect("the README");
         assert!(
