@@ -10,6 +10,7 @@ pub mod bakeoff;
 pub mod collector;
 pub mod grounded;
 pub mod mechanical;
+pub mod pairs;
 pub mod router;
 pub mod sense;
 pub mod tools;

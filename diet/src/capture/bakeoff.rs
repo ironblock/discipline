@@ -28,6 +28,7 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use crate::capture::pairs;
 use crate::capture::sense::{
     self, Blocker, Cached, Cell, ControlFailure, DataError, EmbeddedSet, Embedder, Gate, Metric,
     PRE_REGISTRATION, Reported, Row, ScoreError, Scoring, SenseSet, SetError, decimal,
@@ -120,6 +121,22 @@ pub enum RunError {
     },
     /// The paired bootstrap could not run.
     Bootstrap(sense::BootstrapError),
+    /// A pairs run could not turn a register into cells.
+    Pairs(pairs::CellError),
+    /// The record consumed a sense register and a pairs register both, and a
+    /// run is one instrument or the other.
+    MixedRegisters,
+    /// A pairs run consumed no `pairs-intent.jsonl`, which is its primary
+    /// register.
+    NoPairs,
+    /// A pairs run's embedder has a cache for one role and not the other,
+    /// and no role-less cache to stand in.
+    RoleCacheMissing {
+        /// The embedder.
+        model: String,
+        /// The role with no cache.
+        role: &'static str,
+    },
     /// The directory to assemble into already holds a report.
     Occupied {
         /// The directory.
@@ -214,6 +231,21 @@ impl fmt::Display for RunError {
                 gate.tag()
             ),
             Self::Bootstrap(err) => write!(f, "{err}"),
+            Self::Pairs(err) => write!(f, "{err}"),
+            Self::MixedRegisters => write!(
+                f,
+                "the record consumes a sense register and a pairs register both; a run is one \
+                 instrument or the other"
+            ),
+            Self::NoPairs => write!(
+                f,
+                "a pairs run consumed no pairs-intent.jsonl, which is its primary register"
+            ),
+            Self::RoleCacheMissing { model, role } => write!(
+                f,
+                "{model}: no {role} cache ({model}.{role}.vectors.jsonl) and no {model}.vectors.jsonl \
+                 to stand in for it"
+            ),
         }
     }
 }
@@ -251,10 +283,31 @@ fn read_consumed(dir: &Path, artifact: &Artifact) -> Result<String, RunError> {
     })
 }
 
+/// Which side of a pair a role cache serves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Role {
+    Query,
+    Document,
+}
+
+impl Role {
+    fn tag(self) -> &'static str {
+        match self {
+            Self::Query => "query",
+            Self::Document => "document",
+        }
+    }
+}
+
 /// What a consumed input is, decided by its name.
 enum Input {
     /// A `<model>.vectors.jsonl` cache, under the model's id.
     Cache(String),
+    /// A `<model>.query.vectors.jsonl` or `<model>.document.vectors.jsonl`
+    /// cache: one side of a pairs run's embedder.
+    RoleCache(String, Role),
+    /// A pairs-run register, by its fixed file name.
+    Pairs(pairs::PairRegister),
     /// A register file, under what its name says is in it.
     Register(sense::RegisterName),
     /// Something the bakeoff does not read -- a record consumes what it
@@ -273,8 +326,17 @@ fn classify(path: &str) -> Input {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(path);
+    if let Some(model) = name.strip_suffix(".query.vectors.jsonl") {
+        return Input::RoleCache(model.to_owned(), Role::Query);
+    }
+    if let Some(model) = name.strip_suffix(".document.vectors.jsonl") {
+        return Input::RoleCache(model.to_owned(), Role::Document);
+    }
     if let Some(model) = name.strip_suffix(".vectors.jsonl") {
         return Input::Cache(model.to_owned());
+    }
+    if let Some(register) = pairs::PairRegister::of(name) {
+        return Input::Pairs(register);
     }
     match name
         .strip_suffix(".jsonl")
@@ -289,11 +351,20 @@ fn classify(path: &str) -> Input {
 struct Inputs {
     caches: Vec<Cached>,
     register: BTreeMap<SenseSet, Vec<Row>>,
+    /// A pairs run's role caches, by embedder id.
+    role_caches: BTreeMap<(String, Role), Cached>,
+    /// A pairs run's primary register.
+    pairs: Vec<pairs::Pair>,
+    /// A pairs run's authored-sense register.
+    turns: Vec<pairs::Turn>,
 }
 
 fn gather(dir: &Path, events: &[Event]) -> Result<Inputs, RunError> {
     let mut caches = Vec::new();
     let mut register: BTreeMap<SenseSet, Vec<Row>> = BTreeMap::new();
+    let mut role_caches = BTreeMap::new();
+    let mut pair_rows = Vec::new();
+    let mut turn_rows = Vec::new();
     for artifact in consumed(events) {
         let what = classify(&artifact.path);
         if matches!(what, Input::Other) {
@@ -316,13 +387,39 @@ fn gather(dir: &Path, events: &[Event]) -> Result<Inputs, RunError> {
                 })?;
                 register.entry(named.set).or_default().extend(rows);
             }
+            Input::RoleCache(model, role) => {
+                let role_cache =
+                    Cached::load(&model, &source).map_err(|reason| RunError::Data {
+                        path: artifact.path.clone(),
+                        reason,
+                    })?;
+                role_caches.insert((model, role), role_cache);
+            }
+            Input::Pairs(pairs::PairRegister::Intent) => {
+                pair_rows = pairs::pairs(&source).map_err(|reason| RunError::Data {
+                    path: artifact.path.clone(),
+                    reason,
+                })?;
+            }
+            Input::Pairs(pairs::PairRegister::Sense) => {
+                turn_rows = pairs::turns(&source).map_err(|reason| RunError::Data {
+                    path: artifact.path.clone(),
+                    reason,
+                })?;
+            }
             Input::Other => unreachable!("filtered above"),
         }
     }
-    if caches.is_empty() {
+    if caches.is_empty() && role_caches.is_empty() {
         return Err(RunError::NoCaches);
     }
-    Ok(Inputs { caches, register })
+    Ok(Inputs {
+        caches,
+        register,
+        role_caches,
+        pairs: pair_rows,
+        turns: turn_rows,
+    })
 }
 
 /// One cell's report: scored, with its metrics -- and, typed beside them, the
@@ -496,8 +593,84 @@ pub fn run(path: &Path) -> Result<Value, RunError> {
     computed(path).map(|done| done.report)
 }
 
+/// Which instrument a run is: the sense bakeoff, or the pairs register.
+///
+/// Decided by what the record consumed, and one or the other: the two have
+/// different pre-registrations, hypotheses and cells, and a directory that
+/// mixed them would carry a pre-registration for half its numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunKind {
+    Sense,
+    Pairs,
+}
+
+impl RunKind {
+    /// The pre-registration the directory carries, pinned by digest.
+    fn pre_registration(self) -> Value {
+        match self {
+            Self::Sense => PRE_REGISTRATION.value(),
+            Self::Pairs => pairs::pre_registration(),
+        }
+    }
+
+    /// The claim row's hypothesis.
+    fn hypothesis(self) -> &'static str {
+        match self {
+            Self::Sense => PRE_REGISTRATION.primary,
+            Self::Pairs => pairs::HYPOTHESIS,
+        }
+    }
+
+    /// The pre-registered endpoints the README restates as strings.
+    fn endpoints(self) -> [(&'static str, &'static str); 5] {
+        match self {
+            Self::Sense => [
+                ("primary", PRE_REGISTRATION.primary),
+                ("separation", PRE_REGISTRATION.separation),
+                ("over_firing", PRE_REGISTRATION.over_firing),
+                ("comparator", PRE_REGISTRATION.comparator),
+                ("correction", PRE_REGISTRATION.correction),
+            ],
+            Self::Pairs => [
+                ("primary", pairs::PRIMARY),
+                ("separation", pairs::SEPARATION),
+                ("over_firing", pairs::OVER_FIRING),
+                (
+                    "by_source",
+                    "precision at every budget broken out by source, planted against mined, beside the pooled figure",
+                ),
+                ("correction", pairs::CORRECTION),
+            ],
+        }
+    }
+
+    /// The README's title.
+    fn title(self) -> &'static str {
+        match self {
+            Self::Sense => "The sense bakeoff, over the caches this record consumed",
+            Self::Pairs => "The entry-to-turn nomination run, over the caches this record consumed",
+        }
+    }
+
+    /// What the record declared, as the README's observation.
+    fn observation(self) -> &'static str {
+        match self {
+            Self::Sense => {
+                "A record declared the caches it consumed, with a digest for each, and\n\
+                            nothing had turned those caches into numbers."
+            }
+            Self::Pairs => {
+                "A record declared a pairs register and the caches that place its texts,\n\
+                            with a digest for each, and nothing had turned them into numbers."
+            }
+        }
+    }
+}
+
 /// A run, and everything the directory it assembles into needs from it.
 struct Computed {
+    /// Which instrument.
+    kind: RunKind,
     /// The numbers.
     report: Value,
     /// The record the run was described by: its regime is the regime these
@@ -519,6 +692,12 @@ fn computed(path: &Path) -> Result<Computed, RunError> {
         path: "the shipped sense sets".to_owned(),
         reason,
     })?;
+    if !inputs.pairs.is_empty() || !inputs.turns.is_empty() || !inputs.role_caches.is_empty() {
+        if !inputs.register.is_empty() {
+            return Err(RunError::MixedRegisters);
+        }
+        return computed_pairs(record, dir, &inputs, &senses);
+    }
 
     let mut cells = Vec::new();
     for cached in &inputs.caches {
@@ -583,10 +762,209 @@ fn computed(path: &Path) -> Result<Computed, RunError> {
         ),
     ]));
     Ok(Computed {
+        kind: RunKind::Sense,
         report,
         record,
         dir,
     })
+}
+
+/// The pairs instrument, composed: every embedder's two sides, the intent
+/// register's cells, the sense register's, the comparisons and the null.
+fn computed_pairs(
+    record: crate::formats::record::Record,
+    dir: PathBuf,
+    inputs: &Inputs,
+    senses: &[sense::Sense],
+) -> Result<Computed, RunError> {
+    if inputs.pairs.is_empty() {
+        return Err(RunError::NoPairs);
+    }
+    let plain: BTreeMap<&str, &Cached> = inputs
+        .caches
+        .iter()
+        .map(|cache| (cache.id(), cache))
+        .collect();
+    let mut ids: BTreeSet<String> = plain.keys().map(|id| (*id).to_owned()).collect();
+    ids.extend(inputs.role_caches.keys().map(|(model, _)| model.clone()));
+    let side = |model: &str, role: Role| -> Result<&Cached, RunError> {
+        inputs
+            .role_caches
+            .get(&(model.to_owned(), role))
+            .or_else(|| plain.get(model).copied())
+            .ok_or_else(|| RunError::RoleCacheMissing {
+                model: model.to_owned(),
+                role: role.tag(),
+            })
+    };
+    let mut cells = Vec::new();
+    for id in &ids {
+        let roles = pairs::Roles {
+            id,
+            query: side(id, Role::Query)?,
+            document: side(id, Role::Document)?,
+        };
+        cells.extend(pairs::intent_cells(&inputs.pairs, roles, SEED).map_err(RunError::Pairs)?);
+        if !inputs.turns.is_empty() {
+            cells.extend(
+                pairs::sense_cells(&inputs.turns, senses, roles, SEED).map_err(RunError::Pairs)?,
+            );
+        }
+    }
+    let scored: Vec<&pairs::CellReport> = cells
+        .iter()
+        .filter_map(|cell| match cell {
+            pairs::Outcome::Scored(report) => Some(report),
+            pairs::Outcome::ControlFailed(_) => None,
+        })
+        .collect();
+    let (comparisons, gate_comparisons) = pair_comparisons(&scored)?;
+    let count = |n: usize| Value::Integer(i64::try_from(n).unwrap_or(i64::MAX));
+    let intent_rows = pairs::intent_rows(&inputs.pairs);
+    let report = Value::Object(BTreeMap::from([
+        ("regime".to_owned(), regime_ids(record.regime())),
+        (
+            "embedders".to_owned(),
+            Value::Array(ids.iter().map(|id| Value::String(id.clone())).collect()),
+        ),
+        (
+            "registers".to_owned(),
+            Value::Object(BTreeMap::from([
+                (
+                    "intent".to_owned(),
+                    Value::Object(BTreeMap::from([
+                        ("pairs".to_owned(), count(inputs.pairs.len())),
+                        ("rows".to_owned(), count(intent_rows.len())),
+                        (
+                            "excluded_no_intent".to_owned(),
+                            count(inputs.pairs.len() - intent_rows.len()),
+                        ),
+                        ("by_label".to_owned(), pair_census(&intent_rows)),
+                    ])),
+                ),
+                (
+                    "sense".to_owned(),
+                    Value::Object(BTreeMap::from([(
+                        "rows".to_owned(),
+                        count(inputs.turns.len()),
+                    )])),
+                ),
+            ])),
+        ),
+        (
+            "cells".to_owned(),
+            Value::Array(cells.iter().map(pairs::Outcome::value).collect()),
+        ),
+        (
+            "control_failed".to_owned(),
+            count(cells.len() - scored.len()),
+        ),
+        ("comparisons".to_owned(), comparisons),
+        ("gate_comparisons".to_owned(), gate_comparisons),
+    ]));
+    Ok(Computed {
+        kind: RunKind::Pairs,
+        report,
+        record,
+        dir,
+    })
+}
+
+/// The intent register's rows by label and source: counts, not scores.
+fn pair_census(rows: &[&pairs::Pair]) -> Value {
+    let mut members = BTreeMap::new();
+    for label in sense::Label::ALL {
+        for source in pairs::PairSource::ALL {
+            let n = rows
+                .iter()
+                .filter(|row| row.label == *label && row.source == *source)
+                .count();
+            members.insert(
+                format!("{}/{}", label.tag(), source.tag()),
+                Value::Integer(i64::try_from(n).unwrap_or(i64::MAX)),
+            );
+        }
+    }
+    Value::Object(members)
+}
+
+/// One paired bootstrap, rendered.
+fn comparison_value(cell: &str, a: &str, b: &str, test: &sense::Bootstrap, adjusted: f64) -> Value {
+    Value::Object(BTreeMap::from([
+        ("cell".to_owned(), Value::String(cell.to_owned())),
+        ("a".to_owned(), Value::String(a.to_owned())),
+        ("b".to_owned(), Value::String(b.to_owned())),
+        ("difference".to_owned(), decimal(test.observed, 4)),
+        ("p".to_owned(), decimal(test.p.value(), 6)),
+        ("p_holm".to_owned(), decimal(adjusted, 6)),
+        (
+            "attainable_p_floor".to_owned(),
+            decimal(sense::attainable_p_floor(PRE_REGISTRATION.resamples), 6),
+        ),
+    ]))
+}
+
+/// The pairs run's comparisons: every embedder against every other within a
+/// cell, and the anchored arm against the ungated arm within every
+/// (embedder, register, scoring) -- the bootstrap the pre-gate sub-rule needs,
+/// which the sense instrument never emitted. Holm-corrected together.
+fn pair_comparisons(cells: &[&pairs::CellReport]) -> Result<(Value, Value), RunError> {
+    let mut by_cell: BTreeMap<String, Vec<&pairs::CellReport>> = BTreeMap::new();
+    for cell in cells {
+        by_cell.entry(cell.key()).or_default().push(cell);
+    }
+    let mut raw = Vec::new();
+    let mut across = Vec::new();
+    for (key, group) in &by_cell {
+        for (index, a) in group.iter().enumerate() {
+            for b in group.iter().skip(index + 1) {
+                let test =
+                    sense::paired_bootstrap(&a.scores, &b.scores, PRE_REGISTRATION.resamples, SEED)
+                        .map_err(RunError::Bootstrap)?;
+                raw.push(test.p.value());
+                across.push((key.clone(), a.embedder.clone(), b.embedder.clone(), test));
+            }
+        }
+    }
+    let mut arms = Vec::new();
+    for with in cells
+        .iter()
+        .filter(|cell| cell.gate == pairs::PairGate::Anchored)
+    {
+        let Some(without) = cells.iter().find(|cell| {
+            cell.gate == pairs::PairGate::Without
+                && cell.embedder == with.embedder
+                && cell.register == with.register
+                && cell.scoring == with.scoring
+        }) else {
+            continue;
+        };
+        let test = sense::paired_bootstrap(
+            &with.scores,
+            &without.scores,
+            PRE_REGISTRATION.resamples,
+            SEED,
+        )
+        .map_err(RunError::Bootstrap)?;
+        raw.push(test.p.value());
+        arms.push((
+            format!("{}/{}/{}", with.register.tag(), with.scoring, with.embedder),
+            with.gate.tag().to_owned(),
+            without.gate.tag().to_owned(),
+            test,
+        ));
+    }
+    let corrected = sense::holm(&raw);
+    let (first, second) = corrected.split_at(across.len());
+    let render = |rows: &[(String, String, String, sense::Bootstrap)], adjusted: &[f64]| {
+        Value::Array(
+            rows.iter()
+                .zip(adjusted)
+                .map(|((cell, a, b, test), adjusted)| comparison_value(cell, a, b, test, *adjusted))
+                .collect(),
+        )
+    };
+    Ok((render(&across, first), render(&arms, second)))
 }
 
 /// Every cell of one embedder over one set: a scored cell per (scoring, gate),
@@ -1000,22 +1378,80 @@ pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
     // bytes are still there, unchanged, at the moment the scores are written
     // -- re-read below rather than trusted from the variable.
     let mut pre_registration = String::new();
-    json::render(&PRE_REGISTRATION.value(), &mut pre_registration);
+    json::render(&done.kind.pre_registration(), &mut pre_registration);
     pre_registration.push('\n');
     let pre_registration_path = into.join("pre-registration.json");
     write(&pre_registration_path, pre_registration.as_bytes())?;
     let pre_registration_sha256 = sha256_hex(pre_registration.as_bytes());
 
     let regime = done.record.regime().clone();
-    let record = crate::formats::record::Record {
+    let record = synthesized_record(&done, &artifacts, checked, &product_sha256);
+    write(
+        &into.join("run.jsonl"),
+        crate::formats::record::render(&record).as_bytes(),
+    )?;
+    // Re-read, not re-used: the point of the digest is the file, so the file
+    // is what is hashed again. Same refusal shape as a cache whose bytes are
+    // not the bytes the record declared -- the scores do not get written over
+    // a pre-registration that moved under them.
+    let landed = std::fs::read(&pre_registration_path).map_err(|err| RunError::Write {
+        path: pre_registration_path.display().to_string(),
+        reason: err.to_string(),
+    })?;
+    let found = sha256_hex(&landed);
+    if found != pre_registration_sha256 {
+        return Err(RunError::PreRegistrationMoved {
+            declared: pre_registration_sha256,
+            found,
+        });
+    }
+    write(&into.join("report.json"), product.as_bytes())?;
+    write(&into.join("regimen.toml"), regimen_of(&regime).as_bytes())?;
+    write(
+        &into.join("README.md"),
+        report_of(
+            done.kind,
+            &regime,
+            &product_sha256,
+            &pre_registration_sha256,
+            checked,
+        )
+        .as_bytes(),
+    )?;
+    write(&into.join("recompute.sh"), RECOMPUTE.as_bytes())?;
+    executable(&into.join("recompute.sh"))?;
+
+    Ok(Value::Object(BTreeMap::from([
+        (
+            "directory".to_owned(),
+            Value::String(into.display().to_string()),
+        ),
+        ("product_sha256".to_owned(), Value::String(product_sha256)),
+        (
+            "targets_checked".to_owned(),
+            Value::Integer(i64::from(checked)),
+        ),
+    ])))
+}
+
+/// The record the assembled directory carries: the run's regime and source,
+/// one claim consuming every artifact, and a recompute summary. Written
+/// `unadjudicated`, for the reason the claim row's comment gives.
+fn synthesized_record(
+    done: &Computed,
+    artifacts: &[&Artifact],
+    checked: u32,
+    product_sha256: &str,
+) -> crate::formats::record::Record {
+    crate::formats::record::Record {
         events: vec![
             Event::Start {
-                regime: Box::new(regime.clone()),
+                regime: Box::new(done.record.regime().clone()),
                 source: done.record.source().clone(),
             },
             Event::Claim {
                 id: "c1".to_owned(),
-                hypothesis: PRE_REGISTRATION.primary.to_owned(),
+                hypothesis: done.kind.hypothesis().to_owned(),
                 // THE SAME WORD THE FRONT-MATTER USES, and it has to be:
                 // ruled 2026-09-14, after this row said `inconclusive` while
                 // the README said `unadjudicated` and nothing compared them.
@@ -1051,49 +1487,10 @@ pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
                         .map(|artifact| artifact.sha256.clone())
                         .collect(),
                 },
-                product_sha256: product_sha256.clone(),
+                product_sha256: product_sha256.to_owned(),
             },
         ],
-    };
-    write(
-        &into.join("run.jsonl"),
-        crate::formats::record::render(&record).as_bytes(),
-    )?;
-    // Re-read, not re-used: the point of the digest is the file, so the file
-    // is what is hashed again. Same refusal shape as a cache whose bytes are
-    // not the bytes the record declared -- the scores do not get written over
-    // a pre-registration that moved under them.
-    let landed = std::fs::read(&pre_registration_path).map_err(|err| RunError::Write {
-        path: pre_registration_path.display().to_string(),
-        reason: err.to_string(),
-    })?;
-    let found = sha256_hex(&landed);
-    if found != pre_registration_sha256 {
-        return Err(RunError::PreRegistrationMoved {
-            declared: pre_registration_sha256,
-            found,
-        });
     }
-    write(&into.join("report.json"), product.as_bytes())?;
-    write(&into.join("regimen.toml"), regimen_of(&regime).as_bytes())?;
-    write(
-        &into.join("README.md"),
-        report_of(&regime, &product_sha256, &pre_registration_sha256, checked).as_bytes(),
-    )?;
-    write(&into.join("recompute.sh"), RECOMPUTE.as_bytes())?;
-    executable(&into.join("recompute.sh"))?;
-
-    Ok(Value::Object(BTreeMap::from([
-        (
-            "directory".to_owned(),
-            Value::String(into.display().to_string()),
-        ),
-        ("product_sha256".to_owned(), Value::String(product_sha256)),
-        (
-            "targets_checked".to_owned(),
-            Value::Integer(i64::from(checked)),
-        ),
-    ])))
 }
 
 /// Write one file, naming it when the write fails.
@@ -1204,6 +1601,7 @@ fn kind_and_caveat(regime: &Regime) -> (&'static str, String) {
 /// in the report and requires `recompute.sh` to notice, so a report with no
 /// number in it would make the probe vacuous.
 fn report_of(
+    kind: RunKind,
     regime: &Regime,
     product_sha256: &str,
     pre_registration_sha256: &str,
@@ -1214,12 +1612,17 @@ fn report_of(
         .into_iter()
         .map(|id| format!("{id:?}"))
         .collect();
-    let (kind, caveat) = kind_and_caveat(regime);
+    let (directory_kind, caveat) = kind_and_caveat(regime);
+    let endpoints: Vec<String> = kind
+        .endpoints()
+        .iter()
+        .map(|(key, value)| format!("{key} = {value:?}"))
+        .collect();
     format!(
         "+++\n\
          hypothesis = {:?}\n\
          result = \"unadjudicated\"\n\
-         kind = {kind:?}\n\
+         kind = {directory_kind:?}\n\
          product_sha256 = {product_sha256:?}\n\
          pre_registration_sha256 = {pre_registration_sha256:?}\n\
          controls_run = [\"scoring-extremes\", \"shuffled-label-null\"]\n\
@@ -1232,22 +1635,17 @@ fn report_of(
          dogma_version = {}\n\
          \n\
          [pre_registration]\n\
-         primary = {:?}\n\
-         separation = {:?}\n\
-         over_firing = {:?}\n\
-         comparator = {:?}\n\
-         correction = {:?}\n\
+         {}\n\
          +++\n\
          \n\
-         # The sense bakeoff, over the caches this record consumed\n\
+         # {}\n\
          \n\
          Written by `diet bakeoff --into`. The numbers are in `report.json`;\n\
          this file is what makes them checkable.\n\
          \n\
          ## Observation\n\
          \n\
-         A record declared the caches it consumed, with a digest for each, and\n\
-         nothing had turned those caches into numbers.\n\
+         {}\n\
          \n\
          ## Hypothesis\n\
          \n\
@@ -1289,16 +1687,14 @@ fn report_of(
          `unadjudicated`.\n\
          \n\
          {caveat}\n",
-        PRE_REGISTRATION.primary,
+        kind.hypothesis(),
         regime.arm,
         ids.join(", "),
         regime.dogma_version,
-        PRE_REGISTRATION.primary,
-        PRE_REGISTRATION.separation,
-        PRE_REGISTRATION.over_firing,
-        PRE_REGISTRATION.comparator,
-        PRE_REGISTRATION.correction,
-        PRE_REGISTRATION.primary,
+        endpoints.join("\n"),
+        kind.title(),
+        kind.observation(),
+        kind.hypothesis(),
     )
 }
 
@@ -2340,6 +2736,206 @@ mod tests {
         let path = dir.join("run.jsonl");
         std::fs::write(&path, record).expect("a record");
         assert!(matches!(run(&path), Err(RunError::NoCaches)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A pairs run's inputs, written under `dir`: three drives so the
+    /// per-drive pooling has something to pool, every label in every drive
+    /// so no metric is undefined for want of a class, and one role-less
+    /// cache built from [`Fixture`] over every text the run places.
+    fn write_pairs_run(dir: &Path) -> PathBuf {
+        // Three drives, so the per-drive pooling has something to pool; every
+        // label in every drive, so no metric is undefined for want of a class.
+        let mut pairs_src = String::new();
+        let mut turns_src = String::new();
+        let mut texts: Vec<String> = Vec::new();
+        for drive in ["d1", "d2", "d3"] {
+            for i in 0..3 {
+                let rows = [
+                    (
+                        "positive",
+                        format!("the resolver reads flag {i} from `config_{i}.toml`"),
+                        format!(
+                            "Actually flag {i} in `config_{i}.toml` is never read by the resolver. Let me check the loader for {drive}."
+                        ),
+                        format!("Let me check the loader for {drive}."),
+                    ),
+                    (
+                        "negative",
+                        format!("note {i} about the parser for {drive}"),
+                        format!("Reading the docs for module {i}. Let me read on."),
+                        "Let me read on.".to_owned(),
+                    ),
+                    (
+                        "hard_negative",
+                        format!("the `lexer_{i}` is slow in {drive}"),
+                        format!("Using `lexer_{i}` as before in {drive}. Let me run it."),
+                        "Let me run it.".to_owned(),
+                    ),
+                ];
+                for (n, (label, entry, prose, intent)) in rows.iter().enumerate() {
+                    let id = format!("{drive}-{i}-{n}");
+                    let _ = writeln!(
+                        pairs_src,
+                        "{{\"id\":{},\"drive\":{},\"turn\":1,\"step\":{i},\"entry\":{},\"turn_intent\":{},\"turn_prose\":{},\"turn_tools\":[],\"label\":{},\"source\":{}}}",
+                        quoted(&id),
+                        quoted(drive),
+                        quoted(entry),
+                        quoted(intent),
+                        quoted(prose),
+                        quoted(label),
+                        quoted(if n == 0 { "planted" } else { "mined" })
+                    );
+                    let _ = writeln!(
+                        turns_src,
+                        "{{\"id\":{},\"drive\":{},\"turn\":1,\"step\":{i},\"text\":{},\"anchored\":{},\"label\":{},\"source\":\"mined\",\"pairs\":[{}]}}",
+                        quoted(&format!("t-{id}")),
+                        quoted(drive),
+                        quoted(prose),
+                        n == 0,
+                        quoted(label),
+                        quoted(&id)
+                    );
+                    texts.push(entry.clone());
+                    texts.push(intent.clone());
+                    texts.push(prose.clone());
+                }
+            }
+        }
+        for sense in sense::shipped_senses().expect("senses") {
+            texts.push(sense.text);
+        }
+        texts.push(sense::UNRELATED.to_owned());
+        texts.sort();
+        texts.dedup();
+        let files = [
+            ("pairs-intent.jsonl".to_owned(), pairs_src),
+            ("turns-sense.jsonl".to_owned(), turns_src),
+            ("fx.vectors.jsonl".to_owned(), cache(&texts, &[], false)),
+        ];
+        let mut consumes = Vec::new();
+        for (name, body) in &files {
+            std::fs::write(dir.join(name), body).expect("a written input");
+            consumes.push(format!(
+                "{{\"path\":\"{name}\",\"sha256\":\"{}\"}}",
+                sha256_hex(body.as_bytes())
+            ));
+        }
+        let record = format!(
+            "{}\n{}\n{}\n",
+            START,
+            format_args!(
+                "{{\"record\":\"claim\",\"id\":\"c1\",\"hypothesis\":\"the pairs are \
+                 comparable\",\"result\":\"supported\",\"consumes\":[{}]}}",
+                consumes.join(",")
+            ),
+            SUMMARY
+        );
+        let path = dir.join("run.jsonl");
+        std::fs::write(&path, record).expect("a written record");
+        path
+    }
+
+    /// Both linters over an assembled directory, as themselves; skipped
+    /// loudly when the built binary is not one the resolver vouches for.
+    fn lint_assembled(root: &Path, dir: &Path) {
+        let resolved = std::process::Command::new("python3")
+            .arg(root.join("scripts/resolve-diet.py"))
+            .current_dir(root)
+            .output();
+        let usable = matches!(&resolved, Ok(out) if out.status.success());
+        if !usable {
+            eprintln!(
+                "the assembled pairs directory was NOT linted, and this test proved nothing about \
+                 the gates"
+            );
+            return;
+        }
+        for (script, what) in [
+            ("scripts/check-results.py", "the directory linter"),
+            ("scripts/check-recompute.py", "gate 0"),
+        ] {
+            let out = std::process::Command::new("python3")
+                .arg(root.join(script))
+                .arg("--root")
+                .arg(dir)
+                .current_dir(root)
+                .output()
+                .unwrap_or_else(|err| panic!("{what} could not be run: {err}"));
+            assert!(
+                out.status.success(),
+                "{what} refused the assembled pairs directory:\n{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr),
+            );
+        }
+    }
+
+    /// A PAIRS run assembles a directory the gates accept, by the same two
+    /// linters: the instrument the courier series adds is held to the shape
+    /// the sense bakeoff is held to, or it is a second shape.
+    #[test]
+    fn a_pairs_run_assembles_a_directory_the_gates_accept() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the workspace root")
+            .to_path_buf();
+        let dir = root.join("target/bakeoff-pairs-assembled");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a directory");
+
+        let path = write_pairs_run(&dir);
+
+        let into = dir.join("2026-01-01-a-pairs-run");
+        let answer =
+            assemble(&path, &into).unwrap_or_else(|err| panic!("the assembly failed: {err}"));
+        let Value::String(reported) = field(&answer, "product_sha256") else {
+            panic!("the answer names the product's digest")
+        };
+        let product = std::fs::read_to_string(into.join("report.json")).expect("the product");
+        assert_eq!(*reported, sha256_hex(product.as_bytes()));
+        assert!(
+            product.contains("\"gate_comparisons\""),
+            "the pairs run emits the gate-arm bootstrap the sub-rule needs"
+        );
+        assert!(
+            product.contains("\"register\":\"intent\"")
+                && product.contains("\"register\":\"sense\""),
+            "both registers produced cells"
+        );
+        let readme = std::fs::read_to_string(into.join("README.md")).expect("the README");
+        assert!(
+            readme.contains("entry-to-turn"),
+            "the README is the pairs run's, not the sense bakeoff's"
+        );
+        let pre = std::fs::read_to_string(into.join("pre-registration.json"))
+            .expect("the pre-registration");
+        assert!(
+            pre.contains("anchors_required"),
+            "the pairs pre-registration was written"
+        );
+
+        lint_assembled(&root, &dir);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A record that consumes both instruments' registers is refused by name.
+    #[test]
+    fn a_record_consuming_both_instruments_registers_is_refused() {
+        let dir = scratch("mixed");
+        let path = write_run(&dir);
+        let pairs_src = "{\"id\":\"p\",\"drive\":\"d\",\"turn\":1,\"step\":1,\"entry\":\"an entry\",\"turn_intent\":\"Let me.\",\"turn_prose\":\"prose\",\"turn_tools\":[],\"label\":\"positive\",\"source\":\"mined\"}\n";
+        std::fs::write(dir.join("pairs-intent.jsonl"), pairs_src).expect("written");
+        let record = std::fs::read_to_string(&path).expect("the record");
+        let patched = record.replace(
+            "\"consumes\":[",
+            &format!(
+                "\"consumes\":[{{\"path\":\"pairs-intent.jsonl\",\"sha256\":\"{}\"}},",
+                sha256_hex(pairs_src.as_bytes())
+            ),
+        );
+        std::fs::write(&path, patched).expect("written");
+        assert_eq!(run(&path).unwrap_err(), RunError::MixedRegisters);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
