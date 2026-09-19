@@ -92,9 +92,11 @@ impl Adapted {
     ///
     /// The one place an adapted log becomes a record the schema will parse.
     /// `Start` is required first and this crate's `Source::Adapted` names the
-    /// adapter, the log's own digest, and whether that log can be read again
-    /// -- see [`Source`] for why replay's own answer is always
-    /// [`Availability::PinnedOnly`] rather than a guess.
+    /// adapter, the log's own digest, and whether that log can be read again.
+    /// `source_available` is declared by the caller, never guessed here: this
+    /// function has no way to know whether the log it was handed lives in a
+    /// repository somewhere, so it does not try. `diet replay` takes it as a
+    /// required flag for exactly this reason -- see its own module docs.
     ///
     /// No `Event::Summary` is appended. A record needs one only if it claims
     /// a verdict about itself, and a replay reaches none: it reads a log or

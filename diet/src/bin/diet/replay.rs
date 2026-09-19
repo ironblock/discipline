@@ -6,15 +6,16 @@
 //! **No model is called**, and none can be: nothing here holds a transport.
 //!
 //! ```text
-//! diet replay --adapter claude-code --regimen <regimen.toml> <log.jsonl>
+//! diet replay --adapter claude-code --regimen <regimen.toml> \
+//!              --source-available committed|pinned_only <log.jsonl>
 //! ```
 //!
 //! # Not a second binary
 //!
 //! #28's own acceptance line names `diet-replay` as its own program. Ruled on
 //! #76: it is a verb on `diet` instead, the first one that needed more than
-//! `diet`'s existing `[command, path]` shape -- two required flags ahead of
-//! its one positional -- so it is dispatched before that shape is read rather
+//! `diet`'s existing `[command, path]` shape -- required flags ahead of its
+//! one positional -- so it is dispatched before that shape is read rather
 //! than forced through it. [`run`] is what `diet.rs`'s `main` calls when the
 //! first argument is `replay`; everything below it is unchanged from when
 //! this was `diet-replay`'s own `main`.
@@ -112,18 +113,54 @@ fn line(text: &str) -> Result<(), u8> {
     }
 }
 
+/// The usage banner, printed on any command line [`Args::of`] refuses.
+fn usage() -> &'static str {
+    "usage: diet replay --adapter claude-code --regimen <regimen.toml> \\\n\
+     \x20      --source-available committed|pinned_only <log.jsonl>\n\
+     \n\
+     Runs the capture lanes over a session log this library did not produce.\n\
+     No model is called. The census on stdout says what the adapter could not\n\
+     type -- read it, because an adapted log is a view of a session and not a\n\
+     transcript of one.\n\
+     \n\
+     --source-available is not a guess: `committed` claims the log itself is\n\
+     checked into a repository beside the record, recoverable by whoever reads\n\
+     it later; `pinned_only` claims only that its digest is pinned. An\n\
+     operator's own log is almost always the second -- it is not in any\n\
+     repository this program knows of, and saying otherwise would be a promise\n\
+     this program cannot keep."
+}
+
+/// `tag` as the [`Availability`] it names, or every tag this program accepts,
+/// for the refusal.
+///
+/// Declared, not inferred -- the same rule every other provenance fact in
+/// this crate is held to (the regimen, the substrate, the reasoning state).
+/// This program has no way to know whether the log it was pointed at lives
+/// in a repository somewhere; the operator invoking it does, and saying so
+/// is their claim to make, not this program's to guess from the path.
+fn source_available_of(tag: &str) -> Result<Availability, String> {
+    Availability::ALL
+        .iter()
+        .copied()
+        .find(|state| state.tag() == tag)
+        .ok_or_else(|| {
+            format!(
+                "`--source-available {tag}` is not one of {}",
+                Availability::ALL
+                    .iter()
+                    .map(|state| state.tag())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
+}
+
 /// `diet replay`'s whole verb, called from `diet.rs`'s `main` with everything
 /// after the literal `replay` token.
 pub fn run(args: &[String]) -> ExitCode {
     let Some(parsed) = Args::of(args) else {
-        eprintln!(
-            "usage: diet replay --adapter claude-code --regimen <regimen.toml> <log.jsonl>\n\
-             \n\
-             Runs the capture lanes over a session log this library did not produce.\n\
-             No model is called. The census on stdout says what the adapter could not\n\
-             type -- read it, because an adapted log is a view of a session and not a\n\
-             transcript of one."
-        );
+        eprintln!("{}", usage());
         return ExitCode::from(EXIT_COULD_NOT_RUN);
     };
 
@@ -142,6 +179,14 @@ pub fn run(args: &[String]) -> ExitCode {
         );
         return ExitCode::from(EXIT_COULD_NOT_RUN);
     }
+
+    let source_available = match source_available_of(&parsed.source_available) {
+        Ok(state) => state,
+        Err(why) => {
+            eprintln!("{why}");
+            return ExitCode::from(EXIT_COULD_NOT_RUN);
+        }
+    };
 
     let log = match std::fs::read_to_string(&parsed.log) {
         Ok(text) => text,
@@ -198,11 +243,12 @@ pub fn run(args: &[String]) -> ExitCode {
     let census_line = read.census.render();
     let events_len = read.events.len();
 
-    // The record: `Start` first, declaring `source = adapted` -- this log
-    // pins by digest and, per the one honest limit the module header names,
-    // is `pinned_only` because a foreign harness's log is not in this
-    // repository and cannot be, so the digest cannot promise a later reader
-    // can refetch it. Then every event the adapter produced, `Event::Unknown`
+    // The record: `Start` first, declaring `source = adapted` and the
+    // `source_available` the operator declared above -- `pinned_only` for
+    // the common case, an operator's own log, which is not in any repository
+    // this program knows of; `committed`, correctly, when replay is pointed
+    // at a log that IS checked in beside its own record, such as this lane's
+    // fixture corpus. Then every event the adapter produced, `Event::Unknown`
     // included -- ruling 1's own point, that a row the adapter could not map
     // still has to be a row IN the record and not only a line in the census.
     //
@@ -210,7 +256,7 @@ pub fn run(args: &[String]) -> ExitCode {
     // `diet::drive` holds itself to: a record this verb can write and its own
     // format cannot parse is a defect found here, not three lines into
     // somebody else's stdout.
-    let built = read.into_record(regime.clone(), source_digest, Availability::PinnedOnly);
+    let built = read.into_record(regime.clone(), source_digest, source_available);
     let rendered_record = record::render(&built);
     if let Err(why) = record::parse(&rendered_record) {
         eprintln!("the record this replay built does not parse back: {why}");
@@ -366,17 +412,20 @@ enum Flag {
     Adapter,
     /// The regimen the replay is filed under.
     Regimen,
+    /// Whether the log this replay reads can be reached again.
+    SourceAvailable,
 }
 
 impl Flag {
     /// Every flag this verb takes.
-    const ALL: &'static [Self] = &[Self::Adapter, Self::Regimen];
+    const ALL: &'static [Self] = &[Self::Adapter, Self::Regimen, Self::SourceAvailable];
 
     /// How it is spelled on the command line.
     const fn tag(self) -> &'static str {
         match self {
             Self::Adapter => "--adapter",
             Self::Regimen => "--regimen",
+            Self::SourceAvailable => "--source-available",
         }
     }
 
@@ -392,6 +441,12 @@ struct Args {
     adapter: String,
     regimen: String,
     log: String,
+    /// `committed | pinned_only`, in the record's own spelling -- parsed
+    /// against [`Availability::from_tag`] in [`run`], not here: this struct
+    /// is the command line as text, and the one place a string becomes the
+    /// typed value is where every other record vocabulary already becomes
+    /// one.
+    source_available: String,
 }
 
 impl Args {
@@ -417,6 +472,7 @@ impl Args {
         }
         Some(Self {
             adapter: flags.get(&Flag::Adapter)?.clone(),
+            source_available: flags.get(&Flag::SourceAvailable)?.clone(),
             regimen: flags.get(&Flag::Regimen)?.clone(),
             log: positional.remove(0).clone(),
         })

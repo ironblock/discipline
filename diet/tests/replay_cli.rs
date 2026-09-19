@@ -86,6 +86,8 @@ fn adapters_an_adapted_session_replays_to_a_census_and_a_working_object() {
         "claude-code",
         "--regimen",
         &regimen().to_string_lossy(),
+        "--source-available",
+        "committed",
         &fixture("session").to_string_lossy(),
     ]);
     assert_eq!(code, 0, "{err}");
@@ -162,6 +164,8 @@ fn adapters_a_replay_takes_no_endpoint_and_the_binary_holds_no_transport() {
         "claude-code",
         "--regimen",
         &regimen().to_string_lossy(),
+        "--source-available",
+        "committed",
         &fixture("session").to_string_lossy(),
     ]);
     assert_eq!(code, 0);
@@ -174,6 +178,8 @@ fn adapters_a_replay_takes_no_endpoint_and_the_binary_holds_no_transport() {
         "claude-code",
         "--regimen",
         &regimen().to_string_lossy(),
+        "--source-available",
+        "committed",
         &fixture("session").to_string_lossy(),
         "http://127.0.0.1:1/v1",
     ]);
@@ -213,6 +219,8 @@ fn adapters_a_kind_never_seen_is_counted_and_does_not_stop_the_replay() {
         "claude-code",
         "--regimen",
         &regimen().to_string_lossy(),
+        "--source-available",
+        "committed",
         &fixture("an-unmapped-kind").to_string_lossy(),
     ]);
     assert_eq!(
@@ -252,9 +260,10 @@ fn adapters_a_kind_never_seen_is_counted_and_does_not_stop_the_replay() {
         out.contains("\"record\":\"start\"")
             && out.contains(
                 "\"source\":{\"adapter\":\"claude-code\",\"kind\":\"adapted\",\
-                 \"source_available\":\"pinned_only\""
+                 \"source_available\":\"committed\""
             ),
-        "the record's own start row says it was adapted, not driven: {out}"
+        "the record's own start row says it was adapted, not driven, from a \
+         log this repository ships: {out}"
     );
 }
 
@@ -265,6 +274,8 @@ fn adapters_a_renamed_field_is_refused_with_the_clis_refusal_code_and_no_object(
         "claude-code",
         "--regimen",
         &regimen().to_string_lossy(),
+        "--source-available",
+        "committed",
         &fixture("a-renamed-field").to_string_lossy(),
     ]);
 
@@ -290,8 +301,9 @@ fn adapters_every_invocation_that_never_reached_an_answer_exits_two() {
     // The CLI's `2`: *usage, or could not run*. Everything here is an
     // invocation that never got as far as reading a log -- a command line
     // this program does not serve, or a file it could not open. A document it
-    // READ and declined is `3` and is tested above; the two are different
-    // things to wake up to, which is the whole reason they are two numbers.
+    // READ and declined is `3`, tested separately below; the two are
+    // different things to wake up to, which is the whole reason they are two
+    // numbers.
     let regimen = regimen().to_string_lossy().into_owned();
     let log = fixture("session").to_string_lossy().into_owned();
     let missing = fixture("no-such-fixture").to_string_lossy().into_owned();
@@ -300,13 +312,62 @@ fn adapters_every_invocation_that_never_reached_an_answer_exits_two() {
         ("no arguments at all", vec![]),
         (
             "no log",
-            vec!["--adapter", "claude-code", "--regimen", &regimen],
+            vec![
+                "--adapter",
+                "claude-code",
+                "--regimen",
+                &regimen,
+                "--source-available",
+                "committed",
+            ],
         ),
-        ("no adapter", vec!["--regimen", &regimen, &log]),
-        ("no regimen", vec!["--adapter", "claude-code", &log]),
+        (
+            "no adapter",
+            vec![
+                "--regimen",
+                &regimen,
+                "--source-available",
+                "committed",
+                &log,
+            ],
+        ),
+        (
+            "no regimen",
+            vec![
+                "--adapter",
+                "claude-code",
+                "--source-available",
+                "committed",
+                &log,
+            ],
+        ),
+        (
+            "no source-available",
+            vec!["--adapter", "claude-code", "--regimen", &regimen, &log],
+        ),
+        (
+            "a source-available value nobody declared",
+            vec![
+                "--adapter",
+                "claude-code",
+                "--regimen",
+                &regimen,
+                "--source-available",
+                "sometimes",
+                &log,
+            ],
+        ),
         (
             "an adapter this build does not have",
-            vec!["--adapter", "opencode", "--regimen", &regimen, &log],
+            vec![
+                "--adapter",
+                "opencode",
+                "--regimen",
+                &regimen,
+                "--source-available",
+                "committed",
+                &log,
+            ],
         ),
         (
             "a flag nobody defined",
@@ -315,13 +376,23 @@ fn adapters_every_invocation_that_never_reached_an_answer_exits_two() {
                 "claude-code",
                 "--regimen",
                 &regimen,
+                "--source-available",
+                "committed",
                 "--quiet",
                 &log,
             ],
         ),
         (
             "a log that is not there",
-            vec!["--adapter", "claude-code", "--regimen", &regimen, &missing],
+            vec![
+                "--adapter",
+                "claude-code",
+                "--regimen",
+                &regimen,
+                "--source-available",
+                "committed",
+                &missing,
+            ],
         ),
     ] {
         let (code, out, err) = run(&args);
@@ -329,24 +400,59 @@ fn adapters_every_invocation_that_never_reached_an_answer_exits_two() {
         assert!(!err.is_empty(), "{why}: and says why");
         assert!(out.is_empty(), "{why}: and prints no census");
     }
+}
 
-    // And the one that is NOT `2`: a regimen this program reads and declines
-    // is a document whose schema it recognises and refuses -- the same class
-    // as a log whose format moved, and the same code.
-    let (code, out, err) = run(&["--adapter", "claude-code", "--regimen", &log, &log]);
+#[test]
+fn adapters_a_regimen_this_program_reads_and_declines_exits_three_not_two() {
+    // The one that is NOT `2`: a regimen this program reads and declines is
+    // a document whose schema it recognises and refuses -- the same class as
+    // a log whose format moved, and the same code.
+    let log = fixture("session").to_string_lossy().into_owned();
+    let (code, out, err) = run(&[
+        "--adapter",
+        "claude-code",
+        "--regimen",
+        &log,
+        "--source-available",
+        "committed",
+        &log,
+    ]);
     assert_eq!(
         code, 3,
         "a regimen that is not one is refused, not a usage error. {err}"
     );
     assert!(!err.is_empty() && out.is_empty());
+}
 
-    // `1` is a verdict on a document, and this program never reaches one:
-    // it reads a log or refuses it, and a census is not a verdict. Asserted
+#[test]
+fn adapters_replay_reaches_no_verdict_so_it_never_exits_one() {
+    // `1` is a verdict on a document, and this program never reaches one: it
+    // reads a log or refuses it, and a census is not a verdict. Asserted
     // rather than assumed, because a `1` appearing here later would mean
     // somebody gave replay an opinion it is not supposed to have.
+    let regimen = regimen().to_string_lossy().into_owned();
+    let log = fixture("session").to_string_lossy().into_owned();
+    let missing = fixture("no-such-fixture").to_string_lossy().into_owned();
+
     for args in [
-        vec!["--adapter", "claude-code", "--regimen", &regimen, &log],
-        vec!["--adapter", "claude-code", "--regimen", &regimen, &missing],
+        vec![
+            "--adapter",
+            "claude-code",
+            "--regimen",
+            &regimen,
+            "--source-available",
+            "committed",
+            &log,
+        ],
+        vec![
+            "--adapter",
+            "claude-code",
+            "--regimen",
+            &regimen,
+            "--source-available",
+            "committed",
+            &missing,
+        ],
         vec![],
     ] {
         let (code, _, _) = run(&args);
@@ -361,7 +467,15 @@ fn adapters_a_replay_is_the_same_bytes_every_time_it_is_run() {
     // incomparable, which is the one thing the census exists to allow.
     let regimen = regimen().to_string_lossy().into_owned();
     let log = fixture("session").to_string_lossy().into_owned();
-    let args = ["--adapter", "claude-code", "--regimen", &regimen, &log];
+    let args = [
+        "--adapter",
+        "claude-code",
+        "--regimen",
+        &regimen,
+        "--source-available",
+        "committed",
+        &log,
+    ];
 
     let (first_code, first, _) = run(&args);
     let (again_code, again, _) = run(&args);
@@ -386,6 +500,8 @@ fn adapters_a_path_that_resolves_to_nothing_makes_no_fact() {
         "claude-code",
         "--regimen",
         &regimen().to_string_lossy(),
+        "--source-available",
+        "committed",
         &fixture("a-path-that-resolves-to-nothing").to_string_lossy(),
     ]);
     assert_eq!(code, 0, "{err}");
@@ -455,6 +571,10 @@ fn adapters_a_reader_that_stops_reading_is_not_a_failed_replay() {
             "claude-code",
             "--regimen",
             &regimen().to_string_lossy(),
+            // Genuinely `pinned_only`, not `committed`: this log is written
+            // to a temp directory below, not shipped in this repository.
+            "--source-available",
+            "pinned_only",
             &path.to_string_lossy(),
         ])
         .stdout(std::process::Stdio::piped())
