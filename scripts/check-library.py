@@ -48,7 +48,37 @@ because that happened -- a whole module, 500 lines and eleven tests, sat on
 disk uncompiled while the gate stayed green, and the only symptom was a test
 filter quietly selecting nothing.
 
-Stdlib only. Exit 0 if both rules hold, 1 otherwise.
+RULE THREE: no claim bound to a test that is not there.
+
+A comment stating a fact about the tree -- a count, a name, a "no path does
+X", a "removing Y trips Z" -- is true when written and silently rots: nothing
+compares it to the tree again. Six specimens shipped this way in one week
+(#77): a claim that an injection trips a refusal it does not trip, a
+``.reason`` teaching a vocabulary a commit had already grown, a "no path
+raises" beside a bare traceback. The fix is not "write better comments" --
+every one of the six was true when written -- it is binding the ones that are
+checkable to the thing that checks them, so a later change that falsifies the
+comment also breaks the build.
+
+A comment of the form ``// claim: <fact> :: <ref>`` states `<fact>` and names
+what proves it. When `<ref>` is a bare identifier or a `::`-qualified path --
+no space, no `/`, no `.` -- it is a test name, and this rule fails if no
+`#[test]` function by that name exists anywhere this crate compiles (rule
+two's own reachable set, so a claim bound to a test in an orphaned file also
+fails). Anything else -- a shell command, a path, a sentence -- is a
+`<ref>` this script cannot run, and is accepted unchecked: an unbindable
+claim is still better disclosed than untagged, but nothing here can verify a
+command's output. Untagged comments are opinions and stay unchecked; the
+discipline is that a *fact* gets a tag or gets rewritten as one.
+
+Deliberately narrow. This governs `diet/src/` alone, because that is where
+`#[test]` functions live and where this script can name a false claim by
+running nothing but `rustc`'s own module graph. A claim about a script in
+`scripts/` or a fixture's `.reason` file is real and just as capable of
+rotting, but this rule cannot bind it to a test it cannot see; extending
+coverage there is a different script's job, not a wider regex here.
+
+Stdlib only. Exit 0 if all three rules hold, 1 otherwise.
 """
 
 from __future__ import annotations
@@ -70,6 +100,42 @@ PATH_MOD = re.compile(
 )
 
 CHAR = re.compile(r"'(?:\\.[^']*|[^'\\])'")
+
+# `// claim: <fact> :: <ref>`, its own comment line. The `::` must be
+# space-padded so a `::`-qualified path in `<ref>` (or a stray `::` inside
+# `<fact>`'s own prose) is never mistaken for the separator.
+CLAIM = re.compile(r"^[ \t]*//[!/]?\s*claim:\s*(?P<body>.+?)\s*$", re.M)
+
+# A `<ref>` this script can resolve to a real function: no space, `/` or `.`,
+# because those are exactly the characters a shell command or a path has and
+# a bare identifier or `mod::path::name` does not.
+TEST_REF = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*$")
+
+TEST_ATTR = re.compile(r"#\[\s*test\s*\]")
+ATTR = re.compile(r"#\[[^\]]*\]")
+FN_NAME = re.compile(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+
+
+def test_fn_names(masked: str) -> set[str]:
+    """Every `#[test] fn NAME` in `masked`, skipping attributes in between.
+
+    Reads the masked text, same as the other two rules, so a `#[test]`
+    written out in a comment or a string does not mint a name nothing runs.
+    """
+    names: set[str] = set()
+    for found in TEST_ATTR.finditer(masked):
+        index = found.end()
+        while True:
+            gap = re.match(r"\s*", masked[index:])
+            index += gap.end()
+            attr = ATTR.match(masked, index)
+            if attr is None:
+                break
+            index = attr.end()
+        fn = FN_NAME.match(masked, index)
+        if fn:
+            names.add(fn.group(1))
+    return names
 
 
 def mask(text: str) -> tuple[str, set[int]]:
@@ -328,6 +394,8 @@ def main() -> int:
             )
 
     lines_scanned = 0
+    all_test_names: set[str] = set()
+    claims: list[tuple[pathlib.Path, str, str, int]] = []
     for source in sources:
         try:
             text = source.read_text(encoding="utf-8")
@@ -345,6 +413,34 @@ def main() -> int:
                 f"{source}:{line_of(text, caught[0])}: a match arm on a string "
                 f"literal: {pattern[:90]}"
             )
+        # A file rustc never reaches never runs the test a claim there names,
+        # so an orphaned file's tests do not enter the name set either --
+        # rule two's own finding, reused rather than re-decided here.
+        if source.resolve() in compiled:
+            all_test_names |= test_fn_names(masked)
+        for found in CLAIM.finditer(text):
+            body = found.group("body")
+            # No ` :: ` at all is ordinary prose that happens to use the word
+            # -- "they are one claim: the record says what happened" is a
+            # sentence, not a tag, and flagging it would be the same
+            # over-eager-regex mistake rule one's own docstring narrates.
+            # Only a line that actually offers a reference is this rule's to
+            # check; the discipline is a fact gets a tag, not that every
+            # appearance of the word does.
+            if " :: " not in body:
+                continue
+            _fact, ref = body.rsplit(" :: ", 1)
+            claims.append((source, text, ref, found.start()))
+
+    for source, text, ref, index in claims:
+        if not TEST_REF.match(ref):
+            continue  # a command or a path: not this script's to run
+        name = ref.rsplit("::", 1)[-1]
+        if name not in all_test_names:
+            failures.append(
+                f"{source}:{line_of(text, index)}: claim names a test that "
+                f"does not exist: `{ref}`"
+            )
 
     if not lines_scanned:
         print(f"{ROOT}: scanned no lines", file=sys.stderr)
@@ -360,7 +456,7 @@ def main() -> int:
         return 1
     print(
         f"check-library: {len(sources)} source file(s), {lines_scanned} line(s); "
-        f"all compiled, no match arm on a string literal"
+        f"all compiled, no match arm on a string literal, no dangling claim"
     )
     return 0
 

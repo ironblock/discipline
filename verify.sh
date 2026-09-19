@@ -1357,6 +1357,15 @@ inject_stringly_or_pattern() {
     >> diet/src/lib.rs
 }
 
+# A `claim:` bound to a test that is not there -- whether never named
+# correctly or (as here) simply invented. Rule three exists because six
+# comments this true this week rotted into false ones with nothing to catch
+# it; this is the seeded case that proves a dangling one goes red.
+inject_dangling_claim() {
+  printf '\n// claim: a seeded fact that binds to nothing :: this_test_does_not_exist_anywhere\n' \
+    >> diet/src/lib.rs
+}
+
 # The acceptance case where THE BUILD IS THE GATE: a field-kind variant added
 # without wiring it. Every exhaustive match over FieldKind stops compiling,
 # which is the whole reason the predicate is an enum.
@@ -2481,6 +2490,14 @@ inject_parity() {
   # Prove a fault the manifest does not account for: parity would then be
   # declared over less than the gate actually covers.
   rm -rf tests/fixtures/results-bad/2026-01-14-bad-sha
+}
+
+# The empty-shard guard's own tag, quietly dropped. #77 item 3: a guard
+# declared unseedable is not exempt from being seen red -- if its tag goes
+# missing, the reasoning above it is still there, now unbound, exactly like
+# a `claim:` whose test was deleted.
+inject_unseedable_tag_dropped() {
+  edit_in_place '/^  # unseedable: a re-entrant --selftest call/d' verify.sh
 }
 
 # An injection that writes a literal of an AMBIGUOUS type while editing a file
@@ -6251,6 +6268,8 @@ selftest() {
     'object.rs: no .mod. declaration reaches it'
   seeded_case "a stringly predicate cargo fmt wrapped" library inject_stringly_or_pattern \
     'a_decision_tag_that_is_quite_long_indeed'
+  seeded_case "a claim bound to a test that is not there" library inject_dangling_claim \
+    'claim names a test that does not exist'
   seeded_case "a record missing its substrates"       results  inject_results_no_substrate \
     'says diet check-record: a .start. row is missing its required .substrates.'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
@@ -6303,6 +6322,8 @@ selftest() {
     'which verify\.sh does not prove'
   seeded_case "a signature its own scope line matches" parity  inject_parity_scope_signature \
     'matches the line naming its own scope'
+  seeded_case "an unseedable guard's tag dropped"      parity   inject_unseedable_tag_dropped \
+    'the guard this declares is untagged, undeclared, or the two have drifted apart'
   seeded_case "a forbidden id in a commit message"    history  inject_history \
     'hygiene: internal-ticket-id:'
   seeded_case "content added and then removed"        history  inject_history_added_then_removed \
@@ -7272,10 +7293,12 @@ EOF
   # overclaimed what the bound guards against. Both are the same defect: the
   # thing that made it safe was somewhere else, and nothing said so here.
   #
-  # THIS GUARD HAS NO SEEDED FAULT AND NO MECHANICS ASSERTION, which by this
-  # repository's own law makes it a gate nothing has seen red -- so here is
-  # why, rather than a silence somebody has to rediscover. Both are run from
-  # inside `selftest`: a seeded case runs one `verify.sh --only <check>`, and
+  # unseedable: a re-entrant --selftest call would recurse into the function containing it; proved by hand instead
+  #
+  # This repository's own law is that a gate nothing has seen red is a gate
+  # that does not exist, so the tag above is not decoration: #77's lint
+  # refuses a guard with neither a manifest fault nor this line. Both are run
+  # from inside `selftest`: a seeded case runs one `verify.sh --only <check>`, and
   # `prove_mechanics` runs unconditionally in every shard. An assertion that
   # invoked `verify.sh --selftest` to watch this line refuse would re-enter
   # the function containing it, and the inner run would do the same. Covering
