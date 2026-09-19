@@ -579,9 +579,9 @@ mod tests {
             include_str!("../../adapters/gate.toml"),
             // The lane's whole source, so a catcher can be looked for
             // wherever its test lives. `replay_cli.rs` is not optional here:
-            // it holds the only tests that run `diet-replay`, and two faults
-            // in this manifest mutate the binary and are caught by nothing
-            // else.
+            // it holds the only tests that run `diet replay`, and several
+            // faults in this manifest mutate what is now
+            // `diet/src/bin/diet/replay.rs` and are caught by nothing else.
             concat!(
                 include_str!("mod.rs"),
                 include_str!("claude_code.rs"),

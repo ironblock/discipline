@@ -47,10 +47,21 @@
 # `--no-fail-fast` is in the command and the other lanes' commands do not
 # have it. Without it, a fault caught in the library stops cargo before the
 # integration tests run, and every catcher in `diet/tests/replay_cli.rs` --
-# which is the only thing that runs `diet-replay` at all -- would be invisible
+# which is the only thing that runs `diet replay` at all -- would be invisible
 # to this generator. Four faults here would have been recorded with fewer
-# catchers than they have, and the two that live in `bin/replay.rs` would
-# have been recorded as caught by nothing.
+# catchers than they have, and the two that live in what was `bin/replay.rs`
+# would have been recorded as caught by nothing.
+#
+# UPDATED, not regenerated from zero, when #85 landed `Kind::Unknown` and
+# ruling 1 stopped being blocked: `diet-replay`'s whole implementation moved
+# to `diet/src/bin/diet/replay.rs` (a verb on `diet`, not its own binary --
+# also ruled on #76), so every fault's `target` naming the old path was
+# repointed to the new one, and one fault was added -- ruling 1 itself,
+# `adapters.an-unmapped-row-is-counted-but-never-emitted`. All 30 were
+# re-verified the same way: applied to a fresh, isolated `git worktree`, the
+# mutation proved to change the tree, the command in `[package]` run there
+# with its own `CARGO_TARGET_DIR`, `expect_exit` and every name in `catches`
+# confirmed against the real run, one box at a time.
 
 [package]
 name = "diet-adapters"
@@ -605,7 +616,7 @@ catches = [
 ]
 
 [[fault]]
-# `diet-replay | head` closes the pipe partway through, and the first
+# `diet replay | head` closes the pipe partway through, and the first
 # version panicked: a correct census on screen and exit 101 under it. An
 # exit code that depends on whether somebody piped the program is not an
 # exit code. Its catcher generates its own log, because the defect needs
