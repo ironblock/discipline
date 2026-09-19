@@ -88,6 +88,17 @@ REQUIRED_REGIME_KEYS: dict[str, type | tuple[type, ...]] = {
     "dogma_version": int,
 }
 
+# `[derivation]`'s four keys, ruled 2026-09-19 on #84's second ruling: the
+# arithmetic's environment is a typed block, not README prose. Optional at
+# the top level (most directories derive from nothing); required whole once
+# declared, the way `[regime]` is.
+REQUIRED_DERIVATION_KEYS: dict[str, type | tuple[type, ...]] = {
+    "applier_sha256": str,
+    "runtime": str,
+    "substrate_id": str,
+    "derived_from": str,
+}
+
 SECTIONS = ["Observation", "Hypothesis", "Test", "Results", "Conclusion"]
 
 # The two kinds a directory may declare. Spelled here as well as in
@@ -567,6 +578,86 @@ def check_run(directory: pathlib.Path) -> list[str]:
             "`pre_registration_sha256`; endpoints nothing pins can be edited after "
             "the numbers, which is what pre-registering them is against",
         )
+
+    # THE ARITHMETIC'S ENVIRONMENT IS A TYPED BLOCK, NOT README PROSE. Ruled
+    # 2026-09-19 on #84's second ruling, after a derived directory's README
+    # stated "the arithmetic ran under Python 3.14.6 ... the registry's
+    # mac-pro-2019 instance" in prose that nothing here checked -- the
+    # prose-claims class #77 names: true when written, checked by nothing.
+    #
+    # OPTIONAL, the way `pre_registration_sha256` is: most directories derive
+    # from nothing, and this check is about a declared derivation being real,
+    # not about requiring every directory to be one. Required whole once
+    # declared, the way `[regime]` is required whole.
+    #
+    # Two of its four keys are digests and are verified as such, the same way
+    # `pre_registration_sha256` is: `applier_sha256` against `recompute.sh`
+    # itself -- "the applier is the Python inside recompute.sh; there is no
+    # other copy" -- and `derived_from` against the claim row's own
+    # `consumes`, so citing an original by digest is a checked fact and not
+    # an assertion nobody reads back. `runtime` and `substrate_id` are typed
+    # and required but not independently verifiable from this directory
+    # alone -- there is no second reading of which interpreter or which
+    # machine ran, only the one this directory declares.
+    derivation = front.get("derivation")
+    if derivation is not None and not isinstance(derivation, dict):
+        fail("results.key-mistyped", "front-matter `derivation` is not a table")
+    elif isinstance(derivation, dict):
+        for key, expected in REQUIRED_DERIVATION_KEYS.items():
+            if key not in derivation:
+                fail(
+                    "results.required-key-missing",
+                    f"front-matter `derivation` is missing required key `{key}`",
+                )
+            elif not has_type(derivation[key], expected):
+                fail(
+                    "results.key-mistyped",
+                    f"front-matter `derivation.{key}` is {type(derivation[key]).__name__}, "
+                    f"expected {type_name(expected)}",
+                )
+
+        applier_sha256 = derivation.get("applier_sha256")
+        applier_file = directory / "recompute.sh"
+        if isinstance(applier_sha256, str):
+            if not SHA256.fullmatch(applier_sha256):
+                fail(
+                    "results.sha-malformed",
+                    "front-matter `derivation.applier_sha256` is not 64 lowercase hex characters",
+                )
+            elif not applier_file.is_file():
+                fail(
+                    "results.derivation-applier-absent",
+                    "front-matter declares `derivation.applier_sha256` and there is no "
+                    "`recompute.sh` here to be the applier",
+                )
+            else:
+                found_applier = digest_of(applier_file)
+                if found_applier != applier_sha256:
+                    fail(
+                        "results.derivation-applier-digest",
+                        f"`recompute.sh` hashes to {found_applier} and the front-matter "
+                        f"declares {applier_sha256}; the applier that ran is not the one "
+                        f"committed beside it",
+                    )
+
+        derived_from = derivation.get("derived_from")
+        if isinstance(derived_from, str):
+            if not SHA256.fullmatch(derived_from):
+                fail(
+                    "results.sha-malformed",
+                    "front-matter `derivation.derived_from` is not 64 lowercase hex characters",
+                )
+            elif not any(
+                isinstance(artifact, dict) and artifact.get("sha256") == derived_from
+                for claim in claims
+                for artifact in claim.get("consumes", [])
+            ):
+                fail(
+                    "results.derivation-unconsumed",
+                    f"front-matter `derivation.derived_from` is {derived_from!r}, which no "
+                    f"claim row's `consumes` names; citing an original by digest means "
+                    f"consuming it",
+                )
 
     sha = front.get("product_sha256")
     if isinstance(sha, str):

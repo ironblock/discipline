@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 443
+red_faults = 444
 mechanics_assertions = 119
 migrated = 0
 
@@ -4093,6 +4093,14 @@ kind = "results-fixture"
 check = "results"
 label = "2026-02-01-pre-registration-unpinned"
 failure_class = "results.pre-registration-unpinned"
+migrated = false
+
+[[fault]]
+id = "results.2026-02-02-derivation-applier-digest"
+kind = "results-fixture"
+check = "results"
+label = "2026-02-02-derivation-applier-digest"
+failure_class = "results.derivation-applier-digest"
 migrated = false
 
 # --- lane-declared faults, generated -- never hand-typed ---
