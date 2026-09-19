@@ -593,7 +593,7 @@ becomes = '''
 const EXIT_REFUSED: u8 = 2;'''
 catches = [
     "adapters_a_renamed_field_is_refused_with_the_clis_refusal_code_and_no_object",
-    "adapters_every_invocation_that_never_reached_an_answer_exits_two",
+    "adapters_a_regimen_this_program_reads_and_declines_exits_three_not_two",
 ]
 
 [[fault]]
@@ -612,7 +612,7 @@ becomes = '''
             eprintln!("{why}");
             return ExitCode::from(EXIT_COULD_NOT_RUN);'''
 catches = [
-    "adapters_every_invocation_that_never_reached_an_answer_exits_two",
+    "adapters_a_regimen_this_program_reads_and_declines_exits_three_not_two",
 ]
 
 [[fault]]
