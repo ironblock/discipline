@@ -1015,7 +1015,9 @@ impl Router {
             | Event::Capture { .. }
             | Event::Seam { .. }
             | Event::Rejected { .. }
-            | Event::Claim { .. } => Vec::new(),
+            | Event::Claim { .. }
+            // Unmapped: no turn boundary, no lane, no call to route.
+            | Event::Unknown { .. } => Vec::new(),
         }
     }
 

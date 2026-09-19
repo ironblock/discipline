@@ -831,7 +831,10 @@ impl Lane {
             | Event::Seam { .. }
             | Event::Rejected { .. }
             | Event::Claim { .. }
-            | Event::Summary { .. } => {}
+            | Event::Summary { .. }
+            // A row no adapter could map carries no tool call, so it moves
+            // nothing here. Listed rather than wildcarded, like the rest.
+            | Event::Unknown { .. } => {}
         }
     }
 
@@ -1798,7 +1801,7 @@ mod tests {
     use crate::formats::record::{self, Event, Regime};
     use crate::object::{EntryId, Patch, WorkingObject};
 
-    const START: &str = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"h","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
+    const START: &str = r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
 
     fn regime() -> Regime {
         record::parse(START).expect("a record").regime().clone()

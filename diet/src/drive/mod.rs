@@ -69,7 +69,7 @@ use crate::client::transport::Transport;
 use crate::client::{Client, IdSource, Outcome, wire};
 use crate::formats::interview;
 use crate::formats::record::json::Value;
-use crate::formats::record::{Count, Event, ParseError, Record, Summary, render};
+use crate::formats::record::{Count, Event, ParseError, Record, Source, Summary, render};
 use crate::isolation::{Confinement, NotRun, Policy as IsolationPolicy, Unavailable};
 use crate::object::{Applied, EntryId, ObjectError, Patch, Provenance, WorkingObject};
 use crate::seam::policy::Policy as SeamPolicy;
@@ -509,6 +509,9 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
 
     let mut events = vec![Event::Start {
         regime: Box::new(script.regime.clone()),
+        // This function IS the live path: it drove the turns and wrote these
+        // rows as they happened. Nothing else in this crate may say `Live`.
+        source: Source::Live,
     }];
     let mut unspellable: Vec<Unspellable> = Vec::new();
     let mut uncaptured: Vec<Uncaptured> = Vec::new();
@@ -906,7 +909,8 @@ mod tests {
                 // while the program under it wrote a different one, and the
                 // one thing this field has to be is the same in both.
                 weights: Weights::Digest(canned::acts_digest()),
-                hardware_fingerprint: "the-runner".to_owned(),
+                hardware_fingerprint:
+                    "7a42c854bf784d24d1f5f418b9235c431dbd755c9431559152b70f3dcb3db7d9".to_owned(),
                 // Not empty: the schema refuses a blank `sampler_card`,
                 // because "nobody wrote the settings down" and "the settings
                 // were these" are different facts about a run.

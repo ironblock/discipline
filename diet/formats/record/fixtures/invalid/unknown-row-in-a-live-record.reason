@@ -1,0 +1,3 @@
+A `live` record carrying an `unknown` row. `unknown` is what an adapter writes
+for a foreign row it has no word for; a record this library drove has a word for
+every row it writes, so the two cannot both be true.

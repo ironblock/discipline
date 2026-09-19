@@ -31,10 +31,17 @@
 //!   of `R` resamples cannot produce a p below `1/(R+1)`. [`PValue`] carries
 //!   that floor and prints it, so a small register cannot report a
 //!   significance it could not have reached.
-//! * **The controls are rows.** The sense text verbatim must rank first; a
-//!   row of unrelated words -- or the negative sense verbatim, under a scoring
-//!   that subtracts it -- must rank last; and a shuffled-label null must sit
-//!   at chance. A run whose controls are not at their extremes is not a run.
+//! * **The controls are rows.** The sense text verbatim must rank first; no
+//!   POSITIVE row may rank below a row of unrelated words -- or below the
+//!   negative sense verbatim, under a scoring that subtracts it -- while a
+//!   negative that sinks under either is a negative doing its job, measured
+//!   where negatives are measured; and a shuffled-label null must sit at
+//!   chance. A cell whose controls are not at their extremes is not a cell:
+//!   it is reported as the control failure it is, with no metric over it.
+//!   Ruled on #24 (2026-09-15), after the first invocation on real embedders
+//!   found the bound as coded assumed "unrelated" was the minimum of the
+//!   space -- under raw cosine it sits near the origin, and a real negative
+//!   can be anti-correlated with a sense.
 //!
 //! Negation is why there is a `reversal` set at all. Embedding models read
 //! "X" and "not X" as neighbours, so supersession is nominated by an authored,
@@ -1439,8 +1446,10 @@ pub enum Control {
     /// The negative literal, verbatim. Must rank last under a scoring that
     /// subtracts it.
     VerbatimNegative,
-    /// Words that share nothing with any sense. Must rank last under a scoring
-    /// that measures closeness to the positive side only.
+    /// Words that share nothing with any sense. No positive row may rank below
+    /// it under a scoring that measures closeness to the positive side only;
+    /// a negative may, because under raw cosine these words sit near the
+    /// origin and a negative can be anti-correlated with the sense.
     UnrelatedWords,
 }
 
@@ -1523,7 +1532,12 @@ pub enum ControlFailure {
         /// What that row scored.
         other: f64,
     },
-    /// A register row went under the bottom control.
+    /// A positive register row went under the bottom control.
+    ///
+    /// Positives only, ruled on #24 (2026-09-15): the control's meaning is
+    /// that the embedder can place a positive above noise. A negative below
+    /// the bottom control is measured by precision, the false-positive rate
+    /// and d', not refused here.
     NotAtBottom {
         /// The control.
         control: Control,
@@ -1570,7 +1584,7 @@ impl fmt::Display for ControlFailure {
                 other,
             } => write!(
                 f,
-                "{} scored {score} and {row} went under it at {other}",
+                "{} scored {score} and the positive {row} went under it at {other}",
                 control.tag()
             ),
             Self::Inverted { top, bottom } => write!(
@@ -1591,8 +1605,12 @@ impl Error for ControlFailure {}
 /// The controls are scored ungated, because they test the scoring and the gate
 /// is a separate factor. The top control must **strictly** outscore every
 /// register row -- an embedder that cannot tell the sense from the register
-/// ties them, and a tie is that failure -- and no register row may go under
-/// the bottom control.
+/// ties them, and a tie is that failure -- and no POSITIVE register row may go
+/// under the bottom control. Negatives are unconstrained by the bottom: under
+/// raw cosine the unrelated-words row sits near the origin, and an authored
+/// hard negative anti-correlated with the sense is doing its job, not failing
+/// the instrument. Ruled on #24 (2026-09-15); as first coded the bound took
+/// every row, and on three of four real embedders a negative sat under it.
 ///
 /// # Errors
 ///
@@ -1639,7 +1657,7 @@ pub fn controls(
                 other: row.score,
             });
         }
-        if row.score < bottom_score {
+        if row.label.is_positive() && row.score < bottom_score {
             return Err(ControlFailure::NotAtBottom {
                 control: bottom,
                 score: bottom_score,
@@ -1788,14 +1806,33 @@ fn moments(values: &[f64]) -> Option<Moments> {
 /// separation over a zero spread is not infinite, it is undefined.
 #[must_use]
 pub fn d_prime(rows: &[Scored]) -> Option<f64> {
+    d_prime_or_why(rows).ok()
+}
+
+/// [`d_prime`], saying why when it has no value.
+///
+/// Two conditions make it undefined and they are different facts about the
+/// rows: a class with fewer than two members has no spread to standardise
+/// by, and two classes with no spread between them have nothing to divide.
+/// A seat reading the refusal from outside could not tell which had fired,
+/// so each is named. Ruled on #24 (2026-09-15).
+///
+/// # Errors
+///
+/// [`UndefinedCause::TooFewRows`] naming the class and its count, or
+/// [`UndefinedCause::ZeroSpread`].
+pub fn d_prime_or_why(rows: &[Scored]) -> Result<f64, UndefinedCause> {
     let (positive, negative) = split(rows);
-    let positive = moments(&positive)?;
-    let negative = moments(&negative)?;
-    let pooled = f64::midpoint(positive.variance, negative.variance).sqrt();
+    let too_few = |class: Label, n: usize| UndefinedCause::TooFewRows { class, n };
+    let positive_moments =
+        moments(&positive).ok_or_else(|| too_few(Label::Positive, positive.len()))?;
+    let negative_moments =
+        moments(&negative).ok_or_else(|| too_few(Label::Negative, negative.len()))?;
+    let pooled = f64::midpoint(positive_moments.variance, negative_moments.variance).sqrt();
     if pooled <= 0.0 {
-        return None;
+        return Err(UndefinedCause::ZeroSpread);
     }
-    Some((positive.mean - negative.mean) / pooled)
+    Ok((positive_moments.mean - negative_moments.mean) / pooled)
 }
 
 /// A seeded pseudo-random generator: xorshift with a multiplicative output.
@@ -2304,13 +2341,19 @@ impl Metric {
     }
 
     /// The metric over `rows`, at budget `k` where a budget applies.
-    #[must_use]
-    pub fn compute(self, k: usize, rows: &[Scored]) -> Option<f64> {
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`UndefinedCause`] when the rows do not meet the metric's
+    /// precondition -- typed, so a refusal downstream can say which.
+    pub fn compute(self, k: usize, rows: &[Scored]) -> Result<f64, UndefinedCause> {
         match self {
-            Self::PrecisionAtK => precision_at_k(rows, k).as_f64(),
-            Self::OverFiring => over_firing(rows, k).as_f64(),
-            Self::Auc => auc(rows),
-            Self::DPrime => d_prime(rows),
+            Self::PrecisionAtK => precision_at_k(rows, k)
+                .as_f64()
+                .ok_or(UndefinedCause::NoValue),
+            Self::OverFiring => over_firing(rows, k).as_f64().ok_or(UndefinedCause::NoValue),
+            Self::Auc => auc(rows).ok_or(UndefinedCause::NoValue),
+            Self::DPrime => d_prime_or_why(rows),
         }
     }
 
@@ -2378,8 +2421,70 @@ pub enum MetricError {
         /// The metric.
         metric: Metric,
         /// Which rows.
-        on: &'static str,
+        on: MetricSubject,
+        /// Why: which of the metric's preconditions the rows did not meet.
+        ///
+        /// Typed, ruled on #24 (2026-09-15): `d_prime is undefined on the
+        /// subject` told a seat outside the instrument neither which cell nor
+        /// which of two conditions fired, and it could not diagnose from the
+        /// message. Now it can.
+        cause: UndefinedCause,
     },
+}
+
+/// Which rows a metric was taken over.
+///
+/// Typed rather than a string so that a reader deciding what an undefined
+/// metric means -- the instrument's own fixture, or the subject it was asked
+/// about -- matches on a variant, not on prose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetricSubject {
+    /// The metric's own failure fixture, which must fail.
+    FailureFixture,
+    /// The rows the metric was asked about.
+    Subject,
+}
+
+impl fmt::Display for MetricSubject {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::FailureFixture => "its failure fixture",
+            Self::Subject => "the subject",
+        })
+    }
+}
+
+/// Why a metric has no value on a set of rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UndefinedCause {
+    /// Fewer than two rows of one class, so that class has no spread.
+    TooFewRows {
+        /// Which class.
+        class: Label,
+        /// How many rows it had.
+        n: usize,
+    },
+    /// Both classes present and no spread between them at all.
+    ZeroSpread,
+    /// The metric had nothing to rank or count over.
+    NoValue,
+    /// The metric computed, and to a value that is not a number.
+    NotFinite,
+}
+
+impl fmt::Display for UndefinedCause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TooFewRows { class, n } => write!(
+                f,
+                "fewer than two {} rows ({n}), so that class has no spread",
+                class.tag()
+            ),
+            Self::ZeroSpread => write!(f, "no spread at all across the two classes"),
+            Self::NoValue => write!(f, "nothing to rank or count over"),
+            Self::NotFinite => write!(f, "the value is not a finite number"),
+        }
+    }
 }
 
 impl fmt::Display for MetricError {
@@ -2399,8 +2504,8 @@ impl fmt::Display for MetricError {
                  budget outside that ladder is refused here rather than reported quietly",
                 metric.tag()
             ),
-            Self::Undefined { metric, on } => {
-                write!(f, "{} is undefined on {on}", metric.tag())
+            Self::Undefined { metric, on, cause } => {
+                write!(f, "{} is undefined on {on}: {cause}", metric.tag())
             }
         }
     }
@@ -2427,10 +2532,14 @@ impl Reported {
     /// has no value on the fixture or on the subject.
     pub fn take(metric: Metric, k: usize, subject: &[Scored]) -> Result<Self, MetricError> {
         let failing = metric.failure_fixture();
-        let on_failure_fixture = metric.compute(k, &failing).ok_or(MetricError::Undefined {
-            metric,
-            on: "its failure fixture",
-        })?;
+        let on_failure_fixture =
+            metric
+                .compute(k, &failing)
+                .map_err(|cause| MetricError::Undefined {
+                    metric,
+                    on: MetricSubject::FailureFixture,
+                    cause,
+                })?;
         if !metric.failed(on_failure_fixture) {
             return Err(MetricError::InstrumentNeverFailed {
                 metric,
@@ -2439,14 +2548,18 @@ impl Reported {
                 reading: metric.failure_reading(),
             });
         }
-        let value = metric.compute(k, subject).ok_or(MetricError::Undefined {
-            metric,
-            on: "the subject",
-        })?;
+        let value = metric
+            .compute(k, subject)
+            .map_err(|cause| MetricError::Undefined {
+                metric,
+                on: MetricSubject::Subject,
+                cause,
+            })?;
         if !value.is_finite() {
             return Err(MetricError::Undefined {
                 metric,
-                on: "the subject",
+                on: MetricSubject::Subject,
+                cause: UndefinedCause::NotFinite,
             });
         }
         Ok(Self {
@@ -2775,11 +2888,12 @@ mod tests {
     use super::{
         BUDGETS, Blocker, BootstrapError, Cached, Cell, Control, ControlFailure, DataError,
         Embedded, EmbeddedSet, Embedder, Fixture, Fraction, Gate, JoinError, Label, Metric,
-        MetricError, NULL_AUC_BAND, NULL_D_PRIME_BAND, NULL_SHUFFLES, PRE_REGISTRATION, Polarity,
-        REGISTER_SIDECARS, RegisterName, Reported, Row, ScoreError, Scored, Scoring, SenseSet,
-        SetError, Source, Xorshift, attainable_p_floor, auc, controls, cosine, d_prime, holm,
-        joined, narrowest_budget, over_firing, paired_bootstrap, precision_at_k, provenance,
-        register, score_rows, seeds, senses, shipped_senses, shuffled_null, widest_budget,
+        MetricError, MetricSubject, NULL_AUC_BAND, NULL_D_PRIME_BAND, NULL_SHUFFLES,
+        PRE_REGISTRATION, Polarity, REGISTER_SIDECARS, RegisterName, Reported, Row, ScoreError,
+        Scored, Scoring, SenseSet, SetError, Source, UndefinedCause, Xorshift, attainable_p_floor,
+        auc, controls, cosine, d_prime, d_prime_or_why, holm, joined, narrowest_budget,
+        over_firing, paired_bootstrap, precision_at_k, provenance, register, score_rows, seeds,
+        senses, shipped_senses, shuffled_null, widest_budget,
     };
     use crate::formats::record::json::{self, Decimal, Value};
 
@@ -3643,12 +3757,12 @@ mod tests {
             ControlFailure::NotAtBottom {
                 control: Control::UnrelatedWords,
                 score: 0.0,
-                row: "authored/hard_negative/mistakes-of-this-kind".to_owned(),
+                row: "authored/positive/actually-the-flag".to_owned(),
                 other: -1.0,
             }
             .to_string(),
-            "unrelated_words scored 0 and authored/hard_negative/mistakes-of-this-kind went \
-             under it at -1"
+            "unrelated_words scored 0 and the positive authored/positive/actually-the-flag \
+             went under it at -1"
         );
         assert_eq!(
             ControlFailure::Unscorable(ScoreError::Unembeddable {
@@ -3698,13 +3812,13 @@ mod tests {
                 scoring.tag()
             );
         }
-        // And a register row *under* the bottom control. The fixture
+        // And a POSITIVE register row *under* the bottom control. The fixture
         // embedder's components are token counts, so nothing it places can go
         // there; a signed space is where a real embedder puts things.
         let under = rows
             .iter()
-            .find(|row| row.id == "authored/hard_negative/mistakes-of-this-kind")
-            .expect("a hard negative")
+            .find(|row| row.label.is_positive() && row.id != displaced.id)
+            .expect("a second positive")
             .clone();
         let positive = literal(SenseSet::Mistake, Polarity::Positive);
         let placed = Placed::at(&[
@@ -3716,7 +3830,7 @@ mod tests {
         let signed = EmbeddedSet::embed(&shipped(), SenseSet::Mistake, &placed)
             .expect("the shipped set embeds");
         let err = controls(&rows, &signed, &placed, Scoring::RawCosine)
-            .expect_err("a register row went under the bottom control and the controls passed");
+            .expect_err("a positive went under the bottom control and the controls passed");
         let ControlFailure::NotAtBottom { control, row, .. } = &err else {
             panic!("{err:?}")
         };
@@ -3725,6 +3839,25 @@ mod tests {
             (Control::UnrelatedWords, under.id.as_str()),
             "the wrong control or the wrong row was named"
         );
+        // A NEGATIVE under the bottom control is not a failure: it is the
+        // direction a negative is supposed to go, and it is measured by the
+        // metrics rather than refused by the controls. As first coded this
+        // was refused, and three of four real embedders failed on an authored
+        // hard negative at a cosine below random words. Ruled on #24.
+        let negative = rows
+            .iter()
+            .find(|row| row.id == "authored/hard_negative/mistakes-of-this-kind")
+            .expect("a hard negative")
+            .clone();
+        let sunk = Placed::at(&[
+            (positive.as_str(), [1.0, 0.0]),
+            (super::UNRELATED, [0.0, 1.0]),
+            (negative.text.as_str(), [-1.0, 0.0]),
+        ]);
+        let signed = EmbeddedSet::embed(&shipped(), SenseSet::Mistake, &sunk)
+            .expect("the shipped set embeds");
+        controls(&rows, &signed, &sunk, Scoring::RawCosine)
+            .unwrap_or_else(|err| panic!("a negative under the bottom control was refused: {err}"));
     }
 
     #[test]
@@ -4113,6 +4246,15 @@ mod tests {
             row("n2", Label::Negative, 0.2),
         ];
         assert!(d_prime(&too_few).is_none(), "one positive has no spread");
+        // And WHY, typed: a seat reading the refusal from outside the
+        // instrument could not tell one positive from a flat register.
+        assert_eq!(
+            d_prime_or_why(&too_few),
+            Err(UndefinedCause::TooFewRows {
+                class: Label::Positive,
+                n: 1
+            })
+        );
         let flat = [
             row("p1", Label::Positive, 0.5),
             row("p2", Label::Positive, 0.5),
@@ -4122,6 +4264,20 @@ mod tests {
         assert!(
             d_prime(&flat).is_none(),
             "no spread, no standardised separation"
+        );
+        assert_eq!(d_prime_or_why(&flat), Err(UndefinedCause::ZeroSpread));
+        assert_eq!(
+            MetricError::Undefined {
+                metric: Metric::DPrime,
+                on: MetricSubject::Subject,
+                cause: UndefinedCause::TooFewRows {
+                    class: Label::Negative,
+                    n: 0
+                },
+            }
+            .to_string(),
+            "d_prime is undefined on the subject: fewer than two negative rows (0), so \
+             that class has no spread"
         );
     }
 
@@ -4638,10 +4794,11 @@ mod tests {
         assert_eq!(
             MetricError::Undefined {
                 metric: Metric::DPrime,
-                on: "the subject",
+                on: MetricSubject::Subject,
+                cause: UndefinedCause::ZeroSpread,
             }
             .to_string(),
-            "d_prime is undefined on the subject"
+            "d_prime is undefined on the subject: no spread at all across the two classes"
         );
     }
 
