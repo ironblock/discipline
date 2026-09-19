@@ -1,0 +1,55 @@
+{
+ "cache": "all-MiniLM-L6-v2.vectors.jsonl",
+ "cache_sha256": "b067436cfa4b422c99d573d287596f565391e50de2b7ac11ab0044fbaa2e9861",
+ "id": "all-MiniLM-L6-v2",
+ "model": "sentence-transformers/all-MiniLM-L6-v2",
+ "revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+ "files": [
+  {
+   "file": "model.safetensors",
+   "sha256": "53aa51172d142c89d9012cce15ae4d6cc0ca6895895114379cacb4fab128d9db"
+  },
+  {
+   "file": "tokenizer.json",
+   "sha256": "be50c3628f2bf5bb5e3a7f17b1f74611b2561a3a27eeab05e5aa30f411572037"
+  },
+  {
+   "file": "config.json",
+   "sha256": "953f9c0d463486b10a6871cc2fd59f223b2c70184f49815e7efbcab5d8908b41"
+  },
+  {
+   "file": "modules.json",
+   "sha256": "84e40c8e006c9b1d6c122e02cba9b02458120b5fb0c87b746c41e0207cf642cf"
+  },
+  {
+   "file": "1_Pooling/config.json",
+   "sha256": "4be450dde3b0273bb9787637cfbd28fe04a7ba6ab9d36ac48e92b11e350ffc23"
+  }
+ ],
+ "dimension": 384,
+ "normalized": true,
+ "pooling": "sentence-transformers' shipped modules for the model, Transformer -> Pooling -> Normalize: Pooling mode 'mean', then Normalize; encode(normalize_embeddings=True)",
+ "prefix_rows": "",
+ "prefix_senses": "",
+ "regime": "no instruction prefix on either kind (neither model documents one); the cache text is bare",
+ "texts": 323,
+ "rows": 305,
+ "senses": 18,
+ "texts_source": {
+  "gym_commit": "c20e32b",
+  "register": "diet/capture/sense/register/*.jsonl minus *.provenance.jsonl",
+  "senses": "diet/capture/sense/sets.jsonl"
+ },
+ "decimals": 8,
+ "batch_size": 32,
+ "device": "cpu",
+ "python": "3.12.13",
+ "sentence_transformers": "3.0.1",
+ "transformers": "4.44.2",
+ "torch": "2.2.2",
+ "tokenizers": "0.19.1",
+ "HF_HUB_OFFLINE": "1",
+ "TRANSFORMERS_OFFLINE": "1",
+ "environment": "encoder-suite/.venv (the research program's pinned environment)",
+ "script": "embed_st.py"
+}
