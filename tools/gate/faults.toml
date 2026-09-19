@@ -86,7 +86,7 @@ check = "test"
 target = "test:conformance/formats::regimen"
 label = "non-conforming format fixture"
 failure_class = "format.valid-fixture-mismatch"
-legacy_signature = "conformance failure\\(s\\)"
+legacy_signature = "regimen/fixtures/valid/seeded-nonconforming\\.toml"
 migrated = false
 
 [[fault]]
@@ -106,7 +106,7 @@ check = "test"
 target = "test:conformance/formats::decline"
 label = "decline grammar loses its end anchor"
 failure_class = "format.invalid-fixture-accepted"
-legacy_signature = "coordinated-with-and\\.txt: accepted as"
+legacy_signature = "decline/fixtures/invalid/coordinated-with-and\\.txt"
 migrated = false
 
 [[fault]]
@@ -116,7 +116,7 @@ check = "test"
 target = "test:conformance/formats::interview"
 label = "interview drops continuation lines"
 failure_class = "format.valid-fixture-misparsed"
-legacy_signature = "multi-line-continuation\\.txt: parsed to"
+legacy_signature = "interview/fixtures/valid/multi-line-continuation\\.txt"
 migrated = false
 
 [[fault]]
@@ -126,7 +126,7 @@ check = "test"
 target = "test:conformance/formats::interview"
 label = "interview blind to truncation"
 failure_class = "format.valid-fixture-misparsed"
-legacy_signature = "truncated-unterminated-fence\\.txt: parsed to"
+legacy_signature = "interview/fixtures/valid/truncated-unterminated-fence\\.txt"
 migrated = false
 
 [[fault]]
@@ -156,7 +156,7 @@ check = "test"
 target = "test:conformance/formats::record"
 label = "a summary kind's fields made advisory"
 failure_class = "schema.kind-field-not-refused"
-legacy_signature = "recompute-summary-carries-turns\\.jsonl: accepted as"
+legacy_signature = "record/fixtures/invalid/recompute-summary-carries-turns\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -166,7 +166,7 @@ check = "test"
 target = "test:conformance/formats::record"
 label = "a recompute summary with no product digest"
 failure_class = "schema.summary-product-digest-optional"
-legacy_signature = "recompute-summary-without-its-product-digest\\.jsonl: accepted as"
+legacy_signature = "record/fixtures/invalid/recompute-summary-without-its-product-digest\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -176,7 +176,7 @@ check = "test"
 target = "test:conformance/formats::record"
 label = "a summary that cannot be true of itself"
 failure_class = "schema.summary-impossible-accepted"
-legacy_signature = "recompute-matched-exceeds-checked\\.jsonl: accepted as"
+legacy_signature = "record/fixtures/invalid/recompute-matched-exceeds-checked\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -225,7 +225,7 @@ check = "test"
 target = "test:conformance/formats::record"
 label = "a substrate reference that resolves to anything"
 failure_class = "schema.substrate-reference-unchecked"
-legacy_signature = "lane-names-an-undeclared-substrate\\.jsonl: accepted as"
+legacy_signature = "record/fixtures/invalid/lane-names-an-undeclared-substrate\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -235,7 +235,7 @@ check = "test"
 target = "test:conformance/formats::record"
 label = "a substrate reference defaulted when alone"
 failure_class = "schema.substrate-reference-defaulted"
-legacy_signature = "request-with-no-substrate\\.jsonl: accepted as"
+legacy_signature = "record/fixtures/invalid/request-with-no-substrate\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -245,7 +245,7 @@ check = "test"
 target = "test:conformance/formats::record"
 label = "weights identified by name"
 failure_class = "schema.weights-not-digested"
-legacy_signature = "weights-named-not-digested\\.jsonl: accepted as"
+legacy_signature = "record/fixtures/invalid/weights-named-not-digested\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -255,7 +255,7 @@ check = "test"
 target = "test:conformance/formats::record"
 label = "record substrate made optional"
 failure_class = "format.invalid-fixture-accepted"
-legacy_signature = "regime-missing-substrate\\.jsonl: accepted as"
+legacy_signature = "record/fixtures/invalid/regime-missing-substrate\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -265,7 +265,7 @@ check = "test"
 target = "test:conformance/formats::record"
 label = "a row that links to itself"
 failure_class = "record.self-link"
-legacy_signature = "retry-of-itself\\.jsonl: accepted as"
+legacy_signature = "record/fixtures/invalid/retry-of-itself\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -275,7 +275,7 @@ check = "test"
 target = "test:conformance/formats::record"
 label = "record nesting left unbounded"
 failure_class = "record.unbounded-recursion"
-legacy_signature = "deep-nesting\\.jsonl: accepted as"
+legacy_signature = "record/fixtures/invalid/deep-nesting\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -2064,7 +2064,7 @@ check = "test"
 target = "test:conformance/formats::verdict"
 label = "a verdict read by prefix"
 failure_class = "format.invalid-fixture-accepted"
-legacy_signature = "verdict-as-a-prefix\\.txt: accepted as"
+legacy_signature = "verdict/fixtures/invalid/verdict-as-a-prefix\\.txt"
 migrated = false
 
 [[fault]]
@@ -2074,7 +2074,7 @@ check = "test"
 target = "test:conformance/formats::verdict"
 label = "an identifier in a reason read as a verdict"
 failure_class = "format.valid-fixture-rejected"
-legacy_signature = "reason-naming-an-identifier\\.txt: rejected"
+legacy_signature = "verdict/fixtures/valid/reason-naming-an-identifier\\.txt"
 migrated = false
 
 [[fault]]
@@ -2084,7 +2084,7 @@ check = "test"
 target = "test:conformance/formats::verdict"
 label = "a second verdict in a reason accepted"
 failure_class = "format.invalid-fixture-accepted"
-legacy_signature = "two-verdicts\\.txt: accepted as"
+legacy_signature = "verdict/fixtures/invalid/two-verdicts\\.txt"
 migrated = false
 
 [[fault]]
@@ -3701,7 +3701,7 @@ check = "test"
 target = "test:conformance/formats::record"
 label = "a lane free to change substrate"
 failure_class = "schema.lane-changed-substrate"
-legacy_signature = "lane-changes-substrate\\.jsonl: accepted as"
+legacy_signature = "record/fixtures/invalid/lane-changes-substrate\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -3962,7 +3962,7 @@ check = "test"
 target = "test:conformance/formats::record"
 label = "a substrate reference inferred from a count"
 failure_class = "schema.undeclared-substrate"
-legacy_signature = "one-substrate-and-a-request-elsewhere\\.jsonl: accepted as"
+legacy_signature = "record/fixtures/invalid/one-substrate-and-a-request-elsewhere\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -3972,7 +3972,7 @@ check = "test"
 target = "test:conformance/formats::record"
 label = "a fork that names no substrate"
 failure_class = "schema.undeclared-substrate"
-legacy_signature = "fork-names-an-undeclared-substrate\\.jsonl: accepted as"
+legacy_signature = "record/fixtures/invalid/fork-names-an-undeclared-substrate\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -3982,7 +3982,7 @@ check = "test"
 target = "test:conformance/formats::record"
 label = "a canned substrate that need not say which acts"
 failure_class = "schema.canned-without-acts"
-legacy_signature = "canned-with-no-acts-digest\\.jsonl: accepted as"
+legacy_signature = "record/fixtures/invalid/canned-with-no-acts-digest\\.jsonl"
 migrated = false
 
 [[fault]]

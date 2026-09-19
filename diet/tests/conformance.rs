@@ -43,6 +43,17 @@ fn formats_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("formats")
 }
 
+/// A fixture path, relative to [`formats_dir`] -- what a failure message
+/// names it by, so the name is the same string on every machine that runs
+/// this test rather than an absolute path baked from `CARGO_MANIFEST_DIR`
+/// at compile time. A fixture's relative path is a stable identifier a
+/// seeded fault can bind to; an absolute one never was, and every
+/// `legacy_signature` that named a fixture already worked around this by
+/// matching only the filename fragment rather than the path this printed.
+fn rel(case: &Path) -> &Path {
+    case.strip_prefix(formats_dir()).unwrap_or(case)
+}
+
 /// The [`Format`] a named test module covers.
 ///
 /// A module whose name is absent from [`FORMATS`] is a module asserting
@@ -260,7 +271,10 @@ fn assert_valid_fixtures_parse_to_their_expected_value(format: &Format) {
         let expected: Json = match serde_json::from_str(&read_companion(&expected_path)) {
             Ok(json) => json,
             Err(err) => {
-                failures.push(format!("{}: unreadable expectation: {err}", case.display()));
+                failures.push(format!(
+                    "{}: unreadable expectation: {err}",
+                    rel(&case).display()
+                ));
                 continue;
             }
         };
@@ -268,9 +282,9 @@ fn assert_valid_fixtures_parse_to_their_expected_value(format: &Format) {
             Ok(actual) if actual == expected => {}
             Ok(actual) => failures.push(format!(
                 "{}: parsed to {actual}, expected {expected}",
-                case.display()
+                rel(&case).display()
             )),
-            Err(err) => failures.push(format!("{}: rejected: {err}", case.display())),
+            Err(err) => failures.push(format!("{}: rejected: {err}", rel(&case).display())),
         }
     }
 
@@ -297,7 +311,7 @@ fn assert_invalid_fixtures_are_rejected(format: &Format) {
         match parse_to_json(format, &read_case(&case)) {
             Ok(parsed) => failures.push(format!(
                 "{}: accepted as {parsed}, but must be rejected: {reason}",
-                case.display()
+                rel(&case).display()
             )),
             // Two fixtures rejected by the identical message are one fixture
             // and a duplicate: whichever is second pins nothing the first does
@@ -309,8 +323,8 @@ fn assert_invalid_fixtures_are_rejected(format: &Format) {
                     failures.push(format!(
                         "{} and {} are both rejected by `{rejection}`, so the \
                          second pins nothing the first does not",
-                        first.display(),
-                        case.display()
+                        rel(&first).display(),
+                        rel(&case).display()
                     ));
                 }
             }
