@@ -34,9 +34,21 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 445
+red_faults = 447
 mechanics_assertions = 119
+unseedable_guards = 1
 migrated = 0
+
+# A guard genuinely too dangerous to seed -- covering it would re-enter
+# `--selftest` from inside itself -- is declared here rather than left
+# silent. Each entry's `reason` must appear verbatim as an
+# `unseedable: <reason>` comment in `file`; check-fault-manifest.py checks
+# this on every run, so a tag quietly dropped from the code goes red the
+# same way a `claim:` whose test disappeared does (#77).
+[[unseedable]]
+id = "selftest.empty-shard-declares-pass"
+file = "verify.sh"
+reason = "a re-entrant --selftest call would recurse into the function containing it; proved by hand instead"
 
 
 [[fault]]
@@ -740,6 +752,15 @@ legacy_signature = "no .mod. declaration reaches it"
 migrated = false
 
 [[fault]]
+id = "library.dangling_claim"
+kind = "seeded-gate"
+check = "library"
+label = "a claim bound to a test that is not there"
+failure_class = "library.dangling-claim"
+legacy_signature = "claim names a test that does not exist"
+migrated = false
+
+[[fault]]
 id = "results.results"
 kind = "seeded-gate"
 check = "results"
@@ -818,6 +839,15 @@ check = "parity"
 label = "parity drifts from what is proven"
 failure_class = "parity.manifest-drift"
 legacy_signature = "which verify\\.sh does not prove"
+migrated = false
+
+[[fault]]
+id = "parity.unseedable_tag_dropped"
+kind = "seeded-gate"
+check = "parity"
+label = "an unseedable guard's tag dropped"
+failure_class = "parity.unseedable-untagged"
+legacy_signature = "the guard this declares is untagged, undeclared, or the two have drifted apart"
 migrated = false
 
 [[fault]]

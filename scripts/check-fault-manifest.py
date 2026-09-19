@@ -373,6 +373,49 @@ def main() -> int:
                 f"the signature whether or not the gate fired"
             )
 
+    # UNSEEDABLE GUARDS (#77 item 3). A fault that genuinely cannot be seeded
+    # -- a mechanics assertion over `--selftest` re-entering itself -- is not
+    # exempt from this repository's law that a gate nothing has seen red does
+    # not exist; it is declared instead, with the hand transcript that stands
+    # in for a fixture. This does not go looking for an undeclared guard
+    # anywhere in `verify.sh` -- there is no syntactic marker for "a guard"
+    # short of the tag itself, and a scan that guessed would either miss real
+    # ones or flag ordinary `if`/`return` code that guards nothing. What it
+    # proves is narrower and still real: every guard THIS manifest says is
+    # unseedable still carries the tag its declaration promises, so a tag
+    # quietly dropped from the code -- the guard's own reasoning still
+    # sitting above it, now unbound -- goes red exactly like a `claim:` whose
+    # test disappeared.
+    unseedable = doc.get("unseedable") or []
+    declared_unseedable: set[str] = set()
+    for index, entry in enumerate(unseedable):
+        where = f"{MANIFEST.name}[unseedable][{index}]"
+        for field in ("id", "file", "reason"):
+            if not isinstance(entry.get(field), str) or not entry[field].strip():
+                failures.append(f"{where}: `{field}` is missing or empty")
+        ident = entry.get("id")
+        if isinstance(ident, str):
+            if ident in declared_unseedable:
+                failures.append(f"{where}: duplicate id `{ident}`")
+            declared_unseedable.add(ident)
+        name, reason = entry.get("file"), entry.get("reason")
+        if not isinstance(name, str) or not isinstance(reason, str):
+            continue
+        target = ROOT / name
+        if not target.is_file():
+            failures.append(f"{where}: `{name}` does not exist")
+            continue
+        tag = re.compile(
+            r"^[ \t]*(?:#|//)\s*unseedable:\s*" + re.escape(reason) + r"\s*$",
+            re.M,
+        )
+        if not tag.search(target.read_text(encoding="utf-8")):
+            failures.append(
+                f"{where}: no `unseedable: {reason}` comment in {name} -- the "
+                f"guard this declares is untagged, undeclared, or the two "
+                f"have drifted apart"
+            )
+
     meta = doc.get("meta") or {}
     red = sum(len(seen[k]) for k in seen if k != "mechanics")
     if meta.get("red_faults") != red:
@@ -381,6 +424,11 @@ def main() -> int:
         failures.append(
             f"[meta] mechanics_assertions is {meta.get('mechanics_assertions')}, "
             f"observed {len(seen['mechanics'])}"
+        )
+    if meta.get("unseedable_guards") != len(unseedable):
+        failures.append(
+            f"[meta] unseedable_guards is {meta.get('unseedable_guards')}, "
+            f"observed {len(unseedable)}"
         )
 
     # Asked for the count, answer the count. Deliberately before the failure

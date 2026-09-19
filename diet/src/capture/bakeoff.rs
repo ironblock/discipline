@@ -1656,6 +1656,7 @@ mod tests {
     /// present and unparseable went out through `json.loads` or
     /// `tomllib.loads` with a Python stack trace, under a comment claiming no
     /// path out of the script was an exception nobody wrote.
+    // claim: every read in the generated recompute.sh is a typed exit, never a bare traceback :: a_directory_this_script_cannot_read_is_a_two_not_a_traceback
     #[test]
     fn a_directory_this_script_cannot_read_is_a_two_not_a_traceback() {
         let dir = scratch("exit-codes");
