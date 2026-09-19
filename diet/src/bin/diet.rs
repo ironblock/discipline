@@ -23,6 +23,9 @@ use std::process::ExitCode;
 use diet::formats::Format;
 use diet::formats::record::json::{self, Value};
 
+#[path = "diet/replay.rs"]
+mod replay;
+
 /// Exit code for a usage error, kept distinct from a format failure so that a
 /// caller can tell "you invoked me wrong" from "your input is wrong".
 const EXIT_USAGE: u8 = 2;
@@ -50,6 +53,16 @@ enum Operation {
     /// checked against the digest the record declares. That is not a second
     /// format -- it is this format's `consumes`, followed.
     Bakeoff,
+    /// Read a foreign harness's session log (#28) and answer with a census
+    /// and the record it becomes.
+    ///
+    /// Listed here for `usage()` and so `every_format_has_a_command...` can
+    /// still say a lane with no format resolves to none, but NOT dispatched
+    /// through the table below: `replay` takes two required flags ahead of
+    /// its one positional, a shape `[command, path]` cannot hold, so `main`
+    /// reads it off the front of `args` before the shape every other verb
+    /// shares is read at all. Ruled on #76 -- not a second binary.
+    Replay,
 }
 
 /// The verb each operation is exposed under.
@@ -70,6 +83,7 @@ const COMMANDS: &[(&str, Operation)] = &[
     ("parse-verdict", Operation::Format("verdict")),
     ("route", Operation::Route),
     ("bakeoff", Operation::Bakeoff),
+    ("replay", Operation::Replay),
 ];
 
 fn usage() -> String {
@@ -89,16 +103,31 @@ fn usage() -> String {
                  {:<20} ...and with `--into DIR`, assemble the results directory",
                 ""
             ),
+            Operation::Replay => writeln!(
+                out,
+                "  {command:<18} read a foreign harness's session log (#28)\n\
+                 {:<20} usage: diet replay --adapter <name> --regimen <path> <log.jsonl>",
+                ""
+            ),
         };
     }
     out.push_str("\nEvery command writes a JSON result to stdout. Exit 0 when the\n");
     out.push_str("document is what the command says it is, 1 when it is not, 2 on\n");
-    out.push_str("a usage error.\n");
+    out.push_str("a usage error. `replay` is the exception: see `diet replay` with no\n");
+    out.push_str("arguments for its own usage and exit codes.\n");
     out
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // `replay` takes an entirely different shape -- two required flags ahead
+    // of one positional, rather than `[command, path]` -- so it is read off
+    // the front of `args` and dispatched before that shape is assumed at all.
+    if args.first().is_some_and(|command| command == "replay") {
+        return replay::run(&args[1..]);
+    }
+
     // `bakeoff` takes a second argument and nothing else does, so the shape is
     // read here rather than by a flag parser: two forms, both exact, and
     // anything else is the usage text.
@@ -151,6 +180,14 @@ fn main() -> ExitCode {
                     .map_err(|err| err.to_string()),
             },
         ),
+        // `main` returns through the early `replay` branch above before this
+        // shape is ever read, for every `args` whose first token is
+        // `"replay"` -- which is the only way `COMMANDS` resolves this
+        // operation. Reaching it here would mean that branch stopped
+        // agreeing with this table, not that a real invocation got here.
+        Operation::Replay => {
+            unreachable!("`replay` is dispatched before `command`/`path` are ever read from `args`")
+        }
     };
 
     let (ok, key, held) = match outcome {
@@ -181,7 +218,7 @@ fn format_for(command: &str) -> Option<&'static Format> {
     let (_, operation) = COMMANDS.iter().find(|(verb, _)| *verb == command)?;
     match operation {
         Operation::Format(name) => diet::formats::format(name),
-        Operation::Route | Operation::Bakeoff => None,
+        Operation::Route | Operation::Bakeoff | Operation::Replay => None,
     }
 }
 
@@ -211,7 +248,7 @@ mod tests {
             .iter()
             .filter_map(|(_, operation)| match operation {
                 Operation::Format(name) => Some(*name),
-                Operation::Route | Operation::Bakeoff => None,
+                Operation::Route | Operation::Bakeoff | Operation::Replay => None,
             })
             .collect();
         let declared: std::collections::BTreeSet<&str> =
@@ -230,7 +267,7 @@ mod tests {
                 // A lane's verb has no format, and must not borrow one: a
                 // census answered under a format's name would read as that
                 // format's value, and a bakeoff's numbers are not a document.
-                Operation::Route | Operation::Bakeoff => assert!(
+                Operation::Route | Operation::Bakeoff | Operation::Replay => assert!(
                     format_for(command).is_none(),
                     "`{command}` is a lane, and it resolved to a format"
                 ),

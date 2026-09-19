@@ -1,0 +1,53 @@
+# The regimen a replay of a foreign session runs under.
+#
+# A Claude Code session log records no model, no quantization and no sampler
+# settings. Its `version` field is the harness's version, not the model's, and
+# nothing in the file says which model answered. So the regime a replay is
+# filed under cannot be derived from the log -- the operator declares it, the
+# way `diet-drive` makes them declare it, and for the same reason: a regime
+# tag a program invented makes every result under it incomparable with every
+# other, which is what the tags are for.
+#
+# THIS FILE IS A FIXTURE, and every value in it is about the fixture log it
+# accompanies rather than about any real session. Replaying your own log means
+# writing your own regimen, saying what you were actually running. Copying
+# this one and pointing it at a different log would be exactly the
+# fabrication this arrangement exists to prevent.
+
+arm = "replay-fixture"
+dogma_version = 0
+
+# What served the session being replayed. `claude-code` is the harness, which
+# is the honest answer to "what produced this log" -- and it is deliberately
+# NOT a model name, because the log does not carry one. Item 3 made a
+# substrate's identity typed (a sha256 of the weights, or a named hosted model
+# with a version) and a replay has neither, so this crossing reads no
+# `substrate_model` / `substrate_quantization` key any more -- see
+# `SUBSTRATE_KEYS` in `diet/src/drive/regimen.rs`.
+substrate = "claude-code"
+# `Reasoning::Undeclared` (#76 ruling 5, landed via #85): the log never
+# carries whether reasoning was on, so this states the absence rather than
+# guessing. It was `"on"` here first, standing in for a state the vocabulary
+# had no word for at the time -- true of the fixture beside this file, which
+# carries a `thinking` block, and false of a replay pointed at a session that
+# reasoned not at all. `undeclared` is honest about both.
+substrate_reasoning = "undeclared"
+# `hardware_fingerprint` is a registry digest -- sha256 over exactly the
+# hardware fields an equipment entry's type declares (#68, refused otherwise
+# since 5b60a56) -- and a replay names no registry entry, so this is not one:
+# it is `sha256("undeclared-by-the-log")`, the same placeholder convention
+# 5b60a56 migrated the whole corpus's prose fingerprints to (`one-gpu` became
+# the sha256 of `one-gpu`, and so on). Anyone can recompute it from the label;
+# nobody should read it as an identity.
+substrate_hardware = "4cf941fc93ef4b44504be14f11089cb50fd8579599a262f05f340ceee7e358bf"
+
+# Replay runs no commands, so there is nothing for a sandbox to confine. The
+# capture lane reads tool calls that already happened; it does not re-run one.
+isolation = "none"
+
+# The record refuses a blank `substrate.sampler`, because "nobody wrote the
+# settings down" and "the settings were these" are different facts about a
+# run. A replayed session has the first kind, and says so in the one place the
+# schema gives it.
+[sampler]
+declared = false
