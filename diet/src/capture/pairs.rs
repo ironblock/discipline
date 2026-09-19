@@ -1731,7 +1731,7 @@ mod tests {
         pair_controls, pairs, pooled_top_k, precision_at_k, precision_by_source, recurring_anchors,
         score_pairs, sense_cells, turns,
     };
-    use crate::capture::sense::{self, Fixture, Label};
+    use crate::capture::sense::{self, Control, ControlFailure, Embedder, Fixture, Label};
 
     fn row(id: &str, drive: &str, label: Label, source: PairSource, score: f64) -> ScoredPair {
         ScoredPair {
@@ -1836,6 +1836,220 @@ mod tests {
             label,
             source: PairSource::Mined,
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // control-failure test embedders
+    //
+    // `pair_controls`'s own success path is exercised above
+    // (`the_controls_land_under_the_fixture_embedder`); these three embedders
+    // force each of its four failure branches, mirroring `sense`'s own
+    // `Constant`/`Impostor`/`Placed` test embedders (private to that
+    // module's tests, so not reusable here directly).
+    // -----------------------------------------------------------------------
+
+    /// An embedder that places every text at the same point. The controls
+    /// must catch it, or they catch nothing.
+    struct Constant;
+
+    impl Constant {
+        const ID: &'static str = "constant";
+    }
+
+    impl Embedder for Constant {
+        fn embed(&self, _text: &str) -> Vec<f64> {
+            vec![1.0, 1.0, 1.0]
+        }
+        fn id(&self) -> &str {
+            Self::ID
+        }
+    }
+
+    /// The fixture embedder with one text placed exactly where another sits:
+    /// an embedder that cannot tell a register row from the sense itself.
+    struct Impostor {
+        text: String,
+        as_if: String,
+    }
+
+    impl Impostor {
+        const ID: &'static str = "impostor";
+    }
+
+    impl Embedder for Impostor {
+        fn embed(&self, text: &str) -> Vec<f64> {
+            if self.text == text {
+                Fixture.embed(&self.as_if)
+            } else {
+                Fixture.embed(text)
+            }
+        }
+        fn id(&self) -> &str {
+            Self::ID
+        }
+    }
+
+    /// An embedder reading its vectors from a table. The fixture embedder's
+    /// components are token counts, so every cosine it produces is
+    /// non-negative and no row it places can go under a control; a real
+    /// model's components have signs, and this one lets a test put a row
+    /// where a real model could put it.
+    struct Placed(Vec<(String, Vec<f64>)>);
+
+    impl Placed {
+        const ID: &'static str = "placed";
+
+        /// Where a text the table does not name sits: between the extremes,
+        /// so a row that trips a control is the row the test placed there.
+        const ELSEWHERE: [f64; 2] = [1.0, 1.0];
+
+        fn at(pairs: &[(&str, [f64; 2])]) -> Self {
+            Self(
+                pairs
+                    .iter()
+                    .map(|(text, vector)| ((*text).to_owned(), vector.to_vec()))
+                    .collect(),
+            )
+        }
+    }
+
+    impl Embedder for Placed {
+        fn embed(&self, text: &str) -> Vec<f64> {
+            self.0
+                .iter()
+                .find(|(placed, _)| placed == text)
+                .map_or_else(|| Self::ELSEWHERE.to_vec(), |(_, vector)| vector.clone())
+        }
+        fn id(&self) -> &str {
+            Self::ID
+        }
+    }
+
+    #[test]
+    fn a_register_with_no_positive_refuses_the_top_control_by_name() {
+        let roles = Roles {
+            id: "fixture",
+            query: &Fixture,
+            document: &Fixture,
+        };
+        let n = pair("n", "an entry", "prose", Some("intent"), Label::Negative);
+        let rows = [&n];
+        let err = pair_controls(&rows, roles, PairScoring::RawCosine)
+            .expect_err("no positive in the register and the controls passed");
+        assert!(
+            matches!(
+                err,
+                ControlFailure::Missing {
+                    control: Control::VerbatimPositive
+                }
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn an_embedder_that_cannot_tell_texts_apart_inverts_the_controls() {
+        let constant = Constant;
+        let roles = Roles {
+            id: "constant",
+            query: &constant,
+            document: &constant,
+        };
+        let p = pair(
+            "p",
+            "the resolver reads the flag",
+            "Actually the resolver never read the flag.",
+            Some("Let me check the resolver."),
+            Label::Positive,
+        );
+        let rows = [&p];
+        for scoring in PairScoring::ALL {
+            let err = pair_controls(&rows, roles, *scoring)
+                .expect_err("an embedder that cannot tell texts apart passed the controls");
+            assert!(
+                matches!(err, ControlFailure::Inverted { .. }),
+                "{}: {err:?}",
+                scoring.tag()
+            );
+        }
+    }
+
+    #[test]
+    fn a_register_row_that_reaches_the_top_control_is_named_as_the_row_that_displaced_it() {
+        let p = pair(
+            "p",
+            "the resolver reads the flag",
+            "Actually the resolver never read the flag.",
+            Some("Let me check the resolver."),
+            Label::Positive,
+        );
+        let n = pair(
+            "n",
+            "an unrelated note",
+            "Reading the docs.",
+            Some("Let me read."),
+            Label::Negative,
+        );
+        let impostor = Impostor {
+            text: n.turn_intent.clone().expect("n states an intent"),
+            as_if: n.entry.clone(),
+        };
+        let roles = Roles {
+            id: "impostor",
+            query: &impostor,
+            document: &impostor,
+        };
+        let rows = [&p, &n];
+        let err = pair_controls(&rows, roles, PairScoring::RawCosine)
+            .expect_err("a register row reached the top control and the controls passed");
+        let ControlFailure::NotAtTop { row, .. } = &err else {
+            panic!("{err:?}")
+        };
+        assert_eq!(
+            row, "n",
+            "the wrong row was named as having displaced the control"
+        );
+    }
+
+    #[test]
+    fn a_positive_row_under_the_bottom_control_is_named_as_the_row_that_went_under_it() {
+        let p = pair(
+            "p",
+            "the resolver reads the flag",
+            "Actually the resolver never read the flag.",
+            Some("Let me check the resolver."),
+            Label::Positive,
+        );
+        let u = pair(
+            "u",
+            "the resolver reads the flag",
+            "the resolver reads the flag",
+            Some("the opposite of the resolver"),
+            Label::Positive,
+        );
+        let placed = Placed::at(&[
+            (p.entry.as_str(), [1.0, 0.0]),
+            (sense::UNRELATED, [0.0, 1.0]),
+            (
+                u.turn_intent.as_deref().expect("u states an intent"),
+                [-1.0, 0.0],
+            ),
+        ]);
+        let roles = Roles {
+            id: "placed",
+            query: &placed,
+            document: &placed,
+        };
+        let rows = [&p, &u];
+        let err = pair_controls(&rows, roles, PairScoring::RawCosine)
+            .expect_err("a positive went under the bottom control and the controls passed");
+        let ControlFailure::NotAtBottom { row, .. } = &err else {
+            panic!("{err:?}")
+        };
+        assert_eq!(
+            row, "u",
+            "the wrong row was named as having gone under the control"
+        );
     }
 
     #[test]
