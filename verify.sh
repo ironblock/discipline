@@ -1357,6 +1357,15 @@ inject_stringly_or_pattern() {
     >> diet/src/lib.rs
 }
 
+# A `claim:` bound to a test that is not there -- whether never named
+# correctly or (as here) simply invented. Rule three exists because six
+# comments this true this week rotted into false ones with nothing to catch
+# it; this is the seeded case that proves a dangling one goes red.
+inject_dangling_claim() {
+  printf '\n// claim: a seeded fact that binds to nothing :: this_test_does_not_exist_anywhere\n' \
+    >> diet/src/lib.rs
+}
+
 # The acceptance case where THE BUILD IS THE GATE: a field-kind variant added
 # without wiring it. Every exhaustive match over FieldKind stops compiling,
 # which is the whole reason the predicate is an enum.
@@ -2481,6 +2490,14 @@ inject_parity() {
   # Prove a fault the manifest does not account for: parity would then be
   # declared over less than the gate actually covers.
   rm -rf tests/fixtures/results-bad/2026-01-14-bad-sha
+}
+
+# The empty-shard guard's own tag, quietly dropped. #77 item 3: a guard
+# declared unseedable is not exempt from being seen red -- if its tag goes
+# missing, the reasoning above it is still there, now unbound, exactly like
+# a `claim:` whose test was deleted.
+inject_unseedable_tag_dropped() {
+  edit_in_place '/^  # unseedable: a re-entrant --selftest call/d' verify.sh
 }
 
 # An injection that writes a literal of an AMBIGUOUS type while editing a file
@@ -6061,33 +6078,33 @@ selftest() {
   seeded_case "failing unit test"                     test     inject_test \
     'seeded_fault::seeded_failure \.\.\. FAILED' 'lib/seeded_fault'
   seeded_case "non-conforming format fixture"         test     inject_conformance \
-    'conformance failure\(s\)' 'test:conformance/formats::regimen'
+    'regimen/fixtures/valid/seeded-nonconforming\.toml' 'test:conformance/formats::regimen'
   seeded_case "FORMATS emptied, harness covers none"  test     inject_formats_empty \
     'FORMATS is empty' 'test:conformance'
   seeded_case "decline grammar loses its end anchor"  test     inject_decline_unanchored \
-    'coordinated-with-and\.txt: accepted as' 'test:conformance/formats::decline'
+    'decline/fixtures/invalid/coordinated-with-and\.txt' 'test:conformance/formats::decline'
   seeded_case "interview drops continuation lines"    test     inject_interview_drops_continuations \
-    'multi-line-continuation\.txt: parsed to' 'test:conformance/formats::interview'
+    'interview/fixtures/valid/multi-line-continuation\.txt' 'test:conformance/formats::interview'
   seeded_case "interview blind to truncation"         test     inject_interview_truncation_blind \
-    'truncated-unterminated-fence\.txt: parsed to' 'test:conformance/formats::interview'
+    'interview/fixtures/valid/truncated-unterminated-fence\.txt' 'test:conformance/formats::interview'
   seeded_case "interview discards trailing content"   test     inject_interview_discards_trailing \
     'content lost parsing' 'lib/formats::interview::tests'
   seeded_case "an event kind with no fixture"         test     inject_record_unfixtured_kind \
     'no fixture.*spurious' 'lib/formats::record::tests'
   seeded_case "record substrate made optional"        test     inject_record_substrate_optional \
-    'regime-missing-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+    'record/fixtures/invalid/regime-missing-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "a summary kind's fields made advisory" test     inject_record_summary_kind_fields_advisory \
-    'recompute-summary-carries-turns\.jsonl: accepted as' 'test:conformance/formats::record'
+    'record/fixtures/invalid/recompute-summary-carries-turns\.jsonl' 'test:conformance/formats::record'
   seeded_case "a recompute summary with no product digest" test inject_record_recompute_digest_optional \
-    'recompute-summary-without-its-product-digest\.jsonl: accepted as' 'test:conformance/formats::record'
+    'record/fixtures/invalid/recompute-summary-without-its-product-digest\.jsonl' 'test:conformance/formats::record'
   seeded_case "a summary that cannot be true of itself" test   inject_record_summary_impossible_unchecked \
-    'recompute-matched-exceeds-checked\.jsonl: accepted as' 'test:conformance/formats::record'
+    'record/fixtures/invalid/recompute-matched-exceeds-checked\.jsonl' 'test:conformance/formats::record'
   seeded_case "a substrate reference that resolves to anything" test inject_record_substrate_reference_unchecked \
-    'lane-names-an-undeclared-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+    'record/fixtures/invalid/lane-names-an-undeclared-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "a substrate reference defaulted when alone" test inject_record_substrate_defaults_when_alone \
-    'request-with-no-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+    'record/fixtures/invalid/request-with-no-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "weights identified by name"            test     inject_record_weights_named_not_digested \
-    'weights-named-not-digested\.jsonl: accepted as' 'test:conformance/formats::record'
+    'record/fixtures/invalid/weights-named-not-digested\.jsonl' 'test:conformance/formats::record'
   seeded_case "an injection only GNU sed accepts"     injections inject_injection_needs_gnu_sed \
     'sed forms only GNU accepts'
   seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \
@@ -6097,9 +6114,9 @@ selftest() {
   seeded_case "a budget no fixture demonstrates"      test     inject_bakeoff_budget_unfixtured \
     'its fixture does not demonstrate failure there' 'lib/capture::sense'
   seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
-    'retry-of-itself\.jsonl: accepted as' 'test:conformance/formats::record'
+    'record/fixtures/invalid/retry-of-itself\.jsonl' 'test:conformance/formats::record'
   seeded_case "record nesting left unbounded"         test     inject_record_depth_unbounded \
-    'deep-nesting\.jsonl: accepted as' 'test:conformance/formats::record'
+    'record/fixtures/invalid/deep-nesting\.jsonl' 'test:conformance/formats::record'
   seeded_case "grounding floor made inert"            test     inject_grounded_floor_inert \
     'a lane that mostly fabricated must be rejected whole' 'lib/capture::grounded::tests'
   seeded_case "grounding gates a judgment field"      test     inject_grounded_gates_judgment \
@@ -6251,6 +6268,8 @@ selftest() {
     'object.rs: no .mod. declaration reaches it'
   seeded_case "a stringly predicate cargo fmt wrapped" library inject_stringly_or_pattern \
     'a_decision_tag_that_is_quite_long_indeed'
+  seeded_case "a claim bound to a test that is not there" library inject_dangling_claim \
+    'claim names a test that does not exist'
   seeded_case "a record missing its substrates"       results  inject_results_no_substrate \
     'says diet check-record: a .start. row is missing its required .substrates.'
   seeded_case "results claim contradicts run.jsonl"   results  inject_results \
@@ -6303,6 +6322,8 @@ selftest() {
     'which verify\.sh does not prove'
   seeded_case "a signature its own scope line matches" parity  inject_parity_scope_signature \
     'matches the line naming its own scope'
+  seeded_case "an unseedable guard's tag dropped"      parity   inject_unseedable_tag_dropped \
+    'the guard this declares is untagged, undeclared, or the two have drifted apart'
   seeded_case "a forbidden id in a commit message"    history  inject_history \
     'hygiene: internal-ticket-id:'
   seeded_case "content added and then removed"        history  inject_history_added_then_removed \
@@ -6410,11 +6431,11 @@ selftest() {
   seeded_case "a run directory inside a run directory" results inject_results_nested_directory \
     'a run directory inside a run directory'
   seeded_case "a verdict read by prefix"               test     inject_verdict_prefix_accepted \
-    'verdict-as-a-prefix\.txt: accepted as' 'test:conformance/formats::verdict'
+    'verdict/fixtures/invalid/verdict-as-a-prefix\.txt' 'test:conformance/formats::verdict'
   seeded_case "an identifier in a reason read as a verdict" test inject_verdict_identifier_read_as_a_verdict \
-    'reason-naming-an-identifier\.txt: rejected' 'test:conformance/formats::verdict'
+    'verdict/fixtures/valid/reason-naming-an-identifier\.txt' 'test:conformance/formats::verdict'
   seeded_case "a second verdict in a reason accepted"  test     inject_verdict_second_verdict_accepted \
-    'two-verdicts\.txt: accepted as' 'test:conformance/formats::verdict'
+    'verdict/fixtures/invalid/two-verdicts\.txt' 'test:conformance/formats::verdict'
   seeded_case "an anchor matched inside a longer word"  test     inject_collector_substring_match \
     'an anchor matched inside a longer word' 'lib/capture::collector::literal::tests'
   seeded_case "an English word made an anchor"         test     inject_collector_english_anchor \
@@ -6560,13 +6581,13 @@ selftest() {
   seeded_case "the second reader left unbounded"      test     inject_json_objects_unbounded \
     'a JSON Lines reader that does not bound its nesting' 'lib/formats::record::json::tests'
   seeded_case "a lane free to change substrate"       test     inject_record_lane_may_change_substrate \
-    'lane-changes-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+    'record/fixtures/invalid/lane-changes-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "a substrate reference inferred from a count" test inject_record_substrate_reference_inferred_from_a_count \
-    'one-substrate-and-a-request-elsewhere\.jsonl: accepted as' 'test:conformance/formats::record'
+    'record/fixtures/invalid/one-substrate-and-a-request-elsewhere\.jsonl' 'test:conformance/formats::record'
   seeded_case "a fork that names no substrate"         test     inject_record_a_fork_names_no_substrate \
-    'fork-names-an-undeclared-substrate\.jsonl: accepted as' 'test:conformance/formats::record'
+    'record/fixtures/invalid/fork-names-an-undeclared-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "a canned substrate that need not say which acts" test inject_record_canned_acts_optional \
-    'canned-with-no-acts-digest\.jsonl: accepted as' 'test:conformance/formats::record'
+    'record/fixtures/invalid/canned-with-no-acts-digest\.jsonl' 'test:conformance/formats::record'
 
   echo
   echo "--- results fixtures, checked directly ---"
@@ -7272,10 +7293,12 @@ EOF
   # overclaimed what the bound guards against. Both are the same defect: the
   # thing that made it safe was somewhere else, and nothing said so here.
   #
-  # THIS GUARD HAS NO SEEDED FAULT AND NO MECHANICS ASSERTION, which by this
-  # repository's own law makes it a gate nothing has seen red -- so here is
-  # why, rather than a silence somebody has to rediscover. Both are run from
-  # inside `selftest`: a seeded case runs one `verify.sh --only <check>`, and
+  # unseedable: a re-entrant --selftest call would recurse into the function containing it; proved by hand instead
+  #
+  # This repository's own law is that a gate nothing has seen red is a gate
+  # that does not exist, so the tag above is not decoration: #77's lint
+  # refuses a guard with neither a manifest fault nor this line. Both are run
+  # from inside `selftest`: a seeded case runs one `verify.sh --only <check>`, and
   # `prove_mechanics` runs unconditionally in every shard. An assertion that
   # invoked `verify.sh --selftest` to watch this line refuse would re-enter
   # the function containing it, and the inner run would do the same. Covering
