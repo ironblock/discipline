@@ -68,8 +68,20 @@ two's own reachable set, so a claim bound to a test in an orphaned file also
 fails). Anything else -- a shell command, a path, a sentence -- is a
 `<ref>` this script cannot run, and is accepted unchecked: an unbindable
 claim is still better disclosed than untagged, but nothing here can verify a
-command's output. Untagged comments are opinions and stay unchecked; the
-discipline is that a *fact* gets a tag or gets rewritten as one.
+command's output. A bare single word meant as a no-argument command reads
+identically to a test name and is checked as one; disclosed rather than
+guessed around, since a command with any argument, flag or path already
+falls outside the pattern. Untagged comments are opinions and stay
+unchecked; the discipline is that a *fact* gets a tag or gets rewritten as
+one.
+
+Read off real comments, not raw text, so a claim-shaped line quoted inside a
+string literal -- a fixture, a generated script -- is string content, never
+mistaken for a comment no rustc would ever see. A fact too long for one line
+continues on the next comment line, joined bounded to four physical lines
+total: enough for a claim that wraps once, not so much that an unrelated
+`//!` doc block below an untagged "claim:" mention gets searched end to end
+for a stray `::` that would bind the wrong reference to it entirely.
 
 Deliberately narrow. This governs `diet/src/` alone, because that is where
 `#[test]` functions live and where this script can name a false claim by
@@ -101,19 +113,65 @@ PATH_MOD = re.compile(
 
 CHAR = re.compile(r"'(?:\\.[^']*|[^'\\])'")
 
-# `// claim: <fact> :: <ref>`, its own comment line. The `::` must be
-# space-padded so a `::`-qualified path in `<ref>` (or a stray `::` inside
-# `<fact>`'s own prose) is never mistaken for the separator.
-CLAIM = re.compile(r"^[ \t]*//[!/]?\s*claim:\s*(?P<body>.+?)\s*$", re.M)
+# A `//` line comment's own text, prefix stripped -- applied to one
+# `mask()`-reported comment span at a time, never to raw text, so a
+# claim-shaped line inside a string literal (`r#"// claim: ... :: ..."#`) is
+# string content, never mistaken for a comment no rustc would ever see.
+COMMENT_PREFIX = re.compile(r"^[ \t]*//[!/]?\s*")
+CLAIM_START = re.compile(r"^claim:\s*(?P<body>.*?)\s*$")
 
 # A `<ref>` this script can resolve to a real function: no space, `/` or `.`,
 # because those are exactly the characters a shell command or a path has and
-# a bare identifier or `mod::path::name` does not.
+# a bare identifier or `mod::path::name` does not. A single bare word meant
+# as a no-argument command (`:: cargo`) reads the same as a test name and is
+# checked as one -- a real ambiguity, disclosed rather than guessed around;
+# a command reference with any argument, flag or path already falls outside
+# this pattern and is left unverified as intended.
 TEST_REF = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*$")
 
 TEST_ATTR = re.compile(r"#\[\s*test\s*\]")
 ATTR = re.compile(r"#\[[^\]]*\]")
 FN_NAME = re.compile(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+
+
+def claims_in(text: str, comment_spans: list[tuple[int, int]]) -> list[tuple[str, int]]:
+    """Every `claim: <fact> :: <ref>` found across real `//` comments.
+
+    A fact that does not fit on one line continues on the next comment
+    line -- joined here, bounded to four physical lines total, so a `//!`
+    doc block that runs on for many lines with nothing to do with any tag
+    is never searched end to end for a stray `::` that would bind the wrong
+    reference to it entirely. Two comment lines join only when nothing but
+    whitespace and a single newline sits between them: a blank line or a
+    line of code breaks the chain, the same way a paragraph break would.
+    """
+    claims: list[tuple[str, int]] = []
+    total = len(comment_spans)
+    i = 0
+    while i < total:
+        start, end = comment_spans[i]
+        stripped = COMMENT_PREFIX.sub("", text[start:end], count=1)
+        first = CLAIM_START.match(stripped)
+        if first is None:
+            i += 1
+            continue
+        body = first.group("body")
+        j = i
+        while " :: " not in body and j + 1 < total and j - i < 3:
+            gap = text[comment_spans[j][1] : comment_spans[j + 1][0]]
+            if gap.count("\n") != 1 or gap.strip():
+                break
+            j += 1
+            cont = COMMENT_PREFIX.sub("", text[comment_spans[j][0] : comment_spans[j][1]], count=1)
+            body = f"{body} {cont.strip()}"
+        # No ` :: ` anywhere in what joined is ordinary prose that happens to
+        # use the word -- "they are one claim: the record says what
+        # happened" is a sentence, not a tag, and flagging it would be the
+        # same over-eager-regex mistake rule one's own docstring narrates.
+        if " :: " in body:
+            claims.append((body, start))
+        i += 1
+    return claims
 
 
 def test_fn_names(masked: str) -> set[str]:
@@ -138,16 +196,21 @@ def test_fn_names(masked: str) -> set[str]:
     return names
 
 
-def mask(text: str) -> tuple[str, set[int]]:
+def mask(text: str) -> tuple[str, set[int], list[tuple[int, int]]]:
     """Blank out comments and literal interiors; report where literals start.
 
     Returns the masked text -- same length, so every index still lines up with
-    the original -- and the set of indices at which a string literal begins.
-    Structure is read off the masked text so that a `=>` or a brace inside a
-    string or a comment cannot be mistaken for the real thing.
+    the original -- the set of indices at which a string literal begins, and
+    the span of every `//` line comment. Structure is read off the masked
+    text so that a `=>` or a brace inside a string or a comment cannot be
+    mistaken for the real thing; the comment spans exist for the opposite
+    reason -- rule three reads comments themselves, and a line inside a raw
+    string that merely looks like one (`r#"// claim: ... :: ..."#`) is string
+    content, not a comment no rustc would ever see as one.
     """
     out = list(text)
     starts: set[int] = set()
+    line_comments: list[tuple[int, int]] = []
     i, n = 0, len(text)
 
     def blank(lo: int, hi: int) -> None:
@@ -160,6 +223,7 @@ def mask(text: str) -> tuple[str, set[int]]:
         if rest.startswith("//"):
             end = text.find("\n", i)
             end = n if end == -1 else end
+            line_comments.append((i, end))
             blank(i, end)
             i = end
             continue
@@ -212,7 +276,7 @@ def mask(text: str) -> tuple[str, set[int]]:
                 i = found.end()
                 continue
         i += 1
-    return "".join(out), starts
+    return "".join(out), starts, line_comments
 
 
 def _guard_start(masked: str, start: int, end: int) -> int:
@@ -326,7 +390,7 @@ def declared_modules(source: pathlib.Path) -> tuple[list[str], list[str]]:
         text = source.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return [], []
-    masked, _ = mask(text)
+    masked, _, _ = mask(text)
     # `#[path = "..."]` keeps its literal, which masking blanked; take those
     # from the original text and trust the masked text for the rest.
     paths = [
@@ -403,7 +467,7 @@ def main() -> int:
             failures.append(f"{source}: cannot read: {err}")
             continue
         lines_scanned += len(text.splitlines())
-        masked, literals = mask(text)
+        masked, literals, comment_spans = mask(text)
         for start, end in arm_patterns(masked) + matches_patterns(masked):
             caught = sorted(index for index in literals if start <= index < end)
             if not caught:
@@ -418,19 +482,9 @@ def main() -> int:
         # rule two's own finding, reused rather than re-decided here.
         if source.resolve() in compiled:
             all_test_names |= test_fn_names(masked)
-        for found in CLAIM.finditer(text):
-            body = found.group("body")
-            # No ` :: ` at all is ordinary prose that happens to use the word
-            # -- "they are one claim: the record says what happened" is a
-            # sentence, not a tag, and flagging it would be the same
-            # over-eager-regex mistake rule one's own docstring narrates.
-            # Only a line that actually offers a reference is this rule's to
-            # check; the discipline is a fact gets a tag, not that every
-            # appearance of the word does.
-            if " :: " not in body:
-                continue
+        for body, index in claims_in(text, comment_spans):
             _fact, ref = body.rsplit(" :: ", 1)
-            claims.append((source, text, ref, found.start()))
+            claims.append((source, text, ref, index))
 
     for source, text, ref, index in claims:
         if not TEST_REF.match(ref):
