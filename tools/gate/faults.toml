@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 447
+red_faults = 477
 mechanics_assertions = 119
 unseedable_guards = 1
 migrated = 0
