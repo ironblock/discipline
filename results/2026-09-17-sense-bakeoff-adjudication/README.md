@@ -12,6 +12,12 @@ targets_matched = 2
 arm = "sense-bakeoff-four-embedders"
 substrates = ["all-MiniLM-L6-v2", "bge-small-en-v1.5", "embeddinggemma-300m", "Qwen3-Embedding-0.6B"]
 dogma_version = 0
+
+[derivation]
+applier_sha256 = "475cef5b87bc3fd7d2e897cebe585ba7c3de01336cb109d910071948ee99b1a0"
+runtime = "Python 3.14.6"
+substrate_id = "mac-pro-2019"
+derived_from = "eac8640d9238471698a848a4c594b26e7e3f23bada875cf19475d9c5017f6789"
 +++
 
 # The sense bakeoff, adjudicated under its pre-registered rule
@@ -58,10 +64,14 @@ the pre-gate sub-rule's scope; and its quantifier. Where a reading
 turns the verdict, the verdict under the other reading is computed
 and carried under `alternatives`, so a ruling is a measured delta.
 
-The arithmetic ran under `Python 3.14.6` on the data seat's workstation,
-the registry's `mac-pro-2019` instance; the record's start row is the
-run being adjudicated, per the assembler's note in `regimen.toml`,
-and the machine that applied the rule is stated here, not there.
+The arithmetic's environment is the `[derivation]` block in the
+front-matter, not this prose (ruled on #84): the applier's digest,
+which is `recompute.sh`'s own; the runtime that applied the rule; the
+substrate it ran on, by registry id; and the original, cited by the
+digest of its product, which is the digest the claim row consumes.
+The record's start row stays the run being adjudicated, per the same
+ruling: the regime is what was measured, and an adjudication measures
+nothing.
 
 ## Results
 
@@ -77,7 +87,10 @@ Under the reading that it is the best cell on the primary endpoint,
 two cells tie at the top precision and one of them sits under the
 floor: if every tied cell must clear the margin the verdict is
 `refuted`, and if the tie is broken by separation it is
-`inconclusive`. Which reading is the rule's is not decided here.
+`inconclusive`. Ruled on #84: "the best cell" in a clause about
+separation is the best-separated cell, the reading that needs no rule
+beyond the text; both readings stay on the verdict, and rule v2 is
+worded as the maximum separation over all scored cells.
 
 The pre-gate sub-rule: 0 contender pair(s) improved
 by the margin, 7 were lower by it, out of
@@ -88,9 +101,9 @@ it is `inconclusive`.
 ## Conclusion
 
 `inconclusive` under the rule as read here: the data did not
-decide the primary claim, and one reading the ratified text leaves
-open would make it `refuted`, which is the maintainer's to rule.
-What is still unknown is stated on the
+decide the primary claim; the reading of "the best cell" under which
+it would be `refuted` is carried, and the ruling on #84 records that
+the claim is not supported under either. What is still unknown is stated on the
 verdict: the pre-gate sub-verdict is `refuted`, and the
 ratified text does not say how the two conjuncts of the hypothesis
 combine into one word, so this directory's `result` is the main
