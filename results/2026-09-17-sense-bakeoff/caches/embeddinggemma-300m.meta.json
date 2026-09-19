@@ -1,0 +1,58 @@
+{
+ "cache": "embeddinggemma-300m.vectors.jsonl",
+ "cache_sha256": "9f117f6beb102c0773e324c243d041ea4e77274c75f4922c485d35dbfa39962a",
+ "id": "embeddinggemma-300m",
+ "model": "onnx-community/embeddinggemma-300m-ONNX",
+ "revision": "5090578d9565bb06545b4552f76e6bc2c93e4a66",
+ "onnx": [
+  {
+   "file": "onnx/model_quantized.onnx",
+   "sha256": "172efde319fe1542dc41f31be6154910b05b78f7a861c265c4600eec906bd6d8"
+  },
+  {
+   "file": "onnx/model_quantized.onnx_data",
+   "sha256": "705626e28e4c23c82ade34566b4197d97f534c12275fa406dfb71e9937d388c0"
+  }
+ ],
+ "tokenizer": {
+  "file": "tokenizer.json",
+  "sha256": "4dda02faaf32bc91031dc8c88457ac272b00c1016cc679757d1c441b248b9c47"
+ },
+ "graph": {
+  "kind": "encoder",
+  "output": "sentence_embedding",
+  "inputs": 2,
+  "outputs": 2,
+  "kv_inputs": 0
+ },
+ "dimension": 768,
+ "normalized": true,
+ "pooling": "the graph's own `sentence_embedding` output, taken as-is: the exporter's pooling head over `last_hidden_state`, which the session verifies at load is unit-norm as emitted and is not the masked mean of `last_hidden_state`; the input framed as the shipped tokenizer.json post-processor frames it, <bos> text <eos>",
+ "framing": {
+  "bos": "<bos>",
+  "eos": "<eos>"
+ },
+ "prefix_rows": "title: none | text: ",
+ "prefix_senses": "task: search result | query: ",
+ "prefix_note": "EmbeddingGemma's documented document prompt (title: none | text: ) and retrieval-query prompt (task: search result | query: ), byte for byte",
+ "regime": "register rows are the documents, senses are the queries; the prefix is applied to the model input only and the cache text is bare",
+ "texts": 323,
+ "rows": 305,
+ "senses": 18,
+ "texts_source": {
+  "gym_commit": "c20e32b",
+  "register": "diet/capture/sense/register/*.jsonl minus *.provenance.jsonl",
+  "senses": "diet/capture/sense/sets.jsonl"
+ },
+ "decimals": 8,
+ "threads": 4,
+ "batch_size": 1,
+ "execution_provider": "CPUExecutionProvider",
+ "python": "3.12.13",
+ "onnxruntime": "1.23.2",
+ "tokenizers": "0.23.2",
+ "numpy": "2.5.2",
+ "huggingface_hub": "1.30.0",
+ "HF_HUB_OFFLINE": "1",
+ "environment": "requirements-ort-frozen.txt (throwaway uv venv; onnxruntime, tokenizers, numpy, huggingface_hub; no torch)"
+}

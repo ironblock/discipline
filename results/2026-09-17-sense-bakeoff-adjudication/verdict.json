@@ -1,0 +1,317 @@
+{
+  "alternatives": {
+    "best_cell_is_best_precision_and_every_tie_must_clear": {
+      "cells": [
+        "Qwen3-Embedding-0.6B/softmax/without_gate",
+        "bge-small-en-v1.5/softmax/without_gate"
+      ],
+      "verdict": "refuted"
+    },
+    "best_cell_is_best_precision_with_ties_broken_by_d_prime": {
+      "cells": [
+        "bge-small-en-v1.5/softmax/without_gate"
+      ],
+      "verdict": "inconclusive"
+    }
+  },
+  "cells": [
+    {
+      "clears_supported": false,
+      "d_prime": -0.0179,
+      "d_prime_margin_over_floor": -0.0077,
+      "embedder": "Qwen3-Embedding-0.6B",
+      "floor_d_prime": -0.0102,
+      "gate": "with_gate",
+      "over_firing": 0.0377,
+      "precision_at_k": 0.4,
+      "scoring": "contrastive"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": -0.0125,
+      "d_prime_margin_over_floor": -0.0023,
+      "embedder": "bge-small-en-v1.5",
+      "floor_d_prime": -0.0102,
+      "gate": "with_gate",
+      "over_firing": 0.0189,
+      "precision_at_k": 0.8,
+      "scoring": "contrastive"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": -0.0113,
+      "d_prime_margin_over_floor": -0.0011,
+      "embedder": "embeddinggemma-300m",
+      "floor_d_prime": -0.0102,
+      "gate": "with_gate",
+      "over_firing": 0.0189,
+      "precision_at_k": 0.8,
+      "scoring": "contrastive"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": 0.0095,
+      "d_prime_margin_over_floor": -0.4231,
+      "embedder": "Qwen3-Embedding-0.6B",
+      "floor_d_prime": 0.4326,
+      "gate": "without_gate",
+      "over_firing": 0.0377,
+      "precision_at_k": 0.6,
+      "scoring": "contrastive"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": 0.5223,
+      "d_prime_margin_over_floor": 0.0897,
+      "embedder": "bge-small-en-v1.5",
+      "floor_d_prime": 0.4326,
+      "gate": "without_gate",
+      "over_firing": 0.0189,
+      "precision_at_k": 0.8,
+      "scoring": "contrastive"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": 0.3703,
+      "d_prime_margin_over_floor": -0.0623,
+      "embedder": "embeddinggemma-300m",
+      "floor_d_prime": 0.4326,
+      "gate": "without_gate",
+      "over_firing": 0.0,
+      "precision_at_k": 0.8,
+      "scoring": "contrastive"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": -0.0067,
+      "d_prime_margin_over_floor": 0.0108,
+      "embedder": "Qwen3-Embedding-0.6B",
+      "floor_d_prime": -0.0175,
+      "gate": "with_gate",
+      "over_firing": 0.0377,
+      "precision_at_k": 0.4,
+      "scoring": "ensemble_max"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": -0.0149,
+      "d_prime_margin_over_floor": 0.0026,
+      "embedder": "bge-small-en-v1.5",
+      "floor_d_prime": -0.0175,
+      "gate": "with_gate",
+      "over_firing": 0.0,
+      "precision_at_k": 0.4,
+      "scoring": "ensemble_max"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": 0.2647,
+      "d_prime_margin_over_floor": 0.2862,
+      "embedder": "Qwen3-Embedding-0.6B",
+      "floor_d_prime": -0.0215,
+      "gate": "without_gate",
+      "over_firing": 0.0189,
+      "precision_at_k": 0.8,
+      "scoring": "ensemble_max"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": 0.0998,
+      "d_prime_margin_over_floor": 0.1213,
+      "embedder": "bge-small-en-v1.5",
+      "floor_d_prime": -0.0215,
+      "gate": "without_gate",
+      "over_firing": 0.0377,
+      "precision_at_k": 0.6,
+      "scoring": "ensemble_max"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": -0.0146,
+      "d_prime_margin_over_floor": null,
+      "embedder": "bge-small-en-v1.5",
+      "floor_d_prime": null,
+      "gate": "with_gate",
+      "over_firing": 0.0,
+      "precision_at_k": 0.4,
+      "scoring": "raw_cosine"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": 0.1169,
+      "d_prime_margin_over_floor": null,
+      "embedder": "bge-small-en-v1.5",
+      "floor_d_prime": null,
+      "gate": "without_gate",
+      "over_firing": 0.0377,
+      "precision_at_k": 0.6,
+      "scoring": "raw_cosine"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": 0.014,
+      "d_prime_margin_over_floor": -0.0622,
+      "embedder": "Qwen3-Embedding-0.6B",
+      "floor_d_prime": 0.0762,
+      "gate": "with_gate",
+      "over_firing": 0.0,
+      "precision_at_k": 0.6,
+      "scoring": "softmax"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": 0.1078,
+      "d_prime_margin_over_floor": 0.0316,
+      "embedder": "bge-small-en-v1.5",
+      "floor_d_prime": 0.0762,
+      "gate": "with_gate",
+      "over_firing": 0.0189,
+      "precision_at_k": 0.8,
+      "scoring": "softmax"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": 0.0905,
+      "d_prime_margin_over_floor": 0.0143,
+      "embedder": "embeddinggemma-300m",
+      "floor_d_prime": 0.0762,
+      "gate": "with_gate",
+      "over_firing": 0.0377,
+      "precision_at_k": 0.4,
+      "scoring": "softmax"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": 0.3745,
+      "d_prime_margin_over_floor": -0.2873,
+      "embedder": "Qwen3-Embedding-0.6B",
+      "floor_d_prime": 0.6618,
+      "gate": "without_gate",
+      "over_firing": 0.0,
+      "precision_at_k": 1.0,
+      "scoring": "softmax"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": 0.9465,
+      "d_prime_margin_over_floor": 0.2847,
+      "embedder": "bge-small-en-v1.5",
+      "floor_d_prime": 0.6618,
+      "gate": "without_gate",
+      "over_firing": 0.0,
+      "precision_at_k": 1.0,
+      "scoring": "softmax"
+    },
+    {
+      "clears_supported": false,
+      "d_prime": 0.8082,
+      "d_prime_margin_over_floor": 0.1464,
+      "embedder": "embeddinggemma-300m",
+      "floor_d_prime": 0.6618,
+      "gate": "without_gate",
+      "over_firing": 0.0189,
+      "precision_at_k": 0.6,
+      "scoring": "softmax"
+    }
+  ],
+  "pre_gate": {
+    "alternative_every_pair_lower": "inconclusive",
+    "because": "no cell improves by the margin and at least one is lower by it",
+    "deltas": [
+      {
+        "delta": -0.2,
+        "embedder": "Qwen3-Embedding-0.6B",
+        "scoring": "contrastive",
+        "with_gate": 0.4,
+        "without_gate": 0.6
+      },
+      {
+        "delta": -0.4,
+        "embedder": "Qwen3-Embedding-0.6B",
+        "scoring": "ensemble_max",
+        "with_gate": 0.4,
+        "without_gate": 0.8
+      },
+      {
+        "delta": -0.4,
+        "embedder": "Qwen3-Embedding-0.6B",
+        "scoring": "softmax",
+        "with_gate": 0.6,
+        "without_gate": 1.0
+      },
+      {
+        "delta": 0.0,
+        "embedder": "bge-small-en-v1.5",
+        "scoring": "contrastive",
+        "with_gate": 0.8,
+        "without_gate": 0.8
+      },
+      {
+        "delta": -0.2,
+        "embedder": "bge-small-en-v1.5",
+        "scoring": "ensemble_max",
+        "with_gate": 0.4,
+        "without_gate": 0.6
+      },
+      {
+        "delta": -0.2,
+        "embedder": "bge-small-en-v1.5",
+        "scoring": "raw_cosine",
+        "with_gate": 0.4,
+        "without_gate": 0.6
+      },
+      {
+        "delta": -0.2,
+        "embedder": "bge-small-en-v1.5",
+        "scoring": "softmax",
+        "with_gate": 0.8,
+        "without_gate": 1.0
+      },
+      {
+        "delta": 0.0,
+        "embedder": "embeddinggemma-300m",
+        "scoring": "contrastive",
+        "with_gate": 0.8,
+        "without_gate": 0.8
+      },
+      {
+        "delta": -0.2,
+        "embedder": "embeddinggemma-300m",
+        "scoring": "softmax",
+        "with_gate": 0.4,
+        "without_gate": 0.6
+      }
+    ],
+    "improved": 0,
+    "margin": 0.05,
+    "verdict": "refuted",
+    "worsened": 7
+  },
+  "readings": {
+    "best_cell": "the contender cell with the highest defined d_prime on the primary register",
+    "cell": "a (scoring, gate) pair as the pre-registration lists them, so a gate arm is its own cell",
+    "floor_separation": "the floor's d_prime on the same (set, scoring, gate) cell",
+    "pre_gate_refuted": "no pair improves by the margin and at least one is lower by it",
+    "pre_gate_scope": "per contender (embedder, scoring) pair on the primary register at the budget",
+    "primary_register": "the tripped-up register, the `mistake` set",
+    "undefined_margin": "satisfies neither bound and is carried as null"
+  },
+  "refuted_by": {
+    "best_cell": "bge-small-en-v1.5/softmax/without_gate",
+    "best_cell_d_prime": 0.9465,
+    "best_cell_fails_floor_margin": false,
+    "best_cell_margin_over_floor": 0.2847,
+    "cells_reaching_ceiling": 49,
+    "no_cell_reaches_precision_ceiling": false
+  },
+  "rule": {
+    "budget": 5,
+    "floor": "all-MiniLM-L6-v2",
+    "inconclusive": "otherwise",
+    "primary_register": "mistake",
+    "refuted": "no cell at any pre-registered budget reaches precision >= 0.60 on the primary register, or the best cell's separation does not exceed the floor's by >= 0.2 -- either alone",
+    "supported": "for at least one (embedder x scoring) cell at budget k = 5: precision on the primary register >= 0.80, hard-negative false-positive rate <= 0.10, and the cell's separation (d') exceeds the floor's by >= 0.5 -- all three at once, on the same cell"
+  },
+  "supported_by": [],
+  "verdict": "inconclusive"
+}
