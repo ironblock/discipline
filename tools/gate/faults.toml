@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 444
+red_faults = 445
 mechanics_assertions = 119
 migrated = 0
 
@@ -4101,6 +4101,14 @@ kind = "results-fixture"
 check = "results"
 label = "2026-01-30-pinned-only-called-reproducible"
 failure_class = "results.pinned-only-cannot-be-reproducible"
+migrated = false
+
+[[fault]]
+id = "results.2026-02-02-derivation-applier-digest"
+kind = "results-fixture"
+check = "results"
+label = "2026-02-02-derivation-applier-digest"
+failure_class = "results.derivation-applier-digest"
 migrated = false
 
 # --- lane-declared faults, generated -- never hand-typed ---
