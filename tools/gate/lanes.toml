@@ -16,26 +16,17 @@
 # `--selftest` cases this registry's `--list` output generates.
 #
 # RULED on #76, 2026-09-14: "client, drive, isolation, digest, and this
-# lane's [adapters]." Four of those five are registered below. The fifth,
-# `seam`, is NOT on that list and IS registered here anyway -- a disclosed
-# substitution, not an extension of scope, explained in full where the
-# ruling is answered. In short: `adapters`'s source (`diet/src/adapters/`)
-# does not exist on `main` today -- it arrives with PR #76 -- so registering
-# its manifest now would make "a registry entry with no manifest" fire on
-# the day THIS registry's own consumer merges, which is the one outcome the
-# rule exists to prevent. `seam` is the opposite case: its manifest already
-# exists, already carries 29 real proven faults, and the DISCOVERY half of
-# this mechanism (`diet/*/gate.toml` on disk, compared against the names
-# below) would find it unregistered the moment that half is turned on for
-# real -- an immediate, live instance of exactly the drift this registry
-# exists to catch. Leaving it out to match the ruling's list literally would
-# have meant either lying about what "no registry entry" checks (scoping
-# discovery to a fixed list defeats the rule it implements) or shipping a
-# check that reddens `main` on day one over a file this PR did not touch.
-# Neither is acceptable, so `seam` is in and `adapters` is commented below,
-# to be uncommented in the same commit that brings its manifest onto `main`.
-#
-# adapters = "diet/adapters/gate.toml"   # lands with PR #76 (issue #28)
+# lane's [adapters]." All five are registered below. `adapters`'s own
+# manifest (`diet/adapters/gate.toml`) did not exist on `main` when this
+# comment was first written, so the entry was left commented out to avoid
+# firing "a registry entry with no manifest" against a file that had no PR
+# bringing it yet. That PR (#76) is now merging: uncommented here, in the
+# one-line fix its own thread posted (comment 5739679341), ruled to land
+# ahead of the manifest itself (comment 5739752816) so #76 goes green on a
+# rebase with no other change, rather than the two landing in the order
+# that would have kept both checks honest continuously. `seam` was the
+# opposite case at the time and is unaffected by this change: its manifest
+# already existed and was already unregistered drift.
 
 [lanes]
 client = "diet/client/gate.toml"
@@ -43,3 +34,4 @@ drive = "diet/drive/gate.toml"
 isolation = "diet/isolation/gate.toml"
 digest = "diet/digest/gate.toml"
 seam = "diet/seam/gate.toml"
+adapters = "diet/adapters/gate.toml"
