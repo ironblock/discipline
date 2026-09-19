@@ -1,0 +1,21 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123\",\"id\":\"local\",\"reasoning\":\"undeclared\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]},\"source\":{\"adapter\":\"claude-code\",\"kind\":\"adapted\",\"source_available\":\"pinned_only\",\"source_digest\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}}\n{\"raw\":\"{\\\"type\\\":\\\"queue-operation\\\",\\\"op\\\":\\\"enqueue\\\",\\\"uuid\\\":\\\"b3f1\\\"}\",\"record\":\"unknown\",\"source_kind\":\"queue-operation\"}\n",
+  "kinds": [
+    "start",
+    "unknown"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "hosted_substrates": [],
+    "substrates": [
+      "local"
+    ]
+  },
+  "source": {
+    "adapter": "claude-code",
+    "kind": "adapted",
+    "source_available": "pinned_only",
+    "source_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}

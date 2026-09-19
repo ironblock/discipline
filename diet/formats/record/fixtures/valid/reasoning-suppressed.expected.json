@@ -1,5 +1,5 @@
 {
-  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532\",\"id\":\"local\",\"reasoning\":\"suppressed\",\"sampler_card\":{\"seed\":0},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]}}\n",
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532\",\"id\":\"local\",\"reasoning\":\"suppressed\",\"sampler_card\":{\"seed\":0},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]},\"source\":{\"kind\":\"live\"}}\n",
   "kinds": [
     "start"
   ],
@@ -10,5 +10,8 @@
     "substrates": [
       "local"
     ]
+  },
+  "source": {
+    "kind": "live"
   }
 }

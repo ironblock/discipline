@@ -583,7 +583,7 @@ mod tests {
     /// itself is the judge of the spelling.
     fn record_with(text: &str) -> String {
         format!(
-            r#"{{"record":"start","regime":{{"arm":"baseline","dogma_version":0,"substrates":[{{"id":"local","engine":{{"name":"a-runtime","version_or_digest":"1.0"}},"weights":{{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"hardware_fingerprint":"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532","sampler_card":{{"temperature":{text}}},"reasoning":"on"}}]}}}}"#
+            r#"{{"source":{{"kind":"live"}},"record":"start","regime":{{"arm":"baseline","dogma_version":0,"substrates":[{{"id":"local","engine":{{"name":"a-runtime","version_or_digest":"1.0"}},"weights":{{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},"hardware_fingerprint":"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532","sampler_card":{{"temperature":{text}}},"reasoning":"on"}}]}}}}"#
         )
     }
 
@@ -606,7 +606,7 @@ mod tests {
             let made = Decimal::new(text).unwrap_or_else(|| panic!("{text} is a decimal"));
             assert_eq!(made.as_str(), text);
             let parsed = parse(&record_with(text)).unwrap_or_else(|err| panic!("{text}: {err}"));
-            let Some(Event::Start { regime }) = parsed.events.first() else {
+            let Some(Event::Start { regime, .. }) = parsed.events.first() else {
                 panic!("a start row");
             };
             assert_eq!(
