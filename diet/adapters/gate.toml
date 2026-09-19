@@ -56,7 +56,7 @@
 name = "diet-adapters"
 check = "test"
 command = "cargo test --no-fail-fast -p discipline-diet -- adapters --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 29
+faults = 30
 
 [[fault]]
 # The census is the product. A row kind the adapter has no word for that
@@ -76,6 +76,31 @@ catches = [
     "adapters::tests::a_census_counts_every_row_once_and_into_exactly_one_bucket",
     "adapters_a_kind_never_seen_is_counted_and_does_not_stop_the_replay",
     "adapters_an_adapted_session_replays_to_a_census_and_a_working_object",
+]
+
+[[fault]]
+# Ruling 1 on #76 itself: a census is a count of what was lost, not the
+# content, and a replay viewer cannot render a row that does not exist. This
+# is the position the ruling refused, restored one line at a time -- the row
+# is still counted in `unmapped`, and simply never becomes an `Event::Unknown`
+# in the record. The census alone would read as a clean success; only a
+# reader of the record itself would notice the row it names is not there.
+id = "adapters.an-unmapped-row-is-counted-but-never-emitted"
+failure_class = "adapters.an-unmapped-row-is-counted-but-never-emitted"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+            self.census.unmapped_one(kind);
+            self.events.push(Event::Unknown {
+                source_kind: kind.to_owned(),
+                raw: raw.to_owned(),
+            });
+            return Ok(());'''
+becomes = '''
+            self.census.unmapped_one(kind);
+            return Ok(());'''
+catches = [
+    "adapters_a_kind_never_seen_is_counted_and_does_not_stop_the_replay",
 ]
 
 [[fault]]
@@ -474,9 +499,9 @@ failure_class = "adapters.a-refusal-points-at-a-kept-row-and-not-a-file-line"
 target = "diet/src/adapters/claude_code.rs"
 expect_exit = 101
 anchor = '''
-        rows.push((at + 1, row));'''
+        rows.push((at + 1, line, row));'''
 becomes = '''
-        rows.push((rows.len() + 1, row));'''
+        rows.push((rows.len() + 1, line, row));'''
 catches = [
     "adapters::claude_code::tests::a_refusal_counts_the_files_lines_and_not_the_rows_it_kept",
 ]
@@ -549,7 +574,7 @@ catches = [
 # ruling was issued to remove, reintroduced in one character.
 id = "adapters.a-refusal-collapses-into-the-could-not-run-code"
 failure_class = "adapters.a-refusal-collapses-into-the-could-not-run-code"
-target = "diet/src/bin/replay.rs"
+target = "diet/src/bin/diet/replay.rs"
 expect_exit = 101
 anchor = '''
 const EXIT_REFUSED: u8 = 3;'''
@@ -567,7 +592,7 @@ catches = [
 # code, and the two paths are one line apart.
 id = "adapters.a-declined-regimen-is-reported-as-a-failure-to-run"
 failure_class = "adapters.a-declined-regimen-is-reported-as-a-failure-to-run"
-target = "diet/src/bin/replay.rs"
+target = "diet/src/bin/diet/replay.rs"
 expect_exit = 101
 anchor = '''
             eprintln!("{why}");
@@ -587,7 +612,7 @@ catches = [
 # more output than a pipe buffer holds.
 id = "adapters.a-reader-that-left-is-a-failure-to-run"
 failure_class = "adapters.a-reader-that-left-is-a-failure-to-run"
-target = "diet/src/bin/replay.rs"
+target = "diet/src/bin/diet/replay.rs"
 expect_exit = 101
 anchor = '''
         Err(why) if why.kind() == std::io::ErrorKind::BrokenPipe => Err(EXIT_OK),'''
@@ -603,7 +628,7 @@ catches = [
 # `{"content":"read ","id":"mechanical/file/"}` -- a fact that is not one.
 id = "adapters.a-path-that-resolved-to-nothing-becomes-a-fact"
 failure_class = "adapters.a-path-that-resolved-to-nothing-becomes-a-fact"
-target = "diet/src/bin/replay.rs"
+target = "diet/src/bin/diet/replay.rs"
 expect_exit = 101
 anchor = '''
         if path.as_os_str().is_empty() {
@@ -623,7 +648,7 @@ catches = [
 # a real replay named a turn that did not exist.
 id = "adapters.a-derived-fact-claims-a-turn-that-never-happened"
 failure_class = "adapters.a-derived-fact-claims-a-turn-that-never-happened"
-target = "diet/src/bin/replay.rs"
+target = "diet/src/bin/diet/replay.rs"
 expect_exit = 101
 anchor = '''
             touch.turn,'''

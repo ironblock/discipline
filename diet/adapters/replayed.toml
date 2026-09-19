@@ -19,26 +19,27 @@ dogma_version = 0
 
 # What served the session being replayed. `claude-code` is the harness, which
 # is the honest answer to "what produced this log" -- and it is deliberately
-# NOT a model name, because the log does not carry one. The remaining keys say
-# `undeclared` in the same spirit: the fixture states that the fact is absent
-# rather than inventing a plausible value for it, and a reader can tell the
-# difference between "nobody wrote it down" and "it was this".
+# NOT a model name, because the log does not carry one. Item 3 made a
+# substrate's identity typed (a sha256 of the weights, or a named hosted model
+# with a version) and a replay has neither, so this crossing reads no
+# `substrate_model` / `substrate_quantization` key any more -- see
+# `SUBSTRATE_KEYS` in `diet/src/drive/regimen.rs`.
 substrate = "claude-code"
-substrate_model = "undeclared-by-the-log"
-substrate_quantization = "undeclared-by-the-log"
-# The ONE key here that states a fact rather than its absence, because the
-# schema gives it no choice: `Reasoning` is `off | on | suppressed` and has no
-# "undeclared". `off` was written here first and was simply false -- the
-# session fixture beside this file carries a `thinking` block, and the log it
-# was distilled from carries hundreds of them, every one counted in the census
-# as dropped content. (The count itself lives in one stamped block in
-# `diet/src/adapters/claude_code.rs` and is not restated here: that log grows,
-# and a number repeated in two files is two claims that can disagree -- as
-# these two did.) A regimen filing a reasoning session as `reasoning = off`
-# while the census counts the reasoning it dropped is the kind of disagreement
-# that survives because nobody reads two files at once.
-substrate_reasoning = "on"
-substrate_hardware = "undeclared-by-the-log"
+# `Reasoning::Undeclared` (#76 ruling 5, landed via #85): the log never
+# carries whether reasoning was on, so this states the absence rather than
+# guessing. It was `"on"` here first, standing in for a state the vocabulary
+# had no word for at the time -- true of the fixture beside this file, which
+# carries a `thinking` block, and false of a replay pointed at a session that
+# reasoned not at all. `undeclared` is honest about both.
+substrate_reasoning = "undeclared"
+# `hardware_fingerprint` is a registry digest -- sha256 over exactly the
+# hardware fields an equipment entry's type declares (#68, refused otherwise
+# since 5b60a56) -- and a replay names no registry entry, so this is not one:
+# it is `sha256("undeclared-by-the-log")`, the same placeholder convention
+# 5b60a56 migrated the whole corpus's prose fingerprints to (`one-gpu` became
+# the sha256 of `one-gpu`, and so on). Anyone can recompute it from the label;
+# nobody should read it as an identity.
+substrate_hardware = "4cf941fc93ef4b44504be14f11089cb50fd8579599a262f05f340ceee7e358bf"
 
 # Replay runs no commands, so there is nothing for a sandbox to confine. The
 # capture lane reads tool calls that already happened; it does not re-run one.

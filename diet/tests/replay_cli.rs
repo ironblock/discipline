@@ -1,4 +1,4 @@
-//! `diet-replay` as a program, which is the only place the adapter is a
+//! `diet replay` as a program, which is the only place the adapter is a
 //! product rather than a function.
 //!
 //! #28 asks for a replay that "produces a working object and a census with no
@@ -7,6 +7,12 @@
 //! shows that a census and an object come out of one invocation, that a log
 //! the adapter refuses exits 2 and writes no object, and that nothing on the
 //! path needs an endpoint.
+//!
+//! **A verb on `diet`, not its own binary.** Ruled on #76: `diet-replay` was
+//! the issue's own acceptance line, and the ruling folded it into `diet`'s
+//! verb table instead -- the first verb that needed more than `[command,
+//! path]`. `REPLAY` below is `diet`'s own binary; [`run`] prepends the
+//! `replay` token every call needs.
 //!
 //! **Every test here begins with `adapters_`, and that is load-bearing.**
 //! #28's own acceptance row is `cargo test -p discipline-diet -- adapters`,
@@ -25,7 +31,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const REPLAY: &str = env!("CARGO_BIN_EXE_diet-replay");
+const REPLAY: &str = env!("CARGO_BIN_EXE_diet");
 
 /// The regimen this lane ships beside its corpus.
 fn regimen() -> PathBuf {
@@ -54,9 +60,10 @@ fn fixture(name: &str) -> PathBuf {
 /// and nothing here claims to.
 fn run(args: &[&str]) -> (i32, String, String) {
     let out = Command::new(REPLAY)
+        .arg("replay")
         .args(args)
         .output()
-        .expect("diet-replay runs");
+        .expect("diet replay runs");
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -92,8 +99,9 @@ fn adapters_an_adapted_session_replays_to_a_census_and_a_working_object() {
         "the census is the first line and it counts the corpus: {census}"
     );
     assert!(
-        tally.contains("\"entries\":2") && tally.contains("\"events\":7"),
-        "and the second line says what the lane derived: {tally}"
+        tally.contains("\"entries\":2") && tally.contains("\"events\":10"),
+        "and the second line says what the lane derived -- seven mapped events \
+         plus one `Event::Unknown` per unmapped row, ruling 1's own point: {tally}"
     );
     // Seven, and the seventh is the point. Three assistant rows, three user
     // rows, and of the assistant rows one makes a tool call and says nothing
@@ -143,12 +151,12 @@ fn adapters_a_replay_takes_no_endpoint_and_the_binary_holds_no_transport() {
     // than a second run of the session.
     //
     // Named for what it checks. It was `…_and_opens_no_socket`, and it does
-    // not watch a socket: it shows the program needs no endpoint, refuses one
+    // not watch a socket: it shows the verb needs no endpoint, refuses one
     // offered, and produces its object anyway. Proving no connect is made
     // wants a network namespace or an strace, neither of which belongs in a
     // unit test -- and the structural argument is the stronger one anyway:
-    // `diet-replay` links no transport, which the linker check below states
-    // as an assertion rather than as a comment.
+    // the `diet` binary links no transport, which the linker check below
+    // states as an assertion rather than as a comment.
     let (code, out, _) = run(&[
         "--adapter",
         "claude-code",
@@ -174,12 +182,16 @@ fn adapters_a_replay_takes_no_endpoint_and_the_binary_holds_no_transport() {
         "a second positional is a usage error, not a destination"
     );
 
-    // The structural half: the program's own binary carries none of the
-    // transport's strings. `diet::client::transport` builds requests out of
-    // these, and a build that linked it would carry them -- so this fails the
-    // moment somebody gives replay mode a way to call a model without saying
-    // so. Not a proof (a transport could be written that uses neither), but
-    // it is an observation of the artifact rather than a sentence about it.
+    // The structural half: the `diet` binary carries none of the transport's
+    // strings. `diet::client::transport` builds requests out of these, and a
+    // build that linked it would carry them -- so this fails the moment
+    // somebody gives replay mode, OR any other verb sharing this binary, a
+    // way to call a model without saying so. A coarser claim than when this
+    // was `diet-replay`'s own binary -- every verb on `diet` shares one
+    // artifact now, so this scans all of it, not replay's code alone -- and
+    // still true, since none of them link a transport either. Not a proof (a
+    // transport could be written that uses neither), but it is an observation
+    // of the artifact rather than a sentence about it.
     let binary = std::fs::read(REPLAY).expect("the binary this test just ran");
     for marker in [
         &b"POST /v1"[..],
@@ -188,7 +200,7 @@ fn adapters_a_replay_takes_no_endpoint_and_the_binary_holds_no_transport() {
     ] {
         assert!(
             !binary.windows(marker.len()).any(|window| window == marker),
-            "diet-replay carries `{}`, which is a transport's vocabulary",
+            "the `diet` binary carries `{}`, which is a transport's vocabulary",
             String::from_utf8_lossy(marker)
         );
     }
@@ -217,6 +229,32 @@ fn adapters_a_kind_never_seen_is_counted_and_does_not_stop_the_replay() {
     assert!(
         census.contains("\"rows\":3") && census.contains("\"mapped_rows\":2"),
         "rows still equals mapped plus unmapped: {census}"
+    );
+
+    // Ruling 1 on #76: a census is a count of what was lost, not the content,
+    // and a replay viewer cannot render a row that does not exist. So the
+    // unmapped row is not only a number above -- it is a real
+    // `Event::Unknown` in the record this replay built, carrying its own
+    // spelling of its kind and the row it came from, verbatim.
+    assert!(
+        out.contains(
+            "{\"raw\":\"{\\\"type\\\":\\\"a-kind-this-adapter-has-never-seen\\\",\\\"payload\\\":\\\
+             \"something the harness grew\\\",\\\"sessionId\\\":\\\"s\\\"}\",\
+             \"record\":\"unknown\",\"source_kind\":\"a-kind-this-adapter-has-never-seen\"}"
+        ),
+        "the unmapped row is carried into the record as `Event::Unknown`, not \
+         only counted: {out}"
+    );
+    // And the record it sits in declares where it came from: this library
+    // adapted it, it did not drive it, so a live session could never have
+    // produced a row with no word for its own kind.
+    assert!(
+        out.contains("\"record\":\"start\"")
+            && out.contains(
+                "\"source\":{\"adapter\":\"claude-code\",\"kind\":\"adapted\",\
+                 \"source_available\":\"pinned_only\""
+            ),
+        "the record's own start row says it was adapted, not driven: {out}"
     );
 }
 
@@ -370,7 +408,7 @@ fn adapters_a_path_that_resolves_to_nothing_makes_no_fact() {
 
 #[test]
 fn adapters_a_reader_that_stops_reading_is_not_a_failed_replay() {
-    // `diet-replay | head` closes the pipe partway through, and `println!`
+    // `diet replay | head` closes the pipe partway through, and `println!`
     // panics when a write fails: the acid test against a 14 MB log printed a
     // correct census and exited 101. A program whose contract is an exit code
     // cannot have one that depends on whether somebody piped it.
@@ -412,6 +450,7 @@ fn adapters_a_reader_that_stops_reading_is_not_a_failed_replay() {
 
     let mut child = Command::new(REPLAY)
         .args([
+            "replay",
             "--adapter",
             "claude-code",
             "--regimen",
@@ -420,7 +459,7 @@ fn adapters_a_reader_that_stops_reading_is_not_a_failed_replay() {
         ])
         .stdout(std::process::Stdio::piped())
         .spawn()
-        .expect("diet-replay runs");
+        .expect("diet replay runs");
 
     // Read one line, the way `head -1` does, then close the pipe.
     let mut stdout = child.stdout.take().expect("a pipe");

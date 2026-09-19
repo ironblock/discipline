@@ -76,7 +76,7 @@ pub mod claude_code;
 
 use std::collections::BTreeMap;
 
-use crate::formats::record::Event;
+use crate::formats::record::{Availability, Event, Record, Regime, Source};
 
 /// What a foreign log became, and what it cost to get there.
 #[derive(Debug, Clone, PartialEq)]
@@ -85,6 +85,40 @@ pub struct Adapted {
     pub events: Vec<Event>,
     /// What was seen, what was mapped, and what was not.
     pub census: Census,
+}
+
+impl Adapted {
+    /// File this reading under `regime`, and say where it came from.
+    ///
+    /// The one place an adapted log becomes a record the schema will parse.
+    /// `Start` is required first and this crate's `Source::Adapted` names the
+    /// adapter, the log's own digest, and whether that log can be read again
+    /// -- see [`Source`] for why replay's own answer is always
+    /// [`Availability::PinnedOnly`] rather than a guess.
+    ///
+    /// No `Event::Summary` is appended. A record needs one only if it claims
+    /// a verdict about itself, and a replay reaches none: it reads a log or
+    /// refuses it, the same reason [`crate`]'s CLI-wide exit codes never let
+    /// `diet replay` return `1`.
+    #[must_use]
+    pub fn into_record(
+        self,
+        regime: Regime,
+        source_digest: String,
+        source_available: Availability,
+    ) -> Record {
+        let mut events = Vec::with_capacity(self.events.len() + 1);
+        events.push(Event::Start {
+            regime: Box::new(regime),
+            source: Source::Adapted {
+                adapter: self.census.adapter.clone(),
+                source_digest,
+                source_available,
+            },
+        });
+        events.extend(self.events);
+        Record { events }
+    }
 }
 
 /// Which foreign kinds an adapter saw, and which it could type.

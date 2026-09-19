@@ -1,4 +1,4 @@
-//! `diet-replay` — run the capture lanes over a foreign harness's session log.
+//! `diet replay` — run the capture lanes over a foreign harness's session log.
 //!
 //! The read-only front door from #28. It adapts a log this library did not
 //! produce, runs the deterministic capture lane over the result, and prints
@@ -6,8 +6,18 @@
 //! **No model is called**, and none can be: nothing here holds a transport.
 //!
 //! ```text
-//! diet-replay --adapter claude-code --regimen <regimen.toml> <log.jsonl>
+//! diet replay --adapter claude-code --regimen <regimen.toml> <log.jsonl>
 //! ```
+//!
+//! # Not a second binary
+//!
+//! #28's own acceptance line names `diet-replay` as its own program. Ruled on
+//! #76: it is a verb on `diet` instead, the first one that needed more than
+//! `diet`'s existing `[command, path]` shape -- two required flags ahead of
+//! its one positional -- so it is dispatched before that shape is read rather
+//! than forced through it. [`run`] is what `diet.rs`'s `main` calls when the
+//! first argument is `replay`; everything below it is unchanged from when
+//! this was `diet-replay`'s own `main`.
 //!
 //! # Why a regimen is required, when the issue's command line does not show one
 //!
@@ -23,7 +33,7 @@
 //! This is a deliberate divergence from the issue's acceptance line, and it
 //! is disclosed on the PR rather than smoothed over.
 //!
-//! # The exit codes, which are the CLI's and not this program's
+//! # The exit codes, which are the CLI's and not this verb's
 //!
 //! Ruled on #76, CLI-wide, so that no two meanings ever share a number again:
 //!
@@ -42,7 +52,7 @@
 //! the row was for -- and the number is `3`.
 //!
 //! Replay never exits `1`, and that is not an oversight: `1` is a verdict on
-//! a document, and this program does not reach one. It reads a log or refuses
+//! a document, and this verb does not reach one. It reads a log or refuses
 //! it. A census is not a verdict.
 //!
 //! One judgement call inside the ruled vocabulary, disclosed rather than
@@ -56,20 +66,20 @@ use std::process::ExitCode;
 use diet::adapters::{Adapter, claude_code::ClaudeCode};
 use diet::capture::mechanical::Lane;
 use diet::drive::regimen::regime_of;
-use diet::formats::record::Event;
+use diet::formats::record::{self, Availability, Event};
 use diet::formats::regimen;
 use diet::object::{EntryId, Patch, Provenance, WorkingObject};
 
 /// Everything ran.
 const EXIT_OK: u8 = 0;
-/// The command line was not one this program serves, a file it was pointed at
+/// The command line was not one this verb serves, a file it was pointed at
 /// could not be read, or its output could not be written.
 ///
 /// The CLI's `2`: *usage, or could not run*. One number for one meaning, and
 /// the meaning is "this invocation never got as far as an answer".
 const EXIT_COULD_NOT_RUN: u8 = 2;
 /// Input refused: the adapter found a row whose format has moved, or the
-/// regimen is a document this program recognises and declines.
+/// regimen is a document this verb recognises and declines.
 ///
 /// The CLI's `3`. #28's row four asks for a declared refusal under its own
 /// code rather than a mapped guess; the ruling on #76 says which code.
@@ -78,9 +88,9 @@ const EXIT_REFUSED: u8 = 3;
 /// Write one line to stdout, saying how the run should end.
 ///
 /// Not `println!`, which panics when the write fails, and the write fails
-/// routinely: `diet-replay | head` closes the pipe, and this program's output
-/// is a census followed by every entry in the object -- hundreds of lines on
-/// a real session. A reader that stops reading is not an error in
+/// routinely: `diet replay | head` closes the pipe, and this verb's output is
+/// a census followed by every entry in the object -- hundreds of lines on a
+/// real session. A reader that stops reading is not an error in
 /// the replay, so a broken pipe ends the run at [`EXIT_OK`] rather than at a
 /// panic's 101. Found by running the program, not by reading it: the acid
 /// test against a 14 MB log was piped into `head` and exited 101 with the
@@ -102,11 +112,12 @@ fn line(text: &str) -> Result<(), u8> {
     }
 }
 
-fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let Some(parsed) = Args::of(&args) else {
+/// `diet replay`'s whole verb, called from `diet.rs`'s `main` with everything
+/// after the literal `replay` token.
+pub fn run(args: &[String]) -> ExitCode {
+    let Some(parsed) = Args::of(args) else {
         eprintln!(
-            "usage: diet-replay --adapter claude-code --regimen <regimen.toml> <log.jsonl>\n\
+            "usage: diet replay --adapter claude-code --regimen <regimen.toml> <log.jsonl>\n\
              \n\
              Runs the capture lanes over a session log this library did not produce.\n\
              No model is called. The census on stdout says what the adapter could not\n\
@@ -149,7 +160,7 @@ fn main() -> ExitCode {
     {
         Ok(regime) => regime,
         Err(why) => {
-            // `3`, not `2`. A regimen this program cannot READ is a file that
+            // `3`, not `2`. A regimen this verb cannot READ is a file that
             // could not be opened; a regimen it reads and declines is a
             // document whose schema it recognises and refuses, which is the
             // same class as a log whose format moved.
@@ -157,6 +168,12 @@ fn main() -> ExitCode {
             return ExitCode::from(EXIT_REFUSED);
         }
     };
+
+    // The sha256 of the log this verb actually read, over its own bytes --
+    // before adapting, so it names the file that was opened rather than
+    // anything derived from it. `Start.source.source_digest` for the record
+    // built below.
+    let source_digest = diet::digest::sha256_hex(log.as_bytes());
 
     // The regimen declares exactly one substrate and the log names none, so
     // this is the id every adapted row is filed against. Reading it off the
@@ -176,10 +193,31 @@ fn main() -> ExitCode {
     for event in &read.events {
         lane.observe(event);
     }
-
-    let mut object = WorkingObject::open(regime);
     let turns = derived(&lane, &read.events);
     let entries: usize = turns.iter().map(|(_, patches)| patches.len()).sum();
+    let census_line = read.census.render();
+    let events_len = read.events.len();
+
+    // The record: `Start` first, declaring `source = adapted` -- this log
+    // pins by digest and, per the one honest limit the module header names,
+    // is `pinned_only` because a foreign harness's log is not in this
+    // repository and cannot be, so the digest cannot promise a later reader
+    // can refetch it. Then every event the adapter produced, `Event::Unknown`
+    // included -- ruling 1's own point, that a row the adapter could not map
+    // still has to be a row IN the record and not only a line in the census.
+    //
+    // Rendered and read back before anything is written, the same discipline
+    // `diet::drive` holds itself to: a record this verb can write and its own
+    // format cannot parse is a defect found here, not three lines into
+    // somebody else's stdout.
+    let built = read.into_record(regime.clone(), source_digest, Availability::PinnedOnly);
+    let rendered_record = record::render(&built);
+    if let Err(why) = record::parse(&rendered_record) {
+        eprintln!("the record this replay built does not parse back: {why}");
+        return ExitCode::from(EXIT_COULD_NOT_RUN);
+    }
+
+    let mut object = WorkingObject::open(regime);
     // One `apply_turn` per turn, in turn order. The object refuses a turn of
     // patches whose provenances name different turns -- "a turn is ordered
     // within itself" -- and it is right to: a replay of a six-turn session is
@@ -194,13 +232,22 @@ fn main() -> ExitCode {
     }
 
     let dump = object.dump();
-    let written = line(&read.census.render())
+    let written = line(&census_line)
         .and_then(|()| {
             line(&format!(
-                "{{\"entries\":{entries},\"events\":{},\"object_version\":{}}}",
-                read.events.len(),
+                "{{\"entries\":{entries},\"events\":{events_len},\"object_version\":{}}}",
                 object.version()
             ))
+        })
+        .and_then(|()| {
+            // The record's own lines, each already newline-terminated JSON:
+            // written one at a time for the same reason the object's dump is
+            // below, and ahead of it, because it is what the log BECAME,
+            // before saying what was derived from it.
+            for entry in rendered_record.lines() {
+                line(entry)?;
+            }
+            Ok(())
         })
         .and_then(|()| {
             // `dump` already ends every entry with a newline, so the lines are
@@ -308,7 +355,7 @@ fn at_turn_of(events: &[Event], event: &str) -> u32 {
         .unwrap_or(0)
 }
 
-/// A flag this program reads, and the one place its spelling lives.
+/// A flag this verb reads, and the one place its spelling lives.
 ///
 /// Same rule as the adapter's own vocabularies: a tag becomes a flag in
 /// [`Flag::from_tag`], walking [`Flag::ALL`], and nothing else compares a
@@ -322,7 +369,7 @@ enum Flag {
 }
 
 impl Flag {
-    /// Every flag this program takes.
+    /// Every flag this verb takes.
     const ALL: &'static [Self] = &[Self::Adapter, Self::Regimen];
 
     /// How it is spelled on the command line.
@@ -339,7 +386,8 @@ impl Flag {
     }
 }
 
-/// The command line, or nothing when it is not one this program can serve.
+/// The command line after `replay`, or nothing when it is not one this verb
+/// can serve.
 struct Args {
     adapter: String,
     regimen: String,

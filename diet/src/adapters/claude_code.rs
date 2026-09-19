@@ -78,11 +78,19 @@
 //!
 //! `thinking` blocks have no event kind in this schema, so they are counted
 //! as dropped content rather than quietly discarded; the reading above says
-//! how many. The seven unmapped row kinds are counted as unmapped rows. Both
-//! are in the census, and neither is in the record: an adapted record is
-//! **lossy by declaration**, a view of a foreign session rather than a
-//! transcript of one, and the census is the authority on what was seen and
-//! not carried.
+//! how many, and a dropped block is not in the record -- there is no
+//! `Event` a block of content can become on its own.
+//!
+//! A row this adapter has no KIND for is different. Ruling 1 on #76 refused
+//! the position this paragraph used to state -- that the census alone
+//! discharges "never dropping silently" -- on the grounds that a census is a
+//! count of what was lost, not the content, and a replay viewer cannot render
+//! a row that does not exist. So the seven unmapped row kinds are counted as
+//! unmapped rows **and** carried into the record as [`Event::Unknown`], one
+//! per row, holding the row's own spelling of its kind and the row verbatim.
+//! An adapted record is still **lossy by declaration** -- content inside a
+//! mapped row that this schema has no home for does not survive -- but an
+//! unmapped ROW does, typed as what it is: unread.
 
 use std::collections::BTreeMap;
 
@@ -232,8 +240,8 @@ impl Adapter for ClaudeCode {
     fn adapt(&self, log: &str, substrate: &str) -> Result<Adapted, Drift> {
         let rows = parse(log)?;
         let mut run = Run::new(self.name(), substrate);
-        for (at, (at_row, row)) in rows.iter().enumerate() {
-            run.row(*at_row, row, rows.get(at + 1..).unwrap_or(&[]))?;
+        for (at, (at_row, raw, row)) in rows.iter().enumerate() {
+            run.row(*at_row, raw, row, rows.get(at + 1..).unwrap_or(&[]))?;
         }
         Ok(Adapted {
             events: run.events,
@@ -242,7 +250,8 @@ impl Adapter for ClaudeCode {
     }
 }
 
-/// Every non-blank line, as JSON and the FILE line it came from.
+/// Every non-blank line, as its own text, JSON, and the FILE line it came
+/// from.
 ///
 /// The line number is carried rather than recovered, because it cannot be
 /// recovered: blank lines are skipped, so a row's position in this vector is
@@ -251,7 +260,14 @@ impl Adapter for ClaudeCode {
 /// lines and `MissingField` counted rows -- two numbering systems inside one
 /// enum whose whole doc comment is that a refusal says WHERE. One blank line
 /// anywhere above the fault was enough to send a reader to the wrong line.
-fn parse(log: &str) -> Result<Vec<(usize, serde_json::Value)>, Drift> {
+///
+/// The line's own text is carried too, alongside the value parsed from it,
+/// for `Event::Unknown::raw`: that field is documented "as it appeared,
+/// verbatim", and a value re-serialized from a parsed `serde_json::Value` is
+/// not verbatim -- key order and spacing are not guaranteed to survive a
+/// round trip, and the record's own byte-identical-render discipline is the
+/// reason that distinction is not academic here.
+fn parse(log: &str) -> Result<Vec<(usize, &str, serde_json::Value)>, Drift> {
     let mut rows = Vec::new();
     for (at, line) in log.lines().enumerate() {
         if line.trim().is_empty() {
@@ -264,7 +280,7 @@ fn parse(log: &str) -> Result<Vec<(usize, serde_json::Value)>, Drift> {
         if !row.is_object() {
             return Err(Drift::NotAnObject { at_row: at + 1 });
         }
-        rows.push((at + 1, row));
+        rows.push((at + 1, line, row));
     }
     Ok(rows)
 }
@@ -305,16 +321,23 @@ impl Run {
     fn row(
         &mut self,
         at_row: usize,
+        raw: &str,
         row: &serde_json::Value,
-        rest: &[(usize, serde_json::Value)],
+        rest: &[(usize, &str, serde_json::Value)],
     ) -> Result<(), Drift> {
         let Some(kind) = row.get("type").and_then(serde_json::Value::as_str) else {
             return Err(Drift::NoKind { at_row });
         };
         // A kind this adapter has no word for is NEWS, not a failure: the
-        // census carries it and the walk goes on.
+        // census carries it, ruling 1 on #76 carries the row itself into the
+        // record as `Event::Unknown` -- a census is a count of what was lost,
+        // not the content -- and the walk goes on.
         let Some(mapped) = Row::from_tag(kind) else {
             self.census.unmapped_one(kind);
+            self.events.push(Event::Unknown {
+                source_kind: kind.to_owned(),
+                raw: raw.to_owned(),
+            });
             return Ok(());
         };
         self.census.mapped_one(kind);
@@ -329,7 +352,7 @@ impl Run {
         &mut self,
         at_row: usize,
         row: &serde_json::Value,
-        rest: &[(usize, serde_json::Value)],
+        rest: &[(usize, &str, serde_json::Value)],
     ) -> Result<(), Drift> {
         let content = content_of(at_row, Row::User.tag(), row)?;
         let mut said = String::new();
@@ -704,8 +727,8 @@ fn block_type(block: &serde_json::Value) -> Option<&str> {
 /// `None` means the log affords no answer -- an interrupted session's last
 /// turn, or a usage object carrying none of the three keys. The caller turns
 /// that into the zero the record gives it no way to avoid, and counts it.
-fn prefill_after(rest: &[(usize, serde_json::Value)]) -> Result<Option<Count>, Drift> {
-    for (at_row, row) in rest {
+fn prefill_after(rest: &[(usize, &str, serde_json::Value)]) -> Result<Option<Count>, Drift> {
+    for (at_row, _raw, row) in rest {
         match row.get("type").and_then(serde_json::Value::as_str) {
             Some(kind) if kind == Row::Assistant.tag() => {}
             // A row that opens a turn of its own ends the lookahead: whatever
