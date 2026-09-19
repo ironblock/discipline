@@ -5132,3 +5132,244 @@ check = "lanes"
 label = "seam.object-version-unrecorded"
 failure_class = "seam.object-version-unrecorded"
 migrated = false
+
+
+[[fault]]
+id = "adapters.an-unmapped-kind-is-walked-past-uncounted"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.an-unmapped-kind-is-walked-past-uncounted"
+failure_class = "adapters.an-unmapped-kind-is-walked-past-uncounted"
+migrated = false
+
+[[fault]]
+id = "adapters.an-unmapped-row-is-counted-but-never-emitted"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.an-unmapped-row-is-counted-but-never-emitted"
+failure_class = "adapters.an-unmapped-row-is-counted-but-never-emitted"
+migrated = false
+
+[[fault]]
+id = "adapters.a-renamed-field-is-read-off-a-neighbour"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-renamed-field-is-read-off-a-neighbour"
+failure_class = "adapters.a-renamed-field-is-read-off-a-neighbour"
+migrated = false
+
+[[fault]]
+id = "adapters.the-tool-names-cross-untranslated"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.the-tool-names-cross-untranslated"
+failure_class = "adapters.the-tool-names-cross-untranslated"
+migrated = false
+
+[[fault]]
+id = "adapters.a-tool-name-must-match-the-tables-own-case"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-tool-name-must-match-the-tables-own-case"
+failure_class = "adapters.a-tool-name-must-match-the-tables-own-case"
+migrated = false
+
+[[fault]]
+id = "adapters.a-folded-tool-name-is-counted-under-the-tables-spelling"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-folded-tool-name-is-counted-under-the-tables-spelling"
+failure_class = "adapters.a-folded-tool-name-is-counted-under-the-tables-spelling"
+migrated = false
+
+[[fault]]
+id = "adapters.the-path-argument-keeps-its-foreign-name"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.the-path-argument-keeps-its-foreign-name"
+failure_class = "adapters.the-path-argument-keeps-its-foreign-name"
+migrated = false
+
+[[fault]]
+id = "adapters.the-prefill-counts-only-the-uncached-tokens"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.the-prefill-counts-only-the-uncached-tokens"
+failure_class = "adapters.the-prefill-counts-only-the-uncached-tokens"
+migrated = false
+
+[[fault]]
+id = "adapters.the-prefill-lookahead-runs-past-the-next-turn"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.the-prefill-lookahead-runs-past-the-next-turn"
+failure_class = "adapters.the-prefill-lookahead-runs-past-the-next-turn"
+migrated = false
+
+[[fault]]
+id = "adapters.a-prefill-the-log-never-carried-passes-as-measured"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-prefill-the-log-never-carried-passes-as-measured"
+failure_class = "adapters.a-prefill-the-log-never-carried-passes-as-measured"
+migrated = false
+
+[[fault]]
+id = "adapters.a-count-past-the-cap-becomes-a-zero"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-count-past-the-cap-becomes-a-zero"
+failure_class = "adapters.a-count-past-the-cap-becomes-a-zero"
+migrated = false
+
+[[fault]]
+id = "adapters.an-assistant-row-that-said-nothing-reports-nothing-spent"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.an-assistant-row-that-said-nothing-reports-nothing-spent"
+failure_class = "adapters.an-assistant-row-that-said-nothing-reports-nothing-spent"
+migrated = false
+
+[[fault]]
+id = "adapters.a-response-names-a-request-that-is-not-there"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-response-names-a-request-that-is-not-there"
+failure_class = "adapters.a-response-names-a-request-that-is-not-there"
+migrated = false
+
+[[fault]]
+id = "adapters.reasoning-is-discarded-rather-than-counted"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.reasoning-is-discarded-rather-than-counted"
+failure_class = "adapters.reasoning-is-discarded-rather-than-counted"
+migrated = false
+
+[[fault]]
+id = "adapters.a-tool-result-row-opens-a-turn-of-its-own"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-tool-result-row-opens-a-turn-of-its-own"
+failure_class = "adapters.a-tool-result-row-opens-a-turn-of-its-own"
+migrated = false
+
+[[fault]]
+id = "adapters.a-mapped-row-that-produced-nothing-is-not-counted"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-mapped-row-that-produced-nothing-is-not-counted"
+failure_class = "adapters.a-mapped-row-that-produced-nothing-is-not-counted"
+migrated = false
+
+[[fault]]
+id = "adapters.a-tool-result-is-joined-without-its-output"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-tool-result-is-joined-without-its-output"
+failure_class = "adapters.a-tool-result-is-joined-without-its-output"
+migrated = false
+
+[[fault]]
+id = "adapters.an-absent-is-error-becomes-a-zero"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.an-absent-is-error-becomes-a-zero"
+failure_class = "adapters.an-absent-is-error-becomes-a-zero"
+migrated = false
+
+[[fault]]
+id = "adapters.a-users-text-block-that-moved-is-read-around"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-users-text-block-that-moved-is-read-around"
+failure_class = "adapters.a-users-text-block-that-moved-is-read-around"
+migrated = false
+
+[[fault]]
+id = "adapters.a-calls-arguments-that-moved-are-read-as-none"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-calls-arguments-that-moved-are-read-as-none"
+failure_class = "adapters.a-calls-arguments-that-moved-are-read-as-none"
+migrated = false
+
+[[fault]]
+id = "adapters.an-unspellable-argument-is-coerced-into-a-string"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.an-unspellable-argument-is-coerced-into-a-string"
+failure_class = "adapters.an-unspellable-argument-is-coerced-into-a-string"
+migrated = false
+
+[[fault]]
+id = "adapters.a-refusal-points-at-a-kept-row-and-not-a-file-line"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-refusal-points-at-a-kept-row-and-not-a-file-line"
+failure_class = "adapters.a-refusal-points-at-a-kept-row-and-not-a-file-line"
+migrated = false
+
+[[fault]]
+id = "adapters.the-declared-kinds-disagree-with-the-mapped-ones"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.the-declared-kinds-disagree-with-the-mapped-ones"
+failure_class = "adapters.the-declared-kinds-disagree-with-the-mapped-ones"
+migrated = false
+
+[[fault]]
+id = "adapters.the-census-counts-a-mapped-row-in-both-buckets"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.the-census-counts-a-mapped-row-in-both-buckets"
+failure_class = "adapters.the-census-counts-a-mapped-row-in-both-buckets"
+migrated = false
+
+[[fault]]
+id = "adapters.a-control-character-crosses-into-the-census-raw"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-control-character-crosses-into-the-census-raw"
+failure_class = "adapters.a-control-character-crosses-into-the-census-raw"
+migrated = false
+
+[[fault]]
+id = "adapters.a-refusal-collapses-into-the-could-not-run-code"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-refusal-collapses-into-the-could-not-run-code"
+failure_class = "adapters.a-refusal-collapses-into-the-could-not-run-code"
+migrated = false
+
+[[fault]]
+id = "adapters.a-declined-regimen-is-reported-as-a-failure-to-run"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-declined-regimen-is-reported-as-a-failure-to-run"
+failure_class = "adapters.a-declined-regimen-is-reported-as-a-failure-to-run"
+migrated = false
+
+[[fault]]
+id = "adapters.a-reader-that-left-is-a-failure-to-run"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-reader-that-left-is-a-failure-to-run"
+failure_class = "adapters.a-reader-that-left-is-a-failure-to-run"
+migrated = false
+
+[[fault]]
+id = "adapters.a-path-that-resolved-to-nothing-becomes-a-fact"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-path-that-resolved-to-nothing-becomes-a-fact"
+failure_class = "adapters.a-path-that-resolved-to-nothing-becomes-a-fact"
+migrated = false
+
+[[fault]]
+id = "adapters.a-derived-fact-claims-a-turn-that-never-happened"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-derived-fact-claims-a-turn-that-never-happened"
+failure_class = "adapters.a-derived-fact-claims-a-turn-that-never-happened"
+migrated = false
