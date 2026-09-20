@@ -48,10 +48,7 @@ pub const FORK_ANSWER: &str = "some prose nobody tagged\n\
 /// difference.
 #[must_use]
 pub fn reply_counting_only_the_prompt(text: &str) -> String {
-    let escaped = text
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n");
+    let escaped = escaped(text);
     format!(
         "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":\"{escaped}\"}},\
          \"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":{PROMPT_TOKENS}}},\
@@ -212,16 +209,64 @@ pub fn digest_of(acts: &[Act]) -> String {
 /// step.
 #[must_use]
 pub fn reply(text: &str) -> String {
-    let escaped = text
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n");
+    let escaped = escaped(text);
     format!(
         "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":\"{escaped}\"}},\
          \"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":{PROMPT_TOKENS},\
          \"completion_tokens\":7}},\"generation_settings\":{{}},\
          \"timings\":{{\"prompt_n_cached\":512}}}}"
     )
+}
+
+/// A reply that says what it thought as well as what it answered.
+///
+/// The field is `reasoning_content`, which is where both dialects this client
+/// carries declare it -- see `client::shape::Dialect::reasoning`. NOT folded
+/// into `content`: a server that put its thinking in the answer would be a
+/// different server, and #94's negative control reads the two apart.
+///
+/// NOT in [`acts`], and that is load-bearing. `acts_digest()` is the canned
+/// substrate's whole identity, it is cited in `substrates/registry.toml` and
+/// in a committed record fixture, and a new act in that list would move it --
+/// so the reasoning acts are functions a test composes its own list out of.
+#[must_use]
+pub fn reply_with_reasoning(text: &str, reasoning: &str) -> String {
+    format!(
+        "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":\"{}\",\
+         \"reasoning_content\":\"{}\"}},\"finish_reason\":\"stop\"}}],\
+         \"usage\":{{\"prompt_tokens\":{PROMPT_TOKENS},\"completion_tokens\":7}},\
+         \"generation_settings\":{{}},\"timings\":{{\"prompt_n_cached\":512}}}}",
+        escaped(text),
+        escaped(reasoning),
+    )
+}
+
+/// A reply whose whole budget went inside the think block.
+///
+/// `finish_reason` is `length` -- the server saying it ran out of room --
+/// the reasoning is what it got through, and the answer is the empty string:
+/// not "the model declined", not "the answer was cut off", but a generation
+/// that never reached the answer at all. #94 design point 5's input.
+#[must_use]
+pub fn reply_exhausted_in_the_think_block(reasoning: &str) -> String {
+    format!(
+        "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":\"\",\
+         \"reasoning_content\":\"{}\"}},\"finish_reason\":\"length\"}}],\
+         \"usage\":{{\"prompt_tokens\":{PROMPT_TOKENS},\"completion_tokens\":128}},\
+         \"generation_settings\":{{}},\"timings\":{{\"prompt_n_cached\":512}}}}",
+        escaped(reasoning),
+    )
+}
+
+/// One string, as a JSON string literal's interior.
+///
+/// Four replies here escape the same way. Two of them spelled it out
+/// inline, which is two copies of the same four lines: one fix and one
+/// survivor.
+fn escaped(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
 }
 
 /// How many calls [`script`] makes: one per turn, one per fork, one per seam.

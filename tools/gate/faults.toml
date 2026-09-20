@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 477
+red_faults = 484
 mechanics_assertions = 119
 unseedable_guards = 1
 migrated = 0
@@ -246,6 +246,26 @@ target = "test:conformance/formats::record"
 label = "weights identified by name"
 failure_class = "schema.weights-not-digested"
 legacy_signature = "record/fixtures/invalid/weights-named-not-digested\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.regimen_reasoning_pair_unchecked"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::regimen"
+label = "an effort level with no budget"
+failure_class = "schema.reasoning-pair-incomplete"
+legacy_signature = "regimen/fixtures/invalid/reasoning-effort-without-budget\\.toml"
+migrated = false
+
+[[fault]]
+id = "test.record_substrates_indistinguishable"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "two ids over one substrate"
+failure_class = "schema.substrates-indistinguishable"
+legacy_signature = "record/fixtures/invalid/substrates-indistinguishable\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -4342,6 +4362,22 @@ failure_class = "client.issued-is-recorded-only-on-success"
 migrated = false
 
 [[fault]]
+id = "client.template-kwargs-never-sent"
+kind = "lane-fault"
+check = "lanes"
+label = "client.template-kwargs-never-sent"
+failure_class = "client.template-kwargs-never-sent"
+migrated = false
+
+[[fault]]
+id = "client.reasoning-never-read"
+kind = "lane-fault"
+check = "lanes"
+label = "client.reasoning-never-read"
+failure_class = "client.reasoning-never-read"
+migrated = false
+
+[[fault]]
 id = "digest.drops-the-zero-pad"
 kind = "lane-fault"
 check = "lanes"
@@ -4710,6 +4746,14 @@ failure_class = "drive.the-census-reports-the-unrepresentable-sentinel"
 migrated = false
 
 [[fault]]
+id = "drive.a-canned-reasoning-control-halts-on-the-wrong-lane"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-canned-reasoning-control-halts-on-the-wrong-lane"
+failure_class = "drive.a-canned-reasoning-control-halts-on-the-wrong-lane"
+migrated = false
+
+[[fault]]
 id = "drive.the-sampler-crosses-as-a-debug-rendering"
 kind = "lane-fault"
 check = "lanes"
@@ -4739,6 +4783,22 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.the-shipped-regimen-declares-the-sandbox"
 failure_class = "drive.the-shipped-regimen-declares-the-sandbox"
+migrated = false
+
+[[fault]]
+id = "drive.the-kwarg-control-never-refuses"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-kwarg-control-never-refuses"
+failure_class = "drive.the-kwarg-control-never-refuses"
+migrated = false
+
+[[fault]]
+id = "drive.a-spent-think-budget-is-an-ordinary-silence"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-spent-think-budget-is-an-ordinary-silence"
+failure_class = "drive.a-spent-think-budget-is-an-ordinary-silence"
 migrated = false
 
 [[fault]]

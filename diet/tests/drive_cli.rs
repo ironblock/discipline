@@ -262,6 +262,23 @@ fn every_drive_refusal_has_its_own_exit_code() {
     // the message has to name it, or a caller cannot tell them apart.
     let thin = ground.base.join("thin.toml");
     std::fs::write(&thin, "arm = \"x\"\n").expect("a regimen missing everything else");
+    // The lane's own shipped regimen, with a `[reasoning]` table added --
+    // exactly the shape a fresh-instance review of PR #103 constructed by
+    // hand to find that this program halted on turn three, blaming the
+    // wrong lane, rather than refusing the actual defect: this program
+    // drives only its own canned server, which renders no chat template for
+    // a reasoning control to instruct.
+    let with_reasoning = ground.base.join("with-reasoning.toml");
+    let shipped = std::fs::read_to_string(&regimen).expect("the shipped regimen reads");
+    std::fs::write(
+        &with_reasoning,
+        shipped.replacen(
+            "[sampler]",
+            "[reasoning]\neffort = \"high\"\nbudget_tokens = 4096\n\n[sampler]",
+            1,
+        ),
+    )
+    .expect("a regimen declaring a reasoning control");
     let cases: Vec<(Vec<String>, &str)> = vec![
         (
             vec!["/nope/absent.toml".to_owned(), ground.tree(), ground.out()],
@@ -303,6 +320,14 @@ fn every_drive_refusal_has_its_own_exit_code() {
             // the equipment registry lands, and asserting an unreachable
             // message here would be asserting a path nothing takes.
             "regimen v1 cannot say WHICH weights",
+        ),
+        (
+            vec![
+                with_reasoning.to_string_lossy().into_owned(),
+                ground.tree(),
+                ground.out(),
+            ],
+            "renders no chat template",
         ),
     ];
     for (args, says) in cases {

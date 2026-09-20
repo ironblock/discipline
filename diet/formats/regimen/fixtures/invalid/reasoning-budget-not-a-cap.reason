@@ -1,0 +1,4 @@
+A budget is a count of tokens. The only other thing `budget_tokens` may say is
+that there is no cap, spelled `none` -- spelled rather than left out, so the
+absence is a declaration a reader can see. A boolean here is neither, and a
+reader that took it for either would be guessing.

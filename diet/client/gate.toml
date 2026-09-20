@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 24
+faults = 26
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -118,6 +118,7 @@ becomes = '''
                         text: String::new(),
                         output_tokens: None,
                         finish_reason: None,
+                        reasoning: None,
                         echo: Echo {
                             dialect: String::new(),
                             sent: sending.sampler.clone(),
@@ -456,4 +457,46 @@ becomes = '''
 catches = [
     "client::tests::a_request_that_never_reached_a_server_is_still_a_request_the_client_issued",
     "client::tests::the_record_projection_names_every_fact_record_v0_cannot_carry",
+]
+
+# --- #94: the template's arguments out, and the reasoning back ---
+#
+# Both generated the same way as everything above: applied to the tree, the
+# lane's tests run, `catches` is what actually failed.
+
+[[fault]]
+id = "client.template-kwargs-never-sent"
+failure_class = "client.template-kwargs-never-sent"
+target = "diet/src/client/wire.rs"
+expect_exit = 101
+anchor = '''
+    if !shape.template_kwargs.is_empty() {
+        out.push_str(",\"chat_template_kwargs\":");
+        crate::formats::record::json::render(
+            &crate::formats::record::json::Value::Object(shape.template_kwargs.clone()),
+            &mut out,
+        );
+    }
+'''
+becomes = '''
+'''
+catches = [
+    "client::wire::tests::a_template_kwarg_is_sent_in_the_object_the_template_reads_and_not_beside_the_sampler",
+]
+
+[[fault]]
+id = "client.reasoning-never-read"
+failure_class = "client.reasoning-never-read"
+target = "diet/src/client/wire.rs"
+expect_exit = 101
+anchor = '''
+        reasoning: dialect
+            .reasoning
+            .as_deref()
+            .and_then(|path| at(&root, path))
+            .and_then(as_text),'''
+becomes = '''
+        reasoning: None,'''
+catches = [
+    "client::wire::tests::reasoning_is_read_from_the_declared_path_and_absence_is_not_silence",
 ]

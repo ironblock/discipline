@@ -1,0 +1,10 @@
+# An effort level and the cap that bounds it. #94 design point 1: the level is
+# an instruction the chat template renders as system-message text, so it is
+# soft and bounds nothing; the cap is what a spend can be held to.
+arm = "thinking-high"
+dogma_version = 0
+substrate = "local"
+
+[reasoning]
+effort = "high"
+budget_tokens = 4096

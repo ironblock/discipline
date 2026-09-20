@@ -1,0 +1,9 @@
+# No cap, and somebody said so. "there is no cap" and "nobody wrote the cap
+# down" are different facts about a run, and only the first has a spelling.
+arm = "thinking-uncapped"
+dogma_version = 0
+substrate = "local"
+
+[reasoning]
+effort = "medium"
+budget_tokens = "none"

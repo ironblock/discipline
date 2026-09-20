@@ -61,6 +61,14 @@ isolation = "none"
 # budget, no phases. The script declares a boundary on turn two, so the seam
 # lands where the script chose rather than where a cadence happened to put it.
 
+# NO `[reasoning]`, and that is a declaration rather than an omission. The
+# canned server renders no chat template, so there is no effort level to
+# instruct it with and no think block for a budget to cap; a regimen naming
+# one here would be naming a control nothing applies. A regimen that DOES
+# declare `[reasoning]` must carry both `effort` and `budget_tokens` (or
+# `budget_tokens = "none"`), and the drive it runs makes a kwarg-delivery
+# negative control before its first turn. #94 design points 1 and 4.
+
 [sampler]
 temperature = 0.6
 top_p = 0.95

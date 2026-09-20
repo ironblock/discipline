@@ -1,0 +1,6 @@
+A `reasoning_control` is two fields and this one carries a level with no cap
+beside it. The level is an INSTRUCTION the chat template renders as
+system-message text; it bounds nothing, so a record carrying it alone says
+what was asked for and nothing about what it cost. The regimen format refuses
+the same shape one crossing earlier; this is the record refusing it in a
+document nobody had to come through a regimen to write.
