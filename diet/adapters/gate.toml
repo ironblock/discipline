@@ -67,7 +67,7 @@
 name = "diet-adapters"
 check = "test"
 command = "cargo test --no-fail-fast -p discipline-diet -- adapters --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 32
+faults = 36
 
 [[fault]]
 # The census is the product. A row kind the adapter has no word for that
@@ -704,4 +704,82 @@ becomes = '''
     }'''
 catches = [
     "adapters::claude_code::tests::a_harness_composed_meta_row_does_not_open_a_turn",
+]
+
+[[fault]]
+# #76 known defect 4, ruled: a row whose OWN content the record's value
+# space cannot hold used to refuse the whole log; it now becomes an
+# `Event::Unknown` row instead. This mutation reverts the downgrade
+# entirely, back to the old hard refusal for every case.
+id = "adapters.an-unrepresentable-rows-own-content-still-refuses-the-log"
+failure_class = "adapters.an-unrepresentable-rows-own-content-still-refuses-the-log"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+        if *bad_row != at_row {
+            return Err(drift);
+        }'''
+becomes = '''
+        if true {
+            return Err(drift);
+        }'''
+catches = [
+    "adapters::claude_code::tests::a_tool_argument_the_record_cannot_spell_is_named_rather_than_coerced",
+    "adapters::claude_code::tests::a_count_past_what_the_record_holds_is_refused_rather_than_zeroed",
+    "adapters::claude_code::tests::an_unrepresentable_block_rolls_back_the_calls_that_came_before_it_in_the_same_row",
+    "adapters::claude_code::tests::every_declared_field_is_refused_when_it_moves_not_read_around",
+]
+
+[[fault]]
+# The scoping guard is what stops a LOOKAHEAD's bad value (the prefill sum,
+# read from a later row) from downgrading the wrong row. Removed, every
+# `Unrepresentable` downgrades regardless of which row it names -- silently
+# showing the wrong row's raw text beside someone else's bad value.
+id = "adapters.a-different-rows-unrepresentable-value-downgrades-this-one-too"
+failure_class = "adapters.a-different-rows-unrepresentable-value-downgrades-this-one-too"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+        if *bad_row != at_row {
+            return Err(drift);
+        }
+        self.events.truncate(before_events);'''
+becomes = '''
+        self.events.truncate(before_events);'''
+catches = [
+    "adapters::claude_code::tests::a_count_past_what_the_record_holds_is_refused_rather_than_zeroed",
+]
+
+[[fault]]
+# A row can carry several tool calls; the first can succeed before a later
+# one's content is what downgrades the row. Without this rollback, the
+# earlier call stands beside the `Unknown` row meant to replace the whole
+# thing -- half a row that adapted and half that did not.
+id = "adapters.a-rolled-back-call-is-not-actually-removed"
+failure_class = "adapters.a-rolled-back-call-is-not-actually-removed"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+        self.events.truncate(before_events);
+        self.awaiting.retain(|_, at| *at < before_events);'''
+becomes = '''
+        let _ = before_events;'''
+catches = [
+    "adapters::claude_code::tests::an_unrepresentable_block_rolls_back_the_calls_that_came_before_it_in_the_same_row",
+]
+
+[[fault]]
+# The downgrade is silent without this: a row survives as `Unknown`, but
+# nothing says what content did not fit or that it happened at all.
+id = "adapters.an-unrepresentable-row-is-not-counted-in-the-census"
+failure_class = "adapters.an-unrepresentable-row-is-not-counted-in-the-census"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+        self.census
+            .unrepresentable_one(&format!("{kind}: {field} ({why})"));'''
+becomes = '''
+        let _ = (&field, &why);'''
+catches = [
+    "adapters::claude_code::tests::a_count_past_what_the_record_holds_is_refused_rather_than_zeroed",
 ]

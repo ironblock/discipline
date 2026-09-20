@@ -376,10 +376,66 @@ impl Run {
             self.census.no_event_one(&format!("{}/{why}", mapped.tag()));
             return Ok(());
         }
+        let before_events = self.events.len();
+        let before_turn = self.turn;
         match mapped {
             Row::User => self.user(at_row, row, rest),
             Row::Assistant => self.assistant(at_row, row),
         }
+        .or_else(|drift| {
+            self.unrepresentable_row(at_row, raw, kind, before_events, before_turn, drift)
+        })
+    }
+
+    /// #76 known defect 4, ruled: a mapped row whose OWN content the record's
+    /// value space cannot hold becomes an [`Event::Unknown`] row rather than
+    /// refusing the whole log -- the "counted and carried on from" treatment
+    /// ruling 1 gave an unmapped KIND, extended to a mapped kind whose
+    /// content did not fit. Format drift (a renamed or absent field) still
+    /// refuses: that is a claim the schema itself moved, which puts every
+    /// row already read in doubt, not only this one.
+    ///
+    /// Scoped to `drift`'s own `at_row` matching THIS row: the prefill
+    /// lookahead raises `Unrepresentable` naming a LATER row (the assistant
+    /// row that answers this turn), and downgrading this row for that would
+    /// show the wrong row's raw text beside someone else's bad value, so
+    /// that case still propagates as a refusal.
+    ///
+    /// `events`/`awaiting` are rolled back to what they were before this row
+    /// was attempted: a `user`/`assistant` row can process several blocks
+    /// (several tool calls, say), and one further along failing must not
+    /// leave the earlier ones' events standing beside the `Unknown` row that
+    /// replaces the whole thing.
+    fn unrepresentable_row(
+        &mut self,
+        at_row: usize,
+        raw: &str,
+        kind: &str,
+        before_events: usize,
+        before_turn: u32,
+        drift: Drift,
+    ) -> Result<(), Drift> {
+        let Drift::Unrepresentable {
+            at_row: bad_row,
+            field,
+            why,
+        } = &drift
+        else {
+            return Err(drift);
+        };
+        if *bad_row != at_row {
+            return Err(drift);
+        }
+        self.events.truncate(before_events);
+        self.awaiting.retain(|_, at| *at < before_events);
+        self.turn = before_turn;
+        self.census
+            .unrepresentable_one(&format!("{kind}: {field} ({why})"));
+        self.events.push(Event::Unknown {
+            source_kind: kind.to_owned(),
+            raw: raw.to_owned(),
+        });
+        Ok(())
     }
 
     /// A `user` row: a person's turn, or a tool's answer, never both invented.
@@ -1516,15 +1572,37 @@ mod tests {
             assistant("[{\"type\":\"text\",\"text\":\"ok\"}]", huge, [1, 0, 0]),
         ]
         .join("\n");
+        // #76 defect 4, ruled: THIS row's own count overflowing downgrades
+        // the row to `Event::Unknown` rather than refusing the whole log --
+        // "named, not silently zeroed" still holds: the census says exactly
+        // what would not fit, and the row survives as `Unknown` rather than
+        // vanishing into a success that never happened.
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("named, not refused");
         assert!(
-            matches!(
-                ClaudeCode.adapt(&log, A_SUBSTRATE),
-                Err(Drift::Unrepresentable { field, .. }) if field.contains("output_tokens")
-            ),
-            "an output count past the cap is named, not silently zeroed"
+            !adapted
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Response { .. })),
+            "the row that overflowed never became a response"
+        );
+        assert!(
+            adapted
+                .census
+                .unrepresentable
+                .keys()
+                .any(|what| what.contains("output_tokens")),
+            "and the overflow is named in the census: {:?}",
+            adapted.census.unrepresentable
         );
 
-        // And the same for the three prefill counts, which are summed.
+        // The three prefill counts are different: they are read by the
+        // LOOKAHEAD from the user row's own turn, so the `Unrepresentable`
+        // this raises names the answering assistant row, not the row
+        // `Run::row` was called with. Downgrading the user row for a
+        // different row's bad value would show the wrong row's raw text
+        // beside it, so this case still refuses the whole log.
         let log = [
             user_says("go"),
             assistant(
@@ -1576,26 +1654,49 @@ mod tests {
             );
         }
 
-        // `input` renamed away entirely, and `input` reshaped.
-        for input in [
-            "\"arguments\":{\"file_path\":\"/srv/p/a.rs\"}",
-            "\"input\":\"ls -la\"",
-        ] {
-            let log = [
-                user_says("go"),
-                assistant(
-                    &format!("[{{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"Read\",{input}}}]"),
-                    1,
-                    [1, 0, 0],
-                ),
-            ]
-            .join("\n");
-            assert!(
-                ClaudeCode.adapt(&log, A_SUBSTRATE).is_err(),
-                "a call whose arguments moved is refused, not read as a call \
-                 with none: {input}"
-            );
-        }
+        // `input` renamed away entirely: the field this mapping declares is
+        // simply not there, which is `MissingField` and still a refusal.
+        let log = [
+            user_says("go"),
+            assistant(
+                "[{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"Read\",\
+                 \"arguments\":{\"file_path\":\"/srv/p/a.rs\"}}]",
+                1,
+                [1, 0, 0],
+            ),
+        ]
+        .join("\n");
+        assert!(
+            matches!(
+                ClaudeCode.adapt(&log, A_SUBSTRATE),
+                Err(Drift::MissingField { .. })
+            ),
+            "`input` renamed away entirely is a call read as one with none, refused"
+        );
+
+        // `input` reshaped -- present, but not the object this mapping
+        // reads. #76 defect 4, ruled: this is content THIS row carries that
+        // does not fit, the same class as a null argument, so it downgrades
+        // the row to `Event::Unknown` rather than refusing the whole log.
+        let log = [
+            user_says("go"),
+            assistant(
+                "[{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"Read\",\"input\":\"ls -la\"}]",
+                1,
+                [1, 0, 0],
+            ),
+        ]
+        .join("\n");
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("a reshaped `input` is named, not a refusal");
+        assert!(
+            !adapted
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::ToolCall { .. })),
+            "the call whose arguments reshaped is not read as one with none"
+        );
     }
 
     /// A tool argument the record's value space cannot hold is refused.
@@ -1606,6 +1707,10 @@ mod tests {
     /// refusal vocabulary had never been seen at all.
     #[test]
     fn a_tool_argument_the_record_cannot_spell_is_named_rather_than_coerced() {
+        // #76 defect 4, ruled: the argument's own row becomes `Event::Unknown`
+        // rather than refusing the whole log -- "named by the census, not
+        // coerced into a string" is still exactly the claim, just carried by
+        // a row that survives instead of a refusal that stops the walk.
         for (why, value) in [("null", "null"), ("an exponent", "1e5")] {
             let log = [
                 user_says("go"),
@@ -1619,14 +1724,67 @@ mod tests {
                 ),
             ]
             .join("\n");
+            let adapted = ClaudeCode
+                .adapt(&log, A_SUBSTRATE)
+                .unwrap_or_else(|err| panic!("{why} is named, not a refusal: {err}"));
             assert!(
-                matches!(
-                    ClaudeCode.adapt(&log, A_SUBSTRATE),
-                    Err(Drift::Unrepresentable { .. })
-                ),
-                "{why} is refused by name rather than coerced into a string"
+                !adapted
+                    .events
+                    .iter()
+                    .any(|e| matches!(e, Event::ToolCall { .. })),
+                "{why}: the call that could not be spelled is not in the record as a call"
+            );
+            assert!(
+                adapted
+                    .events
+                    .iter()
+                    .any(|e| matches!(e, Event::Unknown { source_kind, .. } if source_kind == "assistant")),
+                "{why}: and the row survives, typed as unread"
             );
         }
+    }
+
+    /// A whole row downgrades, not just the block that failed.
+    ///
+    /// An assistant row can carry several tool calls, and the first can
+    /// succeed before the second's argument is what the row's own content
+    /// downgrades for. Without a rollback, the valid call would stand beside
+    /// the `Unknown` row that is supposed to replace the WHOLE thing --
+    /// half a row that adapted and half that did not, which is not what "an
+    /// unrepresentable row becomes an Unknown row" says.
+    #[test]
+    fn an_unrepresentable_block_rolls_back_the_calls_that_came_before_it_in_the_same_row() {
+        let log = [
+            user_says("go"),
+            assistant(
+                "[{\"type\":\"tool_use\",\"id\":\"first\",\"name\":\"Bash\",\
+                 \"input\":{\"command\":\"ls\"}},\
+                 {\"type\":\"tool_use\",\"id\":\"second\",\"name\":\"Read\",\
+                 \"input\":{\"file_path\":null}}]",
+                1,
+                [1, 0, 0],
+            ),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the row is named, not refused");
+        assert!(
+            !adapted
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::ToolCall { .. })),
+            "the first call, valid on its own, does not survive the row it \
+             was part of: {:?}",
+            adapted.events
+        );
+        let unknown_rows = adapted
+            .events
+            .iter()
+            .filter(|e| matches!(e, Event::Unknown { .. }))
+            .count();
+        assert_eq!(unknown_rows, 1, "one row, one Unknown, not one per block");
     }
 
     /// A refusal points at the line of the FILE, blank lines and all.
