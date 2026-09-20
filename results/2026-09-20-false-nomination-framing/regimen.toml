@@ -1,0 +1,4 @@
+# The regimen this run applied.
+arm = "false-nomination-framing-four-arms-six-rungs"
+substrates = ["accel24-beellama-qwen27b-q4kxl"]
+dogma_version = 0

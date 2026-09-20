@@ -1,0 +1,14 @@
+{
+ "changed": {
+  "advisory": true,
+  "imperative": true
+ },
+ "commands": {
+  "advisory": "grep -n \"eval_llama_cmpl\\|stream_session\\|stream_aware\\|attach_pipe\" ~/git/reference/beellama.cpp/tools/server/server-context.cpp | head -20",
+  "control": "grep -n \"task.params\" ~/git/reference/beellama.cpp/tools/server/server-context.cpp | head -20",
+  "imperative": "grep -n \"task.params\\s*=\" ~/git/reference/beellama.cpp/tools/server/server-context.cpp | head -20"
+ },
+ "entry": "Search beellama for streaming/session-related types (`stream_session`, `stream_read_status`) to determine if streaming buffer system was removed or inlined",
+ "fork": "drive-08#t9s24",
+ "pair": "pbb5d335fe1"
+}

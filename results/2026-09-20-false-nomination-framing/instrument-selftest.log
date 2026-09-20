@@ -1,0 +1,14 @@
+  [ok] extractor takes the last shell block
+  [ok] extractor yields no command when a non-shell fence precedes the shell one (as measured)
+  [ok] extractor reads no block as no command
+  [ok] different tool reads changed
+  [ok] different target reads changed
+  [ok] same tool and target with other flags reads unchanged
+  [ok] command against no command reads changed
+  [ok] no command against no command reads unchanged
+  [ok] fixture: the grader reads every differing pair as changed
+  [ok] sham has the advisory line's length and comes from another drive
+  [ok] sign test on eight forks all in the good direction is at its floor
+  [ok] sign test with no discordant pair is p = 1
+selftest: ok
+selftest rc=0
