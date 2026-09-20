@@ -1,0 +1,7 @@
+arm = "thinking-numeric"
+dogma_version = 0
+substrate = "local"
+
+[reasoning]
+effort = 3
+budget_tokens = 4096

@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 483
+red_faults = 484
 mechanics_assertions = 119
 unseedable_guards = 1
 migrated = 0
@@ -4743,6 +4743,14 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.the-census-reports-the-unrepresentable-sentinel"
 failure_class = "drive.the-census-reports-the-unrepresentable-sentinel"
+migrated = false
+
+[[fault]]
+id = "drive.a-canned-reasoning-control-halts-on-the-wrong-lane"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-canned-reasoning-control-halts-on-the-wrong-lane"
+failure_class = "drive.a-canned-reasoning-control-halts-on-the-wrong-lane"
 migrated = false
 
 [[fault]]

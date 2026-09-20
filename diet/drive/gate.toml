@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 44
+faults = 45
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -639,6 +639,35 @@ becomes = '''
             Value::Integer(-1),'''
 catches = [
     "the_drive_writes_a_record_a_second_process_accepts",
+]
+
+[[fault]]
+id = "drive.a-canned-reasoning-control-halts-on-the-wrong-lane"
+failure_class = "drive.a-canned-reasoning-control-halts-on-the-wrong-lane"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    if regime
+        .substrates
+        .iter()
+        .any(|substrate| substrate.reasoning_control.is_some())
+    {
+        return Err((
+            EXIT_INPUT,
+            "the regimen declares `[reasoning]`, and this program only ever runs its own \
+             canned server, which renders no chat template and has no think block for a \
+             budget to cap -- a reasoning control here is a control nothing applies. \
+             Supported once a real endpoint's substrate identity is resolvable; until then, \
+             an endpoint given is refused above for the same missing-identity reason, and a \
+             canned run declaring one is refused here"
+                .to_owned(),
+        ));
+    }
+'''
+becomes = '''
+'''
+catches = [
+    "every_drive_refusal_has_its_own_exit_code",
 ]
 
 [[fault]]

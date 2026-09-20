@@ -1941,14 +1941,11 @@ fn reasoning_control(
     members: &mut BTreeMap<String, Value>,
     of: &'static str,
 ) -> Result<ReasoningControl, ParseError> {
+    // `take_string` already refuses a blank `effort` (a required string it
+    // cannot tell from absent) before this function sees it -- a second,
+    // more qualified check here could never fire, and an unreachable branch
+    // cannot be seen red.
     let effort = take_string(members, of, "effort")?;
-    if effort.trim().is_empty() {
-        return Err(SchemaError::BlankField {
-            of,
-            field: "substrates[].reasoning_control.effort",
-        }
-        .into());
-    }
     let mut budget = take_object(members, of, "budget_tokens")?;
     let tag = take_string(&mut budget, of, "kind")?;
     let kind = BudgetKind::from_tag(&tag).ok_or(SchemaError::BadValue {

@@ -472,7 +472,8 @@ pub fn reasoning_of(regimen: &Regimen) -> Result<Option<ReasoningControl>, Parse
                 missing: EFFORT,
             }),
             // A `[reasoning]` table carrying neither declares no reasoning
-            // state. It is not empty -- the grammar refuses an empty table --
+            // state. It is not empty -- the parser refuses an empty table
+            // (`ParseError::EmptyTable`) before this reader ever sees it --
             // so it says something this reader is not the reader of.
             _ => Ok(None),
         };

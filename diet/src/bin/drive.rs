@@ -181,6 +181,32 @@ fn declared(
     let regimen = regimen::parse(&text)
         .map_err(|why| (EXIT_INPUT, format!("{path} is not a regimen: {why:?}")))?;
     let regime = regime_of(&regimen, endpoint_given).map_err(|why| (EXIT_INPUT, why))?;
+    // `regime_of` refused above already if an endpoint was given, so a regime
+    // that reaches here is always about to run against this program's own
+    // canned server. That server renders no chat template -- no effort level
+    // to instruct it with and no think block for a budget to cap -- so a
+    // reasoning control declared against it is a control nothing applies,
+    // and driving it anyway does not fail cleanly: the kwarg-delivery
+    // negative control makes an extra call the canned script never budgeted
+    // for, consumes the first turn's answer, and the drive halts on turn
+    // three blaming the wrong lane. Refused here, named for what it is,
+    // rather than reached as that misattributed halt.
+    if regime
+        .substrates
+        .iter()
+        .any(|substrate| substrate.reasoning_control.is_some())
+    {
+        return Err((
+            EXIT_INPUT,
+            "the regimen declares `[reasoning]`, and this program only ever runs its own \
+             canned server, which renders no chat template and has no think block for a \
+             budget to cap -- a reasoning control here is a control nothing applies. \
+             Supported once a real endpoint's substrate identity is resolvable; until then, \
+             an endpoint given is refused above for the same missing-identity reason, and a \
+             canned run declaring one is refused here"
+                .to_owned(),
+        ));
+    }
     let isolation_policy = IsolationPolicy::from_regimen(&regimen)
         .map_err(|why| (EXIT_INPUT, format!("its isolation policy: {why}")))?;
     let seam_policy = SeamPolicy::from_regimen(&regimen)
