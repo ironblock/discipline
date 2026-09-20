@@ -1726,10 +1726,10 @@ pub fn pre_registration() -> Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        ANCHORS_REQUIRED, CellError, Outcome, Pair, PairCell, PairGate, PairMetric, PairReported,
-        PairScoring, PairSource, Roles, ScoredPair, Tool, anchored, intent_cells, over_firing,
-        pair_controls, pairs, pooled_top_k, precision_at_k, precision_by_source, recurring_anchors,
-        score_pairs, sense_cells, turns,
+        ANCHORS_REQUIRED, CellError, Outcome, Pair, PairCell, PairGate, PairMetric,
+        PairMetricError, PairReported, PairScoring, PairSource, Roles, ScoredPair, Tool, anchored,
+        intent_cells, over_firing, pair_controls, pairs, pooled_top_k, precision_at_k,
+        precision_by_source, recurring_anchors, score_pairs, sense_cells, turns,
     };
     use crate::capture::sense::{self, Control, ControlFailure, Embedder, Fixture, Label};
 
