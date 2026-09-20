@@ -1,0 +1,959 @@
+{
+  "alternatives": {
+    "holm_p_at_floor": "inconclusive",
+    "holm_p_below_0_05": "supported"
+  },
+  "attainability": {
+    "adjudicable_rungs": [
+      1,
+      3,
+      5,
+      10,
+      25,
+      50
+    ],
+    "ceiling_by_budget": {
+      "1": 1.0,
+      "3": 0.8333,
+      "5": 0.7667,
+      "10": 0.5251,
+      "25": 0.3005,
+      "50": 0.2124
+    },
+    "fixed_supported_bar": 0.8,
+    "note": "every v2 bar is a fraction of its rung's ceiling, so every rung is adjudicable by construction; d' has no arithmetic ceiling and a margin undefined on either side satisfies neither bound",
+    "refuted_precision_ceiling_bar": 0.6,
+    "scaled_refuted_floor_by_budget": {
+      "1": 0.6,
+      "3": 0.5,
+      "5": 0.46,
+      "10": 0.3151,
+      "25": 0.1803,
+      "50": 0.1274
+    },
+    "supported_bar": 0.6133,
+    "supported_bar_attainable_at_k": true
+  },
+  "authored_sense_register": [
+    {
+      "by_source": {
+        "mined": {
+          "hits": 9,
+          "of": 78
+        },
+        "planted": {
+          "hits": 12,
+          "of": 12
+        }
+      },
+      "d_prime": 1.0397,
+      "embedder": "all-MiniLM-L6-v2",
+      "gate": "with_gate",
+      "over_firing": 0.3556,
+      "precision_at_k": 0.2333,
+      "scoring": "contrastive"
+    },
+    {
+      "by_source": {
+        "mined": {
+          "hits": 9,
+          "of": 77
+        },
+        "planted": {
+          "hits": 13,
+          "of": 13
+        }
+      },
+      "d_prime": 1.0358,
+      "embedder": "bge-small-en-v1.5",
+      "gate": "with_gate",
+      "over_firing": 0.363,
+      "precision_at_k": 0.2444,
+      "scoring": "contrastive"
+    },
+    {
+      "by_source": {
+        "mined": {
+          "hits": 9,
+          "of": 80
+        },
+        "planted": {
+          "hits": 10,
+          "of": 10
+        }
+      },
+      "d_prime": 1.0328,
+      "embedder": "embeddinggemma-300m",
+      "gate": "with_gate",
+      "over_firing": 0.3778,
+      "precision_at_k": 0.2111,
+      "scoring": "contrastive"
+    },
+    {
+      "by_source": {
+        "mined": {
+          "hits": 10,
+          "of": 83
+        },
+        "planted": {
+          "hits": 7,
+          "of": 7
+        }
+      },
+      "d_prime": 0.2159,
+      "embedder": "all-MiniLM-L6-v2",
+      "gate": "without_gate",
+      "over_firing": 0.2889,
+      "precision_at_k": 0.1889,
+      "scoring": "contrastive"
+    },
+    {
+      "by_source": {
+        "mined": {
+          "hits": 8,
+          "of": 84
+        },
+        "planted": {
+          "hits": 6,
+          "of": 6
+        }
+      },
+      "d_prime": 0.2452,
+      "embedder": "bge-small-en-v1.5",
+      "gate": "without_gate",
+      "over_firing": 0.3333,
+      "precision_at_k": 0.1556,
+      "scoring": "contrastive"
+    },
+    {
+      "by_source": {
+        "mined": {
+          "hits": 9,
+          "of": 83
+        },
+        "planted": {
+          "hits": 7,
+          "of": 7
+        }
+      },
+      "d_prime": 0.0313,
+      "embedder": "embeddinggemma-300m",
+      "gate": "without_gate",
+      "over_firing": 0.3185,
+      "precision_at_k": 0.1778,
+      "scoring": "contrastive"
+    },
+    {
+      "by_source": {
+        "mined": {
+          "hits": 9,
+          "of": 77
+        },
+        "planted": {
+          "hits": 13,
+          "of": 13
+        }
+      },
+      "d_prime": 1.085,
+      "embedder": "all-MiniLM-L6-v2",
+      "gate": "with_gate",
+      "over_firing": 0.3704,
+      "precision_at_k": 0.2444,
+      "scoring": "raw_cosine"
+    },
+    {
+      "by_source": {
+        "mined": {
+          "hits": 10,
+          "of": 81
+        },
+        "planted": {
+          "hits": 9,
+          "of": 9
+        }
+      },
+      "d_prime": 0.6226,
+      "embedder": "all-MiniLM-L6-v2",
+      "gate": "without_gate",
+      "over_firing": 0.3037,
+      "precision_at_k": 0.2111,
+      "scoring": "raw_cosine"
+    },
+    {
+      "by_source": {
+        "mined": {
+          "hits": 9,
+          "of": 78
+        },
+        "planted": {
+          "hits": 12,
+          "of": 12
+        }
+      },
+      "d_prime": 1.0573,
+      "embedder": "all-MiniLM-L6-v2",
+      "gate": "with_gate",
+      "over_firing": 0.3556,
+      "precision_at_k": 0.2333,
+      "scoring": "softmax"
+    },
+    {
+      "by_source": {
+        "mined": {
+          "hits": 9,
+          "of": 78
+        },
+        "planted": {
+          "hits": 12,
+          "of": 12
+        }
+      },
+      "d_prime": 1.0477,
+      "embedder": "bge-small-en-v1.5",
+      "gate": "with_gate",
+      "over_firing": 0.363,
+      "precision_at_k": 0.2333,
+      "scoring": "softmax"
+    },
+    {
+      "by_source": {
+        "mined": {
+          "hits": 9,
+          "of": 78
+        },
+        "planted": {
+          "hits": 12,
+          "of": 12
+        }
+      },
+      "d_prime": 1.0311,
+      "embedder": "embeddinggemma-300m",
+      "gate": "with_gate",
+      "over_firing": 0.363,
+      "precision_at_k": 0.2333,
+      "scoring": "softmax"
+    },
+    {
+      "by_source": {
+        "mined": {
+          "hits": 10,
+          "of": 86
+        },
+        "planted": {
+          "hits": 4,
+          "of": 4
+        }
+      },
+      "d_prime": 0.2111,
+      "embedder": "all-MiniLM-L6-v2",
+      "gate": "without_gate",
+      "over_firing": 0.2963,
+      "precision_at_k": 0.1556,
+      "scoring": "softmax"
+    },
+    {
+      "by_source": {
+        "mined": {
+          "hits": 8,
+          "of": 82
+        },
+        "planted": {
+          "hits": 8,
+          "of": 8
+        }
+      },
+      "d_prime": 0.3827,
+      "embedder": "bge-small-en-v1.5",
+      "gate": "without_gate",
+      "over_firing": 0.2444,
+      "precision_at_k": 0.1778,
+      "scoring": "softmax"
+    },
+    {
+      "by_source": {
+        "mined": {
+          "hits": 9,
+          "of": 84
+        },
+        "planted": {
+          "hits": 6,
+          "of": 6
+        }
+      },
+      "d_prime": 0.3325,
+      "embedder": "embeddinggemma-300m",
+      "gate": "without_gate",
+      "over_firing": 0.3111,
+      "precision_at_k": 0.1667,
+      "scoring": "softmax"
+    }
+  ],
+  "cells": [
+    {
+      "admitted_only_at_k": {
+        "hits": 56,
+        "of": 80
+      },
+      "by_source": {
+        "mined": {
+          "hits": 1,
+          "of": 33
+        },
+        "planted": {
+          "hits": 56,
+          "of": 57
+        }
+      },
+      "clears_supported": false,
+      "d_prime": 1.6219,
+      "d_prime_margin_over_floor": -0.0202,
+      "embedder": "Qwen3-Embedding-0.6B",
+      "floor_cell_control_failed": false,
+      "floor_d_prime": 1.6421,
+      "gate": "with_gate",
+      "over_firing": 0.1971,
+      "precision_at_k": 0.6333,
+      "precision_ceiling_at_k": 0.7667,
+      "scaled_supported_bar": 0.6133,
+      "scoring": "ensemble_max",
+      "supported_bar_attainable": true
+    },
+    {
+      "admitted_only_at_k": {
+        "hits": 57,
+        "of": 80
+      },
+      "by_source": {
+        "mined": {
+          "hits": 1,
+          "of": 32
+        },
+        "planted": {
+          "hits": 57,
+          "of": 58
+        }
+      },
+      "clears_supported": false,
+      "d_prime": 1.6073,
+      "d_prime_margin_over_floor": -0.0348,
+      "embedder": "bge-small-en-v1.5",
+      "floor_cell_control_failed": false,
+      "floor_d_prime": 1.6421,
+      "gate": "with_gate",
+      "over_firing": 0.1898,
+      "precision_at_k": 0.6444,
+      "precision_ceiling_at_k": 0.7667,
+      "scaled_supported_bar": 0.6133,
+      "scoring": "ensemble_max",
+      "supported_bar_attainable": true
+    },
+    {
+      "admitted_only_at_k": {
+        "hits": 56,
+        "of": 80
+      },
+      "by_source": {
+        "mined": {
+          "hits": 1,
+          "of": 33
+        },
+        "planted": {
+          "hits": 56,
+          "of": 57
+        }
+      },
+      "clears_supported": false,
+      "d_prime": 1.6232,
+      "d_prime_margin_over_floor": -0.0189,
+      "embedder": "embeddinggemma-300m",
+      "floor_cell_control_failed": false,
+      "floor_d_prime": 1.6421,
+      "gate": "with_gate",
+      "over_firing": 0.1971,
+      "precision_at_k": 0.6333,
+      "precision_ceiling_at_k": 0.7667,
+      "scaled_supported_bar": 0.6133,
+      "scoring": "ensemble_max",
+      "supported_bar_attainable": true
+    },
+    {
+      "admitted_only_at_k": {
+        "hits": 56,
+        "of": 90
+      },
+      "by_source": {
+        "mined": {
+          "hits": 2,
+          "of": 36
+        },
+        "planted": {
+          "hits": 54,
+          "of": 54
+        }
+      },
+      "clears_supported": false,
+      "d_prime": 2.2271,
+      "d_prime_margin_over_floor": 0.1421,
+      "embedder": "Qwen3-Embedding-0.6B",
+      "floor_cell_control_failed": false,
+      "floor_d_prime": 2.085,
+      "gate": "without_gate",
+      "over_firing": 0.219,
+      "precision_at_k": 0.6222,
+      "precision_ceiling_at_k": 0.7667,
+      "scaled_supported_bar": 0.6133,
+      "scoring": "ensemble_max",
+      "supported_bar_attainable": true
+    },
+    {
+      "admitted_only_at_k": {
+        "hits": 51,
+        "of": 90
+      },
+      "by_source": {
+        "mined": {
+          "hits": 2,
+          "of": 41
+        },
+        "planted": {
+          "hits": 49,
+          "of": 49
+        }
+      },
+      "clears_supported": false,
+      "d_prime": 1.9877,
+      "d_prime_margin_over_floor": -0.0973,
+      "embedder": "bge-small-en-v1.5",
+      "floor_cell_control_failed": false,
+      "floor_d_prime": 2.085,
+      "gate": "without_gate",
+      "over_firing": 0.2336,
+      "precision_at_k": 0.5667,
+      "precision_ceiling_at_k": 0.7667,
+      "scaled_supported_bar": 0.6133,
+      "scoring": "ensemble_max",
+      "supported_bar_attainable": true
+    },
+    {
+      "admitted_only_at_k": {
+        "hits": 49,
+        "of": 90
+      },
+      "by_source": {
+        "mined": {
+          "hits": 2,
+          "of": 43
+        },
+        "planted": {
+          "hits": 47,
+          "of": 47
+        }
+      },
+      "clears_supported": false,
+      "d_prime": 2.108,
+      "d_prime_margin_over_floor": 0.023,
+      "embedder": "embeddinggemma-300m",
+      "floor_cell_control_failed": false,
+      "floor_d_prime": 2.085,
+      "gate": "without_gate",
+      "over_firing": 0.2482,
+      "precision_at_k": 0.5444,
+      "precision_ceiling_at_k": 0.7667,
+      "scaled_supported_bar": 0.6133,
+      "scoring": "ensemble_max",
+      "supported_bar_attainable": true
+    },
+    {
+      "admitted_only_at_k": {
+        "hits": 51,
+        "of": 80
+      },
+      "by_source": {
+        "mined": {
+          "hits": 1,
+          "of": 38
+        },
+        "planted": {
+          "hits": 51,
+          "of": 52
+        }
+      },
+      "clears_supported": false,
+      "d_prime": 1.5556,
+      "d_prime_margin_over_floor": null,
+      "embedder": "bge-small-en-v1.5",
+      "floor_cell_control_failed": true,
+      "floor_d_prime": null,
+      "gate": "with_gate",
+      "over_firing": 0.219,
+      "precision_at_k": 0.5778,
+      "precision_ceiling_at_k": 0.7667,
+      "scaled_supported_bar": 0.6133,
+      "scoring": "raw_cosine",
+      "supported_bar_attainable": true
+    },
+    {
+      "admitted_only_at_k": {
+        "hits": 52,
+        "of": 80
+      },
+      "by_source": {
+        "mined": {
+          "hits": 1,
+          "of": 37
+        },
+        "planted": {
+          "hits": 52,
+          "of": 53
+        }
+      },
+      "clears_supported": false,
+      "d_prime": 1.5419,
+      "d_prime_margin_over_floor": null,
+      "embedder": "embeddinggemma-300m",
+      "floor_cell_control_failed": true,
+      "floor_d_prime": null,
+      "gate": "with_gate",
+      "over_firing": 0.219,
+      "precision_at_k": 0.5889,
+      "precision_ceiling_at_k": 0.7667,
+      "scaled_supported_bar": 0.6133,
+      "scoring": "raw_cosine",
+      "supported_bar_attainable": true
+    },
+    {
+      "admitted_only_at_k": {
+        "hits": 18,
+        "of": 90
+      },
+      "by_source": {
+        "mined": {
+          "hits": 2,
+          "of": 71
+        },
+        "planted": {
+          "hits": 16,
+          "of": 19
+        }
+      },
+      "clears_supported": false,
+      "d_prime": -0.2757,
+      "d_prime_margin_over_floor": null,
+      "embedder": "bge-small-en-v1.5",
+      "floor_cell_control_failed": true,
+      "floor_d_prime": null,
+      "gate": "without_gate",
+      "over_firing": 0.2993,
+      "precision_at_k": 0.2,
+      "precision_ceiling_at_k": 0.7667,
+      "scaled_supported_bar": 0.6133,
+      "scoring": "raw_cosine",
+      "supported_bar_attainable": true
+    },
+    {
+      "admitted_only_at_k": {
+        "hits": 23,
+        "of": 90
+      },
+      "by_source": {
+        "mined": {
+          "hits": 2,
+          "of": 67
+        },
+        "planted": {
+          "hits": 21,
+          "of": 23
+        }
+      },
+      "clears_supported": false,
+      "d_prime": 0.0689,
+      "d_prime_margin_over_floor": null,
+      "embedder": "embeddinggemma-300m",
+      "floor_cell_control_failed": true,
+      "floor_d_prime": null,
+      "gate": "without_gate",
+      "over_firing": 0.292,
+      "precision_at_k": 0.2556,
+      "precision_ceiling_at_k": 0.7667,
+      "scaled_supported_bar": 0.6133,
+      "scoring": "raw_cosine",
+      "supported_bar_attainable": true
+    }
+  ],
+  "envelope": {
+    "label": "characterization",
+    "outside": [
+      "bge-small-en-v1.5 query instruction",
+      "Qwen3-Embedding-0.6B instruction byte form",
+      "all-MiniLM-L6-v2 sequence length",
+      "bge-small-en-v1.5 sequence length",
+      "embeddinggemma-300m context"
+    ],
+    "parameters": [
+      {
+        "parameter": "budget ladder",
+        "range": "the collector's per-session nomination budget, ratified on #24/#69; the ladder is the design's own",
+        "value": "[1, 3, 5, 10, 25, 50], k = 5 adjudicated",
+        "within": true
+      },
+      {
+        "parameter": "anchored pre-gate",
+        "range": "the ratified pre-registration's; the shipped tier 0 fires on one, carried as a reading",
+        "value": "two distinct anchors must recur",
+        "within": true
+      },
+      {
+        "parameter": "bge-small-en-v1.5 query instruction",
+        "range": "the card recommends its query instruction for short-query retrieval; declared unused on #24's regime",
+        "value": "not used",
+        "within": false
+      },
+      {
+        "parameter": "embeddinggemma-300m prompts",
+        "range": "the model card's",
+        "value": "documented document and retrieval-query prompts, byte for byte",
+        "within": true
+      },
+      {
+        "parameter": "Qwen3-Embedding-0.6B instruction byte form",
+        "range": "the card emits no space; the space is the ruling's byte form declared on #24",
+        "value": "`Instruct: {task}\\nQuery: ` with a space after `Query:`",
+        "within": false
+      },
+      {
+        "parameter": "Qwen3-Embedding-0.6B document prefix",
+        "range": "the card: documents need no instruction",
+        "value": "none",
+        "within": true
+      },
+      {
+        "parameter": "pooling per embedder",
+        "range": "each model's documented pooling",
+        "value": "the model's shipped modules (mean; CLS; the graph's head; last token)",
+        "within": true
+      },
+      {
+        "parameter": "all-MiniLM-L6-v2 sequence length",
+        "range": "44 of 1566 cached texts exceed 256 tokens, listed by digest in the meta",
+        "value": "max_seq_length 256, silent truncation",
+        "within": false
+      },
+      {
+        "parameter": "bge-small-en-v1.5 sequence length",
+        "range": "25 of 1566 cached texts exceed 512 tokens, listed by digest in the meta",
+        "value": "max_seq_length 512, silent truncation",
+        "within": false
+      },
+      {
+        "parameter": "embeddinggemma-300m context",
+        "range": "the model's documented context; the truncated documents are listed by digest in the meta",
+        "value": "2048 positions, 3 documents truncated to the context less the closing token",
+        "within": false
+      }
+    ]
+  },
+  "pre_gate": {
+    "because": "a pair clears the margin with its precision bootstrap's uncorrected p at the attainable floor",
+    "deltas": [
+      {
+        "attainable_p_floor": 0.0001,
+        "delta": 0.0111,
+        "embedder": "Qwen3-Embedding-0.6B",
+        "p": 0.4474,
+        "p_holm": 1.0,
+        "scoring": "ensemble_max",
+        "with_gate": 0.6333,
+        "without_gate": 0.6222
+      },
+      {
+        "attainable_p_floor": 0.0001,
+        "delta": 0.0778,
+        "embedder": "bge-small-en-v1.5",
+        "p": 0.0271,
+        "p_holm": 1.0,
+        "scoring": "ensemble_max",
+        "with_gate": 0.6444,
+        "without_gate": 0.5667
+      },
+      {
+        "attainable_p_floor": 0.0001,
+        "delta": 0.3778,
+        "embedder": "bge-small-en-v1.5",
+        "p": 0.0001,
+        "p_holm": 0.0117,
+        "scoring": "raw_cosine",
+        "with_gate": 0.5778,
+        "without_gate": 0.2
+      },
+      {
+        "attainable_p_floor": 0.0001,
+        "delta": 0.0889,
+        "embedder": "embeddinggemma-300m",
+        "p": 0.0148,
+        "p_holm": 0.814,
+        "scoring": "ensemble_max",
+        "with_gate": 0.6333,
+        "without_gate": 0.5444
+      },
+      {
+        "attainable_p_floor": 0.0001,
+        "delta": 0.3333,
+        "embedder": "embeddinggemma-300m",
+        "p": 0.0001,
+        "p_holm": 0.0117,
+        "scoring": "raw_cosine",
+        "with_gate": 0.5889,
+        "without_gate": 0.2556
+      }
+    ],
+    "improved": 4,
+    "margin": 0.05,
+    "verdict": "supported",
+    "worsened": 0
+  },
+  "readings": {
+    "authored_sense_register": "scored and reported beside the verdict, not adjudicated",
+    "by_source": "reported beside every cell at the budget; the pooled verdict stands",
+    "cell": "a (scoring, gate) pair per embedder, so a gate arm is its own cell (#84, ruled)",
+    "floor_separation": "the floor's d_prime on the matched (register, scoring, gate) cell (ratified)",
+    "gated_rows_fill_the_budget": "a row the gate rejects still fills a drive's budget at the floor when fewer than k are admitted; the pooled figure is adjudicated as ratified and the admitted-only precision the verb now emits is reported beside every cell",
+    "maximum_separation": "the contender cell with the highest defined d_prime on the primary register, against its matched floor cell (ratified; the primary-register scope is this applier's reading)",
+    "pre_gate_p": "the drive-resampled paired bootstrap of pooled precision at k between the gate arms (emitted since #99), its own p uncorrected at the attainable floor as ruled; Holm readings carried under alternatives",
+    "scaled_bars": "v2 wording (#17, 5747481065): the supported precision bar is 0.80 x the rung's attainable ceiling and the refuted clause's precision floor 0.60 x each rung's ceiling; the d' margins stand as ratified",
+    "undefined_margin": "satisfies neither bound and is carried as null (ratified)"
+  },
+  "refuted_by": {
+    "best_cell": "Qwen3-Embedding-0.6B/ensemble_max/without_gate",
+    "best_cell_d_prime": 2.2271,
+    "best_cell_fails_floor_margin": true,
+    "best_cell_margin_over_floor": 0.1421,
+    "cells_reaching_ceiling": 50,
+    "no_cell_reaches_precision_ceiling": false
+  },
+  "registers": {
+    "intent": {
+      "by_drive": {
+        "drive-01": {
+          "hard_negative": 10,
+          "negative": 7,
+          "positive": 7
+        },
+        "drive-02": {
+          "hard_negative": 4,
+          "negative": 11,
+          "positive": 5
+        },
+        "drive-03": {
+          "hard_negative": 5,
+          "negative": 40,
+          "positive": 7
+        },
+        "drive-04": {
+          "hard_negative": 2,
+          "negative": 15,
+          "positive": 3
+        },
+        "drive-05": {
+          "hard_negative": 2,
+          "negative": 13,
+          "positive": 5
+        },
+        "drive-06": {
+          "hard_negative": 1,
+          "negative": 8,
+          "positive": 6
+        },
+        "drive-07": {
+          "hard_negative": 6,
+          "negative": 24,
+          "positive": 9
+        },
+        "drive-08": {
+          "hard_negative": 22,
+          "negative": 80,
+          "positive": 5
+        },
+        "drive-09": {
+          "hard_negative": 17,
+          "negative": 61,
+          "positive": 7
+        },
+        "drive-10": {
+          "hard_negative": 28,
+          "negative": 64,
+          "positive": 5
+        },
+        "drive-11": {
+          "hard_negative": 10,
+          "negative": 0,
+          "positive": 1
+        },
+        "drive-12": {
+          "hard_negative": 8,
+          "negative": 7,
+          "positive": 1
+        },
+        "drive-13": {
+          "hard_negative": 4,
+          "negative": 4,
+          "positive": 1
+        },
+        "drive-14": {
+          "hard_negative": 3,
+          "negative": 10,
+          "positive": 1
+        },
+        "drive-15": {
+          "hard_negative": 3,
+          "negative": 12,
+          "positive": 2
+        },
+        "drive-16": {
+          "hard_negative": 6,
+          "negative": 13,
+          "positive": 9
+        },
+        "drive-17": {
+          "hard_negative": 3,
+          "negative": 24,
+          "positive": 19
+        },
+        "drive-18": {
+          "hard_negative": 3,
+          "negative": 19,
+          "positive": 17
+        }
+      },
+      "by_label": {
+        "hard_negative/mined": 135,
+        "hard_negative/planted": 2,
+        "negative/mined": 309,
+        "negative/planted": 103,
+        "positive/mined": 8,
+        "positive/planted": 102
+      },
+      "excluded_no_intent": 153,
+      "pairs": 812,
+      "rows": 659
+    },
+    "sense": {
+      "by_drive": {
+        "drive-01": {
+          "hard_negative": 7,
+          "negative": 1,
+          "positive": 3
+        },
+        "drive-02": {
+          "hard_negative": 7,
+          "negative": 8,
+          "positive": 3
+        },
+        "drive-03": {
+          "hard_negative": 9,
+          "negative": 10,
+          "positive": 3
+        },
+        "drive-04": {
+          "hard_negative": 4,
+          "negative": 12,
+          "positive": 1
+        },
+        "drive-05": {
+          "hard_negative": 4,
+          "negative": 10,
+          "positive": 1
+        },
+        "drive-06": {
+          "hard_negative": 5,
+          "negative": 10,
+          "positive": 2
+        },
+        "drive-07": {
+          "hard_negative": 9,
+          "negative": 12,
+          "positive": 1
+        },
+        "drive-08": {
+          "hard_negative": 16,
+          "negative": 13,
+          "positive": 2
+        },
+        "drive-09": {
+          "hard_negative": 15,
+          "negative": 11,
+          "positive": 2
+        },
+        "drive-10": {
+          "hard_negative": 16,
+          "negative": 11,
+          "positive": 1
+        },
+        "drive-11": {
+          "hard_negative": 2,
+          "negative": 0,
+          "positive": 3
+        },
+        "drive-12": {
+          "hard_negative": 7,
+          "negative": 2,
+          "positive": 1
+        },
+        "drive-13": {
+          "hard_negative": 9,
+          "negative": 3,
+          "positive": 1
+        },
+        "drive-14": {
+          "hard_negative": 3,
+          "negative": 4,
+          "positive": 1
+        },
+        "drive-15": {
+          "hard_negative": 3,
+          "negative": 5,
+          "positive": 1
+        },
+        "drive-16": {
+          "hard_negative": 9,
+          "negative": 4,
+          "positive": 1
+        },
+        "drive-17": {
+          "hard_negative": 5,
+          "negative": 5,
+          "positive": 2
+        },
+        "drive-18": {
+          "hard_negative": 5,
+          "negative": 4,
+          "positive": 2
+        }
+      },
+      "rows": 291
+    }
+  },
+  "rule": {
+    "budget": 5,
+    "floor": "all-MiniLM-L6-v2",
+    "inconclusive": "otherwise",
+    "primary_register": "intent",
+    "refuted": "no contender cell at any pre-registered budget reaches 0.60 x that budget's ceiling ({1: 0.6, 3: 0.5, 5: 0.46, 10: 0.3151, 25: 0.1803, 50: 0.1274}), or the best-separated contender cell does not clear its matched floor cell by >= 0.2 -- either alone",
+    "supported": "for at least one contender cell at k = 5 on the primary register: precision >= 0.80 x the rung's attainable ceiling (0.6133 here), hard-negative false-positive rate <= 0.1, and d' over the matched floor cell by >= 0.5 -- all three at once",
+    "v1_wording": {
+      "refuted": "no contender cell at any pre-registered budget reaches precision >= 0.60 on the primary register, or the maximum separation over all scored contender cells does not exceed the matched floor cell's by >= 0.2 -- either alone",
+      "supported": "for at least one contender cell at k = 5 on the primary register: precision >= 0.80, hard-negative false-positive rate <= 0.10, and the cell's d' exceeds the floor's d' on the same (register, scoring, gate) cell by >= 0.5 -- all three at once"
+    },
+    "v2_wording": {
+      "admitted_only": "the precision over admitted nominations the verb now emits is reported beside every cell and adjudicates nothing",
+      "d_prime_margins": "as ratified: 0.5 over the matched floor cell for supported, 0.2 for refuted",
+      "pre_gate_p": "the drive-resampled paired bootstrap of pooled precision at k between the gate arms (the verb emits it since #99), its own p uncorrected at the attainable floor",
+      "refuted_precision_ceiling": "0.60 x each rung's ceiling likewise",
+      "ruled": "#17, 5747481065 (2026-09-20): the third reading the ratified text already contains -- the precision bars scale with the rung's attainable ceiling",
+      "sits_beside": "the v1 adjudication of the same run under the fixed bars; both rules and both verdicts are in the ledger",
+      "supported_precision_at_5": "0.80 x the ceiling at k = 5, the ceiling being sum over drives of min(k, positives) over sum of min(k, rows) from the report's by_drive counts"
+    },
+    "version": "v2"
+  },
+  "supported_by": [],
+  "verdict": "refuted"
+}
