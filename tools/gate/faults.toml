@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 483
+red_faults = 490
 mechanics_assertions = 119
 unseedable_guards = 1
 migrated = 0
@@ -136,7 +136,7 @@ check = "test"
 target = "lib/formats::interview::tests"
 label = "interview discards trailing content"
 failure_class = "format.content-unaccounted-for"
-legacy_signature = "content lost parsing"
+legacy_signature = "formats::interview::tests::every_byte_of_an_answer_is_accounted_for \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -146,7 +146,7 @@ check = "test"
 target = "lib/formats::record::tests"
 label = "an event kind with no fixture"
 failure_class = "format.kind-without-fixture"
-legacy_signature = "no fixture.*spurious"
+legacy_signature = "formats::record::tests::every_event_kind_appears_in_the_committed_corpus \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -195,7 +195,7 @@ check = "test"
 target = "lib/capture::bakeoff"
 label = "the runner's digest made advisory"
 failure_class = "results.recompute-input-unchecked"
-legacy_signature = "an edited cache was not refused"
+legacy_signature = "capture::bakeoff::tests::a_cache_the_record_did_not_consume_is_refused \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -205,7 +205,7 @@ check = "test"
 target = "lib/capture::bakeoff"
 label = "the assembled directory's evidence is elsewhere"
 failure_class = "results.evidence-not-attached"
-legacy_signature = "a cache the record consumed was not committed beside it"
+legacy_signature = "capture::bakeoff::tests::the_assembled_directory_is_one_the_gates_accept \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -215,7 +215,7 @@ check = "test"
 target = "lib/capture::sense"
 label = "a budget no fixture demonstrates"
 failure_class = "results.metric-never-failed"
-legacy_signature = "its fixture does not demonstrate failure there"
+legacy_signature = "capture::sense::tests::every_pre_registered_budget_is_one_its_fixture_demonstrates \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -246,6 +246,26 @@ target = "test:conformance/formats::record"
 label = "weights identified by name"
 failure_class = "schema.weights-not-digested"
 legacy_signature = "record/fixtures/invalid/weights-named-not-digested\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.regimen_reasoning_pair_unchecked"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::regimen"
+label = "an effort level with no budget"
+failure_class = "schema.reasoning-pair-incomplete"
+legacy_signature = "regimen/fixtures/invalid/reasoning-effort-without-budget\\.toml"
+migrated = false
+
+[[fault]]
+id = "test.record_substrates_indistinguishable"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "two ids over one substrate"
+failure_class = "schema.substrates-indistinguishable"
+legacy_signature = "record/fixtures/invalid/substrates-indistinguishable\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -285,7 +305,7 @@ check = "test"
 target = "lib/capture::grounded::tests"
 label = "grounding floor made inert"
 failure_class = "capture.floor-not-enforced"
-legacy_signature = "a lane that mostly fabricated must be rejected whole"
+legacy_signature = "capture::grounded::tests::a_lane_below_the_floor_is_rejected_whole_and_recorded \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -295,7 +315,7 @@ check = "test"
 target = "lib/capture"
 label = "grounding gates a judgment field"
 failure_class = "capture.judgment-not-exempt"
-legacy_signature = "the gate touched a judgment-class field"
+legacy_signature = "capture::grounded::tests::the_gate_does_not_touch_a_judgment_class_field \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -305,7 +325,7 @@ check = "test"
 target = "lib/capture::grounded::tests"
 label = "a score with no demonstrated failure"
 failure_class = "capture.instrument-never-failed"
-legacy_signature = "a measurement was handed back whose instrument never failed"
+legacy_signature = "capture::grounded::tests::a_measurement_requires_its_instrument_to_have_been_seen_fail \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -315,7 +335,7 @@ check = "test"
 target = "lib/capture::grounded::tests"
 label = "grounding loosened to recombination"
 failure_class = "capture.presence-is-recombination"
-legacy_signature = "a sentence the source never said was scored as present in it"
+legacy_signature = "capture::grounded::tests::presence_is_not_recombination \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -325,7 +345,7 @@ check = "test"
 target = "lib/capture::grounded::tests"
 label = "a floor of zero"
 failure_class = "capture.floor-is-zero"
-legacy_signature = "a floor of zero was accepted, and every lane meets it"
+legacy_signature = "capture::grounded::tests::a_floor_must_be_pre_registered_and_nonzero \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -335,7 +355,7 @@ check = "test"
 target = "lib"
 label = "supersede deletes what it replaced"
 failure_class = "object.correction-deletes"
-legacy_signature = "the voided entry is still here"
+legacy_signature = "object::tests::a_supersede_voids_and_links_and_never_deletes \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -345,7 +365,7 @@ check = "test"
 target = "lib/object"
 label = "the reconciler stops deduping"
 failure_class = "object.duplicate-fact"
-legacy_signature = "the same fact, wrapped differently, is the same fact"
+legacy_signature = "object::tests::two_forks_saying_the_same_thing_dedup_with_both_provenances \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -355,7 +375,7 @@ check = "test"
 target = "test:cli"
 label = "a usage error that exits zero"
 failure_class = "cli.exit-code"
-legacy_signature = "a usage error must be distinguishable from a bad document"
+legacy_signature = "a_usage_error_exits_two_and_prints_no_result \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -365,7 +385,7 @@ check = "test"
 target = "test:cli"
 label = "a verb wired to the wrong format"
 failure_class = "cli.mis-dispatch"
-legacy_signature = "a valid fixture of its own format did not read"
+legacy_signature = "every_verb_reads_its_own_formats_valid_fixtures \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -385,7 +405,7 @@ check = "test"
 target = "lib/object::tests"
 label = "a correction that restates what it voids"
 failure_class = "object.self-link"
-legacy_signature = "an entry was voided by itself"
+legacy_signature = "object::tests::a_supersede_that_restates_the_entry_it_voids_is_refused \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -395,7 +415,7 @@ check = "test"
 target = "lib/object::tests"
 label = "a state change over a supersede link"
 failure_class = "object.correction-erased"
-legacy_signature = "a correction was erased by a later state change"
+legacy_signature = "object::tests::a_voided_entry_cannot_be_resolved_retired_or_voided_again \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -405,7 +425,7 @@ check = "test"
 target = "lib/object::tests"
 label = "a no-op patch that claims an entry"
 failure_class = "object.false-attribution"
-legacy_signature = "the patch claimed entries no diff can support"
+legacy_signature = "object::tests::a_patch_that_changes_nothing_claims_nothing \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -415,7 +435,7 @@ check = "test"
 target = "lib/object::tests"
 label = "the regime moves under a patch"
 failure_class = "object.regime-not-immutable"
-legacy_signature = "moved the regime the object was opened under"
+legacy_signature = "object::tests::no_patch_variant_can_move_the_regime \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -425,7 +445,7 @@ check = "test"
 target = "lib/object::tests"
 label = "dedup rebinds instead of aliasing"
 failure_class = "object.identity-collapsed"
-legacy_signature = "a lane was told the object had never heard of the id it chose"
+legacy_signature = "object::tests::an_alias_resolves_to_its_entry_and_keeps_both_provenances \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -435,7 +455,7 @@ check = "test"
 target = "lib/object::tests"
 label = "a turn applied in arrival order"
 failure_class = "object.order-dependent"
-legacy_signature = "the outcome of a turn depended on the order its patches arrived in"
+legacy_signature = "object::tests::a_turns_patches_apply_the_same_in_any_order \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -445,7 +465,7 @@ check = "test"
 target = "lib/object::tests"
 label = "a self-supersede through an alias"
 failure_class = "object.self-link"
-legacy_signature = "was not named as one"
+legacy_signature = "object::tests::a_supersede_of_an_entry_by_its_own_alias_is_refused \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -474,7 +494,7 @@ check = "test"
 target = "lib"
 label = "a subshell read as a group"
 failure_class = "shell.scope-lost"
-legacy_signature = "the bracketed list was not read as a subshell"
+legacy_signature = "formats::shell::tests::a_subshell_is_a_command_of_its_own_and_not_a_word \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -484,7 +504,7 @@ check = "test"
 target = "lib/formats::shell::tests"
 label = "a stderr pipe read as a plain pipe"
 failure_class = "shell.stderr-misplaced"
-legacy_signature = "did not become the duplication it abbreviates"
+legacy_signature = "formats::shell::tests::a_stderr_pipe_is_the_duplication_it_abbreviates \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -494,7 +514,7 @@ check = "test"
 target = "lib"
 label = "an expanding word reported literal"
 failure_class = "shell.literal-overclaimed"
-legacy_signature = "a word the shell would expand was reported literal"
+legacy_signature = "formats::shell::tests::a_brace_expansion_is_not_the_word_it_looks_like \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -504,7 +524,7 @@ check = "test"
 target = "lib/formats::shell::tests"
 label = "the producer read as the last command"
 failure_class = "shell.producer-misread"
-legacy_signature = "produces its output with"
+legacy_signature = "formats::shell::tests::the_producer_is_the_head_of_the_last_pipeline_and_not_its_tail \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -514,7 +534,7 @@ check = "test"
 target = "lib/formats::shell::tests"
 label = "an operator dropped from the table"
 failure_class = "shell.operator-lost"
-legacy_signature = "the table gained or lost an operator"
+legacy_signature = "formats::shell::tests::every_operator_is_named_here_and_the_table_says_the_same \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -524,7 +544,7 @@ check = "test"
 target = "lib/formats::shell::tests"
 label = "a stripping heredoc that keeps tabs"
 failure_class = "shell.heredoc-unstripped"
-legacy_signature = "did not strip the tabs the shell strips"
+legacy_signature = "formats::shell::tests::a_stripping_heredoc_strips_its_tabs_and_a_plain_one_keeps_them \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -534,7 +554,7 @@ check = "test"
 target = "lib"
 label = "the command word read as an operand"
 failure_class = "shell.operand-overcounted"
-legacy_signature = "the command word is not one of its own operands"
+legacy_signature = "formats::shell::tests::the_command_word_is_the_first_word_and_the_operands_are_the_rest \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -553,7 +573,7 @@ check = "test"
 target = "lib/formats::record::tests"
 label = "an empty payload read as absent"
 failure_class = "record.payload-dropped"
-legacy_signature = "an empty answer is a recorded answer, not a missing one"
+legacy_signature = "formats::record::tests::archive_rows_keep_their_payloads_through_a_round_trip \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -563,7 +583,7 @@ check = "test"
 target = "lib/capture::ablation::tests"
 label = "the ablation's control arm dropped"
 failure_class = "ablation.control-missing"
-legacy_signature = "the control arm is missing: an ablation with no sentence-removed arm"
+legacy_signature = "capture::ablation::tests::the_arms_include_the_control_with_no_imperative_at_all \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -573,7 +593,7 @@ check = "test"
 target = "lib/capture::ablation::tests"
 label = "silence counted as engagement"
 failure_class = "ablation.endpoints-collapsed"
-legacy_signature = "counted as engagement and as silence at once"
+legacy_signature = "capture::ablation::tests::silence_and_engagement_are_never_both_true \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -583,7 +603,7 @@ check = "test"
 target = "lib/capture::ablation::tests"
 label = "a p reported without its floor"
 failure_class = "ablation.p-floor-omitted"
-legacy_signature = "a p reported without its attainable floor"
+legacy_signature = "capture::ablation::tests::every_reported_p_carries_its_attainable_floor \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -593,7 +613,7 @@ check = "test"
 target = "lib/capture::ablation::tests"
 label = "a resample that draws once"
 failure_class = "ablation.resample-degenerate"
-legacy_signature = "the resamples no longer draw one outcome for every fork"
+legacy_signature = "capture::ablation::tests::a_resample_draws_one_outcome_for_every_fork_there_is \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -603,7 +623,7 @@ check = "test"
 target = "lib/capture::ablation::tests"
 label = "a generator that never advances"
 failure_class = "ablation.resample-frozen"
-legacy_signature = "a seeded draw did not reach every fork in 64 tries"
+legacy_signature = "capture::ablation::tests::the_generator_advances_so_a_resample_is_not_one_fork_counted_over \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -613,7 +633,7 @@ check = "test"
 target = "lib/capture::ablation::tests"
 label = "each arm credited with the other's"
 failure_class = "ablation.rate-misattributed"
-legacy_signature = "the first arm held on 5 of these 6 forks and the bootstrap counted"
+legacy_signature = "capture::ablation::tests::each_arms_rate_counts_that_arms_own_outcomes \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -623,7 +643,7 @@ check = "test"
 target = "lib/capture::ablation::tests"
 label = "the silence endpoint unregistered"
 failure_class = "ablation.endpoint-unregistered"
-legacy_signature = "the pre-registration no longer carries two endpoints"
+legacy_signature = "capture::ablation::tests::both_endpoints_are_pre_registered_in_the_direction_each_is_read_in \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -633,7 +653,7 @@ check = "test"
 target = "lib/capture::ablation::tests"
 label = "one imperative for every arm"
 failure_class = "ablation.plan-arms-collapsed"
-legacy_signature = "the plan does not pair the arm"
+legacy_signature = "capture::ablation::tests::the_plan_pairs_every_arm_with_its_own_imperative_and_says_none_has_run \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -643,7 +663,7 @@ check = "test"
 target = "lib/capture::ablation::tests"
 label = "two arms under one name"
 failure_class = "ablation.arm-name-collision"
-legacy_signature = "two arms of the ablation are reported under one name"
+legacy_signature = "capture::ablation::tests::every_arm_is_reported_under_a_name_no_other_arm_answers_to \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -653,7 +673,7 @@ check = "test"
 target = "lib/capture::ablation::tests"
 label = "an arm's clauses run together"
 failure_class = "ablation.imperative-malformed"
-legacy_signature = "the imperative an arm puts in the fork is not its clauses separated by one"
+legacy_signature = "capture::ablation::tests::the_full_arm_renders_the_sentence_this_ablation_takes_apart \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -673,7 +693,7 @@ check = "test"
 target = "lib/capture::ablation::tests"
 label = "a blank clause text admitted"
 failure_class = "ablation.blank-clause-admitted"
-legacy_signature = "a clause table with a blank clause text was not refused for that reason"
+legacy_signature = "capture::ablation::tests::a_clause_table_that_breaks_the_schema_says_which_rule_it_broke \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -703,7 +723,7 @@ check = "test"
 target = "lib/formats::record::json::tests"
 label = "the second reader left unbounded"
 failure_class = "record.json-lines-unbounded"
-legacy_signature = "a JSON Lines reader that does not bound its nesting"
+legacy_signature = "formats::record::json::tests::a_line_nested_past_the_limit_is_a_verdict_and_not_a_crash \\.\\.\\. FAILED"
 
 [[fault]]
 id = "test.record_negative_zero_decimal"
@@ -712,7 +732,7 @@ check = "test"
 target = "lib"
 label = "a negative zero decimal accepted"
 failure_class = "record.second-spelling"
-legacy_signature = "was constructed, and the grammar would not read it back"
+legacy_signature = "formats::record::json::tests::a_spelling_the_grammar_refuses_cannot_be_constructed \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1855,7 +1875,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "self-capture exempt from grounding"
 failure_class = "capture.modality-exempt-from-grounding"
-legacy_signature = "modality does not exempt a lane from grounding"
+legacy_signature = "capture::tools::tests::a_self_captured_entry_absent_from_what_the_model_saw_is_dropped \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1865,7 +1885,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "a reminder cadence that never fires"
 failure_class = "capture.reminder-never-fires"
-legacy_signature = "ten silent turns must be reminded at every third turn"
+legacy_signature = "capture::tools::tests::ten_silent_turns_are_reminded_on_the_cadence_and_the_sweep_covers_them \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1875,7 +1895,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "a harness tool call read as a capture"
 failure_class = "capture.foreign-tool-as-source"
-legacy_signature = "a harness tool call is not a capture tool and writes nothing"
+legacy_signature = "capture::tools::tests::a_harness_tool_call_is_not_a_patch_source \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1895,7 +1915,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "a capture grounded in its own echo"
 failure_class = "capture.grounded-in-its-own-echo"
-legacy_signature = "a harness that repeats a capture back grounded the capture in itself"
+legacy_signature = "capture::tools::tests::a_capture_is_not_grounded_in_a_harness_repeating_it_back \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1905,7 +1925,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "a capture grounded in a later turn"
 failure_class = "capture.grounded-in-a-later-turn"
-legacy_signature = "a turn-1 capture was grounded in a turn-2 tool output"
+legacy_signature = "capture::tools::tests::a_capture_is_not_grounded_in_a_turn_the_model_had_not_reached \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1915,7 +1935,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "a superseding entry with a minted id"
 failure_class = "capture.minted-entry-id"
-legacy_signature = "a superseding entry id must be derived from the row that carried it"
+legacy_signature = "capture::tools::tests::naming_what_it_replaces_makes_the_capture_a_supersede \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1925,7 +1945,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "a verdict that resolves elsewhere"
 failure_class = "capture.verdict-resolves-another-entry"
-legacy_signature = "a verdict resolved an entry the model never named"
+legacy_signature = "capture::tools::tests::only_a_settled_entry_is_resolved_by_a_verdict_alone \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1935,7 +1955,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "the asks reworded to nothing"
 failure_class = "capture.ask-words-unpinned"
-legacy_signature = "the words this lane says out loud are the only product it has"
+legacy_signature = "capture::tools::tests::every_ask_kind_is_named_and_asks_in_its_own_words \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1965,7 +1985,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "a closed choice left in its own case"
 failure_class = "capture.choice-case-unsettled"
-legacy_signature = "a harness may shout a closed choice back at us"
+legacy_signature = "capture::tools::tests::an_argument_in_the_case_the_harness_used_is_settled_by_the_contract \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1985,7 +2005,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "a reminder that drops the deferral"
 failure_class = "capture.reminder-drops-the-deferral"
-legacy_signature = "the cadence reminded without what the router put off in that turn"
+legacy_signature = "capture::tools::tests::a_fired_reminder_carries_its_kind_and_what_the_router_put_off \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1995,7 +2015,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "tools described in one character"
 failure_class = "capture.tool-described-in-nothing"
-legacy_signature = "a foreign harness registers this text verbatim"
+legacy_signature = "capture::tools::tests::every_tool_is_offered_in_words_rather_than_ordered \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2005,7 +2025,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "an offered tool the contract omits"
 failure_class = "capture.offered-tool-undescribed"
-legacy_signature = "an offered tool with no row is refused before a harness ever sees it"
+legacy_signature = "capture::tools::tests::a_contract_that_omits_an_offered_tool_is_refused \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2015,7 +2035,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "one tool described twice"
 failure_class = "capture.tool-described-twice"
-legacy_signature = "one tool described twice leaves the harness to the order of the file"
+legacy_signature = "capture::tools::tests::a_contract_that_describes_one_tool_twice_is_refused \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2025,7 +2045,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "a verdict the lane cannot honour"
 failure_class = "capture.contract-admits-an-unhonoured-word"
-legacy_signature = "this lane refuses it at runtime: the model is invited to say a word"
+legacy_signature = "capture::tools::tests::every_verdict_the_contract_admits_is_one_this_lane_can_honour \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2035,7 +2055,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "a turn swept after it recorded"
 failure_class = "capture.sweeps-a-turn-that-recorded"
-legacy_signature = "a turn the model did record in the end was swept anyway"
+legacy_signature = "capture::tools::tests::a_turn_that_records_after_it_looked_silent_is_not_swept \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2045,7 +2065,7 @@ check = "test"
 target = "lib/formats::record::tests"
 label = "the object reader with no limit"
 failure_class = "record.objects-without-a-depth-limit"
-legacy_signature = "one level past the limit must be a verdict from `objects`"
+legacy_signature = "formats::record::tests::a_deeply_nested_object_document_is_a_verdict_and_not_a_crash \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2055,7 +2075,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "a corpus that drives one tool"
 failure_class = "capture.corpus-covers-one-tool"
-legacy_signature = "is offered to the model and no corpus case ever calls it"
+legacy_signature = "capture::tools::tests::the_corpus_drives_every_tool_this_lane_offers \\.\\.\\. FAILED"
 
 [[fault]]
 id = "test.verdict_prefix_accepted"
@@ -2094,7 +2114,7 @@ check = "test"
 target = "lib/capture::collector::literal::tests"
 label = "an anchor matched inside a longer word"
 failure_class = "collector.substring-match"
-legacy_signature = "an anchor matched inside a longer word"
+legacy_signature = "capture::collector::literal::tests::a_match_is_at_a_word_boundary \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2104,7 +2124,7 @@ check = "test"
 target = "lib/capture::collector::literal::tests"
 label = "an English word made an anchor"
 failure_class = "collector.over-firing"
-legacy_signature = "an English word became an anchor"
+legacy_signature = "capture::collector::literal::tests::an_english_sentence_has_no_anchors \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2114,7 +2134,7 @@ check = "test"
 target = "lib/capture::collector::literal::tests"
 label = "an entry nominated by its own turn"
 failure_class = "collector.self-nomination"
-legacy_signature = "an entry nominated itself"
+legacy_signature = "capture::collector::literal::tests::an_entry_is_not_nominated_by_the_turn_that_made_it \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2144,7 +2164,7 @@ check = "test"
 target = "lib/capture::collector::sense::tests"
 label = "an uncalibrated nomination policy accepted"
 failure_class = "collector.uncalibrated-policy"
-legacy_signature = "the fixture policy was accepted by the door that ships"
+legacy_signature = "capture::collector::sense::tests::the_shipped_fixture_policy_is_refused_by_the_door_that_ships \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2164,7 +2184,7 @@ check = "test"
 target = "lib/capture::collector::literal::tests"
 label = "a turn that nominates only its first entry"
 failure_class = "collector.nomination-dropped"
-legacy_signature = "a turn that named two anchors nominated fewer than two entries"
+legacy_signature = "capture::collector::literal::tests::every_entry_whose_anchor_recurs_is_nominated \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2174,7 +2194,7 @@ check = "test"
 target = "lib/capture::collector::literal::tests"
 label = "a voided entry nominated by tier 0"
 failure_class = "collector.retired-entry-renominated"
-legacy_signature = "a voided entry was nominated again by the literal tier"
+legacy_signature = "capture::collector::literal::tests::a_voided_entry_is_not_nominated_again \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2274,7 +2294,7 @@ check = "test"
 target = "lib/capture::collector::tests"
 label = "a nomination that names the other tier"
 failure_class = "collector.vocabulary-drift"
-legacy_signature = "a nomination named the wrong tier"
+legacy_signature = "capture::collector::tests::a_nomination_names_the_tier_that_made_it \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2294,7 +2314,7 @@ check = "test"
 target = "lib/capture::collector::sense::tests"
 label = "a lexical pre-gate the tier ignores"
 failure_class = "collector.policy-setting-inert"
-legacy_signature = "a turn carrying no seed was scored by a gated policy anyway"
+legacy_signature = "capture::collector::sense::tests::the_lexical_gate_decides_whether_a_turn_is_scored_at_all \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2304,7 +2324,7 @@ check = "test"
 target = "lib/capture::collector::sense::tests"
 label = "a turn-level threshold never compared"
 failure_class = "collector.policy-setting-inert"
-legacy_signature = "an unremarkable turn nominated"
+legacy_signature = "capture::collector::sense::tests::a_turn_that_is_not_a_reversal_nominates_nothing \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2314,7 +2334,7 @@ check = "test"
 target = "lib/capture::collector::sense::tests"
 label = "a per-entry threshold never compared"
 failure_class = "collector.policy-setting-inert"
-legacy_signature = "the tier nominated an entry the turn was not about"
+legacy_signature = "capture::collector::sense::tests::an_entry_the_turn_is_not_about_is_not_nominated \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2324,7 +2344,7 @@ check = "test"
 target = "lib/capture::collector::sense::tests"
 label = "a turn scored against the wrong sense set"
 failure_class = "collector.wrong-register"
-legacy_signature = "a turn about a mistaken assumption was scored as a reversal"
+legacy_signature = "capture::collector::sense::tests::the_turn_is_scored_against_the_authored_reversal_senses \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2334,7 +2354,7 @@ check = "test"
 target = "lib/capture::collector::sense::tests"
 label = "an intent register that reads the prose"
 failure_class = "collector.wrong-register"
-legacy_signature = "the tier measured the prose of the turn where it should have measured the stated intent"
+legacy_signature = "capture::collector::sense::tests::the_second_register_measures_the_stated_intent_and_not_the_prose \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2364,7 +2384,7 @@ check = "test"
 target = "lib/capture::collector::sense::tests"
 label = "an entry nominated by its own turn at tier 1"
 failure_class = "collector.self-nomination"
-legacy_signature = "an entry born in this turn nominated itself"
+legacy_signature = "capture::collector::sense::tests::an_entry_is_not_nominated_by_the_turn_that_made_it \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2374,7 +2394,7 @@ check = "test"
 target = "lib/capture::collector::sense::tests"
 label = "a voided entry nominated by tier 1"
 failure_class = "collector.retired-entry-renominated"
-legacy_signature = "a voided entry was nominated again by the sense tier"
+legacy_signature = "capture::collector::sense::tests::a_voided_entry_is_not_nominated_again \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2384,7 +2404,7 @@ check = "test"
 target = "lib/capture::collector::sense::tests"
 label = "a report that drops half its policy"
 failure_class = "collector.unreadable-report"
-legacy_signature = "the report did not say which scoring produced it"
+legacy_signature = "capture::collector::sense::tests::the_report_carries_the_policy_that_produced_it \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2394,7 +2414,7 @@ check = "test"
 target = "lib/capture::collector::sense::tests"
 label = "a calibration that names no run"
 failure_class = "collector.uncalibrated-policy"
-legacy_signature = "was read as a calibration"
+legacy_signature = "capture::collector::sense::tests::a_policy_that_names_no_run_is_refused_and_one_that_names_a_run_is_not \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2453,7 +2473,7 @@ check = "test"
 target = "lib/capture"
 label = "a cosine that forgot its second norm"
 failure_class = "sense.similarity-unnormalised"
-legacy_signature = "cosine of a vector with itself was not one"
+legacy_signature = "capture::sense::tests::cosine_of_a_vector_with_itself_is_one \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2463,7 +2483,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "contrastive scoring that ignores the negative sense"
 failure_class = "sense.contrast-dropped"
-legacy_signature = "the contrastive score ignored the negative sense"
+legacy_signature = "capture::sense::tests::contrastive_scoring_subtracts_the_negative_sense \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2473,7 +2493,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "a null whose labels are never shuffled"
 failure_class = "sense.null-not-at-chance"
-legacy_signature = "d-prime on a shuffled-label null was far from zero"
+legacy_signature = "capture::sense::tests::a_shuffled_label_null_sits_at_chance \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2483,7 +2503,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "a bootstrap p with no attainable floor"
 failure_class = "sense.p-without-floor"
-legacy_signature = "a bootstrap p-value came without its attainable floor"
+legacy_signature = "capture::sense::tests::a_p_value_never_travels_without_its_attainable_floor \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2503,7 +2523,7 @@ check = "test"
 target = "lib/formats::record::json::tests"
 label = "two data lines read as one"
 failure_class = "record.line-silently-truncated"
-legacy_signature = "two lines were read as one, and the second was lost"
+legacy_signature = "formats::record::json::tests::a_data_line_is_one_object_of_the_record_grammar \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2513,7 +2533,7 @@ check = "test"
 target = "lib/object::tangent::tests"
 label = "a tangent drop that deletes"
 failure_class = "object.disposition-deletes"
-legacy_signature = "a drop evicts to the archive and never deletes"
+legacy_signature = "object::tangent::tests::a_dropped_entry_is_evicted_to_the_archive_and_never_deleted \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2523,7 +2543,7 @@ check = "test"
 target = "lib/object::tangent::tests"
 label = "a parked entry that still renders"
 failure_class = "object.park-still-live"
-legacy_signature = "a parked entry still speaks for the object"
+legacy_signature = "object::tangent::tests::a_parked_entry_is_retained_and_stops_speaking_for_the_object \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2533,7 +2553,7 @@ check = "test"
 target = "lib/object::tangent::tests"
 label = "a tangent scoped by recency"
 failure_class = "object.scope-by-recency"
-legacy_signature = "scope is by provenance, not by recency"
+legacy_signature = "object::tangent::tests::an_entry_the_trunk_created_after_the_fork_is_not_in_the_tangents_scope \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2543,7 +2563,7 @@ check = "test"
 target = "lib/object::tangent::tests"
 label = "a tangent closed leaving an entry unruled"
 failure_class = "object.closure-partial"
-legacy_signature = "closure is total: a tangent-born entry was left undisposed"
+legacy_signature = "object::tangent::tests::a_tangent_born_entry_left_undisposed_refuses_the_closure \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2553,7 +2573,7 @@ check = "test"
 target = "lib/object::tangent::tests"
 label = "a prefix claimed intact, not compared"
 failure_class = "object.prefix-unmeasured"
-legacy_signature = "the prefix was reported intact after the trunk moved"
+legacy_signature = "object::tangent::tests::a_tangent_that_touched_the_trunk_says_the_prefix_moved \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2563,7 +2583,7 @@ check = "test"
 target = "lib/object::tangent::tests"
 label = "a tangent id opened twice"
 failure_class = "object.scope-ambiguous"
-legacy_signature = "a tangent id the record already carries was opened again"
+legacy_signature = "object::tangent::tests::a_tangent_id_the_record_already_carries_is_refused \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2573,7 +2593,7 @@ check = "test"
 target = "lib/object::tangent::tests"
 label = "a tangent that dates a fact at the fork"
 failure_class = "object.provenance-undated"
-legacy_signature = "a tangent dated a patch at a turn other than the one it was made at"
+legacy_signature = "object::tangent::tests::a_tangent_stamps_the_provenance_of_every_patch_made_under_it \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2583,7 +2603,7 @@ check = "test"
 target = "lib/object::tangent::tests"
 label = "a closure ruling dated at the fork"
 failure_class = "object.ruling-predates-fact"
-legacy_signature = "the closure filed its ruling at a turn it did not close at"
+legacy_signature = "object::tangent::tests::a_closure_files_its_ruling_at_the_turn_it_closed \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2593,7 +2613,7 @@ check = "test"
 target = "lib/object::tangent::tests"
 label = "a closure under a coined lane"
 failure_class = "object.lane-coined"
-legacy_signature = "the closure filed its ruling under a lane the record does not already have"
+legacy_signature = "object::tangent::tests::a_closure_files_its_ruling_in_the_canonical_lane \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2603,7 +2623,7 @@ check = "test"
 target = "lib/object::tangent::tests"
 label = "a disposition missing from the list"
 failure_class = "object.vocabulary-incomplete"
-legacy_signature = "the dispositions a closure can rule with are not the three the record names"
+legacy_signature = "object::tangent::tests::the_dispositions_are_the_three_a_closure_rules_with \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2613,7 +2633,7 @@ check = "test"
 target = "lib/object::tangent::tests"
 label = "a tangent that offers a settled fact again"
 failure_class = "object.scope-reoffers-ruled"
-legacy_signature = "the tangent offered a fact the record had already ruled on for disposition a second time"
+legacy_signature = "object::tangent::tests::a_tangent_does_not_offer_a_fact_it_has_already_ruled_on \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2623,7 +2643,7 @@ check = "test"
 target = "lib/object::tangent::tests"
 label = "a prefix that counts dead trunk rows"
 failure_class = "object.prefix-counts-dead"
-legacy_signature = "a trunk row that was already dead at the fork was counted into the prefix"
+legacy_signature = "object::tangent::tests::a_trunk_row_already_dead_at_the_fork_is_not_part_of_the_prefix \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2633,7 +2653,7 @@ check = "test"
 target = "lib/object::tangent::tests"
 label = "a prefix called intact whenever it only grew"
 failure_class = "object.prefix-growth-only"
-legacy_signature = "the prefix was reported unmoved after the trunk wrote a fact of its own"
+legacy_signature = "object::tangent::tests::a_trunk_that_went_on_writing_moved_the_prefix_the_fork_recorded \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2643,7 +2663,7 @@ check = "test"
 target = "lib/object::tests"
 label = "a parked entry that reads as retired"
 failure_class = "object.state-name-collapsed"
-legacy_signature = "a state renders under a name the dump does not promise"
+legacy_signature = "object::tests::every_entry_state_renders_the_name_the_dump_promises \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2653,7 +2673,7 @@ check = "test"
 target = "lib/object::tests"
 label = "a park with no tangent behind it"
 failure_class = "object.park-untangented"
-legacy_signature = "an entry was parked under no tangent, so it left the live set"
+legacy_signature = "object::tests::parking_an_entry_no_tangent_created_is_refused \\.\\.\\. FAILED"
 
 [[fault]]
 id = "test.regimen_float_as_a_string"
@@ -2662,7 +2682,7 @@ check = "test"
 target = "lib/formats::regimen::tests"
 label = "a regimen float rendered as a string"
 failure_class = "regimen.float-stringified"
-legacy_signature = "a float projected as something other than a decimal"
+legacy_signature = "formats::regimen::tests::a_float_projects_as_a_number_and_not_as_its_digits_in_quotes \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2672,7 +2692,7 @@ check = "test"
 target = "lib/formats::regimen::tests"
 label = "a table header that opens nothing"
 failure_class = "regimen.table-scope-lost"
-legacy_signature = "its keys are not the document.s"
+legacy_signature = "formats::regimen::tests::a_table_scopes_the_keys_that_follow_it \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2682,7 +2702,7 @@ check = "test"
 target = "lib/formats::regimen::tests"
 label = "two tables of one name accepted"
 failure_class = "regimen.table-collision-unchecked"
-legacy_signature = "a table opened twice was not refused"
+legacy_signature = "formats::regimen::tests::a_table_may_not_arrive_twice_or_take_a_key_s_name \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2692,7 +2712,7 @@ check = "test"
 target = "lib/formats::regimen::tests"
 label = "the float rule widened past the record"
 failure_class = "regimen.decimal-drift"
-legacy_signature = "the regimen grammar and the record.s decimal disagree"
+legacy_signature = "formats::regimen::tests::the_float_rule_and_the_records_decimal_rule_agree \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2729,7 +2749,7 @@ check = "test"
 target = "lib/formats::regimen::tests"
 label = "a nested table flattened"
 failure_class = "regimen.table-depth-lost"
-legacy_signature = "holds its own binding and the table below it"
+legacy_signature = "formats::regimen::tests::a_table_may_hold_one_table_and_no_more \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2739,7 +2759,7 @@ check = "test"
 target = "lib/formats::regimen::tests"
 label = "an array read by a second reader"
 failure_class = "regimen.array-second-reader"
-legacy_signature = "an array item was read by something other than the value reader"
+legacy_signature = "formats::regimen::tests::an_array_holds_scalars_read_by_the_same_reader \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3033,7 +3053,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "an ask wired to another class's question"
 failure_class = "router.ask-untuned"
-legacy_signature = "the ask does not ask its own question"
+legacy_signature = "capture::router::tests::each_ask_asks_the_question_its_class_calls_for \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3043,7 +3063,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "a template without the imperative"
 failure_class = "router.ask-imperative-missing"
-legacy_signature = "the ask does not carry the fork-local imperative"
+legacy_signature = "capture::router::tests::every_ask_kind_has_a_template_that_carries_the_imperative \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3063,7 +3083,7 @@ check = "test"
 target = "test:cli"
 label = "a route verb answering with a hollow census"
 failure_class = "router.census-not-computed"
-legacy_signature = "where the drive spends"
+legacy_signature = "the_route_verb_answers_with_a_census_and_not_with_prose \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3073,7 +3093,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "a table row that can never fire"
 failure_class = "router.table-row-dead"
-legacy_signature = "can never fire"
+legacy_signature = "capture::router::tests::no_row_of_the_table_can_ever_fire_from_below_an_earlier_one \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3083,7 +3103,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "a corpus that stops covering a class"
 failure_class = "router.corpus-incomplete"
-legacy_signature = "call\\(s\\) in the corpus, fewer than"
+legacy_signature = "capture::router::tests::the_corpus_covers_every_class_and_every_tool_name_the_router_knows \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3093,7 +3113,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "a table row skipped, not refused"
 failure_class = "router.table-row-skipped"
-legacy_signature = "was skipped rather than refused"
+legacy_signature = "capture::router::tests::a_table_row_that_is_not_a_rule_is_refused_and_not_skipped \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3103,7 +3123,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "an intent taken from any lane"
 failure_class = "router.intent-off-lane"
-legacy_signature = "did not quote back what the model said it was about to do"
+legacy_signature = "capture::router::tests::an_ask_quotes_back_what_the_canonical_lane_said_it_would_do \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3113,7 +3133,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "the first stated intent, not the last"
 failure_class = "router.intent-stale"
-legacy_signature = "quoted an intent the model had already moved past"
+legacy_signature = "capture::router::tests::stated_intent_takes_the_last_sentence_that_states_one \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3123,7 +3143,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "an intent marker lost from the table"
 failure_class = "router.intent-marker-lost"
-legacy_signature = "a marker was added or lost without a sentence that reaches it"
+legacy_signature = "capture::router::tests::every_marker_the_model_states_an_intent_with_is_heard \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3143,7 +3163,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "the declared default out of the vocabulary"
 failure_class = "router.vocabulary-shortened"
-legacy_signature = "left the vocabulary without leaving the tests that walk it"
+legacy_signature = "capture::router::tests::every_vocabulary_is_named_in_full_where_the_tests_walk_it \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3163,7 +3183,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "a judgment ask released mid-turn"
 failure_class = "router.judgment-mid-turn"
-legacy_signature = "a judgment ask fired in the middle of a turn"
+legacy_signature = "capture::router::tests::a_judgment_ask_waits_for_the_turn_boundary \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3193,7 +3213,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "a reduction claimed, not computed"
 failure_class = "router.reduction-claimed"
-legacy_signature = "the reduction is not the number its own counts give"
+legacy_signature = "capture::router::tests::the_census_reports_the_reduction_as_a_decimal_of_its_own_counts \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3203,7 +3223,7 @@ check = "test"
 target = "lib/capture::mechanical::tests"
 label = "a subshell that shares the parent state"
 failure_class = "capture.subshell-state-leaks"
-legacy_signature = "the subshell cd leaked into the parent"
+legacy_signature = "capture::mechanical::tests::a_subshells_cd_does_not_leak_into_the_parent \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3213,7 +3233,7 @@ check = "test"
 target = "lib/capture::mechanical::tests"
 label = "a failed cd applied anyway"
 failure_class = "capture.failed-cd-applied"
-legacy_signature = "a failed cd moved the working directory"
+legacy_signature = "capture::mechanical::tests::a_failed_cd_leaves_the_cwd_where_it_was_and_is_recorded \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3223,7 +3243,7 @@ check = "test"
 target = "lib/capture::mechanical::tests"
 label = "popd on an empty stack ignored"
 failure_class = "capture.stack-underflow-ignored"
-legacy_signature = "popd on an empty stack was silently ignored"
+legacy_signature = "capture::mechanical::tests::popd_on_an_empty_stack_is_a_recorded_failure \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3233,7 +3253,7 @@ check = "test"
 target = "lib/capture::mechanical::tests"
 label = "the mechanical-noun table emptied"
 failure_class = "capture.mechanical-noun-table-empty"
-legacy_signature = "a question about a mechanical fact went unflagged"
+legacy_signature = "capture::mechanical::tests::the_lint_catches_every_shape_of_mechanical_question \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3243,7 +3263,7 @@ check = "test"
 target = "lib/capture::mechanical::tests"
 label = "a mechanical entry sent through the gate"
 failure_class = "capture.mechanical-entry-gated"
-legacy_signature = "a mechanical entry was dropped as if it needed grounding"
+legacy_signature = "capture::mechanical::tests::mechanical_entries_are_applied_without_a_lane_report \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3253,7 +3273,7 @@ check = "test"
 target = "lib"
 label = "a quoted substitution descended into"
 failure_class = "capture.invented-read"
-legacy_signature = "a single-quoted substitution was descended into"
+legacy_signature = "capture::mechanical::tests::a_quoted_substitution_is_three_characters_and_not_a_command \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3283,7 +3303,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "a mined row nobody can trace"
 failure_class = "sense.provenance-untraced"
-legacy_signature = "a row nobody can trace was accepted"
+legacy_signature = "capture::sense::tests::a_mined_row_without_provenance_is_refused_and_so_is_provenance_without_a_row \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3293,7 +3313,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "controls that never look at the register"
 failure_class = "sense.controls-not-compared"
-legacy_signature = "a register row reached the top control and the controls passed"
+legacy_signature = "capture::sense::tests::a_register_row_that_reaches_a_control_is_named_as_the_row_that_displaced_it \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3303,7 +3323,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "a bootstrap that never resamples"
 failure_class = "sense.bootstrap-not-resampled"
-legacy_signature = "every resample was the observed difference"
+legacy_signature = "capture::sense::tests::a_paired_bootstrap_resamples_rather_than_repeating_the_observed_difference \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3313,7 +3333,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "a failure reading off the worst reading"
 failure_class = "capture.instrument-never-failed"
-legacy_signature = "is the worst the metric can say"
+legacy_signature = "capture::sense::tests::every_metric_names_the_reading_at_which_it_has_failed \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3323,7 +3343,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "a pre-registration with nothing in it"
 failure_class = "sense.endpoint-unregistered"
-legacy_signature = "the primary endpoint is not the endpoint that was registered"
+legacy_signature = "capture::sense::tests::the_pre_registration_names_its_endpoints_and_its_blockers \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3333,7 +3353,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "a lexical gate asked about the id"
 failure_class = "sense.gate-on-the-wrong-field"
-legacy_signature = "the gate did not decide on the row"
+legacy_signature = "capture::sense::tests::a_gated_out_row_sits_at_the_scorings_floor \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3343,7 +3363,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "a separation over one class spread"
 failure_class = "sense.separation-unpooled"
-legacy_signature = "d-prime was standardised by one class"
+legacy_signature = "capture::sense::tests::d_prime_is_the_standardised_separation_of_the_two_means \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3353,7 +3373,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "a null band widened past a finding"
 failure_class = "sense.null-not-at-chance"
-legacy_signature = "bands are not the numbers they were registered as"
+legacy_signature = "capture::sense::tests::the_null_bands_are_wider_than_measurement_and_narrower_than_a_finding \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3372,7 +3392,7 @@ check = "test"
 target = "lib/capture::mechanical::tests"
 label = "the mechanical lane renamed"
 failure_class = "capture.lane-misnamed"
-legacy_signature = "the lane was renamed"
+legacy_signature = "capture::mechanical::tests::the_lane_is_named_mechanical_and_every_entry_says_so \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3382,7 +3402,7 @@ check = "test"
 target = "lib/capture::mechanical::tests"
 label = "an option word read as a directory"
 failure_class = "capture.invented-directory"
-legacy_signature = "an option word was read as the directory it names"
+legacy_signature = "capture::mechanical::tests::an_option_word_is_not_a_directory \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3392,7 +3412,7 @@ check = "test"
 target = "lib/capture::mechanical::tests"
 label = "a flag value read as a file"
 failure_class = "capture.invented-touch"
-legacy_signature = "the lane read a file out of a flag.s value"
+legacy_signature = "capture::mechanical::tests::a_flag_value_is_not_a_file_the_turn_touched \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3402,7 +3422,7 @@ check = "test"
 target = "lib/capture::mechanical::tests"
 label = "an entry with the wrong verb"
 failure_class = "capture.entry-misstates-the-fact"
-legacy_signature = "the entry used the wrong verb for what happened to the file"
+legacy_signature = "capture::mechanical::tests::an_entry_names_what_happened_to_the_file_it_is_about \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3412,7 +3432,7 @@ check = "test"
 target = "lib/capture::mechanical::tests"
 label = "a pipeline whose members never run"
 failure_class = "capture.command-not-read"
-legacy_signature = "nothing in the pipeline ran"
+legacy_signature = "capture::mechanical::tests::a_pipeline_and_a_background_chain_still_run_the_commands_in_them \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3422,7 +3442,7 @@ check = "test"
 target = "lib/capture::mechanical::tests"
 label = "a write lost to a read of the same path"
 failure_class = "capture.fact-discarded"
-legacy_signature = "a write was lost to a read of the same path in the same call"
+legacy_signature = "capture::mechanical::tests::a_file_written_and_read_by_one_call_is_two_facts_and_a_file_named_twice_is_one \\.\\.\\. FAILED"
 
 migrated = false
 
@@ -3433,7 +3453,7 @@ check = "test"
 target = "lib/formats::regimen::tests"
 label = "a header comment read as a table"
 failure_class = "regimen.header-comment-as-table"
-legacy_signature = "a comment after a table header is not a table the header opened"
+legacy_signature = "formats::regimen::tests::a_comment_after_a_table_header_is_not_part_of_the_table \\.\\.\\. FAILED"
 migrated = false
 [[fault]]
 id = "resolver.keyed_by_a_comment"
@@ -3650,7 +3670,7 @@ check = "test"
 target = "lib/formats::interview"
 label = "a dogma tag in no vocabulary"
 failure_class = "interview.tag-undeclared"
-legacy_signature = "dogma tag\\(s\\) absent from diet/formats/interview/tags\\.tsv"
+legacy_signature = "formats::interview::tests::no_dogma_tag_is_missing_from_the_table \\.\\.\\. FAILED"
 migrated = false
 [[fault]]
 id = "test.operating_points_sorted"
@@ -3659,7 +3679,7 @@ check = "test"
 target = "lib/formats::operating_points"
 label = "operating points sorted, not in file order"
 failure_class = "operating-points.order-lost"
-legacy_signature = "the projection lost the file's order"
+legacy_signature = "formats::operating_points::tests::the_entries_come_back_in_the_order_the_file_wrote_them \\.\\.\\. FAILED"
 migrated = false
 [[fault]]
 id = "test.number_terminal_regrown"
@@ -4099,7 +4119,7 @@ check = "test"
 target = "lib/formats::operating_points"
 label = "an unmarked entry that shadows another is admitted"
 failure_class = "operating-points.shadowed-unmarked"
-legacy_signature = "the retired spelling is refused"
+legacy_signature = "formats::operating_points::tests::the_retired_spelling_is_refused_for_shadowing_and_not_something_else \\.\\.\\. FAILED"
 migrated = false
 [[fault]]
 id = "results.2026-01-30-verdict-disagrees-with-record"
@@ -4339,6 +4359,22 @@ kind = "lane-fault"
 check = "lanes"
 label = "client.issued-is-recorded-only-on-success"
 failure_class = "client.issued-is-recorded-only-on-success"
+migrated = false
+
+[[fault]]
+id = "client.template-kwargs-never-sent"
+kind = "lane-fault"
+check = "lanes"
+label = "client.template-kwargs-never-sent"
+failure_class = "client.template-kwargs-never-sent"
+migrated = false
+
+[[fault]]
+id = "client.reasoning-never-read"
+kind = "lane-fault"
+check = "lanes"
+label = "client.reasoning-never-read"
+failure_class = "client.reasoning-never-read"
 migrated = false
 
 [[fault]]
@@ -4710,6 +4746,14 @@ failure_class = "drive.the-census-reports-the-unrepresentable-sentinel"
 migrated = false
 
 [[fault]]
+id = "drive.a-canned-reasoning-control-halts-on-the-wrong-lane"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-canned-reasoning-control-halts-on-the-wrong-lane"
+failure_class = "drive.a-canned-reasoning-control-halts-on-the-wrong-lane"
+migrated = false
+
+[[fault]]
 id = "drive.the-sampler-crosses-as-a-debug-rendering"
 kind = "lane-fault"
 check = "lanes"
@@ -4739,6 +4783,22 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.the-shipped-regimen-declares-the-sandbox"
 failure_class = "drive.the-shipped-regimen-declares-the-sandbox"
+migrated = false
+
+[[fault]]
+id = "drive.the-kwarg-control-never-refuses"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-kwarg-control-never-refuses"
+failure_class = "drive.the-kwarg-control-never-refuses"
+migrated = false
+
+[[fault]]
+id = "drive.a-spent-think-budget-is-an-ordinary-silence"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-spent-think-budget-is-an-ordinary-silence"
+failure_class = "drive.a-spent-think-budget-is-an-ordinary-silence"
 migrated = false
 
 [[fault]]

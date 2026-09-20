@@ -9,6 +9,19 @@
 //! and is built through [`Decimal::new`], which checks the text against the
 //! record's own rule. That is the anti-drift device: the regimen grammar and
 //! the record grammar both spell a decimal, and only one of them enforces it.
+//!
+//! # The one table this reader knows the meaning of
+//!
+//! Everything above is about SHAPE: any bare key may be bound to any value,
+//! and what the keys mean is the consumer's business. `[reasoning]` is the
+//! exception, and it is one deliberately. An effort level is an INSTRUCTION
+//! the chat template renders as system-message text -- it bounds nothing --
+//! so a document naming a level and no budget declares a reasoning state no
+//! claim can be fixed in, and the one place able to refuse that before it
+//! reaches anybody is here. See [`reasoning_of`], which is both the rule
+//! [`parse`] applies and the reader the drive's regime crossing uses; and see
+//! [`ReasoningControl`], which is the RECORD's type, held for the same
+//! anti-drift reason [`Decimal`] is. Ruled on #94, design point 1.
 
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
@@ -20,6 +33,16 @@ use pest::iterators::Pair;
 use pest_derive::Parser;
 
 use crate::formats::record::json::Decimal;
+use crate::formats::record::{Budget, Count, ReasoningControl};
+
+/// The table a regimen declares its reasoning controls under.
+const REASONING: &str = "reasoning";
+/// The instruction level, inside [`REASONING`].
+const EFFORT: &str = "effort";
+/// The hard cap, inside [`REASONING`].
+const BUDGET: &str = "budget_tokens";
+/// The one spelling of "there is no cap, and I am saying so".
+const NO_BUDGET: &str = "none";
 
 #[derive(Parser)]
 #[grammar = "../formats/regimen/grammar.pest"]
@@ -162,6 +185,52 @@ pub enum ParseError {
         /// The literal as it appeared in the document.
         literal: String,
     },
+    /// A `[reasoning]` table naming one of its two fields and not the other.
+    ///
+    /// **An effort level is an instruction, not a budget.** The chat template
+    /// renders it as a sentence in the system message; the model may spend
+    /// six tokens thinking or six thousand, and nothing about the level
+    /// bounds which. So a regimen that names a level and no cap has declared
+    /// a reasoning state nobody can reproduce and no claim can be fixed in --
+    /// and the fix is one integer, or the word `none` where there genuinely
+    /// is no cap. #94 design point 1, whose acceptance row is exactly this
+    /// document exiting 1.
+    ///
+    /// Symmetric, and deliberately wider than that row: a cap with no level
+    /// is the same pair half-written. `medium` is a real level -- the one
+    /// that injects nothing -- so a regimen capping the spend under the
+    /// default has a word for what it did, and "nobody said" stops being
+    /// indistinguishable from "the default, on purpose".
+    ReasoningPairIncomplete {
+        /// The field the table does carry.
+        present: &'static str,
+        /// The one it does not.
+        missing: &'static str,
+    },
+    /// A `reasoning.effort` bound to something that is not a level.
+    ///
+    /// Its own variant rather than a second spelling of
+    /// [`Self::ReasoningPairIncomplete`]: `effort = 3` DOES bind the key, and
+    /// a message saying the table "binds `budget_tokens` and not `effort`"
+    /// about it would send the reader to look for a key that is right there.
+    ///
+    /// A level is text, and which text is the chat template's business --
+    /// this refuses the shape and takes no view on the spelling. See
+    /// [`crate::formats::record::ReasoningControl::effort`] for why the set
+    /// of levels is open.
+    ReasoningEffortNotALevel {
+        /// What the document bound, rendered as the document's own kind.
+        found: String,
+    },
+    /// A `reasoning.budget_tokens` that is neither a cap nor `"none"`.
+    ///
+    /// A cap is a count of tokens. The only other thing this field may say is
+    /// that there is no cap, spelled `none`, and spelled rather than left out
+    /// so that the absence is a declaration a reader can see.
+    ReasoningBudgetNotACapOrNone {
+        /// What the document bound, rendered as the document's own kind.
+        found: String,
+    },
     /// The grammar produced a value rule the reader does not know.
     ///
     /// Unreachable against the grammar as written -- and it used to say so,
@@ -214,6 +283,24 @@ impl fmt::Display for ParseError {
                     "integer `{literal}` bound to `{key}` does not fit in i64"
                 )
             }
+            Self::ReasoningPairIncomplete { present, missing } => write!(
+                f,
+                "`[{REASONING}]` binds `{present}` and not `{missing}`; a reasoning \
+                 state is two facts, because an effort level is an instruction the \
+                 template renders as text and bounds nothing -- write the other one, \
+                 or `{BUDGET} = \"{NO_BUDGET}\"` where there is no cap"
+            ),
+            Self::ReasoningEffortNotALevel { found } => write!(
+                f,
+                "`{REASONING}.{EFFORT}` is bound to {found}; an effort level is the text \
+                 a chat template renders into the head of the prompt, and which text is \
+                 the template's business rather than this format's"
+            ),
+            Self::ReasoningBudgetNotACapOrNone { found } => write!(
+                f,
+                "`{REASONING}.{BUDGET}` is bound to {found}; a budget is a count of \
+                 tokens, or the word `{NO_BUDGET}` where there is no cap"
+            ),
             Self::UnexpectedRule { key, rule } => {
                 write!(
                     f,
@@ -236,6 +323,9 @@ impl Error for ParseError {
             | Self::EmptyTable { .. }
             | Self::FloatNotADecimal { .. }
             | Self::IntegerOutOfRange { .. }
+            | Self::ReasoningPairIncomplete { .. }
+            | Self::ReasoningEffortNotALevel { .. }
+            | Self::ReasoningBudgetNotACapOrNone { .. }
             | Self::UnexpectedRule { .. } => None,
         }
     }
@@ -336,7 +426,115 @@ pub fn parse(input: &str) -> Result<Regimen, ParseError> {
             name: segments.join("."),
         });
     }
-    Ok(Regimen { entries })
+    let parsed = Regimen { entries };
+    // THE SAME READER THE CROSSING USES. `reasoning_of` is called here for
+    // its verdict and by `drive::regimen::regime_of` for its value, so the
+    // rule that refuses a half-written pair and the rule that builds the
+    // regime out of a whole one are one function. A second reader of this
+    // question is the defect class this repository keeps finding in itself,
+    // and the `Decimal` above is the same device one field over.
+    reasoning_of(&parsed)?;
+    Ok(parsed)
+}
+
+/// What `[reasoning]` declares, as the record's own type.
+///
+/// `None` when the document declares no reasoning state at all -- no
+/// `[reasoning]` table, or one carrying neither field. That is a legal
+/// regimen: a run against a substrate with no reasoning controls has none to
+/// declare, and it is a different fact from a run that named a level and
+/// forgot the cap.
+///
+/// The RECORD's [`ReasoningControl`] and not a type of this module's own, for
+/// the reason a regimen float is built through the record's [`Decimal`]: the
+/// regimen spells a reasoning control and the record enforces one, and two
+/// types would be two rules that can drift.
+///
+/// # Errors
+///
+/// [`ParseError::ReasoningPairIncomplete`] when the table names one field and
+/// not the other, and [`ParseError::ReasoningBudgetNotACapOrNone`] when the
+/// budget is neither a count of tokens nor `"none"`.
+pub fn reasoning_of(regimen: &Regimen) -> Result<Option<ReasoningControl>, ParseError> {
+    let Some(Value::Table(table)) = regimen.get(REASONING) else {
+        return Ok(None);
+    };
+    let effort = table.get(EFFORT);
+    let budget = table.get(BUDGET);
+    let (Some(effort), Some(budget)) = (effort, budget) else {
+        return match (effort, budget) {
+            (Some(_), None) => Err(ParseError::ReasoningPairIncomplete {
+                present: EFFORT,
+                missing: BUDGET,
+            }),
+            (None, Some(_)) => Err(ParseError::ReasoningPairIncomplete {
+                present: BUDGET,
+                missing: EFFORT,
+            }),
+            // A `[reasoning]` table carrying neither declares no reasoning
+            // state. It is not empty -- the parser refuses an empty table
+            // (`ParseError::EmptyTable`) before this reader ever sees it --
+            // so it says something this reader is not the reader of.
+            _ => Ok(None),
+        };
+    };
+    // BOUND, and bound to a level. A key bound to something that is not text
+    // is a different finding from a key that is not there, and the two get
+    // different refusals so that neither message describes the other's
+    // document.
+    let Value::String(level) = effort else {
+        return Err(ParseError::ReasoningEffortNotALevel {
+            found: rendered(effort),
+        });
+    };
+    if level.trim().is_empty() {
+        return Err(ParseError::ReasoningEffortNotALevel {
+            found: rendered(effort),
+        });
+    }
+    let budget_tokens = match budget {
+        // Through `Count`, which is the record's own bound on a number it
+        // can spell: a cap no record can write down is not a cap this
+        // regimen may declare. A negative one is not a cap at all, and both
+        // land in the same refusal naming the literal.
+        Value::Integer(tokens) => {
+            match u64::try_from(*tokens).ok().and_then(|n| Count::new(n).ok()) {
+                Some(count) => Budget::Tokens(count),
+                None => {
+                    return Err(ParseError::ReasoningBudgetNotACapOrNone {
+                        found: rendered(budget),
+                    });
+                }
+            }
+        }
+        Value::String(word) if word == NO_BUDGET => Budget::Uncapped,
+        other => {
+            return Err(ParseError::ReasoningBudgetNotACapOrNone {
+                found: rendered(other),
+            });
+        }
+    };
+    Ok(Some(ReasoningControl {
+        effort: level.clone(),
+        budget_tokens,
+    }))
+}
+
+/// One value, named the way a refusal has to name it: what it says, and what
+/// kind the document made it.
+///
+/// A message that printed only the text would say `budget_tokens is bound to
+/// none` for both `"none"` and a bare word the grammar refuses anyway, and a
+/// message that printed only the kind would not say which value was wrong.
+fn rendered(value: &Value) -> String {
+    match value {
+        Value::String(text) => format!("the string `{text}`"),
+        Value::Integer(number) => format!("`{number}`"),
+        Value::Float(number) => format!("the float `{}`", number.as_str()),
+        Value::Boolean(flag) => format!("the boolean `{flag}`"),
+        Value::Array(_) => "an array".to_owned(),
+        Value::Table(_) => "a table".to_owned(),
+    }
 }
 
 /// Open the table a header names, creating a parent the document has not
@@ -515,7 +713,115 @@ fn tagged(value: &Value) -> crate::formats::record::json::Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{Decimal, ParseError, Value, parse};
+    use super::{Decimal, ParseError, Value, parse, reasoning_of};
+    use crate::formats::record::{Budget, Count, ReasoningControl};
+
+    /// An effort level is an instruction and a budget is a cap, and #94's
+    /// first design point is that one of them is not the other.
+    ///
+    /// Both directions, because the pair is a pair: the acceptance row names
+    /// the level-without-cap half, and a cap with no level is the same
+    /// document written the other way round.
+    #[test]
+    fn a_reasoning_state_is_two_fields_and_half_of_one_is_not_a_regimen() {
+        // Compared against the module's own constants rather than spelled
+        // again as literals: `check-library.py` refuses a string literal in
+        // a match pattern anywhere in this crate, and a second spelling of a
+        // field name is the drift that rule exists for.
+        assert!(
+            matches!(
+                parse("[reasoning]\neffort = \"high\"\n"),
+                Err(ParseError::ReasoningPairIncomplete { present, missing })
+                    if present == super::EFFORT && missing == super::BUDGET
+            ),
+            "a level with no cap declares a reasoning state nothing bounds"
+        );
+        assert!(
+            matches!(
+                parse("[reasoning]\nbudget_tokens = 4096\n"),
+                Err(ParseError::ReasoningPairIncomplete { present, missing })
+                    if present == super::BUDGET && missing == super::EFFORT
+            ),
+            "and a cap with no level is a run whose instruction nobody wrote down"
+        );
+        // A level whose value is not a level. Its OWN refusal: the key IS
+        // bound, so a message saying the table does not bind it would send
+        // the reader looking for something that is right there.
+        assert!(matches!(
+            parse("[reasoning]\neffort = 3\nbudget_tokens = 4096\n"),
+            Err(ParseError::ReasoningEffortNotALevel { .. })
+        ));
+        assert!(matches!(
+            parse("[reasoning]\neffort = \"  \"\nbudget_tokens = 4096\n"),
+            Err(ParseError::ReasoningEffortNotALevel { .. })
+        ));
+    }
+
+    /// The budget is a count of tokens or the declared absence of one, and
+    /// nothing else. `none` is a DECLARATION: the whole point of refusing the
+    /// half-written pair is that "no cap" and "nobody said" stop being the
+    /// same document.
+    #[test]
+    fn a_budget_is_a_count_of_tokens_or_the_word_none() {
+        let capped = parse("[reasoning]\neffort = \"high\"\nbudget_tokens = 4096\n")
+            .expect("document is a regimen");
+        assert_eq!(
+            reasoning_of(&capped).expect("it was already accepted"),
+            Some(ReasoningControl {
+                effort: "high".to_owned(),
+                budget_tokens: Budget::Tokens(Count::new(4096).expect("4096 is a count")),
+            })
+        );
+        let uncapped = parse("[reasoning]\neffort = \"medium\"\nbudget_tokens = \"none\"\n")
+            .expect("document is a regimen");
+        assert_eq!(
+            reasoning_of(&uncapped).expect("it was already accepted"),
+            Some(ReasoningControl {
+                effort: "medium".to_owned(),
+                budget_tokens: Budget::Uncapped,
+            })
+        );
+        for refused in [
+            "[reasoning]\neffort = \"high\"\nbudget_tokens = true\n",
+            "[reasoning]\neffort = \"high\"\nbudget_tokens = \"lots\"\n",
+            "[reasoning]\neffort = \"high\"\nbudget_tokens = -1\n",
+            "[reasoning]\neffort = \"high\"\nbudget_tokens = 0.5\n",
+        ] {
+            assert!(
+                matches!(
+                    parse(refused),
+                    Err(ParseError::ReasoningBudgetNotACapOrNone { .. })
+                ),
+                "{refused:?} was read as a budget"
+            );
+        }
+        // Zero IS a cap: a run that allotted no thinking tokens is a run
+        // somebody configured, and reading it as "no cap" would invert it.
+        let none_at_all = parse("[reasoning]\neffort = \"medium\"\nbudget_tokens = 0\n")
+            .expect("document is a regimen");
+        assert_eq!(
+            reasoning_of(&none_at_all).expect("it was already accepted"),
+            Some(ReasoningControl {
+                effort: "medium".to_owned(),
+                budget_tokens: Budget::Tokens(Count::default()),
+            })
+        );
+    }
+
+    /// A regimen that declares no reasoning state is a regimen, and this is
+    /// the assertion that stops the rule above from being a rule about every
+    /// document. Every committed regimen is one of these.
+    #[test]
+    fn a_regimen_that_declares_no_reasoning_state_declares_none() {
+        let plain =
+            parse("arm = \"dev-loop\"\ndogma_version = 0\n").expect("document is a regimen");
+        assert_eq!(reasoning_of(&plain).expect("nothing to refuse"), None);
+        // A `[reasoning]` table that says something else entirely. The
+        // grammar refuses an EMPTY table, so a header here always binds
+        // something; what it binds is not necessarily this reader's.
+        let elsewhere = parse("[reasoning]\nnotes = \"see the arm\"\n").expect("a regimen");
+        assert_eq!(reasoning_of(&elsewhere).expect("nothing to refuse"), None);
+    }
 
     #[test]
     fn parses_the_three_scalar_kinds() {

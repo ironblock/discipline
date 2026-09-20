@@ -1,0 +1,11 @@
+{
+  "arm": { "string": "thinking-high" },
+  "dogma_version": { "integer": 0 },
+  "reasoning": {
+    "table": {
+      "budget_tokens": { "integer": 4096 },
+      "effort": { "string": "high" }
+    }
+  },
+  "substrate": { "string": "local" }
+}

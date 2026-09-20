@@ -844,13 +844,18 @@ mod tests {
         );
     }
 
-    // A closure rules later than the fork, and the record has to say when. A
-    // ruling filed at the fork turn is a verdict recorded before the fact it
-    // ruled on existed. The lane is the canonical one: a tangent is a scope
-    // over the object, not a producer of content, and the tangent it closed
-    // is already in the provenance.
-    #[test]
-    fn a_closure_files_its_rulings_at_the_turn_it_closed_and_in_the_canonical_lane() {
+    /// A tangent-born fact at turn 4, dropped by a closure at turn 9.
+    ///
+    /// SHARED BY THE TWO TESTS BELOW, AND THAT IS THE POINT. One test used to
+    /// assert both the turn a closure files its ruling at and the lane it
+    /// files it under, so the two seeded faults that prove those two rules --
+    /// `inject_tangent_ruling_dated_at_fork` and
+    /// `inject_tangent_closing_lane_coined` -- broke the same test and could
+    /// be told apart only by which `assert_eq!` message came back. That is
+    /// prose lifted out of a panic, which is the staleness #46 exists to end.
+    /// Split, each fault breaks a test of its own and cargo's own
+    /// `test <path> ... FAILED` line is the class.
+    fn closed_over_a_dropped_fact() -> WorkingObject {
         let (mut object, tangent) = forked();
         object
             .apply(&add(
@@ -862,7 +867,16 @@ mod tests {
         tangent
             .close(&mut object, 9, &dispositions(&[("t1", Disposition::Drop)]))
             .expect("a total closure");
+        object
+    }
 
+    // A closure rules later than the fork, and the record has to say when. A
+    // ruling filed at the fork turn is a verdict recorded before the fact it
+    // ruled on existed -- and the entry's birth stays at the turn it was made
+    // at, which is the same claim read from the other end.
+    #[test]
+    fn a_closure_files_its_ruling_at_the_turn_it_closed() {
+        let object = closed_over_a_dropped_fact();
         let entry = object.entry(&id("t1")).expect("the dropped entry");
         let ruling = entry
             .provenances
@@ -873,6 +887,25 @@ mod tests {
             "the closure filed its ruling at a turn it did not close at: {ruling:?}"
         );
         assert_eq!(
+            entry.provenances.first().map(|birth| birth.turn),
+            Some(4),
+            "the entry's birth was refiled at the turn the closure ran"
+        );
+    }
+
+    // The lane a closure files under is the canonical one: a tangent is a
+    // scope over the object, not a producer of content, and the tangent it
+    // closed is already in the provenance, so a lane of its own would be a
+    // second name for what the provenance already says.
+    #[test]
+    fn a_closure_files_its_ruling_in_the_canonical_lane() {
+        let object = closed_over_a_dropped_fact();
+        let entry = object.entry(&id("t1")).expect("the dropped entry");
+        let ruling = entry
+            .provenances
+            .last()
+            .expect("the closure recorded a provenance of its own");
+        assert_eq!(
             ruling.lane, "main",
             "the closure filed its ruling under a lane the record does not \
              already have: {ruling:?}"
@@ -881,11 +914,6 @@ mod tests {
             ruling.tangent.as_deref(),
             Some("t-cache"),
             "the closure's own patch does not say which tangent it closed"
-        );
-        assert_eq!(
-            entry.provenances.first().map(|birth| birth.turn),
-            Some(4),
-            "the entry's birth was refiled at the turn the closure ran"
         );
     }
 

@@ -248,6 +248,17 @@ pub struct Dialect {
     pub cached_tokens: Option<String>,
     /// Where the server reports why it stopped.
     pub finish_reason: Option<String>,
+    /// Where the server puts the reasoning it did, separately from the
+    /// answer.
+    ///
+    /// DECLARED like every other path here, and it earns the declaration
+    /// twice over. A client that guessed and found nothing cannot tell "the
+    /// model did not think" from "I looked in the wrong place" -- and #94's
+    /// negative control turns exactly that distinction into a verdict on
+    /// whether template kwargs are reaching the template. Guessing the path
+    /// would make the control pass by construction on any server whose field
+    /// this client cannot find.
+    pub reasoning: Option<String>,
 }
 
 impl Dialect {
@@ -267,6 +278,7 @@ impl Dialect {
             prompt_tokens: Some("usage.prompt_tokens".to_owned()),
             cached_tokens: Some("usage.prompt_tokens_details.cached_tokens".to_owned()),
             finish_reason: Some("choices.0.finish_reason".to_owned()),
+            reasoning: Some("choices.0.message.reasoning_content".to_owned()),
         }
     }
 
@@ -282,6 +294,7 @@ impl Dialect {
             prompt_tokens: Some("usage.prompt_tokens".to_owned()),
             cached_tokens: Some("timings.prompt_n_cached".to_owned()),
             finish_reason: Some("choices.0.finish_reason".to_owned()),
+            reasoning: Some("choices.0.message.reasoning_content".to_owned()),
         }
     }
 }
@@ -299,6 +312,28 @@ pub struct RequestShape {
     pub limits: Limits,
     /// A grammar the answer must satisfy, when the regimen constrains it.
     pub grammar: Option<String>,
+    /// Arguments handed to the server's CHAT TEMPLATE, not to its sampler.
+    ///
+    /// A THIRD PLACE THE REASONING STATE IS SET, and #94 exists because it
+    /// was not distinguishable from the other two. The chat template takes
+    /// kwargs per request (`enable_thinking`, and on some templates the
+    /// effort level); the engine takes startup flags that apply to every
+    /// request; the harness decides which of the two, if either, it actually
+    /// forwards. A sampler pin lands in the request body's top level and is
+    /// echoed back by [`Dialect::sampler_echo`]; these land inside
+    /// `chat_template_kwargs` and are echoed by nothing at all -- which is
+    /// why their delivery is proved by a negative control rather than by an
+    /// echo.
+    ///
+    /// The record's own value space, and not a type of this module's: a
+    /// kwarg that reaches the wire has to be spellable in the archive of the
+    /// request that carried it, and `wire::body` renders it through the
+    /// record's renderer so a decimal goes out as the digits that were
+    /// written. Empty is the ordinary case and renders no key at all: a
+    /// request that carries `chat_template_kwargs: {}` when it has nothing
+    /// to say to the template is a request this program changed for no
+    /// reason, and every drive in this crate makes one.
+    pub template_kwargs: BTreeMap<String, crate::formats::record::json::Value>,
 }
 
 impl RequestShape {
@@ -406,6 +441,7 @@ mod tests {
                 retries: 0,
             },
             grammar: None,
+            template_kwargs: std::collections::BTreeMap::new(),
         };
         let next_turn = RequestShape {
             messages: vec![

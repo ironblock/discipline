@@ -52,6 +52,28 @@
 //! fork's answer becomes one entry per tagged field with a value, and every
 //! field that was not that is counted and reported rather than dropped --
 //! see [`Drive::uncaptured`].
+//!
+//! # A reasoning state is proved deliverable before it is claimed
+//!
+//! A regime that declares [`crate::formats::record::ReasoningControl`] gets
+//! one extra call before turn one: the [`CONTROL`] lane, sent
+//! `enable_thinking: false`, which must come back with no reasoning at all.
+//! It is the only check available -- a template kwarg is echoed by nothing,
+//! so its delivery cannot be confirmed the way a sampler pin's is -- and a
+//! drive whose control comes back thinking stops at
+//! [`Halt::KwargsNotDelivered`] rather than banking a level it did not set.
+//! A regime that declares no reasoning control makes no reasoning-state
+//! claim, so it pays for no control. #94 design point 4.
+//!
+//! **What is NOT here, and is disclosed rather than half-built:** the
+//! RESOLVED effort level, echoed from the rendered prompt head. #94 design
+//! point 2 asks for it because the injected sentence differs per level, so
+//! the head distinguishes them where the request cannot -- but no server this
+//! client speaks to returns its rendered head, and a field filled from the
+//! request would be the copied-from-the-request reading that design point
+//! exists to refuse. The same gap is why the harness declared-versus-rendered
+//! pair (design point 3) is not built: there is no rendered side to pair
+//! with.
 
 pub mod canned;
 pub mod regimen;
@@ -83,6 +105,32 @@ pub const MAIN: &str = "main";
 pub const INTERVIEW: &str = "interview";
 /// The lane a seam's ratification ask is made on.
 pub const RATIFY: &str = "ratify";
+/// The lane the kwarg-delivery negative control is made on.
+///
+/// Its own lane, and NOT a fork: the record's `fork` row links to a turn, and
+/// this call happens before turn one exists. A lane is a role on a substrate,
+/// the control is a role, and its request and response rows land in the
+/// archive like any other call's -- so the run that banked a reasoning-state
+/// claim carries the evidence that its kwargs were delivered, rather than a
+/// claim about a call nobody can find. #94 design point 4.
+pub const CONTROL: &str = "control";
+
+/// The template kwarg the negative control sets.
+///
+/// The kwarg #94's source reference names, and the only one whose effect is
+/// checkable without knowing what a template does with a level: `false` must
+/// produce no reasoning at all, so a single character coming back is a
+/// delivery failure and not a judgment about a model. Which templates read
+/// it is not measured here and is not claimed.
+pub const ENABLE_THINKING: &str = "enable_thinking";
+
+/// What the negative control asks.
+///
+/// Pinned rather than composed per run, because the control's verdict is
+/// "zero reasoning characters" and a longer or harder ask would make a model
+/// that thinks anyway look like a harness that dropped the kwarg. Short, and
+/// answerable without reasoning.
+pub const KWARG_CONTROL_ASK: &str = "Reply with the single word: ok";
 
 /// Everything a drive runs against, borrowed for the length of the run.
 ///
@@ -168,6 +216,27 @@ pub enum Halt {
         /// Why.
         why: SeamError,
     },
+    /// The negative control came back with reasoning in it, so the template
+    /// kwargs this drive sends are not reaching the template.
+    ///
+    /// **The drive refuses rather than continues, and that is the point.** A
+    /// fork sent `enable_thinking: false` that answers with reasoning
+    /// characters proves the kwarg went nowhere -- a server started without
+    /// `--jinja`, a harness that drops what it does not recognise, a
+    /// template that never reads the argument. Every reasoning-state claim
+    /// the run would go on to bank would then be recording a level it did
+    /// not set. #94 design point 4.
+    ///
+    /// The count, not a flag: "the control returned 40 reasoning characters"
+    /// is a measurement somebody can check against the archive, and "the
+    /// control failed" is this program's opinion about one.
+    KwargsNotDelivered {
+        /// The lane the control was made on.
+        lane: String,
+        /// How many characters of reasoning came back where none was asked
+        /// for.
+        reasoning_chars: usize,
+    },
     /// The record this drive built is not a record.
     ///
     /// The one variant that is a defect in this module rather than a fact
@@ -221,6 +290,18 @@ impl fmt::Display for Halt {
             Self::CommandNotRun { turn, why } => write!(f, "turn {turn}: {why}"),
             Self::ObjectRefused { turn, why } => write!(f, "turn {turn}: {why:?}"),
             Self::SeamRefused { turn, why } => write!(f, "turn {turn}: {why:?}"),
+            Self::KwargsNotDelivered {
+                lane,
+                reasoning_chars,
+            } => write!(
+                f,
+                "the `{lane}` negative control was sent `{ENABLE_THINKING}: false` and \
+                 answered with {reasoning_chars} characters of reasoning, so template \
+                 kwarg delivery is broken -- the server may have been started without \
+                 `--jinja`, or something between here and the template is dropping what \
+                 it does not recognise. Nothing this drive could bank about a reasoning \
+                 state would be about the state it set"
+            ),
             Self::Unrecordable { why } => write!(
                 f,
                 "the drive ran and what it wrote is not a record: {why}. That is a \
@@ -252,13 +333,12 @@ pub struct Uncaptured {
     pub captured: usize,
     /// The tags that appeared and were not kept, as they were written.
     pub passed_over: Vec<String>,
-    /// Whether the answer was cut off.
+    /// What became of the answer as a whole.
     ///
-    /// The interview grammar types truncation deliberately, and a truncated
-    /// answer's surviving fields are still real -- so they are folded, and
-    /// the fact that there were more is carried here. Dropped, it made a
-    /// cut-off answer indistinguishable from a whole one.
-    pub truncated: bool,
+    /// One field rather than a `truncated` flag beside a second reading of
+    /// the same fact: the states are exclusive, and #94 design point 5 adds
+    /// a third that is neither "cut off" nor "nothing came back".
+    pub outcome: ForkOutcome,
     /// How many entries this capture MOVED.
     ///
     /// `Applied::touched` is the object's own answer to which entries a patch
@@ -282,6 +362,43 @@ pub struct Uncaptured {
     /// that the day the schema has somewhere to put them, nothing has to be
     /// recomputed from an archive that never carried the second.
     pub entries_created: u32,
+}
+
+crate::client::vocabulary! {
+    /// What became of a fork's answer as a whole.
+    ///
+    /// **`ThinkingExhausted` is neither truncation nor an unreadable answer,
+    /// and it lives HERE rather than in the interview grammar.** The grammar
+    /// sees the answer's text and nothing else: an answer consumed inside
+    /// the think block arrives as the empty string, which is
+    /// `interview::Completion::Empty` -- "the lane emitted nothing", reason
+    /// unknown. The reason is in the REPLY, which only the drive holds: the
+    /// server said it ran out of room and reported reasoning it did not get
+    /// to finish. A format cannot type an outcome from evidence its input
+    /// does not carry, so this is the drive's vocabulary. #94 design point 5.
+    ForkOutcome {
+        /// The answer ended where the model meant it to.
+        Complete => "complete",
+        /// Cut off, on the interview grammar's own evidence -- an
+        /// unterminated fence, or a trailing tag with no value. The fields
+        /// that arrived are still real and are still folded.
+        Truncated => "truncated",
+        /// Nothing came back, and nothing says why.
+        ///
+        /// The grammar's own `Completion::Empty`, carried rather than folded
+        /// into `Complete`: a lane that emitted nothing has not finished an
+        /// answer. It is here because `ThinkingExhausted` is the NAMED
+        /// version of it, and a refinement of a state the census could not
+        /// spell would have nothing to refine.
+        Empty => "empty",
+        /// The cap was spent inside the think block: reasoning came back,
+        /// the answer did not, and the server said it stopped for length.
+        /// Counted by the census as its own outcome, because a fork that ran
+        /// out of budget thinking and a fork that had nothing to say are
+        /// different facts about the machinery and `entries: 0` says the
+        /// same thing for both.
+        ThinkingExhausted => "thinking_exhausted",
+    }
 }
 
 /// What became of one seam's ratification.
@@ -454,7 +571,17 @@ fn fold(
         regions: answer.fields.len(),
         captured: patches.len(),
         passed_over,
-        truncated,
+        // What the GRAMMAR can see, which is its own `Completion` and no
+        // more. `ThinkingExhausted` is set by the caller, which holds the
+        // reply this text came out of; a fold that named it from an empty
+        // string would be guessing at a reason that is not in its input.
+        outcome: if truncated {
+            ForkOutcome::Truncated
+        } else if matches!(answer.completion, interview::Completion::Empty) {
+            ForkOutcome::Empty
+        } else {
+            ForkOutcome::Complete
+        },
         // Filled by the caller: what the object made of these patches is not
         // known until they are applied, and a fold that guessed would be
         // guessing at the one number this census exists to be right about.
@@ -523,6 +650,76 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
     let mut tool_ids = IdSource::new("t");
     let mut capture_ids = IdSource::new("p");
     let mut seam_ids = IdSource::new("s");
+    let mut control_ids = IdSource::new("c");
+
+    // THE NEGATIVE CONTROL, before a single turn has run. #94 design point 4.
+    //
+    // A reasoning state is set in three places with three semantics -- the
+    // chat template's kwargs, the engine's startup flags, the harness's
+    // decision about what to forward -- and nothing echoes the first back.
+    // So delivery is proved the only way it can be: ask for no thinking and
+    // require that no thinking comes back. A single reasoning character
+    // against `enable_thinking: false` says the kwarg went nowhere, and every
+    // level this drive would go on to record would be a level it did not set.
+    //
+    // ONLY WHERE THERE IS A CLAIM TO REFUSE. A regime that declares no
+    // reasoning control makes no reasoning-state claim, so there is nothing
+    // for a control to protect and an extra call per drive would be a cost
+    // with no question behind it. The issue scopes the consequence the same
+    // way: the drive "refuses to bank any reasoning-state claim".
+    if script
+        .regime
+        .substrates
+        .iter()
+        .any(|declared| declared.reasoning_control.is_some())
+    {
+        let mut asking = gym.shape.clone();
+        asking.messages = vec![Message {
+            role: Role::User,
+            content: KWARG_CONTROL_ASK.to_owned(),
+        }];
+        asking
+            .template_kwargs
+            .insert(ENABLE_THINKING.to_owned(), Value::Boolean(false));
+        let call = gym.client.call(&asking, CONTROL, &mut control_ids);
+        let Some(answered) = call.outcome.answer() else {
+            // Turn zero, which is not a turn: this happened before the
+            // session began. The same spelling `regime.substrates` uses a
+            // few lines up for the other pre-turn refusal.
+            return Err(Halt::NoAnswer {
+                turn: 0,
+                lane: CONTROL.to_owned(),
+                outcome: Box::new(call.outcome.clone()),
+            });
+        };
+        // CHARACTERS, because that is what the issue's acceptance row
+        // counts and what a reader can recount from the archive.
+        //
+        // `None` COUNTS AS ZERO, and the limit is worth writing down: it
+        // means either that the reply carried no reasoning field -- the
+        // ordinary pass -- or that the dialect declares nowhere to look,
+        // which is no evidence at all. `Answer` cannot tell those apart.
+        // The place that can is where the dialect is chosen, and both
+        // dialects this crate ships declare the path; a control run under
+        // one that does not is a control that cannot fail, which is a gap
+        // in the DIALECT rather than something this branch can measure its
+        // way out of.
+        let reasoning_chars = answered
+            .reasoning
+            .as_deref()
+            .unwrap_or_default()
+            .chars()
+            .count();
+        if reasoning_chars > 0 {
+            return Err(Halt::KwargsNotDelivered {
+                lane: CONTROL.to_owned(),
+                reasoning_chars,
+            });
+        }
+        // Archived like every other call. A control whose evidence is not in
+        // the record is a control a later reader has to take on trust.
+        archive(&call, 0, &substrate, &mut events, &mut unspellable)?;
+    }
 
     for turn in &script.turns {
         let index = controller.begin_turn();
@@ -601,6 +798,26 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 });
             };
             let text = reply.text.clone();
+            // THE BUDGET SPENT INSIDE THE THINK BLOCK. #94 design point 5.
+            //
+            // Three facts, and all three are needed: the server said it
+            // stopped for length (`Outcome::Capped`), it reported reasoning,
+            // and no answer came out the other side. Drop any one and this
+            // becomes something else -- a capped answer that DID say
+            // something is an ordinary truncation the interview grammar
+            // types, an empty answer with no reasoning behind it is a lane
+            // that had nothing to say, and reasoning with a whole answer
+            // beside it is a fork that worked.
+            //
+            // Read from the REPLY and not from the text, which is why the
+            // interview format cannot own this outcome: the evidence is not
+            // in the format's input.
+            let thinking_exhausted = matches!(forked.outcome, Outcome::Capped(_))
+                && text.trim().is_empty()
+                && reply
+                    .reasoning
+                    .as_deref()
+                    .is_some_and(|thought| !thought.is_empty());
             let fork_id = format!("fork-{index}");
             events.push(Event::Fork {
                 id: fork_id.clone(),
@@ -649,6 +866,16 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             uncaptured.push(Uncaptured {
                 entries_touched,
                 entries_created,
+                // The fold answered from the text; this answers from the
+                // reply the text came out of, and it outranks -- an answer
+                // consumed inside the think block is empty, so the grammar
+                // said `Empty`, "nothing came back and nothing says why",
+                // which is the reading this outcome exists to refine.
+                outcome: if thinking_exhausted {
+                    ForkOutcome::ThinkingExhausted
+                } else {
+                    census.outcome
+                },
                 ..census
             });
 
@@ -860,14 +1087,15 @@ mod tests {
     use crate::client::transport::{Endpoint, Http};
     use crate::formats::record::json::Value;
     use crate::formats::record::{
-        Engine, Event, Kind, Reasoning, Regime, Substrate, Summary, Weights,
+        Budget, Count, Engine, Event, Kind, Reasoning, ReasoningControl, Regime, Substrate,
+        Summary, Weights,
     };
     use crate::isolation::{Confinement, Policy as IsolationPolicy};
     use crate::seam::policy::Policy as SeamPolicy;
 
     use super::canned;
     use super::script::{Command, Script};
-    use super::{Drive, Gym, Halt, run};
+    use super::{CONTROL, Drive, ENABLE_THINKING, ForkOutcome, Gym, Halt, run};
 
     /// A working tree the drive's commands run in.
     struct Ground {
@@ -919,6 +1147,14 @@ mod tests {
                     crate::formats::record::json::Value::Integer(7),
                 )]),
                 reasoning: Reasoning::Off,
+                // NO REASONING CONTROL, and that is what keeps every drive
+                // below unchanged by #94: the kwarg-delivery control fires
+                // only for a regime that declares one, because a drive making
+                // no reasoning-state claim has nothing to prove delivery of.
+                // `regime_declaring_a_reasoning_state` builds the one that
+                // does.
+                reasoning_control: None,
+                chat_template_sha256: None,
             }],
             dogma_version: 0,
         }
@@ -941,6 +1177,7 @@ mod tests {
                 retries: 1,
             },
             grammar: None,
+            template_kwargs: std::collections::BTreeMap::new(),
         }
     }
 
@@ -969,6 +1206,22 @@ mod tests {
         ground: &Ground,
         shape: RequestShape,
     ) -> Result<Drive, Halt> {
+        served(script, acts, ground, shape).0
+    }
+
+    /// The same again, and the request bodies the server actually received.
+    ///
+    /// The bodies are the only evidence for the half of #94 design point 4
+    /// that is about what the client SENT. A control whose verdict is read
+    /// off a reply proves the reply; that the request carried
+    /// `chat_template_kwargs` at all is a claim about the wire, and this is
+    /// where it can be checked.
+    fn served(
+        script: &Script,
+        acts: Vec<Act>,
+        ground: &Ground,
+        shape: RequestShape,
+    ) -> (Result<Drive, Halt>, Vec<String>) {
         let stub = Stub::serving(acts).expect("loopback binds");
         let client = Client::new(
             Http::new(Endpoint::parse(&stub.url()).expect("the stub's URL is an endpoint")),
@@ -978,7 +1231,7 @@ mod tests {
             },
         );
         let isolation = IsolationPolicy::unconfined();
-        run(
+        let driven = run(
             script,
             &Gym {
                 client: &client,
@@ -996,7 +1249,22 @@ mod tests {
                     phases: crate::seam::phase::PhaseGraph::none(),
                 },
             },
-        )
+        );
+        // After the run, so the bodies are all of them. `received` stops the
+        // stub, which is why it cannot be asked before the drive is done.
+        let bodies = stub.received();
+        (driven, bodies)
+    }
+
+    /// The same regime, declaring a reasoning state -- so the kwarg-delivery
+    /// control fires. #94 design point 4.
+    fn regime_declaring_a_reasoning_state() -> Regime {
+        let mut declared = regime();
+        declared.substrates[0].reasoning_control = Some(ReasoningControl {
+            effort: "high".to_owned(),
+            budget_tokens: Budget::Tokens(Count::new(4096).expect("4096 is a count")),
+        });
+        declared
     }
 
     // -----------------------------------------------------------------------
@@ -1397,7 +1665,11 @@ mod tests {
              saying it has nothing, and banking it as a fact is the confabulation \
              the decline vocabulary exists to prevent: {first:?}"
         );
-        assert!(!first.truncated, "and the canned answer is whole");
+        assert_eq!(
+            first.outcome,
+            super::ForkOutcome::Complete,
+            "and the canned answer is whole"
+        );
         assert!(
             first.passed_over.iter().any(|tag| tag.contains("EVIDENCE")),
             "and it names them as written: {:?}",
@@ -1446,6 +1718,164 @@ mod tests {
         assert!(census.regions > 0, "it read a region and kept none");
     }
 
+    // -----------------------------------------------------------------------
+    // #94: the reasoning state, its delivery, and the outcome a spent budget
+    // is
+    // -----------------------------------------------------------------------
+
+    /// A drive that declares a reasoning state proves its template kwargs
+    /// reach the template before it banks anything. #94 design point 4,
+    /// acceptance row 3.
+    ///
+    /// The seeded case is the issue's own: a server that ignores
+    /// `enable_thinking: false` and thinks anyway. Forty characters, because
+    /// the acceptance row counts forty and a count somebody can recompute
+    /// beats a flag.
+    #[test]
+    fn a_drive_whose_kwargs_never_reach_the_template_refuses_before_it_banks_anything() {
+        let ground = Ground::make("kwargs-not-delivered");
+        let thinking = "x".repeat(40);
+        assert_eq!(thinking.chars().count(), 40, "the row counts forty");
+        let script = canned::script(regime_declaring_a_reasoning_state());
+
+        let refused = against(
+            &script,
+            vec![Act::Answer(canned::reply_with_reasoning("ok", &thinking))],
+            &ground,
+        )
+        .expect_err("a control that came back thinking is not a drive");
+
+        let Halt::KwargsNotDelivered {
+            lane,
+            reasoning_chars,
+        } = &refused
+        else {
+            panic!("the drive continued past a failed kwarg control: {refused:?}");
+        };
+        assert_eq!(*reasoning_chars, 40, "counted, not asserted");
+        assert_eq!(lane, CONTROL);
+        // Exit two, which is what the acceptance row asks the drive for: a
+        // session that could not start is not a session that failed.
+        assert_eq!(Halt::EXIT, 2);
+        let said = refused.to_string();
+        assert!(
+            said.contains(ENABLE_THINKING) && said.contains("kwarg"),
+            "and it names kwarg delivery rather than blaming the model: {said}"
+        );
+
+        // NOTHING RAN. The control is at drive start, so the refusal costs
+        // one call and no turn -- and the script's first command would have
+        // written into the working tree if a turn had happened.
+        assert!(
+            !ground.tree.join("one.txt").exists(),
+            "the drive refused before the first turn"
+        );
+    }
+
+    /// The other half, and the half that stops the refusal above from being
+    /// a refusal of every drive: a control that comes back with no reasoning
+    /// lets the drive run, and the request that proved it is in the archive.
+    #[test]
+    fn a_control_that_comes_back_silent_lets_the_drive_run_and_is_archived() {
+        let ground = Ground::make("kwargs-delivered");
+        let script = canned::script(regime_declaring_a_reasoning_state());
+        // The control's reply first, then the six the script asks for.
+        let mut acts = vec![Act::Answer(canned::reply_with_reasoning("ok", ""))];
+        acts.extend(canned::acts());
+
+        let (driven, bodies) = served(&script, acts, &ground, shape());
+        let drive = driven.expect("a control that thought nothing is not a finding");
+
+        // THE REQUEST CARRIED THE KWARG. Read off what the server received,
+        // not off the shape this test built: a client that dropped
+        // `template_kwargs` on the floor would leave the control passing for
+        // the wrong reason, which is exactly the failure the control exists
+        // to catch one layer out.
+        let control_body = bodies.first().expect("the control was the first call");
+        assert!(
+            control_body.contains("\"chat_template_kwargs\":{\"enable_thinking\":false}"),
+            "the control's request did not carry the kwarg it is a control over: \
+             {control_body}"
+        );
+        // And no other call carries it: the control is a control, not a
+        // setting this drive applies to the session it is measuring.
+        assert_eq!(
+            bodies
+                .iter()
+                .filter(|body| body.contains("chat_template_kwargs"))
+                .count(),
+            1,
+            "the control's kwarg leaked into the drive's own calls"
+        );
+
+        // The evidence is in the record, on its own lane, and the record is
+        // still a record with it there.
+        crate::formats::record::project(&drive.rendered)
+            .expect("`check-record` accepts a drive carrying its control");
+        assert_eq!(
+            drive.record.substrate_of(CONTROL),
+            Some("canned"),
+            "the control's rows name the substrate they were put to"
+        );
+    }
+
+    /// A fork whose budget was spent inside the think block is its own
+    /// outcome. #94 design point 5, acceptance row 4.
+    ///
+    /// Three contrasting replies, because the outcome is a conjunction and
+    /// each conjunct is load-bearing. Assert only the first and the check
+    /// passes with `Capped` dropped, or with the reasoning ignored, or with
+    /// the empty answer ignored -- and each of those turns an ordinary
+    /// truncation or an ordinary silence into `thinking_exhausted`.
+    #[test]
+    fn a_fork_whose_budget_went_inside_the_think_block_is_thinking_exhausted() {
+        let thought = "I should weigh the two readings before answering";
+        for (name, fork_reply, want) in [
+            (
+                "capped, thought, and no answer",
+                canned::reply_exhausted_in_the_think_block(thought),
+                ForkOutcome::ThinkingExhausted,
+            ),
+            (
+                // Capped and thought, but it DID answer. An ordinary
+                // truncation, which the interview grammar types itself.
+                "capped, thought, and an answer that was cut off",
+                canned::reply_exhausted_in_the_think_block(thought).replace(
+                    "\"content\":\"\"",
+                    "\"content\":\"```\\nDECISION: keep it\\nLEARNED: the answer stops he\"",
+                ),
+                ForkOutcome::Truncated,
+            ),
+            (
+                // No answer and no thinking either: a lane that had nothing
+                // to say, which is not the same fact.
+                "capped, and nothing at all",
+                canned::reply_exhausted_in_the_think_block(""),
+                ForkOutcome::Empty,
+            ),
+        ] {
+            let ground = Ground::make("thinking-exhausted");
+            let mut script = three_turns();
+            script.turns.truncate(1);
+            script.turns[0].commands = Vec::new();
+
+            let drive = against(
+                &script,
+                vec![
+                    Act::Answer(canned::reply("turn one")),
+                    Act::Answer(fork_reply),
+                ],
+                &ground,
+            )
+            .expect("the drive ran");
+            assert_eq!(
+                drive.uncaptured[0].outcome, want,
+                "{name}: {:?}",
+                drive.uncaptured[0]
+            );
+        }
+    }
+
     #[test]
     fn a_truncated_fork_answer_is_recorded_as_truncated() {
         // The interview grammar types truncation deliberately, and dropping
@@ -1464,8 +1894,9 @@ mod tests {
             )),
         ];
         let drive = against(&script, acts, &ground).expect("the drive ran");
-        assert!(
-            drive.uncaptured[0].truncated,
+        assert_eq!(
+            drive.uncaptured[0].outcome,
+            super::ForkOutcome::Truncated,
             "an unclosed fence is the grammar's own truncation signal: {:?}",
             drive.uncaptured[0]
         );

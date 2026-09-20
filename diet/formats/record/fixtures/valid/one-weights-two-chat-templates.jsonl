@@ -1,0 +1,7 @@
+{"source":{"kind":"live"},"record":"start","regime":{"arm":"template-pair","dogma_version":0,"substrates":[{"id":"stock","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"806ccf68e5aa511d667a22f728d55def617b53ca309daac60d2f2c7e8c6e1ddb","sampler_card":{"seed":7},"reasoning":"on","chat_template_sha256":"d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1"},{"id":"patched","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"806ccf68e5aa511d667a22f728d55def617b53ca309daac60d2f2c7e8c6e1ddb","sampler_card":{"seed":7},"reasoning":"on","chat_template_sha256":"d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2"}]}}
+{"record":"turn","index":1,"prefill_tokens":1024}
+{"record":"request","id":"q1","lane":"main","substrate":"stock","text":"think about it"}
+{"record":"response","id":"a1","to_request":"q1","output_tokens":40,"text":"stock head"}
+{"record":"request","id":"q2","lane":"patched","substrate":"patched","text":"think about it"}
+{"record":"response","id":"a2","to_request":"q2","output_tokens":44,"text":"patched head"}
+{"record":"summary","kind":"drive","turns":1,"prefill_tokens_total":1024,"product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}

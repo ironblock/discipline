@@ -1192,6 +1192,44 @@ path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
 
+# #94 design point 1: an effort level with no budget beside it. The level is
+# an INSTRUCTION the chat template renders as system-message text -- it bounds
+# nothing -- so a regimen naming one and no cap has declared a reasoning state
+# no claim can be fixed in. With the pair check off, the corpus fixture is
+# accepted and `diet check-regimen` exits 0 on it.
+inject_regimen_reasoning_pair_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "    reasoning_of(&parsed)?;\n"
+new = "    let _ = reasoning_of(&parsed);\n"
+if source.count(old) != 1:
+    raise SystemExit(f"the reasoning pair check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# #94 design point 2: two substrate entries that differ in nothing but their
+# ids. A result attributed to one and a result attributed to the other came
+# from the same substrate under two names, and the chat template's digest is
+# what makes two files of one model into two substrates. With the check off,
+# the record is accepted and the comparison reads as a comparison.
+inject_record_substrates_indistinguishable() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "        if let Some(twin) = declared.iter().find(|s| indistinguishable(s, &one)) {"
+new = "        if let Some(twin) = declared.iter().find(|s| false && indistinguishable(s, &one)) {"
+if source.count(old) != 1:
+    raise SystemExit(f"the indistinguishable check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
 inject_record_weights_named_not_digested() {
   python3 - <<'EOF'
 import pathlib
@@ -2853,11 +2891,25 @@ if entry is None or not entry.get("legacy_signature"):
     raise SystemExit(f"{TARGET}: no such fault, or it carries no signature to stale")
 old = entry["legacy_signature"]
 
-for path in (pathlib.Path("verify.sh"), manifest):
+# ONE SIGNATURE, TWO SPELLINGS. `tomllib` hands back the DECODED regex, which
+# is what verify.sh carries inside shell quotes -- but the manifest's own text
+# spells every backslash twice, because a TOML basic string escapes them. That
+# was invisible while this fault's signature was prose with nothing to escape:
+# the decoded value and the file's text were the same characters, and one
+# lookup served both files. The moment #46 moved it to `<test path> \.\.\.
+# FAILED` the decoded form appeared zero times in the manifest, and this
+# injection -- which refuses rather than guesses -- said so. Re-encode instead
+# of searching for a form the file does not contain.
+for path, spelling in (
+    (pathlib.Path("verify.sh"), old),
+    (manifest, old.replace("\\", "\\\\").replace('"', '\\"')),
+):
     source = path.read_text(encoding="utf-8")
-    if source.count(old) != 1:
-        raise SystemExit(f"{path}: the signature to stale appears {source.count(old)} times")
-    path.write_text(source.replace(old, NEW), encoding="utf-8")
+    if source.count(spelling) != 1:
+        raise SystemExit(
+            f"{path}: the signature to stale appears {source.count(spelling)} times"
+        )
+    path.write_text(source.replace(spelling, NEW), encoding="utf-8")
 EOF
 }
 
@@ -6088,9 +6140,9 @@ selftest() {
   seeded_case "interview blind to truncation"         test     inject_interview_truncation_blind \
     'interview/fixtures/valid/truncated-unterminated-fence\.txt' 'test:conformance/formats::interview'
   seeded_case "interview discards trailing content"   test     inject_interview_discards_trailing \
-    'content lost parsing' 'lib/formats::interview::tests'
+    'formats::interview::tests::every_byte_of_an_answer_is_accounted_for \.\.\. FAILED' 'lib/formats::interview::tests'
   seeded_case "an event kind with no fixture"         test     inject_record_unfixtured_kind \
-    'no fixture.*spurious' 'lib/formats::record::tests'
+    'formats::record::tests::every_event_kind_appears_in_the_committed_corpus \.\.\. FAILED' 'lib/formats::record::tests'
   seeded_case "record substrate made optional"        test     inject_record_substrate_optional \
     'record/fixtures/invalid/regime-missing-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "a summary kind's fields made advisory" test     inject_record_summary_kind_fields_advisory \
@@ -6105,127 +6157,131 @@ selftest() {
     'record/fixtures/invalid/request-with-no-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "weights identified by name"            test     inject_record_weights_named_not_digested \
     'record/fixtures/invalid/weights-named-not-digested\.jsonl' 'test:conformance/formats::record'
+  seeded_case "an effort level with no budget"        test     inject_regimen_reasoning_pair_unchecked \
+    'regimen/fixtures/invalid/reasoning-effort-without-budget\.toml' 'test:conformance/formats::regimen'
+  seeded_case "two ids over one substrate"            test     inject_record_substrates_indistinguishable \
+    'record/fixtures/invalid/substrates-indistinguishable\.jsonl' 'test:conformance/formats::record'
   seeded_case "an injection only GNU sed accepts"     injections inject_injection_needs_gnu_sed \
     'sed forms only GNU accepts'
   seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \
-    'an edited cache was not refused' 'lib/capture::bakeoff'
+    'capture::bakeoff::tests::a_cache_the_record_did_not_consume_is_refused \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "the assembled directory's evidence is elsewhere" test inject_bakeoff_evidence_not_attached \
-    'a cache the record consumed was not committed beside it' 'lib/capture::bakeoff'
+    'capture::bakeoff::tests::the_assembled_directory_is_one_the_gates_accept \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "a budget no fixture demonstrates"      test     inject_bakeoff_budget_unfixtured \
-    'its fixture does not demonstrate failure there' 'lib/capture::sense'
+    'capture::sense::tests::every_pre_registered_budget_is_one_its_fixture_demonstrates \.\.\. FAILED' 'lib/capture::sense'
   seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
     'record/fixtures/invalid/retry-of-itself\.jsonl' 'test:conformance/formats::record'
   seeded_case "record nesting left unbounded"         test     inject_record_depth_unbounded \
     'record/fixtures/invalid/deep-nesting\.jsonl' 'test:conformance/formats::record'
   seeded_case "grounding floor made inert"            test     inject_grounded_floor_inert \
-    'a lane that mostly fabricated must be rejected whole' 'lib/capture::grounded::tests'
+    'capture::grounded::tests::a_lane_below_the_floor_is_rejected_whole_and_recorded \.\.\. FAILED' 'lib/capture::grounded::tests'
   seeded_case "grounding gates a judgment field"      test     inject_grounded_gates_judgment \
-    'the gate touched a judgment-class field' 'lib/capture'
+    'capture::grounded::tests::the_gate_does_not_touch_a_judgment_class_field \.\.\. FAILED' 'lib/capture'
   seeded_case "a score with no demonstrated failure"  test     inject_grounded_undemonstrated \
-    'a measurement was handed back whose instrument never failed' 'lib/capture::grounded::tests'
+    'capture::grounded::tests::a_measurement_requires_its_instrument_to_have_been_seen_fail \.\.\. FAILED' 'lib/capture::grounded::tests'
   seeded_case "grounding loosened to recombination"   test     inject_grounded_loose_matching \
-    'a sentence the source never said was scored as present in it' 'lib/capture::grounded::tests'
+    'capture::grounded::tests::presence_is_not_recombination \.\.\. FAILED' 'lib/capture::grounded::tests'
   seeded_case "a floor of zero"                       test     inject_grounded_zero_floor \
-    'a floor of zero was accepted, and every lane meets it' 'lib/capture::grounded::tests'
+    'capture::grounded::tests::a_floor_must_be_pre_registered_and_nonzero \.\.\. FAILED' 'lib/capture::grounded::tests'
   seeded_case "supersede deletes what it replaced"    test     inject_object_supersede_deletes \
-    'the voided entry is still here' 'lib'
+    'object::tests::a_supersede_voids_and_links_and_never_deletes \.\.\. FAILED' 'lib'
   seeded_case "the reconciler stops deduping"         test     inject_object_no_dedup \
-    'the same fact, wrapped differently, is the same fact' 'lib/object'
+    'object::tests::two_forks_saying_the_same_thing_dedup_with_both_provenances \.\.\. FAILED' 'lib/object'
   seeded_case "a correction that restates what it voids" test   inject_object_self_void \
-    'an entry was voided by itself' 'lib/object::tests'
+    'object::tests::a_supersede_that_restates_the_entry_it_voids_is_refused \.\.\. FAILED' 'lib/object::tests'
   seeded_case "a state change over a supersede link"  test     inject_object_state_overwrite \
-    'a correction was erased by a later state change' 'lib/object::tests'
+    'object::tests::a_voided_entry_cannot_be_resolved_retired_or_voided_again \.\.\. FAILED' 'lib/object::tests'
   seeded_case "a no-op patch that claims an entry"    test     inject_object_false_attribution \
-    'the patch claimed entries no diff can support' 'lib/object::tests'
+    'object::tests::a_patch_that_changes_nothing_claims_nothing \.\.\. FAILED' 'lib/object::tests'
   seeded_case "a usage error that exits zero"         test     inject_cli_usage_exit \
-    'a usage error must be distinguishable from a bad document' 'test:cli'
+    'a_usage_error_exits_two_and_prints_no_result \.\.\. FAILED' 'test:cli'
   seeded_case "a verb wired to the wrong format"      test     inject_cli_wrong_format \
-    'a valid fixture of its own format did not read' 'test:cli'
+    'every_verb_reads_its_own_formats_valid_fixtures \.\.\. FAILED' 'test:cli'
   seeded_case "a CLI that prints no result"           test     inject_cli_silent \
     'stdout is not JSON' 'test:cli'
   seeded_case "the regime moves under a patch"        test     inject_object_regime_mutable \
-    'moved the regime the object was opened under' 'lib/object::tests'
+    'object::tests::no_patch_variant_can_move_the_regime \.\.\. FAILED' 'lib/object::tests'
   seeded_case "dedup rebinds instead of aliasing"     test     inject_object_no_alias \
-    'a lane was told the object had never heard of the id it chose' 'lib/object::tests'
+    'object::tests::an_alias_resolves_to_its_entry_and_keeps_both_provenances \.\.\. FAILED' 'lib/object::tests'
   seeded_case "a turn applied in arrival order"       test     inject_object_unsorted_turn \
-    'the outcome of a turn depended on the order its patches arrived in' 'lib/object::tests'
+    'object::tests::a_turns_patches_apply_the_same_in_any_order \.\.\. FAILED' 'lib/object::tests'
   seeded_case "a self-supersede through an alias"     test     inject_object_alias_self_void \
-    'was not named as one' 'lib/object::tests'
+    'object::tests::a_supersede_of_an_entry_by_its_own_alias_is_refused \.\.\. FAILED' 'lib/object::tests'
   seeded_case "a field kind nothing covers"           test     inject_field_kind_variant \
     'non-exhaustive patterns' 'lib'
   seeded_case "a subshell read as a group"            test     inject_shell_subshell_as_group \
-    'the bracketed list was not read as a subshell' 'lib'
+    'formats::shell::tests::a_subshell_is_a_command_of_its_own_and_not_a_word \.\.\. FAILED' 'lib'
   seeded_case "a stderr pipe read as a plain pipe"    test     inject_shell_stderr_pipe_flat \
-    'did not become the duplication it abbreviates' 'lib/formats::shell::tests'
+    'formats::shell::tests::a_stderr_pipe_is_the_duplication_it_abbreviates \.\.\. FAILED' 'lib/formats::shell::tests'
   seeded_case "an expanding word reported literal"    test     inject_shell_expansion_literal \
-    'a word the shell would expand was reported literal' 'lib'
+    'formats::shell::tests::a_brace_expansion_is_not_the_word_it_looks_like \.\.\. FAILED' 'lib'
   seeded_case "an empty payload read as absent"       test     inject_record_empty_payload_dropped \
-    'an empty answer is a recorded answer, not a missing one' 'lib/formats::record::tests'
+    'formats::record::tests::archive_rows_keep_their_payloads_through_a_round_trip \.\.\. FAILED' 'lib/formats::record::tests'
   seeded_case "a tangent drop that deletes"           test     inject_tangent_drop_removes \
-    'a drop evicts to the archive and never deletes' 'lib/object::tangent::tests'
+    'object::tangent::tests::a_dropped_entry_is_evicted_to_the_archive_and_never_deleted \.\.\. FAILED' 'lib/object::tangent::tests'
 
   seeded_case "a parked entry that still renders"     test     inject_tangent_park_renders \
-    'a parked entry still speaks for the object' 'lib/object::tangent::tests'
+    'object::tangent::tests::a_parked_entry_is_retained_and_stops_speaking_for_the_object \.\.\. FAILED' 'lib/object::tangent::tests'
 
   seeded_case "a tangent scoped by recency"           test     inject_tangent_scope_by_recency \
-    'scope is by provenance, not by recency' 'lib/object::tangent::tests'
+    'object::tangent::tests::an_entry_the_trunk_created_after_the_fork_is_not_in_the_tangents_scope \.\.\. FAILED' 'lib/object::tangent::tests'
 
   seeded_case "a tangent closed leaving an entry unruled" test  inject_tangent_undisposed_ignored \
-    'closure is total: a tangent-born entry was left undisposed' 'lib/object::tangent::tests'
+    'object::tangent::tests::a_tangent_born_entry_left_undisposed_refuses_the_closure \.\.\. FAILED' 'lib/object::tangent::tests'
 
   seeded_case "a prefix claimed intact, not compared" test     inject_tangent_prefix_asserted \
-    'the prefix was reported intact after the trunk moved' 'lib/object::tangent::tests'
+    'object::tangent::tests::a_tangent_that_touched_the_trunk_says_the_prefix_moved \.\.\. FAILED' 'lib/object::tangent::tests'
 
   seeded_case "a tangent id opened twice"             test     inject_tangent_id_reused \
-    'a tangent id the record already carries was opened again' 'lib/object::tangent::tests'
+    'object::tangent::tests::a_tangent_id_the_record_already_carries_is_refused \.\.\. FAILED' 'lib/object::tangent::tests'
 
   seeded_case "a tangent that dates a fact at the fork" test   inject_tangent_provenance_ignores_turn \
-    'a tangent dated a patch at a turn other than the one it was made at' 'lib/object::tangent::tests'
+    'object::tangent::tests::a_tangent_stamps_the_provenance_of_every_patch_made_under_it \.\.\. FAILED' 'lib/object::tangent::tests'
 
   seeded_case "a closure ruling dated at the fork"    test     inject_tangent_ruling_dated_at_fork \
-    'the closure filed its ruling at a turn it did not close at' 'lib/object::tangent::tests'
+    'object::tangent::tests::a_closure_files_its_ruling_at_the_turn_it_closed \.\.\. FAILED' 'lib/object::tangent::tests'
 
   seeded_case "a closure under a coined lane"         test     inject_tangent_closing_lane_coined \
-    'the closure filed its ruling under a lane the record does not already have' 'lib/object::tangent::tests'
+    'object::tangent::tests::a_closure_files_its_ruling_in_the_canonical_lane \.\.\. FAILED' 'lib/object::tangent::tests'
 
   seeded_case "a disposition missing from the list"   test     inject_tangent_disposition_missing_from_all \
-    'the dispositions a closure can rule with are not the three the record names' 'lib/object::tangent::tests'
+    'object::tangent::tests::the_dispositions_are_the_three_a_closure_rules_with \.\.\. FAILED' 'lib/object::tangent::tests'
 
   seeded_case "a tangent that offers a settled fact again" test inject_tangent_scope_offers_a_ruled_entry \
-    'the tangent offered a fact the record had already ruled on for disposition a second time' 'lib/object::tangent::tests'
+    'object::tangent::tests::a_tangent_does_not_offer_a_fact_it_has_already_ruled_on \.\.\. FAILED' 'lib/object::tangent::tests'
 
   seeded_case "a prefix that counts dead trunk rows"  test     inject_tangent_prefix_counts_dead_rows \
-    'a trunk row that was already dead at the fork was counted into the prefix' 'lib/object::tangent::tests'
+    'object::tangent::tests::a_trunk_row_already_dead_at_the_fork_is_not_part_of_the_prefix \.\.\. FAILED' 'lib/object::tangent::tests'
 
   seeded_case "a prefix called intact whenever it only grew" test inject_tangent_prefix_only_grew \
-    'the prefix was reported unmoved after the trunk wrote a fact of its own' 'lib/object::tangent::tests'
+    'object::tangent::tests::a_trunk_that_went_on_writing_moved_the_prefix_the_fork_recorded \.\.\. FAILED' 'lib/object::tangent::tests'
 
   seeded_case "a parked entry that reads as retired"  test     inject_object_park_renders_as_retired \
-    'a state renders under a name the dump does not promise' 'lib/object::tests'
+    'object::tests::every_entry_state_renders_the_name_the_dump_promises \.\.\. FAILED' 'lib/object::tests'
 
   seeded_case "a park with no tangent behind it"      test     inject_object_park_needs_no_tangent \
-    'an entry was parked under no tangent, so it left the live set' 'lib/object::tests'
+    'object::tests::parking_an_entry_no_tangent_created_is_refused \.\.\. FAILED' 'lib/object::tests'
 
   seeded_case "a negative zero decimal accepted"      test     inject_record_negative_zero_decimal \
-    'was constructed, and the grammar would not read it back' 'lib'
+    'formats::record::json::tests::a_spelling_the_grammar_refuses_cannot_be_constructed \.\.\. FAILED' 'lib'
   seeded_case "the producer read as the last command" test     inject_shell_producer_is_last_written \
-    'produces its output with' 'lib/formats::shell::tests'
+    'formats::shell::tests::the_producer_is_the_head_of_the_last_pipeline_and_not_its_tail \.\.\. FAILED' 'lib/formats::shell::tests'
   seeded_case "an operator dropped from the table"    test     inject_shell_operator_table_row_dropped \
-    'the table gained or lost an operator' 'lib/formats::shell::tests'
+    'formats::shell::tests::every_operator_is_named_here_and_the_table_says_the_same \.\.\. FAILED' 'lib/formats::shell::tests'
   seeded_case "a stripping heredoc that keeps tabs"   test     inject_shell_heredoc_strip_keeps_tabs \
-    'did not strip the tabs the shell strips' 'lib/formats::shell::tests'
+    'formats::shell::tests::a_stripping_heredoc_strips_its_tabs_and_a_plain_one_keeps_them \.\.\. FAILED' 'lib/formats::shell::tests'
   seeded_case "the command word read as an operand"   test     inject_shell_command_word_is_an_operand \
-    'the command word is not one of its own operands' 'lib'
+    'formats::shell::tests::the_command_word_is_the_first_word_and_the_operands_are_the_rest \.\.\. FAILED' 'lib'
   seeded_case "a regimen float rendered as a string"  test     inject_regimen_float_as_a_string \
-    'a float projected as something other than a decimal' 'lib/formats::regimen::tests'
+    'formats::regimen::tests::a_float_projects_as_a_number_and_not_as_its_digits_in_quotes \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "a table header that opens nothing"     test     inject_regimen_table_scope_flattened \
-    'its keys are not the document.s' 'lib/formats::regimen::tests'
+    'formats::regimen::tests::a_table_scopes_the_keys_that_follow_it \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "a header comment read as a table"      test     inject_regimen_header_comment_is_a_table \
-    'a comment after a table header is not a table the header opened' 'lib/formats::regimen::tests'
+    'formats::regimen::tests::a_comment_after_a_table_header_is_not_part_of_the_table \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "two tables of one name accepted"       test     inject_regimen_table_collision_unchecked \
-    'a table opened twice was not refused' 'lib/formats::regimen::tests'
+    'formats::regimen::tests::a_table_may_not_arrive_twice_or_take_a_key_s_name \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "the float rule widened past the record" test    inject_regimen_float_rule_widened \
-    'the regimen grammar and the record.s decimal disagree' 'lib/formats::regimen::tests'
+    'formats::regimen::tests::the_float_rule_and_the_records_decimal_rule_agree \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "a summary the rows do not carry"       recompute inject_recompute_summary_not_derived \
     'the report does not re-derive'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
@@ -6251,9 +6307,9 @@ selftest() {
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing'
   seeded_case "a nested table flattened"              test     inject_regimen_nested_table_flattened \
-    'holds its own binding and the table below it' 'lib/formats::regimen::tests'
+    'formats::regimen::tests::a_table_may_hold_one_table_and_no_more \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
-    'an array item was read by something other than the value reader' 'lib/formats::regimen::tests'
+    'formats::regimen::tests::an_array_holds_scalars_read_by_the_same_reader \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "a merged field an injection cannot see" injections inject_injections_struct_grew \
     'builds a Provenance without cohort'
   seeded_case "a literal the scan cannot place"       injections inject_injections_literal_unplaceable \
@@ -6287,11 +6343,11 @@ selftest() {
   seeded_case "external subresource on the site"      pages    inject_pages \
     'hygiene: external-subresource:'
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
-    'dogma tag\(s\) absent from diet/formats/interview/tags\.tsv' 'lib/formats::interview'
+    'formats::interview::tests::no_dogma_tag_is_missing_from_the_table \.\.\. FAILED' 'lib/formats::interview'
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \
-    "the projection lost the file's order" 'lib/formats::operating_points'
+    "formats::operating_points::tests::the_entries_come_back_in_the_order_the_file_wrote_them \.\.\. FAILED" 'lib/formats::operating_points'
   seeded_case "an unmarked entry that shadows another is admitted" test  inject_shadowing_admitted \
-    "the retired spelling is refused" 'lib/formats::operating_points'
+    "formats::operating_points::tests::the_retired_spelling_is_refused_for_shadowing_and_not_something_else \.\.\. FAILED" 'lib/formats::operating_points'
   seeded_case "an integer terminal grown a second time" test     inject_number_terminal_regrown \
     'it belongs in number\.pest and nowhere else' 'test:conformance/the_integer_terminal'
   seeded_case "a shared body written out under another name" test inject_number_terminal_body_regrown \
@@ -6331,59 +6387,59 @@ selftest() {
   seeded_case "history with an undeterminable base"   history  inject_history_no_base \
     'an undeterminable base is a failure, not an empty scan'
   seeded_case "an ask wired to another class's question" test inject_router_ask_class_untuned \
-    'the ask does not ask its own question' 'lib/capture::router::tests'
+    'capture::router::tests::each_ask_asks_the_question_its_class_calls_for \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "a template without the imperative"     test     inject_router_ask_imperative_dropped \
-    'the ask does not carry the fork-local imperative' 'lib/capture::router::tests'
+    'capture::router::tests::every_ask_kind_has_a_template_that_carries_the_imperative \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "a census that miscounts which classes fired" test inject_router_census_class_miscounted \
     'the census does not say which classes fired' 'lib/capture::router::tests'
   seeded_case "a route verb answering with a hollow census" test inject_router_route_census_hollow \
-    'where the drive spends' 'test:cli'
+    'the_route_verb_answers_with_a_census_and_not_with_prose \.\.\. FAILED' 'test:cli'
   seeded_case "a table row that can never fire"       test     inject_router_table_row_shadowed \
-    'can never fire' 'lib/capture::router::tests'
+    'capture::router::tests::no_row_of_the_table_can_ever_fire_from_below_an_earlier_one \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "a corpus that stops covering a class"  test     inject_router_corpus_class_uncovered \
-    'call\(s\) in the corpus, fewer than' 'lib/capture::router::tests'
+    'capture::router::tests::the_corpus_covers_every_class_and_every_tool_name_the_router_knows \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "a table row skipped, not refused"      test     inject_router_table_row_skipped \
-    'was skipped rather than refused' 'lib/capture::router::tests'
+    'capture::router::tests::a_table_row_that_is_not_a_rule_is_refused_and_not_skipped \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "an intent taken from any lane"         test     inject_router_intent_lane_ignored \
-    'did not quote back what the model said it was about to do' 'lib/capture::router::tests'
+    'capture::router::tests::an_ask_quotes_back_what_the_canonical_lane_said_it_would_do \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "the first stated intent, not the last" test     inject_router_intent_first_not_last \
-    'quoted an intent the model had already moved past' 'lib/capture::router::tests'
+    'capture::router::tests::stated_intent_takes_the_last_sentence_that_states_one \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "an intent marker lost from the table"  test     inject_router_intent_marker_lost \
-    'a marker was added or lost without a sentence that reaches it' 'lib/capture::router::tests'
+    'capture::router::tests::every_marker_the_model_states_an_intent_with_is_heard \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "an unclassified call nobody can look up" test   inject_router_unclassified_unattributed \
     'must name the call, its turn, its tool and its word' 'lib/capture::router::tests'
   seeded_case "the declared default out of the vocabulary" test inject_router_class_vocabulary_shortened \
-    'left the vocabulary without leaving the tests that walk it' 'lib/capture::router::tests'
+    'capture::router::tests::every_vocabulary_is_named_in_full_where_the_tests_walk_it \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "a quoted substitution descended into"  test     inject_mechanical_quoted_substitution \
-    'a single-quoted substitution was descended into' 'lib'
+    'capture::mechanical::tests::a_quoted_substitution_is_three_characters_and_not_a_command \.\.\. FAILED' 'lib'
   seeded_case "the declared default replaced by silence" test   inject_router_unknown_silent \
     'an unknown pattern must route to the declared default, never to silence' 'lib/capture::router::tests'
   seeded_case "a judgment ask released mid-turn"      test     inject_router_judgment_mid_turn \
-    'a judgment ask fired in the middle of a turn' 'lib/capture::router::tests'
+    'capture::router::tests::a_judgment_ask_waits_for_the_turn_boundary \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "a row of the routing table lost"       test     inject_router_table_row_lost \
     'misrouted call' 'lib/capture::router::tests'
   seeded_case "an unknown call routed but not recorded" test   inject_router_unclassified_silent \
     'an unknown pattern must be a typed event' 'lib/capture::router::tests'
   seeded_case "a reduction claimed, not computed"     test     inject_router_reduction_claimed \
-    'the reduction is not the number its own counts give' 'lib/capture::router::tests'
+    'capture::router::tests::the_census_reports_the_reduction_as_a_decimal_of_its_own_counts \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "a subshell that shares the parent state" test   inject_mechanical_subshell_leaks \
-    'the subshell cd leaked into the parent' 'lib/capture::mechanical::tests'
+    'capture::mechanical::tests::a_subshells_cd_does_not_leak_into_the_parent \.\.\. FAILED' 'lib/capture::mechanical::tests'
   seeded_case "a failed cd applied anyway"            test     inject_mechanical_failed_cd_applied \
-    'a failed cd moved the working directory' 'lib/capture::mechanical::tests'
+    'capture::mechanical::tests::a_failed_cd_leaves_the_cwd_where_it_was_and_is_recorded \.\.\. FAILED' 'lib/capture::mechanical::tests'
   seeded_case "popd on an empty stack ignored"        test     inject_mechanical_popd_empty_ignored \
-    'popd on an empty stack was silently ignored' 'lib/capture::mechanical::tests'
+    'capture::mechanical::tests::popd_on_an_empty_stack_is_a_recorded_failure \.\.\. FAILED' 'lib/capture::mechanical::tests'
   seeded_case "the mechanical-noun table emptied"     test     inject_mechanical_lint_table_emptied \
-    'a question about a mechanical fact went unflagged' 'lib/capture::mechanical::tests'
+    'capture::mechanical::tests::the_lint_catches_every_shape_of_mechanical_question \.\.\. FAILED' 'lib/capture::mechanical::tests'
   seeded_case "a mechanical entry sent through the gate" test  inject_mechanical_entry_grounded \
-    'a mechanical entry was dropped as if it needed grounding' 'lib/capture::mechanical::tests'
+    'capture::mechanical::tests::mechanical_entries_are_applied_without_a_lane_report \.\.\. FAILED' 'lib/capture::mechanical::tests'
   seeded_case "a cosine that forgot its second norm"  test     inject_sense_cosine_unnormalised \
-    'cosine of a vector with itself was not one' 'lib/capture'
+    'capture::sense::tests::cosine_of_a_vector_with_itself_is_one \.\.\. FAILED' 'lib/capture'
   seeded_case "contrastive scoring that ignores the negative sense" test inject_sense_contrastive_ignores_negative \
-    'the contrastive score ignored the negative sense' 'lib/capture::sense::tests'
+    'capture::sense::tests::contrastive_scoring_subtracts_the_negative_sense \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "a null whose labels are never shuffled" test   inject_sense_null_labels_unshuffled \
-    'd-prime on a shuffled-label null was far from zero' 'lib/capture::sense::tests'
+    'capture::sense::tests::a_shuffled_label_null_sits_at_chance \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "a bootstrap p with no attainable floor" test   inject_sense_p_without_floor \
-    'a bootstrap p-value came without its attainable floor' 'lib/capture::sense::tests'
+    'capture::sense::tests::a_p_value_never_travels_without_its_attainable_floor \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "a metric whose failure fixture is gone" test   inject_sense_metric_fixture_removed \
     'no failure fixture, so it can never be reported' 'lib/capture::sense::tests'
   seeded_case "a register mislabelled at its source" test     inject_sense_register_source_mislabelled \
@@ -6391,37 +6447,37 @@ selftest() {
   seeded_case "a file in the register naming nothing"  test     inject_sense_register_unnamed_file \
     'not a declared sidecar' 'lib/capture::sense::tests'
   seeded_case "a mined row nobody can trace"          test     inject_sense_provenance_join_dropped \
-    'a row nobody can trace was accepted' 'lib/capture::sense::tests'
+    'capture::sense::tests::a_mined_row_without_provenance_is_refused_and_so_is_provenance_without_a_row \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
-    'two lines were read as one, and the second was lost' 'lib/formats::record::json::tests'
+    'formats::record::json::tests::a_data_line_is_one_object_of_the_record_grammar \.\.\. FAILED' 'lib/formats::record::json::tests'
   seeded_case "controls that never look at the register" test inject_sense_controls_ignore_register \
-    'a register row reached the top control and the controls passed' 'lib/capture::sense::tests'
+    'capture::sense::tests::a_register_row_that_reaches_a_control_is_named_as_the_row_that_displaced_it \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "a bootstrap that never resamples"      test     inject_sense_bootstrap_never_resamples \
-    'every resample was the observed difference' 'lib/capture::sense::tests'
+    'capture::sense::tests::a_paired_bootstrap_resamples_rather_than_repeating_the_observed_difference \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "a failure reading off the worst reading" test   inject_sense_failure_reading_moved \
-    'is the worst the metric can say' 'lib/capture::sense::tests'
+    'capture::sense::tests::every_metric_names_the_reading_at_which_it_has_failed \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "a pre-registration with nothing in it" test     inject_sense_pre_registration_emptied \
-    'the primary endpoint is not the endpoint that was registered' 'lib/capture::sense::tests'
+    'capture::sense::tests::the_pre_registration_names_its_endpoints_and_its_blockers \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "a lexical gate asked about the id"     test     inject_sense_gate_reads_the_id \
-    'the gate did not decide on the row' 'lib/capture::sense::tests'
+    'capture::sense::tests::a_gated_out_row_sits_at_the_scorings_floor \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "a separation over one class spread"    test     inject_sense_d_prime_unpooled \
-    'd-prime was standardised by one class' 'lib/capture::sense::tests'
+    'capture::sense::tests::d_prime_is_the_standardised_separation_of_the_two_means \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "a null band widened past a finding"    test     inject_sense_null_band_widened \
-    'bands are not the numbers they were registered as' 'lib/capture::sense::tests'
+    'capture::sense::tests::the_null_bands_are_wider_than_measurement_and_narrower_than_a_finding \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "a reported metric that reports a constant" test inject_sense_reported_value_constant \
     'the record of a metric is not the numbers the metric produced' 'lib/capture::sense::tests'
   seeded_case "the mechanical lane renamed"           test     inject_mechanical_lane_renamed \
-    'the lane was renamed' 'lib/capture::mechanical::tests'
+    'capture::mechanical::tests::the_lane_is_named_mechanical_and_every_entry_says_so \.\.\. FAILED' 'lib/capture::mechanical::tests'
   seeded_case "an option word read as a directory"    test     inject_mechanical_option_is_a_directory \
-    'an option word was read as the directory it names' 'lib/capture::mechanical::tests'
+    'capture::mechanical::tests::an_option_word_is_not_a_directory \.\.\. FAILED' 'lib/capture::mechanical::tests'
   seeded_case "a flag value read as a file"           test     inject_mechanical_flag_value_is_a_file \
-    'the lane read a file out of a flag.s value' 'lib/capture::mechanical::tests'
+    'capture::mechanical::tests::a_flag_value_is_not_a_file_the_turn_touched \.\.\. FAILED' 'lib/capture::mechanical::tests'
   seeded_case "an entry with the wrong verb"          test     inject_mechanical_entry_verb_swapped \
-    'the entry used the wrong verb for what happened to the file' 'lib/capture::mechanical::tests'
+    'capture::mechanical::tests::an_entry_names_what_happened_to_the_file_it_is_about \.\.\. FAILED' 'lib/capture::mechanical::tests'
   seeded_case "a pipeline whose members never run"    test     inject_mechanical_pipeline_skipped \
-    'nothing in the pipeline ran' 'lib/capture::mechanical::tests'
+    'capture::mechanical::tests::a_pipeline_and_a_background_chain_still_run_the_commands_in_them \.\.\. FAILED' 'lib/capture::mechanical::tests'
   seeded_case "a write lost to a read of the same path" test   inject_mechanical_write_lost_to_a_read \
-    'a write was lost to a read of the same path in the same call' 'lib/capture::mechanical::tests'
+    'capture::mechanical::tests::a_file_written_and_read_by_one_call_is_two_facts_and_a_file_named_twice_is_one \.\.\. FAILED' 'lib/capture::mechanical::tests'
   seeded_case "the resolver keying on a comment"       resolver inject_keyed_by_a_comment \
     'keyed as .*inject_alpha'
   seeded_case "a build failure read as a broken derivation" derive inject_derive_build_failure_unread \
@@ -6437,23 +6493,23 @@ selftest() {
   seeded_case "a second verdict in a reason accepted"  test     inject_verdict_second_verdict_accepted \
     'verdict/fixtures/invalid/two-verdicts\.txt' 'test:conformance/formats::verdict'
   seeded_case "an anchor matched inside a longer word"  test     inject_collector_substring_match \
-    'an anchor matched inside a longer word' 'lib/capture::collector::literal::tests'
+    'capture::collector::literal::tests::a_match_is_at_a_word_boundary \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "an English word made an anchor"         test     inject_collector_english_anchor \
-    'an English word became an anchor' 'lib/capture::collector::literal::tests'
+    'capture::collector::literal::tests::an_english_sentence_has_no_anchors \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "an entry nominated by its own turn"     test     inject_collector_self_nomination \
-    'an entry nominated itself' 'lib/capture::collector::literal::tests'
+    'capture::collector::literal::tests::an_entry_is_not_nominated_by_the_turn_that_made_it \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "a supersession that adds without voiding" test   inject_reconcile_supersede_without_voiding \
     'the old entry was not voided' 'lib/capture::collector::reconcile::tests'
   seeded_case "a verdict that settles nothing settling"  test   inject_reconcile_partial_applies_a_patch \
     'PARTIAL produced a patch' 'lib/capture::collector::reconcile::tests'
   seeded_case "an uncalibrated nomination policy accepted" test inject_collector_uncalibrated_policy \
-    'the fixture policy was accepted by the door that ships' 'lib/capture::collector::sense::tests'
+    'capture::collector::sense::tests::the_shipped_fixture_policy_is_refused_by_the_door_that_ships \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a nomination budget ignored"           test     inject_collector_budget_ignored \
     'the budget did not bind' 'lib/capture::collector::sense::tests'
   seeded_case "a turn that nominates only its first entry" test inject_collector_one_nomination_per_turn \
-    'a turn that named two anchors nominated fewer than two entries' 'lib/capture::collector::literal::tests'
+    'capture::collector::literal::tests::every_entry_whose_anchor_recurs_is_nominated \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "a voided entry nominated by tier 0" test inject_collector_voided_entry_renominated \
-    'a voided entry was nominated again by the literal tier' 'lib/capture::collector::literal::tests'
+    'capture::collector::literal::tests::a_voided_entry_is_not_nominated_again \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "a hit that says nothing about where" test inject_collector_hit_offset_lost \
     'the hits did not say where the anchor recurred' 'lib/capture::collector::literal::tests'
   seeded_case "an overlapping anchor scan" test inject_collector_overlapping_scan \
@@ -6473,31 +6529,31 @@ selftest() {
   seeded_case "a source vocabulary with no members" test inject_collector_source_vocabulary_emptied \
     'the source vocabulary is not what it promises' 'lib/capture::collector::tests'
   seeded_case "a nomination that names the other tier" test inject_collector_tier_name_swapped \
-    'a nomination named the wrong tier' 'lib/capture::collector::tests'
+    'capture::collector::tests::a_nomination_names_the_tier_that_made_it \.\.\. FAILED' 'lib/capture::collector::tests'
   seeded_case "registers that swapped their names" test inject_collector_register_permuted \
     'the register vocabulary is not what it promises' 'lib/capture::collector::tests'
   seeded_case "a lexical pre-gate the tier ignores" test inject_collector_gate_ignored \
-    'a turn carrying no seed was scored by a gated policy anyway' 'lib/capture::collector::sense::tests'
+    'capture::collector::sense::tests::the_lexical_gate_decides_whether_a_turn_is_scored_at_all \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a turn-level threshold never compared" test inject_collector_turn_threshold_ignored \
-    'an unremarkable turn nominated' 'lib/capture::collector::sense::tests'
+    'capture::collector::sense::tests::a_turn_that_is_not_a_reversal_nominates_nothing \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a per-entry threshold never compared" test inject_collector_entry_threshold_ignored \
-    'the tier nominated an entry the turn was not about' 'lib/capture::collector::sense::tests'
+    'capture::collector::sense::tests::an_entry_the_turn_is_not_about_is_not_nominated \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a turn scored against the wrong sense set" test inject_collector_wrong_sense_set \
-    'a turn about a mistaken assumption was scored as a reversal' 'lib/capture::collector::sense::tests'
+    'capture::collector::sense::tests::the_turn_is_scored_against_the_authored_reversal_senses \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "an intent register that reads the prose" test inject_collector_intent_register_reads_the_prose \
-    'the tier measured the prose of the turn where it should have measured the stated intent' 'lib/capture::collector::sense::tests'
+    'capture::collector::sense::tests::the_second_register_measures_the_stated_intent_and_not_the_prose \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a budget spent on the worst candidates" test inject_collector_budget_takes_the_worst \
     'the budget was spent on the entries that scored lowest' 'lib/capture::collector::sense::tests'
   seeded_case "a nomination score nothing measured" test inject_collector_score_not_measured \
     'a nomination carried a score nothing measured' 'lib/capture::collector::sense::tests'
   seeded_case "an entry nominated by its own turn at tier 1" test inject_collector_sense_self_nomination \
-    'an entry born in this turn nominated itself' 'lib/capture::collector::sense::tests'
+    'capture::collector::sense::tests::an_entry_is_not_nominated_by_the_turn_that_made_it \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a voided entry nominated by tier 1" test inject_collector_sense_voided_entry_renominated \
-    'a voided entry was nominated again by the sense tier' 'lib/capture::collector::sense::tests'
+    'capture::collector::sense::tests::a_voided_entry_is_not_nominated_again \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a report that drops half its policy" test inject_collector_report_drops_the_policy \
-    'the report did not say which scoring produced it' 'lib/capture::collector::sense::tests'
+    'capture::collector::sense::tests::the_report_carries_the_policy_that_produced_it \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a calibration that names no run" test inject_collector_policy_names_no_run \
-    'was read as a calibration' 'lib/capture::collector::sense::tests'
+    'capture::collector::sense::tests::a_policy_that_names_no_run_is_refused_and_one_that_names_a_run_is_not \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a supersession that writes a constant" test inject_reconcile_supersede_writes_a_constant \
     'the superseding entry does not say what superseded the old one' 'lib/capture::collector::reconcile::tests'
   seeded_case "a supersession with no fork behind it" test inject_reconcile_supersede_loses_its_fork \
@@ -6509,77 +6565,77 @@ selftest() {
   seeded_case "a mention applied as a supersession" test inject_reconcile_mention_superseded \
     'NOT_THIS produced a patch' 'lib/capture::collector::reconcile::tests'
   seeded_case "self-capture exempt from grounding"    test     inject_tools_ungrounded \
-    'modality does not exempt a lane from grounding' 'lib/capture::tools::tests'
+    'capture::tools::tests::a_self_captured_entry_absent_from_what_the_model_saw_is_dropped \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a reminder cadence that never fires"   test     inject_tools_reminder_silent \
-    'ten silent turns must be reminded at every third turn' 'lib/capture::tools::tests'
+    'capture::tools::tests::ten_silent_turns_are_reminded_on_the_cadence_and_the_sweep_covers_them \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a harness tool call read as a capture" test     inject_tools_foreign_call \
-    'a harness tool call is not a capture tool and writes nothing' 'lib/capture::tools::tests'
+    'capture::tools::tests::a_harness_tool_call_is_not_a_patch_source \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a phase proposal that writes a fact"   test     inject_tools_proposal_writes \
     'a phase-transition proposal is advisory and writes nothing' 'lib/capture::tools::tests'
   seeded_case "a capture grounded in its own echo"   test     inject_tools_self_echo \
-    'a harness that repeats a capture back grounded the capture in itself' 'lib/capture::tools::tests'
+    'capture::tools::tests::a_capture_is_not_grounded_in_a_harness_repeating_it_back \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a capture grounded in a later turn"   test     inject_tools_future_output \
-    'a turn-1 capture was grounded in a turn-2 tool output' 'lib/capture::tools::tests'
+    'capture::tools::tests::a_capture_is_not_grounded_in_a_turn_the_model_had_not_reached \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a superseding entry with a minted id" test     inject_tools_supersede_minted \
-    'a superseding entry id must be derived from the row that carried it' 'lib/capture::tools::tests'
+    'capture::tools::tests::naming_what_it_replaces_makes_the_capture_a_supersede \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a verdict that resolves elsewhere"    test     inject_tools_resolve_elsewhere \
-    'a verdict resolved an entry the model never named' 'lib/capture::tools::tests'
+    'capture::tools::tests::only_a_settled_entry_is_resolved_by_a_verdict_alone \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "the asks reworded to nothing"         test     inject_tools_ask_words \
-    'the words this lane says out loud are the only product it has' 'lib/capture::tools::tests'
+    'capture::tools::tests::every_ask_kind_is_named_and_asks_in_its_own_words \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "an ask that drops its own question"   test     inject_tools_ask_question_dropped \
     'an ask carrying a deferral is the question and then the deferral' 'lib/capture::tools::tests'
   seeded_case "the sweep asking as the cadence"      test     inject_tools_sweep_kind \
     'the sweep and the cadence are one ask wearing two names' 'lib/capture::tools::tests'
   seeded_case "a closed choice left in its own case" test     inject_tools_choice_uncanonical \
-    'a harness may shout a closed choice back at us' 'lib/capture::tools::tests'
+    'capture::tools::tests::an_argument_in_the_case_the_harness_used_is_settled_by_the_contract \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a phase proposal with no reason"      test     inject_tools_proposal_reasonless \
     'the reason is the whole of what it carries into one' 'lib/capture::tools::tests'
   seeded_case "a reminder that drops the deferral"   test     inject_tools_reminder_deferral_dropped \
-    'the cadence reminded without what the router put off in that turn' 'lib/capture::tools::tests'
+    'capture::tools::tests::a_fired_reminder_carries_its_kind_and_what_the_router_put_off \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "tools described in one character"     test     inject_tools_description_thin \
-    'a foreign harness registers this text verbatim' 'lib/capture::tools::tests'
+    'capture::tools::tests::every_tool_is_offered_in_words_rather_than_ordered \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "an offered tool the contract omits"   test     inject_tools_contract_undescribed \
-    'an offered tool with no row is refused before a harness ever sees it' 'lib/capture::tools::tests'
+    'capture::tools::tests::a_contract_that_omits_an_offered_tool_is_refused \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "one tool described twice"             test     inject_tools_contract_duplicate \
-    'one tool described twice leaves the harness to the order of the file' 'lib/capture::tools::tests'
+    'capture::tools::tests::a_contract_that_describes_one_tool_twice_is_refused \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a verdict the lane cannot honour"     test     inject_tools_verdict_list_open \
-    'this lane refuses it at runtime: the model is invited to say a word' 'lib/capture::tools::tests'
+    'capture::tools::tests::every_verdict_the_contract_admits_is_one_this_lane_can_honour \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a turn swept after it recorded"       test     inject_tools_silent_kept \
-    'a turn the model did record in the end was swept anyway' 'lib/capture::tools::tests'
+    'capture::tools::tests::a_turn_that_records_after_it_looked_silent_is_not_swept \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "the object reader with no limit"      test     inject_record_objects_undepthed \
-    'one level past the limit must be a verdict from `objects`' 'lib/formats::record::tests'
+    'formats::record::tests::a_deeply_nested_object_document_is_a_verdict_and_not_a_crash \.\.\. FAILED' 'lib/formats::record::tests'
   seeded_case "a corpus that drives one tool"       test     inject_tools_corpus_one_tool \
-    'is offered to the model and no corpus case ever calls it' 'lib/capture::tools::tests'
+    'capture::tools::tests::the_corpus_drives_every_tool_this_lane_offers \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "the ablation's control arm dropped"     test     inject_ablation_no_control \
-    'the control arm is missing: an ablation with no sentence-removed arm' 'lib/capture::ablation::tests'
+    'capture::ablation::tests::the_arms_include_the_control_with_no_imperative_at_all \.\.\. FAILED' 'lib/capture::ablation::tests'
   seeded_case "silence counted as engagement"          test     inject_ablation_silence_engages \
-    'counted as engagement and as silence at once' 'lib/capture::ablation::tests'
+    'capture::ablation::tests::silence_and_engagement_are_never_both_true \.\.\. FAILED' 'lib/capture::ablation::tests'
   seeded_case "a p reported without its floor"         test     inject_ablation_p_floor_dropped \
-    'a p reported without its attainable floor' 'lib/capture::ablation::tests'
+    'capture::ablation::tests::every_reported_p_carries_its_attainable_floor \.\.\. FAILED' 'lib/capture::ablation::tests'
   seeded_case "a resample that draws once"            test     inject_ablation_resample_single_draw \
-    'the resamples no longer draw one outcome for every fork' 'lib/capture::ablation::tests'
+    'capture::ablation::tests::a_resample_draws_one_outcome_for_every_fork_there_is \.\.\. FAILED' 'lib/capture::ablation::tests'
   seeded_case "a generator that never advances"       test     inject_ablation_frozen_generator \
-    'a seeded draw did not reach every fork in 64 tries' 'lib/capture::ablation::tests'
+    'capture::ablation::tests::the_generator_advances_so_a_resample_is_not_one_fork_counted_over \.\.\. FAILED' 'lib/capture::ablation::tests'
   seeded_case "each arm credited with the other's"    test     inject_ablation_rates_swapped \
-    'the first arm held on 5 of these 6 forks and the bootstrap counted' 'lib/capture::ablation::tests'
+    'capture::ablation::tests::each_arms_rate_counts_that_arms_own_outcomes \.\.\. FAILED' 'lib/capture::ablation::tests'
   seeded_case "the silence endpoint unregistered"     test     inject_ablation_endpoint_dropped \
-    'the pre-registration no longer carries two endpoints' 'lib/capture::ablation::tests'
+    'capture::ablation::tests::both_endpoints_are_pre_registered_in_the_direction_each_is_read_in \.\.\. FAILED' 'lib/capture::ablation::tests'
   seeded_case "one imperative for every arm"          test     inject_ablation_plan_one_imperative \
-    'the plan does not pair the arm' 'lib/capture::ablation::tests'
+    'capture::ablation::tests::the_plan_pairs_every_arm_with_its_own_imperative_and_says_none_has_run \.\.\. FAILED' 'lib/capture::ablation::tests'
   seeded_case "two arms under one name"               test     inject_ablation_arm_names_collide \
-    'two arms of the ablation are reported under one name' 'lib/capture::ablation::tests'
+    'capture::ablation::tests::every_arm_is_reported_under_a_name_no_other_arm_answers_to \.\.\. FAILED' 'lib/capture::ablation::tests'
   seeded_case "an arm's clauses run together"         test     inject_ablation_clauses_run_together \
-    'the imperative an arm puts in the fork is not its clauses separated by one' 'lib/capture::ablation::tests'
+    'capture::ablation::tests::the_full_arm_renders_the_sentence_this_ablation_takes_apart \.\.\. FAILED' 'lib/capture::ablation::tests'
   seeded_case "a placeholder nobody counts"           test     inject_ablation_placeholder_word_dropped \
     'the-placeholder-words-nobody-replaced: graded .engaged. where the corpus says .inert.' 'lib/capture::ablation::tests'
   seeded_case "a blank clause text admitted"          test     inject_ablation_blank_clause_allowed \
-    'a clause table with a blank clause text was not refused for that reason' 'lib/capture::ablation::tests'
+    'capture::ablation::tests::a_clause_table_that_breaks_the_schema_says_which_rule_it_broke \.\.\. FAILED' 'lib/capture::ablation::tests'
   seeded_case "a grading case quietly dropped"        test     inject_ablation_corpus_case_dropped \
     'the corpus holds a case with no expectation or an expectation with no case' 'lib/capture::ablation::tests'
   seeded_case "an untagged decline read as content"   test     inject_ablation_untagged_decline_engages \
     'an-untagged-decline: graded .engaged. where the corpus says .inert.' 'lib/capture::ablation::tests'
   seeded_case "the second reader left unbounded"      test     inject_json_objects_unbounded \
-    'a JSON Lines reader that does not bound its nesting' 'lib/formats::record::json::tests'
+    'formats::record::json::tests::a_line_nested_past_the_limit_is_a_verdict_and_not_a_crash \.\.\. FAILED' 'lib/formats::record::json::tests'
   seeded_case "a lane free to change substrate"       test     inject_record_lane_may_change_substrate \
     'record/fixtures/invalid/lane-changes-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "a substrate reference inferred from a count" test inject_record_substrate_reference_inferred_from_a_count \

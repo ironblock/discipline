@@ -577,6 +577,12 @@ mod tests {
                     "c2f0719673bcb7b439c8bb569f2e8da4f8ee61babbbb12e1485dc480f2b405a7".to_owned(),
                 sampler_card: BTreeMap::new(),
                 reasoning: Reasoning::Off,
+                // No reasoning controls and no chat template: this regime is a
+                // fixture for something else, and #94's two fields are declared
+                // where they are the subject rather than everywhere a `Substrate`
+                // is constructed.
+                reasoning_control: None,
+                chat_template_sha256: None,
             }],
             dogma_version: 1,
         }

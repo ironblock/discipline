@@ -1,0 +1,6 @@
+`chat_template_sha256` is an identity claim about an artifact, and a prose name
+cannot make one: two checkouts can call the same file different things and two
+different files the same thing. Checked as a digest for the reason
+`weights.sha256`, `acts_sha256` and `hardware_fingerprint` are -- a sentinel
+sitting in an identity field is the class the #68 fingerprint tightening
+already caught once.

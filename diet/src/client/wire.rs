@@ -31,6 +31,15 @@ pub struct Reply {
     pub text: Option<String>,
     /// Why the server stopped, as the server spells it.
     pub finish_reason: Option<String>,
+    /// The reasoning the server reports it did, where the dialect declares a
+    /// place for it.
+    ///
+    /// `None` means nobody looked, or the declared path reached nothing;
+    /// `Some("")` means the field was there and empty, which is the server
+    /// saying it thought about nothing. Not collapsed, because they are
+    /// different facts about the reply -- though #94's negative control,
+    /// which counts characters, reads both as none.
+    pub reasoning: Option<String>,
     /// How many tokens came back.
     pub output_tokens: Option<u64>,
     /// How many prompt tokens the server read.
@@ -150,6 +159,24 @@ pub fn body(shape: &RequestShape) -> String {
         string(grammar, &mut out);
     }
 
+    // THE TEMPLATE'S ARGUMENTS, not the sampler's, and they go in their own
+    // object because that is where a chat template reads them from. Rendered
+    // through the RECORD's renderer rather than spelled again here: a kwarg
+    // is carried into the archive of the request that sent it, and two
+    // renderings of one value space is the drift the hand-rendered sampler
+    // pins above already exist to avoid one level down.
+    //
+    // No key at all when nothing is set. An empty `chat_template_kwargs` is
+    // a field this program added to a request that had nothing to say with
+    // it.
+    if !shape.template_kwargs.is_empty() {
+        out.push_str(",\"chat_template_kwargs\":");
+        crate::formats::record::json::render(
+            &crate::formats::record::json::Value::Object(shape.template_kwargs.clone()),
+            &mut out,
+        );
+    }
+
     out.push('}');
     out
 }
@@ -196,6 +223,11 @@ pub fn read(dialect: &Dialect, text: &str) -> Result<Reply, WireError> {
         text: at(&root, "choices.0.message.content").and_then(as_text),
         finish_reason: dialect
             .finish_reason
+            .as_deref()
+            .and_then(|path| at(&root, path))
+            .and_then(as_text),
+        reasoning: dialect
+            .reasoning
             .as_deref()
             .and_then(|path| at(&root, path))
             .and_then(as_text),
@@ -330,6 +362,7 @@ mod tests {
                 retries: 0,
             },
             grammar: None,
+            template_kwargs: std::collections::BTreeMap::new(),
         }
     }
 
@@ -371,6 +404,82 @@ mod tests {
         assert_eq!(
             parsed["messages"][0]["content"],
             serde_json::json!("say \"hi\"\nthen stop\ttidily")
+        );
+    }
+
+    /// A template kwarg goes where a chat template reads it, and a sampler
+    /// pin does not go there. #94 design point 4's other half: the control is
+    /// a claim about what the server sent back, and this is the claim about
+    /// what it was sent.
+    #[test]
+    fn a_template_kwarg_is_sent_in_the_object_the_template_reads_and_not_beside_the_sampler() {
+        use crate::formats::record::json::Value;
+
+        let nothing = body(&shape(SamplerCard::empty()));
+        assert!(
+            !nothing.contains("chat_template_kwargs"),
+            "a request with nothing to say to the template says nothing: {nothing}"
+        );
+
+        let mut kwargs = std::collections::BTreeMap::new();
+        kwargs.insert("enable_thinking".to_owned(), Value::Boolean(false));
+        let rendered = body(&RequestShape {
+            template_kwargs: kwargs,
+            ..shape(SamplerCard::empty())
+        });
+        let parsed: serde_json::Value = serde_json::from_str(&rendered).expect("the body is JSON");
+        assert_eq!(
+            parsed["chat_template_kwargs"]["enable_thinking"],
+            serde_json::json!(false)
+        );
+        // NOT at the top level, where the sampler pins live. A server reads
+        // the two from different places, and a kwarg that landed beside
+        // `temperature` would be a kwarg the template never sees -- which is
+        // the exact delivery failure the negative control exists to catch.
+        assert!(
+            parsed.get("enable_thinking").is_none(),
+            "a template kwarg is not a sampler pin: {rendered}"
+        );
+    }
+
+    /// Reasoning is read from the path the dialect declares, and from nowhere
+    /// else.
+    ///
+    /// The three answers are different facts: the field was there and said
+    /// something, the field was there and said nothing, and nobody declared
+    /// anywhere to look. A control that could not tell the third from the
+    /// second would pass on any server whose reasoning field this client
+    /// cannot find.
+    #[test]
+    fn reasoning_is_read_from_the_declared_path_and_absence_is_not_silence() {
+        let reply = concat!(
+            "{\"choices\":[{\"message\":{\"content\":\"ok\",",
+            "\"reasoning_content\":\"weighing it up\"},\"finish_reason\":\"stop\"}]}"
+        );
+        let read_out = read(&Dialect::llama_cpp(), reply).expect("a reply");
+        assert_eq!(read_out.reasoning.as_deref(), Some("weighing it up"));
+
+        let silent = concat!(
+            "{\"choices\":[{\"message\":{\"content\":\"ok\",",
+            "\"reasoning_content\":\"\"},\"finish_reason\":\"stop\"}]}"
+        );
+        assert_eq!(
+            read(&Dialect::llama_cpp(), silent)
+                .expect("a reply")
+                .reasoning
+                .as_deref(),
+            Some(""),
+            "a server saying it thought about nothing is not a server that said nothing"
+        );
+
+        let undeclared = Dialect {
+            reasoning: None,
+            ..Dialect::llama_cpp()
+        };
+        assert_eq!(
+            read(&undeclared, reply).expect("a reply").reasoning,
+            None,
+            "nobody looked, which is not the same as nothing being there"
         );
     }
 

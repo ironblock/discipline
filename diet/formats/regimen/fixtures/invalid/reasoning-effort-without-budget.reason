@@ -1,0 +1,6 @@
+An effort level is an INSTRUCTION, not a budget: the chat template renders it
+as a sentence in the system message, and nothing about the level bounds how
+many tokens the model spends behind it. A regimen naming a level and no cap
+has declared a reasoning state no claim can be fixed in. Write the cap, or
+`budget_tokens = "none"` where there genuinely is none. #94 design point 1,
+acceptance row 1.
