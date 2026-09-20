@@ -375,7 +375,7 @@ check = "test"
 target = "test:cli"
 label = "a CLI that prints no result"
 failure_class = "cli.no-output"
-legacy_signature = "stdout is not JSON"
+legacy_signature = "every_verb_prints_its_result_on_stdout \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -464,7 +464,7 @@ check = "test"
 target = "lib"
 label = "a field kind nothing covers"
 failure_class = "library.non-exhaustive-predicate"
-legacy_signature = "non-exhaustive patterns"
+legacy_signature = "error\\[E0004\\]: non-exhaustive patterns: `FieldKind::Seeded` not covered"
 migrated = false
 
 [[fault]]
@@ -663,7 +663,7 @@ check = "test"
 target = "lib/capture::ablation::tests"
 label = "a placeholder nobody counts"
 failure_class = "ablation.placeholder-uncounted"
-legacy_signature = "the-placeholder-words-nobody-replaced: graded .engaged. where the corpus says .inert."
+legacy_signature = "capture/ablation/corpus/the-placeholder-words-nobody-replaced\\.answer\\.txt"
 migrated = false
 
 [[fault]]
@@ -683,7 +683,7 @@ check = "test"
 target = "lib/capture::ablation::tests"
 label = "a grading case quietly dropped"
 failure_class = "ablation.corpus-unpaired"
-legacy_signature = "the corpus holds a case with no expectation or an expectation with no case"
+legacy_signature = "capture::ablation::tests::the_corpus_pairs_every_case_with_its_expectation \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -693,7 +693,7 @@ check = "test"
 target = "lib/capture::ablation::tests"
 label = "an untagged decline read as content"
 failure_class = "ablation.untagged-decline-engages"
-legacy_signature = "an-untagged-decline: graded .engaged. where the corpus says .inert."
+legacy_signature = "capture/ablation/corpus/an-untagged-decline\\.answer\\.txt"
 migrated = false
 
 [[fault]]
@@ -1885,7 +1885,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "a phase proposal that writes a fact"
 failure_class = "capture.proposal-writes-a-fact"
-legacy_signature = "a phase-transition proposal is advisory and writes nothing"
+legacy_signature = "capture::tools::tests::a_phase_transition_proposal_is_advisory_and_writes_nothing \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1945,7 +1945,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "an ask that drops its own question"
 failure_class = "capture.ask-drops-the-question"
-legacy_signature = "an ask carrying a deferral is the question and then the deferral"
+legacy_signature = "capture::tools::tests::the_sweep_carries_what_the_router_put_off \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1955,7 +1955,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "the sweep asking as the cadence"
 failure_class = "capture.sweep-indistinguishable-from-cadence"
-legacy_signature = "the sweep and the cadence are one ask wearing two names"
+legacy_signature = "capture::tools::tests::the_sweep_asks_as_a_sweep_and_not_as_the_cadence \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1975,7 +1975,7 @@ check = "test"
 target = "lib/capture::tools::tests"
 label = "a phase proposal with no reason"
 failure_class = "capture.proposal-with-no-reason"
-legacy_signature = "the reason is the whole of what it carries into one"
+legacy_signature = "capture::tools::tests::a_phase_transition_proposal_carries_the_ruling_it_asks_for \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2124,7 +2124,7 @@ check = "test"
 target = "lib/capture::collector::reconcile::tests"
 label = "a supersession that adds without voiding"
 failure_class = "collector.supersede-without-void"
-legacy_signature = "the old entry was not voided"
+legacy_signature = "capture::collector::reconcile::tests::a_superseded_verdict_voids_the_old_entry_and_links_it_rather_than_deleting \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2134,7 +2134,7 @@ check = "test"
 target = "lib/capture::collector::reconcile::tests"
 label = "a verdict that settles nothing settling"
 failure_class = "collector.verdict-overapplied"
-legacy_signature = "PARTIAL produced a patch"
+legacy_signature = "capture::collector::reconcile::tests::a_partial_verdict_applies_nothing \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2154,7 +2154,7 @@ check = "test"
 target = "lib/capture::collector::sense::tests"
 label = "a nomination budget ignored"
 failure_class = "collector.budget-ignored"
-legacy_signature = "the budget did not bind"
+legacy_signature = "capture::collector::sense::tests::the_budget_is_the_most_a_turn_may_spend \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2184,7 +2184,7 @@ check = "test"
 target = "lib/capture::collector::literal::tests"
 label = "a hit that says nothing about where"
 failure_class = "collector.evidence-without-a-place"
-legacy_signature = "the hits did not say where the anchor recurred"
+legacy_signature = "capture::collector::literal::tests::a_hit_says_where_the_anchor_recurred \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2194,7 +2194,7 @@ check = "test"
 target = "lib/capture::collector::literal::tests"
 label = "an overlapping anchor scan"
 failure_class = "collector.overlapping-match"
-legacy_signature = "an anchor that overlaps itself was counted at every shifted position"
+legacy_signature = "capture::collector::literal::tests::an_anchor_that_overlaps_itself_is_counted_once \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2204,7 +2204,7 @@ check = "test"
 target = "lib/capture::collector::literal::tests"
 label = "a double-quoted span that is not an anchor"
 failure_class = "collector.anchor-class-lost"
-legacy_signature = "a double-quoted span was not anchored"
+legacy_signature = "capture::collector::literal::tests::a_double_quoted_span_is_an_anchor \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2214,7 +2214,7 @@ check = "test"
 target = "lib/capture::collector::literal::tests"
 label = "a two-byte shape read as an anchor"
 failure_class = "collector.over-firing"
-legacy_signature = "a two-byte shape was anchored"
+legacy_signature = "capture::collector::literal::tests::a_shape_below_three_bytes_is_a_coincidence_not_an_anchor \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2224,7 +2224,7 @@ check = "test"
 target = "lib/capture::collector::literal::tests"
 label = "a module path that is not an identifier"
 failure_class = "collector.anchor-class-lost"
-legacy_signature = "a path through the module tree was not anchored"
+legacy_signature = "capture::collector::literal::tests::a_path_through_the_module_tree_is_an_anchor \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2234,7 +2234,7 @@ check = "test"
 target = "lib/capture::collector::literal::tests"
 label = "a sentence word read as a file extension"
 failure_class = "collector.anchor-kind-wrong"
-legacy_signature = "a dotted word whose tail is a word was read as a file name"
+legacy_signature = "capture::collector::literal::tests::a_dotted_word_whose_tail_is_a_word_is_a_name_not_a_file \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2244,7 +2244,7 @@ check = "test"
 target = "lib/capture::collector::literal::tests"
 label = "an anchor with the sentence still on it"
 failure_class = "collector.anchor-missed"
-legacy_signature = "the punctuation prose hung on a token was kept as part of the anchor"
+legacy_signature = "capture::collector::literal::tests::the_punctuation_prose_hangs_on_a_token_is_not_part_of_it \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2254,7 +2254,7 @@ check = "test"
 target = "lib/capture::collector::tests"
 label = "anchor kinds that swapped their names"
 failure_class = "collector.vocabulary-drift"
-legacy_signature = "the anchor kind vocabulary is not what it promises"
+legacy_signature = "capture::collector::tests::the_anchor_kind_vocabulary_is_the_words_a_record_carries \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2264,7 +2264,7 @@ check = "test"
 target = "lib/capture::collector::tests"
 label = "a source vocabulary with no members"
 failure_class = "collector.vocabulary-drift"
-legacy_signature = "the source vocabulary is not what it promises"
+legacy_signature = "capture::collector::tests::the_source_vocabulary_is_the_words_a_record_carries \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2284,7 +2284,7 @@ check = "test"
 target = "lib/capture::collector::tests"
 label = "registers that swapped their names"
 failure_class = "collector.vocabulary-drift"
-legacy_signature = "the register vocabulary is not what it promises"
+legacy_signature = "capture::collector::tests::the_register_vocabulary_is_the_words_a_record_carries \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2344,7 +2344,7 @@ check = "test"
 target = "lib/capture::collector::sense::tests"
 label = "a budget spent on the worst candidates"
 failure_class = "collector.budget-misspent"
-legacy_signature = "the budget was spent on the entries that scored lowest"
+legacy_signature = "capture::collector::sense::tests::the_ranking_a_budget_spends_on_is_best_first \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2354,7 +2354,7 @@ check = "test"
 target = "lib/capture::collector::sense::tests"
 label = "a nomination score nothing measured"
 failure_class = "collector.unmeasured-number"
-legacy_signature = "a nomination carried a score nothing measured"
+legacy_signature = "capture::collector::sense::tests::a_nomination_carries_the_score_that_was_measured \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2404,7 +2404,7 @@ check = "test"
 target = "lib/capture::collector::reconcile::tests"
 label = "a supersession that writes a constant"
 failure_class = "collector.silent-loss"
-legacy_signature = "the superseding entry does not say what superseded the old one"
+legacy_signature = "capture::collector::reconcile::tests::a_superseding_entry_says_what_superseded_the_old_one \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2414,7 +2414,7 @@ check = "test"
 target = "lib/capture::collector::reconcile::tests"
 label = "a supersession with no fork behind it"
 failure_class = "collector.unattributable-patch"
-legacy_signature = "the superseding entry does not say which fork produced it"
+legacy_signature = "capture::collector::reconcile::tests::a_superseding_entry_says_which_fork_produced_it \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2424,7 +2424,7 @@ check = "test"
 target = "lib/capture::collector::reconcile::tests"
 label = "a patch the reconciler never hands back"
 failure_class = "collector.verdict-unapplied"
-legacy_signature = "a verdict that produced a patch did not hand it back"
+legacy_signature = "capture::collector::reconcile::tests::a_done_verdict_resolves_the_entry_and_hands_its_patch_back \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2434,7 +2434,7 @@ check = "test"
 target = "lib/capture::collector::reconcile::tests"
 label = "a PARTIAL counted as a false nomination"
 failure_class = "collector.verdict-overapplied"
-legacy_signature = "a fork that said the prose bears on the entry was read as a false nomination"
+legacy_signature = "capture::collector::reconcile::tests::a_partial_is_not_a_false_nomination \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -2444,7 +2444,7 @@ check = "test"
 target = "lib/capture::collector::reconcile::tests"
 label = "a mention applied as a supersession"
 failure_class = "collector.supersede-on-a-mention"
-legacy_signature = "NOT_THIS produced a patch"
+legacy_signature = "capture::collector::reconcile::tests::a_not_this_verdict_applies_nothing \\.\\.\\. FAILED"
 migrated = false
 [[fault]]
 id = "test.sense_cosine_unnormalised"
@@ -2493,7 +2493,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "a metric whose failure fixture is gone"
 failure_class = "capture.instrument-never-failed"
-legacy_signature = "no failure fixture, so it can never be reported"
+legacy_signature = "capture::sense::tests::every_metric_is_reported_only_after_failing_its_own_fixture \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3051,9 +3051,9 @@ id = "test.router_census_class_miscounted"
 kind = "seeded-gate"
 check = "test"
 target = "lib/capture::router::tests"
-label = "a census that miscounts which classes fired"
+label = "a census that files a silent call as a fork"
 failure_class = "router.census-per-class"
-legacy_signature = "the census does not say which classes fired"
+legacy_signature = "capture::router::tests::the_census_files_a_silent_call_as_silent_and_not_as_a_fork \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3133,7 +3133,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "an unclassified call nobody can look up"
 failure_class = "router.unclassified-unattributed"
-legacy_signature = "must name the call, its turn, its tool and its word"
+legacy_signature = "capture::router::tests::an_unclassified_event_names_the_call_its_turn_its_tool_and_its_word \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3153,7 +3153,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "the declared default replaced by silence"
 failure_class = "router.silent-default"
-legacy_signature = "an unknown pattern must route to the declared default, never to silence"
+legacy_signature = "capture::router::tests::an_unknown_tool_call_routes_to_the_declared_default \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3173,7 +3173,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "a row of the routing table lost"
 failure_class = "router.misrouted"
-legacy_signature = "misrouted call"
+legacy_signature = "capture::router::tests::the_producer_of_the_last_pipeline_decides_the_class \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3183,7 +3183,7 @@ check = "test"
 target = "lib/capture::router::tests"
 label = "an unknown call routed but not recorded"
 failure_class = "router.unclassified-unrecorded"
-legacy_signature = "an unknown pattern must be a typed event"
+legacy_signature = "capture::router::tests::an_unknown_tool_call_is_a_typed_event \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -3263,7 +3263,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "a register mislabelled at its source"
 failure_class = "sense.register-source-mislabelled"
-legacy_signature = "and a row says otherwise"
+legacy_signature = "capture/sense/register/authored-mistake\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -3273,7 +3273,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "a file in the register naming nothing"
 failure_class = "sense.register-unclassified-file"
-legacy_signature = "not a declared sidecar"
+legacy_signature = "capture/sense/register/notaregister\\.jsonl"
 migrated = false
 
 [[fault]]
@@ -3363,7 +3363,7 @@ check = "test"
 target = "lib/capture::sense::tests"
 label = "a reported metric that reports a constant"
 failure_class = "sense.record-detached-from-measurement"
-legacy_signature = "the record of a metric is not the numbers the metric produced"
+legacy_signature = "capture::sense::tests::the_record_of_a_metric_carries_the_numbers_it_produced \\.\\.\\. FAILED"
 
 [[fault]]
 id = "test.mechanical_lane_renamed"

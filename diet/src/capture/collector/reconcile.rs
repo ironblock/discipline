@@ -154,11 +154,28 @@ mod tests {
 
     const PROSE: &str = "Actually, check_record exists now: the CLI gained it.";
 
-    #[test]
-    fn a_superseded_verdict_links_and_voids_rather_than_deleting() {
-        let mut object = object_with_stale_entry();
+    fn replacement() -> Replacement<'static> {
+        Replacement {
+            event: "a18",
+            content: PROSE,
+            provenance: at(18),
+        }
+    }
+
+    /// The one nomination the acceptance drive produces, reconciled against
+    /// `text`.
+    ///
+    /// SHARED BY THE TESTS BELOW, AND THAT IS THE POINT. Two tests used to
+    /// carry every assertion about this module between them -- three about a
+    /// supersession and four about the other three verdicts -- so the seven
+    /// seeded faults that prove those rules broke two tests between them and
+    /// could be told apart only by which `assert_eq!` message came back. That
+    /// is prose lifted out of a panic, which is the staleness #46 exists to
+    /// end. Split, each fault breaks a test of its own and cargo's own
+    /// `test <path> ... FAILED` line is the class.
+    fn reconciled(object: &WorkingObject, text: &str) -> Outcome {
         let nominations = nominate(
-            &object,
+            object,
             NewText {
                 turn: 18,
                 prose: PROSE,
@@ -166,21 +183,30 @@ mod tests {
             },
         );
         assert_eq!(nominations.len(), 1, "the pair was not nominated");
-        let answer = verdict::parse("SUPERSEDED: the CLI has the verb now").expect("a verdict");
-        let outcome = reconcile(
-            &nominations[0],
-            &answer,
-            Replacement {
-                event: "a18",
-                content: PROSE,
-                provenance: at(18),
-            },
-        )
-        .expect("reconciled");
+        let answer = verdict::parse(text).expect("a verdict");
+        reconcile(&nominations[0], &answer, replacement()).expect("reconciled")
+    }
+
+    /// The acceptance drive with its supersession applied.
+    fn superseded_object() -> WorkingObject {
+        let mut object = object_with_stale_entry();
+        let outcome = reconciled(&object, "SUPERSEDED: the CLI has the verb now");
         let Outcome::Superseded(patch) = &outcome else {
             panic!("a SUPERSEDED verdict must supersede: {outcome:?}");
         };
         object.apply(patch).expect("applied");
+        object
+    }
+
+    fn superseding_entry(object: &WorkingObject) -> &crate::object::Entry {
+        object
+            .entry(&EntryId::new("a18/supersedes/e1").expect("id"))
+            .expect("the new entry")
+    }
+
+    #[test]
+    fn a_superseded_verdict_voids_the_old_entry_and_links_it_rather_than_deleting() {
+        let object = superseded_object();
         let old = object
             .entry(&EntryId::new("e1").expect("id"))
             .expect("the old entry is still in the object");
@@ -189,60 +215,55 @@ mod tests {
             "the old entry was not voided: {:?}",
             old.state
         );
-        let new = object
-            .entry(&EntryId::new("a18/supersedes/e1").expect("id"))
-            .expect("the new entry");
         assert_eq!(
-            new.supersedes.as_ref().map(EntryId::as_str),
+            superseding_entry(&object)
+                .supersedes
+                .as_ref()
+                .map(EntryId::as_str),
             Some("e1"),
             "a supersession that did not link the entry it voided"
-        );
-        // A link to an entry whose text is not the fact that replaced it is
-        // the silent loss this module exists to prevent, wearing the shape
-        // of a repair. What the new entry says is the nominating prose, and
-        // where it came from is the fork that judged.
-        assert_eq!(
-            new.content, PROSE,
-            "the superseding entry does not say what superseded the old one"
-        );
-        assert_eq!(
-            new.provenances,
-            vec![at(18)],
-            "the superseding entry does not say which fork produced it"
         );
         assert_eq!(object.entries().count(), 2, "an entry was deleted");
         assert_eq!(object.live().count(), 1);
     }
 
+    /// A link to an entry whose text is not the fact that replaced it is the
+    /// silent loss this module exists to prevent, wearing the shape of a
+    /// repair. What the new entry says is the nominating prose.
     #[test]
-    fn done_resolves_and_the_other_two_apply_nothing() {
-        let mut object = object_with_stale_entry();
-        let nominations = nominate(
-            &object,
-            NewText {
-                turn: 18,
-                prose: PROSE,
-                tool_output: "",
-            },
+    fn a_superseding_entry_says_what_superseded_the_old_one() {
+        let object = superseded_object();
+        assert_eq!(
+            superseding_entry(&object).content,
+            PROSE,
+            "the superseding entry does not say what superseded the old one"
         );
-        let replacement = || Replacement {
-            event: "a18",
-            content: PROSE,
-            provenance: at(18),
-        };
-        let done = reconcile(
-            &nominations[0],
-            &verdict::parse("DONE").expect("v"),
-            replacement(),
-        )
-        .expect("ok");
+    }
+
+    /// And where it came from is the fork that judged: without the
+    /// provenance, nothing can attribute a wrong supersession to the turn
+    /// that made it.
+    #[test]
+    fn a_superseding_entry_says_which_fork_produced_it() {
+        let object = superseded_object();
+        assert_eq!(
+            superseding_entry(&object).provenances,
+            vec![at(18)],
+            "the superseding entry does not say which fork produced it"
+        );
+    }
+
+    /// The accessor is how a caller gets at what the reconciler produced. One
+    /// that answered `None` for every verdict would leave the whole module
+    /// applying nothing, with the four outcomes still distinct and every
+    /// assertion about them still true.
+    #[test]
+    fn a_done_verdict_resolves_the_entry_and_hands_its_patch_back() {
+        let mut object = object_with_stale_entry();
+        let done = reconciled(&object, "DONE");
         let Outcome::Resolved(patch) = &done else {
             panic!("{done:?}")
         };
-        // The accessor is how a caller gets at what the reconciler produced.
-        // One that answered `None` for every verdict would leave the whole
-        // module applying nothing, with the four outcomes still distinct and
-        // every assertion about them still true.
         assert_eq!(
             done.patch(),
             Some(patch),
@@ -255,51 +276,75 @@ mod tests {
                 .map(|e| e.state.clone()),
             Some(EntryState::Resolved)
         );
+    }
 
-        let mut untouched = object_with_stale_entry();
-        let before = untouched.dump();
-        for text in ["PARTIAL", "NOT_THIS"] {
-            let outcome = reconcile(
-                &nominations[0],
-                &verdict::parse(text).expect("v"),
-                replacement(),
-            )
-            .expect("ok");
-            assert!(
-                outcome.patch().is_none(),
-                "{text} produced a patch: {outcome:?}"
-            );
-            if let Some(patch) = outcome.patch() {
-                untouched.apply(patch).expect("never reached");
-            }
+    /// `PARTIAL` says the prose bears on the entry without replacing it; a
+    /// reconciler that resolves on it closes an entry the fork deliberately
+    /// left open.
+    #[test]
+    fn a_partial_verdict_applies_nothing() {
+        let mut object = object_with_stale_entry();
+        let before = object.dump();
+        let outcome = reconciled(&object, "PARTIAL");
+        assert!(
+            outcome.patch().is_none(),
+            "PARTIAL produced a patch: {outcome:?}"
+        );
+        if let Some(patch) = outcome.patch() {
+            object.apply(patch).expect("never reached");
         }
         assert_eq!(
-            untouched.dump(),
+            object.dump(),
             before,
             "a verdict that applies nothing changed the object"
         );
-        // The two are not one answer. `NOT_THIS` is the false nomination the
-        // precision gate is calibrated against, and `PARTIAL` is prose that
-        // bears on the entry without settling it; counting a PARTIAL as a
-        // false nomination would inflate the very number the gate reads.
+    }
+
+    /// A mention is not a reversal, and the verdict is the only thing that
+    /// tells them apart.
+    #[test]
+    fn a_not_this_verdict_applies_nothing() {
+        let mut object = object_with_stale_entry();
+        let before = object.dump();
+        let outcome = reconciled(&object, "NOT_THIS");
+        assert!(
+            outcome.patch().is_none(),
+            "NOT_THIS produced a patch: {outcome:?}"
+        );
         assert_eq!(
-            reconcile(
-                &nominations[0],
-                &verdict::parse("NOT_THIS").expect("v"),
-                replacement()
-            )
-            .expect("ok"),
+            outcome,
             Outcome::NotThis,
             "a fork that said the nomination was wrong was read as something else"
         );
+        if let Some(patch) = outcome.patch() {
+            object.apply(patch).expect("never reached");
+        }
         assert_eq!(
-            reconcile(
-                &nominations[0],
-                &verdict::parse("PARTIAL").expect("v"),
-                replacement()
-            )
-            .expect("ok"),
-            Outcome::Partial,
+            object.dump(),
+            before,
+            "a verdict that applies nothing changed the object"
+        );
+    }
+
+    /// The two are not one answer. `NOT_THIS` is the false nomination the
+    /// precision gate is calibrated against, and `PARTIAL` is prose that
+    /// bears on the entry without settling it; counting a PARTIAL as a false
+    /// nomination would inflate the very number the gate reads.
+    ///
+    /// Asserted as the inequality it is, rather than as `PARTIAL == Partial`:
+    /// the rule this test exists for is that the two verdicts do not collapse
+    /// into one outcome, and a `PARTIAL == Partial` spelling is also tripped
+    /// by `inject_reconcile_partial_applies_a_patch`, which
+    /// `a_partial_verdict_applies_nothing` above already owns. `PARTIAL`
+    /// applies nothing, `NOT_THIS` is `NotThis`, and the two differ -- which
+    /// pins `PARTIAL` to `Partial` across the three tests without either
+    /// fault breaking the other's.
+    #[test]
+    fn a_partial_is_not_a_false_nomination() {
+        let object = object_with_stale_entry();
+        assert_ne!(
+            reconciled(&object, "PARTIAL"),
+            reconciled(&object, "NOT_THIS"),
             "a fork that said the prose bears on the entry was read as a false nomination"
         );
     }

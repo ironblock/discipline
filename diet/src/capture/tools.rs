@@ -1832,8 +1832,16 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_phase_transition_proposal_is_advisory_and_writes_nothing() {
+    /// One well-formed phase-transition proposal.
+    ///
+    /// SHARED BY THE TWO TESTS BELOW, AND THAT IS THE POINT. One test used to
+    /// assert both that a proposal writes nothing and what it carries, so
+    /// `inject_tools_proposal_writes` and `inject_tools_proposal_reasonless`
+    /// broke the same test and could be told apart only by which assertion
+    /// message came back. That is prose lifted out of a panic, which is the
+    /// staleness #46 exists to end. Split, each fault breaks a test of its
+    /// own and cargo's own `test <path> ... FAILED` line is the class.
+    fn proposal_effect() -> Effect {
         let row = call(
             "t6",
             3,
@@ -1843,14 +1851,25 @@ mod tests {
                 ("to", "review"),
             ],
         );
-        let effect = apply(&row, 0, saw()).expect("a well-formed proposal");
+        apply(&row, 0, saw()).expect("a well-formed proposal")
+    }
+
+    #[test]
+    fn a_phase_transition_proposal_is_advisory_and_writes_nothing() {
+        let effect = proposal_effect();
         assert!(
             effect.patches.is_empty(),
             "a phase-transition proposal is advisory and writes nothing, and \
              this one wrote {:?}",
             effect.patches
         );
-        let proposal = effect.proposal.expect("the proposal is reported");
+    }
+
+    #[test]
+    fn a_phase_transition_proposal_carries_the_ruling_it_asks_for() {
+        let proposal = proposal_effect()
+            .proposal
+            .expect("the proposal is reported");
         assert_eq!(proposal.to, "review");
         assert_eq!(proposal.at_turn, 3);
         assert_eq!(proposal.from_call, "t6");
@@ -1904,8 +1923,17 @@ mod tests {
         assert_eq!(reminder.missed(1..11), vec![1, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
 
-    #[test]
-    fn the_sweep_carries_what_the_router_put_off() {
+    /// The one ask a recovery sweep raises over a silent turn the router
+    /// deferred something on.
+    ///
+    /// SHARED BY THE TWO TESTS BELOW, AND THAT IS THE POINT. One test used to
+    /// assert both which kind the sweep asks as and what that ask says, so
+    /// `inject_tools_sweep_kind` and `inject_tools_ask_question_dropped`
+    /// broke the same test and could be told apart only by which assertion
+    /// message came back. That is prose lifted out of a panic, which is the
+    /// staleness #46 exists to end. Split, each fault breaks a test of its
+    /// own and cargo's own `test <path> ... FAILED` line is the class.
+    fn swept_ask() -> Ask {
         let mut reminder = Reminder::default();
         reminder.deferred(2, "a write whose effect nobody asked about");
         for turn in 1..=3 {
@@ -1915,6 +1943,12 @@ mod tests {
         let [ask] = asks.as_slice() else {
             panic!("one silent turn in range, and {} asks", asks.len());
         };
+        ask.clone()
+    }
+
+    #[test]
+    fn the_sweep_asks_as_a_sweep_and_not_as_the_cadence() {
+        let ask = swept_ask();
         assert_eq!(
             ask.kind,
             AskKind::Sweep,
@@ -1922,12 +1956,21 @@ mod tests {
              are one ask wearing two names",
             ask.kind
         );
+    }
+
+    /// The opening is read off the ask's own kind rather than written as
+    /// `AskKind::Sweep`: which kind the sweep asks as is the test above, and
+    /// spelling it here would make `inject_tools_sweep_kind` break this test
+    /// too.
+    #[test]
+    fn the_sweep_carries_what_the_router_put_off() {
+        let ask = swept_ask();
         assert_eq!(
             ask.text(),
             format!(
                 "{} It went by without an answer: a write whose effect nobody \
                  asked about.",
-                AskKind::Sweep.opening()
+                ask.kind.opening()
             ),
             "an ask carrying a deferral is the question and then the deferral, \
              and this one is neither: {}",

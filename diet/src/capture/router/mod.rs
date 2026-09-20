@@ -1120,9 +1120,9 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        Ask, AskKind, Class, FAMILIES, Family, IMPERATIVE, INTENT_MARKERS, Router, Routing, Rule,
-        TableError, Term, Trigger, Unclassified, classify, parse_rules, replay, rules,
-        stated_intent,
+        Ask, AskKind, Class, Decision, FAMILIES, Family, IMPERATIVE, INTENT_MARKERS, Router,
+        Routing, Rule, TableError, Term, Trigger, Unclassified, classify, parse_rules, replay,
+        rules, stated_intent,
     };
     use crate::capture::mechanical::Facts;
     use crate::formats::record::json::Value;
@@ -1386,12 +1386,62 @@ mod tests {
         }
     }
 
-    #[test]
-    fn an_unknown_tool_call_routes_to_the_declared_default_and_says_so() {
+    /// A router that has seen one call matching no row of the table.
+    ///
+    /// SHARED BY THE THREE TESTS BELOW, AND THAT IS THE POINT. One test used
+    /// to assert where an unknown call routes, that it is recorded at all,
+    /// and what the record says, so the three seeded faults that prove those
+    /// rules -- `inject_router_unknown_silent`,
+    /// `inject_router_unclassified_silent` and
+    /// `inject_router_unclassified_unattributed` -- broke the same test and
+    /// could be told apart only by which assertion message came back. That is
+    /// prose lifted out of a panic, which is the staleness #46 exists to end.
+    /// Split, cargo's own `test <path> ... FAILED` line is the class.
+    fn router_over_an_unknown_call() -> (Router, Vec<Decision>) {
         let mut router = Router::new().expect("the table parses");
         router.observe(&turn(1));
         let decisions = router.observe(&call("t1", 1, "bash", shell("xyzzy --frob")));
         assert_eq!(decisions.len(), 1);
+        (router, decisions)
+    }
+
+    /// The per-class census counts a call under the routing it actually got.
+    /// The totals are the same whichever class a call is counted under and
+    /// whichever column inside that class it lands in, so a tally that files
+    /// a silent call as a fork is a census whose numbers all add up and whose
+    /// statement about the run is false -- the drive is told a directory
+    /// listing was forked.
+    ///
+    /// Asserted on a class the table routes silently rather than on the
+    /// corpus: `the_corpus_census_says_which_classes_fired` is broken by any
+    /// fault that moves a call between classes, and this one moves a call
+    /// between columns of the class it was already in.
+    #[test]
+    fn the_census_files_a_silent_call_as_silent_and_not_as_a_fork() {
+        let mut router = Router::new().expect("the table parses");
+        router.observe(&turn(1));
+        let decisions = router.observe(&call("t1", 1, "bash", shell("ls -la")));
+        assert_eq!(
+            decisions[0].routing,
+            Routing::Silent,
+            "a directory listing is inert by class, and this one was not"
+        );
+        let tally = router
+            .census()
+            .per_class
+            .get(&Class::DirectoryListing)
+            .copied()
+            .unwrap_or_default();
+        assert_eq!(
+            (tally.seen, tally.silent, tally.forked, tally.deferred),
+            (1, 1, 0, 0),
+            "the census filed a silent call under another column: {tally:?}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_tool_call_routes_to_the_declared_default() {
+        let (_router, decisions) = router_over_an_unknown_call();
         assert_eq!(
             decisions[0].routing,
             Routing::Fork(AskKind::Generic),
@@ -1401,23 +1451,15 @@ mod tests {
             decisions[0].turn, 1,
             "a decision was attributed to a turn the call was not in"
         );
+    }
+
+    #[test]
+    fn an_unknown_tool_call_is_a_typed_event() {
+        let (mut router, _) = router_over_an_unknown_call();
         assert_eq!(
             router.unclassified().len(),
             1,
             "an unknown pattern must be a typed event, or misrouting cannot be measured"
-        );
-        // Every field, because each one answers a different question about
-        // the misroute: which call, when, whose tool, and the word nobody
-        // wrote a row for.
-        assert_eq!(
-            router.unclassified()[0],
-            Unclassified {
-                id: "t1".to_owned(),
-                turn: 1,
-                tool: "bash".to_owned(),
-                word: Some("xyzzy".to_owned()),
-            },
-            "the unclassified event must name the call, its turn, its tool and its word"
         );
         // A tool whose NAME is unknown is unknown too, with no word.
         let decisions = router.observe(&Event::ToolCall {
@@ -1430,6 +1472,29 @@ mod tests {
         });
         assert_eq!(decisions[0].class, Class::Unknown);
         assert_eq!(router.census().unclassified, 2);
+    }
+
+    /// Every field, because each one answers a different question about the
+    /// misroute: which call, when, whose tool, and the word nobody wrote a
+    /// row for.
+    ///
+    /// A mutation that records no event at all breaks this test as well as
+    /// `an_unknown_tool_call_is_a_typed_event` above -- there is nothing to
+    /// name -- so the two faults are told apart by that test, which only the
+    /// silent one breaks, and not by this one.
+    #[test]
+    fn an_unclassified_event_names_the_call_its_turn_its_tool_and_its_word() {
+        let (router, _) = router_over_an_unknown_call();
+        assert_eq!(
+            router.unclassified(),
+            [Unclassified {
+                id: "t1".to_owned(),
+                turn: 1,
+                tool: "bash".to_owned(),
+                word: Some("xyzzy".to_owned()),
+            }],
+            "the unclassified event must name the call, its turn, its tool and its word"
+        );
     }
 
     #[test]
@@ -1694,6 +1759,16 @@ mod tests {
             .collect()
     }
 
+    // The corpus is walked once per claim, ONE CLAIM PER TEST, AND THAT IS
+    // THE POINT. Every assertion below used to live in one
+    // `the_corpus_routes_every_call_as_labelled`, so four seeded faults --
+    // `inject_router_table_row_lost`, `inject_router_unknown_silent`,
+    // `inject_router_unclassified_silent` and
+    // `inject_router_census_class_miscounted` -- broke that one test between
+    // them and could be told apart only by which assertion message came back.
+    // That is prose lifted out of a panic, which is the staleness #46 exists
+    // to end. Split, cargo's own `test <path> ... FAILED` line is the class.
+
     #[test]
     fn the_corpus_routes_every_call_as_labelled() {
         for (path, parsed, expected) in corpus() {
@@ -1731,6 +1806,13 @@ mod tests {
                 misrouted.len(),
                 misrouted.join("\n  ")
             );
+        }
+    }
+
+    #[test]
+    fn the_corpus_reports_every_unclassified_call() {
+        for (path, parsed, expected) in corpus() {
+            let replayed = replay(&parsed).expect("the table parses");
             let unclassified: Vec<&str> = replayed
                 .unclassified
                 .iter()
@@ -1748,6 +1830,13 @@ mod tests {
                 "{}: unclassified",
                 path.display()
             );
+        }
+    }
+
+    #[test]
+    fn the_corpus_census_counts_the_forks_the_router_spent() {
+        for (path, parsed, expected) in corpus() {
+            let replayed = replay(&parsed).expect("the table parses");
             assert_eq!(
                 replayed.census.forks(),
                 expected["forks"].as_u64().expect("forks"),
@@ -1766,9 +1855,21 @@ mod tests {
                 "{}: judgment asks",
                 path.display()
             );
-            // Which classes fired, and what the router did with each. The
-            // totals above are the same whichever class a call was counted
-            // under; this is the half that says the census knows.
+            assert!(
+                replayed.census.forks() < replayed.census.naive_forks(),
+                "{}: the router spent no fewer forks than the naive design",
+                path.display()
+            );
+        }
+    }
+
+    /// Which classes fired, and what the router did with each. The totals in
+    /// the test above are the same whichever class a call was counted under;
+    /// this is the half that says the census knows.
+    #[test]
+    fn the_corpus_census_says_which_classes_fired() {
+        for (path, parsed, expected) in corpus() {
+            let replayed = replay(&parsed).expect("the table parses");
             let mut fired = serde_json::Map::new();
             for (class, tally) in &replayed.census.per_class {
                 fired.insert(
@@ -1785,11 +1886,6 @@ mod tests {
                 serde_json::Value::Object(fired),
                 expected["per_class"],
                 "{}: the census does not say which classes fired",
-                path.display()
-            );
-            assert!(
-                replayed.census.forks() < replayed.census.naive_forks(),
-                "{}: the router spent no fewer forks than the naive design",
                 path.display()
             );
         }
