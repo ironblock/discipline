@@ -91,6 +91,32 @@
 //! An adapted record is still **lossy by declaration** -- content inside a
 //! mapped row that this schema has no home for does not survive -- but an
 //! unmapped ROW does, typed as what it is: unread.
+//!
+//! # `isSidechain` and `isMeta`: read, because the harness declared them
+//!
+//! The "does not second-guess" rule above is about CONTENT -- the adapter
+//! will not decide that a `user` row's text is not really a person's because
+//! of what the text says. `isSidechain` and `isMeta` are not content: they
+//! are booleans the harness itself writes on the row, the same category as
+//! `is_error` on a `tool_result`. Reading them is not a guess.
+//!
+//! A row carrying `isSidechain: true` is a subagent's own exchange, logged
+//! inline with the session that spawned it; one carrying `isMeta: true` is
+//! text the harness composed rather than a person -- a resumption prompt, a
+//! hook's feedback, some (not all) slash-command envelopes. Left unread, both
+//! open a turn the census reports as the top-level session's own turn, which
+//! is [#76]'s known defects 1 and 2. Either flag routes the row to
+//! [`Census::no_event`] instead: mapped, because the kind is one this adapter
+//! knows, and silent, because it is not this session's turn to count.
+//!
+//! **`isMeta` is not a complete fix for defect 2.** Checked against this
+//! adapter's own reference log (see the reading above): of seven rows
+//! carrying a `<command-name>` envelope, only three carry `isMeta: true`. The
+//! harness does not tag every synthetic row it composes, and the remaining
+//! four are turns still, exactly the defect this paragraph is not closing.
+//! Text-sniffing `<command-name>` to catch the rest would be the content
+//! guess this module refuses to make. What is fixed is real: every row the
+//! harness DOES declare synthetic is no longer misattributed.
 
 use std::collections::BTreeMap;
 
@@ -341,6 +367,15 @@ impl Run {
             return Ok(());
         };
         self.census.mapped_one(kind);
+        // Declared, not guessed: `isSidechain`/`isMeta` are booleans the
+        // harness writes on the row, not a reading of what the row says. A
+        // row either flag names is mapped -- the kind is one this adapter
+        // knows -- and silent, because it is a subagent's own exchange or
+        // text the harness composed, never the top-level session's turn.
+        if let Some(why) = excluded_from_parent(row) {
+            self.census.no_event_one(&format!("{}/{why}", mapped.tag()));
+            return Ok(());
+        }
         match mapped {
             Row::User => self.user(at_row, row, rest),
             Row::Assistant => self.assistant(at_row, row),
@@ -709,6 +744,21 @@ fn block_type(block: &serde_json::Value) -> Option<&str> {
     block.get("type").and_then(serde_json::Value::as_str)
 }
 
+/// Why a row is excluded from the parent session's turn stream, if the
+/// harness declared it so.
+///
+/// See this module's header for why reading these two fields is not the
+/// content guess the rest of this adapter refuses to make.
+fn excluded_from_parent(row: &serde_json::Value) -> Option<&'static str> {
+    if row.get("isSidechain").and_then(serde_json::Value::as_bool) == Some(true) {
+        return Some("isSidechain");
+    }
+    if row.get("isMeta").and_then(serde_json::Value::as_bool) == Some(true) {
+        return Some("isMeta");
+    }
+    None
+}
+
 /// The prefill of the assistant row that answers THIS turn, if one does.
 ///
 /// All three token fields, because all three were fed to the model. See this
@@ -934,6 +984,107 @@ mod tests {
         // somewhere, onto the call it answers. Mapped and turn are different
         // claims and the census makes only the first.
         assert_eq!(adapted.census.mapped.get("user").copied(), Some(2));
+    }
+
+    /// #76 known defect 1: a subagent's own exchange is not the parent's turn.
+    ///
+    /// `isSidechain` is the harness's own declaration that a row belongs to a
+    /// subagent's conversation logged inline with the session that spawned
+    /// it, not the operator's text second-guessed. Left unread, the row's
+    /// text opened a turn the census reported as the top-level session's own.
+    #[test]
+    fn a_sidechain_row_does_not_open_a_turn_and_is_counted_instead() {
+        let log = [
+            user_says("do the real work"),
+            "{\"type\":\"user\",\"isSidechain\":true,\"message\":{\"role\":\"user\",\
+             \"content\":\"a subagent's own prompt\"}}"
+                .to_owned(),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
+        let turns = adapted
+            .events
+            .iter()
+            .filter(|e| matches!(e, Event::Turn { .. }))
+            .count();
+        assert_eq!(
+            turns, 1,
+            "the sidechain row's text is not a second turn of this session"
+        );
+        assert_eq!(
+            adapted.census.mapped.get("user").copied(),
+            Some(2),
+            "still a kind this adapter knows"
+        );
+        assert_eq!(
+            adapted.census.no_event.get("user/isSidechain").copied(),
+            Some(1),
+            "silent, and said why, rather than passed over or miscounted"
+        );
+    }
+
+    /// The same declaration on an `assistant` row: no response, no call.
+    #[test]
+    fn a_sidechain_assistant_row_emits_no_response_and_is_counted() {
+        let log = [
+            user_says("go"),
+            "{\"type\":\"assistant\",\"isSidechain\":true,\"message\":{\"role\":\"assistant\",\
+             \"content\":[{\"type\":\"tool_use\",\"id\":\"sub1\",\"name\":\"Bash\",\
+             \"input\":{\"command\":\"ls\"}}],\"usage\":{\"output_tokens\":5}}}"
+                .to_owned(),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
+        assert!(
+            !adapted
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Response { .. } | Event::ToolCall { .. })),
+            "a subagent's own call and answer are not this session's"
+        );
+        assert_eq!(
+            adapted
+                .census
+                .no_event
+                .get("assistant/isSidechain")
+                .copied(),
+            Some(1)
+        );
+    }
+
+    /// #76 known defect 2, the part `isMeta` actually closes: a row the
+    /// harness declares synthetic is not a person's turn either.
+    ///
+    /// Not a complete fix -- see this module's header. The reference log has
+    /// `<command-name>` envelopes with no `isMeta` at all, and those are
+    /// still counted as turns; text-sniffing the envelope to catch them would
+    /// be the content guess this adapter refuses to make.
+    #[test]
+    fn a_harness_composed_meta_row_does_not_open_a_turn() {
+        let log = [
+            user_says("go"),
+            "{\"type\":\"user\",\"isMeta\":true,\"message\":{\"role\":\"user\",\
+             \"content\":\"<command-name>/compact</command-name>\"}}"
+                .to_owned(),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
+        let turns = adapted
+            .events
+            .iter()
+            .filter(|e| matches!(e, Event::Turn { .. }))
+            .count();
+        assert_eq!(turns, 1, "the isMeta row is not a second turn");
+        assert_eq!(adapted.census.no_event.get("user/isMeta").copied(), Some(1));
     }
 
     /// A tool's answer lands on the call it names, not on whichever was last.
