@@ -120,3 +120,43 @@ jobs:
           for check in "${checks[@]}"; do args+=(--only "$check"); done
           printf 'checks owned by diet: %s\n' "${checks[*]}"
           ./verify.sh "${args[@]}"
+
+  # #78, rows 1 and 4 (ruled 2026-09-14): the wasm32 build of the read side,
+  # proven against native in a wasm runtime, and the trap control proven
+  # against a real failure rather than assumed. A sibling job, not a step
+  # added to `checks` above, and not a `verify.sh` check of its own --
+  # `check-ci-coverage.py`'s invariant is one-directional (every `verify.sh`
+  # check has an owner and a workflow), so an extra job with no check behind
+  # it is outside what that guard polices; nothing here required touching
+  # `verify.sh`, `tools/gate/*.toml`, or `.github/check-owners.tsv`.
+  #
+  # `needs: [diet, ...]` in the root `gate` job is satisfied only when EVERY
+  # job in this reusable workflow succeeds, so this job failing fails the
+  # merge gate exactly as `checks` failing already does.
+  wasm:
+    name: diet (wasm conformance)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve the pinned toolchain and add the wasm32 target
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo --version
+          rustc --version
+
+      # The version is the exact one `diet/Cargo.toml` pins the crate to --
+      # `wasm-bindgen`'s bindgen format is an unstable schema shared between
+      # the crate and this CLI, and a mismatch is refused outright rather
+      # than warned about (measured on #78; see that Cargo.toml comment).
+      - name: Install the wasm-bindgen CLI, pinned to the crate's exact version
+        run: cargo install wasm-bindgen-cli --version 0.2.100 --locked
+
+      # `diet/tests/wasm_conformance.rs` builds both wasm32 artifacts itself
+      # (the plain conformance build and the seeded-trap build) and runs
+      # them through Node -- this one command is the whole job. See that
+      # file's own header for why it does not assume a prior build step.
+      - name: Prove the wasm32 read side against native, and the trap control against a real failure
+        run: |
+          cd diet
+          cargo test --no-default-features --features wasm --test wasm_conformance
