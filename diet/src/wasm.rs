@@ -69,6 +69,11 @@ pub fn check_regimen(source: &str) -> String {
 /// -- it is the `.unwrap()` on that `Err`, the same mistake an accidental
 /// host call reaching this module would actually make, that panics and
 /// traps.
+///
+/// # Panics
+///
+/// Always, on the `Err` `std::fs::read_to_string` returns on this target.
+/// That panic is the entire point: see above.
 #[cfg(feature = "wasm-seeded-host-call-trap")]
 #[wasm_bindgen]
 #[must_use]

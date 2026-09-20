@@ -152,6 +152,19 @@ jobs:
       - name: Install the wasm-bindgen CLI, pinned to the crate's exact version
         run: cargo install wasm-bindgen-cli --version 0.2.100 --locked
 
+      # A fresh-instance review of this PR found `seeded_host_call_trap`
+      # failing `-D warnings` under the ONE feature combination that
+      # actually compiles it (`wasm,wasm-seeded-host-call-trap`) -- a
+      # dormant failure, since neither this job's own `cargo test` (a build,
+      # not a lint) nor the `checks` job's clippy step (default features
+      # only) ever exercised that combination. Both feature sets named
+      # explicitly here so this cannot go dormant the same way twice.
+      - name: Lint every wasm feature combination this crate declares
+        run: |
+          cd diet
+          cargo clippy --all-targets --no-default-features --features wasm -- -D warnings
+          cargo clippy --all-targets --no-default-features --features wasm,wasm-seeded-host-call-trap -- -D warnings
+
       # `diet/tests/wasm_conformance.rs` builds both wasm32 artifacts itself
       # (the plain conformance build and the seeded-trap build) and runs
       # them through Node -- this one command is the whole job. See that
