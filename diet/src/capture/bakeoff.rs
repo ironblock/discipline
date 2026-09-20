@@ -665,6 +665,73 @@ impl RunKind {
             }
         }
     }
+
+    /// The controls that actually ran, for the front-matter's
+    /// `controls_run`. Per kind: both cite `scoring-extremes` (every cell's
+    /// [`pair_controls`](pairs::pair_controls) or
+    /// [`sense::controls`] runs before any metric is trusted), but the
+    /// shuffled-label null is computed per cell only for a pairs run
+    /// ([`pairs::CellReport::null`], via [`sense::shuffled_null`]) -- the
+    /// sense path's own [`CellReport`] carries no null, and [`null_over`]
+    /// reports a shuffle count without ever shuffling anything. Ruled
+    /// (ruling 2, 2026-09-20): declare per kind what ran, rather than
+    /// claiming a control for a kind that does not run it.
+    fn controls_run(self) -> &'static [&'static str] {
+        match self {
+            Self::Sense => &["scoring-extremes"],
+            Self::Pairs => &["scoring-extremes", "shuffled-label-null"],
+        }
+    }
+
+    /// The README's conclusion section: why the front-matter says
+    /// `unadjudicated` and what closes that gap.
+    ///
+    /// Per kind, not shared: the sense bakeoff's original pre-registration
+    /// named endpoints and no rule, so "the gap is in the pre-registration"
+    /// was literally true of it. A pairs run's claim is pre-registered
+    /// alongside a `decision-rule.toml`, written before any score existed
+    /// and pinned by digest (ruled on #17, 2026-09-19) -- the same wording
+    /// would tell a reader the rule does not exist when it does. Ruled
+    /// 2026-09-20: the conclusion is per kind, as the title and observation
+    /// already are.
+    fn conclusion(self) -> &'static str {
+        match self {
+            Self::Sense => {
+                "`unadjudicated`, which is not a verdict and does not pretend to be.\n\
+                 Ruled 2026-09-13: `inconclusive` is a SCIENTIFIC verdict -- the data\n\
+                 did not decide -- and a directory whose numbers are decisive while\n\
+                 its front-matter says `inconclusive` states a falsehood a reader has\n\
+                 to catch. `unadjudicated` states what is true: no one has applied a\n\
+                 decision rule.\n\
+                 \n\
+                 And the reason none has been applied is a gap in the PRE-REGISTRATION,\n\
+                 not in this verb: it names endpoints and no rule that turns them into\n\
+                 a verdict. The rule going forward is that a pre-registration carries\n\
+                 its decision rule, written before the data like every other endpoint;\n\
+                 when it does, this assembler applies it mechanically and writes\n\
+                 `supported`, `refuted` or `inconclusive`, because applying a\n\
+                 PRE-REGISTERED rule after seeing numbers is not choosing after seeing\n\
+                 them. Until this claim's pre-registration carries one, the answer is\n\
+                 `unadjudicated`."
+            }
+            Self::Pairs => {
+                "`unadjudicated`, which is not a verdict and does not pretend to be.\n\
+                 Ruled 2026-09-13: `inconclusive` is a SCIENTIFIC verdict -- the data\n\
+                 did not decide -- and a directory whose numbers are decisive while\n\
+                 its front-matter says `inconclusive` states a falsehood a reader has\n\
+                 to catch. `unadjudicated` states what is true: no one has applied a\n\
+                 decision rule to these numbers yet.\n\
+                 \n\
+                 Unlike the sense bakeoff, the gap here is not in the pre-registration:\n\
+                 a pairs claim is pre-registered alongside a `decision-rule.toml`,\n\
+                 written before any score existed and pinned by digest. Applying that\n\
+                 rule to the numbers this directory assembled is a separate\n\
+                 adjudication step -- this verb writes the numbers; an adjudication\n\
+                 reads them against the rule and is recorded beside this directory.\n\
+                 Until that adjudication exists, the answer here is `unadjudicated`."
+            }
+        }
+    }
 }
 
 /// A run, and everything the directory it assembles into needs from it.
@@ -960,29 +1027,40 @@ fn comparison_value(cell: &str, a: &str, b: &str, test: &sense::Bootstrap, adjus
     ]))
 }
 
+/// One drive-resampled precision-at-k bootstrap between two arms, rendered.
+fn precision_comparison_value(
+    budget: usize,
+    test: &pairs::PrecisionBootstrap,
+    adjusted: f64,
+) -> Value {
+    Value::Object(BTreeMap::from([
+        (
+            "budget".to_owned(),
+            Value::Integer(i64::try_from(budget).unwrap_or(i64::MAX)),
+        ),
+        ("difference".to_owned(), decimal(test.observed, 4)),
+        ("p".to_owned(), decimal(test.p, 6)),
+        ("p_holm".to_owned(), decimal(adjusted, 6)),
+        ("attainable_p_floor".to_owned(), decimal(test.p_floor, 6)),
+    ]))
+}
+
 /// The pairs run's comparisons: every embedder against every other within a
 /// cell, and the anchored arm against the ungated arm within every
-/// (embedder, register, scoring) -- the bootstrap the pre-gate sub-rule needs,
-/// which the sense instrument never emitted. Holm-corrected together.
-fn pair_comparisons(cells: &[&pairs::CellReport]) -> Result<(Value, Value), RunError> {
-    let mut by_cell: BTreeMap<String, Vec<&pairs::CellReport>> = BTreeMap::new();
-    for cell in cells {
-        by_cell.entry(cell.key()).or_default().push(cell);
-    }
-    let mut raw = Vec::new();
-    let mut across = Vec::new();
-    for (key, group) in &by_cell {
-        for (index, a) in group.iter().enumerate() {
-            for b in group.iter().skip(index + 1) {
-                let test =
-                    sense::paired_bootstrap(&a.scores, &b.scores, PRE_REGISTRATION.resamples, SEED)
-                        .map_err(RunError::Bootstrap)?;
-                raw.push(test.p.value());
-                across.push((key.clone(), a.embedder.clone(), b.embedder.clone(), test));
-            }
-        }
-    }
-    let mut arms = Vec::new();
+/// (embedder, register, scoring) -- the score-difference bootstrap the sense
+/// instrument never emitted, and, beside it on the same entry, a
+/// drive-resampled bootstrap of the **pooled precision at k** between the
+/// same two arms at every pre-registered budget: the statistic the pre-gate
+/// sub-rule actually names (ruled on #17, 2026-09-20; the score-difference
+/// bootstrap is the wrong one for this pair, since a row the gate rejects
+/// sits at the scoring's floor and the mean difference is negative by
+/// construction). Holm-corrected together, one family.
+/// Every (anchored, ungated) pair of the same (embedder, register, scoring):
+/// what a gate-arm comparison is between.
+fn pair_gate_arms<'a>(
+    cells: &[&'a pairs::CellReport],
+) -> Vec<(&'a pairs::CellReport, &'a pairs::CellReport)> {
+    let mut arm_pairs = Vec::new();
     for with in cells
         .iter()
         .filter(|cell| cell.gate == pairs::PairGate::Anchored)
@@ -995,9 +1073,88 @@ fn pair_comparisons(cells: &[&pairs::CellReport]) -> Result<(Value, Value), RunE
         }) else {
             continue;
         };
+        arm_pairs.push((*with, *without));
+    }
+    arm_pairs
+}
+
+/// The rendered `(comparisons, gate_comparisons)` pair: every across-embedder
+/// score-difference bootstrap, and every arm's score-difference bootstrap
+/// with its per-budget precision bootstraps folded in beside it.
+fn render_gate_comparisons(
+    across: &[(String, String, String, sense::Bootstrap)],
+    across_adjusted: &[f64],
+    arms: &[(String, String, String, sense::Bootstrap)],
+    arms_adjusted: &[f64],
+    precisions: &[(usize, pairs::PrecisionBootstrap)],
+    precision_adjusted: &[f64],
+) -> (Value, Value) {
+    let across_value = Value::Array(
+        across
+            .iter()
+            .zip(across_adjusted)
+            .map(|((cell, a, b, test), adjusted)| comparison_value(cell, a, b, test, *adjusted))
+            .collect(),
+    );
+    let budgets = sense::BUDGETS.len();
+    let arms_value = Value::Array(
+        arms.iter()
+            .zip(arms_adjusted)
+            .enumerate()
+            .map(|(index, ((cell, a, b, test), adjusted))| {
+                let mut value = comparison_value(cell, a, b, test, *adjusted);
+                let start = index * budgets;
+                let cell_precisions = &precisions[start..start + budgets];
+                let cell_precision_adjusted = &precision_adjusted[start..start + budgets];
+                if let Value::Object(members) = &mut value {
+                    members.insert(
+                        "precision_at_k".to_owned(),
+                        Value::Array(
+                            cell_precisions
+                                .iter()
+                                .zip(cell_precision_adjusted)
+                                .map(|((budget, test), adjusted)| {
+                                    precision_comparison_value(*budget, test, *adjusted)
+                                })
+                                .collect(),
+                        ),
+                    );
+                }
+                value
+            })
+            .collect(),
+    );
+    (across_value, arms_value)
+}
+
+fn pair_comparisons(cells: &[&pairs::CellReport]) -> Result<(Value, Value), RunError> {
+    let mut by_cell: BTreeMap<String, Vec<&pairs::CellReport>> = BTreeMap::new();
+    for cell in cells {
+        by_cell.entry(cell.key()).or_default().push(cell);
+    }
+    let mut raw = Vec::new();
+    let mut across = Vec::new();
+    for (key, group) in &by_cell {
+        for (index, a) in group.iter().enumerate() {
+            for b in group.iter().skip(index + 1) {
+                let test = sense::paired_bootstrap(
+                    &a.scores(),
+                    &b.scores(),
+                    PRE_REGISTRATION.resamples,
+                    SEED,
+                )
+                .map_err(RunError::Bootstrap)?;
+                raw.push(test.p.value());
+                across.push((key.clone(), a.embedder.clone(), b.embedder.clone(), test));
+            }
+        }
+    }
+    let arm_pairs = pair_gate_arms(cells);
+    let mut arms = Vec::new();
+    for (with, without) in &arm_pairs {
         let test = sense::paired_bootstrap(
-            &with.scores,
-            &without.scores,
+            &with.scores(),
+            &without.scores(),
             PRE_REGISTRATION.resamples,
             SEED,
         )
@@ -1010,17 +1167,32 @@ fn pair_comparisons(cells: &[&pairs::CellReport]) -> Result<(Value, Value), RunE
             test,
         ));
     }
+    let mut precisions = Vec::new();
+    for (with, without) in &arm_pairs {
+        for budget in sense::BUDGETS.iter().copied() {
+            let test = pairs::precision_bootstrap(
+                &with.rows,
+                &without.rows,
+                budget,
+                PRE_REGISTRATION.resamples,
+                SEED,
+            )
+            .map_err(RunError::Bootstrap)?;
+            raw.push(test.p);
+            precisions.push((budget, test));
+        }
+    }
     let corrected = sense::holm(&raw);
-    let (first, second) = corrected.split_at(across.len());
-    let render = |rows: &[(String, String, String, sense::Bootstrap)], adjusted: &[f64]| {
-        Value::Array(
-            rows.iter()
-                .zip(adjusted)
-                .map(|((cell, a, b, test), adjusted)| comparison_value(cell, a, b, test, *adjusted))
-                .collect(),
-        )
-    };
-    Ok((render(&across, first), render(&arms, second)))
+    let (across_and_arms, precision_adjusted) = corrected.split_at(across.len() + arms.len());
+    let (across_adjusted, arms_adjusted) = across_and_arms.split_at(across.len());
+    Ok(render_gate_comparisons(
+        &across,
+        across_adjusted,
+        &arms,
+        arms_adjusted,
+        &precisions,
+        precision_adjusted,
+    ))
 }
 
 /// Every cell of one embedder over one set: a scored cell per (scoring, gate),
@@ -1674,6 +1846,7 @@ fn report_of(
         .iter()
         .map(|(key, value)| format!("{key} = {value:?}"))
         .collect();
+    let controls_run = format!("{:?}", kind.controls_run());
     format!(
         "+++\n\
          hypothesis = {:?}\n\
@@ -1681,7 +1854,7 @@ fn report_of(
          kind = {directory_kind:?}\n\
          product_sha256 = {product_sha256:?}\n\
          pre_registration_sha256 = {pre_registration_sha256:?}\n\
-         controls_run = [\"scoring-extremes\", \"shuffled-label-null\"]\n\
+         controls_run = {controls_run}\n\
          known_defects = []\n\
          targets_checked = {checked}\n\
          \n\
@@ -1725,22 +1898,7 @@ fn report_of(
          \n\
          ## Conclusion\n\
          \n\
-         `unadjudicated`, which is not a verdict and does not pretend to be.\n\
-         Ruled 2026-09-13: `inconclusive` is a SCIENTIFIC verdict -- the data\n\
-         did not decide -- and a directory whose numbers are decisive while\n\
-         its front-matter says `inconclusive` states a falsehood a reader has\n\
-         to catch. `unadjudicated` states what is true: no one has applied a\n\
-         decision rule.\n\
-         \n\
-         And the reason none has been applied is a gap in the PRE-REGISTRATION,\n\
-         not in this verb: it names endpoints and no rule that turns them into\n\
-         a verdict. The rule going forward is that a pre-registration carries\n\
-         its decision rule, written before the data like every other endpoint;\n\
-         when it does, this assembler applies it mechanically and writes\n\
-         `supported`, `refuted` or `inconclusive`, because applying a\n\
-         PRE-REGISTERED rule after seeing numbers is not choosing after seeing\n\
-         them. Until this claim's pre-registration carries one, the answer is\n\
-         `unadjudicated`.\n\
+         {}\n\
          \n\
          {caveat}\n",
         kind.hypothesis(),
@@ -1751,6 +1909,7 @@ fn report_of(
         kind.title(),
         kind.observation(),
         kind.hypothesis(),
+        kind.conclusion(),
     )
 }
 
@@ -1759,7 +1918,7 @@ mod tests {
     use std::fmt::Write as _;
     use std::path::{Path, PathBuf};
 
-    use super::{RunError, assemble, run};
+    use super::{RunError, RunKind, assemble, run};
     use crate::capture::sense::{self, Embedder, Fixture};
     use crate::digest::sha256_hex;
     use crate::formats::record::json::Value;
@@ -1949,6 +2108,21 @@ mod tests {
     /// the numbers re-derive from the artefacts. A directory that passed one
     /// and failed the other would be exactly the half-assembled shape the
     /// ruling was about.
+    #[test]
+    fn controls_run_names_the_null_only_for_the_kind_that_computes_it() {
+        assert_eq!(
+            RunKind::Sense.controls_run(),
+            ["scoring-extremes"],
+            "the sense path's own CellReport carries no null, and null_over reports a shuffle \
+             count without ever shuffling anything -- controls_run must not claim it ran"
+        );
+        assert_eq!(
+            RunKind::Pairs.controls_run(),
+            ["scoring-extremes", "shuffled-label-null"],
+            "every pairs cell computes sense::shuffled_null over its own rows"
+        );
+    }
+
     #[test]
     fn the_assembled_directory_is_one_the_gates_accept() {
         // UNDER THE REPOSITORY, not in the system temp directory, because
@@ -2955,6 +3129,15 @@ mod tests {
             "the pairs run emits the gate-arm bootstrap the sub-rule needs"
         );
         assert!(
+            product.contains("\"precision_at_k\":["),
+            "each gate comparison carries the drive-resampled precision bootstrap the sub-rule \
+             actually names, beside the score-difference one"
+        );
+        assert!(
+            product.contains("\"admitted_only\":["),
+            "each cell carries precision over admitted nominations only, beside the pooled figure"
+        );
+        assert!(
             product.contains("\"register\":\"intent\"")
                 && product.contains("\"register\":\"sense\""),
             "both registers produced cells"
@@ -2968,6 +3151,11 @@ mod tests {
         assert!(
             readme.contains("entry-to-turn"),
             "the README is the pairs run's, not the sense bakeoff's"
+        );
+        assert!(
+            readme.contains("decision-rule.toml"),
+            "the pairs run's conclusion names its own decision rule rather than the sense \
+             bakeoff's generic \"the pre-registration names endpoints and no rule\" text"
         );
         let pre = std::fs::read_to_string(into.join("pre-registration.json"))
             .expect("the pre-registration");
