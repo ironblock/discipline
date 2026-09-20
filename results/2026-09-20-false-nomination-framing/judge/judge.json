@@ -1,8 +1,13 @@
 {
- "model": "claude-fable-5-1 (as the harness reports the subagent model; the judges inherited the seat's session model)",
+ "model": "claude-fable-5-1 for batches 1-25 at first judging and claude-opus-5 for the re-judge of batch 22 (as the harness reports the subagent model; the judges inherited the seat's session model)",
  "harness": "Claude Code subagent, type general-purpose, one fresh instance per batch, instructed to read only judge/prompt.md and its batch file and to write verdicts-NN.json; the key withheld",
  "date": "2026-09-20",
  "batches": 25,
- "void": ["22"],
- "note": "the judge's model and version are the harness's report, not a measurement of the model; the batch files the judges read are committed under judge/batches/ with home prefixes collapsed, the verdicts verbatim"
+ "void": [
+  "22 (first instance, kept as void-22.json)"
+ ],
+ "note": "the judge's model and version are the harness's report, not a measurement of the model; the batch files the judges read are committed under judge/batches/ with home prefixes collapsed, the verdicts verbatim",
+ "re_judged": {
+  "22": "a second fresh instance, same harness, same prompt, batch file and withheld key, 2026-09-20; model as the harness reports it: claude-opus-5, not the first-pass judges' claude-fable-5-1 (the seat's session model changed when the first model's usage credits ran out; a same-model re-judge was refused by the API, HTTP 429); judge-score 4/4 controls keyed, exit 0; its verdicts are verdicts-22.json"
+ }
 }

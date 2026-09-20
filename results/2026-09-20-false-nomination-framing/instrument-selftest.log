@@ -10,5 +10,10 @@
   [ok] sham has the advisory line's length and comes from another drive
   [ok] sign test on eight forks all in the good direction is at its floor
   [ok] sign test with no discordant pair is p = 1
+  [ok] Holm: smallest p times m, then monotone
+  [ok] reading D over advisory fires when advisory sits at the sham
+  [ok] reading D over both framings does not fire when imperative is above the sham
+  [ok] the verdict word follows [ruling].sham_reading
+  [ok] a degenerate ladder is labelled and its rung claims unadjudicated
+  [ok] an unknown sham_reading is refused, not defaulted
 selftest: ok
-selftest rc=0

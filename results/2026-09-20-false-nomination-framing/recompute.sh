@@ -77,16 +77,36 @@ for where, stated in (("front-matter", front["product_sha256"]), ("the summary r
 #      `sham_clause_readings`: (B) the sham's own maximum advantage over all
 #      rungs; (C) the maximum over rungs of advisory's excess over the sham on
 #      the same rung. The verdict word is under (A); (C) would change it.
+#      RULED on PR #101 (relayed, 2026-09-20): "the sham's" binds to the
+#      floor -- the largest changed-turn rate on false nominations over rungs,
+#      against the sham arm's changed-turn rate -- a RATE against a RATE, which
+#      is neither (A) nor (B); (C) is rejected. That reading is (D), computed
+#      here over the advisory framing and over both framings, because the
+#      ruling's text does not say which arm "false nominations" spans and its
+#      gloss ("the floor prediction fails") points at advisory; the arm word
+#      is asked on the thread. `[ruling].sham_reading` in decision-rule.toml
+#      names the reading the verdict word is under (A until the ruling is
+#      ratified); the [rule] table stays byte-identical to the ratified text.
 #   3. "p below the attainable floor": the paired sign test is the pre-registered
 #      comparison, one per rung, ONE-SIDED toward advisory changing less,
 #      uncorrected (ruled on #17 for a named comparison); a p can sit at the
 #      floor and not below it, so the clause holds when p equals the floor --
 #      every discordant fork went the same way. Also worded after the run.
+#      RULED (decision 3): the named comparison (the rule's rung) is
+#      uncorrected against the attainable floor; the other rungs' sign tests
+#      are secondaries and carry a Holm-corrected p beside the raw one under
+#      `secondary_sign_tests`, read by nothing in the verdict.
 #   4. "advisory exceeds the sham by less than imperative does": (advisory - sham)
 #      < (imperative - sham) on the 0.6 rung, i.e. advisory < imperative there.
 #   5. Attainability (ruled on #17): a rate over n graded forks moves in steps of
 #      1/n, so a margin is attainable on a rung iff 1/n <= margin; the supported
 #      clause is asked only where its margin is attainable, else `unadjudicated`.
+#   6. The ladder (ruled, decision 1): with zero realised true nominations on
+#      every rung the rung claims are `unadjudicated` and the ladder is labelled
+#      `degenerate` on the verdict; the population claim over the false
+#      nominations is what the verdict adjudicates.
+#   7. The shuffled-framing null (ruled, decision 5) was added after the run:
+#      labelled post-hoc, counted toward nothing.
 import collections
 import math
 import random
@@ -154,7 +174,20 @@ def shuffled_framing_null(graded, resamples=9999, seed=SEED):
     extreme = sum(1 for d in diffs if abs(d) >= abs(obs) - 1e-12)
     return {"observed": round(obs, 4), "resamples": resamples, "null_mean": round(mean, 4), "null_sd": round(sd, 4),
             "null_ci95": [round(lo, 4), round(hi, 4)], "at_chance": lo <= 0 <= hi,
-            "p_two_sided": (extreme + 1) / (resamples + 1), "floor": 1 / (resamples + 1)}
+            "p_two_sided": (extreme + 1) / (resamples + 1), "floor": 1 / (resamples + 1),
+            "label": "post-hoc", "counted_toward_verdict": False}
+
+
+def holm(pvals):
+    """Holm's step-down correction over a dict of raw p-values; returns the
+    adjusted p per key (monotone, capped at 1)."""
+    items = sorted(pvals.items(), key=lambda kv: kv[1])
+    m = len(items)
+    out, running = {}, 0.0
+    for i, (k, p) in enumerate(items):
+        running = max(running, min(1.0, (m - i) * p))
+        out[k] = running
+    return out
 
 
 def build_report(grades, verdicts, plan):
@@ -238,24 +271,60 @@ def adjudicate(report, rule):
     max_excess = max(excess.values(), default=None)
     reading_b = sham_max is not None and (max_advantage - sham_max) < small
     reading_c = max_excess is not None and max_excess < small
+    # (D) the ruled reading: the largest changed-turn rate on false nominations
+    # over rungs, against the sham arm's changed-turn rate on that rung; over
+    # the advisory framing, and over both framings, the arm word pending
+    def reading_d(arms_):
+        top = max(((x["changed_rate"][a], r, a) for r, x in computable.items() for a in arms_), default=None)
+        if top is None:
+            return {"fires": False}
+        rate_, r, a = top
+        return {"largest_rate": rate_, "rung": rungs[r]["nominal"], "arm": a, "sham_rate_there": rungs[r]["changed_rate"]["sham"],
+                "excess_over_sham": round(rate_ - rungs[r]["changed_rate"]["sham"], 4), "fires": (rate_ - rungs[r]["changed_rate"]["sham"]) < small}
+    d_adv, d_both = reading_d(("advisory",)), reading_d(("advisory", "imperative"))
+    reading_a = no_better_than_sham
+    fires = {"A": reading_a, "B": reading_b, "C": reading_c, "D-advisory": d_adv["fires"], "D-both": d_both["fires"]}
+    ruling = rule.get("ruling", {})  # the maintainer's rulings after the run, in their own table; [rule] stays byte-identical
+    applied = ruling.get("sham_reading", "A")
+    if applied not in fires:
+        raise SystemExit(f"decision-rule.toml names sham_reading {applied!r}; the applier knows {sorted(fires)}")
+    no_better_than_sham = fires[applied]
     # the pre-registered floor prediction: a false nomination changes the turn
     # more often than the sham under BOTH framings, or framing is moot
     floor_pred = {r: {"imperative_above_sham": x["imperative_minus_sham"] > 0, "advisory_above_sham": x["advisory_minus_sham"] > 0}
                   for r, x in computable.items()}
     floor_holds = bool(computable) and all(v["imperative_above_sham"] and v["advisory_above_sham"] for v in floor_pred.values())
-    if supported:
-        verdict = "supported"
-    elif computable and (every_not_lower or no_better_than_sham):
-        verdict = "refuted"
-    elif not computable or (at and not attainable):
-        verdict = "unadjudicated"
-    else:
-        verdict = "inconclusive"
+    def word(sham_fires):
+        if supported:
+            return "supported"
+        if computable and (every_not_lower or sham_fires):
+            return "refuted"
+        if not computable or (at and not attainable):
+            return "unadjudicated"
+        return "inconclusive"
+    verdict = word(no_better_than_sham)
+    # secondaries (ruled, decision 3): every rung's sign test but the named one,
+    # Holm-corrected beside the raw p; read by nothing above
+    secondaries = {r: x["sign_test"]["p"] for r, x in computable.items() if r != key and x["sign_test"]}
+    adj = holm(secondaries)
+    secondary_tests = {r: {"p_raw": p, "p_holm": adj[r], "floor": computable[r]["sign_test"]["floor"]} for r, p in secondaries.items()}
+    # the ladder (ruled, decision 1)
+    shares = {r: x["realised_true_share"] for r, x in rungs.items()}
+    degenerate = all((v or 0) == 0 for v in shares.values())
+    rule_block = {"rung": th["rung"], "supported": th["supported"], "refuted": th["refuted"], "inconclusive": th["inconclusive"],
+                  "sham_reading": applied}
+    for k in ("version", "v1_wording", "v2_wording", "status"):
+        if k in ruling:
+            rule_block[k] = ruling[k]
     return {
-        "rule": {"rung": th["rung"], "supported": th["supported"], "refuted": th["refuted"], "inconclusive": th["inconclusive"]},
+        "rule": rule_block,
         "readings": {
             "every_rung": "quantifies over computable rungs (ten or more false nominations graded); none computable is unadjudicated",
-            "maximum_difference": "advisory's advantage (imperative minus advisory) at the rung where it is largest, against the sham's advantage (imperative minus sham) on that rung",
+            "maximum_difference": {"A": "advisory's advantage (imperative minus advisory) at the rung where it is largest, against the sham's advantage (imperative minus sham) on that rung",
+                                   "B": "the same advantage against the sham's largest advantage over rungs",
+                                   "C": "the largest over rungs of advisory's excess over the sham on the same rung",
+                                   "D-advisory": "the largest advisory changed-turn rate over rungs against the sham's rate on that rung",
+                                   "D-both": "the largest changed-turn rate under either framing over rungs against the sham's rate on that rung"}[applied],
             "p_below_floor": "the paired sign test, one per rung, uncorrected; holds when p equals its attainable floor",
             "sham_clause": "(advisory - sham) < (imperative - sham) on the adjudicated rung",
             "attainability": "a margin is attainable on a rung iff 1/n_graded <= margin; the supported clause is asked only where attainable",
@@ -269,16 +338,22 @@ def adjudicate(report, rule):
                               "holds": supported},
         "refuted_by": {"computable_rungs": sorted(computable), "every_rung_not_lower_by_margin": every_not_lower,
                        "best_rung": (best["nominal"] if best else None), "max_advisory_advantage": max_advantage,
-                       "sham_advantage_at_best_rung": sham_advantage_there, "no_better_than_sham": no_better_than_sham},
+                       "sham_advantage_at_best_rung": sham_advantage_there, "no_better_than_sham": no_better_than_sham, "under_reading": applied},
         "sham_clause_readings": {
-            "applied": "A: the sham's advantage on the rung where advisory's advantage is largest",
-            "A_fires": no_better_than_sham,
+            "applied": applied,
+            "A": "the sham's advantage on the rung where advisory's advantage is largest", "A_fires": reading_a,
             "B": "the sham's own maximum advantage over all rungs", "B_sham_max": sham_max, "B_fires": reading_b,
             "C": "the maximum over rungs of advisory's excess over the sham on the same rung", "C_excess_by_rung": excess, "C_max_excess": max_excess, "C_fires": reading_c,
-            "verdict_under_B": "supported" if supported else ("refuted" if computable and (every_not_lower or reading_b) else ("unadjudicated" if not computable or (at and not attainable) else "inconclusive")),
-            "verdict_under_C": "supported" if supported else ("refuted" if computable and (every_not_lower or reading_c) else ("unadjudicated" if not computable or (at and not attainable) else "inconclusive")),
-            "note": "none of the three readings was posted before the run; the applied one is the applier's, worded near the run's end; the maintainer's ruling decides",
+            "D": "the largest changed-turn rate on false nominations over rungs, against the sham arm's changed-turn rate on that rung (ruled on PR #101; the arm the largest rate is taken over is asked on the thread)",
+            "D_advisory": d_adv, "D_both": d_both,
+            "verdict_under": {k: word(v) for k, v in fires.items()},
+            "note": "none of A, B, C was posted before the run; the ruling (relayed on PR #101) binds the sham's to the floor as a rate, reading D, which is neither A nor B; the verdict word is under rule.sham_reading",
         },
+        "secondary_sign_tests": {"named": key, "named_p_uncorrected": at["sign_test"]["p"] if at and at["sign_test"] else None,
+                                 "correction": "Holm over the other computable rungs", "by_rung": secondary_tests, "counted_toward_verdict": False},
+        "ladder": {"label": "degenerate" if degenerate else "realised", "realised_true_share_by_rung": shares,
+                   "rung_claims": "unadjudicated" if degenerate else "adjudicated",
+                   "text": "zero realised true nominations on every rung: the rung claims are unadjudicated and the verdict adjudicates the population claim over the false nominations" if degenerate else "true nominations realised"},
         "floor_prediction": {"text": "a false nomination changes the turn more often than the sham under both framings, or framing is moot",
                              "by_rung": floor_pred, "holds": floor_holds},
         "envelope": {"parameters": "each fork re-fires its drive's archived turn.request with that request's own sampler parameters; the request digest on every row names it",

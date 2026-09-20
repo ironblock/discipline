@@ -1,16 +1,18 @@
 # The pre-registered claim, floor and decision rule for the false-nomination
-# framing run: the tables below were written before any fork fired and are
-# consumed by the record by digest so that the numbers cannot have chosen
-# them. Ratified by the maintainer on the claim's own issue (#89, 2026-09-19);
-# the fifth and sixth rungs ruled on #17 (5747481065); the run's fixed
-# parameters posted on #89 before the first fork (5747608246, corrected
-# 5747611166). The READINGS the applier takes of the ratified text (which
-# rung the sham's advantage is read on; p at the floor; one-sided) were NOT
-# posted before the run: they are the applier's, worded 2026-09-20T09:12Z
+# framing run: the tables [claim], [floor] and [rule] below were written before
+# any fork fired and are consumed by the record by digest so that the numbers
+# cannot have chosen them. Ratified by the maintainer on the claim's own issue
+# (#89, 2026-09-19); the fifth and sixth rungs ruled on #17 (5747481065); the
+# run's fixed parameters posted on #89 before the first fork (5747608246,
+# corrected 5747611166). The READINGS the applier takes of the ratified text
+# (which rung the sham's advantage is read on; p at the floor; one-sided) were
+# NOT posted before the run: they are the applier's, worded 2026-09-20T09:12Z
 # with the run near its end, stated on the verdict under `readings` and
 # `sham_clause_readings`, and disclosed under `known_defects` (fresh review
-# of PR #101, B1). This header is the only line of the file that changed
-# after the run; the tables are byte-identical to the ratified text.
+# of PR #101, B1). After the run this header changed and the [ruling] table
+# was added (the maintainer's rulings on the PR's decisions, relayed on PR
+# #101 2026-09-20); [claim], [floor] and [rule] are byte-identical to the
+# ratified text.
 
 [claim]
 hypothesis = "When the collector's nominator fires falsely -- it presents an entry as superseded when it is not -- the consumer's turn changes less, and its reasoning acknowledges the nomination without acting on it more often, when the nomination is framed as advisory than when it is framed as imperative; and the size of that difference falls as the nominator's precision rises."
@@ -33,3 +35,22 @@ inconclusive = "otherwise"
 uncomputable_rung = "a rung with fewer than ten false nominations graded satisfies neither bound"
 acknowledgement = "reported beside the verdict, never folded in; the directory's result is the changed-turn rule's word"
 p_reading = "the paired sign test is one comparison per rung, uncorrected, as ruled on #17 for a pre-registered comparison; the attainable floor is 0.5 to the power of the discordant-pair count, printed beside every p"
+
+[ruling]
+# Decision 0 (PR #101): "the sham's" binds to the floor as a RATE -- the
+# largest changed-turn rate on false nominations over rungs against the sham
+# arm's changed-turn rate -- reading D on the verdict, neither A nor B, C
+# rejected. The ruling's text does not say which framing the largest rate is
+# taken over; its gloss points at advisory. The arm word is asked on the
+# thread, so the verdict word stays under the applier's reading A (which
+# agrees with B and with D over advisory) until ratified.
+sham_reading = "A"
+status = "decision 0 ruled as reading D, arm word pending ratification; decision 6 returned for re-ruling (the ruling read the acknowledgement endpoint, the disclosure is about the ratified turn-change endpoint)"
+v2_wording = "at every rung the advisory rate is not lower than imperative by >= 0.05, or the largest changed-turn rate on false nominations under advisory, over all rungs, does not exceed the sham arm's changed-turn rate on that rung by >= 0.05 -- either alone"
+v2_wording_status = "the applier's reading of the ruling's own v2 phrase ('...does not exceed the sham arm's changed-turn rate by >= 0.05'), posted for ratification on PR #101; not yet applied"
+decision_1 = "ladder degenerate: rung claims unadjudicated, labelled on the verdict; (b)-v2 authorized beside this run"
+decision_2 = "batch 22 re-judged by a fresh instance; the void verdicts kept, read by nothing"
+decision_3 = "the named comparison's paired p uncorrected against the attainable floor; the other rungs' sign tests Holm-corrected beside, read by nothing"
+decision_4 = "home-prefix collapse accepted as done"
+decision_5 = "the shuffled-framing null labelled post-hoc, counted toward nothing"
+decision_7 = "grading order disclosed as run; v2 grades a sample in both orders"
