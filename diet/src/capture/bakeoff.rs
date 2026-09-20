@@ -686,12 +686,17 @@ impl RunKind {
     /// The README's conclusion section: why the front-matter says
     /// `unadjudicated` and what closes that gap.
     ///
-    /// Per kind, not shared: the sense bakeoff's original pre-registration
-    /// named endpoints and no rule, so "the gap is in the pre-registration"
-    /// was literally true of it. A pairs run's claim is pre-registered
-    /// alongside a `decision-rule.toml`, written before any score existed
-    /// and pinned by digest (ruled on #17, 2026-09-19) -- the same wording
-    /// would tell a reader the rule does not exist when it does. Ruled
+    /// Per kind, not shared: the sense variant is unchanged (it is what
+    /// `report_of` already wrote, and still describes the sense bakeoff's
+    /// own `decision-rule.toml` correctly). The pairs variant no longer
+    /// claims a pairs run's pre-registration is unlike the sense bakeoff's
+    /// -- the sense bakeoff has had its own digest-pinned
+    /// `decision-rule.toml` since its first committed run, so a contrast
+    /// between the two kinds here would be false of the one it does not
+    /// name. What the pairs text says instead, and only about itself: a
+    /// pairs claim carries a `decision-rule.toml`, written before any score
+    /// existed and pinned by digest (ruled on #17, 2026-09-19), and applying
+    /// it is a separate adjudication step this verb does not perform. Ruled
     /// 2026-09-20: the conclusion is per kind, as the title and observation
     /// already are.
     fn conclusion(self) -> &'static str {
@@ -722,8 +727,7 @@ impl RunKind {
                  to catch. `unadjudicated` states what is true: no one has applied a\n\
                  decision rule to these numbers yet.\n\
                  \n\
-                 Unlike the sense bakeoff, the gap here is not in the pre-registration:\n\
-                 a pairs claim is pre-registered alongside a `decision-rule.toml`,\n\
+                 A pairs claim is pre-registered alongside a `decision-rule.toml`,\n\
                  written before any score existed and pinned by digest. Applying that\n\
                  rule to the numbers this directory assembled is a separate\n\
                  adjudication step -- this verb writes the numbers; an adjudication\n\
