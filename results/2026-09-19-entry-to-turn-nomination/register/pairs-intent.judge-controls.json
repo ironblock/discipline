@@ -1,0 +1,150 @@
+{
+ "what": "Authored pairs with a known answer, seeded four per judge batch, the key withheld from the judge; a batch is void on any miss. 24 batches, 96 of 96 keyed, none void (2026-09-19).",
+ "version": 1,
+ "controls": [
+  {
+   "id": "ctrl01",
+   "answer": "supersedes",
+   "entry": "The default branch is `release-2`, so PRs should target it.",
+   "prose": "Let me confirm the branch layout before opening anything. Turns out `release-2` was deleted last week; `git branch -r` shows only `main` and `feature/parser`, so the default branch is `main`.",
+   "tools": [
+    {
+     "command": "git branch -r",
+     "output": "  origin/HEAD -> origin/main\n  origin/main\n  origin/feature/parser"
+    }
+   ]
+  },
+  {
+   "id": "ctrl02",
+   "answer": "mentions",
+   "entry": "`parse_args` returns a `Vec<String>` and never fails on an empty list.",
+   "prose": "Before I change the CLI I want to see every caller of `parse_args`, since the return type flows into the dispatcher.",
+   "tools": [
+    {
+     "command": "grep -rn 'parse_args(' src/",
+     "output": "src/main.rs:41:    let args = parse_args(std::env::args());\nsrc/repl.rs:12:    let args = parse_args(line.split_whitespace());"
+    }
+   ]
+  },
+  {
+   "id": "ctrl03",
+   "answer": "unrelated",
+   "entry": "The `build:bundle-scenes` script exceeds the 120-second tool timeout and must be run in a local terminal.",
+   "prose": "The user asked about the licence. The README's Licensing section says the engine is MIT and the sample assets are CC-BY; nothing about a separate commercial licence.",
+   "tools": [
+    {
+     "command": "sed -n '/## License/,/## /p' README.md",
+     "output": "## License\nMIT. Sample assets under assets/ are CC-BY 4.0.\n"
+    }
+   ]
+  },
+  {
+   "id": "ctrl04",
+   "answer": "supersedes",
+   "entry": "Next: read `handle_slots_save` in server.cpp to see how a slot's KV cache is written to disk.",
+   "prose": "Read `handle_slots_save`. It builds a filename from the slot id, calls `llama_state_seq_save_file`, and returns the byte count in the JSON body; there is no compression and no checksum.",
+   "tools": [
+    {
+     "command": "sed -n '2210,2260p' tools/server/server.cpp",
+     "output": "static void handle_slots_save(...) {\n    std::string filename = req.get(\"filename\");\n    ...\n    size_t nwrite = llama_state_seq_save_file(ctx, filepath.c_str(), slot->id, tokens.data(), tokens.size());\n    res.set_content(json{{\"n_saved\", nwrite}}.dump(), \"application/json\");\n}"
+    }
+   ]
+  },
+  {
+   "id": "ctrl05",
+   "answer": "mentions",
+   "entry": "`server-task.h` defines `server_task_type` with eleven variants including `SLOT_SAVE` and `SLOT_RESTORE`.",
+   "prose": "Now let me diff `server-task.h` between the two forks to see whether the fork touched the task enum at all.",
+   "tools": [
+    {
+     "command": "diff -u a/tools/server/server-task.h b/tools/server/server-task.h | head -5",
+     "output": ""
+    }
+   ]
+  },
+  {
+   "id": "ctrl06",
+   "answer": "unrelated",
+   "entry": "Speculative decoding is enabled by `--draft-max` and defaults to 16 draft tokens.",
+   "prose": "The user wants the HTTP route table. `server.cpp` registers routes in `init_routes`; I'll list them.",
+   "tools": [
+    {
+     "command": "grep -n 'svr->Get\\|svr->Post' tools/server/server.cpp | head -20",
+     "output": "3100: svr->Get(\"/health\", ...);\n3101: svr->Get(\"/metrics\", ...);\n3102: svr->Post(\"/completion\", ...);\n3103: svr->Post(\"/v1/chat/completions\", ...);"
+    }
+   ]
+  },
+  {
+   "id": "ctrl07",
+   "answer": "supersedes",
+   "entry": "`common_prompt_checkpoint` is only used by the speculative-decoding rollback path.",
+   "prose": "Reading the callers, `common_prompt_checkpoint` is also created by the prompt-cache save path in `server-context.cpp`, not only by rollback, so the earlier note was too narrow.",
+   "tools": [
+    {
+     "command": "grep -n 'common_prompt_checkpoint' tools/server/*.cpp",
+     "output": "tools/server/server-context.cpp:177:struct common_prompt_checkpoint {\ntools/server/server-context.cpp:612:    checkpoints.push_back(common_prompt_checkpoint{...}); // prompt cache save\ntools/server/server-context.cpp:1450:    restore_from(common_prompt_checkpoint&) // spec rollback"
+    }
+   ]
+  },
+  {
+   "id": "ctrl08",
+   "answer": "mentions",
+   "entry": "The README is about 97 KB and gets truncated when read whole; read sections instead.",
+   "prose": "Following my own note, I'll pull just the API section of the README rather than the whole file.",
+   "tools": [
+    {
+     "command": "sed -n '/## API/,/## /p' README.md | head -60",
+     "output": "## API\nPOST /v1/chat/completions\n..."
+    }
+   ]
+  },
+  {
+   "id": "ctrl09",
+   "answer": "unrelated",
+   "entry": "`t_max_predict_ms` triggers a timeout on newline for fill-in-the-middle requests.",
+   "prose": "Let me look at how the WGSL shaders are organised compared with the GLSL effect system.",
+   "tools": [
+    {
+     "command": "ls src/shaders/",
+     "output": "pbr.wgsl\nshadow.wgsl\nskybox.wgsl"
+    }
+   ]
+  },
+  {
+   "id": "ctrl10",
+   "answer": "supersedes",
+   "entry": "Open question: does `prompt_save()` write the KV cache to disk or only keep it in memory?",
+   "prose": "Answered: `prompt_save()` copies the sequence into an in-memory `server_prompt_cache` entry; nothing touches the filesystem, disk persistence is only the separate slots-save endpoint.",
+   "tools": [
+    {
+     "command": "sed -n '/void prompt_save/,/^}/p' tools/server/server-context.cpp",
+     "output": "void prompt_save(server_slot & slot) {\n    ...\n    prompt_cache.save(slot.prompt); // memory only\n}"
+    }
+   ]
+  },
+  {
+   "id": "ctrl11",
+   "answer": "mentions",
+   "entry": "Decision: keep the parity tests pixel-exact rather than tolerance-based.",
+   "prose": "The parity tests are pixel-exact, as decided. I'll add the new scene to the parity list and run them.",
+   "tools": [
+    {
+     "command": "npm run test:parity -- --scene=skybox",
+     "output": "skybox: 1/1 frames identical"
+    }
+   ]
+  },
+  {
+   "id": "ctrl12",
+   "answer": "unrelated",
+   "entry": "Gotcha: `git branch -r` lists a stale `feature/parser` branch that was merged months ago.",
+   "prose": "Compiling the list of sampling parameters the server accepts, starting from `params_from_json_cmpl`.",
+   "tools": [
+    {
+     "command": "grep -n 'params.sampling\\.' tools/server/server-common.cpp | wc -l",
+     "output": "42"
+    }
+   ]
+  }
+ ]
+}
