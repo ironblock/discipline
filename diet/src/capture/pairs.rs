@@ -49,6 +49,7 @@
 //! **Nothing here is a result.** The readings above were fixed on #17 before
 //! any cache for this register existed.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
@@ -811,6 +812,27 @@ pub fn precision_by_source(rows: &[ScoredPair], k: usize, source: PairSource) ->
     }
 }
 
+/// [`precision_at_k`] over only the nominated rows the gate actually
+/// admitted, beside the pooled figure and never replacing it: a drive with
+/// fewer than `k` anchored rows still fills its budget from
+/// [`pooled_top_k`] with the rejected rows sitting at the scoring's floor,
+/// tie-broken by id, so the pooled reading over a with-gate arm is partly
+/// over nominations the gate never made (measured by review: 10 of 90
+/// with-gate nominations at k = 5 were rejected rows). This is the reading
+/// over nominations the gate did make.
+#[must_use]
+pub fn precision_admitted_only(rows: &[ScoredPair], k: usize) -> Fraction {
+    let pooled: Vec<&ScoredPair> = pooled_top_k(rows, k)
+        .into_iter()
+        .filter(|row| row.admitted)
+        .collect();
+    let hits = pooled.iter().filter(|row| row.label.is_positive()).count();
+    Fraction {
+        hits: hits as u64,
+        of: pooled.len() as u64,
+    }
+}
+
 /// Over-firing at budget `k` per drive, pooled: of every hard-negative row,
 /// how many were nominated within their drive's top `k`.
 #[must_use]
@@ -827,6 +849,136 @@ pub fn over_firing(rows: &[ScoredPair], k: usize) -> Fraction {
         hits: nominated as u64,
         of: hard as u64,
     }
+}
+
+/// One arm's pooled precision at `k`, per drive: hits and nominated, from
+/// just that drive's own rows -- the unit [`precision_bootstrap`] resamples.
+fn precision_by_drive(rows: &[ScoredPair], k: usize) -> BTreeMap<&str, (u64, u64)> {
+    let mut by_drive: BTreeMap<&str, Vec<&ScoredPair>> = BTreeMap::new();
+    for row in rows {
+        by_drive.entry(row.drive.as_str()).or_default().push(row);
+    }
+    by_drive
+        .into_iter()
+        .map(|(drive, mut group)| {
+            group.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
+            let top = &group[..group.len().min(k)];
+            let hits = top.iter().filter(|row| row.label.is_positive()).count();
+            (drive, (hits as u64, top.len() as u64))
+        })
+        .collect()
+}
+
+/// A small count as a float, for arithmetic reported to a fixed precision --
+/// never a metric total, which stays exact in the record.
+fn count(n: u64) -> f64 {
+    f64::from(u32::try_from(n).unwrap_or(u32::MAX))
+}
+
+/// The pooled precision over one resample: counts summed across the sampled
+/// drives (a drive drawn twice counts twice), then divided.
+fn pooled_precision(by_drive: &BTreeMap<&str, (u64, u64)>, sample: &[&str]) -> f64 {
+    let (hits, of) = sample.iter().fold((0u64, 0u64), |(hits, of), drive| {
+        let (drive_hits, drive_of) = by_drive[drive];
+        (hits + drive_hits, of + drive_of)
+    });
+    if of == 0 {
+        0.0
+    } else {
+        count(hits) / count(of)
+    }
+}
+
+/// A paired bootstrap's result, in [`sense::Bootstrap`]'s shape short of the
+/// type [`sense::paired_bootstrap`] alone may construct.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrecisionBootstrap {
+    /// The observed difference: the first arm's pooled precision at `k` minus
+    /// the second's, over every drive, unresampled.
+    pub observed: f64,
+    /// How often a drive-resampled difference crossed zero, add-one
+    /// corrected.
+    pub p: f64,
+    /// The smallest value these resamples could have produced.
+    pub p_floor: f64,
+    /// How many resamples.
+    pub resamples: u32,
+}
+
+/// A paired bootstrap of the **pooled precision at `k`** between two arms of
+/// the same register, resampling by drive.
+///
+/// [`pair_comparisons`]'s score-difference bootstrap is the wrong statistic
+/// for the anchored arm against the ungated one: a row the gate rejects sits
+/// at the scoring's floor, so the mean score difference is negative by
+/// construction whatever the two arms' precision did. The pre-gate sub-rule
+/// names precision at k; the natural paired unit under a per-drive pooled
+/// metric is the drive itself (ruled on #17, 2026-09-20) -- resampled with
+/// replacement, each resample's statistic the difference of the two arms'
+/// pooled precision over the resampled drives. The observed statistic is
+/// unresampled: each arm's own pooled [`precision_at_k`], as already
+/// reported.
+///
+/// # Errors
+///
+/// [`sense::BootstrapError::Unpaired`] when the two arms do not share the
+/// same drives, `Empty` for no drives, `NoResamples` for zero resamples.
+pub fn precision_bootstrap(
+    first: &[ScoredPair],
+    second: &[ScoredPair],
+    k: usize,
+    resamples: u32,
+    seed: u64,
+) -> Result<PrecisionBootstrap, sense::BootstrapError> {
+    let first_by_drive = precision_by_drive(first, k);
+    let second_by_drive = precision_by_drive(second, k);
+    if first_by_drive.len() != second_by_drive.len()
+        || first_by_drive.keys().ne(second_by_drive.keys())
+    {
+        return Err(sense::BootstrapError::Unpaired {
+            a: first_by_drive.len(),
+            b: second_by_drive.len(),
+        });
+    }
+    let drives: Vec<&str> = first_by_drive.keys().copied().collect();
+    if drives.is_empty() {
+        return Err(sense::BootstrapError::Empty);
+    }
+    if resamples == 0 {
+        return Err(sense::BootstrapError::NoResamples);
+    }
+    let observed =
+        pooled_precision(&first_by_drive, &drives) - pooled_precision(&second_by_drive, &drives);
+    let mut rng = sense::Xorshift::seeded(seed);
+    let side = observed.partial_cmp(&0.0);
+    let crossed = |difference: f64| match side {
+        Some(Ordering::Greater) => difference <= 0.0,
+        Some(Ordering::Less) => difference >= 0.0,
+        _ => false,
+    };
+    let crossings = (0..resamples)
+        .filter(|_| {
+            let sample: Vec<&str> = (0..drives.len())
+                .map(|_| drives[rng.below(drives.len())])
+                .collect();
+            let difference = pooled_precision(&first_by_drive, &sample)
+                - pooled_precision(&second_by_drive, &sample);
+            crossed(difference)
+        })
+        .count();
+    let p = match side {
+        Some(Ordering::Greater | Ordering::Less) => {
+            let crossings = f64::from(u32::try_from(crossings).unwrap_or(u32::MAX));
+            (crossings + 1.0) / (f64::from(resamples) + 1.0)
+        }
+        _ => 1.0,
+    };
+    Ok(PrecisionBootstrap {
+        observed,
+        p,
+        p_floor: sense::attainable_p_floor(resamples),
+        resamples,
+    })
 }
 
 /// The rows as the sense instrument's, for the metrics that do not pool.
@@ -1155,10 +1307,24 @@ pub struct CellReport {
     pub undefined: Vec<(PairMetric, usize, UndefinedCause)>,
     /// Precision at every budget, by source.
     pub by_source: Vec<(usize, PairSource, Fraction)>,
+    /// [`precision_admitted_only`] at every budget: the pooled figure
+    /// restricted to nominations the gate actually admitted, beside
+    /// [`PairMetric::PrecisionAtK`]'s pooled reading and never replacing it.
+    pub admitted_only: Vec<(usize, Fraction)>,
     /// The shuffled-label null over this cell's rows.
     pub null: Option<Null>,
-    /// The scores, in register order, for the paired bootstraps.
-    pub scores: Vec<f64>,
+    /// The scored rows, in register order: the score-difference bootstrap's
+    /// input, and the drive and label the precision bootstrap needs besides.
+    pub rows: Vec<ScoredPair>,
+}
+
+impl CellReport {
+    /// The rows' scores alone, in register order, for a bootstrap that
+    /// compares raw scores rather than a pooled metric.
+    #[must_use]
+    pub fn scores(&self) -> Vec<f64> {
+        self.rows.iter().map(|row| row.score).collect()
+    }
 }
 
 /// A cell whose controls did not land, reported as that.
@@ -1233,6 +1399,26 @@ impl CellReport {
                 ]))
             })
             .collect();
+        let admitted_only = self
+            .admitted_only
+            .iter()
+            .map(|(budget, fraction)| {
+                Value::Object(BTreeMap::from([
+                    (
+                        "budget".to_owned(),
+                        Value::Integer(i64::try_from(*budget).unwrap_or(i64::MAX)),
+                    ),
+                    (
+                        "hits".to_owned(),
+                        Value::Integer(i64::try_from(fraction.hits).unwrap_or(i64::MAX)),
+                    ),
+                    (
+                        "of".to_owned(),
+                        Value::Integer(i64::try_from(fraction.of).unwrap_or(i64::MAX)),
+                    ),
+                ]))
+            })
+            .collect();
         let null = self.null.map_or_else(
             || Value::String("undefined".to_owned()),
             |null| {
@@ -1262,6 +1448,7 @@ impl CellReport {
             ),
             ("undefined".to_owned(), Value::Array(undefined)),
             ("by_source".to_owned(), Value::Array(by_source)),
+            ("admitted_only".to_owned(), Value::Array(admitted_only)),
             ("null".to_owned(), null),
         ]))
     }
@@ -1352,6 +1539,7 @@ fn cell_over(
     let mut reported = Vec::new();
     let mut undefined = Vec::new();
     let mut by_source = Vec::new();
+    let mut admitted_only = Vec::new();
     for budget in sense::BUDGETS.iter().copied() {
         for metric in PairMetric::ALL.iter().copied() {
             match PairReported::take(metric, budget, scored) {
@@ -1374,6 +1562,7 @@ fn cell_over(
         for source in PairSource::ALL.iter().copied() {
             by_source.push((budget, source, precision_by_source(scored, budget, source)));
         }
+        admitted_only.push((budget, precision_admitted_only(scored, budget)));
     }
     Ok(CellReport {
         embedder: embedder.to_owned(),
@@ -1383,8 +1572,9 @@ fn cell_over(
         reported,
         undefined,
         by_source,
+        admitted_only,
         null: sense::shuffled_null(&as_scored(scored), sense::NULL_SHUFFLES, seed),
-        scores: scored.iter().map(|row| row.score).collect(),
+        rows: scored.to_vec(),
     })
 }
 
@@ -1728,8 +1918,9 @@ mod tests {
     use super::{
         ANCHORS_REQUIRED, CellError, Outcome, Pair, PairCell, PairGate, PairMetric,
         PairMetricError, PairReported, PairScoring, PairSource, Roles, ScoredPair, Tool, anchored,
-        intent_cells, over_firing, pair_controls, pairs, pooled_top_k, precision_at_k,
-        precision_by_source, recurring_anchors, score_pairs, sense_cells, turns,
+        intent_cells, over_firing, pair_controls, pairs, pooled_top_k, precision_admitted_only,
+        precision_at_k, precision_bootstrap, precision_by_source, recurring_anchors, score_pairs,
+        sense_cells, turns,
     };
     use crate::capture::sense::{self, Control, ControlFailure, Embedder, Fixture, Label};
 
@@ -1741,6 +1932,15 @@ mod tests {
             label,
             score,
             admitted: true,
+        }
+    }
+
+    /// A row the gate rejected, sitting at the scoring's floor -- what a
+    /// drive with too few anchored rows fills its budget with.
+    fn rejected(id: &str, drive: &str, label: Label, source: PairSource, score: f64) -> ScoredPair {
+        ScoredPair {
+            admitted: false,
+            ..row(id, drive, label, source, score)
         }
     }
 
@@ -1795,6 +1995,118 @@ mod tests {
         let mined = precision_by_source(&rows, 2, PairSource::Mined);
         assert_eq!((planted.hits, planted.of), (1, 1));
         assert_eq!((mined.hits, mined.of), (1, 3));
+    }
+
+    #[test]
+    fn a_drive_with_too_few_anchored_rows_fills_its_budget_with_a_rejected_row_the_pooled_figure_counts_and_the_admitted_only_figure_does_not()
+     {
+        // Drive `a` has one anchored (admitted) row; drive `b` has none, so
+        // its only row at k = 2 is the rejected one sitting at the floor.
+        let rows = vec![
+            row("a1", "a", Label::Positive, PairSource::Mined, 0.9),
+            rejected("b1", "b", Label::Negative, PairSource::Mined, -1.0),
+        ];
+        let pooled = precision_at_k(&rows, 2);
+        assert_eq!(
+            (pooled.hits, pooled.of),
+            (1, 2),
+            "the pooled figure nominates the rejected row to fill the budget"
+        );
+        let admitted = precision_admitted_only(&rows, 2);
+        assert_eq!(
+            (admitted.hits, admitted.of),
+            (1, 1),
+            "the admitted-only figure is over nominations the gate actually made"
+        );
+    }
+
+    /// Two drives where every drive's positive outranks its negative -- the
+    /// pattern a gate that helps precision would produce.
+    fn two_drives_positive_on_top() -> Vec<ScoredPair> {
+        vec![
+            row("a1", "a", Label::Positive, PairSource::Planted, 0.9),
+            row("a2", "a", Label::Negative, PairSource::Mined, 0.8),
+            row("a3", "a", Label::HardNegative, PairSource::Mined, 0.1),
+            row("b1", "b", Label::Positive, PairSource::Mined, 0.5),
+            row("b2", "b", Label::Negative, PairSource::Mined, 0.4),
+            row("b3", "b", Label::HardNegative, PairSource::Mined, 0.3),
+        ]
+    }
+
+    #[test]
+    fn the_precision_bootstrap_reads_the_pooled_precision_difference_between_two_arms() {
+        let with = two_drives_positive_on_top();
+        let without = two_drives();
+        let test = precision_bootstrap(&with, &without, 1, 999, 7).expect("a bootstrap");
+        assert!(
+            (test.observed - 1.0).abs() < 1e-12,
+            "every drive's positive leads at k = 1 in `with` and neither does in `without`: \
+             observed {}",
+            test.observed
+        );
+        assert_eq!(test.resamples, 999);
+        assert!(
+            (test.p - test.p_floor).abs() < 1e-12,
+            "the difference cannot cross zero on this fixture whichever drives are resampled, so \
+             p sits at the attainable floor: p {} floor {}",
+            test.p,
+            test.p_floor
+        );
+    }
+
+    #[test]
+    fn the_precision_bootstrap_pools_counts_across_resampled_drives_rather_than_averaging_fractions()
+     {
+        // Drive `a` has two admitted rows at k = 2 (both positive, precision
+        // 2/2); drive `b` has only one row at all, so its own top-2 is just
+        // that one row (positive, precision 1/1). Pooled over both drives:
+        // 3 hits of 3 nominated, not the mean of two 1.0 fractions -- the
+        // same number either way here, so a second drive is added with a
+        // worse precision to force pooled and averaged readings apart.
+        let with = vec![
+            row("a1", "a", Label::Positive, PairSource::Mined, 0.9),
+            row("a2", "a", Label::Positive, PairSource::Mined, 0.8),
+            row("b1", "b", Label::Negative, PairSource::Mined, 0.5),
+        ];
+        let without = vec![
+            row("a1", "a", Label::Negative, PairSource::Mined, 0.9),
+            row("a2", "a", Label::Negative, PairSource::Mined, 0.8),
+            row("b1", "b", Label::Negative, PairSource::Mined, 0.5),
+        ];
+        let test = precision_bootstrap(&with, &without, 2, 1, 7).expect("a bootstrap");
+        // `with`'s pooled precision: drive a contributes 2/2, drive b 0/1;
+        // pooled is 2/3, not the mean of a's fraction (1.0) and b's (0.0),
+        // which would be 0.5.
+        assert!(
+            (test.observed - (2.0 / 3.0)).abs() < 1e-12,
+            "pooled precision over both drives' counts is 2/3, not the mean of their fractions: \
+             observed {}",
+            test.observed
+        );
+    }
+
+    #[test]
+    fn the_precision_bootstrap_refuses_arms_that_do_not_share_drives() {
+        let with = two_drives();
+        let mut without = two_drives();
+        without.retain(|row| row.drive != "b");
+        let error = precision_bootstrap(&with, &without, 1, 10, 7).expect_err("unpaired drives");
+        assert!(
+            matches!(error, sense::BootstrapError::Unpaired { a: 2, b: 1 }),
+            "unexpected error: {error:?}"
+        );
+    }
+
+    #[test]
+    fn the_precision_bootstrap_refuses_no_drives_and_no_resamples() {
+        let empty = precision_bootstrap(&[], &[], 1, 10, 7).expect_err("no drives");
+        assert!(matches!(empty, sense::BootstrapError::Empty), "{empty:?}");
+        let rows = two_drives();
+        let no_resamples = precision_bootstrap(&rows, &rows, 1, 0, 7).expect_err("no resamples");
+        assert!(
+            matches!(no_resamples, sense::BootstrapError::NoResamples),
+            "{no_resamples:?}"
+        );
     }
 
     #[test]
@@ -2270,7 +2582,7 @@ mod tests {
                 report.reported.len() + report.undefined.len(),
                 PairMetric::ALL.len() * sense::BUDGETS.len()
             );
-            assert_eq!(report.scores.len(), rows.len());
+            assert_eq!(report.rows.len(), rows.len());
         }
         let senses = sense::shipped_senses().expect("senses");
         let turn_rows = turns(
