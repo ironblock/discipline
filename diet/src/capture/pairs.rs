@@ -1816,12 +1816,39 @@ mod tests {
     }
 
     #[test]
-    fn a_metric_that_never_failed_is_not_reported() {
+    fn a_reported_metric_carries_its_budget_and_value() {
         let rows = two_drives();
         let taken = PairReported::take(PairMetric::PrecisionAtK, 2, &rows).expect("reported");
         assert!((taken.value() - 0.5).abs() < 1e-12);
         assert_eq!(taken.budget(), 2);
         assert_eq!(taken.metric(), PairMetric::PrecisionAtK);
+    }
+
+    /// The refusal the demonstrated-failure discipline exists for: at a budget
+    /// the ladder does not name, past the widest rung, the pooled precision
+    /// fixture's top-k reaches its positives and no longer reads as failure --
+    /// and a metric whose own fixture did not fail is not reported, whatever
+    /// the subject scored. The sense instrument has the same test.
+    #[test]
+    fn a_metric_whose_fixture_did_not_fail_is_refused_not_reported() {
+        let rows = two_drives();
+        let past = sense::widest_budget() + 1;
+        match PairReported::take(PairMetric::PrecisionAtK, past, &rows) {
+            Err(PairMetricError::InstrumentNeverFailed {
+                metric,
+                budget,
+                value,
+                reading,
+            }) => {
+                assert_eq!(metric, PairMetric::PrecisionAtK);
+                assert_eq!(budget, past);
+                assert!(
+                    value > reading,
+                    "the fixture read {value}, which is not the failure {reading}"
+                );
+            }
+            other => panic!("a metric whose fixture did not fail was reported: {other:?}"),
+        }
     }
 
     fn pair(id: &str, entry: &str, prose: &str, intent: Option<&str>, label: Label) -> Pair {
