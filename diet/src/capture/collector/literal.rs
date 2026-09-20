@@ -399,41 +399,68 @@ mod tests {
         );
     }
 
-    /// The rest of the shape rules the module doc names, one assertion each.
-    /// The list in `anchors_are_shapes_prose_does_not_produce_by_accident`
-    /// is a sentence a reader can follow; these are the corners it does not
-    /// reach, and each one is a rule whose removal would change what tier 0
-    /// fires on.
+    // The rest of the shape rules the module doc names, ONE TEST EACH, AND
+    // THAT IS THE POINT. The list in
+    // `anchors_are_shapes_prose_does_not_produce_by_accident` is a sentence a
+    // reader can follow; these are the corners it does not reach, and each
+    // one is a rule whose removal would change what tier 0 fires on.
+    //
+    // They used to be five `assert!`s in one
+    // `the_shapes_the_module_names_are_the_shapes_it_anchors`, so the five
+    // seeded faults that prove them -- `inject_collector_quoted_anchor_delimiter`,
+    // `inject_collector_module_path_shape`, `inject_collector_extension_window`,
+    // `inject_collector_token_untrimmed` and `inject_collector_short_shape_anchored`
+    // -- broke one test between them and could be told apart only by which
+    // assertion message came back. That is prose lifted out of a panic, which
+    // is the staleness #46 exists to end. Split, each fault breaks a test of
+    // its own and cargo's own `test <path> ... FAILED` line is the class.
+
+    // A span set off in double quotes, not only in backticks. The author
+    // quoting it is the shape; the words inside need none of their own.
     #[test]
-    fn the_shapes_the_module_names_are_the_shapes_it_anchors() {
-        // A span set off in double quotes, not only in backticks. The author
-        // quoting it is the shape; the words inside need none of their own.
+    fn a_double_quoted_span_is_an_anchor() {
         assert_eq!(
             texts(&anchors("the CLI answers \"no such verb\" and stops")),
             vec![("no such verb", AnchorKind::Quoted)],
             "a double-quoted span was not anchored"
         );
-        // `a::b`, with nothing else identifier-shaped about it: no
-        // underscore, no dot, no case change.
+    }
+
+    // `a::b`, with nothing else identifier-shaped about it: no underscore, no
+    // dot, no case change.
+    #[test]
+    fn a_path_through_the_module_tree_is_an_anchor() {
         assert_eq!(
             texts(&anchors("queue::pop is the caller")),
             vec![("queue::pop", AnchorKind::Identifier)],
             "a path through the module tree was not anchored"
         );
-        // A dotted word whose tail is a word is a name, not a file. The kind
-        // is what a record carries, so the two must not be confused.
+    }
+
+    // A dotted word whose tail is a word is a name, not a file. The kind is
+    // what a record carries, so the two must not be confused.
+    #[test]
+    fn a_dotted_word_whose_tail_is_a_word_is_a_name_not_a_file() {
         assert_eq!(
             texts(&anchors("notes.summary is derived")),
             vec![("notes.summary", AnchorKind::Identifier)],
             "a dotted word whose tail is a word was read as a file name"
         );
-        // The punctuation prose hangs on a token is not part of the anchor.
+    }
+
+    // The punctuation prose hangs on a token is not part of the anchor.
+    #[test]
+    fn the_punctuation_prose_hangs_on_a_token_is_not_part_of_it() {
         assert_eq!(
             texts(&anchors("we chose plan_a, then moved on")),
             vec![("plan_a", AnchorKind::Identifier)],
             "the punctuation prose hung on a token was kept as part of the anchor"
         );
-        // Below three bytes a shape is a coincidence.
+    }
+
+    // Below three bytes a shape is a coincidence.
+    #[test]
+    fn a_shape_below_three_bytes_is_a_coincidence_not_an_anchor() {
         assert!(
             anchors("the aB flag and the \"xy\" span").is_empty(),
             "a two-byte shape was anchored"
@@ -442,6 +469,11 @@ mod tests {
 
     /// A nomination hands the confirm fork an offset, and an offset that is
     /// always zero is not evidence about where anything recurred.
+    ///
+    /// SPLIT FROM THE TEST BELOW, AND THAT IS THE POINT: this assertion and
+    /// the overlap one were a single test, so `inject_collector_hit_offset_lost`
+    /// and `inject_collector_overlapping_scan` broke the same test and were
+    /// told apart only by their panic messages.
     #[test]
     fn a_hit_says_where_the_anchor_recurred() {
         assert_eq!(
@@ -449,8 +481,12 @@ mod tests {
             vec![Hit { offset: 0 }, Hit { offset: 17 }],
             "the hits did not say where the anchor recurred"
         );
-        // The scan resumes past the match it took, so a needle that overlaps
-        // itself is counted once rather than at every shifted position.
+    }
+
+    /// The scan resumes past the match it took, so a needle that overlaps
+    /// itself is counted once rather than at every shifted position.
+    #[test]
+    fn an_anchor_that_overlaps_itself_is_counted_once() {
         assert_eq!(
             find("a a", "a a a"),
             vec![Hit { offset: 0 }],

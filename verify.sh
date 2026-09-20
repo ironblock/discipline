@@ -6198,7 +6198,7 @@ selftest() {
   seeded_case "a verb wired to the wrong format"      test     inject_cli_wrong_format \
     'every_verb_reads_its_own_formats_valid_fixtures \.\.\. FAILED' 'test:cli'
   seeded_case "a CLI that prints no result"           test     inject_cli_silent \
-    'stdout is not JSON' 'test:cli'
+    'every_verb_prints_its_result_on_stdout \.\.\. FAILED' 'test:cli'
   seeded_case "the regime moves under a patch"        test     inject_object_regime_mutable \
     'object::tests::no_patch_variant_can_move_the_regime \.\.\. FAILED' 'lib/object::tests'
   seeded_case "dedup rebinds instead of aliasing"     test     inject_object_no_alias \
@@ -6208,7 +6208,7 @@ selftest() {
   seeded_case "a self-supersede through an alias"     test     inject_object_alias_self_void \
     'object::tests::a_supersede_of_an_entry_by_its_own_alias_is_refused \.\.\. FAILED' 'lib/object::tests'
   seeded_case "a field kind nothing covers"           test     inject_field_kind_variant \
-    'non-exhaustive patterns' 'lib'
+    'error\[E0004\]: non-exhaustive patterns: `FieldKind::Seeded` not covered' 'lib'
   seeded_case "a subshell read as a group"            test     inject_shell_subshell_as_group \
     'formats::shell::tests::a_subshell_is_a_command_of_its_own_and_not_a_word \.\.\. FAILED' 'lib'
   seeded_case "a stderr pipe read as a plain pipe"    test     inject_shell_stderr_pipe_flat \
@@ -6390,8 +6390,8 @@ selftest() {
     'capture::router::tests::each_ask_asks_the_question_its_class_calls_for \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "a template without the imperative"     test     inject_router_ask_imperative_dropped \
     'capture::router::tests::every_ask_kind_has_a_template_that_carries_the_imperative \.\.\. FAILED' 'lib/capture::router::tests'
-  seeded_case "a census that miscounts which classes fired" test inject_router_census_class_miscounted \
-    'the census does not say which classes fired' 'lib/capture::router::tests'
+  seeded_case "a census that files a silent call as a fork" test inject_router_census_class_miscounted \
+    'capture::router::tests::the_census_files_a_silent_call_as_silent_and_not_as_a_fork \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "a route verb answering with a hollow census" test inject_router_route_census_hollow \
     'the_route_verb_answers_with_a_census_and_not_with_prose \.\.\. FAILED' 'test:cli'
   seeded_case "a table row that can never fire"       test     inject_router_table_row_shadowed \
@@ -6407,19 +6407,19 @@ selftest() {
   seeded_case "an intent marker lost from the table"  test     inject_router_intent_marker_lost \
     'capture::router::tests::every_marker_the_model_states_an_intent_with_is_heard \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "an unclassified call nobody can look up" test   inject_router_unclassified_unattributed \
-    'must name the call, its turn, its tool and its word' 'lib/capture::router::tests'
+    'capture::router::tests::an_unclassified_event_names_the_call_its_turn_its_tool_and_its_word \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "the declared default out of the vocabulary" test inject_router_class_vocabulary_shortened \
     'capture::router::tests::every_vocabulary_is_named_in_full_where_the_tests_walk_it \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "a quoted substitution descended into"  test     inject_mechanical_quoted_substitution \
     'capture::mechanical::tests::a_quoted_substitution_is_three_characters_and_not_a_command \.\.\. FAILED' 'lib'
   seeded_case "the declared default replaced by silence" test   inject_router_unknown_silent \
-    'an unknown pattern must route to the declared default, never to silence' 'lib/capture::router::tests'
+    'capture::router::tests::an_unknown_tool_call_routes_to_the_declared_default \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "a judgment ask released mid-turn"      test     inject_router_judgment_mid_turn \
     'capture::router::tests::a_judgment_ask_waits_for_the_turn_boundary \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "a row of the routing table lost"       test     inject_router_table_row_lost \
-    'misrouted call' 'lib/capture::router::tests'
+    'capture::router::tests::the_producer_of_the_last_pipeline_decides_the_class \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "an unknown call routed but not recorded" test   inject_router_unclassified_silent \
-    'an unknown pattern must be a typed event' 'lib/capture::router::tests'
+    'capture::router::tests::an_unknown_tool_call_is_a_typed_event \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "a reduction claimed, not computed"     test     inject_router_reduction_claimed \
     'capture::router::tests::the_census_reports_the_reduction_as_a_decimal_of_its_own_counts \.\.\. FAILED' 'lib/capture::router::tests'
   seeded_case "a subshell that shares the parent state" test   inject_mechanical_subshell_leaks \
@@ -6441,11 +6441,11 @@ selftest() {
   seeded_case "a bootstrap p with no attainable floor" test   inject_sense_p_without_floor \
     'capture::sense::tests::a_p_value_never_travels_without_its_attainable_floor \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "a metric whose failure fixture is gone" test   inject_sense_metric_fixture_removed \
-    'no failure fixture, so it can never be reported' 'lib/capture::sense::tests'
+    'capture::sense::tests::every_metric_is_reported_only_after_failing_its_own_fixture \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "a register mislabelled at its source" test     inject_sense_register_source_mislabelled \
-    'and a row says otherwise' 'lib/capture::sense::tests'
+    'capture/sense/register/authored-mistake\.jsonl' 'lib/capture::sense::tests'
   seeded_case "a file in the register naming nothing"  test     inject_sense_register_unnamed_file \
-    'not a declared sidecar' 'lib/capture::sense::tests'
+    'capture/sense/register/notaregister\.jsonl' 'lib/capture::sense::tests'
   seeded_case "a mined row nobody can trace"          test     inject_sense_provenance_join_dropped \
     'capture::sense::tests::a_mined_row_without_provenance_is_refused_and_so_is_provenance_without_a_row \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "two data lines read as one"            test     inject_record_data_line_two_lines \
@@ -6465,7 +6465,7 @@ selftest() {
   seeded_case "a null band widened past a finding"    test     inject_sense_null_band_widened \
     'capture::sense::tests::the_null_bands_are_wider_than_measurement_and_narrower_than_a_finding \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "a reported metric that reports a constant" test inject_sense_reported_value_constant \
-    'the record of a metric is not the numbers the metric produced' 'lib/capture::sense::tests'
+    'capture::sense::tests::the_record_of_a_metric_carries_the_numbers_it_produced \.\.\. FAILED' 'lib/capture::sense::tests'
   seeded_case "the mechanical lane renamed"           test     inject_mechanical_lane_renamed \
     'capture::mechanical::tests::the_lane_is_named_mechanical_and_every_entry_says_so \.\.\. FAILED' 'lib/capture::mechanical::tests'
   seeded_case "an option word read as a directory"    test     inject_mechanical_option_is_a_directory \
@@ -6499,39 +6499,39 @@ selftest() {
   seeded_case "an entry nominated by its own turn"     test     inject_collector_self_nomination \
     'capture::collector::literal::tests::an_entry_is_not_nominated_by_the_turn_that_made_it \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "a supersession that adds without voiding" test   inject_reconcile_supersede_without_voiding \
-    'the old entry was not voided' 'lib/capture::collector::reconcile::tests'
+    'capture::collector::reconcile::tests::a_superseded_verdict_voids_the_old_entry_and_links_it_rather_than_deleting \.\.\. FAILED' 'lib/capture::collector::reconcile::tests'
   seeded_case "a verdict that settles nothing settling"  test   inject_reconcile_partial_applies_a_patch \
-    'PARTIAL produced a patch' 'lib/capture::collector::reconcile::tests'
+    'capture::collector::reconcile::tests::a_partial_verdict_applies_nothing \.\.\. FAILED' 'lib/capture::collector::reconcile::tests'
   seeded_case "an uncalibrated nomination policy accepted" test inject_collector_uncalibrated_policy \
     'capture::collector::sense::tests::the_shipped_fixture_policy_is_refused_by_the_door_that_ships \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a nomination budget ignored"           test     inject_collector_budget_ignored \
-    'the budget did not bind' 'lib/capture::collector::sense::tests'
+    'capture::collector::sense::tests::the_budget_is_the_most_a_turn_may_spend \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a turn that nominates only its first entry" test inject_collector_one_nomination_per_turn \
     'capture::collector::literal::tests::every_entry_whose_anchor_recurs_is_nominated \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "a voided entry nominated by tier 0" test inject_collector_voided_entry_renominated \
     'capture::collector::literal::tests::a_voided_entry_is_not_nominated_again \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "a hit that says nothing about where" test inject_collector_hit_offset_lost \
-    'the hits did not say where the anchor recurred' 'lib/capture::collector::literal::tests'
+    'capture::collector::literal::tests::a_hit_says_where_the_anchor_recurred \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "an overlapping anchor scan" test inject_collector_overlapping_scan \
-    'an anchor that overlaps itself was counted at every shifted position' 'lib/capture::collector::literal::tests'
+    'capture::collector::literal::tests::an_anchor_that_overlaps_itself_is_counted_once \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "a double-quoted span that is not an anchor" test inject_collector_quoted_anchor_delimiter \
-    'a double-quoted span was not anchored' 'lib/capture::collector::literal::tests'
+    'capture::collector::literal::tests::a_double_quoted_span_is_an_anchor \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "a two-byte shape read as an anchor" test inject_collector_short_shape_anchored \
-    'a two-byte shape was anchored' 'lib/capture::collector::literal::tests'
+    'capture::collector::literal::tests::a_shape_below_three_bytes_is_a_coincidence_not_an_anchor \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "a module path that is not an identifier" test inject_collector_module_path_shape \
-    'a path through the module tree was not anchored' 'lib/capture::collector::literal::tests'
+    'capture::collector::literal::tests::a_path_through_the_module_tree_is_an_anchor \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "a sentence word read as a file extension" test inject_collector_extension_window \
-    'a dotted word whose tail is a word was read as a file name' 'lib/capture::collector::literal::tests'
+    'capture::collector::literal::tests::a_dotted_word_whose_tail_is_a_word_is_a_name_not_a_file \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "an anchor with the sentence still on it" test inject_collector_token_untrimmed \
-    'the punctuation prose hung on a token was kept as part of the anchor' 'lib/capture::collector::literal::tests'
+    'capture::collector::literal::tests::the_punctuation_prose_hangs_on_a_token_is_not_part_of_it \.\.\. FAILED' 'lib/capture::collector::literal::tests'
   seeded_case "anchor kinds that swapped their names" test inject_collector_anchor_kind_permuted \
-    'the anchor kind vocabulary is not what it promises' 'lib/capture::collector::tests'
+    'capture::collector::tests::the_anchor_kind_vocabulary_is_the_words_a_record_carries \.\.\. FAILED' 'lib/capture::collector::tests'
   seeded_case "a source vocabulary with no members" test inject_collector_source_vocabulary_emptied \
-    'the source vocabulary is not what it promises' 'lib/capture::collector::tests'
+    'capture::collector::tests::the_source_vocabulary_is_the_words_a_record_carries \.\.\. FAILED' 'lib/capture::collector::tests'
   seeded_case "a nomination that names the other tier" test inject_collector_tier_name_swapped \
     'capture::collector::tests::a_nomination_names_the_tier_that_made_it \.\.\. FAILED' 'lib/capture::collector::tests'
   seeded_case "registers that swapped their names" test inject_collector_register_permuted \
-    'the register vocabulary is not what it promises' 'lib/capture::collector::tests'
+    'capture::collector::tests::the_register_vocabulary_is_the_words_a_record_carries \.\.\. FAILED' 'lib/capture::collector::tests'
   seeded_case "a lexical pre-gate the tier ignores" test inject_collector_gate_ignored \
     'capture::collector::sense::tests::the_lexical_gate_decides_whether_a_turn_is_scored_at_all \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a turn-level threshold never compared" test inject_collector_turn_threshold_ignored \
@@ -6543,9 +6543,9 @@ selftest() {
   seeded_case "an intent register that reads the prose" test inject_collector_intent_register_reads_the_prose \
     'capture::collector::sense::tests::the_second_register_measures_the_stated_intent_and_not_the_prose \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a budget spent on the worst candidates" test inject_collector_budget_takes_the_worst \
-    'the budget was spent on the entries that scored lowest' 'lib/capture::collector::sense::tests'
+    'capture::collector::sense::tests::the_ranking_a_budget_spends_on_is_best_first \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a nomination score nothing measured" test inject_collector_score_not_measured \
-    'a nomination carried a score nothing measured' 'lib/capture::collector::sense::tests'
+    'capture::collector::sense::tests::a_nomination_carries_the_score_that_was_measured \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "an entry nominated by its own turn at tier 1" test inject_collector_sense_self_nomination \
     'capture::collector::sense::tests::an_entry_is_not_nominated_by_the_turn_that_made_it \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a voided entry nominated by tier 1" test inject_collector_sense_voided_entry_renominated \
@@ -6555,15 +6555,15 @@ selftest() {
   seeded_case "a calibration that names no run" test inject_collector_policy_names_no_run \
     'capture::collector::sense::tests::a_policy_that_names_no_run_is_refused_and_one_that_names_a_run_is_not \.\.\. FAILED' 'lib/capture::collector::sense::tests'
   seeded_case "a supersession that writes a constant" test inject_reconcile_supersede_writes_a_constant \
-    'the superseding entry does not say what superseded the old one' 'lib/capture::collector::reconcile::tests'
+    'capture::collector::reconcile::tests::a_superseding_entry_says_what_superseded_the_old_one \.\.\. FAILED' 'lib/capture::collector::reconcile::tests'
   seeded_case "a supersession with no fork behind it" test inject_reconcile_supersede_loses_its_fork \
-    'the superseding entry does not say which fork produced it' 'lib/capture::collector::reconcile::tests'
+    'capture::collector::reconcile::tests::a_superseding_entry_says_which_fork_produced_it \.\.\. FAILED' 'lib/capture::collector::reconcile::tests'
   seeded_case "a patch the reconciler never hands back" test inject_reconcile_patch_never_handed_back \
-    'a verdict that produced a patch did not hand it back' 'lib/capture::collector::reconcile::tests'
+    'capture::collector::reconcile::tests::a_done_verdict_resolves_the_entry_and_hands_its_patch_back \.\.\. FAILED' 'lib/capture::collector::reconcile::tests'
   seeded_case "a PARTIAL counted as a false nomination" test inject_reconcile_partial_read_as_a_false_nomination \
-    'a fork that said the prose bears on the entry was read as a false nomination' 'lib/capture::collector::reconcile::tests'
+    'capture::collector::reconcile::tests::a_partial_is_not_a_false_nomination \.\.\. FAILED' 'lib/capture::collector::reconcile::tests'
   seeded_case "a mention applied as a supersession" test inject_reconcile_mention_superseded \
-    'NOT_THIS produced a patch' 'lib/capture::collector::reconcile::tests'
+    'capture::collector::reconcile::tests::a_not_this_verdict_applies_nothing \.\.\. FAILED' 'lib/capture::collector::reconcile::tests'
   seeded_case "self-capture exempt from grounding"    test     inject_tools_ungrounded \
     'capture::tools::tests::a_self_captured_entry_absent_from_what_the_model_saw_is_dropped \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a reminder cadence that never fires"   test     inject_tools_reminder_silent \
@@ -6571,7 +6571,7 @@ selftest() {
   seeded_case "a harness tool call read as a capture" test     inject_tools_foreign_call \
     'capture::tools::tests::a_harness_tool_call_is_not_a_patch_source \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a phase proposal that writes a fact"   test     inject_tools_proposal_writes \
-    'a phase-transition proposal is advisory and writes nothing' 'lib/capture::tools::tests'
+    'capture::tools::tests::a_phase_transition_proposal_is_advisory_and_writes_nothing \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a capture grounded in its own echo"   test     inject_tools_self_echo \
     'capture::tools::tests::a_capture_is_not_grounded_in_a_harness_repeating_it_back \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a capture grounded in a later turn"   test     inject_tools_future_output \
@@ -6583,13 +6583,13 @@ selftest() {
   seeded_case "the asks reworded to nothing"         test     inject_tools_ask_words \
     'capture::tools::tests::every_ask_kind_is_named_and_asks_in_its_own_words \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "an ask that drops its own question"   test     inject_tools_ask_question_dropped \
-    'an ask carrying a deferral is the question and then the deferral' 'lib/capture::tools::tests'
+    'capture::tools::tests::the_sweep_carries_what_the_router_put_off \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "the sweep asking as the cadence"      test     inject_tools_sweep_kind \
-    'the sweep and the cadence are one ask wearing two names' 'lib/capture::tools::tests'
+    'capture::tools::tests::the_sweep_asks_as_a_sweep_and_not_as_the_cadence \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a closed choice left in its own case" test     inject_tools_choice_uncanonical \
     'capture::tools::tests::an_argument_in_the_case_the_harness_used_is_settled_by_the_contract \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a phase proposal with no reason"      test     inject_tools_proposal_reasonless \
-    'the reason is the whole of what it carries into one' 'lib/capture::tools::tests'
+    'capture::tools::tests::a_phase_transition_proposal_carries_the_ruling_it_asks_for \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "a reminder that drops the deferral"   test     inject_tools_reminder_deferral_dropped \
     'capture::tools::tests::a_fired_reminder_carries_its_kind_and_what_the_router_put_off \.\.\. FAILED' 'lib/capture::tools::tests'
   seeded_case "tools described in one character"     test     inject_tools_description_thin \
@@ -6627,13 +6627,13 @@ selftest() {
   seeded_case "an arm's clauses run together"         test     inject_ablation_clauses_run_together \
     'capture::ablation::tests::the_full_arm_renders_the_sentence_this_ablation_takes_apart \.\.\. FAILED' 'lib/capture::ablation::tests'
   seeded_case "a placeholder nobody counts"           test     inject_ablation_placeholder_word_dropped \
-    'the-placeholder-words-nobody-replaced: graded .engaged. where the corpus says .inert.' 'lib/capture::ablation::tests'
+    'capture/ablation/corpus/the-placeholder-words-nobody-replaced\.answer\.txt' 'lib/capture::ablation::tests'
   seeded_case "a blank clause text admitted"          test     inject_ablation_blank_clause_allowed \
     'capture::ablation::tests::a_clause_table_that_breaks_the_schema_says_which_rule_it_broke \.\.\. FAILED' 'lib/capture::ablation::tests'
   seeded_case "a grading case quietly dropped"        test     inject_ablation_corpus_case_dropped \
-    'the corpus holds a case with no expectation or an expectation with no case' 'lib/capture::ablation::tests'
+    'capture::ablation::tests::the_corpus_pairs_every_case_with_its_expectation \.\.\. FAILED' 'lib/capture::ablation::tests'
   seeded_case "an untagged decline read as content"   test     inject_ablation_untagged_decline_engages \
-    'an-untagged-decline: graded .engaged. where the corpus says .inert.' 'lib/capture::ablation::tests'
+    'capture/ablation/corpus/an-untagged-decline\.answer\.txt' 'lib/capture::ablation::tests'
   seeded_case "the second reader left unbounded"      test     inject_json_objects_unbounded \
     'formats::record::json::tests::a_line_nested_past_the_limit_is_a_verdict_and_not_a_crash \.\.\. FAILED' 'lib/formats::record::json::tests'
   seeded_case "a lane free to change substrate"       test     inject_record_lane_may_change_substrate \

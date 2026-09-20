@@ -101,43 +101,63 @@ mod tests {
     /// with `tag` would pass on an empty `ALL` and on any permutation of the
     /// tags: it would be checking that the vocabulary agrees with itself.
     /// The words are the interface, so the words are written out.
-    #[test]
-    fn the_collectors_vocabularies_are_the_words_a_record_carries() {
-        fn check<T: Copy + PartialEq + std::fmt::Debug>(
-            name: &str,
-            all: &[T],
-            tag: impl Fn(T) -> &'static str,
-            from_tag: impl Fn(&str) -> Option<T>,
-            expected: &[&str],
-        ) {
-            let tags: Vec<&str> = all.iter().map(|item| tag(*item)).collect();
-            assert_eq!(
-                tags, expected,
-                "the {name} vocabulary is not what it promises"
-            );
-            let unique: BTreeSet<&str> = tags.iter().copied().collect();
-            assert_eq!(unique.len(), all.len(), "two variants share a tag: {all:?}");
-            for item in all {
-                assert_eq!(from_tag(tag(*item)), Some(*item));
-            }
-            assert!(from_tag("").is_none());
-            assert!(from_tag("no such tag").is_none());
+    ///
+    /// SHARED BY THE THREE TESTS BELOW, ONE VOCABULARY EACH, AND THAT IS THE
+    /// POINT. One test used to call this helper three times, so the three
+    /// seeded faults that prove the three vocabularies --
+    /// `inject_collector_anchor_kind_permuted`,
+    /// `inject_collector_source_vocabulary_emptied` and
+    /// `inject_collector_register_permuted` -- broke the same test and could
+    /// be told apart only by which `name` the panic message interpolated.
+    /// That is prose lifted out of a panic, which is the staleness #46 exists
+    /// to end. Split, each fault breaks a test of its own and cargo's own
+    /// `test <path> ... FAILED` line is the class.
+    fn check_vocabulary<T: Copy + PartialEq + std::fmt::Debug>(
+        name: &str,
+        all: &[T],
+        tag: impl Fn(T) -> &'static str,
+        from_tag: impl Fn(&str) -> Option<T>,
+        expected: &[&str],
+    ) {
+        let tags: Vec<&str> = all.iter().map(|item| tag(*item)).collect();
+        assert_eq!(
+            tags, expected,
+            "the {name} vocabulary is not what it promises"
+        );
+        let unique: BTreeSet<&str> = tags.iter().copied().collect();
+        assert_eq!(unique.len(), all.len(), "two variants share a tag: {all:?}");
+        for item in all {
+            assert_eq!(from_tag(tag(*item)), Some(*item));
         }
-        check(
+        assert!(from_tag("").is_none());
+        assert!(from_tag("no such tag").is_none());
+    }
+
+    #[test]
+    fn the_anchor_kind_vocabulary_is_the_words_a_record_carries() {
+        check_vocabulary(
             "anchor kind",
             AnchorKind::ALL,
             AnchorKind::tag,
             AnchorKind::from_tag,
             &["identifier", "path", "quoted"],
         );
-        check(
+    }
+
+    #[test]
+    fn the_source_vocabulary_is_the_words_a_record_carries() {
+        check_vocabulary(
             "source",
             Source::ALL,
             Source::tag,
             Source::from_tag,
             &["prose", "tool_output"],
         );
-        check(
+    }
+
+    #[test]
+    fn the_register_vocabulary_is_the_words_a_record_carries() {
+        check_vocabulary(
             "register",
             Register::ALL,
             Register::tag,

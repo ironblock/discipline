@@ -2919,6 +2919,18 @@ mod tests {
             .join("register")
     }
 
+    /// A register file's path relative to the crate root -- what a failure
+    /// message names it by, for the reason `diet/tests/conformance.rs::rel`
+    /// gives: this directory is walked by one test, so the seeded faults that
+    /// plant different files in it all break that one test, and the file is
+    /// the only thing that tells them apart. A relative path is a stable
+    /// identifier a seeded fault can bind to and is the same string on every
+    /// machine; an absolute one baked from `CARGO_MANIFEST_DIR` never was.
+    fn rel(path: &Path) -> &Path {
+        path.strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")))
+            .unwrap_or(path)
+    }
+
     fn register_rows() -> Vec<Row> {
         let path = register_dir().join("authored-mistake.jsonl");
         let source = std::fs::read_to_string(&path)
@@ -3202,15 +3214,21 @@ mod tests {
                         .any(|suffix| name.ends_with(suffix)),
                     "{}: not `<source>-<set>.jsonl` and not a declared sidecar, so \
                      nothing here knows what it is",
-                    path.display()
+                    rel(path).display()
                 );
                 continue;
             };
             registers += 1;
             let text = std::fs::read_to_string(path)
-                .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-            let rows = register(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-            assert!(rows.len() >= 10, "{}: {} rows", path.display(), rows.len());
+                .unwrap_or_else(|err| panic!("{}: {err}", rel(path).display()));
+            let rows =
+                register(&text).unwrap_or_else(|err| panic!("{}: {err}", rel(path).display()));
+            assert!(
+                rows.len() >= 10,
+                "{}: {} rows",
+                rel(path).display(),
+                rows.len()
+            );
             // A mined row is evidence, and evidence with no provenance is an
             // assertion. The sidecar is named for the source, so the mined
             // registers in this directory share one.
@@ -3219,7 +3237,7 @@ mod tests {
                 let text = std::fs::read_to_string(&sidecar).unwrap_or_else(|err| {
                     panic!(
                         "{}: a mined register and no {}: {err}",
-                        path.display(),
+                        rel(path).display(),
                         sidecar.display()
                     )
                 });
@@ -3229,7 +3247,7 @@ mod tests {
                     assert!(
                         traced.iter().any(|entry| entry.id == row.id),
                         "{}: {}",
-                        path.display(),
+                        rel(path).display(),
                         JoinError::Untraced(row.id.clone())
                     );
                 }
@@ -3239,14 +3257,14 @@ mod tests {
             assert!(
                 rows.iter().all(|row| row.source == declared.source),
                 "{}: the name says {} and a row says otherwise",
-                path.display(),
+                rel(path).display(),
                 declared.source.tag()
             );
             for label in Label::ALL {
                 assert!(
                     rows.iter().any(|row| row.label == *label),
                     "{}: no {} row",
-                    path.display(),
+                    rel(path).display(),
                     label.tag()
                 );
             }
@@ -4562,6 +4580,14 @@ mod tests {
         assert!(holm(&[]).is_empty());
     }
 
+    /// SPLIT FROM `the_record_of_a_metric_carries_the_numbers_it_produced`
+    /// BELOW, AND THAT IS THE POINT. This loop and that record check were one
+    /// test, so `inject_sense_metric_fixture_removed` and
+    /// `inject_sense_reported_value_constant` broke the same test and could
+    /// be told apart only by which assertion message came back. That is prose
+    /// lifted out of a panic, which is the staleness #46 exists to end.
+    /// Split, each fault breaks a test of its own and cargo's own
+    /// `test <path> ... FAILED` line is the class.
     #[test]
     fn every_metric_is_reported_only_after_failing_its_own_fixture() {
         let subject = ungated();
@@ -4602,11 +4628,15 @@ mod tests {
                 Some(&Value::String(metric.tag().to_owned()))
             );
         }
-        // And the record carries the numbers, not merely their kind. This is
-        // precision at a budget of two over rows ranked exactly right, which
-        // is one; against a fixture holding eight non-positives above its
-        // positives, which is nothing; and the reading that counted as the
-        // failure travels with both.
+    }
+
+    /// And the record carries the numbers, not merely their kind. This is
+    /// precision at a budget of two over rows ranked exactly right, which is
+    /// one; against a fixture holding eight non-positives above its
+    /// positives, which is nothing; and the reading that counted as the
+    /// failure travels with both.
+    #[test]
+    fn the_record_of_a_metric_carries_the_numbers_it_produced() {
         let exact = [
             row("s/p1", Label::Positive, 0.9),
             row("s/p2", Label::Positive, 0.8),

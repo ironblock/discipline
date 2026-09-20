@@ -1052,14 +1052,28 @@ mod tests {
     /// reports a corpus a case was deleted out of as a corpus that passed,
     /// and the case that goes missing is the one whose grade some other case
     /// also happens to carry.
-    fn corpus() -> Vec<(String, interview::Answer, Grade)> {
+    ///
+    /// A case is named by its path relative to the crate root, not by its
+    /// stem, for the reason `diet/tests/conformance.rs::rel` gives: this
+    /// corpus is walked by one test, so the several seeded faults that grade
+    /// different cases wrong all break that one test, and the case is the
+    /// only thing that tells them apart. A relative fixture path is a stable
+    /// identifier a seeded fault can bind to -- the `(test, fixture)` class
+    /// #46 ruled and #93 shipped -- and it is the same string on every
+    /// machine, which an absolute one baked from `CARGO_MANIFEST_DIR` is not.
+    /// The corpus's cases and expectations, by stem, each list sorted.
+    ///
+    /// Pulled out of [`corpus`] so the pairing has a caller of its own:
+    /// `corpus()` uses it on the way to building cases, and
+    /// `the_corpus_pairs_every_case_with_its_expectation` calls it directly,
+    /// so that test's assertion does not depend on `corpus()` keeping this
+    /// check in whatever form it happens to have it today.
+    fn names_and_expectations(dir: &Path) -> (Vec<String>, Vec<String>) {
         const SUFFIX: &str = ".answer.txt";
         const EXPECTATION: &str = ".grade";
-        let dir = corpus_dir();
         let mut names: Vec<String> = Vec::new();
         let mut expectations: Vec<String> = Vec::new();
-        for entry in
-            std::fs::read_dir(&dir).unwrap_or_else(|err| panic!("{}: {err}", dir.display()))
+        for entry in std::fs::read_dir(dir).unwrap_or_else(|err| panic!("{}: {err}", dir.display()))
         {
             let file = entry
                 .unwrap_or_else(|err| panic!("{}: {err}", dir.display()))
@@ -1084,6 +1098,14 @@ mod tests {
             "{}: no cases, so every assertion over this corpus would hold vacuously",
             dir.display()
         );
+        (names, expectations)
+    }
+
+    fn corpus() -> Vec<(String, interview::Answer, Grade)> {
+        const SUFFIX: &str = ".answer.txt";
+        const EXPECTATION: &str = ".grade";
+        let dir = corpus_dir();
+        let (names, expectations) = names_and_expectations(&dir);
         assert_eq!(
             names, expectations,
             "the corpus holds a case with no expectation or an expectation with no case, so it \
@@ -1091,8 +1113,14 @@ mod tests {
         );
         let mut cases = Vec::new();
         for name in names {
-            let source = std::fs::read_to_string(dir.join(format!("{name}{SUFFIX}")))
+            let answer_path = dir.join(format!("{name}{SUFFIX}"));
+            let source = std::fs::read_to_string(&answer_path)
                 .unwrap_or_else(|err| panic!("{name}{SUFFIX}: {err}"));
+            let case = answer_path
+                .strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")))
+                .unwrap_or(&answer_path)
+                .display()
+                .to_string();
             let expectation = dir.join(format!("{name}{EXPECTATION}"));
             let written = std::fs::read_to_string(&expectation)
                 .unwrap_or_else(|err| panic!("{}: {err}", expectation.display()));
@@ -1103,9 +1131,24 @@ mod tests {
                     written.trim()
                 )
             });
-            cases.push((name, answer(&source), grade));
+            cases.push((case, answer(&source), grade));
         }
         cases
+    }
+
+    /// The corpus is walked by the tests below, and a walk over a corpus a
+    /// case was deleted out of reports nothing. The pairing `corpus()`
+    /// asserts is the guard against that, so it is a claim with a test of its
+    /// own rather than a side effect of whichever test ran first: a fixture
+    /// that goes missing then names the rule it broke.
+    #[test]
+    fn the_corpus_pairs_every_case_with_its_expectation() {
+        let (names, expectations) = names_and_expectations(&corpus_dir());
+        assert_eq!(
+            names, expectations,
+            "the corpus holds a case with no expectation or an expectation with no case, so it \
+             walks fewer cases than it looks like it does"
+        );
     }
 
     // Acceptance: the seeded control -- an arm with the sentence removed

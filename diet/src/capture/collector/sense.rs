@@ -877,56 +877,101 @@ mod tests {
         );
     }
 
-    // The budget is the number of confirm forks one turn may spend, and it
-    // binds even when every entry clears the threshold. What it keeps is the
-    // top of the ranking: a budget that truncated the bottom would spend the
-    // tier's whole allowance on the entries least likely to be the one, and
-    // that is worse than no budget at all.
-    #[test]
-    fn the_budget_is_the_most_a_turn_may_spend() {
+    /// Three entries scored against one stated intent, at a budget of
+    /// `budget`. The turn's intent is `e1` word for word, `e2` says it again
+    /// with one word more, and `e3` is about something else, so the ranking
+    /// the fixture embedder produces is `e1`, `e2`, `e3`.
+    ///
+    /// SHARED BY THE FOUR TESTS BELOW, AND THAT IS THE POINT. One test used
+    /// to assert the budget's size, the ranking it spends on, the scores the
+    /// nominations carry and the register they name, so the three seeded
+    /// faults that prove those rules -- `inject_collector_budget_ignored`,
+    /// `inject_collector_budget_takes_the_worst` and
+    /// `inject_collector_score_not_measured` -- broke the same test and could
+    /// be told apart only by which `assert_eq!` message came back. That is
+    /// prose lifted out of a panic, which is the staleness #46 exists to end.
+    /// Split, each fault breaks a test of its own and cargo's own
+    /// `test <path> ... FAILED` line is the class.
+    fn ask_at_budget(budget: u32) -> Vec<Nomination> {
         let object = object_with(&[
             ("e1", "the parser drops continuation lines"),
             ("e2", "the parser drops continuation lines too"),
             ("e3", "the build takes four minutes on this box"),
         ]);
         let senses = shipped_senses().expect("the shipped senses");
-        let ask = |budget: u32| {
-            nominate_sense(
-                &object,
-                SenseText {
-                    turn: 18,
-                    prose: "that limitation is gone now, it was fixed and no longer applies",
-                    intent: "the parser drops continuation lines",
-                },
-                &senses,
-                &Fixture,
-                &shipped("0.000", budget, Gate::Without),
-            )
-            .expect("scored")
-        };
-        let two = ask(2);
+        nominate_sense(
+            &object,
+            SenseText {
+                turn: 18,
+                prose: "that limitation is gone now, it was fixed and no longer applies",
+                intent: "the parser drops continuation lines",
+            },
+            &senses,
+            &Fixture,
+            &shipped("0.000", budget, Gate::Without),
+        )
+        .expect("scored")
+    }
+
+    /// The budget is the number of confirm forks one turn may spend, and it
+    /// binds even when every entry clears the threshold. What it keeps is a
+    /// prefix of the ranking -- which entries that prefix holds is
+    /// `the_ranking_a_budget_spends_on_is_best_first` below, asserted
+    /// separately so a reversed ranking and an unbound budget do not break
+    /// one test between them.
+    #[test]
+    fn the_budget_is_the_most_a_turn_may_spend() {
+        let two = ask_at_budget(2);
         assert_eq!(two.len(), 2, "the budget did not bind");
         assert_eq!(
             ids(&two),
-            vec!["e1", "e2"],
+            ids(&ask_at_budget(9))[..2].to_vec(),
+            "the budget kept something other than the top of the ranking"
+        );
+    }
+
+    /// A budget that truncated the bottom would spend the tier's whole
+    /// allowance on the entries least likely to be the one, and that is worse
+    /// than no budget at all. Asserted at a budget nothing truncates, so the
+    /// claim is about the order and not about the cut.
+    #[test]
+    fn the_ranking_a_budget_spends_on_is_best_first() {
+        assert_eq!(
+            ids(&ask_at_budget(9)),
+            vec!["e1", "e2", "e3"],
             "the budget was spent on the entries that scored lowest"
         );
-        // The numbers a record reads back, and the numbers the fixture
-        // embedder measures: the turn's stated intent is `e1` word for word,
-        // `e2` says it again with one word more, and `e3` is about something
-        // else. A nomination whose score is not the score that was measured
-        // cannot be compared to the run that set the threshold, which is the
-        // whole argument for the policy having one.
-        let all = ask(9);
-        assert_eq!(ids(&all), vec!["e1", "e2", "e3"]);
+    }
+
+    /// The numbers a record reads back, and the numbers the fixture embedder
+    /// measures. A nomination whose score is not the score that was measured
+    /// cannot be compared to the run that set the threshold, which is the
+    /// whole argument for the policy having one.
+    ///
+    /// Read per entry rather than positionally: the score is a property of
+    /// the entry, not of where the ranking put it, and a positional spelling
+    /// would also be tripped by `inject_collector_budget_takes_the_worst`,
+    /// which the test above already owns.
+    #[test]
+    fn a_nomination_carries_the_score_that_was_measured() {
+        let all = ask_at_budget(9);
+        let measured: BTreeMap<&str, String> = ids(&all).into_iter().zip(scores(&all)).collect();
         assert_eq!(
-            scores(&all),
-            vec!["1.000".to_owned(), "0.913".to_owned(), "0.158".to_owned()],
+            measured,
+            BTreeMap::from([
+                ("e1", "1.000".to_owned()),
+                ("e2", "0.913".to_owned()),
+                ("e3", "0.158".to_owned()),
+            ]),
             "a nomination carried a score nothing measured"
         );
-        // The evidence says which register measured, so a confirm fork is
-        // not handed a bare id.
-        let one = ask(1);
+    }
+
+    /// The evidence says which register measured, so a confirm fork is not
+    /// handed a bare id.
+    #[test]
+    fn a_sense_nomination_names_the_register_that_measured() {
+        let one = ask_at_budget(1);
         let Some(Evidence::Sense { register, .. }) = one.first().map(|n| n.evidence.clone()) else {
             panic!("tier 1 answered with something else: {one:?}");
         };

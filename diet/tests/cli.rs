@@ -106,6 +106,35 @@ fn as_text(path: &Path) -> String {
         .to_owned()
 }
 
+/// The result reaches stdout at all.
+///
+/// "A run that prints nothing at all" is the third of the three mutations
+/// this file's own doc says it exists to catch, and it was the one with no
+/// test of its own: every other test here parses stdout as JSON on its way to
+/// some different claim, so that mutation broke five of them at once and was
+/// graded by the phrase `stdout is not JSON` lifted out of whichever panicked
+/// first. The CLI is the only way anything outside this crate reads a format,
+/// so "the result reaches stdout" is a rule in its own right, and a rule with
+/// a test of its own is one cargo's `test <name> ... FAILED` line can name.
+#[test]
+fn every_verb_prints_its_result_on_stdout() {
+    for (verb, format) in VERBS {
+        let case = cases(format, "valid")
+            .into_iter()
+            .next()
+            .expect("a valid fixture");
+        let path = as_text(&case);
+        let (code, out, err) = run(&[verb, &path]);
+        assert!(
+            !out.trim().is_empty(),
+            "{verb} {path}: exit {code} and nothing on stdout, so the result \
+             reached nobody; stderr {err:?}"
+        );
+        serde_json::from_str::<serde_json::Value>(&out)
+            .unwrap_or_else(|why| panic!("{verb} {path}: stdout is not JSON ({why}): {out:?}"));
+    }
+}
+
 #[test]
 fn every_verb_reads_its_own_formats_valid_fixtures() {
     let mut read = 0;
