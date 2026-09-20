@@ -835,6 +835,18 @@ fn excluded_from_parent(row: &serde_json::Value) -> Option<&'static str> {
 /// that into the zero the record gives it no way to avoid, and counts it.
 fn prefill_after(rest: &[(usize, &str, serde_json::Value)]) -> Result<Option<Count>, Drift> {
     for (at_row, _raw, row) in rest {
+        // The same exclusion `Run::row` applies before this lookahead ever
+        // runs, applied here too: a sidechain assistant row is not the
+        // answer to this turn, and a meta user row does not open one, so
+        // neither may end or answer this scan. Skipped, not found: a
+        // fresh-instance review (PR #98) confirmed this row's own drift
+        // without it -- a sidechain row's usage read as the PARENT's
+        // prefill, or a meta row's text stopping the scan before the real
+        // answer, in each case content this PR declares irrelevant still
+        // reaching the parent's turn.
+        if excluded_from_parent(row).is_some() {
+            continue;
+        }
         match row.get("type").and_then(serde_json::Value::as_str) {
             Some(kind) if kind == Row::Assistant.tag() => {}
             // A row that opens a turn of its own ends the lookahead: whatever
@@ -984,7 +996,7 @@ mod tests {
     /// the one it was GIVEN, never one read out of the log.
     const A_SUBSTRATE: &str = "claude-code";
 
-    use super::{Block, ClaudeCode, MAPS, Row, native_tool};
+    use super::{Block, ClaudeCode, MAPS, PREFILL_ASSUMED, Row, native_tool};
     use crate::adapters::{Adapter, Drift};
     use crate::formats::record::Event;
 
@@ -1141,6 +1153,86 @@ mod tests {
             .count();
         assert_eq!(turns, 1, "the isMeta row is not a second turn");
         assert_eq!(adapted.census.no_event.get("user/isMeta").copied(), Some(1));
+    }
+
+    /// A fresh-instance review of #98 found the exclusion applied at
+    /// `Run::row` was not applied to `prefill_after`'s own lookahead, which
+    /// re-scans the same rows independently: a sidechain assistant row
+    /// between a turn and its real answer was read as THAT turn's prefill.
+    #[test]
+    fn a_sidechain_assistant_row_does_not_supply_the_parents_prefill() {
+        let log = [
+            user_says("do the real work"),
+            "{\"type\":\"assistant\",\"isSidechain\":true,\"message\":{\"role\":\"assistant\",\
+             \"content\":[{\"type\":\"text\",\"text\":\"a subagent's own answer\"}],\
+             \"usage\":{\"input_tokens\":9000,\"output_tokens\":1}}}"
+                .to_owned(),
+            assistant(
+                "[{\"type\":\"text\",\"text\":\"the real answer\"}]",
+                2,
+                [7, 0, 0],
+            ),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
+        let prefill = adapted
+            .events
+            .iter()
+            .find_map(|e| match e {
+                Event::Turn { prefill_tokens, .. } => Some(prefill_tokens.get()),
+                _ => None,
+            })
+            .expect("one turn opened");
+        assert_eq!(
+            prefill, 7,
+            "the sidechain row's usage (9000) is not this turn's prefill; \
+             the real answer's (7) is"
+        );
+    }
+
+    /// The same review's second finding: `opens_a_turn`'s check inside the
+    /// lookahead stopped it at ANY user row carrying text, including an
+    /// `isMeta` one -- so a hook-injected reminder between a turn and its
+    /// real answer made the lookahead give up before reaching that answer,
+    /// and the turn's prefill was assumed zero with a real usage object
+    /// sitting right there.
+    #[test]
+    fn a_meta_row_does_not_stop_the_prefill_lookahead_before_the_real_answer() {
+        let log = [
+            user_says("do the real work"),
+            "{\"type\":\"user\",\"isMeta\":true,\"message\":{\"role\":\"user\",\
+             \"content\":\"<system-reminder>a hook injected this</system-reminder>\"}}"
+                .to_owned(),
+            assistant(
+                "[{\"type\":\"text\",\"text\":\"the real answer\"}]",
+                2,
+                [7, 0, 0],
+            ),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
+        let prefill = adapted
+            .events
+            .iter()
+            .find_map(|e| match e {
+                Event::Turn { prefill_tokens, .. } => Some(prefill_tokens.get()),
+                _ => None,
+            })
+            .expect("one turn opened");
+        assert_eq!(
+            prefill, 7,
+            "the meta row does not end the lookahead before the real answer"
+        );
+        assert!(
+            !adapted.census.assumed.contains_key(PREFILL_ASSUMED),
+            "a real answer exists; nothing should have been assumed"
+        );
     }
 
     /// A tool's answer lands on the call it names, not on whichever was last.
