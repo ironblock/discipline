@@ -176,14 +176,27 @@ fn parse_line(text: &str) -> Line {
 /// `Err` naming which id and why, since that shape is a trap and every
 /// caller here treats it as this test's own failure to explain, not a
 /// value to compare.
-fn call_wasm_batch(glue: &Path, calls: &[(String, String, PathBuf)]) -> BTreeMap<String, String> {
+///
+/// `label` names this call's own manifest file, distinctly from any other
+/// call sharing the same `glue`. Two of this file's tests share
+/// [`plain_glue`]'s single cached artifact and run concurrently -- Rust
+/// tests are parallel by default, and only this crate's own local runs
+/// happened to pass `--test-threads=1`. A manifest path built from `glue`
+/// alone let both tests race on writing the same file: measured on CI,
+/// which does not pass that flag, as "the wasm batch produced no result at
+/// all" for every regimen fixture, not a native/wasm disagreement.
+fn call_wasm_batch(
+    glue: &Path,
+    label: &str,
+    calls: &[(String, String, PathBuf)],
+) -> BTreeMap<String, String> {
     let manifest: Vec<serde_json::Value> = calls
         .iter()
         .map(|(id, func, path)| {
             serde_json::json!({"id": id, "func": func, "path": path.to_string_lossy()})
         })
         .collect();
-    let manifest_path = glue.with_file_name("manifest.json");
+    let manifest_path = glue.with_file_name(format!("manifest-{label}.json"));
     std::fs::write(
         &manifest_path,
         serde_json::to_string(&manifest).expect("a Vec<Value> always serializes"),
@@ -285,7 +298,7 @@ fn assert_corpus_matches(format_dir: &str, ext: &str, func: &str) {
         root.display()
     );
 
-    let wasm_results = call_wasm_batch(plain_glue(), &calls);
+    let wasm_results = call_wasm_batch(plain_glue(), format_dir, &calls);
 
     let mut failures = Vec::new();
     for (id, case) in cases {
