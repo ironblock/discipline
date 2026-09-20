@@ -5,7 +5,7 @@ kind = "reproducible-by-config"
 product_sha256 = "eac8640d9238471698a848a4c594b26e7e3f23bada875cf19475d9c5017f6789"
 pre_registration_sha256 = "82b03174df245e6111299b382f3e0519e61cc041c3febac5b973eed7c49383a4"
 controls_run = ["scoring-extremes", "shuffled-label-null"]
-known_defects = []
+known_defects = ["v1 declared the shuffled-label null under controls_run and the runner that wrote this directory did not execute it: report.json carries the null's parameters and no band. Ruled on #17 (5743190831, 2026-09-19): corrected by this superseding note, not by an edit of the numbers; the assembler's correction, to declare only the nulls it runs, is track one's and is not on main as of a7d2148."]
 targets_checked = 12
 
 [regime]
