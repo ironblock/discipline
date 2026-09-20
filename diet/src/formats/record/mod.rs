@@ -242,7 +242,113 @@ pub struct Substrate {
     /// Not in #47's list of substrate fields and kept anyway: it is a property
     /// of how these weights were run, two valid fixtures pin it, and dropping
     /// it would be a distinction the schema stopped being able to make.
+    ///
+    /// An OUTCOME, and the one thing it is not is a control. It answers "was
+    /// reasoning on, and did it come back"; what was ASKED FOR is
+    /// [`Substrate::reasoning_control`], and #94 exists because the two were
+    /// one word.
     pub reasoning: Reasoning,
+    /// What was ASKED FOR: the instruction level, and the hard cap.
+    ///
+    /// Beside [`Substrate::reasoning`] rather than replacing it, because
+    /// "thinking at level `high`" and "reasoning came back" are different
+    /// facts and the second does not imply the first. `effort` is an
+    /// INSTRUCTION the chat template renders as system-message text -- soft,
+    /// and no bound on anything -- so a claim that fixes a reasoning state
+    /// records the cap beside it and measures the length that actually came
+    /// back. #94 design point 1.
+    ///
+    /// Optional, and the absence is a measurement rather than a hole: a run
+    /// against a substrate with no reasoning controls at all (a canned
+    /// server, a model with no think block) has no level and no budget to
+    /// declare, and inventing `medium`/`none` for it would be the
+    /// undeclared-reads-as-a-value defect [`Source`] already refuses one
+    /// field over. What a regimen may not do is name a level and leave the
+    /// cap out; `formats::regimen` refuses that document.
+    pub reasoning_control: Option<ReasoningControl>,
+    /// The digest of the chat template these weights were served through.
+    ///
+    /// A SUBSTRATE FACTOR, beside the weights digest rather than folded into
+    /// it: the template is what renders an effort level into the head of the
+    /// prompt, and two files of one model with different templates render
+    /// different heads from the same request. #94 design point 2, whose
+    /// specimen is an Unsloth-patched template that silently maps `high` to
+    /// `xhigh` where the stock template raises -- one weights digest, two
+    /// substrates, and nothing in the record able to say so.
+    ///
+    /// Optional, and the absence is what
+    /// [`StructureError::SubstratesIndistinguishable`] reads: a record
+    /// declaring the same weights twice with nothing to tell the two apart
+    /// has declared one substrate under two ids. Digest-checked when it is
+    /// there, like every other identity field here.
+    ///
+    /// **Nothing in this repository extracts it.** The digest lives in the
+    /// weights file's header, and this crate reads no weights files; the
+    /// field is declared and the schema enforces what it means. Disclosed
+    /// rather than left to look computed.
+    pub chat_template_sha256: Option<String>,
+}
+
+/// The reasoning controls a substrate was asked to run under.
+///
+/// TWO FIELDS, because the two are different kinds of thing and the failure
+/// #94 names is reading one as the other. `effort` is an instruction the
+/// template renders as text and the model may ignore; `budget_tokens` is a
+/// cap the sampler enforces. A record carrying only the first says what was
+/// requested and nothing about what it cost.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReasoningControl {
+    /// The instruction level, as the template names it.
+    ///
+    /// AN OPEN STRING, deliberately, where nearly everything else in this
+    /// schema is a closed vocabulary. The set of levels is a property of the
+    /// chat template and not of this library -- the specimen on #94 is a
+    /// patched template that answers to `xhigh` where the stock one raises --
+    /// so a closed list here would refuse a level that exists and would have
+    /// to be re-opened by whoever met the next template. Which levels a
+    /// template actually renders is what the template's digest is for.
+    pub effort: String,
+    /// The hard cap on reasoning tokens, or the declared absence of one.
+    pub budget_tokens: Budget,
+}
+
+vocabulary! {
+    /// How a reasoning budget is spelled.
+    ///
+    /// Tagged, for the reason [`WeightsKind`] is: a field that is a number
+    /// when there is a cap and a word when there is not is one field with two
+    /// readings, and the reader cannot tell which it got.
+    BudgetKind {
+        /// A hard cap, in tokens.
+        Tokens => "tokens",
+        /// No cap, and somebody said so. Spelled with the regimen's own word.
+        Uncapped => "none",
+    }
+}
+
+/// A cap on the tokens a substrate may spend thinking.
+///
+/// `Uncapped` is a DECLARATION and not an absence: "there is no cap" and
+/// "nobody wrote the cap down" are different facts about a run, and the
+/// second has no spelling here at all -- a regimen that names a level and no
+/// cap is refused rather than defaulted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Budget {
+    /// This many tokens, at most.
+    Tokens(Count),
+    /// No cap. Declared, never inferred.
+    Uncapped,
+}
+
+impl Budget {
+    /// Which kind this is.
+    #[must_use]
+    pub fn kind(self) -> BudgetKind {
+        match self {
+            Self::Tokens(_) => BudgetKind::Tokens,
+            Self::Uncapped => BudgetKind::Uncapped,
+        }
+    }
 }
 
 vocabulary! {
@@ -1071,6 +1177,31 @@ pub enum StructureError {
     },
     /// Two substrates declared under one id.
     SubstrateDeclaredTwice(String),
+    /// Two substrate entries that differ in nothing but their ids.
+    ///
+    /// Not [`Self::SubstrateDeclaredTwice`], which is the same id twice and
+    /// makes every reference ambiguous. This is the opposite shape: two ids,
+    /// and nothing in the record saying what makes them two. Rows attribute
+    /// themselves to one or the other and a reader comparing the results has
+    /// compared a substrate with itself under another name.
+    ///
+    /// #94 design point 2 is what makes this checkable rather than merely
+    /// true. Two files of one model with different chat templates ARE two
+    /// substrates -- the template renders the effort level, so the same
+    /// request reaches the model as different text -- and the difference is
+    /// in the record exactly when
+    /// [`Substrate::chat_template_sha256`] is. Declare it and they are two;
+    /// leave it out on both and they are one, written twice.
+    ///
+    /// Every declared field counts, not only the template: two entries that
+    /// differ in hardware, engine, sampler card or weights have disclosed
+    /// what makes them two, and this refusal has nothing to say about them.
+    SubstratesIndistinguishable {
+        /// The earlier entry's id.
+        first: String,
+        /// The later entry's id: the one that adds nothing.
+        again: String,
+    },
     /// A lane whose rows name two different substrates.
     LaneChangedSubstrate {
         /// The lane that changed.
@@ -1164,6 +1295,27 @@ impl fmt::Display for SchemaError {
     }
 }
 
+/// The [`StructureError::SubstratesIndistinguishable`] message.
+///
+/// Out of line, and the reason is visible in the lint: `StructureError`'s
+/// `Display` is at the line ceiling, and a complaint worth reading is longer
+/// than the room left inside it. Shortening the message to fit would be
+/// trading what the next reader is told for where the text happens to sit.
+fn indistinguishable_complaint(
+    f: &mut fmt::Formatter<'_>,
+    first: &str,
+    again: &str,
+) -> fmt::Result {
+    write!(
+        f,
+        "substrates `{first}` and `{again}` differ in nothing but their ids, \
+         so a result attributed to one and a result attributed to the other \
+         came from the same substrate under two names; two files of one \
+         model are two substrates when their `chat_template_sha256` says so, \
+         and this record discloses nothing"
+    )
+}
+
 impl fmt::Display for StructureError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -1224,6 +1376,9 @@ impl fmt::Display for StructureError {
                 "two substrates are declared as `{id}`, so every row naming it \
                  would have to be read as one of them"
             ),
+            Self::SubstratesIndistinguishable { first, again } => {
+                indistinguishable_complaint(f, first, again)
+            }
             Self::LaneChangedSubstrate { lane, was, now } => write!(
                 f,
                 "the `{lane}` lane is served by `{was}` and then by `{now}`, \
@@ -1627,9 +1782,48 @@ fn substrates(
         if declared.iter().any(|s| s.id == one.id) {
             return Err(StructureError::SubstrateDeclaredTwice(one.id).into());
         }
+        // AND THE OTHER SHAPE: two ids over one substrate. Compared on every
+        // field but the id, so anything the record discloses -- a second
+        // chat template, other weights, other hardware -- makes them two and
+        // this says nothing. Ruled on #94 design point 2.
+        if let Some(twin) = declared.iter().find(|s| indistinguishable(s, &one)) {
+            return Err(StructureError::SubstratesIndistinguishable {
+                first: twin.id.clone(),
+                again: one.id.clone(),
+            }
+            .into());
+        }
         declared.push(one);
     }
     Ok(declared)
+}
+
+/// Whether two substrate entries say the same thing about the same thing.
+///
+/// EVERY FIELD BUT THE ID, and written as a destructuring rather than as a
+/// list of comparisons: a field added to [`Substrate`] and forgotten here
+/// would silently narrow the check, and this way the compiler refuses to
+/// build until the new field is either compared or explicitly excluded.
+fn indistinguishable(one: &Substrate, other: &Substrate) -> bool {
+    let Substrate {
+        // The one field that is ALLOWED to differ -- two ids is the premise,
+        // not the finding.
+        id: _,
+        engine,
+        weights,
+        hardware_fingerprint,
+        sampler_card,
+        reasoning,
+        reasoning_control,
+        chat_template_sha256,
+    } = one;
+    *engine == other.engine
+        && *weights == other.weights
+        && *hardware_fingerprint == other.hardware_fingerprint
+        && *sampler_card == other.sampler_card
+        && *reasoning == other.reasoning
+        && *reasoning_control == other.reasoning_control
+        && *chat_template_sha256 == other.chat_template_sha256
 }
 
 /// Which weights a substrate ran, from its `weights` object.
@@ -1736,6 +1930,49 @@ fn weights(fields: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Wei
     Ok(built)
 }
 
+/// The reasoning controls a substrate declares, from its object.
+///
+/// KIND FIRST on the budget, the shape [`weights`] and [`summary`] use: the
+/// tag decides which field is read, so `{"kind":"none","tokens":4096}` leaves
+/// `tokens` behind and the caller refuses it as unknown. A cap recorded under
+/// a declaration of no cap is exactly the contradiction a single untagged
+/// field would have swallowed.
+fn reasoning_control(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<ReasoningControl, ParseError> {
+    let effort = take_string(members, of, "effort")?;
+    if effort.trim().is_empty() {
+        return Err(SchemaError::BlankField {
+            of,
+            field: "substrates[].reasoning_control.effort",
+        }
+        .into());
+    }
+    let mut budget = take_object(members, of, "budget_tokens")?;
+    let tag = take_string(&mut budget, of, "kind")?;
+    let kind = BudgetKind::from_tag(&tag).ok_or(SchemaError::BadValue {
+        of,
+        field: "reasoning_control.budget_tokens.kind",
+        found: tag,
+    })?;
+    let budget_tokens = match kind {
+        BudgetKind::Tokens => Budget::Tokens(take_u64(&mut budget, of, "tokens")?),
+        BudgetKind::Uncapped => Budget::Uncapped,
+    };
+    if let Some(field) = budget.keys().next() {
+        return Err(SchemaError::UnknownField {
+            of,
+            field: format!("substrates[].reasoning_control.budget_tokens.{field}"),
+        }
+        .into());
+    }
+    Ok(ReasoningControl {
+        effort,
+        budget_tokens,
+    })
+}
+
 /// One substrate, from its object.
 fn substrate(
     fields: &mut BTreeMap<String, Value>,
@@ -1805,6 +2042,54 @@ fn substrate(
                 field: "reasoning",
                 found: text,
             })?
+        },
+        // OPTIONAL, and taken with `remove` rather than through
+        // `take_object`: a substrate with no reasoning controls declares
+        // none, and the unknown-field check below is what stops the key
+        // being misspelled into silence.
+        reasoning_control: match fields.remove("reasoning_control") {
+            None => None,
+            Some(Value::Object(mut members)) => {
+                let built = reasoning_control(&mut members, of)?;
+                if let Some(field) = members.keys().next() {
+                    return Err(SchemaError::UnknownField {
+                        of,
+                        field: format!("substrates[].reasoning_control.{field}"),
+                    }
+                    .into());
+                }
+                Some(built)
+            }
+            Some(_) => {
+                return Err(SchemaError::WrongType {
+                    of,
+                    field: "substrates[].reasoning_control".to_owned(),
+                    want: "an object carrying `effort` and `budget_tokens`",
+                }
+                .into());
+            }
+        },
+        // Digest-checked when present, like `weights.sha256`,
+        // `acts_sha256` and `hardware_fingerprint`: it is an identity claim
+        // about an artifact, and a string that is not a digest cannot make
+        // one. A template named in prose here would be the sentinel class
+        // the fingerprint tightening already caught once.
+        chat_template_sha256: match fields.remove("chat_template_sha256") {
+            None => None,
+            Some(Value::String(text)) => {
+                if !digest_ok(&text) {
+                    return Err(StructureError::BadDigest(text).into());
+                }
+                Some(text)
+            }
+            Some(_) => {
+                return Err(SchemaError::WrongType {
+                    of,
+                    field: "substrates[].chat_template_sha256".to_owned(),
+                    want: "a sha256",
+                }
+                .into());
+            }
         },
     };
     if let Some(field) = fields.keys().next() {
@@ -2747,6 +3032,24 @@ fn weights_value(weights: &Weights) -> Value {
     Value::Object(members)
 }
 
+/// The reasoning controls as a record value.
+fn reasoning_control_value(control: &ReasoningControl) -> Value {
+    let mut budget = BTreeMap::from([(
+        "kind".to_owned(),
+        Value::String(control.budget_tokens.kind().tag().to_owned()),
+    )]);
+    match control.budget_tokens {
+        Budget::Tokens(count) => {
+            budget.insert("tokens".to_owned(), integer(count));
+        }
+        Budget::Uncapped => {}
+    }
+    Value::Object(BTreeMap::from([
+        ("effort".to_owned(), Value::String(control.effort.clone())),
+        ("budget_tokens".to_owned(), Value::Object(budget)),
+    ]))
+}
+
 /// The regime as a record value.
 ///
 /// Crate-visible because the object's dump carries it: the dump is the only
@@ -2757,7 +3060,7 @@ pub(crate) fn regime_value(regime: &Regime) -> Value {
         .substrates
         .iter()
         .map(|s| {
-            Value::Object(BTreeMap::from([
+            let mut members = BTreeMap::from([
                 ("id".to_owned(), Value::String(s.id.clone())),
                 (
                     "engine".to_owned(),
@@ -2782,7 +3085,25 @@ pub(crate) fn regime_value(regime: &Regime) -> Value {
                     "reasoning".to_owned(),
                     Value::String(s.reasoning.tag().to_owned()),
                 ),
-            ]))
+            ]);
+            // WRITTEN ONLY WHEN DECLARED. A key carrying a stand-in for
+            // "nobody said" is the absence-used-as-a-value shape this schema
+            // refuses elsewhere, and here it would also defeat
+            // `SubstratesIndistinguishable`: two entries would then always
+            // differ, or always agree, on a field neither of them declared.
+            if let Some(control) = &s.reasoning_control {
+                members.insert(
+                    "reasoning_control".to_owned(),
+                    reasoning_control_value(control),
+                );
+            }
+            if let Some(digest) = &s.chat_template_sha256 {
+                members.insert(
+                    "chat_template_sha256".to_owned(),
+                    Value::String(digest.clone()),
+                );
+            }
+            Value::Object(members)
         })
         .collect();
     Value::Object(BTreeMap::from([
@@ -2879,8 +3200,8 @@ pub fn project(source: &str) -> Result<Value, String> {
 mod tests {
     use super::json::Value;
     use super::{
-        Count, Event, Kind, MAX_DEPTH, ParseError, Reasoning, Regime, SchemaError, StructureError,
-        Verdict, Weights, WeightsKind, objects, parse, regime_value, render,
+        Budget, Count, Event, Kind, MAX_DEPTH, ParseError, Reasoning, Regime, SchemaError,
+        StructureError, Verdict, Weights, WeightsKind, objects, parse, regime_value, render,
     };
 
     /// A `start` line whose regime is complete, as every record needs one.
@@ -3199,6 +3520,164 @@ mod tests {
             let parsed = parse(&source).expect("a record");
             assert_eq!(parsed.regime().substrates[0].reasoning, *state);
         }
+    }
+
+    /// One substrate object, spelled once, so the tests below differ only in
+    /// what they are about.
+    fn substrate_row(id: &str, weights_sha: &str, extra: &str) -> String {
+        format!(
+            "{{\"id\":\"{id}\",\"engine\":{{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"}},\
+             \"weights\":{{\"kind\":\"digest\",\"sha256\":\"{weights_sha}\"}},\
+             \"hardware_fingerprint\":\
+             \"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123\",\
+             \"sampler_card\":{{\"seed\":0}},\"reasoning\":\"on\"{extra}}}"
+        )
+    }
+
+    /// A `start` row declaring exactly these substrates.
+    fn start_declaring(substrates: &[String]) -> String {
+        format!(
+            "{{\"source\":{{\"kind\":\"live\"}},\"record\":\"start\",\"regime\":{{\"arm\":\"a\",\
+             \"dogma_version\":0,\"substrates\":[{}]}}}}\n",
+            substrates.join(",")
+        )
+    }
+
+    /// #94 design point 2: the chat template is a substrate factor, and two
+    /// files of one model with different templates are two substrates.
+    ///
+    /// The pair of assertions is the whole content of the rule. Accepting the
+    /// disclosed pair alone would pass with the refusal deleted; refusing the
+    /// undisclosed pair alone would pass with the refusal fired on every
+    /// multi-substrate record. Neither half is the claim.
+    #[test]
+    fn one_weights_digest_and_two_chat_templates_are_two_substrates() {
+        let weights = "a".repeat(64);
+        let stock = format!(",\"chat_template_sha256\":\"{}\"", "d1".repeat(32));
+        let patched = format!(",\"chat_template_sha256\":\"{}\"", "d2".repeat(32));
+
+        let disclosed = start_declaring(&[
+            substrate_row("stock", &weights, &stock),
+            substrate_row("patched", &weights, &patched),
+        ]);
+        let parsed = parse(&disclosed).expect("two templates are two substrates");
+        assert_eq!(parsed.regime().substrate_ids(), ["stock", "patched"]);
+        assert_eq!(
+            parsed.regime().substrates[0].chat_template_sha256,
+            Some("d1".repeat(32)),
+            "and the digest survives the read"
+        );
+
+        // The same record with nothing telling the two apart. Every other
+        // field is identical, so a row attributed to `patched` and a row
+        // attributed to `stock` came from one substrate under two names.
+        let undisclosed = start_declaring(&[
+            substrate_row("stock", &weights, ""),
+            substrate_row("patched", &weights, ""),
+        ]);
+        assert!(
+            matches!(
+                parse(&undisclosed),
+                Err(ParseError::Structure(
+                    StructureError::SubstratesIndistinguishable { .. }
+                ))
+            ),
+            "a comparison with no disclosure behind it was accepted"
+        );
+
+        // And anything else the record discloses is a disclosure too: the
+        // rule is about entries that say nothing different, not about the
+        // template specifically.
+        let other_weights = start_declaring(&[
+            substrate_row("stock", &weights, ""),
+            substrate_row("patched", &"b".repeat(64), ""),
+        ]);
+        parse(&other_weights).expect("two weights digests are two substrates");
+    }
+
+    /// #94 design point 1: the reasoning CONTROL is two fields, and it is not
+    /// the reasoning OUTCOME the substrate already carried.
+    ///
+    /// Both budget kinds, through a render and back, because the writer is
+    /// the only thing that puts a record on disk and a kind it cannot spell
+    /// becomes the other one silently -- the argument
+    /// `every_weights_kind_round_trips` makes one field over.
+    #[test]
+    fn a_reasoning_control_is_two_fields_and_both_budget_kinds_round_trip() {
+        for (written, want) in [
+            (
+                "{\"effort\":\"high\",\"budget_tokens\":{\"kind\":\"tokens\",\"tokens\":4096}}",
+                Budget::Tokens(Count::new(4096).expect("4096 is a count")),
+            ),
+            (
+                "{\"effort\":\"medium\",\"budget_tokens\":{\"kind\":\"none\"}}",
+                Budget::Uncapped,
+            ),
+        ] {
+            let source = start_declaring(&[substrate_row(
+                "n",
+                &"a".repeat(64),
+                &format!(",\"reasoning_control\":{written}"),
+            )]);
+            let once = parse(&source).expect("a record");
+            let control = once.regime().substrates[0]
+                .reasoning_control
+                .clone()
+                .expect("the control was declared");
+            assert_eq!(control.budget_tokens, want);
+            // The OUTCOME is untouched by the CONTROL. #94 exists because the
+            // two were one word, and a reader that took `reasoning: on` for
+            // "at the declared level" would be reading a different fact.
+            assert_eq!(once.regime().substrates[0].reasoning, Reasoning::On);
+            let twice = parse(&render(&once)).expect("the rendering is a record");
+            assert_eq!(once, twice, "{written} did not survive a rendering");
+        }
+
+        // A level with no cap beside it is not a control: the level is an
+        // instruction the template renders as text and bounds nothing.
+        let half = start_declaring(&[substrate_row(
+            "n",
+            &"a".repeat(64),
+            ",\"reasoning_control\":{\"effort\":\"high\"}",
+        )]);
+        assert!(matches!(
+            parse(&half),
+            Err(ParseError::Schema(SchemaError::MissingField { .. }))
+        ));
+
+        // A cap recorded under a declaration of no cap. The tag decides which
+        // field is read, so the leftover is refused rather than ignored --
+        // which is the contradiction one untagged field would have swallowed.
+        let both = start_declaring(&[substrate_row(
+            "n",
+            &"a".repeat(64),
+            ",\"reasoning_control\":{\"effort\":\"high\",\"budget_tokens\":{\"kind\":\"none\",\"tokens\":4096}}",
+        )]);
+        assert!(matches!(
+            parse(&both),
+            Err(ParseError::Schema(SchemaError::UnknownField { .. }))
+        ));
+    }
+
+    /// The template digest is an identity claim, so it is held to the same
+    /// rule as every other one here.
+    #[test]
+    fn a_chat_template_named_in_prose_is_not_a_template_digest() {
+        let named = start_declaring(&[substrate_row(
+            "n",
+            &"a".repeat(64),
+            ",\"chat_template_sha256\":\"the-unsloth-patched-one\"",
+        )]);
+        assert!(matches!(
+            parse(&named),
+            Err(ParseError::Structure(StructureError::BadDigest(_)))
+        ));
+        // And a substrate that declares none is still a substrate: a canned
+        // server renders no template, and the absence is what
+        // `SubstratesIndistinguishable` reads.
+        let absent = start_declaring(&[substrate_row("n", &"a".repeat(64), "")]);
+        let parsed = parse(&absent).expect("a substrate may disclose no template");
+        assert_eq!(parsed.regime().substrates[0].chat_template_sha256, None);
     }
 
     // Both weights kinds have to survive a rendering, because the writer is

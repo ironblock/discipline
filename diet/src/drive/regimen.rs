@@ -133,6 +133,23 @@ pub fn regime_of(regimen: &Regimen, endpoint_given: bool) -> Result<Regime, Stri
             hardware_fingerprint,
             sampler_card: sampler,
             reasoning,
+            // READ BY THE REGIMEN FORMAT'S OWN READER, not by a second
+            // reading of the same table here. `regimen::parse` already
+            // refused a half-written pair before this function was called,
+            // so the only outcomes left are a whole declaration and none at
+            // all -- and `expect` would be a panic on a document this
+            // crossing was handed, so the refusal is relayed.
+            reasoning_control: regimen::reasoning_of(regimen)
+                .map_err(|why| format!("its `[reasoning]` table: {why}"))?,
+            // NOT DECLARABLE HERE, and that is a fact about this program
+            // rather than a gap in the schema. A chat template's digest
+            // comes out of a weights file's header; the canned server has no
+            // weights file and renders no template, so there is nothing for
+            // this substrate to disclose and inventing a digest-shaped
+            // string would be the sentinel class #68 caught in
+            // `hardware_fingerprint`. A regimen key for it belongs with the
+            // equipment registry, beside the weights it would describe.
+            chat_template_sha256: None,
         }],
         dogma_version,
     })
@@ -171,5 +188,54 @@ fn sampled(value: &regimen::Value) -> Value {
                 .map(|(key, value)| (key.clone(), sampled(value)))
                 .collect(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::regime_of;
+    use crate::formats::record::{Budget, Count, ReasoningControl};
+    use crate::formats::regimen;
+
+    /// The smallest regimen this crossing accepts, plus whatever `extra` the
+    /// test is about.
+    fn crossing(extra: &str) -> Result<crate::formats::record::Regime, String> {
+        let text = format!(
+            "arm = \"a\"\ndogma_version = 0\nsubstrate = \"canned\"\n\
+             substrate_reasoning = \"off\"\n\
+             substrate_hardware = \"{}\"\n{extra}\n[sampler]\nseed = 7\n",
+            "a".repeat(64)
+        );
+        let parsed = regimen::parse(&text).expect("the document is a regimen");
+        regime_of(&parsed, false)
+    }
+
+    /// #94 design point 1: the reasoning control crosses from the regimen
+    /// into the regime, as the pair the regimen declared.
+    ///
+    /// Through the FORMAT's reader, which is why the half-written pair never
+    /// reaches here: `regimen::parse` refused it first. A crossing that read
+    /// the table itself would be a second reader of the same rule, which is
+    /// the defect class this file's own header is about.
+    #[test]
+    fn a_drives_regime_carries_the_reasoning_control_the_regimen_declared() {
+        let declared = crossing("[reasoning]\neffort = \"high\"\nbudget_tokens = 4096\n")
+            .expect("a whole pair is a regime");
+        assert_eq!(
+            declared.substrates[0].reasoning_control,
+            Some(ReasoningControl {
+                effort: "high".to_owned(),
+                budget_tokens: Budget::Tokens(Count::new(4096).expect("4096 is a count")),
+            })
+        );
+
+        // And a regimen that declares none crosses as none, rather than as a
+        // level this program picked. Every committed regimen is one of these.
+        let silent = crossing("").expect("a regimen without one is still a regime");
+        assert_eq!(silent.substrates[0].reasoning_control, None);
+
+        // The chat template is not declarable here, and the substrate says
+        // so rather than carrying a digest-shaped string nothing computed.
+        assert_eq!(silent.substrates[0].chat_template_sha256, None);
     }
 }

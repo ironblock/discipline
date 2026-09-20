@@ -1192,6 +1192,44 @@ path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
 
+# #94 design point 1: an effort level with no budget beside it. The level is
+# an INSTRUCTION the chat template renders as system-message text -- it bounds
+# nothing -- so a regimen naming one and no cap has declared a reasoning state
+# no claim can be fixed in. With the pair check off, the corpus fixture is
+# accepted and `diet check-regimen` exits 0 on it.
+inject_regimen_reasoning_pair_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/regimen.rs")
+source = path.read_text(encoding="utf-8")
+old = "    reasoning_of(&parsed)?;\n"
+new = "    let _ = reasoning_of(&parsed);\n"
+if source.count(old) != 1:
+    raise SystemExit(f"the reasoning pair check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
+# #94 design point 2: two substrate entries that differ in nothing but their
+# ids. A result attributed to one and a result attributed to the other came
+# from the same substrate under two names, and the chat template's digest is
+# what makes two files of one model into two substrates. With the check off,
+# the record is accepted and the comparison reads as a comparison.
+inject_record_substrates_indistinguishable() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "        if let Some(twin) = declared.iter().find(|s| indistinguishable(s, &one)) {"
+new = "        if let Some(twin) = declared.iter().find(|s| false && indistinguishable(s, &one)) {"
+if source.count(old) != 1:
+    raise SystemExit(f"the indistinguishable check appears {source.count(old)} times")
+path.write_text(source.replace(old, new), encoding="utf-8")
+EOF
+}
+
 inject_record_weights_named_not_digested() {
   python3 - <<'EOF'
 import pathlib
@@ -6119,6 +6157,10 @@ selftest() {
     'record/fixtures/invalid/request-with-no-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "weights identified by name"            test     inject_record_weights_named_not_digested \
     'record/fixtures/invalid/weights-named-not-digested\.jsonl' 'test:conformance/formats::record'
+  seeded_case "an effort level with no budget"        test     inject_regimen_reasoning_pair_unchecked \
+    'regimen/fixtures/invalid/reasoning-effort-without-budget\.toml' 'test:conformance/formats::regimen'
+  seeded_case "two ids over one substrate"            test     inject_record_substrates_indistinguishable \
+    'record/fixtures/invalid/substrates-indistinguishable\.jsonl' 'test:conformance/formats::record'
   seeded_case "an injection only GNU sed accepts"     injections inject_injection_needs_gnu_sed \
     'sed forms only GNU accepts'
   seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \

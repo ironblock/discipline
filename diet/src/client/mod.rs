@@ -8,7 +8,7 @@
 //! setting silently changing what every throughput number meant; sampler
 //! settings the client *thought* it sent and the server ignored.
 //!
-//! Five things follow, and each of them is a type rather than a convention:
+//! Six things follow, and each of them is a type rather than a convention:
 //!
 //! * The **request shape is data** ([`shape::RequestShape`]), built once and
 //!   carried into the record beside the answer it produced.
@@ -23,6 +23,13 @@
 //! * **Cache telemetry** ([`Cache`]) per request, because reused-token counts
 //!   are the direct measurement of prefix stability and the seam controller's
 //!   claims are checked against them.
+//! * **Template kwargs go somewhere else from sampler pins**
+//!   ([`shape::RequestShape::template_kwargs`]), because they are read by
+//!   something else: a chat template, not a sampler. Nothing echoes them
+//!   back, so where a pin is checked against the server's report of it, a
+//!   kwarg's delivery is checked by a negative control -- see
+//!   [`crate::drive::CONTROL`]. The reasoning the server did comes back on
+//!   [`Answer::reasoning`], from the path the dialect declares.
 //!
 //! What this module does NOT do is choose or configure a server. It records
 //! what it is given: the concurrency is declared ([`shape::Concurrency`]),
@@ -255,6 +262,21 @@ pub struct Answer {
     pub output_tokens: Option<Count>,
     /// Why the server stopped, as the server spells it.
     pub finish_reason: Option<String>,
+    /// The reasoning the server reported, where its dialect declares a place
+    /// for it.
+    ///
+    /// Carried and never merged into [`Answer::text`]. A reasoning block
+    /// folded into the answer is the defect the interview grammar would then
+    /// be asked to parse around, and #94's negative control reads exactly
+    /// this field: a fork sent `enable_thinking: false` that comes back with
+    /// reasoning characters is a fork whose template kwargs never reached
+    /// the template.
+    ///
+    /// `None` is "nobody looked, or the reply carried no such field" and
+    /// `Some("")` is "the server said it thought about nothing". Both are
+    /// zero characters of reasoning, so the control reads them alike; they
+    /// are kept apart for the reader who has to say which happened.
+    pub reasoning: Option<String>,
     /// The pins, against the server's report of them.
     pub echo: Echo,
     /// What the server said about its cache.
@@ -674,6 +696,7 @@ impl<T: Transport> Client<T> {
             text,
             output_tokens,
             finish_reason: parsed.finish_reason,
+            reasoning: parsed.reasoning,
             echo,
             cache,
         });
@@ -804,6 +827,7 @@ mod tests {
                 retries,
             },
             grammar: None,
+            template_kwargs: std::collections::BTreeMap::new(),
         }
     }
 

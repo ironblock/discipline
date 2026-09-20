@@ -264,7 +264,14 @@ fn census(one: &diet::drive::Uncaptured) -> Value {
         ("fork".to_owned(), Value::String(one.fork.clone())),
         ("regions".to_owned(), count(one.regions)),
         ("captured".to_owned(), count(one.captured)),
-        ("truncated".to_owned(), Value::Boolean(one.truncated)),
+        // THE OUTCOME, not a `truncated` flag. #94 design point 5 adds a
+        // third state -- a fork whose budget was spent inside the think
+        // block -- and a boolean would have reported it as `false`, which
+        // reads as "the answer is whole" about a fork that produced none.
+        (
+            "outcome".to_owned(),
+            Value::String(one.outcome.tag().to_owned()),
+        ),
         // BOTH counts -- ruling 6. Record v0 has one field and it means
         // `touched`; a reader of this line gets the question the record
         // cannot yet ask, which is whether the fork produced anything NEW.
@@ -331,5 +338,6 @@ fn shape(regime: &Regime) -> RequestShape {
             retries: 1,
         },
         grammar: None,
+        template_kwargs: std::collections::BTreeMap::new(),
     }
 }

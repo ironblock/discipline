@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 42
+faults = 44
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -274,7 +274,7 @@ anchor = '''
     let answer = interview::parse(text).map_err(|why| format!("{why:?}"))?;'''
 becomes = '''
     let Ok(answer) = interview::parse(text) else {
-        return Ok((Vec::new(), Uncaptured { turn, fork: fork.unwrap_or(lane).to_owned(), regions: 0, captured: 0, passed_over: Vec::new(), truncated: false, entries_touched: 0, entries_created: 0 }));
+        return Ok((Vec::new(), Uncaptured { turn, fork: fork.unwrap_or(lane).to_owned(), regions: 0, captured: 0, passed_over: Vec::new(), outcome: ForkOutcome::Complete, entries_touched: 0, entries_created: 0 }));
     };'''
 catches = [
     "drive::tests::an_answer_the_fold_cannot_read_stops_the_drive",
@@ -713,4 +713,45 @@ becomes = '''
 isolation = "sandbox"'''
 catches = [
     "drive::tests::the_regimen_this_lane_ships_is_one_a_drive_can_run",
+]
+
+# --- #94: the kwarg-delivery control, and the outcome a spent budget is ---
+#
+# Both generated the same way as everything above: applied to the tree, the
+# lane's tests run, `catches` is what actually failed.
+
+[[fault]]
+id = "drive.the-kwarg-control-never-refuses"
+failure_class = "drive.the-kwarg-control-never-refuses"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+        if reasoning_chars > 0 {
+            return Err(Halt::KwargsNotDelivered {
+                lane: CONTROL.to_owned(),
+                reasoning_chars,
+            });
+        }'''
+becomes = '''
+        let _ = reasoning_chars;'''
+catches = [
+    "drive::tests::a_drive_whose_kwargs_never_reach_the_template_refuses_before_it_banks_anything",
+]
+
+[[fault]]
+id = "drive.a-spent-think-budget-is-an-ordinary-silence"
+failure_class = "drive.a-spent-think-budget-is-an-ordinary-silence"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+            let thinking_exhausted = matches!(forked.outcome, Outcome::Capped(_))
+                && text.trim().is_empty()
+                && reply
+                    .reasoning
+                    .as_deref()
+                    .is_some_and(|thought| !thought.is_empty());'''
+becomes = '''
+            let thinking_exhausted = false;'''
+catches = [
+    "drive::tests::a_fork_whose_budget_went_inside_the_think_block_is_thinking_exhausted",
 ]
