@@ -26,6 +26,32 @@
 //!   invalidating every session's prefix when local midnight passes. Volatile
 //!   facts belong in the turn envelope, in the mutable tail.
 //!
+//! # What is proved here, and what is proved end to end
+//!
+//! #79's first two acceptance rows are demonstrated AT THE UNIT and as
+//! fixtures, and one half of the first is demonstrated by a real drive. Said
+//! plainly rather than left for a reader to work out from which tests exist:
+//!
+//! * **Row 1, the date that moved.** The mechanism runs end to end --
+//!   `drive::tests::the_seams_own_render_is_recorded_as_a_prefix_change_naming_the_lines`
+//!   drives three real turns and the record carries a `prefix.changed` at
+//!   `q/3` with reason `text` and a diff naming the lines. The DATE
+//!   specifically cannot be driven here, because design point 4's own lint
+//!   refuses to send a dated head: the two design points are in tension by
+//!   construction for this harness, and an escape hatch for the test would
+//!   weaken the half that actually prevents the miss. The date case is
+//!   `a_date_that_moved_is_a_text_change_naming_the_line` and the fixture
+//!   `valid/head-date-changed-between-turns.jsonl`.
+//! * **Row 2, the tools reordered.** Unit and fixture only.
+//!   `RequestShape::tools` is rendered and hashed, so a harness that declares
+//!   a tool surface gets attribution -- but this crate's own reference drive
+//!   declares none by design, because its script runs commands under
+//!   confinement rather than exposing tools to the model. Nothing here has
+//!   been round-tripped through a server that reads them.
+//!
+//! Row 3 is `crate::client::cache`'s, and it carries the same disclosure; row
+//! 4 is `crate::drive`'s, and is the one that is run against the real file.
+//!
 //! # What this module will not claim
 //!
 //! It names a message that LEFT the frozen history; it does not say the

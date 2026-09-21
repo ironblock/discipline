@@ -65,6 +65,24 @@
 //! A regime that declares no reasoning control makes no reasoning-state
 //! claim, so it pays for no control. #94 design point 4.
 //!
+//! # A head carrying a timestamp never leaves this module
+//!
+//! #79's fourth acceptance row. Before every call the drive renders the head
+//! it is about to send and lints it; a calendar date or a clock in it is a
+//! [`Halt::HeadCarriesATimestamp`], because a head that expires at midnight
+//! takes every session's prefix with it and no cache census can name the
+//! reason. It is run against the REAL regimen this lane ships --
+//! `the_reference_regimens_own_rendered_head_carries_no_timestamp` parses
+//! `diet/drive/dev-loop.toml`, crosses it into a regime, renders it through
+//! the seam's own renderer and puts the result to the lint -- and the same
+//! test appends a date and requires the refusal, so the pass is not vacuous.
+//!
+//! `diet-drive` exits [`Halt::EXIT`] (two) on any halt rather than one: that
+//! is this program's existing code for "could not start", and redefining it
+//! would collapse a drive that never began into a drive that failed. The
+//! row's exit-1 discipline is carried by the seeded fault
+//! `drive.head-not-linted` under the `test` check, as its sibling rows are.
+//!
 //! **What is NOT here, and is disclosed rather than half-built:** the
 //! RESOLVED effort level, echoed from the rendered prompt head. #94 design
 //! point 2 asks for it because the injected sentence differs per level, so

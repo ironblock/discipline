@@ -18,6 +18,22 @@
 //! `expected`, because the fold is exactly what turns a measurement back into
 //! an estimate.
 //!
+//! # Row 3 is proved at the unit, and only at the unit
+//!
+//! #79's third acceptance row -- a six-minute gap under `cache_ttl = 5m`
+//! classified `expected`, a one-minute gap with the same miss classified
+//! `unexplained` -- is `a_gap_past_the_declared_lifetime_is_expected_and_a_gap_inside_it_is_not`,
+//! beside the boundary case, the precedence case, the undeclared case, the
+//! uncached case and the unmeasured case. **It is not driven end to end**,
+//! and this is said plainly here rather than left to be inferred from which
+//! tests exist: the reference drive runs against a canned loopback stub that
+//! plays no provider's cache policy, so there is no expiry for a gap to cross
+//! and no six minutes to wait for. The drive's own output demonstrates the
+//! other half -- `"ttl_undeclared":["canned"]`, an undeclared lifetime named
+//! rather than defaulted -- which is the honest end-to-end claim available
+//! against a substrate nobody has documented a lifetime for. Rows 1 and 2
+//! carry the same disclosure in `crate::client::head`.
+//!
 //! # What this census is beside, and not in
 //!
 //! The record does not carry it. `expected` needs an INTER-CALL GAP, and
