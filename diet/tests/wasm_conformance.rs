@@ -35,6 +35,15 @@
 //! loud failure, not a skip -- a conformance job that passes because its
 //! own toolchain silently was not there is the isolation lane's `bwrap`
 //! lesson wearing a different lane's clothes.
+//!
+//! Row 3 lives here too rather than in a file of its own: it is the same
+//! `wasm-bindgen` invocation this file already runs, checked for one more
+//! property. A generator whose output depended on its caller's `$PWD` would
+//! drift the checked-in bindings the instant CI's checkout path or a
+//! contributor's shell differed from whoever last ran it -- so the claim is
+//! not "the bindings look right," it's "the bindings are the same bytes
+//! regardless of where this ran from," proved by literally running it twice
+//! from two different directories and diffing the output.
 
 #![cfg(feature = "wasm")]
 
@@ -66,14 +75,13 @@ fn fixtures(dir: &Path, ext: &str) -> Vec<PathBuf> {
     paths
 }
 
-/// Build the wasm32 artifact for `features` (always includes `wasm`) and run
-/// `wasm-bindgen --target nodejs` over it. Returns the path to the generated
-/// Node glue (`<crate>.js`).
+/// Build the wasm32 artifact for `features` (always includes `wasm`).
+/// Returns the path to the produced `.wasm`.
 ///
 /// One `--target-dir` per distinct feature set, so the plain conformance
 /// build and the seeded-trap build -- which must not carry the same code --
 /// cannot race on or clobber each other's cached artifacts.
-fn build_and_bind(label: &str, features: &str) -> PathBuf {
+fn build_wasm(label: &str, features: &str) -> PathBuf {
     let target_dir = target_dir().join(label);
     let status = Command::new("cargo")
         .current_dir(crate_root())
@@ -102,12 +110,20 @@ fn build_and_bind(label: &str, features: &str) -> PathBuf {
         "cargo build succeeded but {} is missing",
         wasm_artifact.display()
     );
+    wasm_artifact
+}
 
-    let out_dir = target_dir.join("bindgen-out");
+/// Run `wasm-bindgen --target nodejs` over `wasm_artifact` into `out_dir`,
+/// itself launched from `cwd` -- both `wasm_artifact` and `out_dir` are
+/// absolute, so `cwd` has no reason to matter, and row 3 exists to check
+/// that belief rather than assume it. Returns the generated Node glue
+/// (`<crate>.js`).
+fn bind_nodejs(wasm_artifact: &Path, out_dir: &Path, cwd: &Path) -> PathBuf {
     let status = Command::new("wasm-bindgen")
+        .current_dir(cwd)
         .args(["--target", "nodejs", "--out-dir"])
-        .arg(&out_dir)
-        .arg(&wasm_artifact)
+        .arg(out_dir)
+        .arg(wasm_artifact)
         .status()
         .unwrap_or_else(|err| {
             panic!(
@@ -117,8 +133,9 @@ fn build_and_bind(label: &str, features: &str) -> PathBuf {
         });
     assert!(
         status.success(),
-        "wasm-bindgen --target nodejs over {} failed",
-        wasm_artifact.display()
+        "wasm-bindgen --target nodejs over {} (cwd {}) failed",
+        wasm_artifact.display(),
+        cwd.display()
     );
 
     let glue = out_dir.join("diet.js");
@@ -130,9 +147,27 @@ fn build_and_bind(label: &str, features: &str) -> PathBuf {
     glue
 }
 
+fn build_and_bind(label: &str, features: &str) -> PathBuf {
+    let wasm_artifact = build_wasm(label, features);
+    let out_dir = target_dir().join(label).join("bindgen-out");
+    bind_nodejs(&wasm_artifact, &out_dir, &crate_root())
+}
+
+/// Cached separately from [`plain_glue`]'s bound output, so
+/// `ts_bindings_are_byte_identical_from_two_different_working_directories`
+/// can bind the same `.wasm` a second time without a second `cargo build`
+/// subprocess racing this one under CI's default parallel test threading.
+fn plain_wasm_artifact() -> &'static Path {
+    static ARTIFACT: OnceLock<PathBuf> = OnceLock::new();
+    ARTIFACT.get_or_init(|| build_wasm("plain", "wasm"))
+}
+
 fn plain_glue() -> &'static Path {
     static GLUE: OnceLock<PathBuf> = OnceLock::new();
-    GLUE.get_or_init(|| build_and_bind("plain", "wasm"))
+    GLUE.get_or_init(|| {
+        let out_dir = target_dir().join("plain").join("bindgen-out");
+        bind_nodejs(plain_wasm_artifact(), &out_dir, &crate_root())
+    })
 }
 
 fn seeded_trap_glue() -> &'static Path {
@@ -372,5 +407,72 @@ fn the_seeded_host_call_trap_actually_fails_the_job() {
     assert!(
         error.contains("unreachable"),
         "seeded_host_call_trap failed, but not with a wasm trap: {error}"
+    );
+}
+
+/// Row 3: `wasm-bindgen --target nodejs`, invoked twice from two different
+/// working directories against the same `.wasm` artifact, produces
+/// byte-identical output. Compares every file the generator writes, named
+/// by directory listing rather than a guessed set, so a future
+/// `wasm-bindgen` version adding or renaming an output file is caught by
+/// this test noticing the two listings still match each other -- not by a
+/// hardcoded filename silently going unchecked.
+#[test]
+fn ts_bindings_are_byte_identical_from_two_different_working_directories() {
+    let wasm_artifact = plain_wasm_artifact();
+    let root = target_dir().join("plain").join("bindgen-cwd-proof");
+
+    let out_a = root.join("from-crate-root");
+    let cwd_a = crate_root();
+    let out_b = root.join("from-workspace-root");
+    let cwd_b = crate_root()
+        .parent()
+        .expect("diet/ has a parent directory")
+        .to_path_buf();
+    assert_ne!(cwd_a, cwd_b, "the two runs must actually differ in cwd");
+
+    bind_nodejs(wasm_artifact, &out_a, &cwd_a);
+    bind_nodejs(wasm_artifact, &out_b, &cwd_b);
+
+    let names = |dir: &Path| -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap_or_else(|err| panic!("cannot read {}: {err}", dir.display()))
+            .map(|entry| {
+                entry
+                    .expect("a readable directory yields readable entries")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        names.sort();
+        names
+    };
+    let names_a = names(&out_a);
+    let names_b = names(&out_b);
+    assert_eq!(
+        names_a, names_b,
+        "wasm-bindgen wrote a different set of files depending on cwd"
+    );
+    assert!(!names_a.is_empty(), "wasm-bindgen wrote nothing to compare");
+
+    let mut mismatches = Vec::new();
+    for name in &names_a {
+        let bytes_a = std::fs::read(out_a.join(name))
+            .unwrap_or_else(|err| panic!("cannot read {}: {err}", out_a.join(name).display()));
+        let bytes_b = std::fs::read(out_b.join(name))
+            .unwrap_or_else(|err| panic!("cannot read {}: {err}", out_b.join(name).display()));
+        if bytes_a != bytes_b {
+            mismatches.push(name.clone());
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "cwd-dependent output in: {}\n  {} (cwd {})\n  {} (cwd {})",
+        mismatches.join(", "),
+        out_a.display(),
+        cwd_a.display(),
+        out_b.display(),
+        cwd_b.display()
     );
 }
