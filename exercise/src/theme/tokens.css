@@ -1,0 +1,80 @@
+/*
+ * The catalog's tokens.
+ *
+ * COLOUR is `pages/index.html`'s palette, the repository's one rendered
+ * surface: paper, ink, muted, rule, in both schemes. The six hue tokens are
+ * v3's outcome and lane palette, kept as oklch so they sit at one lightness.
+ *
+ * TYPE is SEMANTIC. One token per kind of text, never per face -- several of
+ * these resolve to the same stack today, and that is deliberate: binding a
+ * component to `--font-answer` rather than to "serif" is what lets the face
+ * change later without touching the component, and collapsing two kinds of
+ * text into one token now is entropy nobody gets back.
+ *
+ *   --font-system   the harness's own chrome: labels, badges, ids, counts
+ *   --font-record   the record's own spelling: canonical JSON, digests, tags
+ *   --font-tool     what a tool said: commands, args, output, exit codes
+ *   --font-ask      the operator's prose: the ask on a request
+ *   --font-answer   the model's prose: `response.text` on the canonical lane
+ *
+ * The faces are a starting point to play with, not a ruling. Mono for what
+ * the system and its tools say; a proportional face for what a person or a
+ * model said, so prose reads as prose and does not impersonate a log line.
+ */
+:root {
+  color-scheme: light dark;
+
+  --ink: #16181d;
+  --paper: #fbfaf8;
+  --muted: #5d6470;
+  --rule: #d9d5cd;
+  --surface: color-mix(in oklab, var(--ink) 4%, var(--paper));
+
+  --hue-ok: oklch(0.58 0.11 150);
+  --hue-amber: oklch(0.62 0.11 85);
+  --hue-orange: oklch(0.6 0.11 45);
+  --hue-red: oklch(0.58 0.13 25);
+  --hue-blue: oklch(0.58 0.11 250);
+  --hue-magenta: oklch(0.58 0.11 305);
+
+  --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', Menlo, Consolas, monospace;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-serif: ui-serif, 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+
+  --font-system: var(--font-mono);
+  --font-record: var(--font-mono);
+  --font-tool: var(--font-mono);
+  --font-ask: var(--font-sans);
+  --font-answer: var(--font-serif);
+
+  --size-system: 12px;
+  --size-prose: 14px;
+
+  /* A pending atom is drawn with a dotted rule in the orange hue -- v3's
+     disclosure habit, kept: a field the record does not carry is never faked. */
+  --pending-stroke: 1px dotted var(--hue-orange);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e8e6e1;
+    --paper: #14161a;
+    --muted: #99a0ac;
+    --rule: #2b2f37;
+
+    --hue-ok: oklch(0.74 0.11 150);
+    --hue-amber: oklch(0.74 0.11 85);
+    --hue-orange: oklch(0.74 0.11 45);
+    --hue-red: oklch(0.74 0.11 25);
+    --hue-blue: oklch(0.74 0.11 250);
+    --hue-magenta: oklch(0.74 0.11 305);
+  }
+}
+
+.ex-root {
+  background: var(--paper);
+  color: var(--ink);
+  font: var(--size-system) / 1.5 var(--font-system);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100%;
+}

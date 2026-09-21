@@ -1,0 +1,9 @@
+# A single package, not a workspace. This file exists because pnpm >= 10 reads
+# its build-script allowlist from here and nowhere else: without it every
+# install ends in ERR_PNPM_IGNORED_BUILDS for esbuild's platform-binary check.
+# One name, and it is the only dependency here that runs a script at all.
+# (`onlyBuiltDependencies` was pnpm 10's spelling; pnpm 11 reads `allowBuilds`.)
+packages:
+  - .
+allowBuilds:
+  esbuild: true

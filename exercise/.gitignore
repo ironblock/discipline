@@ -1,0 +1,11 @@
+# Installed and built, never committed. The hygiene gate scans untracked files
+# too (`git ls-files --others --exclude-standard`), so this file has to exist
+# before the first `pnpm install`, or the scan walks node_modules.
+node_modules/
+storybook-static/
+dist/
+# Vitest browser mode and Playwright leave these beside the run.
+test-results/
+.vitest/
+# The RED proofs copy `src/` here to mutate it. See scripts/verify-red.mjs.
+.red/
