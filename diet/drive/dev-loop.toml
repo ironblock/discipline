@@ -50,6 +50,17 @@ substrate_reasoning = "off"
 # that comparison belongs; it lands with the registry.
 substrate_hardware = "fc96af4713f9aaa26f2b7bda27720b497ec3d30c6edd9292da5fa8be8e0c37b0"
 
+# NO `substrate_cache_ttl`, and that is a declaration rather than an omission.
+# A cache lifetime is a property of the PROVIDER PATH -- first-party Anthropic
+# at roughly thirty minutes, Bedrock at roughly five, which is #79's own
+# specimen -- and the canned server plays no provider's cache policy at all.
+# There is no lifetime here for an inter-call gap to be measured against, so
+# naming one would be copying a constant that describes somebody else's
+# service onto a loopback stub. Leaving it out is what makes the drive's own
+# output say `"ttl_undeclared":["canned"]`, which is the correct result: an
+# undeclared lifetime never reads as a provider expiry, and every miss under
+# one lands in `unexplained` where a reader can see it.
+
 # Unconfined, and declared. The drive's own commands are two `echo`s into the
 # working tree and the lane runs on a runner with no `bubblewrap`, so the
 # sandbox would refuse to start rather than run -- which is the correct

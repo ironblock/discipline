@@ -109,6 +109,16 @@
 //! [`Census::no_event`] instead: mapped, because the kind is one this adapter
 //! knows, and silent, because it is not this session's turn to count.
 //!
+//! A row carrying `isCompactSummary: true` is the harness's own replacement
+//! for a history it discarded, and it is neither of the above: it is an event
+//! of its own kind ([`Event::Compaction`], #79). Before that kind existed the
+//! row carried text, so the turn rule took it, and a compaction became **a
+//! turn a person did not take** -- while the thing that actually happened,
+//! the harness throwing away every session's prefix and moving the
+//! session-start marker, went unrecorded. Read from the flag, never from the
+//! prose: matching "This session is being continued from" would fire on any
+//! transcript that quotes the phrase.
+//!
 //! **`isMeta` is not a complete fix for defect 2.** Checked against this
 //! adapter's own reference log (see the reading above): of seven rows
 //! carrying a `<command-name>` envelope, only three carry `isMeta: true`. The
@@ -121,7 +131,7 @@
 use std::collections::BTreeMap;
 
 use super::{Adapted, Adapter, Census, Drift};
-use crate::formats::record::{Count, Event, json::Value};
+use crate::formats::record::{CompactionSource, Count, Event, json::Value};
 
 /// The Claude Code session-log adapter.
 #[derive(Debug, Clone, Copy, Default)]
@@ -327,6 +337,10 @@ struct Run {
     /// `tool_result` that answers it can be joined to the call it answers
     /// rather than filed as a row of its own.
     awaiting: BTreeMap<String, usize>,
+    /// The turn the last compaction was in, and how many have been emitted
+    /// for it. A pair rather than a session-wide counter so a compaction's id
+    /// reads as *the nth compaction of turn k*.
+    compacted: (u32, u32),
 }
 
 impl Run {
@@ -340,6 +354,7 @@ impl Run {
             substrate: substrate.to_owned(),
             turn: 0,
             awaiting: BTreeMap::new(),
+            compacted: (0, 0),
         }
     }
 
@@ -493,6 +508,16 @@ impl Run {
             }
         }
 
+        // BEFORE THE TURN RULE. #79's third specimen: a harness that
+        // compacts injects a synthetic summary message and moves the
+        // session-start marker, and this row -- which carries text, so the
+        // turn rule would take it -- became A TURN A PERSON DID NOT TAKE.
+        // It is not a turn; it is the harness discarding its own prefix,
+        // which is a double-cold event even when the model is reused.
+        if compacted(row) {
+            return self.compaction(at_row, &said);
+        }
+
         if said.trim().is_empty() {
             // Not a turn. The row carried a tool's answer, which has been
             // joined to the call above, or content with no home, which has
@@ -535,6 +560,52 @@ impl Run {
             // reconstruction, which is the copied-from-the-wrong-place
             // reading `request.head_sha256` exists to make impossible.
             head_sha256: None,
+        });
+        Ok(())
+    }
+
+    /// A `user` row the harness itself marked as a compaction summary.
+    ///
+    /// **Read off a flag the harness writes, never sniffed from prose.**
+    /// `isCompactSummary` is a boolean on the row, the same category as the
+    /// `isSidechain`/`isMeta` this adapter already reads -- and the same
+    /// category the module header insists on. Matching "This session is being
+    /// continued from" would be a content guess that fires on any transcript
+    /// quoting the phrase, including this one.
+    ///
+    /// # Before any turn
+    ///
+    /// Counted with its reason rather than emitted. `Event::Compaction`
+    /// names a turn, and the record refuses a row naming a turn that never
+    /// happened -- a session resumed from a compaction, whose log opens with
+    /// the summary, is exactly that log.
+    fn compaction(&mut self, at_row: usize, said: &str) -> Result<(), Drift> {
+        if self.turn == 0 {
+            self.census
+                .no_event_one("user/isCompactSummary before any turn was opened");
+            return Ok(());
+        }
+        // Reset per turn, so an id reads as "the nth compaction of turn k"
+        // rather than as a session-wide counter that happens to be unique.
+        if self.compacted.0 != self.turn {
+            self.compacted = (self.turn, 0);
+        }
+        let id = format!("compact/{}/{}", self.turn, self.compacted.1);
+        self.compacted.1 += 1;
+        // CHARACTERS, through the record's own bound, like every other count
+        // this adapter crosses. What compaction cost is the difference
+        // between the history that was there and what stands in for it, and
+        // this is the half the log affords.
+        let summary_chars = count_of(
+            at_row,
+            "message.content (the compaction summary)",
+            said.chars().count() as u64,
+        )?;
+        self.events.push(Event::Compaction {
+            id,
+            at_turn: self.turn,
+            source: CompactionSource::HarnessCompaction,
+            summary_chars,
         });
         Ok(())
     }
@@ -915,6 +986,22 @@ fn count_of(at_row: usize, field: &str, raw: u64) -> Result<Count, Drift> {
     })
 }
 
+/// The flag the harness writes on a row it composed to replace a history.
+const COMPACT_SUMMARY: &str = "isCompactSummary";
+
+/// Whether the harness marked this row as a compaction summary.
+///
+/// Its own function beside [`excluded_from_parent`], not a third arm inside
+/// it: the two answer different questions. That one says *this row is not the
+/// top-level session's turn, and nothing should come of it*; this one says
+/// *this row is an event of its own kind*. Folding them would make a
+/// compaction reach the record as a silence.
+fn compacted(row: &serde_json::Value) -> bool {
+    row.get(COMPACT_SUMMARY)
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+}
+
 /// Whether a `user` row carries text, and so opens a turn.
 ///
 /// The same predicate the mapping uses, factored out because the prefill
@@ -1006,7 +1093,7 @@ mod tests {
 
     use super::{Block, ClaudeCode, MAPS, PREFILL_ASSUMED, Row, native_tool};
     use crate::adapters::{Adapter, Drift};
-    use crate::formats::record::Event;
+    use crate::formats::record::{CompactionSource, Event};
 
     /// One `user` row carrying text a person wrote.
     fn user_says(text: &str) -> String {
@@ -1021,6 +1108,180 @@ mod tests {
              \"cache_read_input_tokens\":{},\"output_tokens\":{output_tokens}}}}}}}",
             prefill[0], prefill[1], prefill[2]
         )
+    }
+
+    /// One `user` row the harness marked as its own compaction summary.
+    fn compaction_summary(text: &str) -> String {
+        format!(
+            "{{\"type\":\"user\",\"isCompactSummary\":true,\
+             \"message\":{{\"role\":\"user\",\"content\":\"{text}\"}}}}"
+        )
+    }
+
+    /// #79's third specimen, mapped: the harness discarding its own history
+    /// is an event, not a turn.
+    ///
+    /// **Unverified against a committed log**, on the same terms the module
+    /// header already declares: the reference log is unscrubbed and cannot
+    /// enter this repository. The flag is what the harness writes; these
+    /// inline fixtures are what pins the mapping.
+    #[test]
+    fn a_compaction_summary_is_an_event_and_not_a_turn() {
+        let log = [
+            user_says("do the thing"),
+            assistant("[{\"type\":\"text\",\"text\":\"done\"}]", 3, [1, 0, 0]),
+            compaction_summary("the session so far, in brief"),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
+        let turns = adapted
+            .events
+            .iter()
+            .filter(|e| matches!(e, Event::Turn { .. }))
+            .count();
+        assert_eq!(
+            turns, 1,
+            "the person took one turn; the summary is the harness's own row"
+        );
+        let compactions: Vec<_> = adapted
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Compaction {
+                    id,
+                    at_turn,
+                    source,
+                    summary_chars,
+                } => Some((id.clone(), *at_turn, *source, summary_chars.get())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            compactions,
+            vec![(
+                "compact/1/0".to_owned(),
+                1,
+                CompactionSource::HarnessCompaction,
+                28
+            )],
+            "one compaction, in the turn it interrupted, sized in characters"
+        );
+        // MAPPED, and not counted as a row that produced nothing: the kind is
+        // one this adapter knows and it produced an event.
+        assert_eq!(adapted.census.mapped.get("user").copied(), Some(2));
+        assert!(
+            !adapted
+                .census
+                .no_event
+                .keys()
+                .any(|why| why.contains("isCompactSummary")),
+            "a compaction that produced an event is not a row that produced none: {:?}",
+            adapted.census.no_event
+        );
+    }
+
+    /// The flag, and only the flag. A row whose prose says a session was
+    /// continued is still a turn if the harness did not mark it.
+    #[test]
+    fn a_compaction_is_read_from_the_harnesss_flag_and_never_from_its_prose() {
+        let log = [
+            user_says("do the thing"),
+            assistant("[{\"type\":\"text\",\"text\":\"done\"}]", 3, [1, 0, 0]),
+            user_says("This session is being continued from a previous one"),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
+        assert!(
+            !adapted
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Compaction { .. })),
+            "sniffing the prose would fire on any transcript quoting the phrase"
+        );
+        assert_eq!(
+            adapted
+                .events
+                .iter()
+                .filter(|e| matches!(e, Event::Turn { .. }))
+                .count(),
+            2,
+            "an unmarked row is an ordinary turn, whatever it says"
+        );
+    }
+
+    /// A log that OPENS with a compaction -- a session resumed from one.
+    ///
+    /// `Event::Compaction` names a turn, and the record refuses a row naming
+    /// a turn that never happened. Counted with its reason rather than
+    /// emitted, which is the treatment every other row this adapter cannot
+    /// place already gets.
+    #[test]
+    fn a_compaction_before_any_turn_is_counted_rather_than_named_against_turn_zero() {
+        let log = [
+            compaction_summary("the session so far, in brief"),
+            user_says("carry on"),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
+        assert!(
+            !adapted
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Compaction { .. }))
+        );
+        assert_eq!(
+            adapted
+                .census
+                .no_event
+                .get("user/isCompactSummary before any turn was opened")
+                .copied(),
+            Some(1)
+        );
+        // And the record it produced is one the format accepts, which is what
+        // "counted rather than emitted" has to mean.
+        assert_eq!(
+            adapted
+                .events
+                .iter()
+                .filter(|e| matches!(e, Event::Turn { .. }))
+                .count(),
+            1
+        );
+    }
+
+    /// Two compactions in one turn get two ids, and they read as the first
+    /// and second compaction OF THAT TURN.
+    #[test]
+    fn two_compactions_in_one_turn_are_numbered_within_it() {
+        let log = [
+            user_says("do the thing"),
+            assistant("[{\"type\":\"text\",\"text\":\"done\"}]", 3, [1, 0, 0]),
+            compaction_summary("first summary"),
+            compaction_summary("second summary"),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
+        let ids: Vec<_> = adapted
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Compaction { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids, ["compact/1/0", "compact/1/1"]);
     }
 
     /// THE THOUSAND-TURN LIE, refused.

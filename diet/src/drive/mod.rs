@@ -1314,7 +1314,10 @@ mod tests {
 
     use super::canned;
     use super::script::{Command, Script};
-    use super::{CONTROL, Drive, ENABLE_THINKING, ForkOutcome, Gym, Halt, run};
+    use super::{
+        CONTROL, Drive, ENABLE_THINKING, ForkOutcome, Gym, Halt, MAIN, WorkingObject, linted_head,
+        run,
+    };
 
     /// A working tree the drive's commands run in.
     struct Ground {
@@ -2616,6 +2619,181 @@ mod tests {
                 "`{gone}` names weights this substrate does not have, and                  nothing reads it any more"
             );
         }
+    }
+
+    /// #79's fourth acceptance row, asked of the REAL regimen this lane
+    /// ships -- parsed, crossed into a regime, rendered through the seam's
+    /// own renderer, and put to the lint.
+    ///
+    /// A test that built its own regimen would be a test about a fixture.
+    /// `canned::DEV_LOOP` is `include_str!` of `diet/drive/dev-loop.toml`, so
+    /// this reads the file the lane actually runs; a date templated into that
+    /// file fails HERE rather than as a red lane on somebody else's branch.
+    ///
+    /// **And the pass is not vacuous.** The same head with a date appended IS
+    /// refused, in the second half. A lint asserted clean against a head it
+    /// could never have found anything in is a lint nobody has seen fire.
+    #[test]
+    fn the_reference_regimens_own_rendered_head_carries_no_timestamp() {
+        let regimen =
+            crate::formats::regimen::parse(canned::DEV_LOOP).expect("the shipped regimen parses");
+        let declared = crate::drive::regimen::regime_of(&regimen, false)
+            .expect("the shipped regimen crosses into a regime");
+        let object = WorkingObject::open(declared);
+        let prefix = crate::seam::render::render(&object, None);
+
+        let sending = RequestShape {
+            messages: vec![
+                Message::new(Role::System, prefix.clone()),
+                Message::new(Role::User, "the turn"),
+            ],
+            ..shape()
+        };
+        let linted = linted_head(&sending, 1, MAIN)
+            .unwrap_or_else(|why| panic!("the reference regimen's own rendered head: {why}"));
+        assert_eq!(
+            linted.digest(),
+            crate::client::head::Head::of(&sending).digest(),
+            "and what the lint passed is the head that would be sent"
+        );
+
+        // The vacuity guard: the same head, dated.
+        let dated = RequestShape {
+            messages: vec![
+                Message::new(Role::System, format!("{prefix}today: 2026-09-13\n")),
+                Message::new(Role::User, "the turn"),
+            ],
+            ..shape()
+        };
+        let Err(Halt::HeadCarriesATimestamp { found, .. }) = linted_head(&dated, 1, MAIN) else {
+            panic!("a dated head is refused, or the half above proves nothing");
+        };
+        assert_eq!(found.found, "2026-09-13");
+    }
+
+    /// The lint fires BEFORE the call, and the drive stops.
+    ///
+    /// A dated regime tag is how this arrives in practice -- an arm named for
+    /// the day it was run -- and the seam's render puts the arm at the top of
+    /// every system prompt, so the date is in the frozen head of every turn.
+    #[test]
+    fn a_head_carrying_a_date_stops_the_drive_before_the_call() {
+        let ground = Ground::make("dated-head");
+        let mut dated = regime();
+        dated.arm = "dev-loop-2026-09-13".to_owned();
+        let script = canned::script(dated);
+
+        let halted = against(&script, canned::acts(), &ground)
+            .expect_err("a head carrying a date is refused");
+        let Halt::HeadCarriesATimestamp { turn, lane, found } = &halted else {
+            panic!("the drive stopped for the wrong reason: {halted:?}");
+        };
+        assert_eq!(*turn, 1, "before the first call, not after the run");
+        assert_eq!(lane, MAIN);
+        assert_eq!(found.found, "2026-09-13");
+        assert!(
+            format!("{halted}").contains("midnight"),
+            "the complaint says what a dated head costs: {halted}"
+        );
+    }
+
+    /// #79's first acceptance row, end to end on this crate's own seam.
+    ///
+    /// The seam re-renders the working set into the system prompt at turn
+    /// two, so turn three's head is not turn two's -- and the record says so,
+    /// with a diff naming the lines the render added.
+    ///
+    /// **The DATE case specifically cannot be driven end to end here, and
+    /// that is a tension between two of #79's own design points rather than a
+    /// gap.** Design point 4's lint refuses to send a head carrying a date,
+    /// so this harness cannot both send one and record the change. Building
+    /// an escape hatch for the test would weaken the lint, which is the
+    /// half that actually prevents the miss. The date case is pinned at the
+    /// unit (`client::head::tests::a_date_that_moved_is_a_text_change_\
+    /// naming_the_line`) and as a fixture
+    /// (`valid/head-date-changed-between-turns.jsonl`); what runs here is the
+    /// same mechanism on the same code path.
+    #[test]
+    fn the_seams_own_render_is_recorded_as_a_prefix_change_naming_the_lines() {
+        let ground = Ground::make("prefix-changed");
+        let drive = against(&three_turns(), canned::acts(), &ground).expect("the drive ran");
+
+        let changes: Vec<_> = drive
+            .record
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::PrefixChanged {
+                    at_request,
+                    reason,
+                    diff,
+                    ..
+                } => Some((at_request.as_str(), *reason, diff.len())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            changes.len(),
+            1,
+            "one seam fired, so the head moved once: {changes:?}"
+        );
+        let (at_request, reason, deltas) = changes[0];
+        assert_eq!(
+            at_request, "q/3",
+            "at the first request sent under the re-rendered prefix"
+        );
+        assert_eq!(
+            reason,
+            crate::formats::record::PrefixReason::Text,
+            "the working set is lines of the system message"
+        );
+        assert!(deltas > 0, "and the diff names them");
+
+        // The digests are on the REQUEST rows, where they cannot contradict
+        // the change row. Turn two's head and turn three's differ; turn one's
+        // and turn two's do not, which is the seam controller's own claim.
+        let heads: Vec<_> = drive
+            .record
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Request {
+                    id,
+                    lane,
+                    head_sha256: Some(digest),
+                    ..
+                } if lane == MAIN => Some((id.as_str(), digest.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(heads.len(), 3, "three turns on the main lane: {heads:?}");
+        assert_eq!(
+            heads[0].1, heads[1].1,
+            "the prefix is byte-identical within a phase"
+        );
+        assert_ne!(heads[1].1, heads[2].1, "and the seam moved it");
+    }
+
+    /// The census reports every register, and reads its lifetimes out of the
+    /// regime the record declares.
+    #[test]
+    fn the_cache_census_counts_every_call_and_names_the_undeclared_lifetime() {
+        let ground = Ground::make("cache-census");
+        let drive = against(&three_turns(), canned::acts(), &ground).expect("the drive ran");
+
+        assert_eq!(
+            drive.cache.hits, 6,
+            "the canned server reports reuse on every call"
+        );
+        assert_eq!(drive.cache.misses(), 0);
+        assert_eq!(drive.cache.unmeasured, 0);
+        assert_eq!(
+            drive.cache.ttl_undeclared,
+            vec!["canned".to_owned()],
+            "`dev-loop.toml` declares no lifetime for the canned server on \
+             purpose, and the census names the substrate rather than reading \
+             its misses as a provider expiry"
+        );
     }
 
     #[test]
