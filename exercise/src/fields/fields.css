@@ -1,0 +1,142 @@
+/*
+ * The atoms. Every rule here is bound to a semantic token in
+ * src/theme/tokens.css; a field never names a face or a hex value of its own.
+ */
+
+.ex-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.1em 0.5em;
+  border: 1px solid var(--rule);
+  font: var(--size-system) / 1.4 var(--font-system);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.ex-chip--record {
+  font-family: var(--font-record);
+}
+
+.ex-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.ex-muted {
+  color: var(--muted);
+}
+
+.ex-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.ex-unit {
+  color: var(--muted);
+  margin-left: 0.3em;
+}
+
+.ex-lane {
+  border-color: var(--lane-color, var(--rule));
+  color: var(--lane-color, var(--ink));
+}
+
+.ex-lane::before {
+  content: '';
+  width: 0.5em;
+  height: 0.5em;
+  background: var(--lane-color, var(--muted));
+}
+
+.ex-link {
+  color: var(--muted);
+}
+
+.ex-link__field {
+  color: var(--muted);
+}
+
+.ex-link__arrow {
+  margin: 0 0.35em;
+}
+
+.ex-link__to {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--rule);
+}
+
+.ex-digest {
+  font-family: var(--font-record);
+  letter-spacing: 0.02em;
+}
+
+.ex-digest__rest {
+  color: var(--muted);
+}
+
+.ex-exit {
+  font-family: var(--font-tool);
+  color: var(--exit-color, var(--ink));
+  border-color: var(--exit-color, var(--rule));
+}
+
+.ex-glyph {
+  display: inline-block;
+  width: 1.2em;
+  text-align: center;
+  color: var(--glyph-color, var(--muted));
+}
+
+.ex-outcome {
+  color: var(--glyph-color, var(--ink));
+  border-color: var(--glyph-color, var(--rule));
+}
+
+.ex-badge--ok { --glyph-color: var(--hue-ok); }
+.ex-badge--amber { --glyph-color: var(--hue-amber); }
+.ex-badge--orange { --glyph-color: var(--hue-orange); }
+.ex-badge--red { --glyph-color: var(--hue-red); }
+.ex-badge--blue { --glyph-color: var(--hue-blue); }
+.ex-badge--magenta { --glyph-color: var(--hue-magenta); }
+.ex-badge--muted { --glyph-color: var(--muted); }
+
+/* A pending atom: the record does not carry it, so it is drawn as the shape
+   it would take, dotted, naming the issue -- never as a value. */
+.ex-pending {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5em;
+  padding: 0.1em 0.5em;
+  border: var(--pending-stroke);
+  color: var(--muted);
+  font: var(--size-system) / 1.4 var(--font-system);
+  white-space: nowrap;
+}
+
+.ex-pending__issue {
+  color: var(--hue-orange);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.ex-pending--block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+  padding: 0.6em 0.8em;
+  white-space: normal;
+}
+
+.ex-pending__atom {
+  color: var(--ink);
+}
+
+.ex-pending__why {
+  color: var(--muted);
+  font-size: 11px;
+  max-width: 60ch;
+}

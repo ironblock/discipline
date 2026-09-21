@@ -23,6 +23,9 @@ import * as twoSubstrates from './two-substrates.ts';
 import * as unmappedRow from './unmapped-row.ts';
 import * as weightsHosted from './weights-hosted.ts';
 import * as cannedDrive from './canned-drive.ts';
+import * as controlLaneBeforeTurnOne from './control-lane-before-turn-one.ts';
+import * as laneRunning from './lane-running.ts';
+import * as retryStillRunning from './retry-still-running.ts';
 
 export const fixtures = {
   "archive-rows": archiveRows,
@@ -47,6 +50,9 @@ export const fixtures = {
   "unmapped-row": unmappedRow,
   "weights-hosted": weightsHosted,
   "canned-drive": cannedDrive,
+  "control-lane-before-turn-one": controlLaneBeforeTurnOne,
+  "lane-running": laneRunning,
+  "retry-still-running": retryStillRunning,
 } as const;
 
 export type FixtureName = keyof typeof fixtures;

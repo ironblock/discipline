@@ -1,0 +1,183 @@
+/*
+ * Rows. A row is an event group; its header shows only what is anomalous and
+ * its body, when it has one, is prose or a size -- never inlined tool output.
+ */
+
+.ex-row {
+  display: grid;
+  grid-template-columns: 1.25rem 1fr;
+  column-gap: 0.75rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--rule);
+  font: var(--size-system) / 1.5 var(--font-system);
+}
+
+.ex-row:last-child {
+  border-bottom: none;
+}
+
+/* The containment gutter: solid when the record links the row to its turn,
+   dotted when the row merely follows the turn in row order, empty before
+   turn one. Depth-1 is an invariant, so one gutter is all the structure. */
+.ex-row__gutter {
+  position: relative;
+}
+
+.ex-row__gutter::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--rule);
+}
+
+.ex-row[data-containment='link'] .ex-row__gutter::before {
+  border-left-color: var(--hue-blue);
+}
+
+.ex-row[data-containment='position'] .ex-row__gutter::before {
+  border-left-style: dotted;
+  border-left-color: var(--hue-orange);
+}
+
+.ex-row[data-containment='none'] .ex-row__gutter::before {
+  display: none;
+}
+
+.ex-row--turn {
+  background: var(--surface);
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--rule);
+}
+
+.ex-row--turn .ex-row__gutter::before {
+  display: none;
+}
+
+.ex-row__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  min-width: 0;
+}
+
+.ex-row__head > .ex-spacer {
+  flex: 1 1 auto;
+}
+
+.ex-row__body {
+  grid-column: 2;
+  margin-top: 0.35rem;
+  min-width: 0;
+}
+
+.ex-row__sub {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.3rem;
+  padding-left: 0.75rem;
+  border-left: 1px solid var(--rule);
+}
+
+.ex-row__sub--pending {
+  border-left: var(--pending-stroke);
+}
+
+/* Prose. The operator's ask and the model's answer are set in their own
+   faces so a reader can tell, at a glance, who is speaking. */
+.ex-prose {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 72ch;
+  font-size: var(--size-prose);
+  line-height: 1.55;
+}
+
+.ex-prose--ask {
+  font-family: var(--font-ask);
+}
+
+.ex-prose--answer {
+  font-family: var(--font-answer);
+}
+
+.ex-prose--record {
+  font-family: var(--font-record);
+  font-size: var(--size-system);
+  color: var(--muted);
+}
+
+/* The typed empty answer: a fact, drawn as one. */
+.ex-empty {
+  color: var(--hue-amber);
+  font-style: italic;
+}
+
+/* A superseded claim stays visible and marked -- evict to history, never delete. */
+.ex-superseded {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--rule);
+}
+
+.ex-kv {
+  display: inline-flex;
+  gap: 0.35em;
+  font-family: var(--font-tool);
+}
+
+.ex-kv__k {
+  color: var(--muted);
+}
+
+.ex-kv__k::after {
+  content: '=';
+}
+
+.ex-label {
+  color: var(--muted);
+}
+
+.ex-substrate-card {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 0.75rem;
+  row-gap: 0.15rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--rule);
+  min-width: 0;
+}
+
+.ex-substrate-card__k {
+  color: var(--muted);
+}
+
+.ex-substrate-card__v {
+  font-family: var(--font-record);
+  overflow-wrap: anywhere;
+}
+
+.ex-timeline {
+  border: 1px solid var(--rule);
+}
+
+.ex-timeline__rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ex-timeline__rail strong {
+  color: var(--ink);
+  font-weight: normal;
+}
