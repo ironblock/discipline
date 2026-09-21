@@ -11,9 +11,13 @@
 # workflow calls and the gate job depends on. A check owned by nobody would run
 # nowhere while CI still went green.
 #
-# A package with no checks simply has no row and no workflow. `exercise` is in
-# that state until the SPA exists; a workflow that runs nothing is a vacuous
-# pass, so it does not get one yet.
+# A package with no checks simply has no row and no workflow -- with one
+# declared exception. `exercise` has a workflow (pkg-exercise.yml) and no row:
+# its gate is its own `pnpm verify`, which needs a Node toolchain verify.sh
+# does not carry, so it is a job in the gate's `needs` with no verify.sh check
+# behind it, the shape pkg-diet.yml's wasm job already has. check-ci-coverage
+# permits it (a called workflow with no owner is outside rule 2), and a
+# verify.sh check with a seeded fault is a later ruling. 2026-09-20.
 
 # --- diet: the Rust crate, and the formats it owns ---
 fmt	diet

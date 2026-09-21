@@ -1,0 +1,61 @@
+name: pkg-exercise
+
+# A reusable workflow, composed by verify.yml. Unlike pkg-diet and pkg-pages
+# it names its steps rather than deriving them from check-owners.tsv: the
+# package's gate is its own `pnpm verify` (a Node toolchain `./verify.sh`
+# does not carry), so this is the shape #104's wasm job has -- a job in the
+# gate's `needs`, with no verify.sh check behind it -- and
+# scripts/check-ci-coverage.py permits exactly that (rules 3 and 7: every
+# root job is depended on, every pkg-*.yml is callable and called). Ruled
+# 2026-09-20 with the package's first PR; a verify.sh check with a seeded
+# fault in tools/gate/faults.toml is the fuller integration and is a later
+# ruling, disclosed there.
+#
+# What `pnpm -C exercise verify` runs, in order, each exiting non-zero on
+# its own failure: the canned-drive fixture re-driven and diffed, the
+# generated fixture modules re-derived from `diet check-record` and diffed,
+# typecheck with both ledgers present, lint (every @ts-expect-error cites an
+# issue), every story as a browser test, `diet check-record` over every
+# sequence fixture (accepted) and every pending fixture (refused exactly as
+# pinned), and scripts/verify-red.mjs seeding seven faults and requiring
+# each gate to go red for its own diagnostic.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: exercise
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # `diet` and `diet-drive` are what the fixture scripts dispatch to. The
+      # scripts build them if missing; building here first keeps the cargo
+      # output out of the middle of a test log.
+      - name: Resolve the pinned toolchain and build the diet binaries
+        run: |
+          cargo --version
+          cargo build -p discipline-diet --bin diet --bin diet-drive
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: exercise/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: exercise/pnpm-lock.yaml
+
+      - name: Install the pinned dependency set
+        run: pnpm -C exercise install --frozen-lockfile
+
+      - name: Install the browser every story renders in
+        run: pnpm -C exercise exec playwright install chromium --with-deps
+
+      - name: Run the package's gate
+        run: pnpm -C exercise verify

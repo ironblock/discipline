@@ -46,12 +46,15 @@ jobs:
   repo:
     uses: ./.github/workflows/pkg-repo.yml
 
+  exercise:
+    uses: ./.github/workflows/pkg-exercise.yml
+
   selftest:
     uses: ./.github/workflows/gate-selftest.yml
 
   gate:
     name: gate
-    needs: [diet, pages, repo, selftest]
+    needs: [diet, pages, repo, exercise, selftest]
     if: always()
     runs-on: ubuntu-latest
     # `actions: read` on top of the workflow's `contents: read`, because this
