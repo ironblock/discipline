@@ -535,8 +535,19 @@ fn index(position: usize) -> u32 {
 }
 
 /// How many characters a message carries, as the record spells a count.
+///
+/// Saturating at the largest count the value space can spell, for the reason
+/// [`index`] gives one function up. `Count::new(n).unwrap_or_default()` was
+/// here, and it is the shape `adapters::claude_code::count_of` already
+/// refuses in as many words: it turns a number past the cap into a SILENT
+/// ZERO, reinstating one line at a time exactly the failure [`Count`] exists
+/// to prevent. Unreachable either way -- a message of nine quintillion
+/// characters is not a thing -- and the difference is which direction an
+/// unreachable branch would be wrong in.
 fn chars(content: &str) -> Count {
-    Count::new(content.chars().count() as u64).unwrap_or_default()
+    let counted = u64::try_from(content.chars().count()).unwrap_or(Count::MAX);
+    // Infallible: the argument is clamped to what `Count::new` accepts.
+    Count::new(counted.min(Count::MAX)).unwrap_or_default()
 }
 
 #[cfg(test)]

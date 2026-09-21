@@ -1257,19 +1257,18 @@ fn archive(
             Event::Request { id, text, .. } => {
                 if let Some(attempt) = call.attempts.iter().find(|a| &a.id == id) {
                     *text = Some(wire::body(&attempt.sent));
-                    // THROUGH `Head::of`, the same function the journal's own
-                    // entry went through, over the same `sent` shape. Not a
-                    // second rendering: the digest on the row beside this one
-                    // came from that entry, and a diff computed from
-                    // different bytes would attribute a mutation the record
-                    // does not show.
-                    if let Some(change) = heads
-                        .watch
-                        .observe(&call.lane, crate::client::head::Head::of(&attempt.sent))
-                    {
-                        head_changed = true;
-                        changed_at = Some((id.clone(), change));
-                    }
+                }
+                // THE HEAD THE JOURNAL ALREADY HASHED, read back rather than
+                // computed again. `head_sha256` on this very row came out of
+                // that entry, so a diff derived from a second rendering --
+                // even the same pure function over the same shape -- would be
+                // a second answer to a question the record asks once. One
+                // value, two readings.
+                if let Some(head) = issued_head(call, id)
+                    && let Some(change) = heads.watch.observe(&call.lane, head)
+                {
+                    head_changed = true;
+                    changed_at = Some((id.clone(), change));
                 }
             }
             Event::Response { text, .. } => {
@@ -1320,6 +1319,22 @@ fn archive(
         });
     }
     Ok(())
+}
+
+/// The head the journal recorded for the attempt `id` names.
+///
+/// The journal is the client's own record and it is authoritative for the
+/// transport layer, which is where a head is rendered and hashed. Looking it
+/// up here rather than re-rendering from `attempt.sent` is what makes the
+/// digest on a `request` row and the diff on the `prefix.changed` beside it
+/// two readings of ONE value instead of two values that agree today.
+fn issued_head(call: &crate::client::Call, id: &str) -> Option<crate::client::head::Head> {
+    call.journal.entries().iter().find_map(|entry| match entry {
+        journal::Entry::Issued {
+            id: issued, head, ..
+        } if issued == id => Some(head.clone()),
+        _ => None,
+    })
 }
 
 /// The working object, dumped: one entry per line, id first.
