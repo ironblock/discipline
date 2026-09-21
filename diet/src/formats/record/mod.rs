@@ -4316,8 +4316,9 @@ pub fn project(source: &str) -> Result<Value, String> {
 mod tests {
     use super::json::Value;
     use super::{
-        Budget, Count, Event, Kind, MAX_DEPTH, ParseError, Reasoning, Regime, SchemaError,
-        StructureError, Verdict, Weights, WeightsKind, objects, parse, regime_value, render,
+        Budget, CacheTtl, Count, Event, Kind, MAX_DEPTH, ParseError, PrefixDelta, PrefixReason,
+        Reasoning, Regime, SchemaError, StructureError, Verdict, Weights, WeightsKind, objects,
+        parse, reason_of, regime_value, render,
     };
 
     /// A `start` line whose regime is complete, as every record needs one.
@@ -4709,6 +4710,133 @@ mod tests {
             substrate_row("patched", &"b".repeat(64), ""),
         ]);
         parse(&other_weights).expect("two weights digests are two substrates");
+    }
+
+    /// #79: ONE MODEL, TWO PROVIDER PATHS, and the lifetime is what says so.
+    ///
+    /// The specimen is one weights digest served two ways -- first-party at
+    /// roughly thirty minutes, through a gateway at roughly five. A record
+    /// that could not tell them apart would attribute a miss on the slow path
+    /// to the fast path's lifetime, which is the estimate this issue
+    /// replaces wearing a measurement's clothes.
+    ///
+    /// Both halves, for the reason the chat-template pair above gives: the
+    /// accept alone would pass with the refusal deleted, and the refuse alone
+    /// would pass with it fired on every multi-substrate record.
+    #[test]
+    fn one_weights_digest_and_two_cache_lifetimes_are_two_substrates() {
+        let weights = "a".repeat(64);
+        let long = ",\"cache_ttl\":{\"kind\":\"seconds\",\"seconds\":1800}";
+        let short = ",\"cache_ttl\":{\"kind\":\"seconds\",\"seconds\":300}";
+        let never = ",\"cache_ttl\":{\"kind\":\"none\"}";
+
+        let disclosed = start_declaring(&[
+            substrate_row("first-party", &weights, long),
+            substrate_row("through-a-gateway", &weights, short),
+            substrate_row("no-cache-at-all", &weights, never),
+        ]);
+        let parsed = parse(&disclosed).expect("three lifetimes are three substrates");
+        assert_eq!(
+            parsed
+                .regime()
+                .substrates
+                .iter()
+                .map(|s| s.cache_ttl)
+                .collect::<Vec<_>>(),
+            [
+                Some(CacheTtl::Seconds(Count::new(1800).expect("a count"))),
+                Some(CacheTtl::Seconds(Count::new(300).expect("a count"))),
+                Some(CacheTtl::Uncached),
+            ],
+            "and every lifetime survives the read, in its own kind"
+        );
+        // Through the writer too: a kind the renderer cannot spell becomes
+        // another one silently, which is the argument
+        // `every_weights_kind_round_trips` makes one field over.
+        assert_eq!(parse(&render(&parsed)).as_ref().ok(), Some(&parsed));
+
+        // The same three paths with nothing telling them apart.
+        let undisclosed = start_declaring(&[
+            substrate_row("first-party", &weights, ""),
+            substrate_row("through-a-gateway", &weights, ""),
+        ]);
+        assert!(
+            matches!(
+                parse(&undisclosed),
+                Err(ParseError::Structure(
+                    StructureError::SubstratesIndistinguishable { .. }
+                ))
+            ),
+            "two provider paths with no lifetime between them are one \
+             substrate written twice"
+        );
+    }
+
+    /// #79: THE DECLARATION ORDER OF [`PrefixReason`] IS THE PRECEDENCE, and
+    /// this is the test that fails if somebody reorders it.
+    ///
+    /// Nothing else would. The order is expressed as `Ord` derived from the
+    /// declaration, so a reordering compiles, passes every other test, and
+    /// silently changes what every `prefix.changed` row in every future
+    /// record is attributed to -- while leaving the rows already written
+    /// saying something they no longer mean. `reason_of` is the one function
+    /// that reads it and [`validate`] is the one that enforces it, so this
+    /// pins what both of them are reading.
+    #[test]
+    fn the_precedence_over_prefix_reasons_is_the_order_they_are_declared_in() {
+        assert_eq!(
+            PrefixReason::ALL
+                .iter()
+                .map(|r| r.tag())
+                .collect::<Vec<_>>(),
+            [
+                "model",
+                "tools",
+                "effort",
+                "injection",
+                "text",
+                "unattributed"
+            ],
+            "a reordering here changes what every future record attributes a \
+             miss to, and nothing else in the suite would notice"
+        );
+        // And the minimum really is taken over the diff's own classes, in
+        // that order -- asked of a diff holding one delta of every class, so
+        // the answer cannot be right by accident of which came first.
+        let one_of_each = vec![
+            PrefixDelta::LineChanged {
+                message: 0,
+                line: 0,
+                was: "was".to_owned(),
+                now: "now".to_owned(),
+            },
+            PrefixDelta::MessageAdded {
+                at: 1,
+                role: "user".to_owned(),
+                chars: Count::new(3).expect("3 is a count"),
+            },
+            PrefixDelta::KwargAdded {
+                key: "reasoning_effort".to_owned(),
+                now: "\"high\"".to_owned(),
+            },
+            PrefixDelta::ToolAdded {
+                tool: "search".to_owned(),
+            },
+            PrefixDelta::ModelChanged {
+                was: "before".to_owned(),
+                now: "after".to_owned(),
+            },
+        ];
+        assert_eq!(reason_of(&one_of_each), PrefixReason::Model);
+        assert_eq!(reason_of(&one_of_each[..4]), PrefixReason::Tools);
+        assert_eq!(reason_of(&one_of_each[..3]), PrefixReason::Effort);
+        assert_eq!(reason_of(&one_of_each[..2]), PrefixReason::Injection);
+        assert_eq!(reason_of(&one_of_each[..1]), PrefixReason::Text);
+        assert_eq!(
+            reason_of(&[]),
+            PrefixReason::Unattributed,
+            "and the residual is the class of a diff with nothing in it"
+        );
     }
 
     /// #94 design point 1: the reasoning CONTROL is two fields, and it is not

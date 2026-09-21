@@ -1230,6 +1230,29 @@ path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
 
+# #79: the precedence over prefix reasons, reordered. `PrefixReason`'s
+# DECLARATION ORDER is the precedence -- `Ord` is derived from it -- so
+# swapping two variants compiles, passes every other test, and silently
+# changes what every future record attributes a cache miss to, while leaving
+# the rows already written saying something they no longer mean.
+inject_record_prefix_precedence_reordered() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+first = '        Model => "model",'
+second = '        Tools => "tools",'
+for line in (first, second):
+    if source.count(line) != 1:
+        raise SystemExit(f"{line!r} appears {source.count(line)} times")
+source = source.replace(first, "        PRECEDENCE_SWAP", 1)
+source = source.replace(second, first, 1)
+source = source.replace("        PRECEDENCE_SWAP", second, 1)
+path.write_text(source, encoding="utf-8")
+EOF
+}
+
 # #79: the check that a `prefix.changed` is a change at all. Disabled, a row
 # over two requests that hash the same is accepted -- and a cache census reads
 # a mutation the file itself denies.
@@ -6232,6 +6255,8 @@ selftest() {
     'record/fixtures/invalid/substrates-indistinguishable\.jsonl' 'test:conformance/formats::record'
   seeded_case "a head change that is not a change"    test     inject_record_prefix_change_not_a_change \
     'record/fixtures/invalid/prefix-change-that-is-not-a-change\.jsonl' 'test:conformance/formats::record'
+  seeded_case "the miss classes reordered"           test     inject_record_prefix_precedence_reordered \
+    'formats::record::tests::the_precedence_over_prefix_reasons_is_the_order_they_are_declared_in \.\.\. FAILED' 'lib/formats::record'
   seeded_case "a head change attributed to anything"  test     inject_record_prefix_reason_unchecked \
     'record/fixtures/invalid/prefix-reason-disagrees-with-its-diff\.jsonl' 'test:conformance/formats::record'
   seeded_case "a head fingerprint that is prose"      test     inject_record_head_fingerprint_not_digested \

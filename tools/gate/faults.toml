@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 504
+red_faults = 505
 mechanics_assertions = 119
 unseedable_guards = 1
 migrated = 0
@@ -5486,6 +5486,16 @@ migrated = false
 # and the harness compaction. The four seeded-gate entries are the record
 # format's own conformance corpus; the ten lane faults are declared beside
 # the code that emits them and applied by scripts/apply-lane-faults.py.
+
+[[fault]]
+id = "test.record_prefix_precedence_reordered"
+kind = "seeded-gate"
+check = "test"
+target = "lib/formats::record"
+label = "the miss classes reordered"
+failure_class = "schema.prefix-precedence-reordered"
+legacy_signature = "formats::record::tests::the_precedence_over_prefix_reasons_is_the_order_they_are_declared_in \\.\\.\\. FAILED"
+migrated = false
 
 [[fault]]
 id = "test.record_prefix_change_not_a_change"
