@@ -1,0 +1,245 @@
+{
+"batch": 35,
+"items": [
+{
+"entry": "Function calling / tool use support with `--jinja` flag (README.md, Anthropic API section)",
+"id": "73de9049ab9d",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "`backend_sampling` boolean — gates whether token selection happens on the backend (e.g., GPU) vs. CPU-side llama.cpp sampling; matters for understanding where sampling physically occurs (`server-schema.cpp:170`)",
+"id": "cc47825be014",
+"prose": "",
+"reasoning": "The user wants me to update the working record entry about `backend_sampling`. The issue is that the entry references `server-schema.cpp:170`, but in the beellama fork, `server-schema.cpp` doesn't exist — it was removed. The `backend_sampling` field is now handled differently. Let me check where `backend_sampling` is defined and used in beellama."
+},
+{
+"entry": "There are TWO distinct caching layers with different LCP thresholds — (1) slot-level KV cache reuse uses `f_keep < 0.5f` in `get_available_slot()` to trigger cache save, while (2) the external `server_prompt_cache::load()` uses `f_keep < 0.25f` as a guard against trashing large cached prompts — IMPLICATION: The two layers interact but have independent eviction criteria, so a prompt might be evicted from slot cache but still found in the external cache (or vice versa)",
+"id": "bd061771e10f",
+"prose": "#2 Working Record Correction: The two-layer caching model description is accurate but needs refinement. The `f_keep < 0.5f` threshold in `get_available_slot()` is a **save trigger** (\"should I persist the current slot's KV cache before overwriting?\"), while the `f_keep_cur < 0.25f` guard in `server_prompt_cache::load()` is a **load filter** (\"is this cached entry worth restoring?\"). They operate on different denominators: save-trigger divides by the *slot's* token count, load-filter divides by the *cached entry's* token count.\n\nNow, the full answer on prompt cache / slot reuse:\n\n---\n\n## How Prompt Cache / Slot Reuse Works\n\nThere are **two distinct mechanisms**: (1) **slot selection** with in-slot KV cache reuse, and (2) an **external prompt cache** that stores evicted slot states.\n\n### 1. Slot Selection — `get_available_slot()` (server-context.cpp:1530)\n\nThree strategies, applied in order:\n\n",
+"reasoning": "The user wants me to update a working record entry. Let me first state the correction, then provide the full answer about prompt cache / slot reuse.\n\nThe correction is that the working record entry about \"TWO distinct caching layers with different LCP thresholds\" needs to be clarified. Looking at the code:\n\n1. `get_available_slot()` in `server-context.cpp` (~line 1600): When `f_keep < 0.5f`, it triggers `update_cache = true`, which causes the current slot's prompt to be saved to the external prompt cache BEFORE potentially being overwritten.\n\n2. `server_prompt_cache::load()` in `server-task.cpp` (~line 1737): When searching for a cached prompt to load, it skips entries where `f_keep_cur < 0.25f` — i.e., it won't load a cache entry that would preserve less than 25% of that entry's context.\n\nSo the two thresholds serve different purposes:\n- `f_keep < 0.5f` in `get_available_slot()`: \"Should I save the current slot's prompt to cache before reusing this slot?\" — if we're going to lose more than half the existing context, save it first.\n- `f_keep_cur < 0.25f` in `server_prompt_cache::load()`: \"Is this cached prompt worth loading?\" — if loading it would preserve less than 25% of the cached prompt's context, skip it.\n\nThese are independent decisions but they work together. The working record entry seems mostly accurate but could be clarified. Let me now provide a comprehensive answer about how prompt cache / slot reuse works."
+},
+{
+"entry": "How does `server_response_reader::next()` block/wait for results — need to see the synchronization primitive",
+"id": "051be4584e37",
+"prose": "",
+"reasoning": "Let me see the other stop conditions around line 3813 and 3935."
+},
+{
+"entry": "The `sse_ping_interval` timeout mechanism at the bottom — sends `:\\n\\n` keep-alive pings to prevent client-side timeouts (`server-context.cpp` ~line 3995)",
+"id": "e559dec90cb8",
+"prose": "The note about `sse_ping_interval` sending `:\\n\\n` keep-alive pings is still accurate — I can see it in the code at lines ~3995. Let me now look at the stopping word detection and the `find_stopping_strings` method:\n\n",
+"reasoning": ""
+},
+{
+"entry": "What is `render_message_to_json` and how does it format messages for the Jinja context?",
+"id": "58702eec6c60",
+"prose": "",
+"reasoning": "The working record note about `render_message_to_json` is indeed superseded. I've now traced the full flow and can see exactly how it works. Let me look at the actual `common_chat_template_direct_apply_impl` function to see how the Jinja template gets the tools rendered."
+},
+{
+"entry": "Context checkpoints have a documented bug for SWA (Sliding Window Attention) models tagged `[TAG_CHECKPOINTS_FIX_POS_MIN]` — the `pos_min` range tracking is incorrect for SWA — IMPLICATION: checkpoint restore may behave unpredictably with SWA/hybrid/recurrent models, potentially causing full re-processing instead of partial recovery",
+"id": "438e515ead65",
+"prose": "",
+"reasoning": "Now let me check beellama's `create_checkpoint` function."
+},
+{
+"entry": "`tokenize_input_prompts` converts raw prompt strings to token sequences — relevant for prompt processing bugs",
+"id": "878251e14ebe",
+"prose": "",
+"reasoning": "The user wants me to update the working record entry #43 about `tokenize_input_prompts`. Let me first understand what that function actually does by looking at it, then provide a correction.\n\nBut wait - the user's actual question is about `n_before_user` and checkpoint behavior. The working record update request is a side instruction. Let me first do the working record update, then continue investigating.\n\nLet me search for `tokenize_input_prompts` to understand what it actually does."
+},
+{
+"entry": "NONE — The shell environment is simply empty. There's no Babylon Lite codebase checked out here, so I can't search for or examine the Minecraft clone scene.",
+"id": "a88deed3bf82",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "Diff key shared files (e.g., server-context.cpp, server-common.cpp) against upstream to identify modifications",
+"id": "9e6e53300144",
+"prose": "**CORRECTION**: The entry \"Diff key shared files (e.g., server-context.cpp, server-common.cpp) against upstream to identify modifications\" is superseded. We've already completed the directory-level comparison and identified unique files. The remaining work is targeted feature tracing (e.g., `n_before_user`, checkpoints) within the beellama fork's modified shared files, not a blanket diff.\n\nNow let me search for `n_before_user` and checkpoint-related code:\n\n",
+"reasoning": "The user wants me to:\n1. First update the working record entry about diffing shared files\n2. Then search for 'n_before_user' and checkpoint-related code in the beellama fork\n3. Explain what it does with code quotes\n\nLet me start by searching for these terms."
+},
+{
+"entry": "Read `get_common_prefix()` in server-common.cpp",
+"id": "7674e624a405",
+"prose": "Now I have a comprehensive picture. Here's my complete analysis:\n\n---\n\n## Slot Checkpointing & KV Cache Save/Restore in llama.cpp Server\n\n### Architecture Overview\n\nThe server has **two distinct but complementary caching layers**:\n\n1. **Prompt Cache** (`server_prompt_cache`) — cross-slot, LRU-evicted, stores full KV states keyed by prompt token sequences\n2. **Context Checkpoints** (`common_prompt_checkpoint`) — per-slot, stores incremental snapshots during prompt processing for fast recovery\n\nBoth use the same underlying llama.cpp API: `llama_state_seq_get_data_ext` / `llama_state_seq_set_data_ext`.\n\n---\n\n### Layer 1: Prompt Cache (`--cache-ram N`)\n\n**Purpose:** Save/restoring entire slot KV states across different requests and slots.\n\n**CLI:** `--cache-ram N` (default: 8192 MiB, `-1` = no limit, `0` = disable)\n\n**Data Structures** (`server-task.h:618-656`):\n",
+"reasoning": "The user seems to have pasted a fragment from a different context (pnpm dev:lab). Let me ignore that and provide my comprehensive analysis of the checkpoint/KV cache system based on all the code I've examined."
+},
+{
+"entry": "NONE — The core question (where common-prefix matching happens for prompt cache/slot reuse) has been fully answered with quoted code from all four key locations: `get_common_prefix()` in server-common.cpp, `get_available_slot()` in server-context.cpp, `server_prompt_cache::load()` in server-task.cpp, and the slot-level `prompt_save`/`prompt_load` in server-context.cpp.",
+"id": "066f6a71720a",
+"prose": "The previous entry #119 (\"NONE — The core question... has been fully answered\") is superseded — that question was about prompt cache/slot reuse common-prefix matching, which was indeed resolved. Now addressing the new question about chat template and tool/function definition rendering.\n\n",
+"reasoning": "The user wants me to update the working record to reflect that the previous \"NONE\" entry is superseded. Let me note that and then continue searching for where chat templates and tool/function definitions are applied server-side. The server code seems to be in `tools/` directory based on the listing. Let me search there."
+},
+{
+"entry": "Read the `on_new_task` callback handler in server-context.cpp (around line 1458) to trace slot selection and task assignment",
+"id": "35572595bc02",
+"prose": "",
+"reasoning": "Let me look at the slot update loop where tokens are generated and partial responses are sent."
+},
+{
+"entry": "`cache_idle_slots` automatically saves idle slots to the in-memory prompt cache when a new task starts, but only when `cache_ram_mib > 0` — IMPLICATION: without explicit cache configuration, idle slot state is lost when the slot is reassigned; the auto-save behavior is silently disabled",
+"id": "20320e9c992b",
+"prose": "Let me re-examine the `cache_idle_slots` logic to verify the correction:\n\n",
+"reasoning": "The user wants me to correct a working record entry. Let me first check the actual code to verify what `cache_idle_slots` actually does, and then state the correction.\n\nFrom what I've read, `cache_idle_slots` is checked at line 2431 and it saves idle slots to the prompt cache when a new task starts. But the claim says it \"only when `cache_ram_mib > 0`\". Let me verify this - the prompt cache is created at line 1409 with `params_base.cache_ram_mib`, but the `cache_idle_slots` flag itself is separate. Let me check if `cache_idle_slots` can work without `cache_ram_mib > 0`.\n\nLooking at line 1409:\n```cpp\nprompt_cache = std::make_unique<server_prompt_cache>(params_base.cache_ram_mib, n_ctx);\n```\n\nAnd at line 1470-1473:\n```cpp\nif (params_base.cache_idle_slots) {\n    ...\n    params_base.cache_idle_slots = false;\n```\n\nWait, let me re-read the code around 1470 more carefully."
+},
+{
+"entry": "Tool definition rendering is NOT done by the server code directly — it's delegated to Jinja template rendering via `common_chat_template_direct_apply()` which passes `params.tools` (as OpenAI-compatible JSON) into the model's embedded Jinja template — IMPLICATION: the server doesn't format tool definitions itself; the model's chat template (Jinja) does all the rendering, and the server just provides structured data",
+"id": "937f475514b0",
+"prose": "Let me find where `tools` is extracted from the request body in the handler function.\n\n",
+"reasoning": "The user wants me to update my working record. The previous entry said that tool definition rendering is delegated to Jinja template rendering. But now I've found the actual code flow, so I need to update this with more detail about exactly how it works.\n\nLet me look at the actual function signature for the chat completions handler to see where `tools` comes from in the request."
+},
+{
+"entry": "Were `server-schema.cpp/h` and `server-stream.cpp/h` functionality moved inline into other files in beellama, or were they dropped entirely?",
+"id": "1d3871822ce7",
+"prose": "",
+"reasoning": "beellama's server-context.cpp is 394KB vs upstream's 218KB — that's a 176KB increase (80% larger). The schema and stream files were likely inlined into server-context.cpp. Let me also check the other file size differences to get a complete picture."
+},
+{
+"entry": "The project in the working directory (`phase1-audit-project`) is a Python warehouse inventory tracker, not llama.cpp — the compacted working record references llama.cpp server internals (`server-context.cpp`, prompt cache, slots, etc.) but that source code is not present on this machine. — IMPLICATION: I need to locate the actual llama.cpp source code on this system before I can answer the question about prompt cache / slot reuse and common-prefix matching.",
+"id": "69876e62a390",
+"prose": "The inventory.py file has some llama.cpp audit text appended at the end. This project is a Python inventory tracker, not llama.cpp. The compacted working record references llama.cpp server code that doesn't exist in this repository.\n\nLet me check if there's any other location with llama.cpp source:\n\n",
+"reasoning": ""
+},
+{
+"entry": "Read `get_common_prefix()` in server-common.cpp",
+"id": "4f1680d7c2d5",
+"prose": "",
+"reasoning": "Let me look at the `lora_should_clear_cache` function."
+},
+{
+"entry": "Member `int32_t dry_allowed_length = 2;` — tokens extending repetitions beyond this receive penalty (`common/common.h:241`).",
+"id": "66ce83f1edd2",
+"prose": "The `dry_allowed_length` note from the working record is about sampling params in `common/common.h:241`, which is unrelated to the caching/checkpointing code I'm examining in `server-context.cpp`. It should still hold.\n\nLet me check how `n_before_user` is computed and set:",
+"reasoning": ""
+},
+{
+"entry": "Tool use parsing (`tools`, `tool_choice`) with jinja flag requirement — relevant for function calling flow (server-common.cpp:911-925)",
+"id": "9bcd7f45351e",
+"prose": "Let me see the checkpoint creation conditions more closely:\n\n",
+"reasoning": ""
+},
+{
+"entry": "There are **two different `f_keep` thresholds** in play — `f_keep < 0.5f` in `get_available_slot()` triggers saving the current slot's prompt to cache, while `f_keep_cur < 0.25f` in `server_prompt_cache::load()` rejects cached entries that would preserve less than 25% of their context — IMPLICATION: The asymmetry means the server is more aggressive about saving (at 50% loss) than it is about loading (requires 25%+ preservation), which could lead to cache entries being saved that would never be loaded back.",
+"id": "4092fe01f6e1",
+"prose": "I need to verify the two `f_keep` thresholds mentioned in the working record. Let me check both locations.\n\n",
+"reasoning": "The user is asking me to verify whether the working record entry about the two different `f_keep` thresholds is still accurate. Let me check the current code to verify this.\n\nThe entry says:\n- `f_keep < 0.5f` in `get_available_slot()` triggers saving\n- `f_keep_cur < 0.25f` in `server_prompt_cache::load()` rejects cached entries\n\nLet me check both locations in the code."
+},
+{
+"entry": "Slot save/restore (`/slots/{id}?action=save/restore`) and the internal prompt cache (`server_prompt_cache`) are TWO completely independent systems — slot save/restore writes full KV state to disk via `llama_state_seq_get_data_ext`/`llama_state_seq_set_data_ext`, while the prompt cache is an in-memory cross-slot LRU cache that uses `get_common_prefix` matching — IMPLICATION: Auditing \"cache\" behavior requires reasoning about two separate mechanisms with different APIs, lifecycle rules, and eviction strategies; they are not interchangeable.",
+"id": "95adf901b20f",
+"prose": "",
+"reasoning": "The user's working record note says:\n\n> Slot save/restore (`/slots/{id}?action=save/restore`) and the internal prompt cache (`server_prompt_cache`) are TWO completely independent systems — slot save/restore writes full KV state to disk via `llama_state_seq_get_data_ext`/`llama_state_seq_set_data_ext`, while the prompt cache is an in-memory cross-slot LRU cache that uses `get_common_prefix` matching — IMPLICATION: Auditing \"cache\" behavior requires reasoning about two separate mechanisms with different APIs, lifecycle rules, and eviction strategies; they are not interchangeable.\n\nLet me verify this by looking at the code more carefully. The slot save/restore endpoints use:\n- `llama_state_seq_save_file` for saving (line 2372)\n- `llama_state_seq_load_file` for restoring (line 2413)\n\nThe prompt cache uses:\n- `llama_state_seq_get_data_ext` / `llama_state_seq_get_size_ext` for reading state into memory\n- `llama_state_seq_set_data_ext` for writing state back\n\nSo these ARE two different systems. Let me verify the note still holds and then provide a comprehensive answer about what exists and what the limits are.\n\nActually, looking at the slot save code at line 2372:\n```cpp\nconst size_t nwrite = llama_state_seq_save_file(ctx_tgt, filepath.c_str(), slot->id, tokens.data(), token_count);\n```\n\nAnd the prompt cache at lines 135-150:\n```cpp\nconst size_t cur_size_tgt =           llama_state_seq_get_size_ext(ctx_tgt, id, LLAMA_STATE_SEQ_FLAGS_NONE);\nconst size_t cur_size_dft = ctx_dft ? llama_state_seq_get_size_ext(ctx_dft, id, LLAMA_STATE_SEQ_FLAGS_NONE) : 0;\n\n\n// ...\nllama_state_seq_get_data_ext(ctx_tgt, cur->data.main.data(), cur_size_tgt, id, LLAMA_STATE_SEQ_FLAGS_NONE);\n```\n\nAnd restore at line 1712:\n```cpp\nconst size_t n = llama_state_seq_set_data_ext(ctx_tgt, data.data(), size, id_slot, 0);\n```\n\nSo the slot save/restore uses `llama_state_seq_save_file` and `llama_state_seq_load_file` for disk I/O, while the prompt cache uses the in-memory get/set data functions. These are indeed two separate mechanisms with different purposes and implementations."
+},
+{
+"entry": "The `start_loop` method on `server_queue` is the main event loop that processes queued tasks and manages sleeping — it's where tasks get dispatched to slots (`server-context.cpp` / `server.cpp`)",
+"id": "813562a933f1",
+"prose": "The entry about `start_loop` being the main event loop where tasks get dispatched to slots is misleading. Looking at the actual codebase, `start_loop` is the HTTP server's internal polling/task loop (in `server-http.cpp`), not the inference loop. The actual task dispatch to slots happens in `server_context::update_slots()` — called from the main inference loop in `server.cpp`'s `start_loop()` method on `server_context` (not `server_queue`). Let me verify this distinction:\n\n",
+"reasoning": ""
+},
+{
+"entry": "Cache reuse (`n_cache_reuse`) also requires `llama_memory_can_shift()` to return true — not all memory backends support KV cache shifting",
+"id": "ce372229dd8a",
+"prose": "",
+"reasoning": "The user is telling me that my working record note about `n_cache_reuse` requiring `llama_memory_can_shift()` may be affected. Let me verify this by checking the code again."
+},
+{
+"entry": "The `finish_reason` string mapping from `stop_type` enum (`STOP_TYPE_EOS`/`STOP_TYPE_WORD`/`STOP_TYPE_LIMIT`) to OpenAI-compatible strings (`\"stop\"`/`\"length\"`) is not in `send_final_response` but in `server_task_result_cmpl_final::to_json()` — IMPLICATION: need to read the `to_json()` method to see the exact `finish_reason` mapping",
+"id": "cd0d8ae83715",
+"prose": "Let me read the finish_reason mapping in detail:",
+"reasoning": "The working record entry is superseded because I've now read the actual code. Let me look at the key sections of the `to_json()` methods for the final response to understand the finish_reason mapping."
+},
+{
+"entry": "What are the specific gate mechanisms implemented in the `gates/` directory?",
+"id": "ab41d4bd829a",
+"prose": "Let me first explore the project structure to see what files are available.\n\n",
+"reasoning": "The user wants me to pick one of the files mentioned in the working record and show its first 40 lines. Let me identify the files mentioned:\n\n1. `docs/compaction-model.md`\n2. Files in the `gates/` directory\n3. Files in `phase3/` related to `gridworks`\n4. Files in `phase4/`\n\nLet me first explore what files exist to pick a relevant one. I'll start by looking at the directory structure."
+},
+{
+"entry": "Member `int32_t dry_allowed_length = 2;` — tokens extending repetitions beyond this receive penalty (`common/common.h:241`).",
+"id": "f16d3519c582",
+"prose": "The `dry_allowed_length` entry from the working record is about sampling parameters in `common/common.h` and is unrelated to this `n_before_user` checkpointing work — it should still hold. Let me verify the upstream doesn't have `n_before_user`:\n\n",
+"reasoning": ""
+},
+{
+"entry": "Slot save/restore (`/slots/{id}?action=save/restore`) and the internal prompt cache (`server_prompt_cache`) are TWO completely independent systems — slot save/restore writes full KV state to disk via `llama_state_seq_get_data_ext`/`llama_state_seq_set_data_ext`, while the prompt cache is an in-memory cross-slot LRU cache that uses `get_common_prefix` matching — IMPLICATION: Auditing \"cache\" behavior requires reasoning about two separate mechanisms with different APIs, lifecycle rules, and eviction strategies; they are not interchangeable.",
+"id": "81cf1f982d46",
+"prose": "**Correction:** The previous working record entry is **confirmed accurate** and refined with concrete implementation details from this investigation. The two systems are indeed completely independent with distinct mechanisms:\n\n| Aspect | Slot Save/Restore (API) | Internal Prompt Cache |\n|---|---|---|\n| **Storage** | Disk files via `llama_state_seq_save_file()` | In-memory `std::deque<server_prompt>` |\n| **API** | `/slots/{id}?action=save/restore/erase` | Transparent, auto-triggered on slot reuse |\n| **Scope** | Single explicit slot | Cross-slot, searches all cached states |\n| **Matching** | None (exact file round-trip) | `get_common_prefix()` LCP matching |\n| **Multimodal** | ❌ Blocked by `check_no_mtmd()` | ✅ Supported (multimodal-aware `get_common_prefix`) |\n| **Backends** | Main context only (`ctx_tgt`) | Both main (`ctx_tgt`) and draft (`ctx_dft`) |\n| **Speculative** | No | Stores `checkpoints` per prompt state |\n| **Eviction** | None (manual) | LRU eviction when `size() > limit_size` |\n| **Thresholds** | None | `f_keep < 0.5f` triggers save; `f_keep_cur < 0.25f` rejects load |\n| **Busy slots** | Task deferred via `queue_tasks.defer()` | N/A (only consulted during slot selection) |\n| **Task type gate** | `SERVER_TASK_TYPE_SLOT_SAVE/RESTORE/ERASE` | Only `SERVER_TASK_TYPE_COMPLETION` |\n| **Data path** | `llama_state_seq_get_data_ext` → file → `llama_state_seq_set_data_ext` | `prompt_save()` → `alloc()` → `prompt_load()` → `update()` |\n\n**Key limits discovered:**\n- Slot save/restore is **incompatible with multimodal** models — guarded by `check_no_mtmd()` at lines 2345 and 2387\n- Prompt cache `alloc()` can **fail with `bad_alloc`** and auto-reduces `limit_size` to 40% on failure\n- Prompt cache `load()` requires **both** `f_keep` and `sim` to strictly improve — dual criteria prevents loading tiny cache entries that barely overlap\n- Draft context state is **only saved/restored when `ctx_dft` exists** (speculative decoding enabled)\n- Slot save/restore tasks are **deferred** when the target slot is busy, not rejected\n- Prompt cache checkpoints (`prompt.checkpoints`) are cloned during `alloc()` for speculative decoding state restoration",
+"reasoning": "The user is asking me to update a working record entry. They're saying that a previous entry about slot save/restore and prompt cache being two independent systems is now superseded by this investigation step. I need to:\n\n1. Acknowledge the correction\n2. Update the working record entry with the refined understanding\n\nLet me look at what I've learned and provide a more precise statement that supersedes the old entry.\n\nThe key findings from this investigation:\n\n**Slot Save/Restore (API endpoints):**\n- `/slots/{id}?action=save` - saves slot KV cache to disk file\n- `/slots/{id}?action=restore` - restores slot KV cache from disk file\n- `/slots/{id}?action=erase` - clears slot KV cache\n- Uses `llama_state_seq_save_file` / `llama_state_seq_get_data_ext` / `llama_state_seq_set_data_ext`\n- NOT multimodal-compatible (`check_no_mtmd` guard)\n- Defers if slot is busy (`defer` task)\n- Writes full KV state to disk\n\n**Internal Prompt Cache (`server_prompt_cache`):**\n- In-memory, cross-slot LRU cache\n- Uses `get_common_prefix` for LCP matching\n- Stores both main context state AND draft (speculative) context state\n- Has `f_keep` and `sim` dual criteria for loading\n- Has `limit_size` with eviction of oldest entries\n- Stores checkpoints (for speculative decoding)\n- Only triggered for `SERVER_TASK_TYPE_COMPLETION` tasks\n- `f_keep < 0.5f` threshold triggers save in `get_available_slot`\n\n\n- `f_keep_cur < 0.25f` threshold rejects loading in `load()`\n\nSo the refined understanding is that these are indeed two separate systems with distinct purposes and constraints. The slot save/restore mechanism persists full KV state to disk for manual checkpointing, while the prompt cache operates in-memory across slots using LCP matching with dual threshold criteria for efficient reuse. The prompt cache handles speculative decoding checkpoints and auto-eviction, whereas slot save/restore is an explicit API with deferred task handling."
+},
+{
+"entry": "Whether upstream llama.cpp has any of these new files (server-adaptive-dm.h, server-loop-guard.cpp/h, server-mcp.cpp/h, server-models.cpp/h, server-stream.cpp/h, server-tools.cpp/h) — I haven't checked an upstream clone for comparison",
+"id": "9113222c931b",
+"prose": "Thought: The user is asking me to update the working record based on what I've discovered. I found that upstream llama.cpp (as of commit 6ba5ef247, which beellama merged) already contains `server-mcp.cpp/h`, `server-models.cpp/h`, `server-stream.cpp/h`, and `server-tools.cpp/h`. The only truly beellama-specific files are `server-adaptive-dm.h` and `server-loop-guard.cpp/h`.\n\nLet me also check the `is_user_start` and `near_prompt_end` logic to understand the checkpoint creation trigger better, and look at what `n_before_user` might map to in beellama.\n\n",
+"reasoning": ""
+},
+{
+"entry": "> **Babylon Lite is not a replacement for Babylon.js.** The two engines move forward side by side. Lite optimizes for the smallest bundle and the highest performance on WebGPU; Babylon.js optimizes for the broadest, most mature feature set with WebGL **and** WebGPU support. Closing the gap below is our top priority — features land in Babylon.lite as isolated, tree-shakable modules, so the engine grows without bloating your bundle.",
+"id": "26316900c17a",
+"prose": "",
+"reasoning": "The user seems to have a note about my working record. Let me continue exploring. I should look at the public packages in Babylon.js to compare the module structure."
+},
+{
+"entry": "What is `render_message_to_json` and how does it format messages for the Jinja context?",
+"id": "6901243ba25c",
+"prose": "",
+"reasoning": "Let me look at the `common_chat_template_direct_apply_impl` function which is where the actual Jinja rendering happens with tools."
+},
+{
+"entry": "Slot save/restore (`/slots/{id}?action=save/restore`) and the internal prompt cache (`server_prompt_cache`) are TWO completely independent systems — slot save/restore writes full KV state to disk via `llama_state_seq_get_data_ext`/`llama_state_seq_set_data_ext`, while the prompt cache is an in-memory cross-slot LRU cache that uses `get_common_prefix` matching — IMPLICATION: Auditing \"cache\" behavior requires reasoning about two separate mechanisms with different APIs, lifecycle rules, and eviction strategies; they are not interchangeable.",
+"id": "de322ceba82c",
+"prose": "The original entry incorrectly attributed `llama_state_seq_get_data_ext`/`llama_state_seq_set_data_ext` to the slot save/restore endpoint. Here's the correction:\n\n**Correction:** Slot save/restore (`/slots/{id}?action=save/restore`) uses `llama_state_seq_save_file()` / `llama_state_seq_load_file()` for **file-backed** KV persistence (disk I/O). The internal `server_prompt_cache` uses `llama_state_seq_get_data_ext()` / `llama_state_seq_set_data_ext()` for **in-memory** byte-buffer transfers. These are distinct llama.cpp APIs serving different purposes.\n\n**Updated entry:**\n> Slot save/restore (`/slots/{id}?action=save/restore`) and the internal prompt cache (`server_prompt_cache`) are TWO completely independent systems — slot save/restore writes full KV state to **disk** via `llama_state_seq_save_file()`/`llama_state_seq_load_file()`, is gated by `check_no_mtmd()` (no multimodal), and defers if the slot is busy (`is_processing()`); the prompt cache is an **in-memory** `std::deque<server_prompt>` cross-slot LRU that uses `get_common_prefix()` LCP matching with dual improvement criteria (`f_keep` AND `sim` must both strictly improve), evicts oldest entries via `update()` when exceeding `limit_size`, and transfers KV state via `llama_state_seq_get_data_ext()`/`llama_state_seq_set_data_ext()` — IMPLICATION: Auditing \"cache\" behavior requires reasoning about two separate mechanisms with different APIs (file I/O vs. memory buffers), lifecycle rules (manual HTTP trigger vs. automatic slot-selection trigger), eviction strategies (none vs. LRU size-based), and constraints (disk space vs. RAM limits).",
+"reasoning": "The user is asking me to update my working record. The entry they reference is about slot save/restore and the internal prompt cache being two independent systems. They want me to correct/update this entry based on what I've learned.\n\nLet me review what I've found:\n\n1. **Slot save/restore** (`/slots/{id}?action=save/restore`):\n   - Uses `llama_state_seq_save_file` to save KV cache to disk\n   - Uses `llama_state_seq_load_file` to restore from disk\n   - File-based, explicit user control via HTTP API\n   - Requires slot to be idle (`!slot->is_processing()`) or task is deferred\n   - Not supported with multimodal (`check_no_mtmd`)\n\n2. **Internal prompt cache** (`server_prompt_cache`):\n   - In-memory cache stored in `std::deque<server_prompt>`\n   - Uses `llama_state_seq_get_data_ext` / `llama_state_seq_set_data_ext` for KV state\n   - Automatic cross-slot LCP matching during slot selection\n   - Eviction via `update()` when size exceeds `limit_size`\n   - Uses dual criteria: `f_keep` and `sim` must BOTH improve\n   - Has `f_keep < 0.5f` threshold for saving, `f_keep_cur < 0.25f` for loading rejection\n\nThe user says the entry is \"superseded\" and I should update it. Looking at the original entry, it seems accurate but perhaps incomplete. Let me provide a more comprehensive update that captures all the nuances I've discovered.\n\nThe key corrections/additions:\n- Slot save/restore uses `llama_state_seq_save_file`/`llama_state_seq_load_file` (file I/O), not `llama_state_seq_get_data_ext`/`llama_state_seq_set_data_ext` (those are for the internal prompt cache)\n\n\n- The internal prompt cache maintains a cross-slot deque with automatic eviction and dual improvement criteria for matching, while slot save/restore operates as an explicit file-based mechanism independent of the cache system."
+},
+{
+"entry": "`post_control` — control endpoint for mid-generation actions like `reasoning_end`, posts a `SERVER_TASK_TYPE_CONTROL` task (`server-context.cpp`, ~line 4738)",
+"id": "81e1603bb7cf",
+"prose": "Let me verify the current state of the `post_control` endpoint and the `SERVER_TASK_TYPE_CONTROL` task to provide an accurate correction.\n\n",
+"reasoning": ""
+},
+{
+"entry": "The LRU eviction path (`while (slot.prompt.checkpoints.size() >= (size_t) params_base.n_ctx_checkpoints)`) erases the oldest checkpoint when the limit is reached — this is the hard cap on checkpoint count per slot (server-context.cpp:2535-2543)",
+"id": "380b752829ec",
+"prose": "**Correction to working record entry about LRU eviction:**\n\nThe LRU eviction path at `server-context.cpp:2535-2543` does **not** erase the \"oldest\" checkpoint in a time-based LRU sense. It erases the **front** of the `std::list<common_prompt_checkpoint>` — i.e., the first checkpoint that was appended to the list (`slot.prompt.checkpoints.erase(slot.prompt.checkpoints.begin())`). Since checkpoints are appended in prompt-evaluation order (as tokens are processed), the front of the list is the checkpoint covering the **earliest prompt positions** (smallest `pos_min`/`pos_max`), not the \"least recently used\" one. The eviction is FIFO by creation order, which happens to correlate with prompt position order, but it is not driven by access recency.\n\nAdditionally, there is a **secondary eviction pass** earlier in `create_checkpoint` (lines 2522–2530) that erases checkpoints too close to a previous one (within `checkpoint_min_step` tokens), but only those not created by the current task. This is a density-based eviction, not an LRU eviction.\n\nSo the entry should read:\n\n> The checkpoint cap eviction at `server-context.cpp:2535-2543` erases the **first** checkpoint in the list (earliest prompt positions, FIFO by creation order) when `slot.prompt.checkpoints.size() >= params_base.n_ctx_checkpoints`. This is not LRU — it is position-ordered FIFO. A separate density-based eviction (lines 2522-2530) also removes checkpoints within `checkpoint_min_step` of a prior checkpoint, excluding those created by the current task.",
+"reasoning": ""
+},
+{
+"entry": "`common_prompt_checkpoint` struct in `server-context.cpp:177` — defines the checkpoint data structure used for speculative decoding rollback; may reveal checkpoint granularity and what state is captured",
+"id": "929afe6a06ba",
+"prose": "",
+"reasoning": "I can see some differences. Let me continue examining the prompt cache struct differences."
+},
+{
+"entry": "`workaround::map_developer_role_to_system(params.messages)` — role mapping workaround for templates that don't support \"developer\" role (chat.cpp, line ~2671)",
+"id": "fad65ccbdaae",
+"prose": "Correction: The `workaround::map_developer_role_to_system(params.messages)` call at `common/chat.cpp:2671` is **conditional** — it only maps \"developer\" → \"system\" for templates that do **not** contain the `<|channel|>` token. GPT-OSS templates (which use `<|channel|>`) are explicitly excluded and keep the \"developer\" role intact. The original entry omitted this GPT-OSS exception.",
+"reasoning": "The user is asking me to update a working record entry about the developer role mapping workaround. Let me check what the current understanding is and correct it based on what I found.\n\nLooking back at my earlier findings, at `common/chat.cpp:2671` area, I saw:\n\n```cpp\nif (src.find(\"<|channel|>\") == std::string::npos) {\n    // map developer to system for all models except for GPT-OSS\n    workaround::map_developer_role_to_system(params.messages);\n}\n```\n\nSo the correction is: this workaround specifically maps \"developer\" role to \"system\" for all models EXCEPT GPT-OSS (which uses `<|channel|>` tokens). The original entry didn't mention the GPT-OSS exception.\n\nLet me state this correction clearly."
+},
+{
+"entry": "How does the KV cache reuse actually work in `server-context.cpp` around line 2839 — need to see the full chunk-based cache reuse mechanism",
+"id": "63a806af5109",
+"prose": "Now let me search more specifically for `n_before_user`:",
+"reasoning": ""
+},
+{
+"entry": "NONE — The core question (where common-prefix matching happens for prompt cache/slot reuse) has been fully answered with quoted code from all four key locations: `get_common_prefix()` in server-common.cpp, `get_available_slot()` in server-context.cpp, `server_prompt_cache::load()` in server-task.cpp, and the slot-level `prompt_save`/`prompt_load` in server-context.cpp.",
+"id": "41a18fba9133",
+"prose": "The working record entry about common-prefix matching locations remains accurate — that investigation is complete and independent of the checkpointing/KV cache save/restore topic being explored here.\n\n",
+"reasoning": "The user is asking me to note that the working record entry about common-prefix matching may be affected by this step. Let me check if this is still accurate.\n\nThe working record entry says:\n\"NONE — The core question (where common-prefix matching happens for prompt cache/slot reuse) has been fully answered with quoted code from all four key locations: `get_common_prefix()` in server-common.cpp, `get_available_slot()` in server-context.cpp, `server_prompt_cache::load()` in server-task.cpp, and the slot-level `prompt_save`/`prompt_load` in server-context.cpp.\"\n\nThis is about a different topic - common-prefix matching. The current investigation is about slot checkpointing and KV cache save/restore. This is a related but distinct topic. The working record entry about common-prefix matching is still accurate and not affected by this step.\n\nLet me continue investigating the checkpointing and KV cache save/restore support. I've already gathered a lot of information. Let me now check for the `--cache-ram` parameter and how it controls the prompt cache."
+},
+{
+"entry": "Continue examining the remaining unique beellama files (server-mcp.h, server-stream.cpp, server-stream.h) to understand their purpose",
+"id": "39eed0bfa412",
+"prose": "I've already examined all the unique beellama files in this session. The correction: entry #208 said \"NONE — I have all the information needed to produce the final summary\" referring to a *prior* investigation of upstream llama.cpp. This is a *new* investigation of the beellama fork, and I've now fully examined all unique files. No update needed since #208 was about the prior task, not this one.\n\nLet me now check the remaining shared files with significant size differences:\n\n",
+"reasoning": ""
+},
+{
+"entry": "> **Babylon Lite is not a replacement for Babylon.js.** The two engines move forward side by side. Lite optimizes for the smallest bundle and the highest performance on WebGPU; Babylon.js optimizes for the broadest, most mature feature set with WebGL **and** WebGPU support. Closing the gap below is our top priority — features land in Babylon.lite as isolated, tree-shakable modules, so the engine grows without bloating your bundle.",
+"id": "22d4abd32773",
+"prose": "",
+"reasoning": "The user seems to have triggered some kind of automated message. Let me continue exploring the Babylon.js packages structure to complete my comparison."
+}
+]
+}
