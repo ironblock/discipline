@@ -1,0 +1,72 @@
+# What CI is allowed to cost, and why.
+#
+# Format: constant<TAB>value    (seconds, decimal, no units in the value)
+#
+# Beside check-owners.tsv because it is the same kind of fact: that table says
+# where CI runs a check, this one says how long CI may take to run them all.
+# Both are declared here and read out of here, never restated in a workflow.
+#
+# Readers: scripts/derive-shards.py, which picks the shard count that fits the
+# budget and refuses a file that declares none, and verify.sh's
+# `report_wall_clock`, which prints every run against it. NOTHING FAILS A RUN
+# ON THESE NUMBERS. A slow gate is not a wrong gate, and a budget that can fail
+# a build is a budget somebody raises rather than meets. What they buy is that
+# the overrun is in the log of the run that caused it.
+
+# --- the budget ---
+#
+# A seat that waits on CI comes back to a COLD PREFIX if the wait outlasts its
+# provider's prompt-cache TTL, and then pays the whole prefill again at cold
+# rates. The TTL is ~30 minutes on first-party Anthropic and ~5 minutes on
+# Bedrock, so five minutes is the shortest any seat on this repository runs on
+# and is therefore the ceiling: past it, somebody is paying for the runners not
+# being tuned. It is a WALL CLOCK, not a sum of runner-minutes -- those are
+# unbilled on this repository and are the currency this budget spends.
+#
+# Ruled on #87 (2026-09-19), against a run that took 7m27s.
+wall_clock_seconds	300
+
+# --- what the run costs that is not the selftest itself ---
+#
+# A selftest shard's `./verify.sh --selftest --shard` step is not the whole
+# run. Around it sit the checkout, `cargo --version` resolving the pinned
+# toolchain, apt-get for bubblewrap, the census upload, the run's own admission
+# of each job, and the `gate` job, which cannot start until the last shard
+# finishes. All of that comes off the budget BEFORE the faults are packed: the
+# count derive-shards.py picks is the one whose slowest shard's STEP fits in
+# `wall_clock_seconds` minus this.
+#
+# MEASURED, and measured on the runner, which is the one number in this file a
+# local harvest cannot produce. From run 35415319419 (PR #86, eight shards, all
+# green), by the job and step timestamps the Actions API reports:
+#
+#   run created 02:19:41Z, `gate` finished 02:27:08Z        447s end to end
+#   slowest selftest step (shard 2)  02:20:02 -> 02:26:56   414s
+#   ------------------------------------------------------------
+#   everything that is not that step                         33s
+#
+#   of which, per shard: checkout + toolchain + apt + sysctl  19-24s
+#                        census upload + post-checkout         2-4s
+#   and once per run:    admission, then the `gate` job        ~11s
+#
+# One shard in that run (shard 3) was admitted 36s after its siblings, which no
+# amount of packing recovers and which grows with the shard count. 60 is
+# therefore above the 33s measured and below the 77s a maximally unlucky
+# admission would cost. It errs HIGH on purpose: a too-large overhead buys more
+# shards than strictly needed, and runner-minutes are unbilled here, while a
+# too-small one buys a count that does not fit and the budget is missed.
+#
+# Re-measure it when the steps around the selftest change.
+runner_overhead_seconds	60
+
+# --- the ceiling on the shard count ---
+#
+# The account runs 20 concurrent jobs. Past that a shard does not start until
+# something finishes, so the wall clock stops falling and starts queueing, and
+# a packer that did not know it would keep splitting.
+#
+# 16 rather than 20: `verify.yml` runs diet, pages and repo alongside the
+# shards, so a split that claimed all 20 would queue its own siblings -- and
+# the admission skew measured above is itself a function of how many jobs are
+# admitted at once.
+max_shards	16
