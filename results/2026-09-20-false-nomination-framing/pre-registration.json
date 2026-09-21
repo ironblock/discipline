@@ -1,0 +1,36 @@
+{
+ "arms": [
+  "control",
+  "imperative",
+  "advisory",
+  "sham"
+ ],
+ "controls": [
+  "the true-nomination control fork: a planted positive whose turn is the voiding step must read changed under both framings, or the run refuses",
+  "shuffled-framing null: arm labels permuted within fork must put the advisory-versus-imperative difference at chance",
+  "the sham arm as the perturbation floor",
+  "every grader's demonstrated failure in the instrument's selftest"
+ ],
+ "draws_per_arm": 1,
+ "fork": "a main-lane turn.request of an archived capture drive at a register turn, re-fired verbatim with its recorded sampler parameters; the nomination appended to the last user message",
+ "forks_per_rung": 100,
+ "headroom": "two no-nomination draws agree on (tool, target) and emit a command; decided before firing",
+ "hypothesis": "When the collector's nominator fires falsely, the consumer's turn changes less, and its reasoning acknowledges the nomination without acting on it more often, under advisory framing than imperative; and the difference falls as the nominator's precision rises.",
+ "ladder_reading": "a rung is the seeded proportion of forks receiving a true nomination; within one re-fired turn the consumer sees no history, so a per-nomination rung effect is not expected under this reading; the per-session cost = false-nomination change rate x (1 - p) is reported; forks without a mined positive receive a false nomination at every rung, so the realised true share per rung is reported beside the nominal rung",
+ "names": "any anchor of the nominated entry (the gym's literal::anchors) or the phrase 'working record' in the reasoning (thinking-on forks) or the prose before the command",
+ "primary": "the rate of changed turns on false nominations, advisory against imperative, at each rung, paired by fork",
+ "rungs": [
+  1.0,
+  0.8,
+  0.6,
+  0.4,
+  0.6222,
+  0.0556
+ ],
+ "secondary": "whether the reasoning names the nomination and, if so, accepts, questions or declines it, by a blind judge under seeded controls; reported beside the verdict",
+ "seed": 137,
+ "sham": "a passage of exactly the advisory line's character length from the prose of a register turn of a different drive; source row recorded",
+ "substrate": "the box instance 2026-09-20, pinned engine, production model and flags, each fork's own sampler parameters",
+ "true_nominations": "mined positives only: a planted positive is true by the register's label but not in the archived observation the fork re-fires, so it is never shown as true; the true-nomination control fork is a mined positive",
+ "turn_change": "tool = first word of the extracted command (exercise extract-command, the drive loop's extractor); target = first path-like argument else the second word; unchanged iff equal to the control draw's"
+}

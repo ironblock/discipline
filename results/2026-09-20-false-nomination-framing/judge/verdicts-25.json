@@ -1,0 +1,18 @@
+[
+{"id": "ack09-b25", "verdict": "accepts", "why": "States the correction and records it as resolved."},
+{"id": "0.4|drive-07#t9s1|imperative", "verdict": "declines", "why": "Says entry is correct, no correction needed."},
+{"id": "1.0|drive-09#t8s23|advisory", "verdict": "declines", "why": "Asserts the entry still holds, then moves on."},
+{"id": "0.6|drive-10#t8s12|advisory", "verdict": "questions", "why": "Reasoning says it will verify the entry against code."},
+{"id": "0.0556|drive-07#t10s12|advisory", "verdict": "declines", "why": "States the n_cache_reuse entry still holds."},
+{"id": "0.8|drive-10#t10s7|imperative", "verdict": "questions", "why": "Engages but will search before stating any correction."},
+{"id": "0.4|drive-10#t10s2|imperative", "verdict": "accepts", "why": "Declares entry superseded and states a correction."},
+{"id": "0.4|drive-10#t8s6|imperative", "verdict": "declines", "why": "Says the dual-gate entry is correct as stated."},
+{"id": "ack05-b25", "verdict": "accepts", "why": "Says entry no longer holds, notes second caller."},
+{"id": "0.6|drive-02#t10s9|advisory", "verdict": "declines", "why": "Says the KV cache reuse entry is still valid."},
+{"id": "0.8|drive-02#t8s11|imperative", "verdict": "accepts", "why": "Corrects the record, agrees entry is superseded."},
+{"id": "0.6222|drive-10#t8s2|advisory", "verdict": "questions", "why": "Reasoning says it will check the actual code first."},
+{"id": "0.0556|drive-09#t8s23|imperative", "verdict": "declines", "why": "Says entry is accurate, no correction needed."},
+{"id": "ack12-b25", "verdict": "declines", "why": "Refuses the update; says the entry stands."},
+{"id": "1.0|drive-09#t5s5|imperative", "verdict": "accepts", "why": "Acknowledges supersession and states where defaults live."},
+{"id": "ack02-b25", "verdict": "questions", "why": "Will verify return type before touching the record."}
+]

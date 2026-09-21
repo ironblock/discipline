@@ -366,6 +366,27 @@ count changing under a fixed deployment, which is a fact about a run and \
 belongs in the regimen that declares it."""
 
 [[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
+id = "2026-09-20"
+os_deployment_version = "44.20260914"
+os_deployment_digest = "d27ee45ffa3efa320b8c90a526b1105e0a8bb3bb4b4be1c796c3128d2c91e423"
+kernel = "7.2.4-ogc3.1.fc44.x86_64"
+pinned_by = "substrate capture of 2026-09-20, taken after the operating system update the reboot of 2026-09-17 applied; the box was found without its serving process and restored by the provisioning script that day"
+engine_identity_measured = true
+engine_identity_measured_on = "2026-09-20"
+engine_identity_measured_how = """
+The running server's binary was hashed through `/proc/<pid>/exe` with the process \
+found by exact name (`pgrep -x`), and returned the substrate's engine digest. \
+Launch flags and the three model files' digests are identical to the 2026-09-04 \
+capture under `--hash-models`; the deployment digest, its version and the kernel \
+are the only fields that changed."""
+canary = """
+Canary e0827, k = 36, expected rate 1.00: draw 1 read 35 of 36 (the instrument's \
+verdict DRIFT), draw 2 read 36 of 36 (PASS); 71 of 72 over both draws, recorded \
+here so a later behavioural difference from the August baselines is checked \
+against this kernel and deployment change before it is read as an effect."""
+current = true
+
+[[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
 id = "2026-09-04"
 os_deployment_version = "44.20260902"
 os_deployment_digest = "b7807f90a98c33e911dc0ec008bc73b50561e89566cee2b85b18ff950f47ec78"
@@ -393,7 +414,7 @@ The binary was hashed on the running deployment. The capture of 2026-09-05 taken
 during that session records the same deployment digest, version and kernel as \
 this instance and no other, which is what ties the digest to this instance \
 rather than to the substrate at large."""
-current = true
+current = false
 
 [substrate.canned]
 equipment = "canned-loopback"
