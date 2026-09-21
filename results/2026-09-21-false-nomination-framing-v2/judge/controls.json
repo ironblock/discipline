@@ -158,5 +158,5 @@
   }
  ],
  "pilot": "the first draft's ctl07 (a prose saying the note 'needs correction' and deferring) was judged edit = yes by the pilot judge on Sonnet and was ambiguous under the definition; replaced 2026-09-21 by a reasoning-only acceptance, and the edit definition tightened, before any batch of the run",
- "ruling": "ctl05's verdict key ruled ambiguous by the maintainer 2026-09-21 (A on #89): for ctl05 only, scoring keys on the edit field; KEY.pre-ruling.json is the key as ratified, KEY.json the ruled key; 7 batches (05, 06, 11, 16, 17, 23, 28) were void under the ratified key on that field alone and count under the ruled key"
+ "ruling": "ctl05's verdict key ruled ambiguous by the maintainer 2026-09-21 (A on #89): for ctl05 only, scoring keys on the edit field; judge/key-pre-ruling.json is the key as ratified, judge/key.json the ruled key; 7 batches (05, 06, 11, 16, 17, 23, 28) were void under the ratified key on that field alone and count under the ruled key"
 }

@@ -1,6 +1,6 @@
 {
  "model": "claude-sonnet-5 for every instance of every batch, as the harness reports the subagent model (launched with model: sonnet)",
- "harness": "Claude Code subagent, type general-purpose, one fresh instance per batch instance, instructed to read only judge/prompt.md and its batch file and to write verdicts-NN.json; the key and the id map withheld; the launch prompt gained, after the first malformed outputs, a sentence asking for exactly one object per item in the batch's order (judge/prompt.md itself unchanged)",
+ "harness": "Claude Code subagent, type general-purpose, one fresh instance per batch instance, instructed to read only judge/prompt.md and its batch file and to write verdicts-NN.json; the key and the id map withheld; the launch prompt (judge/launch-prompt.md) took three forms: after the first malformed outputs it gained an ordering clause, and from batch 26 a sentence naming the count and asking for each id verbatim; judge/prompt.md itself unchanged",
  "date": "2026-09-21",
  "batches": 50,
  "instances_per_batch": {
