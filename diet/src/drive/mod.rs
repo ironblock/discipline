@@ -538,6 +538,18 @@ struct Interviewer<'a, T: Transport> {
     turn: Cell<u32>,
     calls: Vec<crate::client::Call>,
     audits: Vec<Audit>,
+    /// When this lane last called.
+    ///
+    /// **Measured here rather than by [`Heads`], and the difference is a
+    /// measurement rather than a tidiness.** A ratify call happens inside
+    /// `Controller::settle`, where the drive's own bookkeeping cannot reach
+    /// it -- so a gap stamped from outside would be whichever lane called
+    /// last, the interview fork's, attributed to a ratification. That is a
+    /// measurement of the wrong thing that reads like a measurement of the
+    /// right one, which is the defect the cache telemetry's own doc names.
+    called: Option<Instant>,
+    /// The gap before each of `calls`, in the same order.
+    gaps: Vec<Option<Duration>>,
 }
 
 impl<T: Transport> Ratifier for Interviewer<'_, T> {
@@ -547,6 +559,12 @@ impl<T: Transport> Ratifier for Interviewer<'_, T> {
             role: Role::User,
             content: ask.text.clone(),
         }];
+        // Immediately before the call, like `Heads::about_to_call`: what a
+        // cache lifetime is compared against is the gap between two
+        // REQUESTS, not the gap between an answer and the next ask.
+        let now = Instant::now();
+        self.gaps
+            .push(self.called.replace(now).map(|was| now.duration_since(was)));
         let call = self.client.call(&shape, RATIFY, &mut self.ids);
         // NOTHING IS FOLDED. See [`Audit`]: the ask demands a verdict
         // vocabulary that is not implemented, and the interview grammar is a
@@ -677,6 +695,12 @@ struct Heads {
     /// what keeps two replays of one drive byte-identical.
     called: BTreeMap<String, Instant>,
     /// The gap before the call currently being archived.
+    ///
+    /// Set by [`Heads::about_to_call`] for the lanes [`run`] calls itself,
+    /// and by `run` from the ratifier's own stamp for the one it does not --
+    /// see [`Interviewer::called`]. Whoever sets it takes the reading BEFORE
+    /// the call, which is the only place the question a cache lifetime
+    /// answers can be asked.
     gap: Option<Duration>,
     /// One per answered call.
     observations: Vec<crate::client::cache::Observation>,
@@ -775,6 +799,8 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             turn: Cell::new(0),
             calls: Vec::new(),
             audits: Vec::new(),
+            called: None,
+            gaps: Vec::new(),
         },
     );
 
@@ -1090,7 +1116,10 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             .settle(&mut object)
             .map_err(|why| Halt::SeamRefused { turn: index, why })?;
         let asked: Vec<_> = controller.ratifier().calls[before..].to_vec();
-        for one in &asked {
+        // Taken from the ratifier, which is the only thing that was present
+        // when these calls were made. See `Interviewer::called`.
+        let gaps: Vec<_> = controller.ratifier().gaps[before..].to_vec();
+        for (one, gap) in asked.iter().zip(gaps) {
             // The same rule as the other two lanes, and it was missing here:
             // a ratify call that never answered used to produce a seam row
             // anyway, asserting the prompt was rebuilt after an audit that did
@@ -1103,6 +1132,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                     outcome: Box::new(one.outcome.clone()),
                 });
             }
+            heads.gap = gap;
             archive(
                 one,
                 index,
