@@ -1,0 +1,2 @@
+interview-t1-1	{"aliases":["interview-t2-1"],"content":"decision: keep the reconciler","id":"interview-t1-1","provenances":[{"fork":"fork-1","index":1,"lane":"interview","turn":1},{"fork":"fork-2","index":1,"lane":"interview","turn":2}],"state":"live"}
+interview-t1-2	{"aliases":["interview-t2-2"],"content":"learned: the seam refills from the object","id":"interview-t1-2","provenances":[{"fork":"fork-1","index":2,"lane":"interview","turn":1},{"fork":"fork-2","index":2,"lane":"interview","turn":2}],"state":"live"}

@@ -1,0 +1,8 @@
+{
+  "issue": "#82.4",
+  "atom": "tool_call.idempotent",
+  "why": "Whether the output can be evicted and replayed. #82 puts it on the class table, not the row; the viewer needs it per row, so either the row carries it or the class table is exposed to the read side.",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `tool_call` row carries `idempotent`, which this schema does not define",
+  "exit": 1
+}

@@ -1,0 +1,8 @@
+{
+  "issue": "#82.3",
+  "atom": "fork.kind = canonical | fork | child_session",
+  "why": "Lane kinds, so a child session renders as its own mainline rather than a fork gone wrong. Proposed here as a field on fork; #82 says `Lane.kind`, and the record has no lane row to put it on -- that is part of the finding.",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `fork` row carries `kind`, which this schema does not define",
+  "exit": 1
+}

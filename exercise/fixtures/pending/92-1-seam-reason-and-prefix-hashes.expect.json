@@ -1,0 +1,8 @@
+{
+  "issue": "#92.1",
+  "atom": "seam.reason, seam.prefix_hash_before/after, seam.dump_sha256_before/after",
+  "why": "Ruled on #27, never landed: a seam that cannot say why it fired is judgment wearing a trigger's clothes.",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `seam` row carries `dump_sha256_after`, which this schema does not define",
+  "exit": 1
+}

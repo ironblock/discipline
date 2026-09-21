@@ -1,0 +1,8 @@
+{
+  "issue": "#82.2",
+  "atom": "substrate.clock_offset_ms",
+  "why": "One clock per substrate, or recorded skew; without it \"these overlapped\" is unverifiable.",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `start` row carries `substrates[].clock_offset_ms`, which this schema does not define",
+  "exit": 1
+}

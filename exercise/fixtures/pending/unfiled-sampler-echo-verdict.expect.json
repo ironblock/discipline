@@ -1,0 +1,8 @@
+{
+  "issue": "unfiled/sampler-echo",
+  "atom": "response.echo",
+  "why": "The client measures the sampler echo (client::echo) and names it uncarryable; #82 wrongly lists it satisfied.",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `response` row carries `echo`, which this schema does not define",
+  "exit": 1
+}

@@ -1,0 +1,8 @@
+{
+  "issue": "#92.6",
+  "atom": "capture.targets[]",
+  "why": "A patch names what it touched by entry id and kind, so provenance is links in a list rather than a count.",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `capture` row carries `targets`, which this schema does not define",
+  "exit": 1
+}

@@ -1,0 +1,3 @@
+{"source":{"kind":"live"},"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on","hardware_fingerprint":"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532"}]}}
+{"record":"turn","index":1,"prefill_tokens":1024}
+{"record":"fork","id":"f1","lane":"interview","substrate":"local","of_turn":1,"outcome":"timeout"}

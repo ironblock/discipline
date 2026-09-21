@@ -1,0 +1,8 @@
+{
+  "issue": "unfiled/request-slot",
+  "atom": "request.slot",
+  "why": "Which parallel slot served a request; without it slot occupancy is inferred, not drawn.",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `request` row carries `slot`, which this schema does not define",
+  "exit": 1
+}

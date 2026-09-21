@@ -1,0 +1,8 @@
+{
+  "issue": "#92.2",
+  "atom": "phase_proposal event",
+  "why": "seam/phase.rs keeps refusals with a typed Refusal (no_graph, not_a_phase, no_edge, already_there); the record has no kind for one.",
+  "refusal": "schema.unknown_kind",
+  "message": "not a session record: `phase_proposal` names no event kind",
+  "exit": 1
+}

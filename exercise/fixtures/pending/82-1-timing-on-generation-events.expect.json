@@ -1,0 +1,8 @@
+{
+  "issue": "#82.1",
+  "atom": "response.started_at / ended_at / ttft_ms / prefill_tokens_new / prefill_tokens_cached / decode_ms",
+  "why": "Timing decomposition on every generation event; queued_ms is derived, never recorded.",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `response` row carries `decode_ms`, which this schema does not define",
+  "exit": 1
+}

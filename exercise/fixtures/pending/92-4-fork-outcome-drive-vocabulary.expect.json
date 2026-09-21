@@ -1,0 +1,8 @@
+{
+  "issue": "#92.4",
+  "atom": "fork.outcome (complete | truncated | empty | thinking_exhausted)",
+  "why": "The same field in the vocabulary the drive computes today (drive::ForkOutcome). When the field lands with one vocabulary, exactly one of this pair flips green and the other becomes a BadValue refusal -- the catalog announces which won.",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `fork` row carries `outcome`, which this schema does not define",
+  "exit": 1
+}

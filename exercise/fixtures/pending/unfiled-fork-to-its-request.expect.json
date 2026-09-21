@@ -1,0 +1,8 @@
+{
+  "issue": "unfiled/fork-request-link",
+  "atom": "request.of_fork",
+  "why": "A fork's own request is joined to it only by row order and lane; nothing validates the join, so the fork row cannot absorb its exchange.",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `request` row carries `of_fork`, which this schema does not define",
+  "exit": 1
+}

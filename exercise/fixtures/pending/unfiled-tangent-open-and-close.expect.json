@@ -1,0 +1,8 @@
+{
+  "issue": "unfiled/tangent",
+  "atom": "tangent event",
+  "why": "object/tangent.rs holds open/close with KEEP | DROP | PARK dispositions; v3 draws it; the record has no kind for it.",
+  "refusal": "schema.unknown_kind",
+  "message": "not a session record: `tangent` names no event kind",
+  "exit": 1
+}

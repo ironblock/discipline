@@ -18,7 +18,8 @@
     "gen": "node scripts/gen-fixtures.mjs",
     "check:fixtures": "node scripts/check-fixtures.mjs",
     "check:red": "node scripts/verify-red.mjs",
-    "verify": "pnpm gen --check && pnpm typecheck && pnpm lint && pnpm test && pnpm check:fixtures && pnpm check:red"
+    "verify": "pnpm gen:drive --check && pnpm gen --check && pnpm typecheck && pnpm lint && pnpm test && pnpm check:fixtures && pnpm check:red",
+    "gen:drive": "node scripts/drive-fixture.mjs"
   },
   "dependencies": {
     "@ariakit/react": "0.4.40",

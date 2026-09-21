@@ -1,0 +1,8 @@
+{
+  "issue": "unfiled/entries-created",
+  "atom": "capture.entries_created",
+  "why": "The drive computes both counts (ruling 6) and the record holds one; `entries` in v0 means entries_touched.",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `capture` row carries `entries_created`, which this schema does not define",
+  "exit": 1
+}

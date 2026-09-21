@@ -1,0 +1,8 @@
+{
+  "issue": "#92.3",
+  "atom": "seam.answer",
+  "why": "The ratify step folds the answer into the object; the record does not carry the answer. The drive already keeps it (Audit.answered).",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `seam` row carries `answer`, which this schema does not define",
+  "exit": 1
+}

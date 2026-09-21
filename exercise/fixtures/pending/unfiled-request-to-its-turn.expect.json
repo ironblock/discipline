@@ -1,0 +1,8 @@
+{
+  "issue": "unfiled/request-turn-link",
+  "atom": "request.at_turn",
+  "why": "A canonical request is joined to its turn only by row order; every turn row's containment of its own call is positional.",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `request` row carries `at_turn`, which this schema does not define",
+  "exit": 1
+}

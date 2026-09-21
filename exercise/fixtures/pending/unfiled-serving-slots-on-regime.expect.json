@@ -1,0 +1,8 @@
+{
+  "issue": "unfiled/serving-slots",
+  "atom": "regime.serving.slots",
+  "why": "Ruled on #82 as `serving.slots`, never landed. v3's whole slot mode hangs on it.",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `start` row carries `regime.serving`, which this schema does not define",
+  "exit": 1
+}

@@ -1,0 +1,8 @@
+{
+  "issue": "#82",
+  "atom": "prefix.cold_fork event",
+  "why": "A fork whose response reports prefill_tokens_new > 0: the warm-prefix property breaking, typed beside the fork (#82 acceptance row 2).",
+  "refusal": "schema.unknown_kind",
+  "message": "not a session record: `prefix.cold_fork` names no event kind",
+  "exit": 1
+}

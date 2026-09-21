@@ -1,0 +1,8 @@
+{
+  "issue": "unfiled/operator-ask",
+  "atom": "request.ask (or a read-side projection of request.text)",
+  "why": "request.text is the whole wire body; showing the ask means parsing the wire format, which is a second parser.",
+  "refusal": "schema.unknown_field",
+  "message": "not a session record: a `request` row carries `ask`, which this schema does not define",
+  "exit": 1
+}
