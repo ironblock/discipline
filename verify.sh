@@ -592,6 +592,16 @@ scripts/derive-shards.py --index DIR/derive-shards.tsv --emit" >&2
     case "$key" in ''|\#*) continue ;; esac
     case "$key" in
       fault)
+        # `read_plan` in scripts/derive-shards.py refuses the same file's
+        # second row for one id rather than taking the last of the two
+        # silently; this docstring-claimed "parsed the same way" was false
+        # until this matched it -- two readers of one file disagreeing on a
+        # duplicate is a plan that means one thing to `--check` and another to
+        # the run it is checking.
+        if [ -n "${SHARD_OF[$a]+_}" ]; then
+          echo "selftest: ${SHARD_PLAN} assigns '${a}' twice" >&2
+          exit "$EXIT_MISUSE"
+        fi
         SHARD_OF["$a"]="$b"
         rows=$(( rows + 1 ))
         ;;
@@ -612,11 +622,31 @@ scripts/derive-shards.py --index DIR/derive-shards.tsv --emit" >&2
 says how many shards it was packed for" >&2
     exit "$EXIT_MISUSE"
   fi
+  case "$declared" in *[!0-9]*)
+    echo "selftest: ${SHARD_PLAN} declares '${declared}' as its shard count, \
+which is not a number -- \"-ne\" on it would report an error to stderr and the \
+\`if\` around it would read that as false, so a corrupt count would be treated \
+as agreeing with --shard rather than refused" >&2
+    exit "$EXIT_MISUSE"
+    ;;
+  esac
   if [ "$declared" -ne "$SELFTEST_SHARDS" ]; then
+    # The affected range runs from whichever of the two is smaller: a caller
+    # passing a bigger N than the plan was packed for leaves shards
+    # declared+1..N with nothing assigned to them, while a smaller N leaves
+    # N+1..declared assigned to shard numbers no job in this run ever is.
+    # Printing "${declared} .. ${SELFTEST_SHARDS}" unconditionally read
+    # backwards -- "16 .. 8" -- in the second, more common case.
+    local lo hi
+    if [ "$declared" -lt "$SELFTEST_SHARDS" ]; then
+      lo=$(( declared + 1 )); hi="$SELFTEST_SHARDS"
+    else
+      lo=$(( SELFTEST_SHARDS + 1 )); hi="$declared"
+    fi
     echo "selftest: --shard ${SELFTEST_SHARD}/${SELFTEST_SHARDS} disagrees with \
 ${SHARD_PLAN}, which was packed for ${declared} shard(s). N is derived from the \
 harvest and is not the caller's to choose: reinterpreting this one would leave \
-the faults assigned to shards ${declared} .. ${SELFTEST_SHARDS} run by nobody" >&2
+the faults assigned to shards ${lo} .. ${hi} run by nobody" >&2
     exit "$EXIT_MISUSE"
   fi
   [ "$rows" -gt 0 ] || {
@@ -665,6 +695,14 @@ census that adds up to the wrong list. Re-harvest: ./verify.sh --selftest \
 --derive-shards DIR" >&2
     exit "$EXIT_MISUSE"
   fi
+  case "$assigned" in *[!0-9]*)
+    echo "selftest: ${SHARD_PLAN} assigns '${assigned}' to '${ident}', which \
+is not a shard number -- \"-eq\" on it would report an error to stderr and the \
+\`if\` around it would read that as false, so a corrupt row would be silently \
+treated as belonging to no shard rather than refused" >&2
+    exit "$EXIT_MISUSE"
+    ;;
+  esac
   if [ "$assigned" -eq "$SELFTEST_SHARD" ]; then
     SELFTEST_RAN+=("$SELFTEST_UNITS")
     return 0
@@ -4148,6 +4186,30 @@ if len(kept) != len(lines) - 1:
 path.write_text("".join(kept), encoding="utf-8")
 EOF
 }
+# Half the checked-in assignment's faults moved onto shard 1, in the real
+# file `--check` reads on every run of the `ci` check -- not a synthetic
+# index handed to the grading function directly, which is what the sibling
+# outlier fixture in derive-shards.py's own selftest already covers. Every
+# shard keeps at least one fault, so this is distinguishable from the
+# empty-shard refusal; shard 1 alone carries roughly half the harvest's
+# total cost, which is far past 3x any other shard's share for any shard
+# count `--emit` would ever produce.
+inject_shard_assignment_outlier() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("tools/gate/shards.tsv")
+lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+fault_lines = [i for i, line in enumerate(lines) if line.startswith("fault\t")]
+assert len(fault_lines) >= 2, "not enough faults to make an outlier"
+half = fault_lines[: len(fault_lines) // 2]
+for i in half:
+    parts = lines[i].rstrip("\n").split("\t")
+    parts[2] = "1"
+    lines[i] = "\t".join(parts) + "\n"
+path.write_text("".join(lines), encoding="utf-8")
+EOF
+}
 # The declared wall-clock budget deleted. The number is what the shard count is
 # derived from and what every run's report is printed against; without it the
 # gate would carry on, silently, with no ceiling at all -- which is the state
@@ -6840,6 +6902,8 @@ selftest() {
     'produced 0 finding\(s\)'
   seeded_case "a fault in the manifest and in no shard" ci      inject_shard_assignment_drops_a_fault \
     'fault\(s\) the manifest declares have no shard'
+  seeded_case "a shard carrying three times the median" ci      inject_shard_assignment_outlier \
+    'x the median shard'
   seeded_case "the wall-clock budget left undeclared"  ci       inject_gate_budget_undeclared \
     'declares no wall_clock_seconds'
   seeded_case "a run directory inside a run directory" results inject_results_nested_directory \
@@ -7729,11 +7793,13 @@ EOF
   # about a run that saw no gate.
   #
   # Found by a fresh instance, reproduced live. Not reachable through CI --
-  # the matrix is eight against a fault list far longer, and the census
-  # refuses an incomplete union whatever any single shard claims -- so this
-  # is a foot-gun for a person running --shard by hand, and a comment that
-  # overclaimed what the bound guards against. Both are the same defect: the
-  # thing that made it safe was somewhere else, and nothing said so here.
+  # `grade_shape` refuses an empty shard in the checked-in plan and LPT packing
+  # cannot produce one, so the matrix CI derives never contains a K this empty,
+  # and the census refuses an incomplete union whatever any single shard
+  # claims -- so this is a foot-gun for a person running --shard by hand, and a
+  # comment that overclaimed what the bound guards against. Both are the same
+  # defect: the thing that made it safe was somewhere else, and nothing said
+  # so here.
   #
   # unseedable: a re-entrant --selftest call would recurse into the function containing it; proved by hand instead
   #

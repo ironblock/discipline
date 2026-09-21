@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Add the selftest's shards back up, and refuse if they do not make a whole.
 
-`verify.sh --selftest --shard K/N` runs every Nth fault starting at the Kth.
+`verify.sh --selftest --shard K/N` runs the faults `tools/gate/shards.tsv`
+assigns to shard K, packed by measured cost rather than by arithmetic.
 That is a division of labour, not a selection of faults -- but the difference
 between those two is invisible from inside any one shard, because a shard that
 ran nothing and a shard that ran its share both exit 0 and both say `success`.

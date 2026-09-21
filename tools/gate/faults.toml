@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 494
+red_faults = 495
 mechanics_assertions = 119
 unseedable_guards = 2
 migrated = 0
@@ -3562,6 +3562,14 @@ check = "ci"
 label = "a fault in the manifest and in no shard"
 failure_class = "wiring.shard-assignment-incomplete"
 legacy_signature = "fault\\(s\\) the manifest declares have no shard"
+migrated = false
+[[fault]]
+id = "ci.shard_assignment_outlier"
+kind = "seeded-gate"
+check = "ci"
+label = "a shard carrying three times the median"
+failure_class = "wiring.shard-assignment-unbalanced"
+legacy_signature = "x the median shard"
 migrated = false
 [[fault]]
 id = "ci.gate_budget_undeclared"

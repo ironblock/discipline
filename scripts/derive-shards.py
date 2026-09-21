@@ -199,6 +199,16 @@ def read_index(path: pathlib.Path) -> tuple[dict[str, int], dict[str, str], int]
             f"and an empty index is what a `--derive-shards` run that never ran "
             f"looks like"
         )
+    zero = sum(1 for measured in cost.values() if measured == 0)
+    if zero * 2 > len(cost):
+        raise Unusable(
+            f"{path} measures zero cost for {zero} of {len(cost)} fault(s). "
+            f"That is what a harvest taken with no clock looks like: below bash "
+            f"5.0 there is no EPOCHREALTIME, `now_ms` falls back to whole "
+            f"SECONDS, and any fault quicker than one second reads as free. A "
+            f"packing over mostly-free faults is not packed against their real "
+            f"cost. Re-harvest on bash 5 or later"
+        )
     if run_ms is None:
         raise Unusable(
             f"{path} carries no `run whole` row, so nothing in it says what the "
@@ -458,6 +468,9 @@ def emit(cost: dict[str, int], run_ms: int, budget: dict[str, int]) -> str:
     assign = pack(cost, shards)
     summed = totals(assign, cost, shards)
     fixed = overhead_ms + budget["runner_overhead_seconds"] * 1000
+    worst = max(summed) + fixed
+    budget_ms = budget["wall_clock_seconds"] * 1000
+    fits = worst <= budget_ms
     out = [
         "# Which shard runs which fault. HARVESTED, NOT WRITTEN.",
         "#",
@@ -477,14 +490,30 @@ def emit(cost: dict[str, int], run_ms: int, budget: dict[str, int]) -> str:
         "# diff on every entry it holds each time one fault was added, and the",
         "# one hand-written line in that diff would be the one nobody could find.",
         "#",
-        f"# Packed longest-processing-time-first into {shards} shard(s): the",
-        f"# smallest count whose slowest shard fits {budget['wall_clock_seconds']}s "
-        f"once the {fixed / 1000:.0f}s",
+        f"# Packed longest-processing-time-first into {shards} shard(s) -- "
+        + (
+            f"the smallest count whose"
+            if fits
+            else f"THE CEILING (`max_shards`); no count up to it"
+        ),
+        f"# slowest shard fits {budget['wall_clock_seconds']}s once the "
+        f"{fixed / 1000:.0f}s",
         f"# every shard pays regardless is taken off -- "
         f"{overhead_ms / 1000:.0f}s of unsharded",
         f"# selftest measured by the harvest, plus "
         f"{budget['runner_overhead_seconds']}s of runner declared",
-        "# in .github/gate-budget.tsv.",
+        "# in .github/gate-budget.tsv."
+        + (
+            ""
+            if fits
+            else f" At {shards} shards the slowest is still {worst / 1000:.0f}s"
+            f" against the {budget['wall_clock_seconds']}s budget on these"
+            f" numbers -- OVER by {(worst - budget_ms) / 1000:.0f}s. This is"
+            f" not a derivation; it is the ceiling reported because nothing"
+            f" under it fits. A harvest on the runner is what settles"
+            f" whether {shards} is enough, and it may need to be higher"
+            f" than `max_shards` currently allows."
+        ),
         "#",
         "# A HARVEST IS MACHINE-RELATIVE, and the two halves of it travel",
         "# differently. The BALANCE rests on the costs relative to each other,",
@@ -517,9 +546,11 @@ def emit(cost: dict[str, int], run_ms: int, budget: dict[str, int]) -> str:
         "",
         "# fault<TAB>id<TAB>shard<TAB>harvested milliseconds",
         "#",
-        "# Sorted by id, not by shard or by cost: this file is re-emitted whole",
-        "# on every re-harvest, and a stable order is what makes the diff show",
-        "# which faults MOVED rather than showing all of them.",
+        "# Sorted by id, not by shard or by cost: every row's cost is",
+        "# re-measured on every re-harvest, so the diff touches every line",
+        "# regardless -- a stable order at least keeps each fault on the SAME",
+        "# line across harvests, so the diff is by fault rather than a reshuffle",
+        "# of the whole file, and the shard column is where a real move reads.",
     ]
     for ident in sorted(cost):
         out.append(f"fault\t{ident}\t{assign[ident]}\t{cost[ident]}")
@@ -789,6 +820,39 @@ def _double_harvest_is_refused():
         return "an id harvested twice was read as one fault"
 
 
+@fixture("a harvest taken with no clock is refused, not packed")
+def _clockless_harvest_is_refused():
+    # Below bash 5.0 there is no EPOCHREALTIME and `now_ms` falls back to whole
+    # SECONDS, so any fault quicker than one second measures zero. A harvest
+    # mostly of zeroes is not a balanced packing away from what it looks like --
+    # it is a broken harvest, and it is this reader's to refuse rather than the
+    # packer's to divide by.
+    with tempfile.TemporaryDirectory() as box:
+        path = pathlib.Path(box) / "harvest.tsv"
+        rows = [f"fault\tf{n}\t{0 if n < 6 else 1000}\tf{n}\n" for n in range(10)]
+        path.write_text("".join(rows) + "run\twhole\t9000\tx\n", encoding="utf-8")
+        try:
+            read_index(path)
+        except Unusable as err:
+            if "zero cost" not in str(err):
+                return f"refused for the wrong reason: {err}"
+            return None
+        return "a harvest measuring zero for 6 of 10 faults was read as sound"
+
+
+@fixture("a harvest with only a minority of zeroes is not refused")
+def _a_few_real_zeroes_are_not_a_clockless_harvest():
+    # A handful of faults can legitimately cost nothing even with a clock --
+    # this must not fire on ordinary variance, only on the majority-zero shape
+    # a clockless harvest actually produces.
+    with tempfile.TemporaryDirectory() as box:
+        path = pathlib.Path(box) / "harvest.tsv"
+        rows = [f"fault\tf{n}\t{0 if n < 2 else 1000}\tf{n}\n" for n in range(10)]
+        path.write_text("".join(rows) + "run\twhole\t9000\tx\n", encoding="utf-8")
+        read_index(path)
+    return None
+
+
 @fixture("a budget declaring nothing is refused rather than defaulted")
 def _budget_is_required():
     # A default in this file would be an undeclared budget: a number nothing
@@ -851,6 +915,39 @@ def _emit_round_trips():
         if emit(cost, run_ms, BUDGET_FIXTURE) != path.read_text(encoding="utf-8"):
             return "emitting the same harvest twice produced two files"
     return None
+
+
+@fixture("--matrix prints the plan's shard numbers as JSON")
+def _matrix_prints_the_range():
+    cost = {f"f{n}": 1 + (n * 13) % 90 for n in range(120)}
+    run_ms = sum(cost.values()) + 5000
+    with tempfile.TemporaryDirectory() as box:
+        path = pathlib.Path(box) / "shards.tsv"
+        path.write_text(emit(cost, run_ms, BUDGET_FIXTURE), encoding="utf-8")
+        shards, _assign, _cost, _overhead = read_plan(path)
+        text = matrix_of(path)
+        if text != "[" + ", ".join(str(n) for n in range(1, shards + 1)) + "]":
+            return f"the matrix does not name every shard 1..{shards}: {text!r}"
+    return None
+
+
+@fixture("--matrix refuses a plan of zero shards rather than printing []")
+def _matrix_refuses_an_empty_range():
+    # `range(1, 1)` is empty, so an ungated print would emit `[]` -- a matrix
+    # of no jobs, which GitHub Actions runs as a success with nothing done.
+    # That is worse than a job that fails: nothing files a census at all.
+    with tempfile.TemporaryDirectory() as box:
+        path = pathlib.Path(box) / "shards.tsv"
+        path.write_text(
+            "shards\t0\nfault\ta\t1\t100\n", encoding="utf-8",
+        )
+        try:
+            matrix_of(path)
+        except Unusable as err:
+            if "0 shard" not in str(err):
+                return f"refused for the wrong reason: {err}"
+            return None
+        return "a plan of zero shards printed a matrix rather than refusing"
 
 
 @fixture("the exit codes say which of the three things happened")
@@ -966,6 +1063,22 @@ def check() -> tuple[int, list[str]]:
     return (EXIT_BAD if failures else 0), failures
 
 
+def matrix_of(path: pathlib.Path) -> str:
+    """The CI matrix for the assignment at `path`: `[1, 2, .. shards]`.
+
+    Refuses rather than prints `[]` for a plan declaring fewer than one
+    shard -- an empty matrix is a workflow of no jobs, and GitHub Actions
+    accepts it as a success with nothing run, not as the failure it is.
+    """
+    shards, _assign, _cost, _overhead = read_plan(path)
+    if shards < 1:
+        raise Unusable(
+            f"{path.name} declares {shards} shard(s). A matrix over that is "
+            f"`[]` -- a workflow of no jobs, printed as if it were one"
+        )
+    return "[" + ", ".join(str(n) for n in range(1, shards + 1)) + "]"
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--index", help="the TSV --derive-shards wrote")
@@ -1011,8 +1124,7 @@ def main(argv: list[str]) -> int:
 
     try:
         if args.matrix:
-            shards, _assign, _cost, _overhead = read_plan(PLAN)
-            print("[" + ", ".join(str(n) for n in range(1, shards + 1)) + "]")
+            print(matrix_of(PLAN))
             return 0
 
         if args.check:
