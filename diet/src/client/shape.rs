@@ -299,11 +299,48 @@ impl Dialect {
     }
 }
 
+/// One tool a request declares, as the head carries it.
+///
+/// A NAME AND A SCHEMA, in the order the harness declares them, because the
+/// ORDER IS PART OF THE HEAD. #79's second-implementor specimen is MCP
+/// definitions emitted in object-key order: reopening the client reorders
+/// them, the rendered head moves, and every session's prefix is cold for a
+/// reason nothing in the record could name. A `Vec` rather than a map is what
+/// makes that expressible at all -- a map would sort the problem away and
+/// hide the mutation the record exists to attribute.
+///
+/// The schema is the record's own value space, and not a string of JSON, for
+/// the reason [`RequestShape::template_kwargs`] is: what reaches the wire has
+/// to be spellable in the archive of the request that carried it, and
+/// `wire::head` renders it through the record's renderer so a decimal goes
+/// out as the digits that were written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolDefinition {
+    /// What the tool calls itself. What a `tool_moved` delta names.
+    pub name: String,
+    /// The parameters it declares.
+    pub schema: crate::formats::record::json::Value,
+}
+
 /// One request to an inference server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestShape {
     /// The model, as the serving stack names it.
     pub model: String,
+    /// The tools this request declares, in the order it declares them.
+    ///
+    /// Empty is the ordinary case here and renders no key at all: a request
+    /// carrying `"tools":[]` when it exposes no tool surface is a request
+    /// this program changed for no reason, which is the rule
+    /// `template_kwargs` already follows one field down.
+    ///
+    /// **Unverified against a live tool-using server.** `wire::head` renders
+    /// these in the OpenAI-compatible shape read from the published surface,
+    /// not measured -- the same disclosure [`Dialect::openai_compatible`]
+    /// carries, and for the same reason: this crate's own reference drive
+    /// declares no tools, so nothing here has been round-tripped through a
+    /// server that reads them.
+    pub tools: Vec<ToolDefinition>,
     /// The conversation, in order.
     pub messages: Vec<Message>,
     /// What the sampler is pinned to.
@@ -336,28 +373,15 @@ pub struct RequestShape {
     pub template_kwargs: BTreeMap<String, crate::formats::record::json::Value>,
 }
 
-impl RequestShape {
-    /// The prefix this request would prefill: every message before the last.
-    ///
-    /// The seam controller's whole claim is that this stays byte-identical
-    /// between seams, so the client is where it can be read off a request
-    /// rather than reconstructed from one.
-    #[must_use]
-    pub fn prefix(&self) -> String {
-        let mut out = String::new();
-        for message in self
-            .messages
-            .iter()
-            .take(self.messages.len().saturating_sub(1))
-        {
-            out.push_str(message.role.tag());
-            out.push('\n');
-            out.push_str(&message.content);
-            out.push('\n');
-        }
-        out
-    }
-}
+// `RequestShape::prefix()` USED TO BE HERE, and #79 removed it. It rendered
+// its own second spelling of the frozen head -- role, newline, content,
+// newline -- which was a weaker answer to "what is the prefix" than the bytes
+// that actually go out. `wire::head` is the answer now: the head IS the
+// opening of the body, proved by
+// `client::head::tests::the_head_is_the_bytes_the_body_starts_with`, and it
+// is what is hashed into `request.head_sha256`. Two renderings of one head is
+// the drift the hand-rendered sampler pins already exist to avoid one level
+// down.
 
 #[cfg(test)]
 mod tests {
@@ -425,10 +449,20 @@ mod tests {
         );
     }
 
+    /// The seam's claim, now asked of the bytes that actually go out.
+    ///
+    /// This test used to call `RequestShape::prefix()`, a second rendering of
+    /// the head that nothing sent. #79 removed it and pointed the same
+    /// question at [`crate::client::wire::head`], which is hashed into the
+    /// record -- so what is asserted byte-identical between two turns is what
+    /// the server's cache is actually keyed on.
     #[test]
-    fn the_prefix_is_every_message_but_the_last_and_does_not_move_when_the_last_does() {
+    fn the_head_is_every_message_but_the_last_and_does_not_move_when_the_last_does() {
+        use crate::client::wire;
+
         let base = RequestShape {
             model: "a-model".to_owned(),
+            tools: Vec::new(),
             messages: vec![
                 Message::new(Role::System, "the regimen"),
                 Message::new(Role::User, "turn one"),
@@ -452,14 +486,14 @@ mod tests {
         };
 
         assert_eq!(
-            base.prefix(),
-            next_turn.prefix(),
+            wire::head(&base),
+            wire::head(&next_turn),
             "the prefill the two share is byte-identical, which is the whole seam claim"
         );
-        assert!(base.prefix().contains("the regimen"));
+        assert!(wire::head(&base).contains("the regimen"));
         assert!(
-            !base.prefix().contains("turn one"),
-            "the turn itself is not part of the prefix it is appended to"
+            !wire::head(&base).contains("turn one"),
+            "the turn itself is not part of the head it is appended to"
         );
     }
 }

@@ -583,6 +583,7 @@ mod tests {
                 // is constructed.
                 reasoning_control: None,
                 chat_template_sha256: None,
+                cache_ttl: None,
             }],
             dogma_version: 1,
         }

@@ -1,0 +1,9 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on"}]},"source":{"kind":"live"}}
+{"record":"turn","index":1,"prefill_tokens":2100}
+{"record":"request","id":"q/1","lane":"main","substrate":"local","head_sha256":"1f2e3d4c5b6a79880f1e2d3c4b5a69780e1d2c3b4a5968770d1c2b3a49586776"}
+{"record":"response","id":"q/1#response","to_request":"q/1","output_tokens":12}
+{"record":"turn","index":2,"prefill_tokens":2100}
+{"record":"request","id":"q/2","lane":"main","substrate":"local","head_sha256":"3d4c5b6a79880f1e2d3c4b5a69780e1d2c3b4a5968770d1c2b3a495867766554"}
+{"record":"prefix.changed","id":"x/1","at_request":"q/2","reason":"tools","diff":[{"kind":"tool_moved","tool":"alpha","was":0,"now":2},{"kind":"tool_moved","tool":"gamma","was":2,"now":0}]}
+{"record":"response","id":"q/2#response","to_request":"q/2","output_tokens":15}
+{"record":"summary","kind":"drive","turns":2,"prefill_tokens_total":4200,"product_sha256":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}

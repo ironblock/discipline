@@ -527,6 +527,14 @@ impl Run {
             substrate: self.substrate.clone(),
             retry_of: None,
             text: Some(said),
+            // NOT HASHED, and that is the adapted state the field exists
+            // for. This log records what was SAID; the bytes the harness
+            // actually sent -- its system prompt, its tool definitions, the
+            // history it chose to resend -- are not in it. A digest computed
+            // from what is here would be a fingerprint of this adapter's
+            // reconstruction, which is the copied-from-the-wrong-place
+            // reading `request.head_sha256` exists to make impossible.
+            head_sha256: None,
         });
         Ok(())
     }

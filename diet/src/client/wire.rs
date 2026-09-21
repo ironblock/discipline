@@ -124,20 +124,23 @@ impl Error for WireError {}
 /// The request body for `shape`, rendered as JSON.
 ///
 /// Every pinned decimal appears as the digits that were pinned.
+///
+/// **IT STARTS FROM THE HEAD**, so the bytes [`head`] hashes are the bytes
+/// that go out. A second renderer here -- one that happened to agree today --
+/// would make `request.head_sha256` a digest of something nobody sent, which
+/// is the class of defect a fingerprint exists to close rather than open.
+/// `client::head::tests::the_head_is_the_bytes_the_body_starts_with` is the
+/// drift guard: it asserts `body(shape).starts_with(&head(shape))`.
 #[must_use]
 pub fn body(shape: &RequestShape) -> String {
-    let mut out = String::from("{\"model\":");
-    string(&shape.model, &mut out);
-    out.push_str(",\"messages\":[");
-    for (index, message) in shape.messages.iter().enumerate() {
-        if index > 0 {
+    let mut out = head(shape);
+    // The MUTABLE TAIL: the one message the head deliberately leaves out.
+    // `head` ends mid-array, so this closes it.
+    if let Some(last) = shape.messages.last() {
+        if shape.messages.len() > 1 {
             out.push(',');
         }
-        out.push_str("{\"role\":");
-        string(message.role.tag(), &mut out);
-        out.push_str(",\"content\":");
-        string(&message.content, &mut out);
-        out.push('}');
+        message(last, &mut out);
     }
     out.push(']');
 
@@ -159,12 +162,60 @@ pub fn body(shape: &RequestShape) -> String {
         string(grammar, &mut out);
     }
 
+    out.push('}');
+    out
+}
+
+/// The FROZEN HEAD of `shape`: everything a server can reuse from its cache.
+///
+/// The opening of [`body`], byte for byte, ending mid-array just before the
+/// mutable tail. What a request hashes into `request.head_sha256` is exactly
+/// this string, through [`crate::digest::sha256_hex`].
+///
+/// **What is in, and why each:**
+///
+/// * the **model**, because a different model is a different cache;
+/// * the **tool definitions, in declaration order**, because the order is
+///   what #79's MCP specimen moves;
+/// * the **chat-template arguments**, because on a server-side template they
+///   are the only thing a request carries about an effort level -- #79's
+///   third live-incident class is a level that rewrites the head, and a hash
+///   that excluded them would hash two different rendered heads alike and
+///   push a real mutation into the residual;
+/// * **every message but the last**, which is the prefix the seam controller
+///   claims stays byte-identical.
+///
+/// **What is out:** the sampler pins, the output cap, the grammar, and the
+/// last message. A temperature change is a regime change and not a prefix
+/// mutation; a server prefills the same bytes either way.
+#[must_use]
+pub fn head(shape: &RequestShape) -> String {
+    let mut out = String::from("{\"model\":");
+    string(&shape.model, &mut out);
+
+    // No key at all when nothing is declared -- the rule
+    // `chat_template_kwargs` follows just below, and for the same reason.
+    if !shape.tools.is_empty() {
+        out.push_str(",\"tools\":[");
+        for (index, tool) in shape.tools.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            out.push_str("{\"type\":\"function\",\"function\":{\"name\":");
+            string(&tool.name, &mut out);
+            out.push_str(",\"parameters\":");
+            crate::formats::record::json::render(&tool.schema, &mut out);
+            out.push_str("}}");
+        }
+        out.push(']');
+    }
+
     // THE TEMPLATE'S ARGUMENTS, not the sampler's, and they go in their own
     // object because that is where a chat template reads them from. Rendered
     // through the RECORD's renderer rather than spelled again here: a kwarg
     // is carried into the archive of the request that sent it, and two
     // renderings of one value space is the drift the hand-rendered sampler
-    // pins above already exist to avoid one level down.
+    // pins already exist to avoid one level down.
     //
     // No key at all when nothing is set. An empty `chat_template_kwargs` is
     // a field this program added to a request that had nothing to say with
@@ -177,8 +228,24 @@ pub fn body(shape: &RequestShape) -> String {
         );
     }
 
-    out.push('}');
+    out.push_str(",\"messages\":[");
+    let frozen = shape.messages.len().saturating_sub(1);
+    for (index, message_of_the_head) in shape.messages.iter().take(frozen).enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        message(message_of_the_head, &mut out);
+    }
     out
+}
+
+/// Append one message as the wire carries it.
+fn message(message: &super::shape::Message, out: &mut String) {
+    out.push_str("{\"role\":");
+    string(message.role.tag(), out);
+    out.push_str(",\"content\":");
+    string(&message.content, out);
+    out.push('}');
 }
 
 /// Append `text` as a JSON string literal.
@@ -363,6 +430,7 @@ mod tests {
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),
+            tools: Vec::new(),
         }
     }
 

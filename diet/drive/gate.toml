@@ -100,15 +100,9 @@ failure_class = "drive.the-record-keeps-no-payloads"
 target = "diet/src/drive/mod.rs"
 expect_exit = 101
 anchor = '''
-            Event::Request { id, text, .. } => {
-                if let Some(attempt) = call.attempts.iter().find(|a| &a.id == id) {
-                    *text = Some(wire::body(&attempt.sent));
-                }
-            }'''
+                    *text = Some(wire::body(&attempt.sent));'''
 becomes = '''
-            Event::Request { id, .. } => {
-                let _ = id;
-            }'''
+                    *text = None;'''
 catches = [
     "drive::tests::a_retried_call_archives_each_attempt_with_what_that_attempt_sent",
     "drive::tests::a_stripped_retry_archives_the_body_that_attempt_actually_sent",
@@ -122,14 +116,9 @@ failure_class = "drive.the-request-body-is-whichever-attempt-was-last"
 target = "diet/src/drive/mod.rs"
 expect_exit = 101
 anchor = '''
-                if let Some(attempt) = call.attempts.iter().find(|a| &a.id == id) {
-                    *text = Some(wire::body(&attempt.sent));
-                }'''
+call.attempts.iter().find(|a| &a.id == id)'''
 becomes = '''
-                let _ = id;
-                if let Some(attempt) = call.attempts.last() {
-                    *text = Some(wire::body(&attempt.sent));
-                }'''
+call.attempts.last()'''
 catches = [
     "drive::tests::a_stripped_retry_archives_the_body_that_attempt_actually_sent",
 ]

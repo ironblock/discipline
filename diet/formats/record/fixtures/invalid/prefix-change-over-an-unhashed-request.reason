@@ -1,0 +1,7 @@
+A `prefix.changed` naming a request that carries no `head_sha256`. A change is
+a difference between two digests, and this row names a request that has none.
+
+The record is `adapted`, which is the one source under which a request may go
+unhashed: a foreign harness's log records what was said, not the bytes that
+were sent. An adapter with no head to hash has no head change to report either,
+and this refusal is what stops it reporting one anyway.

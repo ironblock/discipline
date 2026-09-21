@@ -1,6 +1,6 @@
 {"source":{"kind":"live"},"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"sampler_card":{"seed":7},"reasoning":"on","hardware_fingerprint":"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532"}]}}
 {"record":"turn","index":1,"prefill_tokens":900}
-{"record":"request","id":"q1","lane":"main","substrate":"local","text":"Settle what supersede does, then say where that leaves the session."}
+{"record":"request","id":"q1","lane":"main","substrate":"local","text":"Settle what supersede does, then say where that leaves the session.","head_sha256":"68b6b1e97b7c245db8e2a54d956cd4e67bf4ab8abadfb50e42d50e0c45ab00f0"}
 {"record":"tool_call","id":"t1","at_turn":1,"tool":"bash","args":{"command":"grep -n 'fn supersede' diet/src/object.rs"},"exit":0,"output":"diet/src/object.rs:412: fn supersede"}
 {"record":"response","id":"a1","to_request":"q1","output_tokens":40,"text":"It voids the old entry and links the pair. That was the last open question."}
 {"record":"tool_call","id":"c1","at_turn":1,"tool":"update_record","args":{"content":"diet/src/object.rs:412: fn supersede","field":"evidence"},"exit":0,"output":"recorded: diet/src/object.rs:412: fn supersede"}

@@ -84,6 +84,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use crate::client::journal::{self, Unspellable};
 use crate::client::shape::{Message, RequestShape, Role};
@@ -237,6 +238,29 @@ pub enum Halt {
         /// for.
         reasoning_chars: usize,
     },
+    /// The head this drive was about to send carries a timestamp.
+    ///
+    /// **Refused before the call, not reported after it.** A rendered head
+    /// carrying a calendar date or a clock is a head that expires at
+    /// midnight: #79's first second-implementor specimen is exactly that, a
+    /// system prompt with the current date in it, invalidating every
+    /// session's prefix when local midnight passes -- found by a person
+    /// vowing to track down every miss. Volatile facts belong in the turn
+    /// envelope, in the mutable tail, where they cost one turn's prefill
+    /// rather than the whole prefix.
+    ///
+    /// The drive halts rather than warns because a warning is a thing a
+    /// harness prints past. Every number a run under a dated head produced
+    /// about prefix stability would be about the date.
+    HeadCarriesATimestamp {
+        /// The turn it was about to be sent in. Zero for the pre-turn
+        /// control, the spelling the other pre-turn refusals already use.
+        turn: u32,
+        /// The lane that was about to send it.
+        lane: String,
+        /// What was found, and where.
+        found: crate::client::head::Timestamped,
+    },
     /// The record this drive built is not a record.
     ///
     /// The one variant that is a defect in this module rather than a fact
@@ -301,6 +325,15 @@ impl fmt::Display for Halt {
                  `--jinja`, or something between here and the template is dropping what \
                  it does not recognise. Nothing this drive could bank about a reasoning \
                  state would be about the state it set"
+            ),
+            Self::HeadCarriesATimestamp { turn, lane, found } => write!(
+                f,
+                "turn {turn}: the `{lane}` lane's rendered head carries `{}` in {}, and a \
+                 head carrying a timestamp is a head that expires at midnight -- every \
+                 session's prefix goes cold when the date rolls over, for a reason no \
+                 cache census could name. A volatile fact belongs in the turn envelope, \
+                 in the mutable tail",
+                found.found, found.site
             ),
             Self::Unrecordable { why } => write!(
                 f,
@@ -452,6 +485,19 @@ pub struct Drive {
     /// grammar is not built, so every one of these is an ask put and an
     /// answer kept and not folded.
     pub audits: Vec<Audit>,
+    /// What this run's calls came to, as far as the substrate's cache is
+    /// concerned: hits, and misses in three registers.
+    ///
+    /// **Beside the record rather than in it, and the split is exact.**
+    /// `mutation` is re-derivable from the file alone -- every `request` row
+    /// carries `head_sha256` and every head that moved has a `prefix.changed`
+    /// row -- so nobody has to take this field's word for it. `expected`
+    /// cannot be: it needs an inter-call gap, record v0 carries no clock, and
+    /// inventing a timestamp field here would be #82's territory settled by
+    /// whoever needed it first. The gap is measured with an
+    /// [`std::time::Instant`] taken immediately before each call, so the
+    /// record stays byte-identical run to run while this number does not.
+    pub cache: crate::client::cache::Census,
 }
 
 /// The ratifier a drive uses: it puts the seam's ask to the substrate.
@@ -591,6 +637,86 @@ fn fold(
     Ok((patches, census))
 }
 
+/// What the drive keeps about the heads it sends, across the whole run.
+///
+/// One value rather than five locals threaded through [`archive`], because
+/// the three questions it answers are one question asked three ways: what
+/// head did this lane last send, how long ago did this lane last call, and
+/// what did the server say about its cache when it did. A `prefix.changed`
+/// row and a cache-miss register are two readings of the same measurement.
+struct Heads {
+    /// The last head each lane sent, so a change is noticed as it happens.
+    watch: crate::client::head::Watch,
+    /// Identifiers for the `prefix.changed` rows, derived like every other
+    /// id this drive writes: a random one would make two replays of one
+    /// drive differ in bytes that mean nothing.
+    ids: IdSource,
+    /// When each lane last called.
+    ///
+    /// An [`Instant`] rather than a wall clock: the census needs a DURATION
+    /// between two calls, and a monotonic one cannot be moved by an NTP step
+    /// in the middle of a drive. It also never reaches the record, which is
+    /// what keeps two replays of one drive byte-identical.
+    called: BTreeMap<String, Instant>,
+    /// The gap before the call currently being archived.
+    gap: Option<Duration>,
+    /// One per answered call.
+    observations: Vec<crate::client::cache::Observation>,
+}
+
+impl Heads {
+    fn new() -> Self {
+        Self {
+            watch: crate::client::head::Watch::new(),
+            // `x` for the prefix-change rows, beside `q`, `i`, `t`, `p`, `s`
+            // and `c`. One letter per kind of row, so a reader of the record
+            // can tell what an id names without looking it up.
+            ids: IdSource::new("x"),
+            called: BTreeMap::new(),
+            gap: None,
+            observations: Vec::new(),
+        }
+    }
+
+    /// Start the clock for a call about to be made on `lane`.
+    ///
+    /// TAKEN IMMEDIATELY BEFORE THE CALL, not after the answer: the question
+    /// a TTL answers is how long the server's cache sat idle, which is the
+    /// gap between the two REQUESTS. Measuring from the previous answer would
+    /// shorten every gap by however long that answer took to generate, and
+    /// would shorten it most on exactly the slow calls where a lifetime is
+    /// most likely to have run out.
+    fn about_to_call(&mut self, lane: &str) {
+        let now = Instant::now();
+        self.gap = self
+            .called
+            .insert(lane.to_owned(), now)
+            .map(|before| now.duration_since(before));
+    }
+}
+
+/// The head `shape` would send, refused if it carries a timestamp.
+///
+/// # Errors
+///
+/// [`Halt::HeadCarriesATimestamp`] for a head carrying a calendar date or a
+/// clock. See that variant for why this is a refusal rather than a warning.
+fn linted_head(
+    shape: &RequestShape,
+    turn: u32,
+    lane: &str,
+) -> Result<crate::client::head::Head, Halt> {
+    let head = crate::client::head::Head::of(shape);
+    if let Some(found) = head.timestamp() {
+        return Err(Halt::HeadCarriesATimestamp {
+            turn,
+            lane: lane.to_owned(),
+            found,
+        });
+    }
+    Ok(head)
+}
+
 /// Run `script` in `gym`.
 ///
 /// # Errors
@@ -645,6 +771,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
     let mut seams: Vec<Seam> = Vec::new();
     let mut prefill_total = Count::default();
 
+    let mut heads = Heads::new();
     let mut main_ids = IdSource::new("q");
     let mut fork_ids = IdSource::new("i");
     let mut tool_ids = IdSource::new("t");
@@ -681,6 +808,11 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         asking
             .template_kwargs
             .insert(ENABLE_THINKING.to_owned(), Value::Boolean(false));
+        // Linted before the bytes go out, like every other call this
+        // function makes. Turn zero, which is not a turn: this happens
+        // before the session begins.
+        linted_head(&asking, 0, CONTROL)?;
+        heads.about_to_call(CONTROL);
         let call = gym.client.call(&asking, CONTROL, &mut control_ids);
         let Some(answered) = call.outcome.answer() else {
             // Turn zero, which is not a turn: this happened before the
@@ -718,7 +850,14 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         }
         // Archived like every other call. A control whose evidence is not in
         // the record is a control a later reader has to take on trust.
-        archive(&call, 0, &substrate, &mut events, &mut unspellable)?;
+        archive(
+            &call,
+            0,
+            &substrate,
+            &mut events,
+            &mut unspellable,
+            &mut heads,
+        )?;
     }
 
     for turn in &script.turns {
@@ -737,6 +876,15 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 content: turn.ask.clone(),
             },
         ];
+        // THE LINT, before the call. The main lane is the one whose head
+        // carries anything: every other lane this drive opens sends a single
+        // user message, which is the mutable tail, so its head is the model
+        // line and an empty array -- which is why
+        // `the_reference_regimens_own_rendered_head_carries_no_timestamp`
+        // asks this question of a main-lane shape built from the real
+        // regimen rather than of an invented one.
+        linted_head(&shape, index, MAIN)?;
+        heads.about_to_call(MAIN);
         let call = gym.client.call(&shape, MAIN, &mut main_ids);
         let Some(answer) = call.outcome.answer() else {
             return Err(Halt::NoAnswer {
@@ -757,7 +905,14 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             prefill_tokens: prefill,
         });
         prefill_total = prefill_total.saturating_add(prefill);
-        archive(&call, index, &substrate, &mut events, &mut unspellable)?;
+        archive(
+            &call,
+            index,
+            &substrate,
+            &mut events,
+            &mut unspellable,
+            &mut heads,
+        )?;
 
         // The commands. Each is a tool call, run under the confinement, with
         // its exit status and output as the row says.
@@ -789,6 +944,8 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 role: Role::User,
                 content: question.clone(),
             }];
+            linted_head(&asking, index, INTERVIEW)?;
+            heads.about_to_call(INTERVIEW);
             let forked = gym.client.call(&asking, INTERVIEW, &mut fork_ids);
             let Some(reply) = forked.outcome.answer() else {
                 return Err(Halt::NoAnswer {
@@ -825,7 +982,14 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 substrate: substrate.clone(),
                 of_turn: index,
             });
-            archive(&forked, index, &substrate, &mut events, &mut unspellable)?;
+            archive(
+                &forked,
+                index,
+                &substrate,
+                &mut events,
+                &mut unspellable,
+                &mut heads,
+            )?;
 
             let (patches, census) =
                 fold(&text, index, INTERVIEW, Some(&fork_id)).map_err(|why| Halt::Unreadable {
@@ -921,7 +1085,14 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                     outcome: Box::new(one.outcome.clone()),
                 });
             }
-            archive(one, index, &substrate, &mut events, &mut unspellable)?;
+            archive(
+                one,
+                index,
+                &substrate,
+                &mut events,
+                &mut unspellable,
+                &mut heads,
+            )?;
         }
         if let Some(seam) = settled {
             // No `unwrap_or_default()`. A render this module could not
@@ -973,6 +1144,10 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         crate::formats::record::parse(&rendered).map_err(|why: ParseError| Halt::Unrecordable {
             why: format!("{why:?}"),
         })?;
+    // Read out of the regime the RECORD declares -- the one that was written
+    // down and read back -- rather than out of the script, so that this
+    // census and a later reader of the same file apply one set of lifetimes.
+    let cache = crate::client::cache::Census::of(record.regime(), &heads.observations);
 
     Ok(Drive {
         record,
@@ -982,6 +1157,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         unspellable,
         uncaptured,
         audits: controller.ratifier().audits.clone(),
+        cache,
     })
 }
 
@@ -994,12 +1170,18 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
 /// what a drive is supposed to leave behind, so the texts are filled here --
 /// from the attempt's own `sent` shape and the answer that named the attempt
 /// that produced it, never from "the last one", which retries make wrong.
+/// It is also where a head that moved becomes a row. The `prefix.changed`
+/// goes in IMMEDIATELY AFTER the `request` it names, because every link in a
+/// record resolves backwards: a row naming a request that has not been
+/// written yet is a lineage nobody can walk while the record is being
+/// written, which is the only time anyone would want to walk it.
 fn archive(
     call: &crate::client::Call,
     turn: u32,
     substrate: &str,
     events: &mut Vec<Event>,
     unspellable: &mut Vec<Unspellable>,
+    heads: &mut Heads,
 ) -> Result<(), Halt> {
     // `response.output_tokens` is required and zero is a measurement, and
     // this is where that rule is enforced for EVERY lane. The module header
@@ -1020,11 +1202,26 @@ fn archive(
     }
     let projected = journal::project(&call.journal, substrate);
     let answered = call.outcome.answer();
+    let mut head_changed = false;
     for mut event in projected.events {
+        let mut changed_at: Option<(String, crate::client::head::Change)> = None;
         match &mut event {
             Event::Request { id, text, .. } => {
                 if let Some(attempt) = call.attempts.iter().find(|a| &a.id == id) {
                     *text = Some(wire::body(&attempt.sent));
+                    // THROUGH `Head::of`, the same function the journal's own
+                    // entry went through, over the same `sent` shape. Not a
+                    // second rendering: the digest on the row beside this one
+                    // came from that entry, and a diff computed from
+                    // different bytes would attribute a mutation the record
+                    // does not show.
+                    if let Some(change) = heads
+                        .watch
+                        .observe(&call.lane, crate::client::head::Head::of(&attempt.sent))
+                    {
+                        head_changed = true;
+                        changed_at = Some((id.clone(), change));
+                    }
                 }
             }
             Event::Response { text, .. } => {
@@ -1046,11 +1243,33 @@ fn archive(
             _ => {}
         }
         events.push(event);
+        if let Some((at_request, change)) = changed_at {
+            events.push(change.event(heads.ids.take(), at_request));
+        }
     }
     for lost in projected.unspellable {
         if !unspellable.contains(&lost) {
             unspellable.push(lost);
         }
+    }
+    // ONE OBSERVATION PER ANSWERED CALL, not per attempt. A retry is more
+    // requests and one answer, and the cache telemetry this reads is on the
+    // answer: counting each attempt would count a call that eventually
+    // answered as several misses.
+    if let Some(answer) = answered {
+        heads.observations.push(crate::client::cache::Observation {
+            lane: call.lane.clone(),
+            substrate: substrate.to_owned(),
+            head_changed,
+            since_previous: heads.gap,
+            prompt_tokens: answer.cache.prompt_tokens,
+            cached_tokens: answer.cache.cached_tokens,
+            // Whether the DIALECT declared anywhere to read the reused count
+            // from. Without it, a server that reported nothing and a client
+            // that never asked are the same empty field, and only one of them
+            // is a miss.
+            measured: answer.cache.cached_path.is_some(),
+        });
     }
     Ok(())
 }
@@ -1155,6 +1374,7 @@ mod tests {
                 // does.
                 reasoning_control: None,
                 chat_template_sha256: None,
+                cache_ttl: None,
             }],
             dogma_version: 0,
         }
@@ -1178,6 +1398,7 @@ mod tests {
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),
+            tools: Vec::new(),
         }
     }
 
