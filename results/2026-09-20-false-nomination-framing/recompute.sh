@@ -84,9 +84,11 @@ for where, stated in (("front-matter", front["product_sha256"]), ("the summary r
 #      here over the advisory framing and over both framings, because the
 #      ruling's text does not say which arm "false nominations" spans and its
 #      gloss ("the floor prediction fails") points at advisory; the arm word
-#      is asked on the thread. `[ruling].sham_reading` in decision-rule.toml
-#      names the reading the verdict word is under (A until the ruling is
-#      ratified); the [rule] table stays byte-identical to the ratified text.
+#      was asked on the thread and RATIFIED 2026-09-21: D is per framing --
+#      the clause fires when any framing's largest rate over rungs fails to
+#      clear the sham's by the margin (the floor is conjunctive over framings).
+#      `[ruling].sham_reading` in decision-rule.toml names the reading the
+#      verdict word is under; the [rule] table stays byte-identical.
 #   3. "p below the attainable floor": the paired sign test is the pre-registered
 #      comparison, one per rung, ONE-SIDED toward advisory changing less,
 #      uncorrected (ruled on #17 for a named comparison); a p can sit at the
@@ -281,9 +283,16 @@ def adjudicate(report, rule):
         rate_, r, a = top
         return {"largest_rate": rate_, "rung": rungs[r]["nominal"], "arm": a, "sham_rate_there": rungs[r]["changed_rate"]["sham"],
                 "excess_over_sham": round(rate_ - rungs[r]["changed_rate"]["sham"], 4), "fires": (rate_ - rungs[r]["changed_rate"]["sham"]) < small}
-    d_adv, d_both = reading_d(("advisory",)), reading_d(("advisory", "imperative"))
+    d_adv, d_imp, d_both = reading_d(("advisory",)), reading_d(("imperative",)), reading_d(("advisory", "imperative"))
+    # (D) as ratified (PR #101, 2026-09-21): the ruling equates the clause with
+    # the floor prediction failing, and the floor is stated over BOTH framings
+    # conjunctively, so the clause fires when ANY framing's largest rate over
+    # rungs fails to exceed the sham's by the margin. D-both (the larger of the
+    # two arms' rates) read "both" as a disjunction and is withdrawn, kept
+    # beside only as the misconstruction it was.
+    d_fires = d_adv["fires"] or d_imp["fires"]
     reading_a = no_better_than_sham
-    fires = {"A": reading_a, "B": reading_b, "C": reading_c, "D-advisory": d_adv["fires"], "D-both": d_both["fires"]}
+    fires = {"A": reading_a, "B": reading_b, "C": reading_c, "D": d_fires, "D-advisory": d_adv["fires"], "D-both": d_both["fires"]}
     ruling = rule.get("ruling", {})  # the maintainer's rulings after the run, in their own table; [rule] stays byte-identical
     applied = ruling.get("sham_reading", "A")
     if applied not in fires:
@@ -323,6 +332,7 @@ def adjudicate(report, rule):
             "maximum_difference": {"A": "advisory's advantage (imperative minus advisory) at the rung where it is largest, against the sham's advantage (imperative minus sham) on that rung",
                                    "B": "the same advantage against the sham's largest advantage over rungs",
                                    "C": "the largest over rungs of advisory's excess over the sham on the same rung",
+                                   "D": "per framing, the largest changed-turn rate over rungs against the sham's rate on that rung; fires when any framing fails to exceed it by the margin",
                                    "D-advisory": "the largest advisory changed-turn rate over rungs against the sham's rate on that rung",
                                    "D-both": "the largest changed-turn rate under either framing over rungs against the sham's rate on that rung"}[applied],
             "p_below_floor": "the paired sign test, one per rung, uncorrected; holds when p equals its attainable floor",
@@ -345,9 +355,11 @@ def adjudicate(report, rule):
             "B": "the sham's own maximum advantage over all rungs", "B_sham_max": sham_max, "B_fires": reading_b,
             "C": "the maximum over rungs of advisory's excess over the sham on the same rung", "C_excess_by_rung": excess, "C_max_excess": max_excess, "C_fires": reading_c,
             "D": "the largest changed-turn rate on false nominations over rungs, against the sham arm's changed-turn rate on that rung (ruled on PR #101; the arm the largest rate is taken over is asked on the thread)",
-            "D_advisory": d_adv, "D_both": d_both,
+            "D_advisory": d_adv, "D_imperative": d_imp, "D_fires": d_fires,
+            "D_ratified": "per framing: fires when any framing's largest changed-turn rate over rungs fails to exceed the sham's rate on that rung by the margin (the floor prediction is conjunctive over framings, so its failure is existential); ratified by the maintainer on PR #101, 2026-09-21",
+            "D_both": d_both, "D_both_status": "withdrawn: read 'both framings' as the larger of the two arms' rates, a disjunction the ratified floor text is not; kept as the misconstruction it was, read by nothing",
             "verdict_under": {k: word(v) for k, v in fires.items()},
-            "note": "none of A, B, C was posted before the run; the ruling (relayed on PR #101) binds the sham's to the floor as a rate, reading D, which is neither A nor B; the verdict word is under rule.sham_reading",
+            "note": "none of A, B, C was posted before the run; the ruling (relayed on PR #101) binds the sham's to the floor as a rate, reading D, which is neither A nor B; D's per-framing form was ratified 2026-09-21; the verdict word is under rule.sham_reading",
         },
         "secondary_sign_tests": {"named": key, "named_p_uncorrected": at["sign_test"]["p"] if at and at["sign_test"] else None,
                                  "correction": "Holm over the other computable rungs", "by_rung": secondary_tests, "counted_toward_verdict": False},

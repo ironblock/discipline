@@ -1193,7 +1193,7 @@
   "readings": {
    "attainability": "a margin is attainable on a rung iff 1/n_graded <= margin; the supported clause is asked only where attainable",
    "every_rung": "quantifies over computable rungs (ten or more false nominations graded); none computable is unadjudicated",
-   "maximum_difference": "advisory's advantage (imperative minus advisory) at the rung where it is largest, against the sham's advantage (imperative minus sham) on that rung",
+   "maximum_difference": "per framing, the largest changed-turn rate over rungs against the sham's rate on that rung; fires when any framing fails to exceed it by the margin",
    "p_below_floor": "the paired sign test, one per rung, uncorrected; holds when p equals its attainable floor",
    "sham_clause": "(advisory - sham) < (imperative - sham) on the adjudicated rung"
   },
@@ -1211,16 +1211,18 @@
    "max_advisory_advantage": 0.24999999999999994,
    "no_better_than_sham": true,
    "sham_advantage_at_best_rung": 0.24999999999999994,
-   "under_reading": "A"
+   "under_reading": "D"
   },
   "rule": {
    "inconclusive": "otherwise",
    "refuted": "at every rung the advisory rate is not lower than imperative by >= 0.05, or the maximum difference over all rungs does not exceed the sham's by >= 0.05 -- either alone",
    "rung": 0.6,
-   "sham_reading": "A",
-   "status": "decision 0 ruled as reading D, arm word pending ratification; decision 6 returned for re-ruling (the ruling read the acknowledgement endpoint, the disclosure is about the ratified turn-change endpoint)",
+   "sham_reading": "D",
+   "status": "decisions 0-8 ruled; 0 (framing form), 6 and 8 by the maintainer directly on 2026-09-21, quoted on PR #101",
    "supported": "at the 0.6 rung, the changed-turn rate on false nominations is lower under advisory than imperative by >= 0.15 with the paired sign-test p below the attainable floor for the fork count, and advisory exceeds the sham by less than imperative does",
-   "v2_wording": "at every rung the advisory rate is not lower than imperative by >= 0.05, or the largest changed-turn rate on false nominations under advisory, over all rungs, does not exceed the sham arm's changed-turn rate on that rung by >= 0.05 -- either alone"
+   "v1_wording": "at every rung the advisory rate is not lower than imperative by >= 0.05, or the maximum difference over all rungs does not exceed the sham's by >= 0.05 -- either alone",
+   "v2_wording": "at every rung the advisory rate is not lower than imperative by >= 0.05, or, for either framing, the largest changed-turn rate on false nominations over all rungs does not exceed the sham arm's changed-turn rate by >= 0.05 -- either alone",
+   "version": "v2"
   },
   "secondary_sign_tests": {
    "by_rung": {
@@ -1289,12 +1291,24 @@
     "rung": 0.0556,
     "sham_rate_there": 0.32
    },
-   "applied": "A",
-   "note": "none of A, B, C was posted before the run; the ruling (relayed on PR #101) binds the sham's to the floor as a rate, reading D, which is neither A nor B; the verdict word is under rule.sham_reading",
+   "D_both_status": "withdrawn: read 'both framings' as the larger of the two arms' rates, a disjunction the ratified floor text is not; kept as the misconstruction it was, read by nothing",
+   "D_fires": true,
+   "D_imperative": {
+    "arm": "imperative",
+    "excess_over_sham": 0.25,
+    "fires": false,
+    "largest_rate": 0.57,
+    "rung": 0.0556,
+    "sham_rate_there": 0.32
+   },
+   "D_ratified": "per framing: fires when any framing's largest changed-turn rate over rungs fails to exceed the sham's rate on that rung by the margin (the floor prediction is conjunctive over framings, so its failure is existential); ratified by the maintainer on PR #101, 2026-09-21",
+   "applied": "D",
+   "note": "none of A, B, C was posted before the run; the ruling (relayed on PR #101) binds the sham's to the floor as a rate, reading D, which is neither A nor B; D's per-framing form was ratified 2026-09-21; the verdict word is under rule.sham_reading",
    "verdict_under": {
     "A": "refuted",
     "B": "refuted",
     "C": "inconclusive",
+    "D": "refuted",
     "D-advisory": "refuted",
     "D-both": "inconclusive"
    }

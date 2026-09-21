@@ -40,17 +40,21 @@ p_reading = "the paired sign test is one comparison per rung, uncorrected, as ru
 # Decision 0 (PR #101): "the sham's" binds to the floor as a RATE -- the
 # largest changed-turn rate on false nominations over rungs against the sham
 # arm's changed-turn rate -- reading D on the verdict, neither A nor B, C
-# rejected. The ruling's text does not say which framing the largest rate is
-# taken over; its gloss points at advisory. The arm word is asked on the
-# thread, so the verdict word stays under the applier's reading A (which
-# agrees with B and with D over advisory) until ratified.
-sham_reading = "A"
-status = "decision 0 ruled as reading D, arm word pending ratification; decision 6 returned for re-ruling (the ruling read the acknowledgement endpoint, the disclosure is about the ratified turn-change endpoint)"
-v2_wording = "at every rung the advisory rate is not lower than imperative by >= 0.05, or the largest changed-turn rate on false nominations under advisory, over all rungs, does not exceed the sham arm's changed-turn rate on that rung by >= 0.05 -- either alone"
-v2_wording_status = "the applier's reading of the ruling's own v2 phrase ('...does not exceed the sham arm's changed-turn rate by >= 0.05'), posted for ratification on PR #101; not yet applied"
+# rejected. Ratified by the maintainer 2026-09-21 in its per-framing form: the
+# ruling equates the clause with the floor prediction failing, and the floor
+# is stated over both framings conjunctively, so the clause fires when any
+# framing's largest rate over rungs fails to exceed the sham's by the margin.
+sham_reading = "D"
+version = "v2"
+v1_wording = "at every rung the advisory rate is not lower than imperative by >= 0.05, or the maximum difference over all rungs does not exceed the sham's by >= 0.05 -- either alone"
+v2_wording = "at every rung the advisory rate is not lower than imperative by >= 0.05, or, for either framing, the largest changed-turn rate on false nominations over all rungs does not exceed the sham arm's changed-turn rate by >= 0.05 -- either alone"
+v2_wording_source = "the ruling's own phrase, '...does not exceed the sham arm's changed-turn rate by >= 0.05', with the framing quantifier the ruling's floor logic supplies; ratified on PR #101, 2026-09-21"
+status = "decisions 0-8 ruled; 0 (framing form), 6 and 8 by the maintainer directly on 2026-09-21, quoted on PR #101"
 decision_1 = "ladder degenerate: rung claims unadjudicated, labelled on the verdict; (b)-v2 authorized beside this run"
 decision_2 = "batch 22 re-judged by a fresh instance; the void verdicts kept, read by nothing"
 decision_3 = "the named comparison's paired p uncorrected against the attainable floor; the other rungs' sign tests Holm-corrected beside, read by nothing"
 decision_4 = "home-prefix collapse accepted as done"
 decision_5 = "the shuffled-framing null labelled post-hoc, counted toward nothing"
+decision_6 = "the (tool, target) turn-change grader, fixed and posted before the first fork, adjudicates the ratified claim; the ratified text's third arm (an edit to the entry named) is unmeasured, a named defect, and a requirement of (b)-v2's pre-registration; revisitable"
 decision_7 = "grading order disclosed as run; v2 grades a sample in both orders"
+decision_8 = "the re-judge of batch 22 on claude-opus-5 stands as declared, a regime factor of that batch's 36 secondary rows; blind batch judges default to Sonnet from here, declared per batch"
