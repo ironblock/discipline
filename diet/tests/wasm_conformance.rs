@@ -410,13 +410,67 @@ fn the_seeded_host_call_trap_actually_fails_the_job() {
     );
 }
 
+/// Every file under `dir`, walked recursively, as paths relative to `dir`
+/// and sorted. Not assumed flat: `wasm-bindgen --target nodejs` writes a
+/// `snippets/<hash>/...` subdirectory whenever a binding uses `inline_js`
+/// or a local JS module -- not true of this crate's bindings today, but a
+/// listing that only saw top-level entries would let a future nested file
+/// go uncompared, or crash trying to `read` a directory as if it were one.
+fn relative_files(dir: &Path) -> Vec<PathBuf> {
+    fn walk(dir: &Path, prefix: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir)
+            .unwrap_or_else(|err| panic!("cannot read {}: {err}", dir.display()))
+        {
+            let entry = entry.expect("a readable directory yields readable entries");
+            let relative = prefix.join(entry.file_name());
+            let file_type = entry
+                .file_type()
+                .unwrap_or_else(|err| panic!("cannot stat {}: {err}", entry.path().display()));
+            if file_type.is_dir() {
+                walk(&entry.path(), &relative, out);
+            } else {
+                out.push(relative);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, Path::new(""), &mut out);
+    out.sort();
+    out
+}
+
+/// `relative_files` itself, against a manufactured nested tree -- the exact
+/// shape (`snippets/<hash>/...`) a fresh-instance review of this test found
+/// its earlier, non-recursive directory listing would either crash on or
+/// silently fail to compare, and that this crate's own bindings do not
+/// happen to produce today.
+#[test]
+fn relative_files_walks_into_subdirectories() {
+    let root = target_dir().join("relative-files-selftest");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("snippets/abc123"))
+        .unwrap_or_else(|err| panic!("cannot create {}: {err}", root.display()));
+    std::fs::write(root.join("diet.js"), b"top-level").unwrap();
+    std::fs::write(root.join("snippets/abc123/inline.js"), b"nested").unwrap();
+
+    assert_eq!(
+        relative_files(&root),
+        vec![
+            PathBuf::from("diet.js"),
+            PathBuf::from("snippets/abc123/inline.js"),
+        ],
+        "the walk must find the top-level file AND the one nested under snippets/"
+    );
+}
+
 /// Row 3: `wasm-bindgen --target nodejs`, invoked twice from two different
 /// working directories against the same `.wasm` artifact, produces
-/// byte-identical output. Compares every file the generator writes, named
-/// by directory listing rather than a guessed set, so a future
-/// `wasm-bindgen` version adding or renaming an output file is caught by
-/// this test noticing the two listings still match each other -- not by a
-/// hardcoded filename silently going unchecked.
+/// byte-identical output. Compares every file the generator writes,
+/// including nested ones, named by a recursive directory walk rather than a
+/// guessed set, so a future `wasm-bindgen` version adding, renaming, or
+/// nesting an output file is caught by this test noticing the two listings
+/// still match each other -- not by a hardcoded, non-recursive shape
+/// silently going uncompared.
 #[test]
 fn ts_bindings_are_byte_identical_from_two_different_working_directories() {
     let wasm_artifact = plain_wasm_artifact();
@@ -434,22 +488,8 @@ fn ts_bindings_are_byte_identical_from_two_different_working_directories() {
     bind_nodejs(wasm_artifact, &out_a, &cwd_a);
     bind_nodejs(wasm_artifact, &out_b, &cwd_b);
 
-    let names = |dir: &Path| -> Vec<String> {
-        let mut names: Vec<String> = std::fs::read_dir(dir)
-            .unwrap_or_else(|err| panic!("cannot read {}: {err}", dir.display()))
-            .map(|entry| {
-                entry
-                    .expect("a readable directory yields readable entries")
-                    .file_name()
-                    .to_string_lossy()
-                    .into_owned()
-            })
-            .collect();
-        names.sort();
-        names
-    };
-    let names_a = names(&out_a);
-    let names_b = names(&out_b);
+    let names_a = relative_files(&out_a);
+    let names_b = relative_files(&out_b);
     assert_eq!(
         names_a, names_b,
         "wasm-bindgen wrote a different set of files depending on cwd"
@@ -463,7 +503,7 @@ fn ts_bindings_are_byte_identical_from_two_different_working_directories() {
         let bytes_b = std::fs::read(out_b.join(name))
             .unwrap_or_else(|err| panic!("cannot read {}: {err}", out_b.join(name).display()));
         if bytes_a != bytes_b {
-            mismatches.push(name.clone());
+            mismatches.push(name.display().to_string());
         }
     }
     assert!(
