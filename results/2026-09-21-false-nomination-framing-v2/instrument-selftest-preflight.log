@@ -1,0 +1,46 @@
+  [ok] extractor takes the last shell block
+  [ok] extractor yields no command when a non-shell fence precedes the shell one (as measured)
+  [ok] extractor reads no block as no command
+  [ok] different tool reads changed
+  [ok] different target reads changed
+  [ok] same tool and target with other flags reads unchanged
+  [ok] command against no command reads changed
+  [ok] no command against no command reads unchanged
+  [ok] fixture: the grader reads every differing pair as changed
+  [ok] sham has the advisory line's length and comes from another drive
+  [ok] sign test on eight forks all in the good direction is at its floor
+  [ok] sign test with no discordant pair is p = 1
+  [ok] Holm: smallest p times m, then monotone
+  [ok] reading D over advisory fires when advisory sits at the sham
+  [ok] reading D over both framings does not fire when imperative is above the sham
+  [ok] the verdict word follows [ruling].sham_reading
+  [ok] the ratified D fires when either framing sits at the sham
+  [ok] a degenerate ladder is labelled and its rung claims unadjudicated
+  [ok] an unknown sham_reading is refused, not defaulted
+  [ok] v2 composite: an edit alone reads changed
+  [ok] v2 composite: no edit and same (tool, target) reads unchanged
+  [ok] v2 composite: an unjudged edit is ungradable, not unchanged
+  [ok] v2 composite: an errored row is ungradable
+  [ok] v2 composite: a changed (tool, target) reads changed whatever the edit
+  [ok] v2 scorer: keyed controls exit 0
+  [ok] v2 scorer: a control miss on verdict is exit 1 (void)
+  [ok] v2 scorer: a control miss on edit is exit 1 (void)
+  [ok] v2 scorer: a verdict without the edit field is exit 2 (malformed)
+  [ok] v2 scorer: ids out of order is exit 2
+  [ok] v2 scorer: a batch without a control is exit 2
+  [ok] v2 sample: forced forks are in the sample and the size holds
+  [ok] v2 sample: only the forced forks can draw a true nomination
+  [ok] v2 sample: a forced fork outside headroom is refused
+  [ok] v2 judge ids: a control's id is opaque and batch-specific, not its name
+  [ok] v2 collapse: an invented home prefix collapses to ~
+  [ok] v2 applier: supported when advisory is 0.15 lower, p <= 0.01 askable, and clears the sham by more than imperative's shortfall
+  [ok] v2 applier: not supported when p > 0.01 though the margin holds
+  [ok] v2 applier: unadjudicated when the p floor is above 0.01 (too few discordant forks)
+  [ok] v2 applier: D fires when advisory sits at the sham though imperative is above it
+  [ok] v2 applier: D fires when imperative sits at the sham though advisory is above it
+  [ok] v2 applier: every-rung clause fires when advisory is not lower by 0.05
+  [ok] v2 applier: a failed null control makes a supported word inconclusive
+  [ok] v2 applier: the ladder is labelled nominal and its rung claims unadjudicated
+  [ok] v2 applier: refuses a rule that is not version v2
+  [ok] v2 applier: refuted beats supported when both clauses hold (the floor is asked first)
+selftest: ok
