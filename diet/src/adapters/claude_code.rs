@@ -91,6 +91,32 @@
 //! An adapted record is still **lossy by declaration** -- content inside a
 //! mapped row that this schema has no home for does not survive -- but an
 //! unmapped ROW does, typed as what it is: unread.
+//!
+//! # `isSidechain` and `isMeta`: read, because the harness declared them
+//!
+//! The "does not second-guess" rule above is about CONTENT -- the adapter
+//! will not decide that a `user` row's text is not really a person's because
+//! of what the text says. `isSidechain` and `isMeta` are not content: they
+//! are booleans the harness itself writes on the row, the same category as
+//! `is_error` on a `tool_result`. Reading them is not a guess.
+//!
+//! A row carrying `isSidechain: true` is a subagent's own exchange, logged
+//! inline with the session that spawned it; one carrying `isMeta: true` is
+//! text the harness composed rather than a person -- a resumption prompt, a
+//! hook's feedback, some (not all) slash-command envelopes. Left unread, both
+//! open a turn the census reports as the top-level session's own turn, which
+//! is [#76]'s known defects 1 and 2. Either flag routes the row to
+//! [`Census::no_event`] instead: mapped, because the kind is one this adapter
+//! knows, and silent, because it is not this session's turn to count.
+//!
+//! **`isMeta` is not a complete fix for defect 2.** Checked against this
+//! adapter's own reference log (see the reading above): of seven rows
+//! carrying a `<command-name>` envelope, only three carry `isMeta: true`. The
+//! harness does not tag every synthetic row it composes, and the remaining
+//! four are turns still, exactly the defect this paragraph is not closing.
+//! Text-sniffing `<command-name>` to catch the rest would be the content
+//! guess this module refuses to make. What is fixed is real: every row the
+//! harness DOES declare synthetic is no longer misattributed.
 
 use std::collections::BTreeMap;
 
@@ -341,10 +367,75 @@ impl Run {
             return Ok(());
         };
         self.census.mapped_one(kind);
+        // Declared, not guessed: `isSidechain`/`isMeta` are booleans the
+        // harness writes on the row, not a reading of what the row says. A
+        // row either flag names is mapped -- the kind is one this adapter
+        // knows -- and silent, because it is a subagent's own exchange or
+        // text the harness composed, never the top-level session's turn.
+        if let Some(why) = excluded_from_parent(row) {
+            self.census.no_event_one(&format!("{}/{why}", mapped.tag()));
+            return Ok(());
+        }
+        let before_events = self.events.len();
+        let before_turn = self.turn;
         match mapped {
             Row::User => self.user(at_row, row, rest),
             Row::Assistant => self.assistant(at_row, row),
         }
+        .or_else(|drift| {
+            self.unrepresentable_row(at_row, raw, kind, before_events, before_turn, drift)
+        })
+    }
+
+    /// #76 known defect 4, ruled: a mapped row whose OWN content the record's
+    /// value space cannot hold becomes an [`Event::Unknown`] row rather than
+    /// refusing the whole log -- the "counted and carried on from" treatment
+    /// ruling 1 gave an unmapped KIND, extended to a mapped kind whose
+    /// content did not fit. Format drift (a renamed or absent field) still
+    /// refuses: that is a claim the schema itself moved, which puts every
+    /// row already read in doubt, not only this one.
+    ///
+    /// Scoped to `drift`'s own `at_row` matching THIS row: the prefill
+    /// lookahead raises `Unrepresentable` naming a LATER row (the assistant
+    /// row that answers this turn), and downgrading this row for that would
+    /// show the wrong row's raw text beside someone else's bad value, so
+    /// that case still propagates as a refusal.
+    ///
+    /// `events`/`awaiting` are rolled back to what they were before this row
+    /// was attempted: a `user`/`assistant` row can process several blocks
+    /// (several tool calls, say), and one further along failing must not
+    /// leave the earlier ones' events standing beside the `Unknown` row that
+    /// replaces the whole thing.
+    fn unrepresentable_row(
+        &mut self,
+        at_row: usize,
+        raw: &str,
+        kind: &str,
+        before_events: usize,
+        before_turn: u32,
+        drift: Drift,
+    ) -> Result<(), Drift> {
+        let Drift::Unrepresentable {
+            at_row: bad_row,
+            field,
+            why,
+        } = &drift
+        else {
+            return Err(drift);
+        };
+        if *bad_row != at_row {
+            return Err(drift);
+        }
+        self.events.truncate(before_events);
+        self.awaiting.retain(|_, at| *at < before_events);
+        self.turn = before_turn;
+        self.census
+            .unrepresentable_one(&format!("{kind}: {field} ({why})"));
+        self.events.push(Event::Unknown {
+            source_kind: kind.to_owned(),
+            raw: raw.to_owned(),
+        });
+        Ok(())
     }
 
     /// A `user` row: a person's turn, or a tool's answer, never both invented.
@@ -709,6 +800,21 @@ fn block_type(block: &serde_json::Value) -> Option<&str> {
     block.get("type").and_then(serde_json::Value::as_str)
 }
 
+/// Why a row is excluded from the parent session's turn stream, if the
+/// harness declared it so.
+///
+/// See this module's header for why reading these two fields is not the
+/// content guess the rest of this adapter refuses to make.
+fn excluded_from_parent(row: &serde_json::Value) -> Option<&'static str> {
+    if row.get("isSidechain").and_then(serde_json::Value::as_bool) == Some(true) {
+        return Some("isSidechain");
+    }
+    if row.get("isMeta").and_then(serde_json::Value::as_bool) == Some(true) {
+        return Some("isMeta");
+    }
+    None
+}
+
 /// The prefill of the assistant row that answers THIS turn, if one does.
 ///
 /// All three token fields, because all three were fed to the model. See this
@@ -729,6 +835,18 @@ fn block_type(block: &serde_json::Value) -> Option<&str> {
 /// that into the zero the record gives it no way to avoid, and counts it.
 fn prefill_after(rest: &[(usize, &str, serde_json::Value)]) -> Result<Option<Count>, Drift> {
     for (at_row, _raw, row) in rest {
+        // The same exclusion `Run::row` applies before this lookahead ever
+        // runs, applied here too: a sidechain assistant row is not the
+        // answer to this turn, and a meta user row does not open one, so
+        // neither may end or answer this scan. Skipped, not found: a
+        // fresh-instance review (PR #98) confirmed this row's own drift
+        // without it -- a sidechain row's usage read as the PARENT's
+        // prefill, or a meta row's text stopping the scan before the real
+        // answer, in each case content this PR declares irrelevant still
+        // reaching the parent's turn.
+        if excluded_from_parent(row).is_some() {
+            continue;
+        }
         match row.get("type").and_then(serde_json::Value::as_str) {
             Some(kind) if kind == Row::Assistant.tag() => {}
             // A row that opens a turn of its own ends the lookahead: whatever
@@ -878,7 +996,7 @@ mod tests {
     /// the one it was GIVEN, never one read out of the log.
     const A_SUBSTRATE: &str = "claude-code";
 
-    use super::{Block, ClaudeCode, MAPS, Row, native_tool};
+    use super::{Block, ClaudeCode, MAPS, PREFILL_ASSUMED, Row, native_tool};
     use crate::adapters::{Adapter, Drift};
     use crate::formats::record::Event;
 
@@ -934,6 +1052,187 @@ mod tests {
         // somewhere, onto the call it answers. Mapped and turn are different
         // claims and the census makes only the first.
         assert_eq!(adapted.census.mapped.get("user").copied(), Some(2));
+    }
+
+    /// #76 known defect 1: a subagent's own exchange is not the parent's turn.
+    ///
+    /// `isSidechain` is the harness's own declaration that a row belongs to a
+    /// subagent's conversation logged inline with the session that spawned
+    /// it, not the operator's text second-guessed. Left unread, the row's
+    /// text opened a turn the census reported as the top-level session's own.
+    #[test]
+    fn a_sidechain_row_does_not_open_a_turn_and_is_counted_instead() {
+        let log = [
+            user_says("do the real work"),
+            "{\"type\":\"user\",\"isSidechain\":true,\"message\":{\"role\":\"user\",\
+             \"content\":\"a subagent's own prompt\"}}"
+                .to_owned(),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
+        let turns = adapted
+            .events
+            .iter()
+            .filter(|e| matches!(e, Event::Turn { .. }))
+            .count();
+        assert_eq!(
+            turns, 1,
+            "the sidechain row's text is not a second turn of this session"
+        );
+        assert_eq!(
+            adapted.census.mapped.get("user").copied(),
+            Some(2),
+            "still a kind this adapter knows"
+        );
+        assert_eq!(
+            adapted.census.no_event.get("user/isSidechain").copied(),
+            Some(1),
+            "silent, and said why, rather than passed over or miscounted"
+        );
+    }
+
+    /// The same declaration on an `assistant` row: no response, no call.
+    #[test]
+    fn a_sidechain_assistant_row_emits_no_response_and_is_counted() {
+        let log = [
+            user_says("go"),
+            "{\"type\":\"assistant\",\"isSidechain\":true,\"message\":{\"role\":\"assistant\",\
+             \"content\":[{\"type\":\"tool_use\",\"id\":\"sub1\",\"name\":\"Bash\",\
+             \"input\":{\"command\":\"ls\"}}],\"usage\":{\"output_tokens\":5}}}"
+                .to_owned(),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
+        assert!(
+            !adapted
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Response { .. } | Event::ToolCall { .. })),
+            "a subagent's own call and answer are not this session's"
+        );
+        assert_eq!(
+            adapted
+                .census
+                .no_event
+                .get("assistant/isSidechain")
+                .copied(),
+            Some(1)
+        );
+    }
+
+    /// #76 known defect 2, the part `isMeta` actually closes: a row the
+    /// harness declares synthetic is not a person's turn either.
+    ///
+    /// Not a complete fix -- see this module's header. The reference log has
+    /// `<command-name>` envelopes with no `isMeta` at all, and those are
+    /// still counted as turns; text-sniffing the envelope to catch them would
+    /// be the content guess this adapter refuses to make.
+    #[test]
+    fn a_harness_composed_meta_row_does_not_open_a_turn() {
+        let log = [
+            user_says("go"),
+            "{\"type\":\"user\",\"isMeta\":true,\"message\":{\"role\":\"user\",\
+             \"content\":\"<command-name>/compact</command-name>\"}}"
+                .to_owned(),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
+        let turns = adapted
+            .events
+            .iter()
+            .filter(|e| matches!(e, Event::Turn { .. }))
+            .count();
+        assert_eq!(turns, 1, "the isMeta row is not a second turn");
+        assert_eq!(adapted.census.no_event.get("user/isMeta").copied(), Some(1));
+    }
+
+    /// A fresh-instance review of #98 found the exclusion applied at
+    /// `Run::row` was not applied to `prefill_after`'s own lookahead, which
+    /// re-scans the same rows independently: a sidechain assistant row
+    /// between a turn and its real answer was read as THAT turn's prefill.
+    #[test]
+    fn a_sidechain_assistant_row_does_not_supply_the_parents_prefill() {
+        let log = [
+            user_says("do the real work"),
+            "{\"type\":\"assistant\",\"isSidechain\":true,\"message\":{\"role\":\"assistant\",\
+             \"content\":[{\"type\":\"text\",\"text\":\"a subagent's own answer\"}],\
+             \"usage\":{\"input_tokens\":9000,\"output_tokens\":1}}}"
+                .to_owned(),
+            assistant(
+                "[{\"type\":\"text\",\"text\":\"the real answer\"}]",
+                2,
+                [7, 0, 0],
+            ),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
+        let prefill = adapted
+            .events
+            .iter()
+            .find_map(|e| match e {
+                Event::Turn { prefill_tokens, .. } => Some(prefill_tokens.get()),
+                _ => None,
+            })
+            .expect("one turn opened");
+        assert_eq!(
+            prefill, 7,
+            "the sidechain row's usage (9000) is not this turn's prefill; \
+             the real answer's (7) is"
+        );
+    }
+
+    /// The same review's second finding: `opens_a_turn`'s check inside the
+    /// lookahead stopped it at ANY user row carrying text, including an
+    /// `isMeta` one -- so a hook-injected reminder between a turn and its
+    /// real answer made the lookahead give up before reaching that answer,
+    /// and the turn's prefill was assumed zero with a real usage object
+    /// sitting right there.
+    #[test]
+    fn a_meta_row_does_not_stop_the_prefill_lookahead_before_the_real_answer() {
+        let log = [
+            user_says("do the real work"),
+            "{\"type\":\"user\",\"isMeta\":true,\"message\":{\"role\":\"user\",\
+             \"content\":\"<system-reminder>a hook injected this</system-reminder>\"}}"
+                .to_owned(),
+            assistant(
+                "[{\"type\":\"text\",\"text\":\"the real answer\"}]",
+                2,
+                [7, 0, 0],
+            ),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the fixture adapts");
+        let prefill = adapted
+            .events
+            .iter()
+            .find_map(|e| match e {
+                Event::Turn { prefill_tokens, .. } => Some(prefill_tokens.get()),
+                _ => None,
+            })
+            .expect("one turn opened");
+        assert_eq!(
+            prefill, 7,
+            "the meta row does not end the lookahead before the real answer"
+        );
+        assert!(
+            !adapted.census.assumed.contains_key(PREFILL_ASSUMED),
+            "a real answer exists; nothing should have been assumed"
+        );
     }
 
     /// A tool's answer lands on the call it names, not on whichever was last.
@@ -1365,15 +1664,37 @@ mod tests {
             assistant("[{\"type\":\"text\",\"text\":\"ok\"}]", huge, [1, 0, 0]),
         ]
         .join("\n");
+        // #76 defect 4, ruled: THIS row's own count overflowing downgrades
+        // the row to `Event::Unknown` rather than refusing the whole log --
+        // "named, not silently zeroed" still holds: the census says exactly
+        // what would not fit, and the row survives as `Unknown` rather than
+        // vanishing into a success that never happened.
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("named, not refused");
         assert!(
-            matches!(
-                ClaudeCode.adapt(&log, A_SUBSTRATE),
-                Err(Drift::Unrepresentable { field, .. }) if field.contains("output_tokens")
-            ),
-            "an output count past the cap is named, not silently zeroed"
+            !adapted
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Response { .. })),
+            "the row that overflowed never became a response"
+        );
+        assert!(
+            adapted
+                .census
+                .unrepresentable
+                .keys()
+                .any(|what| what.contains("output_tokens")),
+            "and the overflow is named in the census: {:?}",
+            adapted.census.unrepresentable
         );
 
-        // And the same for the three prefill counts, which are summed.
+        // The three prefill counts are different: they are read by the
+        // LOOKAHEAD from the user row's own turn, so the `Unrepresentable`
+        // this raises names the answering assistant row, not the row
+        // `Run::row` was called with. Downgrading the user row for a
+        // different row's bad value would show the wrong row's raw text
+        // beside it, so this case still refuses the whole log.
         let log = [
             user_says("go"),
             assistant(
@@ -1425,26 +1746,49 @@ mod tests {
             );
         }
 
-        // `input` renamed away entirely, and `input` reshaped.
-        for input in [
-            "\"arguments\":{\"file_path\":\"/srv/p/a.rs\"}",
-            "\"input\":\"ls -la\"",
-        ] {
-            let log = [
-                user_says("go"),
-                assistant(
-                    &format!("[{{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"Read\",{input}}}]"),
-                    1,
-                    [1, 0, 0],
-                ),
-            ]
-            .join("\n");
-            assert!(
-                ClaudeCode.adapt(&log, A_SUBSTRATE).is_err(),
-                "a call whose arguments moved is refused, not read as a call \
-                 with none: {input}"
-            );
-        }
+        // `input` renamed away entirely: the field this mapping declares is
+        // simply not there, which is `MissingField` and still a refusal.
+        let log = [
+            user_says("go"),
+            assistant(
+                "[{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"Read\",\
+                 \"arguments\":{\"file_path\":\"/srv/p/a.rs\"}}]",
+                1,
+                [1, 0, 0],
+            ),
+        ]
+        .join("\n");
+        assert!(
+            matches!(
+                ClaudeCode.adapt(&log, A_SUBSTRATE),
+                Err(Drift::MissingField { .. })
+            ),
+            "`input` renamed away entirely is a call read as one with none, refused"
+        );
+
+        // `input` reshaped -- present, but not the object this mapping
+        // reads. #76 defect 4, ruled: this is content THIS row carries that
+        // does not fit, the same class as a null argument, so it downgrades
+        // the row to `Event::Unknown` rather than refusing the whole log.
+        let log = [
+            user_says("go"),
+            assistant(
+                "[{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"Read\",\"input\":\"ls -la\"}]",
+                1,
+                [1, 0, 0],
+            ),
+        ]
+        .join("\n");
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("a reshaped `input` is named, not a refusal");
+        assert!(
+            !adapted
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::ToolCall { .. })),
+            "the call whose arguments reshaped is not read as one with none"
+        );
     }
 
     /// A tool argument the record's value space cannot hold is refused.
@@ -1455,6 +1799,10 @@ mod tests {
     /// refusal vocabulary had never been seen at all.
     #[test]
     fn a_tool_argument_the_record_cannot_spell_is_named_rather_than_coerced() {
+        // #76 defect 4, ruled: the argument's own row becomes `Event::Unknown`
+        // rather than refusing the whole log -- "named by the census, not
+        // coerced into a string" is still exactly the claim, just carried by
+        // a row that survives instead of a refusal that stops the walk.
         for (why, value) in [("null", "null"), ("an exponent", "1e5")] {
             let log = [
                 user_says("go"),
@@ -1468,14 +1816,67 @@ mod tests {
                 ),
             ]
             .join("\n");
+            let adapted = ClaudeCode
+                .adapt(&log, A_SUBSTRATE)
+                .unwrap_or_else(|err| panic!("{why} is named, not a refusal: {err}"));
             assert!(
-                matches!(
-                    ClaudeCode.adapt(&log, A_SUBSTRATE),
-                    Err(Drift::Unrepresentable { .. })
-                ),
-                "{why} is refused by name rather than coerced into a string"
+                !adapted
+                    .events
+                    .iter()
+                    .any(|e| matches!(e, Event::ToolCall { .. })),
+                "{why}: the call that could not be spelled is not in the record as a call"
+            );
+            assert!(
+                adapted
+                    .events
+                    .iter()
+                    .any(|e| matches!(e, Event::Unknown { source_kind, .. } if source_kind == "assistant")),
+                "{why}: and the row survives, typed as unread"
             );
         }
+    }
+
+    /// A whole row downgrades, not just the block that failed.
+    ///
+    /// An assistant row can carry several tool calls, and the first can
+    /// succeed before the second's argument is what the row's own content
+    /// downgrades for. Without a rollback, the valid call would stand beside
+    /// the `Unknown` row that is supposed to replace the WHOLE thing --
+    /// half a row that adapted and half that did not, which is not what "an
+    /// unrepresentable row becomes an Unknown row" says.
+    #[test]
+    fn an_unrepresentable_block_rolls_back_the_calls_that_came_before_it_in_the_same_row() {
+        let log = [
+            user_says("go"),
+            assistant(
+                "[{\"type\":\"tool_use\",\"id\":\"first\",\"name\":\"Bash\",\
+                 \"input\":{\"command\":\"ls\"}},\
+                 {\"type\":\"tool_use\",\"id\":\"second\",\"name\":\"Read\",\
+                 \"input\":{\"file_path\":null}}]",
+                1,
+                [1, 0, 0],
+            ),
+        ]
+        .join("\n");
+
+        let adapted = ClaudeCode
+            .adapt(&log, A_SUBSTRATE)
+            .expect("the row is named, not refused");
+        assert!(
+            !adapted
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::ToolCall { .. })),
+            "the first call, valid on its own, does not survive the row it \
+             was part of: {:?}",
+            adapted.events
+        );
+        let unknown_rows = adapted
+            .events
+            .iter()
+            .filter(|e| matches!(e, Event::Unknown { .. }))
+            .count();
+        assert_eq!(unknown_rows, 1, "one row, one Unknown, not one per block");
     }
 
     /// A refusal points at the line of the FILE, blank lines and all.

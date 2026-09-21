@@ -173,6 +173,18 @@ pub struct Census {
     /// whose prefill totals look wrong can see how many of its turns had no
     /// prefill to read.
     pub assumed: BTreeMap<String, u64>,
+    /// Rows this adapter mapped whose OWN content the record's value space
+    /// could not hold, downgraded to [`Event::Unknown`] rather than refusing
+    /// the whole log, keyed by what would not fit.
+    ///
+    /// Ruled on #76's known defect 4: distinct from [`Census::dropped`],
+    /// which is content with no schema HOME (a `thinking` block, still
+    /// perfectly representable if there were somewhere to put it). This is
+    /// content that has a home -- a tool call's arguments, a token count --
+    /// and still could not be spelled there: a `null` argument, a number
+    /// past what [`crate::formats::record::Count`] holds. Both are counted
+    /// so the two can be told apart by reading rather than by trusting.
+    pub unrepresentable: BTreeMap<String, u64>,
 }
 
 impl Census {
@@ -243,6 +255,18 @@ impl Census {
         *self.assumed.entry(what.to_owned()).or_default() += 1;
     }
 
+    /// Count one row downgraded to [`Event::Unknown`] because its own
+    /// content did not fit the record's value space.
+    pub fn unrepresentable_one(&mut self, what: &str) {
+        *self.unrepresentable.entry(what.to_owned()).or_default() += 1;
+    }
+
+    /// Rows downgraded to [`Event::Unknown`] for content that did not fit.
+    #[must_use]
+    pub fn unrepresentable_rows(&self) -> u64 {
+        self.unrepresentable.values().sum()
+    }
+
     /// Content inside mapped rows that went nowhere.
     #[must_use]
     pub fn dropped_content(&self) -> u64 {
@@ -282,6 +306,10 @@ impl Census {
         push_counts(&mut out, &self.unmapped);
         out.push_str(",\"unmapped_rows\":");
         out.push_str(&self.unmapped_rows().to_string());
+        out.push_str(",\"unrepresentable\":");
+        push_counts(&mut out, &self.unrepresentable);
+        out.push_str(",\"unrepresentable_rows\":");
+        out.push_str(&self.unrepresentable_rows().to_string());
         out.push('}');
         out
     }
@@ -504,6 +532,7 @@ mod tests {
         census.unmapped_one("mode");
         census.no_event_one("user/carried no text of its own");
         census.assumed_one("turn.prefill_tokens = 0");
+        census.unrepresentable_one("assistant: content[].tool_use.input (an exponent)");
 
         // Every register renders, keys sorted, and the byte string is written
         // out rather than recomputed: a test that built the expectation the
@@ -518,7 +547,9 @@ mod tests {
              \"mapped\":{\"assistant\":1},\"mapped_rows\":1,\
              \"no_event\":{\"user/carried no text of its own\":1},\
              \"rows\":2,\"translated\":{},\"silent_rows\":1,\
-             \"unmapped\":{\"mode\":1},\"unmapped_rows\":1}"
+             \"unmapped\":{\"mode\":1},\"unmapped_rows\":1,\
+             \"unrepresentable\":{\"assistant: content[].tool_use.input (an exponent)\":1},\
+             \"unrepresentable_rows\":1}"
         );
         // The census is read back by the gym, so it is held to the record's
         // own rules rather than to whatever a JSON writer happens to emit.
