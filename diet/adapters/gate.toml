@@ -67,7 +67,7 @@
 name = "diet-adapters"
 check = "test"
 command = "cargo test --no-fail-fast -p discipline-diet -- adapters --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 36
+faults = 37
 
 [[fault]]
 # The census is the product. A row kind the adapter has no word for that
@@ -782,4 +782,28 @@ becomes = '''
         let _ = (&field, &why);'''
 catches = [
     "adapters::claude_code::tests::a_count_past_what_the_record_holds_is_refused_rather_than_zeroed",
+]
+
+[[fault]]
+# The compaction check skipped, so the harness's own summary row falls
+# through to the turn rule -- and a compaction becomes A TURN A PERSON DID
+# NOT TAKE, while the thing that happened (the harness discarding every
+# session's prefix) goes unrecorded. #79's third specimen, as it read before
+# the kind existed.
+id = "adapters.compaction-read-as-a-turn"
+failure_class = "adapters.compaction-read-as-a-turn"
+target = "diet/src/adapters/claude_code.rs"
+expect_exit = 101
+anchor = '''
+        if compacted(row) {
+            return self.compaction(at_row, &said);
+        }'''
+becomes = '''
+        if false && compacted(row) {
+            return self.compaction(at_row, &said);
+        }'''
+catches = [
+    "adapters::claude_code::tests::a_compaction_before_any_turn_is_counted_rather_than_named_against_turn_zero",
+    "adapters::claude_code::tests::a_compaction_summary_is_an_event_and_not_a_turn",
+    "adapters::claude_code::tests::two_compactions_in_one_turn_are_numbered_within_it",
 ]

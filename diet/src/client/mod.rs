@@ -1950,7 +1950,9 @@ mod tests {
             // wherever its test lives rather than only in this file.
             concat!(
                 include_str!("mod.rs"),
+                include_str!("cache.rs"),
                 include_str!("echo.rs"),
+                include_str!("head.rs"),
                 include_str!("journal.rs"),
                 include_str!("shape.rs"),
                 include_str!("stub.rs"),

@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 26
+faults = 32
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -499,4 +499,143 @@ becomes = '''
         reasoning: None,'''
 catches = [
     "client::wire::tests::reasoning_is_read_from_the_declared_path_and_absence_is_not_silence",
+]
+
+# ---------------------------------------------------------------------------
+# #79: the head fingerprint, the diff that attributes a miss, and the census
+# ---------------------------------------------------------------------------
+
+[[fault]]
+# The tool surface left out of the hashed head. Reordering MCP definitions
+# then hashes the same, and the specimen #79 exists for -- a client reopened,
+# its tools re-emitted in another key order, every session's prefix cold --
+# is invisible to the record that was supposed to attribute it.
+id = "client.head-omits-the-tools"
+failure_class = "client.head-omits-the-tools"
+target = "diet/src/client/wire.rs"
+expect_exit = 101
+anchor = '''
+    if !shape.tools.is_empty() {
+        out.push_str(",\"tools\":[");'''
+becomes = '''
+    if false {
+        out.push_str(",\"tools\":[");'''
+# One catcher, and the one that is NOT here is the finding: the drift guard
+# stays green, because `body` starts from `head` and loses the tools too.
+# What the omission breaks is attribution, not agreement.
+catches = [
+    "client::head::tests::reordered_tool_definitions_name_the_tool_that_moved",
+]
+
+[[fault]]
+# A second head renderer inside `body`. The digest then describes bytes
+# nobody sent, which is worse than no digest because it reads like a
+# measurement.
+id = "client.body-renders-its-own-head"
+failure_class = "client.body-renders-its-own-head"
+target = "diet/src/client/wire.rs"
+expect_exit = 101
+anchor = '''
+pub fn body(shape: &RequestShape) -> String {
+    let mut out = head(shape);'''
+becomes = '''
+pub fn body(shape: &RequestShape) -> String {
+    let mut out = String::from("{\"model\":");
+    string(&shape.model, &mut out);
+    out.push_str(",\"messages\":[");
+    for (index, frozen) in shape
+        .messages
+        .iter()
+        .take(shape.messages.len().saturating_sub(1))
+        .enumerate()
+    {
+        if index > 0 {
+            out.push(',');
+        }
+        message(frozen, &mut out);
+    }'''
+catches = [
+    "client::head::tests::the_head_is_the_bytes_the_body_starts_with",
+]
+
+[[fault]]
+# The diff never computed, so every head that moved reports the residual.
+# `unattributed` then means nothing, because it is what everything says.
+id = "client.prefix-change-unnamed"
+failure_class = "client.prefix-change-unnamed"
+target = "diet/src/client/head.rs"
+expect_exit = 101
+anchor = '''
+        tools_diff(&previous.tools, &self.tools, &mut diff);
+        kwargs_diff(&previous.template_kwargs, &self.template_kwargs, &mut diff);
+        messages_diff(&previous.frozen, &self.frozen, &mut diff);'''
+becomes = '''
+        let _ = (&previous.tools, &previous.template_kwargs, &previous.frozen);'''
+catches = [
+    "client::head::tests::a_date_that_moved_is_a_text_change_naming_the_line",
+    "client::head::tests::a_head_that_moved_in_two_places_names_the_stronger_class",
+    "client::head::tests::a_template_argument_that_moved_is_named_by_its_key",
+    "client::head::tests::a_trailing_newline_or_a_crlf_ending_is_an_ordinary_line_delta",
+    "client::head::tests::a_watch_reports_a_change_per_lane_and_never_on_the_first_head",
+    "client::head::tests::history_dropped_from_the_head_is_a_message_that_left",
+    "client::head::tests::reordered_tool_definitions_name_the_tool_that_moved",
+]
+
+[[fault]]
+# The lint made inert. A head carrying the current date then goes out, and
+# every session's prefix expires at local midnight for a reason no census can
+# name.
+id = "client.head-lint-inert"
+failure_class = "client.head-lint-inert"
+target = "diet/src/client/head.rs"
+expect_exit = 101
+anchor = '''
+    pub fn timestamp(&self) -> Option<Timestamped> {
+        for (index, message) in self.frozen.iter().enumerate() {'''
+becomes = '''
+    pub fn timestamp(&self) -> Option<Timestamped> {
+        if self.digest.len() == 64 {
+            return None;
+        }
+        for (index, message) in self.frozen.iter().enumerate() {'''
+catches = [
+    "client::head::tests::a_dated_model_identifier_is_a_name_and_not_a_timestamp",
+]
+
+[[fault]]
+# The line split taken through `str::lines()`, which strips a trailing `\r`
+# and drops the empty segment after a trailing `\n`. Two messages differing
+# only in a gained or lost trailing newline, or in CRLF versus LF, then
+# produce an EMPTY diff -- a real, perfectly attributable edit reported as
+# the residual. This shipped once and was caught by review; the fault is
+# here so the next one is caught by the gate.
+id = "client.line-diff-blind-to-a-newline"
+failure_class = "client.line-diff-blind-to-a-newline"
+target = "diet/src/client/head.rs"
+expect_exit = 101
+anchor = '''
+    let was: Vec<&str> = previous.split('\n').collect();
+    let is: Vec<&str> = now.split('\n').collect();'''
+becomes = '''
+    let was: Vec<&str> = previous.lines().collect();
+    let is: Vec<&str> = now.lines().collect();'''
+catches = [
+    "client::head::tests::a_trailing_newline_or_a_crlf_ending_is_an_ordinary_line_delta",
+]
+
+[[fault]]
+# `unexplained` folded into `expected`. The issue says in as many words that
+# it must not be, and the fold is exactly what turns a measurement back into
+# the residual estimate #79 replaces.
+id = "client.unexplained-folded-into-expected"
+failure_class = "client.unexplained-folded-into-expected"
+target = "diet/src/client/cache.rs"
+expect_exit = 101
+anchor = '''
+        _ => Register::Unexplained,'''
+becomes = '''
+        _ => Register::Expected,'''
+catches = [
+    "client::cache::tests::a_gap_past_the_declared_lifetime_is_expected_and_a_gap_inside_it_is_not",
+    "client::cache::tests::an_undeclared_lifetime_is_unexplained_and_the_substrate_is_named",
 ]

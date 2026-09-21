@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 490
+red_faults = 504
 mechanics_assertions = 119
 unseedable_guards = 1
 migrated = 0
@@ -5480,4 +5480,129 @@ kind = "lane-fault"
 check = "lanes"
 label = "adapters.an-unrepresentable-row-is-not-counted-in-the-census"
 failure_class = "adapters.an-unrepresentable-row-is-not-counted-in-the-census"
+migrated = false
+
+# #79: the head fingerprint, the diff that attributes a miss, the census,
+# and the harness compaction. The four seeded-gate entries are the record
+# format's own conformance corpus; the ten lane faults are declared beside
+# the code that emits them and applied by scripts/apply-lane-faults.py.
+
+[[fault]]
+id = "test.record_prefix_change_not_a_change"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a head change that is not a change"
+failure_class = "schema.prefix-change-not-a-change"
+legacy_signature = "record/fixtures/invalid/prefix-change-that-is-not-a-change\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.record_prefix_reason_unchecked"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a head change attributed to anything"
+failure_class = "schema.prefix-reason-disagrees-with-its-diff"
+legacy_signature = "record/fixtures/invalid/prefix-reason-disagrees-with-its-diff\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.record_head_fingerprint_not_digested"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a head fingerprint that is prose"
+failure_class = "schema.head-fingerprint-not-a-digest"
+legacy_signature = "record/fixtures/invalid/head-fingerprint-not-a-digest\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.record_head_unhashed_in_live_record"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a live request with no head hashed"
+failure_class = "schema.head-unhashed-in-a-live-record"
+legacy_signature = "record/fixtures/invalid/request-unhashed-in-a-live-record\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "client.head-omits-the-tools"
+kind = "lane-fault"
+check = "lanes"
+label = "client.head-omits-the-tools"
+failure_class = "client.head-omits-the-tools"
+migrated = false
+
+[[fault]]
+id = "client.body-renders-its-own-head"
+kind = "lane-fault"
+check = "lanes"
+label = "client.body-renders-its-own-head"
+failure_class = "client.body-renders-its-own-head"
+migrated = false
+
+[[fault]]
+id = "client.prefix-change-unnamed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.prefix-change-unnamed"
+failure_class = "client.prefix-change-unnamed"
+migrated = false
+
+[[fault]]
+id = "client.head-lint-inert"
+kind = "lane-fault"
+check = "lanes"
+label = "client.head-lint-inert"
+failure_class = "client.head-lint-inert"
+migrated = false
+
+[[fault]]
+id = "client.line-diff-blind-to-a-newline"
+kind = "lane-fault"
+check = "lanes"
+label = "client.line-diff-blind-to-a-newline"
+failure_class = "client.line-diff-blind-to-a-newline"
+migrated = false
+
+[[fault]]
+id = "client.unexplained-folded-into-expected"
+kind = "lane-fault"
+check = "lanes"
+label = "client.unexplained-folded-into-expected"
+failure_class = "client.unexplained-folded-into-expected"
+migrated = false
+
+[[fault]]
+id = "drive.head-not-linted"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.head-not-linted"
+failure_class = "drive.head-not-linted"
+migrated = false
+
+[[fault]]
+id = "drive.prefix-change-unrecorded"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.prefix-change-unrecorded"
+failure_class = "drive.prefix-change-unrecorded"
+migrated = false
+
+[[fault]]
+id = "drive.cache-census-skips-a-call"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.cache-census-skips-a-call"
+failure_class = "drive.cache-census-skips-a-call"
+migrated = false
+
+[[fault]]
+id = "adapters.compaction-read-as-a-turn"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.compaction-read-as-a-turn"
+failure_class = "adapters.compaction-read-as-a-turn"
 migrated = false
