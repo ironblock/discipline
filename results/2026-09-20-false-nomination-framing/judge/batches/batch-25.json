@@ -1,0 +1,101 @@
+{
+"batch": 25,
+"items": [
+{
+"id": "ack09-b25",
+"note": "Working record: the entry \"Open question: does `prompt_save()` write to disk?\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "Resolved: `prompt_save()` keeps the sequence in memory and touches no file. Recording that and continuing.",
+"reasoning": ""
+},
+{
+"id": "0.4|drive-07#t9s1|imperative",
+"note": "Working record: the entry \"`ctx_server.process_chat_completion(req, true)` is the key entry point — the second `true` arg likely means \"streaming.\" This function lives in `server-context.cpp` and is where the real flow begins. (`server.cpp`, route registration block)\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "The working record entry is actually correct — `ctx_server.process_chat_completion(req, true)` is indeed the key entry point in `server.cpp`'s route registration, and the second `true` arg does mean streaming. No correction needed there.\n\nNow let me compare the beellama server directory against upstream llama.cpp to identify files that differ in purpose.\n\n",
+"reasoning": ""
+},
+{
+"id": "1.0|drive-09#t8s23|advisory",
+"note": "Working record note: the entry \"Prompt cache (`--cache-ram`) and context checkpoints (`--ctx-checkpoints`) are TWO separate systems — the prompt cache stores full prompt KV states for slot reuse across requests, while context checkpoints are per-slot intermediate save points created during prompt processing for resuming — IMPLICATION: These must be configured independently and serve different purposes; disabling one doesn't affect the other\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "The working record note is accurate - prompt cache and context checkpoints are indeed separate systems. Let me verify one more aspect: how checkpoint restoration interacts with SWA (Sliding Window Attention) models and any known limitations.\n\n",
+"reasoning": "The working record note is still accurate. The prompt cache and context checkpoints are indeed two separate systems:\n\n1. **Prompt cache** (`--cache-ram`): Stores full prompt KV states for slot reuse across requests. When a new request arrives with a similar prompt, the server can restore the KV cache from the prompt cache instead of reprocessing the entire prompt.\n\n2. **Context checkpoints** (`--ctx-checkpoints`): Per-slot intermediate save points created during prompt processing. These allow resuming from mid-prompt if processing is interrupted or if the prompt needs to be reprocessed from a certain point.\n\nLet me continue investigating any remaining aspects of the checkpoint/KV cache system."
+},
+{
+"id": "0.6|drive-10#t8s12|advisory",
+"note": "Working record note: the entry \"BOTH file-based slot save/restore and the in-memory prompt cache are gated by `check_no_mtmd()` — multimodal models get \"This feature is not supported by multimodal\" — IMPLICATION: Any cache-related feature audit must explicitly exclude multimodal paths; the server hard-fails rather than degrading gracefully\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "",
+"reasoning": "The user is providing a working record note that confirms what I've found: both file-based slot save/restore and the in-memory prompt cache are gated by `check_no_mtmd()` — multimodal models get \"This feature is not supported by multimodal\". The note says the server hard-fails rather than degrading gracefully.\n\nLet me verify this is still accurate by checking the check_no_mtmd function and where it's used."
+},
+{
+"id": "0.0556|drive-07#t10s12|advisory",
+"note": "Working record note: the entry \"The `n_cache_reuse` / chunk-level KV cache reuse loop that shifts non-contiguous matching subsequences via `common_context_seq_add` — this is a second layer of cache reuse beyond simple prefix matching, relevant if auditing how partial prompt overlaps are handled at decode time (`server-context.cpp`, lines ~2860–2900)\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "The `n_cache_reuse` entry still holds — the KV cache reuse mechanism is a separate concern from `n_before_user`. The `n_cache_reuse` logic handles shifting non-contiguous matching subsequences via `common_context_seq_add`, which is orthogonal to checkpoint creation timing. Let me verify this is still present in beellama:\n\n",
+"reasoning": ""
+},
+{
+"id": "0.8|drive-10#t10s7|imperative",
+"note": "Working record: the entry \"How speculative decoding checkpoints (`common_prompt_checkpoint`) interact with the in-memory `server_prompt_cache` — do checkpoints get saved/restored as part of prompt cache entries, or are they strictly per-slot ephemeral?\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "",
+"reasoning": "The user wants me to update the working record entry about speculative decoding checkpoints and their interaction with the in-memory prompt cache. Based on what I've seen in the code, let me trace through the checkpoint behavior to understand this relationship.\n\nFrom my analysis:\n1. `common_prompt_checkpoint` stores draft+target model state for speculative decoding rollback\n2. The prompt cache (`server_prompt_cache`) stores serialized KV cache states for cross-slot prompt reuse\n3. The checkpoint system (`slot.prompt.checkpoints`) is per-slot and used for speculative decoding\n\nLet me check if checkpoints are saved/restored as part of prompt cache entries or if they're strictly per-slot ephemeral.\n\nLooking at the code I've seen:\n- `slot.prompt.checkpoints` is a vector of `common_prompt_checkpoint` objects\n- These are created during `pre_decode()` in the inference loop\n- They're used for speculative decoding rollback\n\nLet me search for how checkpoints interact with prompt cache save/load."
+},
+{
+"id": "0.4|drive-10#t10s2|imperative",
+"note": "Working record: the entry \"`tokenize_input_prompts` converts raw prompt strings to token sequences — relevant for prompt processing bugs\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "The entry \"`tokenize_input_prompts` converts raw prompt strings to token sequences — relevant for prompt processing bugs\" is superseded. The correction: `tokenize_input_prompts` is not a standalone function I've audited — the actual tokenization and `n_before_user` computation happens in `prompt_get_n_before_user()` which calculates the token count before the latest user message for checkpoint positioning. Let me continue tracing the checkpoint behavior.\n\n",
+"reasoning": "The user wants me to update my working record. The entry about `tokenize_input_prompts` is superseded. Let me first provide the correction, then continue searching for the checkpoint-related code.\n\nLooking at the context, `n_before_user` is about tracking how many prompt tokens come before the latest user message. This is used for checkpoint behavior. Let me get more context around the checkpoint-related code."
+},
+{
+"id": "0.4|drive-10#t8s6|imperative",
+"note": "Working record: the entry \"The `server_prompt_cache::load()` function has a DUAL improvement gate — a cached entry is only selected if BOTH `f_keep` (fraction of cached context preserved) AND `sim` (common prefix / new prompt length) are strictly better than the slot's current prompt — IMPLICATION: A cache entry with perfect prefix match but low `f_keep` will be rejected, and vice versa; this means the cache is conservative and may miss valid reuse opportunities where only one metric improves.\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "**Correction to working record:** The entry about \"dual improvement gate\" in `server_prompt_cache::load()` is actually **correct** as stated. The code at `server-task.cpp:1754` confirms:\n\n",
+"reasoning": "The user is asking me to update my working record. The entry they're referring to says that `server_prompt_cache::load()` has a \"dual improvement gate\" where BOTH `f_keep` AND `sim` must be strictly better. But from the code I just read, I can see that the actual condition is:\n\n```cpp\nif (f_keep_cur > f_keep_best && f_keep_cur > 0.25f && sim_cur > sim_best) {\n```\n\nSo both conditions must be met: `f_keep_cur > f_keep_best` AND `sim_cur > sim_best`, plus `f_keep_cur > 0.25f`. The user's statement says \"A cache entry with perfect prefix match but low `f_keep` will be rejected\" - this is actually correct based on the code. But the user says this entry is \"superseded\" and needs correction.\n\nLet me re-read the code more carefully:\n\n```cpp\nbool server_prompt_cache::load(server_prompt & prompt, const server_tokens & tokens_new, llama_context * ctx_tgt, llama_context * ctx_dft, int32_t id_slot) {\n    const int lcp_best = prompt.tokens.get_common_prefix(tokens_new);\n\n    float f_keep_best = prompt.tokens.size() > 0 ? float(lcp_best) / prompt.tokens.size() : -1.0f; // empty slot: any cache entry wins\n    float sim_best    = float(lcp_best) / tokens_new.size();\n\n    SRV_INF(\" - looking for better prompt, base f_keep = %.3f, sim = %.3f\\n\", f_keep_best, sim_best);\n\n    auto it_best = states.end();\n\n    // find the most similar cached prompt, that would also preserve the most context\n    for (auto it = states.begin(); it != states.end(); ++it) {\n        const int lcp_cur = it->tokens.get_common_prefix(tokens_new);\n\n        const float f_keep_cur = float(lcp_cur) / it->tokens.size();\n        const float sim_cur    = float(lcp_cur) / tokens_new.size();\n\n        // only consider it if it's better than the best so far\n        // also, don't consider it if it would discard too much of the cached context\n        if (f_keep_cur > f_keep_best && f_keep_cur > 0.25f && sim_cur > sim_best) {\n            it_best = it;\n            f_keep_best = f_keep_cur;\n            sim_best = sim_cur;\n        }\n    }\n```\n\nSo the dual gate is real—both `f_keep` and `sim` must exceed their current best values, and `f_keep` must stay above 0.25. The user's description of the behavior is accurate, but they want me to update the record. I need to clarify what's being corrected here. Looking back at the original entry, the dual improvement criteria is indeed accurate—a cached prompt only gets selected when both `f_keep` and `sim` strictly improve over the slot's current state. The working record entry appears sound, so I should confirm this to the user rather than revise it further."
+},
+{
+"id": "ack05-b25",
+"note": "Working record note: the entry \"`common_prompt_checkpoint` is only used by the rollback path\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "The record's note on `common_prompt_checkpoint` no longer holds: it is also created by the prompt-cache save path. Noting that and moving on.",
+"reasoning": "The grep shows a second caller in the prompt-cache save path, so the entry is too narrow."
+},
+{
+"id": "0.6|drive-02#t10s9|advisory",
+"note": "Working record note: the entry \"How does the KV cache reuse actually work in `server-context.cpp` around line 2839 — need to see the full chunk-based cache reuse mechanism\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "The working record note about KV cache reuse around line 2839 is still valid — the checkpoint mechanism I just examined is a *separate* concern. Checkpoints are speculative-decoding save/restore snapshots, while KV cache reuse (chunk shifting via `common_context_seq_rm`/`common_context_seq_add`) is about reusing cached prompt tokens across requests. They interact but are distinct subsystems. Let me continue searching for `n_before_user`.\n\n",
+"reasoning": ""
+},
+{
+"id": "0.8|drive-02#t8s11|imperative",
+"note": "Working record: the entry \"Read the full `handle_slots_save` implementation at line 4841+ in server-context.cpp to understand the save flow, file format, and what data is serialized.\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "I need to correct the record. The entry about reading `handle_slots_save` at line 4841+ is indeed superseded — I've already read the full implementation in my earlier steps and can now provide the complete picture. Let me also verify the HTTP endpoint handlers and the prompt_save mechanism to make sure I'm not missing anything.\n\n",
+"reasoning": ""
+},
+{
+"id": "0.6222|drive-10#t8s2|advisory",
+"note": "Working record note: the entry \"The prompt cache `load()` function uses a **dual improvement criteria** — a cached prompt is only selected if BOTH `f_keep` (fraction of cached context preserved) AND `sim` (common prefix / new prompt length) are strictly better than the slot's current prompt — IMPLICATION: A cached prompt with high similarity but low `f_keep` won't be used, and vice versa; this prevents loading a tiny cache entry that barely overlaps with the new prompt even if it matches perfectly.\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "",
+"reasoning": "The user is asking me to verify whether the working record entry about the dual improvement criteria in `server_prompt_cache::load()` still holds. Let me look at the actual code to verify this.\n\nThe entry says:\n- A cached prompt is only selected if BOTH `f_keep` AND `sim` are strictly better than the slot's current prompt\n\nLet me check the actual implementation in server-task.cpp around line 1675."
+},
+{
+"id": "0.0556|drive-09#t8s23|imperative",
+"note": "Working record: the entry \"Prompt cache (`--cache-ram`) and context checkpoints (`--ctx-checkpoints`) are TWO separate systems — the prompt cache stores full prompt KV states for slot reuse across requests, while context checkpoints are per-slot intermediate save points created during prompt processing for resuming — IMPLICATION: These must be configured independently and serve different purposes; disabling one doesn't affect the other\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "The working record entry is accurate - prompt cache (`--cache-ram`) and context checkpoints (`--ctx-checkpoints`) are indeed two separate systems with different purposes. No correction needed.\n\nLet me continue investigating the idle slot caching and the limits of the system.\n\n",
+"reasoning": "The working record entry is actually accurate as stated - the prompt cache and context checkpoints ARE two separate systems. The prompt cache stores full prompt KV states for slot reuse across requests, while context checkpoints are per-slot intermediate save points created during prompt processing. Let me verify this is correct and then continue with the investigation.\n\nActually, looking at the code more carefully, I think the statement is correct. Let me continue investigating to provide a comprehensive answer about checkpointing and KV cache save/restore support.\n\nLet me now look at how the cache_idle_slots feature works - this is where idle slots get saved to the prompt cache."
+},
+{
+"id": "ack12-b25",
+"note": "Working record: the entry \"`InstancedMesh` is intentionally missing\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "I won't update that entry: `InstancedMesh` is still absent from the package, so it stands. Reading the thin-instance docs instead.",
+"reasoning": "There is no instanced-mesh file in the package listing, so the entry is correct and the note is wrong."
+},
+{
+"id": "1.0|drive-09#t5s5|imperative",
+"note": "Working record: the entry \"Search for `common_params` defaults in `common.cpp` or `common.h` to find global sampling defaults\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "Acknowledged. The working record entry \"Search for `common_params` defaults in `common.cpp` or `common.h` to find global sampling defaults\" is superseded — I've already found that sampling defaults live in `common_params_sampling` struct in `common/common.h` (line 222+) as C++ member initializer defaults, not in a separate initialization file. Updating the record now.\n\nNow let me look at the core chat template application in `server-common.cpp` around line 1035-1102:\n\n",
+"reasoning": "The user is telling me to update my working record. The entry about searching for `common_params` defaults in `common.cpp` or `common.h` is superseded by the current step where I'm investigating chat templates and tool rendering. Let me acknowledge this and update the record, then continue with the investigation.\n\nLet me look at the key files for chat template application and tool rendering. The key files seem to be:\n- `server-common.cpp` - where `common_chat_templates_apply` is called\n- `server-chat.cpp` - where chat message processing happens\n- `server-context.cpp` - where chat templates are initialized\n\nLet me look at the `server-common.cpp` around line 1035-1102 where `common_chat_templates_apply` is called, and also look at `server-chat.cpp` for the actual chat formatting."
+},
+{
+"id": "ack02-b25",
+"note": "Working record note: the entry \"`parse_args` returns a `Vec<String>`\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "I'll verify the return type of `parse_args` before touching the record.",
+"reasoning": "Does it? The grep shows callers but not the signature. I should read the function before changing the record."
+}
+]
+}

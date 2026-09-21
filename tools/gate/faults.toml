@@ -34,7 +34,7 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 488
+red_faults = 494
 mechanics_assertions = 119
 unseedable_guards = 2
 migrated = 0
@@ -5476,4 +5476,52 @@ kind = "lane-fault"
 check = "lanes"
 label = "adapters.a-derived-fact-claims-a-turn-that-never-happened"
 failure_class = "adapters.a-derived-fact-claims-a-turn-that-never-happened"
+migrated = false
+
+[[fault]]
+id = "adapters.a-sidechain-row-is-not-excluded-from-the-parents-turns"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-sidechain-row-is-not-excluded-from-the-parents-turns"
+failure_class = "adapters.a-sidechain-row-is-not-excluded-from-the-parents-turns"
+migrated = false
+
+[[fault]]
+id = "adapters.a-harness-composed-meta-row-is-not-excluded-from-the-parents-turns"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-harness-composed-meta-row-is-not-excluded-from-the-parents-turns"
+failure_class = "adapters.a-harness-composed-meta-row-is-not-excluded-from-the-parents-turns"
+migrated = false
+
+[[fault]]
+id = "adapters.an-unrepresentable-rows-own-content-still-refuses-the-log"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.an-unrepresentable-rows-own-content-still-refuses-the-log"
+failure_class = "adapters.an-unrepresentable-rows-own-content-still-refuses-the-log"
+migrated = false
+
+[[fault]]
+id = "adapters.a-different-rows-unrepresentable-value-downgrades-this-one-too"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-different-rows-unrepresentable-value-downgrades-this-one-too"
+failure_class = "adapters.a-different-rows-unrepresentable-value-downgrades-this-one-too"
+migrated = false
+
+[[fault]]
+id = "adapters.a-rolled-back-call-is-not-actually-removed"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.a-rolled-back-call-is-not-actually-removed"
+failure_class = "adapters.a-rolled-back-call-is-not-actually-removed"
+migrated = false
+
+[[fault]]
+id = "adapters.an-unrepresentable-row-is-not-counted-in-the-census"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.an-unrepresentable-row-is-not-counted-in-the-census"
+failure_class = "adapters.an-unrepresentable-row-is-not-counted-in-the-census"
 migrated = false

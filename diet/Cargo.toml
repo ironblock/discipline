@@ -9,6 +9,16 @@ repository.workspace = true
 [lib]
 name = "diet"
 path = "src/lib.rs"
+# `cdylib`, alongside the `rlib` every other target here already needs, is
+# what makes `wasm-bindgen` able to read this crate's wasm32 build at all --
+# an `rlib` alone has no flat export table for it to post-process. Cargo has
+# no way to make `crate-type` conditional on target or feature the way
+# dependencies can be (`[target.'cfg(...)'.dependencies]` has no `[lib]`
+# analogue), so this is unconditional: every native build now also links a
+# `libdiet.so` nothing loads, a real but small cost (one extra linking step,
+# not a second compile) disclosed rather than hidden behind "it still
+# builds."
+crate-type = ["rlib", "cdylib"]
 
 [[bin]]
 name = "diet"
@@ -37,6 +47,32 @@ serde_json = { version = "1", features = ["arbitrary_precision"] }
 # nine transitive crates rather than ten. No feature is added back, because
 # the empty set is what compiles.
 sha2 = { version = "0.11", default-features = false }
+# The wasm-facing surface (#78): `wasm-bindgen`'s export macro and JS glue
+# generator. Optional, behind the `wasm` feature, so a native build never
+# sees it -- `default-features = false` at the workspace/crate level already
+# means nothing pulls this in unasked.
+#
+# The version is an EXACT pin, not a range, for a reason semver does not
+# cover: `wasm-bindgen`'s bindgen format is an unstable schema shared between
+# this crate and the separate `wasm-bindgen` CLI that post-processes the
+# compiled `.wasm`. The two must match exactly or the CLI refuses the binary
+# outright -- measured directly: building against an unpinned `"0.2"` (which
+# resolved to 0.2.128) against a 0.2.100 CLI produced "rust Wasm file schema
+# version: 0.2.128, this binary schema version: 0.2.100", not a warning. A
+# caret range would let `cargo update` drift the crate out of lockstep with
+# whatever CLI version the conformance job has installed, silently, until a
+# build that used to pass stops resolving to a matching pair. The CI job that
+# installs the CLI pins the identical version string.
+wasm-bindgen = { version = "=0.2.100", optional = true }
+
+[features]
+wasm = ["dep:wasm-bindgen"]
+# Test-only, never shipped: adds one deliberately unsound export so the
+# conformance job's control (row 4 -- a host call reachable from the read
+# path fails the job) is proven against a real failure, not assumed. See
+# `wasm::seeded_host_call_trap` and
+# `tests/wasm_conformance.rs::the_seeded_host_call_trap_actually_fails_the_job`.
+wasm-seeded-host-call-trap = ["wasm"]
 
 [lints]
 workspace = true

@@ -1,0 +1,1339 @@
+{
+ "arms": [
+  "control",
+  "imperative",
+  "advisory",
+  "sham"
+ ],
+ "forks_per_rung": 100,
+ "rungs": {
+  "0.0556": {
+   "acknowledgement": {
+    "advisory": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 20,
+       "verdicts": {
+        "accepts": 5,
+        "declines": 10,
+        "ignores": 1,
+        "questions": 4
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 37,
+       "verdicts": {
+        "accepts": 1,
+        "declines": 16,
+        "ignores": 8,
+        "questions": 11,
+        "unjudged": 1
+       }
+      }
+     },
+     "named": 57,
+     "of": 100,
+     "verdicts": {
+      "accepts": 6,
+      "declines": 26,
+      "ignores": 9,
+      "questions": 15,
+      "unjudged": 1
+     }
+    },
+    "imperative": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 36,
+       "verdicts": {
+        "accepts": 23,
+        "declines": 4,
+        "ignores": 2,
+        "questions": 7
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 47,
+       "verdicts": {
+        "accepts": 27,
+        "declines": 6,
+        "ignores": 1,
+        "questions": 13
+       }
+      }
+     },
+     "named": 83,
+     "of": 100,
+     "verdicts": {
+      "accepts": 50,
+      "declines": 10,
+      "ignores": 3,
+      "questions": 20
+     }
+    }
+   },
+   "advisory_minus_imperative": -0.24999999999999994,
+   "advisory_minus_sham": 0.0,
+   "bootstrap": {
+    "floor": 0.0001,
+    "observed": -0.25,
+    "p": 0.0001,
+    "resamples": 9999
+   },
+   "changed_rate": {
+    "advisory": 0.32,
+    "imperative": 0.57,
+    "sham": 0.32
+   },
+   "changed_rate_nocomment": {
+    "advisory": 0.32,
+    "imperative": 0.57,
+    "sham": 0.32
+   },
+   "computable": true,
+   "false_nominations": 100,
+   "forks": 100,
+   "graded": 100,
+   "imperative_minus_sham": 0.24999999999999994,
+   "nominal": 0.0556,
+   "per_session_cost": {
+    "advisory": 0.30220800000000003,
+    "imperative": 0.538308
+   },
+   "rate_step": 0.01,
+   "realised_true_share": 0.0,
+   "shuffled_framing_null": {
+    "at_chance": true,
+    "counted_toward_verdict": false,
+    "floor": 0.0001,
+    "label": "post-hoc",
+    "null_ci95": [
+     -0.11,
+     0.11
+    ],
+    "null_mean": 0.0011,
+    "null_sd": 0.0568,
+    "observed": -0.25,
+    "p_two_sided": 0.0001,
+    "resamples": 9999
+   },
+   "sign_test": {
+    "floor": 2.9103830456733704e-11,
+    "k_advisory_only": 5,
+    "k_imperative_only": 30,
+    "n_discordant": 35,
+    "p": 1.1180760338902473e-05
+   },
+   "true_nominations": 0
+  },
+  "0.4": {
+   "acknowledgement": {
+    "advisory": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 19,
+       "verdicts": {
+        "accepts": 3,
+        "declines": 9,
+        "ignores": 2,
+        "questions": 5
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 34,
+       "verdicts": {
+        "declines": 19,
+        "ignores": 4,
+        "questions": 11
+       }
+      }
+     },
+     "named": 53,
+     "of": 100,
+     "verdicts": {
+      "accepts": 3,
+      "declines": 28,
+      "ignores": 6,
+      "questions": 16
+     }
+    },
+    "imperative": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 39,
+       "verdicts": {
+        "accepts": 24,
+        "declines": 6,
+        "ignores": 3,
+        "questions": 6
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 49,
+       "verdicts": {
+        "accepts": 29,
+        "declines": 6,
+        "ignores": 2,
+        "questions": 12
+       }
+      }
+     },
+     "named": 88,
+     "of": 100,
+     "verdicts": {
+      "accepts": 53,
+      "declines": 12,
+      "ignores": 5,
+      "questions": 18
+     }
+    }
+   },
+   "advisory_minus_imperative": -0.18000000000000005,
+   "advisory_minus_sham": -0.09000000000000002,
+   "bootstrap": {
+    "floor": 0.0001,
+    "observed": -0.18,
+    "p": 0.0003,
+    "resamples": 9999
+   },
+   "changed_rate": {
+    "advisory": 0.35,
+    "imperative": 0.53,
+    "sham": 0.44
+   },
+   "changed_rate_nocomment": {
+    "advisory": 0.36,
+    "imperative": 0.52,
+    "sham": 0.43
+   },
+   "computable": true,
+   "false_nominations": 100,
+   "forks": 100,
+   "graded": 100,
+   "imperative_minus_sham": 0.09000000000000002,
+   "nominal": 0.4,
+   "per_session_cost": {
+    "advisory": 0.21,
+    "imperative": 0.318
+   },
+   "rate_step": 0.01,
+   "realised_true_share": 0.0,
+   "shuffled_framing_null": {
+    "at_chance": true,
+    "counted_toward_verdict": false,
+    "floor": 0.0001,
+    "label": "post-hoc",
+    "null_ci95": [
+     -0.11,
+     0.11
+    ],
+    "null_mean": 0.0004,
+    "null_sd": 0.0549,
+    "observed": -0.18,
+    "p_two_sided": 0.0014,
+    "resamples": 9999
+   },
+   "sign_test": {
+    "floor": 3.725290298461914e-09,
+    "k_advisory_only": 5,
+    "k_imperative_only": 23,
+    "n_discordant": 28,
+    "p": 0.00045611709356307983
+   },
+   "true_nominations": 0
+  },
+  "0.6": {
+   "acknowledgement": {
+    "advisory": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 24,
+       "verdicts": {
+        "accepts": 3,
+        "declines": 12,
+        "ignores": 2,
+        "questions": 7
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 36,
+       "verdicts": {
+        "declines": 15,
+        "ignores": 9,
+        "questions": 12
+       }
+      }
+     },
+     "named": 60,
+     "of": 100,
+     "verdicts": {
+      "accepts": 3,
+      "declines": 27,
+      "ignores": 11,
+      "questions": 19
+     }
+    },
+    "imperative": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 40,
+       "verdicts": {
+        "accepts": 31,
+        "ignores": 3,
+        "questions": 6
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 49,
+       "verdicts": {
+        "accepts": 27,
+        "declines": 3,
+        "questions": 19
+       }
+      }
+     },
+     "named": 89,
+     "of": 100,
+     "verdicts": {
+      "accepts": 58,
+      "declines": 3,
+      "ignores": 3,
+      "questions": 25
+     }
+    }
+   },
+   "advisory_minus_imperative": -0.2,
+   "advisory_minus_sham": -0.10999999999999999,
+   "bootstrap": {
+    "floor": 0.0001,
+    "observed": -0.2,
+    "p": 0.0001,
+    "resamples": 9999
+   },
+   "changed_rate": {
+    "advisory": 0.34,
+    "imperative": 0.54,
+    "sham": 0.45
+   },
+   "changed_rate_nocomment": {
+    "advisory": 0.34,
+    "imperative": 0.53,
+    "sham": 0.44
+   },
+   "computable": true,
+   "false_nominations": 100,
+   "forks": 100,
+   "graded": 100,
+   "imperative_minus_sham": 0.09000000000000002,
+   "nominal": 0.6,
+   "per_session_cost": {
+    "advisory": 0.136,
+    "imperative": 0.21600000000000003
+   },
+   "rate_step": 0.01,
+   "realised_true_share": 0.0,
+   "shuffled_framing_null": {
+    "at_chance": true,
+    "counted_toward_verdict": false,
+    "floor": 0.0001,
+    "label": "post-hoc",
+    "null_ci95": [
+     -0.11,
+     0.11
+    ],
+    "null_mean": 0.0001,
+    "null_sd": 0.0574,
+    "observed": -0.2,
+    "p_two_sided": 0.0006,
+    "resamples": 9999
+   },
+   "sign_test": {
+    "floor": 1.4901161193847656e-08,
+    "k_advisory_only": 3,
+    "k_imperative_only": 23,
+    "n_discordant": 26,
+    "p": 4.398822784423828e-05
+   },
+   "true_nominations": 0
+  },
+  "0.6222": {
+   "acknowledgement": {
+    "advisory": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 24,
+       "verdicts": {
+        "accepts": 3,
+        "declines": 13,
+        "ignores": 3,
+        "questions": 5
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 35,
+       "verdicts": {
+        "accepts": 3,
+        "declines": 16,
+        "ignores": 6,
+        "questions": 10
+       }
+      }
+     },
+     "named": 59,
+     "of": 100,
+     "verdicts": {
+      "accepts": 6,
+      "declines": 29,
+      "ignores": 9,
+      "questions": 15
+     }
+    },
+    "imperative": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 43,
+       "verdicts": {
+        "accepts": 23,
+        "declines": 5,
+        "ignores": 5,
+        "questions": 10
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 50,
+       "verdicts": {
+        "accepts": 29,
+        "declines": 7,
+        "ignores": 2,
+        "questions": 12
+       }
+      }
+     },
+     "named": 93,
+     "of": 100,
+     "verdicts": {
+      "accepts": 52,
+      "declines": 12,
+      "ignores": 7,
+      "questions": 22
+     }
+    }
+   },
+   "advisory_minus_imperative": -0.18000000000000005,
+   "advisory_minus_sham": -0.10000000000000003,
+   "bootstrap": {
+    "floor": 0.0001,
+    "observed": -0.18,
+    "p": 0.0004,
+    "resamples": 9999
+   },
+   "changed_rate": {
+    "advisory": 0.36,
+    "imperative": 0.54,
+    "sham": 0.46
+   },
+   "changed_rate_nocomment": {
+    "advisory": 0.37,
+    "imperative": 0.54,
+    "sham": 0.45
+   },
+   "computable": true,
+   "false_nominations": 100,
+   "forks": 100,
+   "graded": 100,
+   "imperative_minus_sham": 0.08000000000000002,
+   "nominal": 0.6222,
+   "per_session_cost": {
+    "advisory": 0.136008,
+    "imperative": 0.20401200000000003
+   },
+   "rate_step": 0.01,
+   "realised_true_share": 0.0,
+   "shuffled_framing_null": {
+    "at_chance": true,
+    "counted_toward_verdict": false,
+    "floor": 0.0001,
+    "label": "post-hoc",
+    "null_ci95": [
+     -0.1,
+     0.1
+    ],
+    "null_mean": 0.0009,
+    "null_sd": 0.0514,
+    "observed": -0.18,
+    "p_two_sided": 0.0007,
+    "resamples": 9999
+   },
+   "sign_test": {
+    "floor": 9.313225746154785e-10,
+    "k_advisory_only": 6,
+    "k_imperative_only": 24,
+    "n_discordant": 30,
+    "p": 0.000715453177690506
+   },
+   "true_nominations": 0
+  },
+  "0.8": {
+   "acknowledgement": {
+    "advisory": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 23,
+       "verdicts": {
+        "accepts": 3,
+        "declines": 13,
+        "questions": 7
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 37,
+       "verdicts": {
+        "accepts": 1,
+        "declines": 14,
+        "ignores": 11,
+        "questions": 10,
+        "unjudged": 1
+       }
+      }
+     },
+     "named": 60,
+     "of": 100,
+     "verdicts": {
+      "accepts": 4,
+      "declines": 27,
+      "ignores": 11,
+      "questions": 17,
+      "unjudged": 1
+     }
+    },
+    "imperative": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 39,
+       "verdicts": {
+        "accepts": 26,
+        "declines": 2,
+        "ignores": 1,
+        "questions": 10
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 49,
+       "verdicts": {
+        "accepts": 31,
+        "declines": 1,
+        "questions": 17
+       }
+      }
+     },
+     "named": 88,
+     "of": 100,
+     "verdicts": {
+      "accepts": 57,
+      "declines": 3,
+      "ignores": 1,
+      "questions": 27
+     }
+    }
+   },
+   "advisory_minus_imperative": -0.11000000000000004,
+   "advisory_minus_sham": -0.010000000000000009,
+   "bootstrap": {
+    "floor": 0.0001,
+    "observed": -0.11,
+    "p": 0.0119,
+    "resamples": 9999
+   },
+   "changed_rate": {
+    "advisory": 0.43,
+    "imperative": 0.54,
+    "sham": 0.44
+   },
+   "changed_rate_nocomment": {
+    "advisory": 0.42,
+    "imperative": 0.53,
+    "sham": 0.43
+   },
+   "computable": true,
+   "false_nominations": 100,
+   "forks": 100,
+   "graded": 100,
+   "imperative_minus_sham": 0.10000000000000003,
+   "nominal": 0.8,
+   "per_session_cost": {
+    "advisory": 0.08599999999999998,
+    "imperative": 0.10799999999999998
+   },
+   "rate_step": 0.01,
+   "realised_true_share": 0.0,
+   "shuffled_framing_null": {
+    "at_chance": true,
+    "counted_toward_verdict": false,
+    "floor": 0.0001,
+    "label": "post-hoc",
+    "null_ci95": [
+     -0.1,
+     0.1
+    ],
+    "null_mean": -0.0002,
+    "null_sd": 0.0526,
+    "observed": -0.11,
+    "p_two_sided": 0.042,
+    "resamples": 9999
+   },
+   "sign_test": {
+    "floor": 1.1920928955078125e-07,
+    "k_advisory_only": 6,
+    "k_imperative_only": 17,
+    "n_discordant": 23,
+    "p": 0.01734483242034912
+   },
+   "true_nominations": 0
+  },
+  "1.0": {
+   "acknowledgement": {
+    "advisory": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 24,
+       "verdicts": {
+        "accepts": 4,
+        "declines": 16,
+        "ignores": 1,
+        "questions": 3
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 35,
+       "verdicts": {
+        "declines": 14,
+        "ignores": 8,
+        "questions": 13
+       }
+      }
+     },
+     "named": 59,
+     "of": 100,
+     "verdicts": {
+      "accepts": 4,
+      "declines": 30,
+      "ignores": 9,
+      "questions": 16
+     }
+    },
+    "imperative": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 42,
+       "verdicts": {
+        "accepts": 26,
+        "declines": 3,
+        "ignores": 3,
+        "questions": 10
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 47,
+       "verdicts": {
+        "accepts": 21,
+        "declines": 6,
+        "questions": 20
+       }
+      }
+     },
+     "named": 89,
+     "of": 100,
+     "verdicts": {
+      "accepts": 47,
+      "declines": 9,
+      "ignores": 3,
+      "questions": 30
+     }
+    }
+   },
+   "advisory_minus_imperative": -0.13,
+   "advisory_minus_sham": -0.02999999999999997,
+   "bootstrap": {
+    "floor": 0.0001,
+    "observed": -0.13,
+    "p": 0.0051,
+    "resamples": 9999
+   },
+   "changed_rate": {
+    "advisory": 0.39,
+    "imperative": 0.52,
+    "sham": 0.42
+   },
+   "changed_rate_nocomment": {
+    "advisory": 0.39,
+    "imperative": 0.52,
+    "sham": 0.41
+   },
+   "computable": true,
+   "false_nominations": 100,
+   "forks": 100,
+   "graded": 100,
+   "imperative_minus_sham": 0.10000000000000003,
+   "nominal": 1.0,
+   "per_session_cost": {
+    "advisory": 0.0,
+    "imperative": 0.0
+   },
+   "rate_step": 0.01,
+   "realised_true_share": 0.0,
+   "shuffled_framing_null": {
+    "at_chance": true,
+    "counted_toward_verdict": false,
+    "floor": 0.0001,
+    "label": "post-hoc",
+    "null_ci95": [
+     -0.11,
+     0.11
+    ],
+    "null_mean": 0.001,
+    "null_sd": 0.054,
+    "observed": -0.13,
+    "p_two_sided": 0.0192,
+    "resamples": 9999
+   },
+   "sign_test": {
+    "floor": 7.450580596923828e-09,
+    "k_advisory_only": 7,
+    "k_imperative_only": 20,
+    "n_discordant": 27,
+    "p": 0.0095786452293396
+   },
+   "true_nominations": 0
+  }
+ },
+ "sample": 100,
+ "seed": 137,
+ "true_nominations": {
+  "changed_rate": {
+   "advisory": null,
+   "imperative": null,
+   "sham": null
+  },
+  "n": 0
+ },
+ "verdict": {
+  "acknowledgement": {
+   "0.0556": {
+    "advisory": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 20,
+       "verdicts": {
+        "accepts": 5,
+        "declines": 10,
+        "ignores": 1,
+        "questions": 4
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 37,
+       "verdicts": {
+        "accepts": 1,
+        "declines": 16,
+        "ignores": 8,
+        "questions": 11,
+        "unjudged": 1
+       }
+      }
+     },
+     "named": 57,
+     "of": 100,
+     "verdicts": {
+      "accepts": 6,
+      "declines": 26,
+      "ignores": 9,
+      "questions": 15,
+      "unjudged": 1
+     }
+    },
+    "imperative": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 36,
+       "verdicts": {
+        "accepts": 23,
+        "declines": 4,
+        "ignores": 2,
+        "questions": 7
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 47,
+       "verdicts": {
+        "accepts": 27,
+        "declines": 6,
+        "ignores": 1,
+        "questions": 13
+       }
+      }
+     },
+     "named": 83,
+     "of": 100,
+     "verdicts": {
+      "accepts": 50,
+      "declines": 10,
+      "ignores": 3,
+      "questions": 20
+     }
+    }
+   },
+   "0.4": {
+    "advisory": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 19,
+       "verdicts": {
+        "accepts": 3,
+        "declines": 9,
+        "ignores": 2,
+        "questions": 5
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 34,
+       "verdicts": {
+        "declines": 19,
+        "ignores": 4,
+        "questions": 11
+       }
+      }
+     },
+     "named": 53,
+     "of": 100,
+     "verdicts": {
+      "accepts": 3,
+      "declines": 28,
+      "ignores": 6,
+      "questions": 16
+     }
+    },
+    "imperative": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 39,
+       "verdicts": {
+        "accepts": 24,
+        "declines": 6,
+        "ignores": 3,
+        "questions": 6
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 49,
+       "verdicts": {
+        "accepts": 29,
+        "declines": 6,
+        "ignores": 2,
+        "questions": 12
+       }
+      }
+     },
+     "named": 88,
+     "of": 100,
+     "verdicts": {
+      "accepts": 53,
+      "declines": 12,
+      "ignores": 5,
+      "questions": 18
+     }
+    }
+   },
+   "0.6": {
+    "advisory": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 24,
+       "verdicts": {
+        "accepts": 3,
+        "declines": 12,
+        "ignores": 2,
+        "questions": 7
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 36,
+       "verdicts": {
+        "declines": 15,
+        "ignores": 9,
+        "questions": 12
+       }
+      }
+     },
+     "named": 60,
+     "of": 100,
+     "verdicts": {
+      "accepts": 3,
+      "declines": 27,
+      "ignores": 11,
+      "questions": 19
+     }
+    },
+    "imperative": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 40,
+       "verdicts": {
+        "accepts": 31,
+        "ignores": 3,
+        "questions": 6
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 49,
+       "verdicts": {
+        "accepts": 27,
+        "declines": 3,
+        "questions": 19
+       }
+      }
+     },
+     "named": 89,
+     "of": 100,
+     "verdicts": {
+      "accepts": 58,
+      "declines": 3,
+      "ignores": 3,
+      "questions": 25
+     }
+    }
+   },
+   "0.6222": {
+    "advisory": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 24,
+       "verdicts": {
+        "accepts": 3,
+        "declines": 13,
+        "ignores": 3,
+        "questions": 5
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 35,
+       "verdicts": {
+        "accepts": 3,
+        "declines": 16,
+        "ignores": 6,
+        "questions": 10
+       }
+      }
+     },
+     "named": 59,
+     "of": 100,
+     "verdicts": {
+      "accepts": 6,
+      "declines": 29,
+      "ignores": 9,
+      "questions": 15
+     }
+    },
+    "imperative": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 43,
+       "verdicts": {
+        "accepts": 23,
+        "declines": 5,
+        "ignores": 5,
+        "questions": 10
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 50,
+       "verdicts": {
+        "accepts": 29,
+        "declines": 7,
+        "ignores": 2,
+        "questions": 12
+       }
+      }
+     },
+     "named": 93,
+     "of": 100,
+     "verdicts": {
+      "accepts": 52,
+      "declines": 12,
+      "ignores": 7,
+      "questions": 22
+     }
+    }
+   },
+   "0.8": {
+    "advisory": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 23,
+       "verdicts": {
+        "accepts": 3,
+        "declines": 13,
+        "questions": 7
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 37,
+       "verdicts": {
+        "accepts": 1,
+        "declines": 14,
+        "ignores": 11,
+        "questions": 10,
+        "unjudged": 1
+       }
+      }
+     },
+     "named": 60,
+     "of": 100,
+     "verdicts": {
+      "accepts": 4,
+      "declines": 27,
+      "ignores": 11,
+      "questions": 17,
+      "unjudged": 1
+     }
+    },
+    "imperative": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 39,
+       "verdicts": {
+        "accepts": 26,
+        "declines": 2,
+        "ignores": 1,
+        "questions": 10
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 49,
+       "verdicts": {
+        "accepts": 31,
+        "declines": 1,
+        "questions": 17
+       }
+      }
+     },
+     "named": 88,
+     "of": 100,
+     "verdicts": {
+      "accepts": 57,
+      "declines": 3,
+      "ignores": 1,
+      "questions": 27
+     }
+    }
+   },
+   "1.0": {
+    "advisory": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 24,
+       "verdicts": {
+        "accepts": 4,
+        "declines": 16,
+        "ignores": 1,
+        "questions": 3
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 35,
+       "verdicts": {
+        "declines": 14,
+        "ignores": 8,
+        "questions": 13
+       }
+      }
+     },
+     "named": 59,
+     "of": 100,
+     "verdicts": {
+      "accepts": 4,
+      "declines": 30,
+      "ignores": 9,
+      "questions": 16
+     }
+    },
+    "imperative": {
+     "by_surface": {
+      "prose": {
+       "graded": 50,
+       "named": 42,
+       "verdicts": {
+        "accepts": 26,
+        "declines": 3,
+        "ignores": 3,
+        "questions": 10
+       }
+      },
+      "reasoning+prose": {
+       "graded": 50,
+       "named": 47,
+       "verdicts": {
+        "accepts": 21,
+        "declines": 6,
+        "questions": 20
+       }
+      }
+     },
+     "named": 89,
+     "of": 100,
+     "verdicts": {
+      "accepts": 47,
+      "declines": 9,
+      "ignores": 3,
+      "questions": 30
+     }
+    }
+   }
+  },
+  "attainability": {
+   "graded": 100,
+   "rate_step": 0.01,
+   "rung": 0.6,
+   "supported_attainable": true,
+   "supported_margin": 0.15
+  },
+  "envelope": {
+   "label": "within-envelope",
+   "parameters": "each fork re-fires its drive's archived turn.request with that request's own sampler parameters; the request digest on every row names it",
+   "within": true
+  },
+  "floor_prediction": {
+   "by_rung": {
+    "0.0556": {
+     "advisory_above_sham": false,
+     "imperative_above_sham": true
+    },
+    "0.4": {
+     "advisory_above_sham": false,
+     "imperative_above_sham": true
+    },
+    "0.6": {
+     "advisory_above_sham": false,
+     "imperative_above_sham": true
+    },
+    "0.6222": {
+     "advisory_above_sham": false,
+     "imperative_above_sham": true
+    },
+    "0.8": {
+     "advisory_above_sham": false,
+     "imperative_above_sham": true
+    },
+    "1.0": {
+     "advisory_above_sham": false,
+     "imperative_above_sham": true
+    }
+   },
+   "holds": false,
+   "text": "a false nomination changes the turn more often than the sham under both framings, or framing is moot"
+  },
+  "ladder": {
+   "label": "degenerate",
+   "realised_true_share_by_rung": {
+    "0.0556": 0.0,
+    "0.4": 0.0,
+    "0.6": 0.0,
+    "0.6222": 0.0,
+    "0.8": 0.0,
+    "1.0": 0.0
+   },
+   "rung_claims": "unadjudicated",
+   "text": "zero realised true nominations on every rung: the rung claims are unadjudicated and the verdict adjudicates the population claim over the false nominations"
+  },
+  "readings": {
+   "attainability": "a margin is attainable on a rung iff 1/n_graded <= margin; the supported clause is asked only where attainable",
+   "every_rung": "quantifies over computable rungs (ten or more false nominations graded); none computable is unadjudicated",
+   "maximum_difference": "per framing, the largest changed-turn rate over rungs against the sham's rate on that rung; fires when any framing fails to exceed it by the margin",
+   "p_below_floor": "the paired sign test, one per rung, uncorrected; holds when p equals its attainable floor",
+   "sham_clause": "(advisory - sham) < (imperative - sham) on the adjudicated rung"
+  },
+  "refuted_by": {
+   "best_rung": 0.0556,
+   "computable_rungs": [
+    "0.0556",
+    "0.4",
+    "0.6",
+    "0.6222",
+    "0.8",
+    "1.0"
+   ],
+   "every_rung_not_lower_by_margin": false,
+   "max_advisory_advantage": 0.24999999999999994,
+   "no_better_than_sham": true,
+   "sham_advantage_at_best_rung": 0.24999999999999994,
+   "under_reading": "D"
+  },
+  "rule": {
+   "inconclusive": "otherwise",
+   "refuted": "at every rung the advisory rate is not lower than imperative by >= 0.05, or the maximum difference over all rungs does not exceed the sham's by >= 0.05 -- either alone",
+   "rung": 0.6,
+   "sham_reading": "D",
+   "status": "decisions 0-8 ruled; 0 (framing form), 6 and 8 by the maintainer directly on 2026-09-21, quoted on PR #101",
+   "supported": "at the 0.6 rung, the changed-turn rate on false nominations is lower under advisory than imperative by >= 0.15 with the paired sign-test p below the attainable floor for the fork count, and advisory exceeds the sham by less than imperative does",
+   "v1_wording": "at every rung the advisory rate is not lower than imperative by >= 0.05, or the maximum difference over all rungs does not exceed the sham's by >= 0.05 -- either alone",
+   "v2_wording": "at every rung the advisory rate is not lower than imperative by >= 0.05, or, for either framing, the largest changed-turn rate on false nominations over all rungs does not exceed the sham arm's changed-turn rate by >= 0.05 -- either alone",
+   "version": "v2"
+  },
+  "secondary_sign_tests": {
+   "by_rung": {
+    "0.0556": {
+     "floor": 2.9103830456733704e-11,
+     "p_holm": 5.590380169451237e-05,
+     "p_raw": 1.1180760338902473e-05
+    },
+    "0.4": {
+     "floor": 3.725290298461914e-09,
+     "p_holm": 0.0018244683742523193,
+     "p_raw": 0.00045611709356307983
+    },
+    "0.6222": {
+     "floor": 9.313225746154785e-10,
+     "p_holm": 0.002146359533071518,
+     "p_raw": 0.000715453177690506
+    },
+    "0.8": {
+     "floor": 1.1920928955078125e-07,
+     "p_holm": 0.0191572904586792,
+     "p_raw": 0.01734483242034912
+    },
+    "1.0": {
+     "floor": 7.450580596923828e-09,
+     "p_holm": 0.0191572904586792,
+     "p_raw": 0.0095786452293396
+    }
+   },
+   "correction": "Holm over the other computable rungs",
+   "counted_toward_verdict": false,
+   "named": "0.6",
+   "named_p_uncorrected": 4.398822784423828e-05
+  },
+  "sham_clause_readings": {
+   "A": "the sham's advantage on the rung where advisory's advantage is largest",
+   "A_fires": true,
+   "B": "the sham's own maximum advantage over all rungs",
+   "B_fires": true,
+   "B_sham_max": 0.24999999999999994,
+   "C": "the maximum over rungs of advisory's excess over the sham on the same rung",
+   "C_excess_by_rung": {
+    "0.0556": -0.0,
+    "0.4": 0.09,
+    "0.6": 0.11,
+    "0.6222": 0.1,
+    "0.8": 0.01,
+    "1.0": 0.03
+   },
+   "C_fires": false,
+   "C_max_excess": 0.11,
+   "D": "the largest changed-turn rate on false nominations over rungs, against the sham arm's changed-turn rate on that rung (ruled on PR #101; the arm the largest rate is taken over is asked on the thread)",
+   "D_advisory": {
+    "arm": "advisory",
+    "excess_over_sham": -0.01,
+    "fires": true,
+    "largest_rate": 0.43,
+    "rung": 0.8,
+    "sham_rate_there": 0.44
+   },
+   "D_both": {
+    "arm": "imperative",
+    "excess_over_sham": 0.25,
+    "fires": false,
+    "largest_rate": 0.57,
+    "rung": 0.0556,
+    "sham_rate_there": 0.32
+   },
+   "D_both_status": "withdrawn: read 'both framings' as the larger of the two arms' rates, a disjunction the ratified floor text is not; kept as the misconstruction it was, read by nothing",
+   "D_fires": true,
+   "D_imperative": {
+    "arm": "imperative",
+    "excess_over_sham": 0.25,
+    "fires": false,
+    "largest_rate": 0.57,
+    "rung": 0.0556,
+    "sham_rate_there": 0.32
+   },
+   "D_ratified": "per framing: fires when any framing's largest changed-turn rate over rungs fails to exceed the sham's rate on that rung by the margin (the floor prediction is conjunctive over framings, so its failure is existential); ratified by the maintainer on PR #101, 2026-09-21",
+   "applied": "D",
+   "note": "none of A, B, C was posted before the run; the ruling (relayed on PR #101) binds the sham's to the floor as a rate, reading D, which is neither A nor B; D's per-framing form was ratified 2026-09-21; the verdict word is under rule.sham_reading",
+   "verdict_under": {
+    "A": "refuted",
+    "B": "refuted",
+    "C": "inconclusive",
+    "D": "refuted",
+    "D-advisory": "refuted",
+    "D-both": "inconclusive"
+   }
+  },
+  "supported_at_rung": {
+   "advisory_minus_imperative": -0.2,
+   "advisory_minus_sham": -0.10999999999999999,
+   "holds": false,
+   "imperative_minus_sham": 0.09000000000000002,
+   "sign_test": {
+    "floor": 1.4901161193847656e-08,
+    "k_advisory_only": 3,
+    "k_imperative_only": 23,
+    "n_discordant": 26,
+    "p": 4.398822784423828e-05
+   }
+  },
+  "true_nominations": {
+   "changed_rate": {
+    "advisory": null,
+    "imperative": null,
+    "sham": null
+   },
+   "n": 0
+  },
+  "verdict": "refuted"
+ }
+}

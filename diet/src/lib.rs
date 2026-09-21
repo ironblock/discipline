@@ -21,3 +21,9 @@ mod gate;
 pub mod isolation;
 pub mod object;
 pub mod seam;
+// The browser-callable read side (#78): a thin, pure pass-through to
+// `formats::record`/`formats::regimen`, so the conformance test's claim is
+// "the same function, two targets" rather than "two functions that agree
+// today."
+#[cfg(feature = "wasm")]
+pub mod wasm;

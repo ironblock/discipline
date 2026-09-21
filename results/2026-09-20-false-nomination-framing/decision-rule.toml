@@ -1,0 +1,60 @@
+# The pre-registered claim, floor and decision rule for the false-nomination
+# framing run: the tables [claim], [floor] and [rule] below were written before
+# any fork fired and are consumed by the record by digest so that the numbers
+# cannot have chosen them. Ratified by the maintainer on the claim's own issue
+# (#89, 2026-09-19); the fifth and sixth rungs ruled on #17 (5747481065); the
+# run's fixed parameters posted on #89 before the first fork (5747608246,
+# corrected 5747611166). The READINGS the applier takes of the ratified text
+# (which rung the sham's advantage is read on; p at the floor; one-sided) were
+# NOT posted before the run: they are the applier's, worded 2026-09-20T09:12Z
+# with the run near its end, stated on the verdict under `readings` and
+# `sham_clause_readings`, and disclosed under `known_defects` (fresh review
+# of PR #101, B1). After the run this header changed and the [ruling] table
+# was added (the maintainer's rulings on the PR's decisions, relayed on PR
+# #101 2026-09-20); [claim], [floor] and [rule] are byte-identical to the
+# ratified text.
+
+[claim]
+hypothesis = "When the collector's nominator fires falsely -- it presents an entry as superseded when it is not -- the consumer's turn changes less, and its reasoning acknowledges the nomination without acting on it more often, when the nomination is framed as advisory than when it is framed as imperative; and the size of that difference falls as the nominator's precision rises."
+rungs = [1.0, 0.8, 0.6, 0.4, 0.6222, 0.0556]
+rungs_note = "1.0, 0.8, 0.6, 0.4 as ratified; 0.6222 the (a) run's operating point (best-separated cell, pooled precision at k = 5); 0.0556 the mined-only precision the (a) applier reported (2 of 36); each rung a seeded true/false assignment across the same fork sample"
+primary = "the rate of changed turns on false nominations, advisory against imperative, at each rung, paired by fork"
+
+[floor]
+arm = "sham"
+role = "the perturbation control: a passage of the advisory line's length from a turn of a different drive in the register"
+prediction = "directional: a false nomination changes the turn more often than the sham under both framings; if it does not, nominations are not consequential at all and framing is moot"
+
+[rule]
+rung = 0.6
+supported = "at the 0.6 rung, the changed-turn rate on false nominations is lower under advisory than imperative by >= 0.15 with the paired sign-test p below the attainable floor for the fork count, and advisory exceeds the sham by less than imperative does"
+supported_margin = 0.15
+refuted = "at every rung the advisory rate is not lower than imperative by >= 0.05, or the maximum difference over all rungs does not exceed the sham's by >= 0.05 -- either alone"
+refuted_margin = 0.05
+inconclusive = "otherwise"
+uncomputable_rung = "a rung with fewer than ten false nominations graded satisfies neither bound"
+acknowledgement = "reported beside the verdict, never folded in; the directory's result is the changed-turn rule's word"
+p_reading = "the paired sign test is one comparison per rung, uncorrected, as ruled on #17 for a pre-registered comparison; the attainable floor is 0.5 to the power of the discordant-pair count, printed beside every p"
+
+[ruling]
+# Decision 0 (PR #101): "the sham's" binds to the floor as a RATE -- the
+# largest changed-turn rate on false nominations over rungs against the sham
+# arm's changed-turn rate -- reading D on the verdict, neither A nor B, C
+# rejected. Ratified by the maintainer 2026-09-21 in its per-framing form: the
+# ruling equates the clause with the floor prediction failing, and the floor
+# is stated over both framings conjunctively, so the clause fires when any
+# framing's largest rate over rungs fails to exceed the sham's by the margin.
+sham_reading = "D"
+version = "v2"
+v1_wording = "at every rung the advisory rate is not lower than imperative by >= 0.05, or the maximum difference over all rungs does not exceed the sham's by >= 0.05 -- either alone"
+v2_wording = "at every rung the advisory rate is not lower than imperative by >= 0.05, or, for either framing, the largest changed-turn rate on false nominations over all rungs does not exceed the sham arm's changed-turn rate by >= 0.05 -- either alone"
+v2_wording_source = "the ruling's own phrase, '...does not exceed the sham arm's changed-turn rate by >= 0.05', with the framing quantifier the ruling's floor logic supplies; ratified on PR #101, 2026-09-21"
+status = "decisions 0-8 ruled; 0 (framing form), 6 and 8 by the maintainer directly on 2026-09-21, quoted on PR #101"
+decision_1 = "ladder degenerate: rung claims unadjudicated, labelled on the verdict; (b)-v2 authorized beside this run"
+decision_2 = "batch 22 re-judged by a fresh instance; the void verdicts kept, read by nothing"
+decision_3 = "the named comparison's paired p uncorrected against the attainable floor; the other rungs' sign tests Holm-corrected beside, read by nothing"
+decision_4 = "home-prefix collapse accepted as done"
+decision_5 = "the shuffled-framing null labelled post-hoc, counted toward nothing"
+decision_6 = "the (tool, target) turn-change grader, fixed and posted before the first fork, adjudicates the ratified claim; the ratified text's third arm (an edit to the entry named) is unmeasured, a named defect, and a requirement of (b)-v2's pre-registration; revisitable"
+decision_7 = "grading order disclosed as run; v2 grades a sample in both orders"
+decision_8 = "the re-judge of batch 22 on claude-opus-5 stands as declared, a regime factor of that batch's 36 secondary rows; blind batch judges default to Sonnet from here, declared per batch"
