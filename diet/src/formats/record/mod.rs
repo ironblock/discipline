@@ -1746,6 +1746,24 @@ pub enum PrefixChangeError {
         /// The request row with no digest.
         id: String,
     },
+    /// A `live` record's request whose head digest differs from its
+    /// predecessor's on the same lane, with no `prefix.changed` naming it.
+    ///
+    /// The four refusals above this one all run row -> digests: they check
+    /// that an EXISTING `prefix.changed` row is true of the two heads it
+    /// names. None of them run the other way, digests -> row, which is the
+    /// direction #79's own design states ("A change... emits a typed
+    /// `prefix.changed` event... never silently"). Checked once, at the end
+    /// of the walk, against every head this format already proves changed --
+    /// a live record has one writer, and a writer that computed the change to
+    /// classify a cache miss but did not also emit the row is a bug in that
+    /// writer, not a fact about the run.
+    ChangeNotNamed {
+        /// The request whose head changed unannounced.
+        at_request: String,
+        /// The lane it was sent on.
+        lane: String,
+    },
 }
 
 impl fmt::Display for PrefixChangeError {
@@ -1788,6 +1806,14 @@ impl fmt::Display for PrefixChangeError {
                  `live`, and a session this library drove rendered the head itself; an \
                  absent fingerprint is an adapted record's state, where the log records \
                  what was said rather than the bytes that were sent"
+            ),
+            Self::ChangeNotNamed { at_request, lane } => write!(
+                f,
+                "request `{at_request}` on lane `{lane}` hashes to a different head than \
+                 the request before it on that lane, and no `prefix.changed` row names the \
+                 change; a live record computed both digests to write this one, and a head \
+                 that moved without a row attributing it is exactly the silent miss #79 \
+                 exists to replace"
             ),
         }
     }
@@ -3231,6 +3257,15 @@ struct Seen<'a> {
     heads: BTreeMap<&'a str, Head<'a>>,
     /// The most recent request on each lane, so far.
     latest: BTreeMap<&'a str, &'a str>,
+    /// Requests a `prefix.changed` row has already named, once that row has
+    /// passed every other check in [`Seen::admit_prefix_change`].
+    ///
+    /// Checked at the end of the walk against every head change `heads`
+    /// itself proves happened, so a live record cannot carry a head mutation
+    /// that no row attributes -- the direction #79's own design forbids
+    /// ("never silently") and the four in-row refusals above it do not cover,
+    /// since all four run the other way: row -> digests, never digests -> row.
+    named_changes: BTreeSet<&'a str>,
 }
 
 /// What one request row said about the head it was sent under.
@@ -3252,6 +3287,7 @@ struct Head<'a> {
 /// is an adapted record's ordinary state, where "the head moved" is still
 /// sayable with only one side known; and a predecessor with a digest is the
 /// case a change is actually computed from.
+#[derive(Clone, Copy)]
 enum Predecessor<'a> {
     /// This is the first request its lane sent.
     None,
@@ -3402,9 +3438,9 @@ impl<'a> Seen<'a> {
     /// first, through the same [`link`] every other row uses, so a row naming
     /// a response or a turn is refused before its arithmetic is examined.
     fn admit_prefix_change(
-        &self,
+        &mut self,
         id: &str,
-        at_request: &str,
+        at_request: &'a str,
         reason: PrefixReason,
         diff: &[PrefixDelta],
     ) -> Result<(), ParseError> {
@@ -3462,6 +3498,11 @@ impl<'a> Seen<'a> {
                 .into(),
             );
         }
+        // Everything above is a refusal; reaching here means this row is a
+        // real attribution of a real change, so the request it names is
+        // covered and the end-of-walk pass in `validate` will not refuse it
+        // as a silent mutation.
+        self.named_changes.insert(at_request);
         Ok(())
     }
 
@@ -3673,6 +3714,35 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
 
     if regime.is_none() {
         return Err(StructureError::NoStart.into());
+    }
+    if live {
+        refuse_unnamed_changes(&seen)?;
+    }
+    Ok(())
+}
+
+/// digests -> row, the direction none of `Seen::admit_prefix_change`'s four
+/// in-row refusals check: every head change the walk itself proved (two
+/// consecutive digests on one lane that differ) must have been named by a
+/// `prefix.changed` that passed those refusals, or a live record's own
+/// computed change is going unreported. Called only for `live` records, like
+/// [`StructureError::PrefixChange`]'s `HeadUnhashedInLiveRecord` beside it: an
+/// adapted record's digests came from a foreign log that may hash one side of
+/// a pair and not the other, so "unnamed" there is not yet a contradiction.
+fn refuse_unnamed_changes(seen: &Seen<'_>) -> Result<(), ParseError> {
+    for (&at_request, head) in &seen.heads {
+        if let (Some(digest), Predecessor::Digest(before)) = (head.digest, head.previous)
+            && before != digest
+            && !seen.named_changes.contains(at_request)
+        {
+            return Err(
+                StructureError::PrefixChange(PrefixChangeError::ChangeNotNamed {
+                    at_request: at_request.to_owned(),
+                    lane: head.lane.to_owned(),
+                })
+                .into(),
+            );
+        }
     }
     Ok(())
 }
@@ -4316,9 +4386,9 @@ pub fn project(source: &str) -> Result<Value, String> {
 mod tests {
     use super::json::Value;
     use super::{
-        Budget, CacheTtl, Count, Event, Kind, MAX_DEPTH, ParseError, PrefixDelta, PrefixReason,
-        Reasoning, Regime, SchemaError, StructureError, Verdict, Weights, WeightsKind, objects,
-        parse, reason_of, regime_value, render,
+        Budget, CacheTtl, Count, DeltaKind, Event, Kind, MAX_DEPTH, ParseError, PrefixDelta,
+        PrefixReason, Reasoning, Regime, SchemaError, StructureError, Verdict, Weights,
+        WeightsKind, delta, delta_value, objects, parse, reason_of, regime_value, render,
     };
 
     /// A `start` line whose regime is complete, as every record needs one.
@@ -4944,6 +5014,92 @@ mod tests {
             let twice = parse(&render(&once)).expect("a rendering is itself a record");
             assert_eq!(once, twice, "{weights} did not survive a rendering");
         }
+    }
+
+    // Every `DeltaKind` has to survive a rendering, for the same reason as
+    // `every_weights_kind_round_trips` one type over: `delta_value` is the
+    // only writer and `delta` the only reader, and a variant either misses
+    // could silently become another one.
+    #[test]
+    fn every_delta_kind_round_trips() {
+        let one_of_each = [
+            PrefixDelta::ModelChanged {
+                was: "before".to_owned(),
+                now: "after".to_owned(),
+            },
+            PrefixDelta::ToolMoved {
+                tool: "search".to_owned(),
+                was: 0,
+                now: 2,
+            },
+            PrefixDelta::ToolAdded {
+                tool: "search".to_owned(),
+            },
+            PrefixDelta::ToolRemoved {
+                tool: "search".to_owned(),
+            },
+            PrefixDelta::ToolChanged {
+                tool: "search".to_owned(),
+            },
+            PrefixDelta::KwargChanged {
+                key: "reasoning_effort".to_owned(),
+                was: "\"low\"".to_owned(),
+                now: "\"high\"".to_owned(),
+            },
+            PrefixDelta::KwargAdded {
+                key: "reasoning_effort".to_owned(),
+                now: "\"high\"".to_owned(),
+            },
+            PrefixDelta::KwargRemoved {
+                key: "reasoning_effort".to_owned(),
+                was: "\"high\"".to_owned(),
+            },
+            PrefixDelta::MessageAdded {
+                at: 1,
+                role: "user".to_owned(),
+                chars: Count::new(3).expect("3 is a count"),
+            },
+            PrefixDelta::MessageRemoved {
+                at: 1,
+                role: "user".to_owned(),
+                chars: Count::new(3).expect("3 is a count"),
+            },
+            PrefixDelta::LineChanged {
+                message: 0,
+                line: 0,
+                was: "was".to_owned(),
+                now: "now".to_owned(),
+            },
+            PrefixDelta::LineAdded {
+                message: 0,
+                line: 1,
+                now: "now".to_owned(),
+            },
+            PrefixDelta::LineRemoved {
+                message: 0,
+                line: 1,
+                was: "was".to_owned(),
+            },
+        ];
+        assert_eq!(
+            one_of_each.len(),
+            DeltaKind::ALL.len(),
+            "one of each kind, or this test does not cover what it claims to"
+        );
+        let mut seen = std::collections::BTreeSet::new();
+        for built in one_of_each {
+            assert!(seen.insert(built.kind()), "two cases of {:?}", built.kind());
+            let Value::Object(mut fields) = delta_value(&built) else {
+                panic!("a delta's value is always an object");
+            };
+            let round_tripped =
+                delta(&mut fields, "test").unwrap_or_else(|err| panic!("{built:?}: {err}"));
+            assert_eq!(
+                round_tripped, built,
+                "a delta this module wrote did not read back"
+            );
+        }
+        assert_eq!(seen.len(), DeltaKind::ALL.len(), "every kind, exactly once");
     }
 
     // A rejected lane has a substrate, and it is the lane's. The rule that

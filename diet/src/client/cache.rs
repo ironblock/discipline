@@ -166,10 +166,13 @@ pub struct Census {
     /// The substrates a call was put to whose cache lifetime nobody
     /// declared, in id order.
     ///
-    /// **Named rather than defaulted.** A substrate with no declared lifetime
-    /// cannot produce an `expected` miss here, so every miss against it lands
-    /// in `unexplained` -- which is the honest register and a useless one
-    /// unless a reader can see why. This list is why.
+    /// **Named rather than defaulted, and named whether or not it ever
+    /// missed.** A substrate with no declared lifetime cannot produce an
+    /// `expected` miss: any miss against it lands in `unexplained`, which is
+    /// the honest register and a useless one unless a reader can see why.
+    /// This list is why -- it names the substrate on the strength of the
+    /// declaration alone, not on whether a miss actually happened to land in
+    /// `unexplained` this run.
     pub ttl_undeclared: Vec<String>,
 }
 

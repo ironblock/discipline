@@ -710,9 +710,9 @@ impl Heads {
     fn new() -> Self {
         Self {
             watch: crate::client::head::Watch::new(),
-            // `x` for the prefix-change rows, beside `q`, `i`, `t`, `p`, `s`
-            // and `c`. One letter per kind of row, so a reader of the record
-            // can tell what an id names without looking it up.
+            // `x` for the prefix-change rows, beside `q`, `i`, `t`, `p`, `s`,
+            // `c` and `r`. One letter per kind of row, so a reader of the
+            // record can tell what an id names without looking it up.
             ids: IdSource::new("x"),
             called: BTreeMap::new(),
             gap: None,

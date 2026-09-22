@@ -143,13 +143,17 @@ impl Head {
 
     /// The first timestamp this head carries, if it carries one.
     ///
-    /// **Pointed at the frozen messages and the tool schemas, and at nothing
-    /// else.** A dated model identifier -- `a-model-2026-08-06` -- is a NAME,
-    /// not a fact that moves at midnight, and refusing it would refuse a
-    /// drive against half the hosted surfaces on the market. A tool's own
-    /// name is an identifier for the same reason. What is scanned is the text
-    /// a template renders into the prompt and the schemas that travel with
-    /// it, which is where a rendered date actually lands.
+    /// **Pointed at the frozen messages, the tool schemas and the template
+    /// arguments, and at nothing else.** A dated model identifier --
+    /// `a-model-2026-08-06` -- is a NAME, not a fact that moves at midnight,
+    /// and refusing it would refuse a drive against half the hosted surfaces
+    /// on the market. A tool's own name is an identifier for the same
+    /// reason. What is scanned is the text a template renders into the
+    /// prompt, the schemas that travel with it, and the arguments a
+    /// server-side chat template takes -- #79's own specimen renders the
+    /// date through a `chat_template_kwargs` value rather than into message
+    /// text, and a lint that skipped it would pass exactly the head design
+    /// point 4 exists to catch.
     #[must_use]
     pub fn timestamp(&self) -> Option<Timestamped> {
         for (index, message) in self.frozen.iter().enumerate() {
@@ -166,6 +170,16 @@ impl Head {
             if let Some(found) = timestamps(&rendered).into_iter().next() {
                 return Some(Timestamped {
                     site: format!("the `{}` tool's schema", tool.name),
+                    found,
+                });
+            }
+        }
+        for (key, value) in &self.template_kwargs {
+            let mut rendered = String::new();
+            json::render(value, &mut rendered);
+            if let Some(found) = timestamps(&rendered).into_iter().next() {
+                return Some(Timestamped {
+                    site: format!("the `{key}` template argument"),
                     found,
                 });
             }
@@ -747,11 +761,39 @@ mod tests {
     #[test]
     fn a_trailing_newline_or_a_crlf_ending_is_an_ordinary_line_delta() {
         let cases = [
-            ("gained", "Be brief.", "Be brief.\n"),
-            ("lost", "Be brief.\n", "Be brief."),
-            ("crlf to lf", "one\r\ntwo", "one\ntwo"),
+            (
+                "gained",
+                "Be brief.",
+                "Be brief.\n",
+                PrefixDelta::LineAdded {
+                    message: 0,
+                    line: 1,
+                    now: String::new(),
+                },
+            ),
+            (
+                "lost",
+                "Be brief.\n",
+                "Be brief.",
+                PrefixDelta::LineRemoved {
+                    message: 0,
+                    line: 1,
+                    was: String::new(),
+                },
+            ),
+            (
+                "crlf to lf",
+                "one\r\ntwo",
+                "one\ntwo",
+                PrefixDelta::LineChanged {
+                    message: 0,
+                    line: 0,
+                    was: "one\r".to_owned(),
+                    now: "one".to_owned(),
+                },
+            ),
         ];
-        for (what, before_text, after_text) in cases {
+        for (what, before_text, after_text, expected) in cases {
             let before = Head::of(&shape(vec![
                 Message::new(Role::System, before_text),
                 Message::new(Role::User, "turn"),
@@ -763,10 +805,11 @@ mod tests {
             let change = after
                 .change_from(&before)
                 .unwrap_or_else(|| panic!("{what}: the head moved"));
-            assert!(
-                !change.diff.is_empty(),
+            assert_eq!(
+                change.diff,
+                vec![expected],
                 "{what}: a newline the head gained or lost is attributable, and an \
-                 empty diff would report it as the residual"
+                 empty or wrong diff would misreport it"
             );
             assert_eq!(
                 change.reason,
@@ -943,6 +986,28 @@ mod tests {
             .expect("a date in the head");
         assert_eq!(found.found, "2026-08-06");
         assert!(found.site.contains("message 0"), "{}", found.site);
+    }
+
+    /// The lint's own blind spot until this was fixed: a server-side chat
+    /// template takes its date through `chat_template_kwargs`, not through
+    /// rendered message text, and #79's own specimen -- a midnight-invalidated
+    /// prefix -- arrives exactly this way.
+    #[test]
+    fn a_dated_template_argument_is_a_timestamp_too() {
+        let mut kwargs = BTreeMap::new();
+        kwargs.insert("today".to_owned(), Value::String("2026-09-13".to_owned()));
+        let dated = RequestShape {
+            template_kwargs: kwargs,
+            ..shape(vec![
+                Message::new(Role::System, "the regimen"),
+                Message::new(Role::User, "turn"),
+            ])
+        };
+        let found = Head::of(&dated)
+            .timestamp()
+            .expect("a date in the template arguments");
+        assert_eq!(found.found, "2026-09-13");
+        assert!(found.site.contains("today"), "{}", found.site);
     }
 
     /// A watch is per lane, and a lane's first head is not a head that moved.
