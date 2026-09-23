@@ -7753,6 +7753,14 @@ EOF
     now_ms
     printf 'run\twhole\t%d\tthe unsharded selftest, end to end\n' \
       "$(( NOW_MS - selftest_started_ms ))" >> "$SELFTEST_COST_INDEX"
+
+    # THE PROVENANCE IS PART OF THE HARVEST, not something asserted about it
+    # afterward: a plan is a claim about the runner's own timing, and the claim
+    # travels with the numbers or not at all. `RUNNER_ENVIRONMENT` is GitHub
+    # Actions' own variable for this and is unset outside Actions, so a local
+    # harvest honestly records `local` rather than guessing at a substrate
+    # nobody declared.
+    printf 'substrate\t%s\t%s\n' "${RUNNER_ENVIRONMENT:-local}" "$(uname -srm 2>/dev/null || echo unknown)" >> "$SELFTEST_COST_INDEX"
   fi
 
   # --- the census ---

@@ -65,8 +65,16 @@ runner_overhead_seconds	60
 # something finishes, so the wall clock stops falling and starts queueing, and
 # a packer that did not know it would keep splitting.
 #
-# 16 rather than 20: `verify.yml` runs diet, pages and repo alongside the
-# shards, so a split that claimed all 20 would queue its own siblings -- and
-# the admission skew measured above is itself a function of how many jobs are
-# admitted at once.
-max_shards	16
+# 20, the real number, not a number shaded down to leave headroom for
+# `verify.yml`'s diet, pages and repo jobs: reserving margin here is a second
+# budget nobody declared, competing with the one this file exists to be. If
+# twenty does not get the slowest shard under `wall_clock_seconds`, that is an
+# UNMET BUDGET, and an unmet budget is disclosed, not faked by a shard count
+# the account cannot actually run concurrently -- `report_wall_clock` prints
+# the achieved wall-clock against this budget on every run, and
+# `derive-shards.py`'s own emitted header says so when the ceiling is what it
+# packed against. The next lever past shard count -- per-shard build time --
+# is its own item, outside #87's scope by #87's own text.
+#
+# Ruled on #87 (2026-09-23).
+max_shards	20

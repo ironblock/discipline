@@ -98,6 +98,13 @@ BUDGET_KEYS = {
 # on the packer's own output is a threshold nobody can keep green.
 OUTLIER_FACTOR = 3
 
+# What GitHub Actions' `RUNNER_ENVIRONMENT` reports on a `runs-on: ubuntu-latest`
+# hosted runner, as opposed to `"self-hosted"`. A harvest's plan is a claim
+# about the runner's own timing; a harvest taken anywhere else is a claim about
+# a different substrate wearing the runner's label, and `grade_substrate`
+# refuses it by comparing against this constant rather than a hand-typed one.
+RUNNER_SUBSTRATE = "github-hosted"
+
 
 class Unusable(Exception):
     """The derivation cannot be run at all."""
@@ -164,15 +171,16 @@ def read_budget(path: pathlib.Path) -> dict[str, int]:
     return found
 
 
-def read_index(path: pathlib.Path) -> tuple[dict[str, int], dict[str, str], int]:
-    """The harvest: each fault's cost in ms, its label, and the whole run's ms.
+def read_index(path: pathlib.Path) -> tuple[dict[str, int], dict[str, str], int, str]:
+    """The harvest: each fault's cost in ms, its label, the run's ms, and where.
 
-    `fault<TAB>id<TAB>ms<TAB>label` and one `run<TAB>whole<TAB>ms<TAB>note`,
-    which verify.sh writes in that order.
+    `fault<TAB>id<TAB>ms<TAB>label`, one `run<TAB>whole<TAB>ms<TAB>note`, and
+    one `substrate<TAB>value<TAB>note`, which verify.sh writes in that order.
     """
     cost: dict[str, int] = {}
     label: dict[str, str] = {}
     run_ms: int | None = None
+    substrate: str | None = None
     for number, row in rows(path, "the index"):
         kind = row[0]
         where = f"{path.name}:{number}"
@@ -191,6 +199,10 @@ def read_index(path: pathlib.Path) -> tuple[dict[str, int], dict[str, str], int]
             if len(row) < 3:
                 raise Unusable(f"{where}: want run, whole and ms")
             run_ms = whole(row[2], where, "the run's length")
+        elif kind == "substrate":
+            if len(row) < 2:
+                raise Unusable(f"{where}: want substrate and value")
+            substrate = row[1]
         else:
             raise Unusable(f"{where}: unknown row kind {kind!r}")
     if not cost:
@@ -215,17 +227,29 @@ def read_index(path: pathlib.Path) -> tuple[dict[str, int], dict[str, str], int]
             f"run cost beyond its faults -- which is the per-shard overhead the "
             f"shard count is derived from"
         )
-    return cost, label, run_ms
+    if substrate is None:
+        raise Unusable(
+            f"{path} carries no substrate row, so nothing says where it was "
+            f"measured; re-harvest with an up-to-date verify.sh"
+        )
+    return cost, label, run_ms, substrate
 
 
-def read_plan(path: pathlib.Path) -> tuple[int, dict[str, int], dict[str, int], int]:
-    """The checked-in assignment: N, id -> shard, id -> harvested ms, overhead.
+def read_plan(path: pathlib.Path) -> tuple[int, dict[str, int], dict[str, int], int, str]:
+    """The checked-in assignment: N, id -> shard, id -> harvested ms, overhead, substrate.
 
     The same file verify.sh reads, parsed the same way -- `key<TAB>value` for
     the scalars, `fault<TAB>id<TAB>shard<TAB>ms` for the assignments.
+
+    `substrate` DEFAULTS TO EMPTY rather than being required, unlike
+    `read_index`'s: this is the checked-in file, which predates the field, and
+    a plan with no substrate row must still PARSE so `--check` can grade it and
+    name the problem by `grade_substrate` -- refusing to read it at all would
+    turn a graded, disclosed defect back into an unreadable file.
     """
     shards: int | None = None
     overhead_ms = 0
+    substrate = ""
     assign: dict[str, int] = {}
     cost: dict[str, int] = {}
     for number, row in rows(path, "the assignment"):
@@ -246,6 +270,8 @@ def read_plan(path: pathlib.Path) -> tuple[int, dict[str, int], dict[str, int], 
             overhead_ms = whole(value, where, "the overhead")
         elif key == "harvest_ms":
             pass  # provenance; the overhead is what the derivation uses
+        elif key == "substrate":
+            substrate = value
         else:
             raise Unusable(f"{where}: unknown key {key!r}")
     if shards is None:
@@ -255,7 +281,7 @@ def read_plan(path: pathlib.Path) -> tuple[int, dict[str, int], dict[str, int], 
         )
     if not assign:
         raise Unusable(f"{path.name} assigns no fault to any shard")
-    return shards, assign, cost, overhead_ms
+    return shards, assign, cost, overhead_ms, substrate
 
 
 def manifest_ids() -> dict[str, str]:
@@ -423,6 +449,30 @@ def grade_shape(shards: int, assign: dict[str, int], budget: dict[str, int]) -> 
     return failures
 
 
+def grade_substrate(substrate: str) -> list[str]:
+    """The plan was harvested on the runner, not merely about the runner.
+
+    A shard split derived from timings measured on a laptop, a self-hosted
+    box, or any substrate other than the CI runner itself is a claim about the
+    runner made on a different machine -- the label-versus-value class this
+    check exists to catch, the same as a fault's cost claiming to belong to a
+    manifest it does not.
+    """
+    if substrate == RUNNER_SUBSTRATE:
+        return []
+    if not substrate:
+        return [
+            f"the plan was harvested before this check existed, so it has no "
+            f"declared substrate. Harvest it on the runner: dispatch the "
+            f"harvest-shards workflow"
+        ]
+    return [
+        f"the plan was harvested on {substrate!r}, not {RUNNER_SUBSTRATE!r} -- "
+        f"the CI runner. Harvest it there instead: dispatch the harvest-shards "
+        f"workflow"
+    ]
+
+
 def grade_balance(shards: int, assign: dict[str, int], cost: dict[str, int]) -> list[str]:
     """No shard carries OUTLIER_FACTOR times the median shard's cost.
 
@@ -456,7 +506,7 @@ def grade_balance(shards: int, assign: dict[str, int], cost: dict[str, int]) -> 
 # --------------------------------------------------------------------------
 
 
-def emit(cost: dict[str, int], run_ms: int, budget: dict[str, int]) -> str:
+def emit(cost: dict[str, int], run_ms: int, budget: dict[str, int], substrate: str) -> str:
     """The whole of tools/gate/shards.tsv, from one harvest.
 
     A pure function of the harvest and the budget, deliberately: re-emitting
@@ -527,6 +577,7 @@ def emit(cost: dict[str, int], run_ms: int, budget: dict[str, int]) -> str:
         "# one, and re-harvesting there is what produces it.",
         "#",
         f"# Harvested: {len(cost)} fault(s), {run_ms / 1000:.0f}s end to end.",
+        f"# Harvested on `{substrate}`.",
         f"# Slowest shard {max(summed) / 1000:.0f}s of fault cost, fastest "
         f"{min(summed) / 1000:.0f}s -- a spread of "
         f"{(max(summed) - min(summed)) / max(1, min(summed)) * 100:.1f}%.",
@@ -543,6 +594,7 @@ def emit(cost: dict[str, int], run_ms: int, budget: dict[str, int]) -> str:
         f"shards\t{shards}",
         f"overhead_ms\t{overhead_ms}",
         f"harvest_ms\t{run_ms}",
+        f"substrate\t{substrate}",
         "",
         "# fault<TAB>id<TAB>shard<TAB>harvested milliseconds",
         "#",
@@ -743,20 +795,45 @@ def _empty_shard_is_refused():
     return None
 
 
+@fixture("a plan not harvested on the runner is refused, by name")
+def _wrong_substrate_is_refused_by_name():
+    # Defect 1's ruling on #87 (2026-09-23): re-harvest on the runner, and make
+    # that the only place a harvest is valid. A shard plan derived from timings
+    # taken anywhere else is a claim about the runner made on a different
+    # substrate -- the label-versus-value class this whole file exists to
+    # catch -- so it must be refused BY NAME, the same as a stray or missing
+    # fault is, rather than trusted because the file otherwise parses.
+    found = grade_substrate("self-hosted")
+    if not found or "self-hosted" not in found[0]:
+        return f"a plan harvested on 'self-hosted' was reported as {found!r}"
+    # The empty case is worded differently -- "never declared" rather than
+    # "declared wrong" -- because it means something different: the plan
+    # predates this check rather than having failed it.
+    empty = grade_substrate("")
+    if not empty or "no declared substrate" not in empty[0]:
+        return f"a plan with no substrate at all was reported as {empty!r}"
+    if grade_substrate(RUNNER_SUBSTRATE):
+        return "a plan harvested on the runner was refused"
+    return None
+
+
 @fixture("the overhead is what the run cost beyond its faults")
 def _overhead_is_measured():
     # Per shard, and measured rather than guessed: it is the sandbox, and the
     # mechanics assertions, which run unsharded in EVERY shard. Guessing it
     # low derives too few shards and the budget is missed by exactly the
     # amount of the guess.
-    index = "fault\ta\t1000\tone\nfault\tb\t2000\ttwo\nrun\twhole\t9000\tthe lot\n"
+    index = (
+        "fault\ta\t1000\tone\nfault\tb\t2000\ttwo\nrun\twhole\t9000\tthe lot\n"
+        "substrate\tgithub-hosted\ttest\n"
+    )
     with tempfile.TemporaryDirectory() as box:
         path = pathlib.Path(box) / "harvest.tsv"
         path.write_text(index, encoding="utf-8")
-        cost, _label, run_ms = read_index(path)
+        cost, _label, run_ms, substrate = read_index(path)
         if run_ms - sum(cost.values()) != 6000:
             return f"read an overhead of {run_ms - sum(cost.values())}ms, not 6000"
-        text = emit(cost, run_ms, BUDGET_FIXTURE)
+        text = emit(cost, run_ms, BUDGET_FIXTURE, substrate)
         if "overhead_ms\t6000" not in text:
             return "the emitted plan does not carry the measured overhead"
     return None
@@ -810,7 +887,8 @@ def _double_harvest_is_refused():
     with tempfile.TemporaryDirectory() as box:
         path = pathlib.Path(box) / "harvest.tsv"
         path.write_text(
-            "fault\ta\t1000\tone\nfault\ta\t9000\tone again\nrun\twhole\t10000\tx\n",
+            "fault\ta\t1000\tone\nfault\ta\t9000\tone again\nrun\twhole\t10000\tx\n"
+            "substrate\tgithub-hosted\ttest\n",
             encoding="utf-8",
         )
         try:
@@ -830,7 +908,10 @@ def _clockless_harvest_is_refused():
     with tempfile.TemporaryDirectory() as box:
         path = pathlib.Path(box) / "harvest.tsv"
         rows = [f"fault\tf{n}\t{0 if n < 6 else 1000}\tf{n}\n" for n in range(10)]
-        path.write_text("".join(rows) + "run\twhole\t9000\tx\n", encoding="utf-8")
+        path.write_text(
+            "".join(rows) + "run\twhole\t9000\tx\nsubstrate\tgithub-hosted\ttest\n",
+            encoding="utf-8",
+        )
         try:
             read_index(path)
         except Unusable as err:
@@ -848,9 +929,33 @@ def _a_few_real_zeroes_are_not_a_clockless_harvest():
     with tempfile.TemporaryDirectory() as box:
         path = pathlib.Path(box) / "harvest.tsv"
         rows = [f"fault\tf{n}\t{0 if n < 2 else 1000}\tf{n}\n" for n in range(10)]
-        path.write_text("".join(rows) + "run\twhole\t9000\tx\n", encoding="utf-8")
+        path.write_text(
+            "".join(rows) + "run\twhole\t9000\tx\nsubstrate\tgithub-hosted\ttest\n",
+            encoding="utf-8",
+        )
         read_index(path)
     return None
+
+
+@fixture("a harvest with no declared substrate is refused")
+def _harvest_needs_a_substrate():
+    # THE PROVENANCE IS PART OF THE HARVEST, not asserted after the fact. A
+    # cost index that names its faults and their timing but not where it was
+    # taken is exactly what a harvest from before this field existed looks
+    # like -- and, unrefused, it is indistinguishable from a runner harvest to
+    # everything downstream of this function.
+    with tempfile.TemporaryDirectory() as box:
+        path = pathlib.Path(box) / "harvest.tsv"
+        path.write_text(
+            "fault\ta\t1000\tone\nrun\twhole\t2000\tthe lot\n", encoding="utf-8",
+        )
+        try:
+            read_index(path)
+        except Unusable as err:
+            if "substrate" not in str(err):
+                return f"refused for the wrong reason: {err}"
+            return None
+        return "an index with no substrate row was read as a harvest"
 
 
 @fixture("a budget declaring nothing is refused rather than defaulted")
@@ -900,19 +1005,20 @@ def _emit_round_trips():
     run_ms = sum(cost.values()) + 5000
     with tempfile.TemporaryDirectory() as box:
         path = pathlib.Path(box) / "shards.tsv"
-        path.write_text(emit(cost, run_ms, BUDGET_FIXTURE), encoding="utf-8")
-        shards, assign, back, overhead = read_plan(path)
+        path.write_text(emit(cost, run_ms, BUDGET_FIXTURE, "github-hosted"), encoding="utf-8")
+        shards, assign, back, overhead, substrate = read_plan(path)
         if back != cost:
             return "the costs did not survive the round trip"
         if overhead != 5000:
             return f"the overhead came back as {overhead}, not 5000"
         found = (grade_coverage({i: "seeded-gate" for i in cost}, assign)
                  + grade_shape(shards, assign, BUDGET_FIXTURE)
-                 + grade_balance(shards, assign, back))
+                 + grade_balance(shards, assign, back)
+                 + grade_substrate(substrate))
         if found:
             return f"--check refused what --emit produced: {found[0]!r}"
         # Byte-for-byte on a second emit, because the file is checked in.
-        if emit(cost, run_ms, BUDGET_FIXTURE) != path.read_text(encoding="utf-8"):
+        if emit(cost, run_ms, BUDGET_FIXTURE, "github-hosted") != path.read_text(encoding="utf-8"):
             return "emitting the same harvest twice produced two files"
     return None
 
@@ -923,8 +1029,8 @@ def _matrix_prints_the_range():
     run_ms = sum(cost.values()) + 5000
     with tempfile.TemporaryDirectory() as box:
         path = pathlib.Path(box) / "shards.tsv"
-        path.write_text(emit(cost, run_ms, BUDGET_FIXTURE), encoding="utf-8")
-        shards, _assign, _cost, _overhead = read_plan(path)
+        path.write_text(emit(cost, run_ms, BUDGET_FIXTURE, "github-hosted"), encoding="utf-8")
+        shards, _assign, _cost, _overhead, _substrate = read_plan(path)
         text = matrix_of(path)
         if text != "[" + ", ".join(str(n) for n in range(1, shards + 1)) + "]":
             return f"the matrix does not name every shard 1..{shards}: {text!r}"
@@ -969,7 +1075,8 @@ def _exit_codes_are_distinct():
                 f"fault\t{ident}\t{100 + (n * 37) % 900}\tcase {n}\n"
                 for n, ident in enumerate(declared)
             )
-            + "run\twhole\t9000\tthe lot\n",
+            + "run\twhole\t9000\tthe lot\n"
+            + "substrate\tgithub-hosted\ttest\n",
             encoding="utf-8",
         )
 
@@ -1015,18 +1122,33 @@ def _exit_codes_are_distinct():
     return None
 
 
-@fixture("--check reads the repository's own assignment and passes on it")
+@fixture("--check reads the repository's own assignment, unsound only for its missing harvest")
 def _the_committed_plan_is_sound():
     # THE ONE FIXTURE WITH A REAL INPUT. Everything above is synthetic, and a
     # suite of synthetic cases can pass while the file that is actually checked
     # in has drifted. This is the same call CI makes, against the same two
     # files, so a manifest edit with no re-harvest is red here and not only
     # there.
+    #
+    # NOT `code == 0`. Per the ruling on #87's defect 1 (2026-09-23): "until
+    # that first runner harvest exists, 16 is a placeholder and the plan says
+    # so" -- tools/gate/shards.tsv predates the substrate field and correctly
+    # carries none, so `check()` correctly reports it unsound for that one
+    # disclosed reason. Asserting a clean 0 here would either block this
+    # fixture on a harvest #87 is explicitly not taking, or get "fixed" by
+    # quietly dropping the one failure the ruling requires stay visible. What
+    # this fixture must still catch is any OTHER defect, so the assertion is
+    # that grade_substrate is the ONLY thing that fires here -- a coverage,
+    # shape or balance regression still reddens it.
     if not PLAN.is_file():
         return f"{PLAN} is not there, so the sharded selftest cannot run at all"
     code, failures = check()
-    if code != 0:
-        return f"{PLAN}: {failures[0] if failures else 'refused with no reason'}"
+    _shards, _assign, _cost, _overhead, substrate = read_plan(PLAN)
+    expected = grade_substrate(substrate)
+    if failures != expected:
+        return f"{PLAN}: expected only the substrate failure {expected!r}, got {failures!r}"
+    if code != (EXIT_BAD if expected else 0):
+        return f"{PLAN}: exit {code} does not match failure list {failures!r}"
     return None
 
 
@@ -1053,12 +1175,13 @@ def selftest() -> int:
 def check() -> tuple[int, list[str]]:
     """Grade the checked-in assignment. The code, and why, for both callers."""
     budget = read_budget(BUDGET)
-    shards, assign, cost, overhead_ms = read_plan(PLAN)
+    shards, assign, cost, overhead_ms, substrate = read_plan(PLAN)
     declared = manifest_ids()
     failures = (
         grade_coverage(declared, assign)
         + grade_shape(shards, assign, budget)
         + grade_balance(shards, assign, cost)
+        + grade_substrate(substrate)
     )
     return (EXIT_BAD if failures else 0), failures
 
@@ -1070,7 +1193,7 @@ def matrix_of(path: pathlib.Path) -> str:
     shard -- an empty matrix is a workflow of no jobs, and GitHub Actions
     accepts it as a success with nothing run, not as the failure it is.
     """
-    shards, _assign, _cost, _overhead = read_plan(path)
+    shards, _assign, _cost, _overhead, _substrate = read_plan(path)
     if shards < 1:
         raise Unusable(
             f"{path.name} declares {shards} shard(s). A matrix over that is "
@@ -1140,7 +1263,7 @@ def main(argv: list[str]) -> int:
                 )
                 return code
             budget = read_budget(BUDGET)
-            shards, assign, cost, overhead_ms = read_plan(PLAN)
+            shards, assign, cost, overhead_ms, substrate = read_plan(PLAN)
             worst, allowed = slowest(assign, cost, shards, overhead_ms, budget)
             print(
                 f"derive-shards: {len(assign)} fault(s) across {shards} shard(s); "
@@ -1149,11 +1272,12 @@ def main(argv: list[str]) -> int:
                 + ("" if worst <= allowed else
                    " -- OVER on those numbers, which were measured wherever the "
                    "harvest was taken and not necessarily on the runner")
+                + f", harvested on {substrate or 'nowhere declared'}"
             )
             return 0
 
         budget = read_budget(BUDGET)
-        cost, label, run_ms = read_index(pathlib.Path(args.index))
+        cost, label, run_ms, substrate = read_index(pathlib.Path(args.index))
 
         # A HARVEST IS GRADED AGAINST THE MANIFEST BEFORE IT IS PACKED. An
         # index missing a fault would emit an assignment missing that fault,
@@ -1174,7 +1298,7 @@ def main(argv: list[str]) -> int:
             return EXIT_BAD
 
         if args.emit:
-            sys.stdout.write(emit(cost, run_ms, budget))
+            sys.stdout.write(emit(cost, run_ms, budget, substrate))
             return 0
 
         overhead_ms = max(0, run_ms - sum(cost.values()))
