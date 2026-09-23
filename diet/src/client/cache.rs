@@ -1,4 +1,5 @@
-//! The three-register cache-miss census: expected, mutation, unexplained.
+//! The four-register cache-miss census: expected, mutation, unexplained,
+//! `cold_start`.
 //!
 //! #30 gave the client cache telemetry per request: how many prompt tokens
 //! the server read, and how many it reused. That counts misses. It does not
@@ -13,10 +14,16 @@
 //! evidence. Cache lifetime is a property of the provider path, declared per
 //! substrate as [`crate::formats::record::CacheTtl`]: a miss after a gap
 //! longer than the lifetime is **expected**, on a constant somebody wrote
-//! down. Everything else is **unexplained** -- a provider restart, a
-//! granularity this client cannot see, a bug -- and it is never folded into
-//! `expected`, because the fold is exactly what turns a measurement back into
-//! an estimate.
+//! down. A lane's first call is **`cold_start`**, checked before either of
+//! those: it has no predecessor by construction, so there is no head to diff
+//! and no gap to compare against a lifetime, and folding it into either would
+//! attribute it to evidence this call does not carry. Everything else is
+//! **unexplained** -- a provider restart, a granularity this client cannot
+//! see, a bug -- and it is never folded into `expected` or `cold_start`,
+//! because the fold is exactly what turns a measurement back into an
+//! estimate. Ruled 2026-09-23 on #79's review: `cold_start` was originally
+//! folded into `unexplained`, which polluted the one register the census
+//! exists to keep small with a miss the record can in fact attribute.
 //!
 //! # Row 3 is proved at the unit, and only at the unit
 //!
@@ -119,6 +126,12 @@ pub enum Register {
     /// bug. **Never folded into `Expected`:** the fold is what turned the
     /// measurement into an estimate in the work this replaces.
     Unexplained,
+    /// A lane's first call. No predecessor exists to diff for a mutation or
+    /// to measure a gap against a lifetime, so this is neither of those and
+    /// it is not `Unexplained` either: the record can name exactly why this
+    /// one is unattributed to evidence -- it is first -- and `Unexplained` is
+    /// reserved for misses this module cannot name a reason for at all.
+    ColdStart,
 }
 
 /// Which register `observation` belongs in, given what its substrate
@@ -130,8 +143,18 @@ pub enum Register {
 /// different tier. Where both would fire, the evidence wins -- and a run
 /// where every miss is `expected` because the gaps happened to be long is a
 /// run that has learned nothing about its own prefix.
+///
+/// **COLD START OUTRANKS BOTH.** Checked first, and unconditionally on
+/// `since_previous` alone -- not on `head_changed`, which a caller could set
+/// however it likes on a first call that by definition has nothing to diff
+/// against. `since_previous` is `None` only ever for a lane's first call
+/// ([`Observation::since_previous`]'s own doc), so it is the one field this
+/// function trusts to say so.
 #[must_use]
 pub fn register(observation: &Observation, declared: Option<CacheTtl>) -> Register {
+    if observation.since_previous.is_none() {
+        return Register::ColdStart;
+    }
     if observation.head_changed {
         return Register::Mutation;
     }
@@ -160,6 +183,9 @@ pub struct Census {
     pub mutation: u64,
     /// Misses neither of the above explains.
     pub unexplained: u64,
+    /// Misses on a lane's first call, which has no predecessor to diff or to
+    /// measure a gap against.
+    pub cold_start: u64,
     /// Calls where nobody could tell: the dialect declared no path, or the
     /// server reported nothing, or the prompt was empty.
     pub unmeasured: u64,
@@ -210,6 +236,7 @@ impl Census {
                     Register::Expected => census.expected += 1,
                     Register::Mutation => census.mutation += 1,
                     Register::Unexplained => census.unexplained += 1,
+                    Register::ColdStart => census.cold_start += 1,
                 },
             }
         }
@@ -220,7 +247,7 @@ impl Census {
     /// Every miss, in whichever register it landed.
     #[must_use]
     pub fn misses(&self) -> u64 {
-        self.expected + self.mutation + self.unexplained
+        self.expected + self.mutation + self.unexplained + self.cold_start
     }
 }
 
@@ -327,15 +354,55 @@ mod tests {
         assert_eq!(census.ttl_undeclared, vec!["served".to_owned()]);
     }
 
-    /// A path that caches nothing misses at any gap, and says so.
+    /// A path that caches nothing misses at any gap it has a predecessor to
+    /// measure against, and says so.
     #[test]
     fn a_path_declared_uncached_misses_expectedly_at_any_gap() {
         let census = Census::of(
             &regime(Some(CacheTtl::Uncached)),
-            &[miss(None, false), miss(Some(Duration::from_secs(1)), false)],
+            &[
+                miss(Some(Duration::from_secs(1)), false),
+                miss(Some(Duration::from_secs(9999)), false),
+            ],
         );
         assert_eq!(census.expected, 2);
+        assert_eq!(census.cold_start, 0);
         assert!(census.ttl_undeclared.is_empty());
+    }
+
+    /// The fourth register: a lane's first call is `cold_start`, never a
+    /// mutation, an expiry or `unexplained` -- there is no predecessor to
+    /// diff or to measure a gap against, whatever the substrate declares and
+    /// whatever a caller sets `head_changed` to.
+    #[test]
+    fn a_lanes_first_call_is_a_cold_start() {
+        let no_predecessor = miss(None, false);
+        assert_eq!(
+            register(&no_predecessor, Some(CacheTtl::Seconds(count(300)))),
+            Register::ColdStart
+        );
+        assert_eq!(
+            register(&no_predecessor, Some(CacheTtl::Uncached)),
+            Register::ColdStart,
+            "a substrate that always misses still reads its first call as cold \
+             start, not as an expiry it has no gap to have measured"
+        );
+        assert_eq!(register(&no_predecessor, None), Register::ColdStart);
+        assert_eq!(
+            register(&miss(None, true), Some(CacheTtl::Seconds(count(300))),),
+            Register::ColdStart,
+            "nothing to diff on a first call, whatever head_changed says"
+        );
+
+        let census = Census::of(
+            &regime(Some(CacheTtl::Seconds(count(300)))),
+            &[no_predecessor],
+        );
+        assert_eq!(census.cold_start, 1);
+        assert_eq!(census.expected, 0);
+        assert_eq!(census.mutation, 0);
+        assert_eq!(census.unexplained, 0);
+        assert_eq!(census.misses(), 1);
     }
 
     /// The fourth register: a call nobody could measure is not a miss.

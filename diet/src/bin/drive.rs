@@ -307,6 +307,7 @@ fn cache(census: &diet::client::cache::Census) -> Value {
                 ("expected".to_owned(), count(census.expected)),
                 ("mutation".to_owned(), count(census.mutation)),
                 ("unexplained".to_owned(), count(census.unexplained)),
+                ("cold_start".to_owned(), count(census.cold_start)),
             ])),
         ),
         (
