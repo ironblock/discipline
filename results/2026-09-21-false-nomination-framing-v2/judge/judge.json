@@ -1,0 +1,240 @@
+{
+ "model": "claude-sonnet-5 for every instance of every batch, as the harness reports the subagent model (launched with model: sonnet)",
+ "harness": "Claude Code subagent, type general-purpose, one fresh instance per batch instance, instructed to read only judge/prompt.md and its batch file and to write verdicts-NN.json; the key and the id map withheld; the launch prompt (judge/launch-prompt.md) took three forms: after the first malformed outputs it gained an ordering clause, and from batch 26 a sentence naming the count and asking for each id verbatim; judge/prompt.md itself unchanged",
+ "date": "2026-09-21",
+ "batches": 50,
+ "instances_per_batch": {
+  "01": [
+   "01"
+  ],
+  "02": [
+   "02"
+  ],
+  "03": [
+   "03"
+  ],
+  "04": [
+   "04",
+   "04b"
+  ],
+  "05": [
+   "05"
+  ],
+  "06": [
+   "06"
+  ],
+  "07": [
+   "07",
+   "07b"
+  ],
+  "08": [
+   "08"
+  ],
+  "09": [
+   "09"
+  ],
+  "10": [
+   "10"
+  ],
+  "11": [
+   "11"
+  ],
+  "12": [
+   "12"
+  ],
+  "13": [
+   "13"
+  ],
+  "14": [
+   "14"
+  ],
+  "15": [
+   "15"
+  ],
+  "16": [
+   "16",
+   "16b"
+  ],
+  "17": [
+   "17"
+  ],
+  "18": [
+   "18",
+   "18b",
+   "18c"
+  ],
+  "19": [
+   "19"
+  ],
+  "20": [
+   "20"
+  ],
+  "21": [
+   "21"
+  ],
+  "22": [
+   "22"
+  ],
+  "23": [
+   "23"
+  ],
+  "24": [
+   "24"
+  ],
+  "25": [
+   "25"
+  ],
+  "26": [
+   "26"
+  ],
+  "27": [
+   "27"
+  ],
+  "28": [
+   "28"
+  ],
+  "29": [
+   "29"
+  ],
+  "30": [
+   "30"
+  ],
+  "31": [
+   "31"
+  ],
+  "32": [
+   "32"
+  ],
+  "33": [
+   "33"
+  ],
+  "34": [
+   "34",
+   "34b"
+  ],
+  "35": [
+   "35"
+  ],
+  "36": [
+   "36"
+  ],
+  "37": [
+   "37"
+  ],
+  "38": [
+   "38"
+  ],
+  "39": [
+   "39"
+  ],
+  "40": [
+   "40"
+  ],
+  "41": [
+   "41"
+  ],
+  "42": [
+   "42"
+  ],
+  "43": [
+   "43"
+  ],
+  "44": [
+   "44"
+  ],
+  "45": [
+   "45"
+  ],
+  "46": [
+   "46"
+  ],
+  "47": [
+   "47"
+  ],
+  "48": [
+   "48"
+  ],
+  "49": [
+   "49"
+  ],
+  "50": [
+   "50"
+  ]
+ },
+ "model_per_instance": {
+  "01": "claude-sonnet-5",
+  "02": "claude-sonnet-5",
+  "03": "claude-sonnet-5",
+  "04": "claude-sonnet-5",
+  "04b": "claude-sonnet-5",
+  "05": "claude-sonnet-5",
+  "06": "claude-sonnet-5",
+  "07": "claude-sonnet-5",
+  "07b": "claude-sonnet-5",
+  "08": "claude-sonnet-5",
+  "09": "claude-sonnet-5",
+  "10": "claude-sonnet-5",
+  "11": "claude-sonnet-5",
+  "12": "claude-sonnet-5",
+  "13": "claude-sonnet-5",
+  "14": "claude-sonnet-5",
+  "15": "claude-sonnet-5",
+  "16": "claude-sonnet-5",
+  "16b": "claude-sonnet-5",
+  "17": "claude-sonnet-5",
+  "18": "claude-sonnet-5",
+  "18b": "claude-sonnet-5",
+  "18c": "claude-sonnet-5",
+  "19": "claude-sonnet-5",
+  "20": "claude-sonnet-5",
+  "21": "claude-sonnet-5",
+  "22": "claude-sonnet-5",
+  "23": "claude-sonnet-5",
+  "24": "claude-sonnet-5",
+  "25": "claude-sonnet-5",
+  "26": "claude-sonnet-5",
+  "27": "claude-sonnet-5",
+  "28": "claude-sonnet-5",
+  "29": "claude-sonnet-5",
+  "30": "claude-sonnet-5",
+  "31": "claude-sonnet-5",
+  "32": "claude-sonnet-5",
+  "33": "claude-sonnet-5",
+  "34": "claude-sonnet-5",
+  "34b": "claude-sonnet-5",
+  "35": "claude-sonnet-5",
+  "36": "claude-sonnet-5",
+  "37": "claude-sonnet-5",
+  "38": "claude-sonnet-5",
+  "39": "claude-sonnet-5",
+  "40": "claude-sonnet-5",
+  "41": "claude-sonnet-5",
+  "42": "claude-sonnet-5",
+  "43": "claude-sonnet-5",
+  "44": "claude-sonnet-5",
+  "45": "claude-sonnet-5",
+  "46": "claude-sonnet-5",
+  "47": "claude-sonnet-5",
+  "48": "claude-sonnet-5",
+  "49": "claude-sonnet-5",
+  "50": "claude-sonnet-5"
+ },
+ "malformed": [
+  "04 (ids out of order)",
+  "07 (one item dropped)",
+  "16 (two items dropped)",
+  "18 (one item dropped, twice: 18 and 18b; the third instance keyed)",
+  "34 (one item dropped)"
+ ],
+ "void_under_ratified_key": [
+  "05",
+  "06",
+  "11",
+  "16 (second instance)",
+  "17",
+  "23",
+  "28"
+ ],
+ "ruling": "ctl05's verdict key ruled ambiguous by the maintainer 2026-09-21 (A on #89): for ctl05 only, scoring keys on the edit field; the seven batches void on that field alone under the ratified key (judge/key-pre-ruling.json) score 4/4 under the ruled key (judge/key.json) and their first blind instances count; no report was run before the ruling",
+ "pilot": "before ratification, one batch of the (b) record's rows, three Sonnet instances; read by nothing, not in this record"
+}

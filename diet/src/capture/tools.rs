@@ -2086,6 +2086,7 @@ mod tests {
             substrate: "local".to_owned(),
             retry_of: None,
             text: None,
+            head_sha256: None,
         }
     }
 

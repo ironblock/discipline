@@ -21,6 +21,7 @@ use std::time::Duration;
 use crate::formats::record::{Count, Event};
 
 use super::echo::Verified;
+use super::head::Head;
 use super::shape::{Concurrency, SamplerCard, SamplerSetting};
 use super::transport::TransportFailure;
 use super::wire::WireError;
@@ -92,6 +93,17 @@ pub enum Entry {
         /// What it pinned. This is the half of the echo the server never
         /// sees, and without it a later reader cannot re-run the comparison.
         sampler: SamplerCard,
+        /// The frozen head it sent, hashed.
+        ///
+        /// SPELLABLE, unlike most of what this entry carries: the record's
+        /// `request.head_sha256` is exactly this head's digest, so the
+        /// projection writes it rather than naming it as a loss. The whole
+        /// [`Head`] rather than the digest alone, because a later reader
+        /// asking *what moved* needs the parts and a reader asking *did it
+        /// move* needs only the fingerprint -- and re-rendering the head from
+        /// a shape the journal did not keep would be a second answer to the
+        /// first question.
+        head: Head,
     },
     /// An answer came back.
     Received {
@@ -356,6 +368,7 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
                 retry_of,
                 because,
                 sampler,
+                head,
             } => {
                 events.push(Event::Request {
                     id: id.clone(),
@@ -363,6 +376,12 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
                     substrate: substrate.to_owned(),
                     retry_of: retry_of.clone(),
                     text: None,
+                    // THE ONE THING THIS ENTRY LOSES NOTHING OF. Every other
+                    // half of an issued request -- the sampler card, a
+                    // retry's reason, the difference between issued and
+                    // arrived -- is named below as unspellable. The head's
+                    // fingerprint has a field, so it goes in it.
+                    head_sha256: Some(head.digest().to_owned()),
                 });
                 if !sampler.is_empty() {
                     note(

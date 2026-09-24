@@ -1016,6 +1016,12 @@ impl Router {
             | Event::Seam { .. }
             | Event::Rejected { .. }
             | Event::Claim { .. }
+            // A head that moved, and a harness that discarded its history,
+            // are facts about the PREFIX rather than about a call: neither
+            // opens a turn, names a lane of its own, or carries a tool call
+            // to route. Listed rather than wildcarded, like the rest.
+            | Event::PrefixChanged { .. }
+            | Event::Compaction { .. }
             // Unmapped: no turn boundary, no lane, no call to route.
             | Event::Unknown { .. } => Vec::new(),
         }
@@ -1654,6 +1660,7 @@ mod tests {
             substrate: "local".to_owned(),
             retry_of: None,
             text: None,
+            head_sha256: None,
         });
         router.observe(&Event::Response {
             id: "a1".to_owned(),
@@ -1684,6 +1691,7 @@ mod tests {
             substrate: "local".to_owned(),
             retry_of: None,
             text: None,
+            head_sha256: None,
         });
         aside.observe(&Event::Response {
             id: "a2".to_owned(),

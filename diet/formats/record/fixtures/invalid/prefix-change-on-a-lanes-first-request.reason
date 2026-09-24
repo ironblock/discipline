@@ -1,0 +1,8 @@
+A `prefix.changed` over the FIRST request on its lane. The head a lane opens
+with is the head it started with; there is no predecessor for it to differ
+from.
+
+Counting it as a mutation would make every lane's first call a miss attributed
+to head movement -- which is the shape of over-attribution that makes the three
+registers worthless: a census where everything is explained has explained
+nothing.

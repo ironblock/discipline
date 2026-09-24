@@ -1,0 +1,51 @@
+# The pre-registered claim, floor and decision rule for the false-nomination
+# framing run, second draw ((b)-v2, authorized by decision 1 on PR #101 beside
+# results/2026-09-20-false-nomination-framing). The tables [claim], [floor] and
+# [rule] below are written before any fork fires and are consumed by the record
+# by digest so that the numbers cannot have chosen them. [claim] and [floor] are
+# byte-identical to the (b) record's ratified text. [rule] carries the refuted
+# clause in the wording ratified on PR #101 (2026-09-21) and the changes listed
+# on #89 under "changes from (b)", each ratified by the maintainer on #89 before
+# the first fork. The applier's readings of this text are in [readings], posted
+# on #89 before the first fork, so the adjudication has none to disclose.
+
+[claim]
+hypothesis = "When the collector's nominator fires falsely -- it presents an entry as superseded when it is not -- the consumer's turn changes less, and its reasoning acknowledges the nomination without acting on it more often, when the nomination is framed as advisory than when it is framed as imperative; and the size of that difference falls as the nominator's precision rises."
+rungs = [1.0, 0.8, 0.6, 0.4, 0.6222, 0.0556]
+rungs_note = "1.0, 0.8, 0.6, 0.4 as ratified; 0.6222 the (a) run's operating point (best-separated cell, pooled precision at k = 5); 0.0556 the mined-only precision the (a) applier reported (2 of 36); each rung a seeded true/false assignment across the same fork sample"
+primary = "the rate of changed turns on false nominations, advisory against imperative, at each rung, paired by fork"
+
+[floor]
+arm = "sham"
+role = "the perturbation control: a passage of the advisory line's length from a turn of a different drive in the register"
+prediction = "directional: a false nomination changes the turn more often than the sham under both framings; if it does not, nominations are not consequential at all and framing is moot"
+
+[rule]
+version = "v2"
+rung = 0.6
+turn_change = "a turn is changed against the same fork's control draw in the same rung iff the extracted command's (tool, target) differs after comment stripping, or a response with no command stands against one with a command, or the reply's prose before the command states a correction to, supersession of, replacement of or removal of the entry the nomination named (the ratified endpoint's third arm, graded by the blind judge's edit field); the (tool, target) grade alone is reported beside, never adjudicating"
+supported = "at the 0.6 rung, the changed-turn rate on false nominations is lower under advisory than imperative by >= 0.15 with the one-sided paired sign-test p <= 0.01 on a rung whose attainable floor is <= 0.01, and advisory exceeds the sham by less than imperative does"
+supported_margin = 0.15
+supported_p = 0.01
+refuted = "at every rung the advisory rate is not lower than imperative by >= 0.05, or, for either framing, the largest changed-turn rate on false nominations over all rungs does not exceed the sham arm's changed-turn rate by >= 0.05 -- either alone"
+refuted_margin = 0.05
+inconclusive = "otherwise"
+uncomputable_rung = "a rung with fewer than ten false nominations graded on both framings satisfies neither bound"
+acknowledgement = "reported beside the verdict, never folded in; the directory's result is the changed-turn rule's word"
+p_reading = "the paired sign test is one comparison per rung, one-sided in the predicted direction (advisory changes less), uncorrected on the named rung as ruled on #17 for a pre-registered comparison; the attainable floor is 0.5 to the power of the discordant-pair count, printed beside every p; the five other rungs' sign tests are Holm-corrected and reported beside, read by nothing"
+controls = "the true-nomination control fork must read changed under both framings before the first nomination fires or the run refuses; the shuffled-framing null (arm labels permuted within fork, 9,999 seeded permutations) must put its mean advisory-minus-imperative difference within 0.02 of zero on every computable rung or the result is inconclusive whatever the rule says; the sham arm is the perturbation floor; the judge scorer refuses a batch on any control miss, seen red in the instrument's selftest before the first batch"
+
+[readings]
+# The applier's readings of the ratified text, posted on #89 before the first
+# fork; each is a construction the adjudication applies, none a result.
+sham_clause = "reading D as ratified on PR #101: per framing, the largest changed-turn rate on false nominations over rungs against the sham arm's changed-turn rate on that same rung; the clause fires when either framing's largest rate fails to exceed it by the margin, i.e. (rate - sham_rate_there) < 0.05; the floor prediction is conjunctive over framings so its failure is existential"
+supported_sham_clause = "(advisory - sham) < (imperative - sham) on the adjudicated rung"
+p_at_floor = "the sign test's p can equal but not fall below its attainable floor; the supported clause asks p <= 0.01 and is asked only where the floor is <= 0.01, the floor printed beside every p"
+every_rung = "quantifies over computable rungs; none computable is unadjudicated"
+attainability = "a margin is attainable on a rung iff 1/n_graded <= margin; the supported clause is asked only where attainable"
+precedence = "when a refuted clause and the supported clause both hold on the same record, the word is refuted: the floor is asked first, and a framing no better than an irrelevant passage is not supported by any margin"
+ties = "every inequality is as written: 'lower by >= m' is (imperative - advisory) >= m; 'does not exceed by >= m' is (x - y) < m"
+changed_rate = "the rate is over fork-rungs graded on both framings; a fork-rung whose row on either framing is unjudged on the edit field after the void protocol, or errored, is excluded from that rung pairwise, the count reported"
+ladder = "nominal: at rung p each of the two forks carrying a mined positive draws a true nomination with probability p and every other fork a false one, so the realisable true share is at most 0.02 on any rung and no rung claim is adjudicable from this register; the six rungs are six seeded assignments of a false nomination per fork over the same 100 forks, the rule's 'every rung' reads over them as replicate stability, and the precision arm of the hypothesis is carried by the per-session cost = false-nomination change rate x (1 - p), reported; the true-nomination change rate on the mined-positive fork-rungs is a control figure with its count printed, read by nothing"
+edit_field = "over the reply's prose before the command only, not the reasoning: an edit is an act of the reply; a reply that questions, checks, or says the entry still holds is not an edit"
+grading_orders = "every deterministic grade is taken over the raw rows and again over the committed rows (home prefixes collapsed); the committed grades are the second; if any grade differs between the two orders, grading order is declared a regime factor in regimen.toml and the differing rows listed; the judge batches are drawn from the committed grades"

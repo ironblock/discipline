@@ -272,6 +272,12 @@ fn written(drive: &diet::drive::Drive, out_path: &str) -> ExitCode {
                 // silently absent, so a reader of this line knows a seam's
                 // ask was put and its answer not read.
                 ("audits_unread".to_owned(), count(drive.audits.len())),
+                // The cache census (#79). BESIDE the record, not in it: the
+                // `expected` register needs an inter-call gap and record v0
+                // carries no clock. The half that is in the record --
+                // `head_sha256` per request, and the `prefix.changed` rows --
+                // is what makes `mutation` re-derivable from the file alone.
+                ("cache".to_owned(), cache(&drive.cache)),
             ]
             .into_iter()
             .collect(),
@@ -280,6 +286,42 @@ fn written(drive: &diet::drive::Drive, out_path: &str) -> ExitCode {
     );
     println!("{out}");
     ExitCode::SUCCESS
+}
+
+/// The cache census, in the record's value space.
+///
+/// **EVERY REGISTER IS RENDERED WHETHER OR NOT IT FIRED.** A census that
+/// omitted its empty registers would report a run with three unexplained
+/// misses and a run with none in shapes a reader has to compare by absence --
+/// and "unexplained" is exactly the register whose disappearance nobody
+/// notices. `ttl_undeclared` is named for the same reason: a substrate with no
+/// declared lifetime cannot produce an `expected` miss, so a reader seeing
+/// everything in `unexplained` deserves to know why.
+fn cache(census: &diet::client::cache::Census) -> Value {
+    let count = |many: u64| Value::Integer(i64::try_from(many).unwrap_or(-1));
+    Value::Object(BTreeMap::from([
+        ("hits".to_owned(), count(census.hits)),
+        (
+            "misses".to_owned(),
+            Value::Object(BTreeMap::from([
+                ("expected".to_owned(), count(census.expected)),
+                ("mutation".to_owned(), count(census.mutation)),
+                ("unexplained".to_owned(), count(census.unexplained)),
+                ("cold_start".to_owned(), count(census.cold_start)),
+            ])),
+        ),
+        (
+            "ttl_undeclared".to_owned(),
+            Value::Array(
+                census
+                    .ttl_undeclared
+                    .iter()
+                    .map(|id| Value::String(id.clone()))
+                    .collect(),
+            ),
+        ),
+        ("unmeasured".to_owned(), count(census.unmeasured)),
+    ]))
 }
 
 /// One fork's census, in the record's value space.
@@ -365,5 +407,11 @@ fn shape(regime: &Regime) -> RequestShape {
         },
         grammar: None,
         template_kwargs: std::collections::BTreeMap::new(),
+        // NO TOOL SURFACE. The pinned script runs commands under the
+        // confinement rather than exposing tools to the model, so a drive
+        // here declares none -- which is why #79's tool-reordering
+        // attribution is proved at the unit and not end to end. Disclosed
+        // rather than left looking like an omission.
+        tools: Vec::new(),
     }
 }

@@ -103,7 +103,11 @@ fn the_drive_writes_a_record_a_second_process_accepts() {
     // The canned drive is deterministic, so these are the run's real numbers
     // and not a shape check.
     assert!(out.contains("\"ok\":true"), "{out}");
-    assert!(out.contains("\"events\":24"), "twenty-four rows: {out}");
+    // Twenty-five, and the twenty-fifth is #79's: the seam re-renders the
+    // working set into the system prompt at turn two, so turn three's head
+    // is not turn two's and a `prefix.changed` row says so. It was
+    // twenty-four before that row existed.
+    assert!(out.contains("\"events\":25"), "twenty-five rows: {out}");
     assert!(
         out.contains("\"seams\":1"),
         "one seam, where the script declared it: {out}"
@@ -112,6 +116,28 @@ fn the_drive_writes_a_record_a_second_process_accepts() {
         out.contains("\"audits_unread\":1"),
         "and one audit put and not folded, because the verdict grammar is not \
          built: {out}"
+    );
+
+    // THE CACHE CENSUS, EVERY REGISTER RENDERED (#79). The canned server is
+    // a loopback stub with no prompt cache to speak of and a dialect that
+    // declares where to read reuse from, so every call is a hit and all
+    // four miss registers are zero -- and all four are PRINTED at zero,
+    // because a census that omitted its empty registers would report a run
+    // with unexplained misses and a run without them in shapes a reader has
+    // to compare by absence.
+    //
+    // `ttl_undeclared` names `canned`, and that is the correct, intentional
+    // result: `dev-loop.toml` declares no `substrate_cache_ttl` because the
+    // canned server plays no provider's cache policy, and this line is the
+    // drive's own demonstration that an undeclared lifetime is named rather
+    // than defaulted.
+    assert!(
+        out.contains(
+            "\"cache\":{\"hits\":6,\"misses\":{\"cold_start\":0,\"expected\":0,\
+             \"mutation\":0,\"unexplained\":0},\"ttl_undeclared\":[\"canned\"],\
+             \"unmeasured\":0}"
+        ),
+        "the whole census line, every register: {out}"
     );
 
     // Ruling 6's two counts, at the case where they DIVERGE. Turn two's fork
