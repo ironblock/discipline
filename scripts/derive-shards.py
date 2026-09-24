@@ -39,7 +39,7 @@ decides anything, and `--index` prints the spread it achieved so the choice is
 checkable rather than asserted.
 
 `--check` grades what is checked in, on every run of the `ci` check, and asks
-two things of it:
+three things of it:
 
   * COVERAGE. Every fault the manifest declares has exactly one assignment, and
     no assignment names a fault that no longer exists. A fault nobody assigned
@@ -49,9 +49,19 @@ two things of it:
   * BALANCE. No shard carries three times the median shard's measured cost. An
     assignment can be complete and still be a hand edit that moved forty faults
     into one job, and the run that finds that out is the run that overran.
+  * SUBSTRATE. A harvest is a claim about the machine it was measured on, and
+    only `harvest-shards.yml`'s own runner is the one this plan is checked
+    against. A substrate that is PRESENT and wrong is refused, by name, same as
+    a coverage or balance defect. A substrate that is ABSENT is a different
+    claim -- a PLACEHOLDER nobody has re-harvested since this field existed --
+    and `--check` prints that loudly rather than either refusing it (the
+    chicken-and-egg `harvest-shards.yml` can only ever resolve by first landing
+    through a PR this check would have blocked) or passing it silently (which
+    would read as the same clean state a real harvest produces).
 
-Exit 0 when the assignment covers the manifest and no shard is an outlier,
-1 when it does not, 2 when the question cannot be answered at all.
+Exit 0 when the assignment covers the manifest, no shard is an outlier, and the
+substrate is either the runner or a declared placeholder; 1 when it does not;
+2 when the question cannot be answered at all.
 
 THE READER IS EXERCISED BEFORE IT IS TRUSTED. `--selftest` runs the fixture
 suite at the foot of this file and `verify.sh --only derive` is that suite,
@@ -450,22 +460,28 @@ def grade_shape(shards: int, assign: dict[str, int], budget: dict[str, int]) -> 
 
 
 def grade_substrate(substrate: str) -> list[str]:
-    """The plan was harvested on the runner, not merely about the runner.
+    """A WRONG substrate is refused; NO substrate is a declared placeholder.
 
-    A shard split derived from timings measured on a laptop, a self-hosted
-    box, or any substrate other than the CI runner itself is a claim about the
-    runner made on a different machine -- the label-versus-value class this
-    check exists to catch, the same as a fault's cost claiming to belong to a
-    manifest it does not.
+    Ruled on #87 (2026-09-24), resolving the chicken-and-egg `--check` itself
+    created: `harvest-shards.yml` can only ever reach the default branch --
+    where `workflow_dispatch` lists it at all -- by landing through a PR, and
+    the `ci` check would have refused that very PR for the one thing it exists
+    to fix. So an EMPTY substrate (no harvest has ever run against this field)
+    is not graded here at all: it is the state of a plan nobody has re-derived
+    since this field was added, no different in kind from gate 0's census
+    before the first results directory, and `main()`'s `--check` branch prints
+    it as a named placeholder rather than folding it into this function's
+    failures.
+
+    A substrate that is PRESENT and WRONG is a different claim entirely: a
+    shard split derived from timings measured on a laptop, a self-hosted box,
+    or anywhere but the CI runner is a claim about the runner made on a
+    different machine -- the label-versus-value class this check exists to
+    catch, the same as a fault's cost claiming to belong to a manifest it does
+    not -- and that is refused, by name, same as ever.
     """
-    if substrate == RUNNER_SUBSTRATE:
+    if not substrate or substrate == RUNNER_SUBSTRATE:
         return []
-    if not substrate:
-        return [
-            f"the plan was harvested before this check existed, so it has no "
-            f"declared substrate. Harvest it on the runner: dispatch the "
-            f"harvest-shards workflow"
-        ]
     return [
         f"the plan was harvested on {substrate!r}, not {RUNNER_SUBSTRATE!r} -- "
         f"the CI runner. Harvest it there instead: dispatch the harvest-shards "
@@ -806,14 +822,22 @@ def _wrong_substrate_is_refused_by_name():
     found = grade_substrate("self-hosted")
     if not found or "self-hosted" not in found[0]:
         return f"a plan harvested on 'self-hosted' was reported as {found!r}"
-    # The empty case is worded differently -- "never declared" rather than
-    # "declared wrong" -- because it means something different: the plan
-    # predates this check rather than having failed it.
-    empty = grade_substrate("")
-    if not empty or "no declared substrate" not in empty[0]:
-        return f"a plan with no substrate at all was reported as {empty!r}"
     if grade_substrate(RUNNER_SUBSTRATE):
         return "a plan harvested on the runner was refused"
+    return None
+
+
+@fixture("an undeclared substrate is a placeholder, not a refusal")
+def _no_substrate_is_a_placeholder_not_a_refusal():
+    # The chicken-and-egg ruling on #87 (2026-09-24): refusing an EMPTY
+    # substrate here would have kept this PR's own `ci` check red forever,
+    # since `harvest-shards.yml` can only become dispatchable by first
+    # landing through a PR this check would have blocked. A substrate that
+    # is PRESENT and wrong is still refused above -- only "never declared"
+    # reads as the placeholder state, not "declared wrong".
+    found = grade_substrate("")
+    if found:
+        return f"an undeclared substrate was graded a failure: {found!r}"
     return None
 
 
@@ -1122,7 +1146,7 @@ def _exit_codes_are_distinct():
     return None
 
 
-@fixture("--check reads the repository's own assignment, unsound only for its missing harvest")
+@fixture("--check reads the repository's own assignment and passes on it")
 def _the_committed_plan_is_sound():
     # THE ONE FIXTURE WITH A REAL INPUT. Everything above is synthetic, and a
     # suite of synthetic cases can pass while the file that is actually checked
@@ -1130,25 +1154,48 @@ def _the_committed_plan_is_sound():
     # files, so a manifest edit with no re-harvest is red here and not only
     # there.
     #
-    # NOT `code == 0`. Per the ruling on #87's defect 1 (2026-09-23): "until
-    # that first runner harvest exists, 16 is a placeholder and the plan says
-    # so" -- tools/gate/shards.tsv predates the substrate field and correctly
-    # carries none, so `check()` correctly reports it unsound for that one
-    # disclosed reason. Asserting a clean 0 here would either block this
-    # fixture on a harvest #87 is explicitly not taking, or get "fixed" by
-    # quietly dropping the one failure the ruling requires stay visible. What
-    # this fixture must still catch is any OTHER defect, so the assertion is
-    # that grade_substrate is the ONLY thing that fires here -- a coverage,
-    # shape or balance regression still reddens it.
+    # `code == 0` even though `tools/gate/shards.tsv` predates the substrate
+    # field and correctly carries none. Per the ruling on #87's chicken-and-egg
+    # (2026-09-24), an undeclared substrate is a PLACEHOLDER, not a failure --
+    # `grade_substrate` returns no failures for it, so this assertion is
+    # generic (it would equally pass once a real harvest lands) rather than
+    # hardcoded to today's placeholder state. What this fixture must still
+    # catch is any OTHER defect, so it grades against the plan's OWN declared
+    # substrate rather than assuming "none": a coverage, shape or balance
+    # regression -- or a real but WRONG substrate -- still reddens it.
     if not PLAN.is_file():
         return f"{PLAN} is not there, so the sharded selftest cannot run at all"
     code, failures = check()
     _shards, _assign, _cost, _overhead, substrate = read_plan(PLAN)
     expected = grade_substrate(substrate)
     if failures != expected:
-        return f"{PLAN}: expected only the substrate failure {expected!r}, got {failures!r}"
+        return f"{PLAN}: expected only {expected!r}, got {failures!r}"
     if code != (EXIT_BAD if expected else 0):
         return f"{PLAN}: exit {code} does not match failure list {failures!r}"
+    return None
+
+
+@fixture("--check prints the placeholder state loudly rather than passing silently")
+def _placeholder_state_is_named_not_silent():
+    # An undeclared substrate is not graded as a failure (the fixture above),
+    # but passing with the SAME message a real runner harvest produces would
+    # read as the same clean state -- and the two are not the same claim.
+    # Driven against the real checked-in plan, which today has no substrate.
+    if not PLAN.is_file():
+        return f"{PLAN} is not there, so the sharded selftest cannot run at all"
+    _shards, _assign, _cost, _overhead, substrate = read_plan(PLAN)
+    if substrate:
+        # A real harvest has landed since this fixture was written; the
+        # placeholder path is exercised by construction above, and this
+        # fixture has nothing left to prove against the real file.
+        return None
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = main(["--check"])
+    if code != 0:
+        return f"the placeholder state exited {code}, not 0: {out.getvalue()!r}"
+    if "placeholder" not in out.getvalue():
+        return f"the placeholder state was not named: {out.getvalue()!r}"
     return None
 
 
@@ -1264,6 +1311,22 @@ def main(argv: list[str]) -> int:
                 return code
             budget = read_budget(BUDGET)
             shards, assign, cost, overhead_ms, substrate = read_plan(PLAN)
+            # THE PLACEHOLDER STATE, NAMED LOUDLY. `grade_substrate` passes an
+            # empty substrate through as no failure (the chicken-and-egg
+            # ruling on #87, 2026-09-24: harvest-shards.yml can only reach the
+            # default branch, where it becomes dispatchable, by landing
+            # through a PR this check would otherwise have refused) -- but
+            # passing silently would read as the same clean state a real
+            # runner harvest produces, and the two are not the same claim.
+            if not substrate:
+                print(
+                    f"derive-shards: placeholder: no runner harvest yet -- "
+                    f"{PLAN.name} declares no substrate. {len(assign)} fault(s) "
+                    f"across {shards} shard(s), packed elsewhere or by hand. "
+                    f"Dispatch the harvest-shards workflow to replace this "
+                    f"with a real one"
+                )
+                return 0
             worst, allowed = slowest(assign, cost, shards, overhead_ms, budget)
             print(
                 f"derive-shards: {len(assign)} fault(s) across {shards} shard(s); "
@@ -1272,7 +1335,7 @@ def main(argv: list[str]) -> int:
                 + ("" if worst <= allowed else
                    " -- OVER on those numbers, which were measured wherever the "
                    "harvest was taken and not necessarily on the runner")
-                + f", harvested on {substrate or 'nowhere declared'}"
+                + f", harvested on {substrate}"
             )
             return 0
 
