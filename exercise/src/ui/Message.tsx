@@ -1,0 +1,101 @@
+import { useState } from 'react';
+
+import type { AssistantNode, Folded, SystemNode, UserNode } from '../session/fold.ts';
+import { Block } from './Block.tsx';
+import { ms, rate, tokens } from './format.ts';
+import { Prose } from './Prose.tsx';
+import './message.css';
+
+/** The trunk's system prompt: the phase's priming, or working memory rendered. */
+export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
+  const [open, setOpen] = useState(false);
+  const lineCount = node.text.split('\n').length;
+  const shown = open ? node.text : node.text.split('\n').slice(0, 3).join('\n');
+  return (
+    <Block
+      tone="system"
+      label={node.render === undefined ? 'system' : `system · render v${node.render}`}
+      stats={[{ value: tokens(node.tokens), unit: 'tok', title: 'tokens in the prefix' }]}
+      provenance={node}
+      id={node.id}
+    >
+      <Prose text={shown} kind="system" />
+      {lineCount > 3 ? (
+        <button type="button" className="ex-more" onClick={() => setOpen(!open)}>
+          {open ? 'less' : `${lineCount - 3} more lines`}
+        </button>
+      ) : null}
+    </Block>
+  );
+}
+
+/** A person's ask. Its footer says what it cost: the prefill it caused, new and reused. */
+export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
+  return (
+    <Block
+      tone="user"
+      label="user"
+      stats={
+        node.prefill
+          ? [
+              { value: tokens(node.prefill.fresh), unit: 'new', title: 'prompt tokens this ask caused to be evaluated' },
+              { value: tokens(node.prefill.cached), unit: 'cached', title: 'prompt tokens reused from the slot' },
+            ]
+          : []
+      }
+      provenance={node}
+      id={node.id}
+    >
+      <Prose text={node.text} kind="ask" />
+    </Block>
+  );
+}
+
+/** The model on the trunk: its reasoning in italic, then its answer, streamed. */
+export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode> }) {
+  const [thinking, setThinking] = useState(false);
+  const live = node.progress === 'prefill' || node.progress === 'streaming';
+  const t = node.timings;
+  const long = node.reasoning.length > 280;
+  const showReasoning = node.reasoning !== '' && (thinking || !long || (live && node.text === ''));
+  return (
+    <Block
+      tone="assistant"
+      label="assistant"
+      live={live}
+      stats={
+        t
+          ? [
+              node.wallMs !== undefined && { value: ms(node.wallMs), title: 'request to response, wall clock' },
+              { value: tokens(t.predicted_n), unit: 'tok', title: 'tokens generated, reasoning included' },
+              { value: rate(t.predicted_n, t.predicted_ms), unit: 'tg t/s', title: 'generation speed' },
+              { value: tokens(t.prompt_n), unit: 'new', title: 'prompt tokens evaluated' },
+              { value: rate(t.prompt_n, t.prompt_ms), unit: 'pp t/s', title: 'prefill speed' },
+              { value: `${node.slot}`, unit: 'slot', title: 'the server slot that served it' },
+            ]
+          : [{ value: node.progress === 'prefill' ? 'prefill…' : 'generating…' }, { value: `${node.slot}`, unit: 'slot' }]
+      }
+      provenance={node}
+      id={node.id}
+    >
+      {node.reasoning !== '' ? (
+        <div className="ex-reasoning">
+          {showReasoning ? (
+            <Prose text={node.reasoning} kind="reasoning" />
+          ) : (
+            <div className="ex-reasoning__clip">
+              <Prose text={node.reasoning.slice(0, 200) + '…'} kind="reasoning" />
+            </div>
+          )}
+          {long && !(live && node.text === '') ? (
+            <button type="button" className="ex-more" onClick={() => setThinking(!thinking)}>
+              {thinking ? 'less' : 'all reasoning'}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {node.text !== '' ? <Prose text={node.text} kind="answer" /> : null}
+      {node.progress === 'cancelled' ? <p className="ex-cancelled">cancelled</p> : null}
+    </Block>
+  );
+}

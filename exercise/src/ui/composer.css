@@ -1,0 +1,93 @@
+.ex-composer {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem 0.9rem 0.6rem;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+  color: var(--ink-muted);
+}
+
+.ex-composer__input {
+  width: 100%;
+  resize: vertical;
+  min-height: 3rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-user);
+  font: var(--size-prose) / var(--leading-prose) var(--font-ask);
+  outline: none;
+}
+
+.ex-composer__input::placeholder {
+  color: var(--ink-faint);
+}
+
+.ex-composer__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.9rem;
+}
+
+.ex-composer__spacer {
+  flex: 1 1 auto;
+}
+
+.ex-composer[data-state='turn'] .ex-composer__state,
+.ex-composer[data-state='capture'] .ex-composer__state {
+  color: var(--ink-interview);
+}
+
+.ex-composer[data-state='ratify'] .ex-composer__state {
+  color: var(--ink-ratify);
+}
+
+.ex-composer__label {
+  color: var(--ink-faint);
+}
+
+.ex-composer__seam {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ex-composer select,
+.ex-composer button {
+  padding: 0.25em 0.6em;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--chip);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ex-composer button:disabled,
+.ex-composer select:disabled {
+  color: var(--ink-faint);
+  cursor: default;
+}
+
+.ex-composer__seam button:not(:disabled) {
+  border-color: var(--seam);
+  color: var(--seam);
+}
+
+.ex-composer__send:not(:disabled) {
+  border-color: var(--ink-user);
+  color: var(--ink-user);
+}
+
+.ex-composer__cancel:not(:disabled) {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.ex-composer__hint {
+  margin: 0;
+  color: var(--ink-faint);
+}

@@ -1,0 +1,113 @@
+.ex-branch {
+  display: grid;
+  gap: 0.35rem;
+  font: var(--size-chrome) / 1.45 var(--font-chrome);
+}
+
+.ex-branch__why {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0 0.1rem;
+  border: 0;
+  background: none;
+  color: var(--ink-muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ex-branch__why:hover {
+  color: var(--ink);
+}
+
+.ex-branch__caret {
+  color: var(--ink-faint);
+}
+
+.ex-branch__exchange {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--panel);
+  border-radius: var(--radius);
+}
+
+.ex-branch__question {
+  margin: 0;
+  color: var(--ink-muted);
+  font: 13px / 1.5 var(--font-system);
+}
+
+.ex-branch__answer .ex-prose {
+  font-size: 13px;
+  color: var(--ink-assistant);
+}
+
+.ex-branch__waiting {
+  margin: 0;
+  color: var(--ink-faint);
+}
+
+.ex-branch__outcome {
+  color: var(--warn);
+  text-transform: uppercase;
+}
+
+.ex-branch__patches {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ex-patch {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.25rem 0.5rem;
+  border-left: 2px solid var(--fresh);
+  background: var(--chip);
+  position: relative;
+}
+
+.ex-patch[data-op='retire'] {
+  border-left-color: var(--ink-faint);
+}
+
+.ex-patch[data-op='supersede'] {
+  border-left-color: var(--warn);
+}
+
+.ex-patch__op {
+  color: var(--fresh);
+}
+
+.ex-patch[data-op='retire'] .ex-patch__op {
+  color: var(--ink-faint);
+}
+
+.ex-patch[data-op='supersede'] .ex-patch__op {
+  color: var(--warn);
+}
+
+.ex-patch__id {
+  color: var(--ink-muted);
+}
+
+.ex-patch__text {
+  color: var(--ink);
+  font-family: var(--font-memory);
+  font-size: 12.5px;
+}
+
+.ex-patch[data-op='retire'] .ex-patch__text {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+.ex-patch__note {
+  margin-left: auto;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}

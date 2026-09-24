@@ -1,0 +1,119 @@
+.ex-block {
+  --fill: var(--fill-assistant);
+  --tone-ink: var(--ink-assistant);
+  background: var(--fill);
+  color: var(--tone-ink);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem 0.6rem;
+  position: relative;
+}
+
+.ex-block--system { --fill: var(--fill-system); --tone-ink: var(--ink-system); }
+.ex-block--user { --fill: var(--fill-user); --tone-ink: var(--ink-user); }
+.ex-block--assistant { --fill: var(--fill-assistant); --tone-ink: var(--ink-assistant); }
+.ex-block--tool { --fill: var(--fill-tool); --tone-ink: var(--ink-tool); border: 1px solid var(--rule); }
+.ex-block--interview { --fill: var(--fill-interview); --tone-ink: var(--ink-interview); }
+.ex-block--ratify { --fill: var(--fill-ratify); --tone-ink: var(--ink-ratify); }
+
+.ex-block--thin {
+  padding: 0.45rem 0.75rem;
+}
+
+.ex-block__body {
+  margin-bottom: 0.75rem;
+}
+
+/* The footer: what the harness measured. Low contrast on purpose. */
+.ex-block__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  font: var(--size-stats) / 1.4 var(--font-stats);
+  color: var(--ink-muted);
+}
+
+.ex-block--thin .ex-block__foot {
+  color: var(--tone-ink);
+}
+
+.ex-block__label {
+  padding: 0.15em 0.5em;
+  background: var(--chip);
+  color: var(--tone-ink);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-family: var(--font-chrome);
+}
+
+.ex-block__inline {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ex-block__spacer {
+  flex: 1 1 auto;
+}
+
+.ex-stat {
+  padding: 0.15em 0.5em;
+  background: var(--chip);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ex-stat__unit {
+  margin-left: 0.35em;
+  color: var(--ink-faint);
+}
+
+.ex-stat--cite {
+  background: none;
+  color: var(--ink-faint);
+  padding-inline: 0;
+}
+
+/* Something is still generating or running in this block. */
+.ex-block--live::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--tone-ink), transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: ex-sweep 1.4s linear infinite;
+  opacity: 0.6;
+}
+
+@keyframes ex-sweep {
+  from { background-position: -40% 0; }
+  to { background-position: 140% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ex-block--live::after { animation: none; background-size: 100% 100%; opacity: 0.3; }
+}
+
+/* The gaps overlay: what `diet` cannot emit yet, outlined and named. */
+.ex-gaps [data-needs]:not([data-needs='']) {
+  outline: 1px dashed var(--gap);
+  outline-offset: 2px;
+}
+
+.ex-gaps [data-needs]:not([data-needs=''])::before {
+  content: 'needs ' attr(data-needs);
+  position: absolute;
+  top: -0.75rem;
+  right: 0.25rem;
+  padding: 0 0.35rem;
+  background: var(--page);
+  color: var(--gap);
+  font: 10px / 1.4 var(--font-chrome);
+  letter-spacing: 0.04em;
+  z-index: 1;
+}

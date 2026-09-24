@@ -1,0 +1,73 @@
+.ex-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1.1rem;
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid var(--rule);
+  background: var(--page);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+  color: var(--ink-muted);
+}
+
+.ex-header__k {
+  color: var(--ink-faint);
+}
+
+.ex-header__model {
+  color: var(--ink-faint);
+}
+
+.ex-header__slots {
+  display: inline-flex;
+  gap: 0.9rem;
+}
+
+.ex-header__slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ex-header__dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  border: 1px solid var(--ink-faint);
+}
+
+.ex-header__slot[data-busy] .ex-header__dot {
+  background: var(--ink-interview);
+  border-color: var(--ink-interview);
+}
+
+.ex-header__holder {
+  color: var(--ink-interview);
+}
+
+.ex-header__spacer {
+  flex: 1 1 auto;
+}
+
+.ex-header__state {
+  padding: 0.15em 0.5em;
+  background: var(--chip);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ex-header__state[data-state='awaiting'] { color: var(--ink-user); }
+.ex-header__state[data-state='turn'],
+.ex-header__state[data-state='capture'] { color: var(--ink-interview); }
+.ex-header__state[data-state='ratify'] { color: var(--ink-ratify); }
+
+.ex-header__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+
+.ex-header__toggle input {
+  accent-color: var(--ink-interview);
+}

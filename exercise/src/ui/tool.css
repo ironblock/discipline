@@ -1,0 +1,70 @@
+.ex-block--tool {
+  padding-top: 0.6rem;
+}
+
+.ex-block--tool .ex-block__body {
+  margin-bottom: 0.5rem;
+}
+
+.ex-tool__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-tool);
+  font: var(--size-tool) / 1.5 var(--font-tool);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ex-tool__head:disabled {
+  cursor: default;
+}
+
+.ex-tool__caret {
+  width: 1ch;
+  color: var(--ink-faint);
+}
+
+.ex-tool__head:disabled .ex-tool__caret {
+  visibility: hidden;
+}
+
+.ex-tool__prompt {
+  color: var(--ink-faint);
+}
+
+.ex-tool__command {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ex-tool__more {
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.ex-tool__script,
+.ex-tool__output {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.8rem;
+  max-height: 22rem;
+  overflow: auto;
+  background: rgb(0 0 0 / 0.25);
+  border-radius: var(--radius);
+  font: var(--size-tool) / 1.5 var(--font-tool);
+  color: var(--ink-tool);
+  white-space: pre;
+}
+
+.ex-tool__script {
+  color: var(--ink-muted);
+}
+
+.ex-exit--ok { color: var(--ok); }
+.ex-exit--bad { color: var(--bad); }

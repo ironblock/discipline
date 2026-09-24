@@ -1,0 +1,66 @@
+import type { ReactNode } from 'react';
+
+import { useSurface } from './surface.tsx';
+import './block.css';
+
+/** A block's fill: a role on the trunk, or a lane beside it. */
+export type Tone = 'system' | 'user' | 'assistant' | 'tool' | 'interview' | 'ratify';
+
+export interface Stat {
+  readonly value: ReactNode;
+  /** A short label after the value: `tok`, `t/s`. */
+  readonly unit?: string;
+  /** What the number is, on hover. */
+  readonly title?: string;
+}
+
+export interface BlockProps {
+  readonly tone: Tone;
+  /** The footer's first chip: the role or lane, in the harness's words. */
+  readonly label: string;
+  readonly stats?: readonly (Stat | false | undefined)[];
+  /** Where this block came from, and what it waits on. From a folded node. */
+  readonly provenance: { readonly from: readonly number[]; readonly needs: readonly string[] };
+  /** Thin: a bar with a footer and no body, for a harness step. */
+  readonly thin?: boolean;
+  readonly live?: boolean;
+  readonly id?: string;
+  readonly children?: ReactNode;
+}
+
+/**
+ * The session event: one block, filled by role, with a low-contrast mono
+ * footer of what the harness measured. Every message, tool call and lane
+ * step on the surface is one of these, refined.
+ */
+export function Block({ tone, label, stats = [], provenance, thin = false, live = false, id, children }: BlockProps) {
+  const { curtain } = useSurface();
+  const shown = stats.filter((s): s is Stat => Boolean(s));
+  return (
+    <div
+      className={`ex-block ex-block--${tone}${thin ? ' ex-block--thin' : ''}${live ? ' ex-block--live' : ''}`}
+      data-tone={tone}
+      data-id={id}
+      data-from={provenance.from.join(' ')}
+      data-needs={provenance.needs.join(' ')}
+    >
+      {children !== undefined && !thin ? <div className="ex-block__body">{children}</div> : null}
+      <footer className="ex-block__foot">
+        <span className="ex-block__label">{label}</span>
+        {thin && children !== undefined ? <span className="ex-block__inline">{children}</span> : null}
+        <span className="ex-block__spacer" />
+        {shown.map((s, i) => (
+          <span className="ex-stat" key={i} title={s.title}>
+            {s.value}
+            {s.unit ? <span className="ex-stat__unit">{s.unit}</span> : null}
+          </span>
+        ))}
+        {curtain ? (
+          <span className="ex-stat ex-stat--cite" title="log positions this block was folded from">
+            #{provenance.from.join(' #')}
+          </span>
+        ) : null}
+      </footer>
+    </div>
+  );
+}

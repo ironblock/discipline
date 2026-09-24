@@ -1,0 +1,199 @@
+.ex-session {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.ex-session__header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.ex-session__main {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: var(--gutter);
+  padding: 0.5rem 1rem 1rem;
+  flex: 1 1 auto;
+}
+
+.ex-session__columns {
+  min-width: 0;
+}
+
+.ex-session__memory {
+  position: sticky;
+  top: 3.5rem;
+  margin-top: 2.2rem;
+  width: var(--memory-width);
+  max-height: calc(100vh - 12rem);
+  overflow-y: auto;
+  flex: 0 0 auto;
+}
+
+.ex-session__composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  padding: 1rem 1rem 1.25rem;
+  background: linear-gradient(to bottom, transparent, var(--page) 1.25rem);
+  display: flex;
+  justify-content: center;
+}
+
+.ex-session__composer > * {
+  width: min(100%, var(--trunk-width));
+}
+
+.ex-session--curtain .ex-session__composer {
+  justify-content: flex-start;
+  padding-left: max(1rem, calc((100vw - var(--trunk-width) - var(--lanes) * (var(--lane-width) + var(--gutter)) - var(--memory-width) - var(--gutter)) / 2));
+}
+
+/* The trunk flows; each other slot is a column its branches are placed in. */
+.ex-lanehead-row,
+.ex-stage {
+  display: grid;
+  grid-template-columns: minmax(0, var(--trunk-width)) repeat(var(--lanes), var(--lane-width));
+  column-gap: var(--gutter);
+}
+
+.ex-session:not(.ex-session--curtain) .ex-stage {
+  grid-template-columns: minmax(0, var(--trunk-width));
+}
+
+.ex-lanehead-row {
+  position: sticky;
+  top: 2.4rem;
+  z-index: 2;
+  padding: 0.6rem 0 0.5rem;
+  background: var(--page);
+}
+
+.ex-lanehead {
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ex-lanehead[data-busy] {
+  color: var(--ink-interview);
+}
+
+.ex-trunk,
+.ex-era {
+  display: grid;
+  gap: 0.9rem;
+  align-content: start;
+  min-width: 0;
+}
+
+.ex-trunk__node {
+  position: relative;
+}
+
+.ex-lane {
+  position: relative;
+}
+
+.ex-branchcell {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+/* The connector: out of the trunk at the anchor, down if the slot was busy, into the branch. */
+.ex-connector {
+  position: absolute;
+  left: calc(-1 * var(--gutter));
+  width: var(--gutter);
+  color: var(--ink-faint);
+  pointer-events: none;
+}
+
+.ex-connector::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 50%;
+  height: 100%;
+  border-top: 1px solid currentColor;
+}
+
+.ex-connector[data-bent]::before {
+  border-right: 1px solid currentColor;
+  border-top-right-radius: 6px;
+}
+
+.ex-connector::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  right: 5px;
+  bottom: 0;
+  border-bottom: 1px solid currentColor;
+}
+
+.ex-connector[data-bent]::after {
+  bottom: -1px;
+}
+
+.ex-connector__tip {
+  position: absolute;
+  right: 0;
+  bottom: -4px;
+  border: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  border-right: 0;
+}
+
+.ex-branchcell:has(.ex-branch[data-outcome='running']) .ex-connector {
+  color: var(--ink-interview);
+}
+
+/* Curtain closed: a quiet marker where a branch left the trunk. */
+.ex-peek {
+  position: absolute;
+  top: 0.4rem;
+  right: -2.25rem;
+  padding: 0.1rem 0.3rem;
+  border: 0;
+  background: none;
+  color: var(--ink-faint);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+  cursor: pointer;
+}
+
+.ex-peek:hover {
+  color: var(--ink-interview);
+}
+
+/* A seam crosses every column: the refill changes the prefix every slot forks from. */
+.ex-session--curtain .ex-seam {
+  margin-right: calc(-1 * var(--lanes) * (var(--lane-width) + var(--gutter)));
+}
+
+/* Following the newest content lands it above the sticky composer, not under it. */
+.ex-session__end {
+  scroll-margin-bottom: 11rem;
+}
+
+@media (max-width: 72rem) {
+  .ex-session__main {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ex-session__memory {
+    position: static;
+    width: auto;
+    max-height: none;
+    margin-top: 0;
+  }
+  .ex-session__columns {
+    overflow-x: auto;
+  }
+}

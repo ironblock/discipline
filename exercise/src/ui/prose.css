@@ -1,0 +1,47 @@
+.ex-prose {
+  font-size: var(--size-prose);
+  line-height: var(--leading-prose);
+  overflow-wrap: anywhere;
+}
+
+.ex-prose--ask { font-family: var(--font-ask); }
+.ex-prose--answer { font-family: var(--font-answer); }
+.ex-prose--system { font-family: var(--font-system); white-space: pre-wrap; }
+.ex-prose--reasoning {
+  font-family: var(--font-reasoning);
+  font-style: var(--style-reasoning);
+  color: var(--ink-reasoning);
+}
+
+.ex-prose > :first-child { margin-top: 0; }
+.ex-prose > :last-child { margin-bottom: 0; }
+
+.ex-prose p,
+.ex-prose ul,
+.ex-prose ol {
+  margin: 0 0 0.75em;
+  white-space: pre-wrap;
+}
+
+.ex-prose ul,
+.ex-prose ol {
+  padding-left: 1.4em;
+}
+
+.ex-prose code {
+  font-family: var(--font-tool);
+  font-size: 0.86em;
+  padding: 0.05em 0.3em;
+  background: var(--chip);
+  border-radius: 2px;
+}
+
+.ex-prose__code {
+  margin: 0 0 0.75em;
+  padding: 0.75em 1em;
+  background: rgb(0 0 0 / 0.25);
+  border-radius: var(--radius);
+  font: var(--size-tool) / 1.5 var(--font-tool);
+  overflow-x: auto;
+  white-space: pre;
+}
