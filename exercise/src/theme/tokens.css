@@ -1,0 +1,133 @@
+/*
+ * Tokens. Named for what they mean, never for how they look: several resolve
+ * to the same value today, and that is deliberate -- a component binds to
+ * `--font-answer`, not to "sans", so the face can change without touching it.
+ *
+ * COLOUR starts from the author's mockup: the trunk's roles as block fills
+ * (system blue, user teal, assistant grey), the side lanes as bars, stats as
+ * low-contrast mono. Dark is the design; light is the same meanings, inverted.
+ *
+ * TYPE: mono for what the harness and its tools say (chrome, stats, commands,
+ * output); one proportional face for what a person or a model said. Role is
+ * carried by fill, not by face. Chain-of-thought is italic.
+ */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --page: #131415;
+  --panel: #1a1b1d;
+  --rule: #2c2e31;
+  --ink: #e2e4e7;
+  --ink-muted: #8b9098;
+  --ink-faint: #5f646c;
+  --chip: rgb(255 255 255 / 0.06);
+
+  /* The trunk, by role */
+  --fill-system: #0c2140;
+  --ink-system: #8cc0ff;
+  --fill-user: #093a33;
+  --ink-user: #62e3c1;
+  --fill-assistant: #252628;
+  --ink-assistant: #b9bdc3;
+  --ink-reasoning: #dfe2e6;
+  --fill-tool: #18191b;
+  --ink-tool: #c3c7cd;
+
+  /* The side lanes */
+  --fill-interview: #0c2140;
+  --ink-interview: #8cc0ff;
+  --fill-ratify: #251d52;
+  --ink-ratify: #e28cf0;
+  --fill-memory: #1d1f22;
+
+  /* Meanings */
+  --ok: #6fd38f;
+  --warn: #e5c26b;
+  --bad: #f07f7f;
+  --fresh: #62e3c1;
+  --seam: #e28cf0;
+  --gap: #e5a06b;
+
+  /* Faces */
+  --face-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+  --face-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+
+  /* Kinds of text */
+  --font-chrome: var(--face-mono);
+  --font-stats: var(--face-mono);
+  --font-tool: var(--face-mono);
+  --font-ask: var(--face-sans);
+  --font-answer: var(--face-sans);
+  --font-reasoning: var(--face-sans);
+  --style-reasoning: italic;
+  --font-system: var(--face-sans);
+  --font-memory: var(--face-sans);
+
+  --size-prose: 15px;
+  --size-chrome: 11px;
+  --size-stats: 11px;
+  --size-tool: 12.5px;
+  --leading-prose: 1.6;
+
+  /* Geometry */
+  --trunk-width: 46rem;
+  --lane-width: 22rem;
+  --memory-width: 20rem;
+  --gutter: 2.5rem;
+  --radius: 3px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    color-scheme: light;
+    --page: #f6f5f2;
+    --panel: #efeeea;
+    --rule: #dcd9d2;
+    --ink: #1a1c1f;
+    --ink-muted: #5d636b;
+    --ink-faint: #8f949b;
+    --chip: rgb(0 0 0 / 0.05);
+    --fill-system: #e3edfb;
+    --ink-system: #1d4f8f;
+    --fill-user: #dcf3ec;
+    --ink-user: #0d6b55;
+    --fill-assistant: #ffffff;
+    --ink-assistant: #30343a;
+    --ink-reasoning: #1a1c1f;
+    --fill-tool: #f0efeb;
+    --ink-tool: #30343a;
+    --fill-interview: #e3edfb;
+    --ink-interview: #1d4f8f;
+    --fill-ratify: #efe4fb;
+    --ink-ratify: #7a2a8f;
+    --fill-memory: #ffffff;
+    --ok: #1f8a4c;
+    --warn: #9a6f00;
+    --bad: #b8322f;
+    --fresh: #0d8a6b;
+    --seam: #8e35a8;
+    --gap: #b8620f;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+}
+
+.ex-root {
+  background: var(--page);
+  color: var(--ink);
+  font: var(--size-chrome) / 1.5 var(--font-chrome);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.ex-root *,
+.ex-root *::before,
+.ex-root *::after {
+  box-sizing: border-box;
+}
