@@ -16,8 +16,17 @@ name: gate-selftest
 # nothing exits 0 and reports `success` like any other; the census is the only
 # thing that can tell you it did.
 #
-# N is `strategy.job-total`, so the matrix below is the one place the shard
-# count is written. Change the list and the flag follows.
+# HOW MANY SHARDS IS NOT WRITTEN HERE. It was -- a literal `[1 .. 8]` -- and
+# eight was right when it was measured and wrong two hundred faults later,
+# which is what #87 was filed about. It is now an output of the harvest that
+# balances them: tools/gate/shards.tsv derives the smallest count whose
+# slowest shard fits .github/gate-budget.tsv's five minutes, and the `plan`
+# job below reads that count out of the same file `verify.sh --shard` reads
+# its assignment from. Neither is free to disagree with the other -- verify.sh
+# refuses an N that is not the one the file was packed for.
+#
+# N is still `strategy.job-total`, which is the size of the matrix the plan
+# produced, so the flag follows the file with nothing restating it.
 
 on:
   workflow_call:
@@ -26,8 +35,42 @@ permissions:
   contents: read
 
 jobs:
+  # One short job, so that the matrix below can be a number this repository
+  # derived rather than a number somebody typed. `fromJson` needs a JSON array
+  # and a matrix needs it before any shard starts, which is what makes this a
+  # job of its own rather than a step.
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.count.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # The JSON is built by the script that owns the file, not by a `seq` or
+      # a `jq` here: a second thing that knows how to turn an assignment into
+      # a matrix is a second thing that can get it wrong, and this one refuses
+      # an unreadable or empty assignment rather than printing `[]` -- which
+      # would make a matrix of nothing, a workflow of no jobs, and a census
+      # that never filed.
+      #
+      # The substitution is BOUND TO A VARIABLE FIRST, not written straight
+      # into the `echo`. `echo "shards=$(...)" >> $GITHUB_OUTPUT` is echo's
+      # exit status, which is 0 whatever the script did -- so a refusal would
+      # set an empty output, and the failure would arrive later as an
+      # unreadable matrix expression rather than here as the script's own
+      # message. An assignment carries the substitution's status, and the
+      # default shell is `bash -e`.
+      - name: How many shards the assignment derives
+        id: count
+        run: |
+          shards="$(python3 scripts/derive-shards.py --matrix)"
+          echo "shards=${shards}" >> "$GITHUB_OUTPUT"
+          echo "the assignment derives ${shards}"
+
   selftest:
     name: selftest ${{ matrix.shard }}
+    needs: [plan]
     runs-on: ubuntu-latest
     strategy:
       # Every shard runs. `fail-fast` would cancel the others on the first
@@ -35,7 +78,7 @@ jobs:
       # arrive alongside a census failure blaming the shards it cancelled.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: ${{ fromJson(needs.plan.outputs.shards) }}
     steps:
       - uses: actions/checkout@v5
 

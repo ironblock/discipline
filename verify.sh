@@ -12,6 +12,7 @@
 #   verify.sh --selftest --shard K/N    run this job's share of the faults
 #   verify.sh --selftest --census PATH  write what this run ran, for the sum
 #   verify.sh --selftest --derive-scopes DIR   re-harvest the test cases' scopes
+#   verify.sh --selftest --derive-shards DIR   re-harvest each fault's cost
 #
 # THE SCOPES ARE A HARVEST, NOT A LIST. Every `test` case declares which tests
 # it needs, and there are 181 of them; a flag that makes the gate run LESS is a
@@ -41,6 +42,23 @@
 # runs its fixture suite in a second, because a tool whose only input is a
 # forty-minute harvest is a tool nobody runs, and the first defect in it was
 # exactly that kind.
+#
+# THE SHARD SPLIT IS A HARVEST TOO, for the same reason and with the same
+# shape. `--shard K/N` used to divide by arithmetic -- every Nth fault -- which
+# splits the COUNT evenly and the COST not at all, and a 58% spread between the
+# slowest and fastest shard pushed CI's wall clock past the shortest prompt-
+# cache TTL any seat runs on. So the split is measured instead:
+#
+#   ./verify.sh --selftest --derive-shards /tmp/cost
+#   python3 scripts/derive-shards.py --index /tmp/cost/derive-shards.tsv --emit \
+#     > tools/gate/shards.tsv
+#   python3 scripts/derive-shards.py --check
+#
+# That run is SCOPED and UNSHARDED: scoped because a shard's cost is the cost
+# of the run CI actually performs, and unsharded because a harvest of one
+# shard's faults cannot balance the others. `--derive-shards` and
+# `--derive-scopes` therefore refuse each other -- one needs the declarations
+# on and the other needs them off, and a single run cannot be both.
 #
 # Three rules this script exists to keep:
 #
@@ -337,7 +355,22 @@ check_pages() {
 # The wiring between these checks and the CI that runs them. CI can go green
 # while running almost nothing -- a check owned by no workflow, a job the gate
 # does not depend on, a path filter that turns a skip into a pass.
-check_ci() { python3 scripts/check-ci-coverage.py; }
+#
+# AND THE SHARD ASSIGNMENT, which is the same kind of wiring: it is what
+# decides how many selftest jobs CI spawns and which faults each one runs.
+# `derive-shards.py --check` refuses a plan that is not a partition of its own
+# shards, or carries an outlier; a PR that adds a fault without re-deriving is
+# REPORTED here and not refused, because `in_shard` runs that fault in the
+# shard a hash of its id picks (ruled on #108, 2026-09-24).
+#
+# Here rather than in a check of its own: a new check needs an owner row, a
+# workflow that runs it and a seeded fault of its own, and this is not a new
+# concern -- it is the same question `check-ci-coverage.py` already asks, about
+# the same workflows, one file further along.
+check_ci() {
+  python3 scripts/check-ci-coverage.py &&
+    python3 scripts/derive-shards.py --check
+}
 
 # What `--range` hands the history check, and empty unless it was given.
 #
@@ -384,7 +417,20 @@ check_resolver() { python3 scripts/check-merge-gate.py; }
 # re.MULTILINE, so every build-breaking fault came back as "the derivation
 # broke" -- survived being written, reviewed and read, and was found only by a
 # harvest. The fixtures cost a second and the harvest does not.
-check_derive() { python3 scripts/derive-scopes.py --selftest; }
+#
+# BOTH harvests' readers, for the same reason. `derive-shards.py` reads a run
+# of the same length and packs the whole fault list into the CI matrix off what
+# it finds; a defect in it is a shard that overruns, or an assignment that
+# covers the manifest on paper and not in fact. No count here: this line's
+# neighbour carried one and it was wrong the day it was written.
+#
+# Chained with `&&` rather than run in a loop: `&&` puts a command's own status
+# where the check's status belongs, and the second reader is only interesting
+# if the first is sound.
+check_derive() {
+  python3 scripts/derive-scopes.py --selftest &&
+    python3 scripts/derive-shards.py --selftest
+}
 
 # The fault-migration manifest defines what parity means for the replacement
 # gate. A manifest that has drifted from this script defines the wrong parity.
@@ -404,6 +450,53 @@ run_check() {
   else
     printf -- '--- %s: FAIL (exit %d)\n' "$name" "$rc"
     FAILED+=("${name} (exit ${rc})")
+  fi
+}
+
+# The declared wall-clock budget, beside check-owners.tsv, which is where this
+# repository keeps what CI is held to. Named here; read at the bottom.
+readonly GATE_BUDGET=".github/gate-budget.tsv"
+
+# One line, on every run, saying what this run cost against what CI is allowed
+# to cost. THE RUN IS NEVER FAILED ON IT: a slow gate is not a wrong gate, and
+# a budget that can fail a build is a budget somebody raises rather than meets.
+# What it is for is that the drift is visible in the log of the run that caused
+# it, rather than in a wall-clock nobody was watching -- which is how #87's
+# 58% shard spread went five months unnoticed.
+#
+# `SECONDS` is this process, so in CI this line measures exactly the step that
+# ran it: for a selftest shard, that shard; for a package job, that job's
+# checks. What it does NOT measure is the runner's own overhead around it --
+# checkout, apt, the toolchain -- which is declared in the same file and
+# subtracted by derive-shards.py when it picks the shard count.
+report_wall_clock() {
+  local elapsed="$SECONDS" budget="" key value
+  if [ -f "${ROOT}/${GATE_BUDGET}" ]; then
+    while IFS=$'\t' read -r key value || [ -n "${key:-}" ]; do
+      case "$key" in
+        wall_clock_seconds) budget="$value" ;;
+      esac
+    done < "${ROOT}/${GATE_BUDGET}"
+  fi
+  case "${budget:-x}" in *[!0-9]*) budget="" ;; esac
+  if [ -z "$budget" ]; then
+    # Reported, not raised. scripts/derive-shards.py --check is what refuses a
+    # budget file that declares nothing, and it runs under the `ci` check; a
+    # second refusal here would fail the run for a defect a gate already owns.
+    printf 'verify: wall-clock %ds against no budget -- %s declares no wall_clock_seconds\n' \
+      "$elapsed" "$GATE_BUDGET"
+  elif [ "$elapsed" -le "$budget" ]; then
+    printf 'verify: wall-clock %ds of the %ds budget (%s), %ds to spare\n' \
+      "$elapsed" "$budget" "$GATE_BUDGET" "$(( budget - elapsed ))"
+  else
+    # ONE printf, ONE single-quoted format, not split across lines. A `\`
+    # before a newline inside single quotes is a literal backslash and a
+    # literal newline -- single quotes take everything literally -- so the
+    # continuation that works in the double-quoted messages elsewhere in this
+    # file would print the backslash and break the line here. Caught by
+    # reading it back, which is the only thing that catches a format string.
+    printf 'verify: wall-clock %ds of the %ds budget (%s), OVER BY %ds -- a seat waiting this long returns to a cold prefix\n' \
+      "$elapsed" "$budget" "$GATE_BUDGET" "$(( elapsed - budget ))"
   fi
 }
 
@@ -439,37 +532,235 @@ SELFTEST_DERIVE=""
 
 # --- the shard ------------------------------------------------------------
 #
-# `--selftest --shard K/N` runs every Nth fault starting at the Kth, so N jobs
-# between them run each fault exactly once. Round-robin rather than blocks:
-# the Rust-class faults are the expensive ones and they are declared in runs,
-# so a block split would put nearly all of them in one shard.
+# `--selftest --shard K/N` runs the faults tools/gate/shards.tsv assigns to
+# shard K, so N jobs between them run each fault exactly once.
 #
-# This is NOT fault selection. Nothing here decides that a fault need not run;
-# it decides which JOB runs it, and scripts/check-selftest-census.py proves
-# after the fact that the shards between them ran every one. Selecting faults
-# by what changed is the thing this repository refuses, and the difference is
-# that a shard's absence is a failure rather than a silence: a missing census
-# is a missing shard, and the aggregate refuses.
+# IT USED TO BE ARITHMETIC: every Nth fault, starting at the Kth. That divides
+# the COUNT evenly and the COST not at all. A `test` fault rebuilds the crate
+# and costs seconds; a pattern class costs milliseconds; and which of the two a
+# round-robin hands a shard is decided by where in this file its declaration
+# happens to sit. Measured on the two runs #87 was filed against, shard 2 took
+# 7m24s and shard 4 took 4m40s -- a 58% spread -- and the whole run overran the
+# 5-minute budget .github/gate-budget.tsv now declares.
 #
-# 0 means unsharded -- one job runs the lot, which is what a contributor gets.
+# So the assignment is HARVESTED, the same way the `--scope` declarations are:
+# `--derive-shards` measures what each fault actually costs, and
+# `scripts/derive-shards.py` packs those costs into shards. N is a DERIVED
+# OUTPUT of that packing and is carried in the file, so a caller passing an N
+# the file does not agree with is refused rather than reinterpreted -- two
+# opinions about how many shards there are is exactly how a fault ends up in
+# no shard at all.
+#
+# This is still NOT fault selection. Nothing here decides that a fault need not
+# run; it decides which JOB runs it, and scripts/check-selftest-census.py
+# proves after the fact that the shards between them ran every one. Selecting
+# faults by what changed is the thing this repository refuses, and the
+# difference is that a shard's absence is a failure rather than a silence: a
+# missing census is a missing shard, and the aggregate refuses.
+#
+# 0 means unsharded -- one job runs the lot, which is what a contributor gets,
+# and what a harvest needs. The assignment is not consulted at all then: it
+# cannot change which faults run, only which shard runs them, and requiring it
+# of an unsharded run would make adding a fault impossible (no harvest without
+# a run, no run without an assignment, no assignment without a harvest).
 SELFTEST_SHARD=0
 SELFTEST_SHARDS=1
 SELFTEST_UNITS=0
 SELFTEST_RAN=()
+SELFTEST_UNPLANNED=0
 SELFTEST_CENSUS=""
+
+# The checked-in assignment, relative to ROOT. Named once; derive-shards.py
+# holds the same path and is the only thing that writes it.
+readonly SHARD_PLAN="tools/gate/shards.tsv"
+
+# Read `${ROOT}/${SHARD_PLAN}` into SHARD_OF, and refuse an N that disagrees.
+#
+# SHARD_OF IS `selftest`'s LOCAL, not a global. `declare -A` at file scope is a
+# usage error on the bash 3.2 a stock Mac ships, and the ORDINARY gate still
+# runs there -- only `--selftest` requires bash 4. Bash scopes locals
+# dynamically, so a `local -A` in selftest() is in scope for everything it
+# calls, including this and in_shard, and the declaration then sits behind the
+# version check that guards it.
+load_shard_plan() {
+  local path="${ROOT}/${SHARD_PLAN}" key a b c declared="" rows=0
+  if [ ! -f "$path" ]; then
+    echo "selftest: --shard needs ${SHARD_PLAN}, which is not there. It is a \
+harvest: ./verify.sh --selftest --derive-shards DIR, then \
+scripts/derive-shards.py --index DIR/derive-shards.tsv --emit" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  while IFS=$'\t' read -r key a b c || [ -n "${key:-}" ]; do
+    case "$key" in ''|\#*) continue ;; esac
+    case "$key" in
+      fault)
+        # `read_plan` in scripts/derive-shards.py refuses the same file's
+        # second row for one id rather than taking the last of the two
+        # silently; this docstring-claimed "parsed the same way" was false
+        # until this matched it -- two readers of one file disagreeing on a
+        # duplicate is a plan that means one thing to `--check` and another to
+        # the run it is checking.
+        if [ -n "${SHARD_OF[$a]+_}" ]; then
+          echo "selftest: ${SHARD_PLAN} assigns '${a}' twice" >&2
+          exit "$EXIT_MISUSE"
+        fi
+        SHARD_OF["$a"]="$b"
+        rows=$(( rows + 1 ))
+        ;;
+      shards) declared="$a" ;;
+      # Harvest provenance, read by derive-shards.py and not by this. Named
+      # rather than skipped by default: a key this does not know is a file
+      # written by something that is not derive-shards.py, and guessing at
+      # one is how a plan gets read as half a plan. `substrate` is the row
+      # `emit()` has written since the substrate ruling on #87 -- missing from
+      # this list, the first runner harvest's own plan would have been refused
+      # by every shard as a file of unknown keys.
+      overhead_ms|harvest_ms|substrate) ;;
+      *)
+        echo "selftest: ${SHARD_PLAN}: unknown key '${key}'" >&2
+        exit "$EXIT_MISUSE"
+        ;;
+    esac
+  done < "$path"
+  if [ -z "$declared" ]; then
+    echo "selftest: ${SHARD_PLAN} declares no shard count, so nothing in it \
+says how many shards it was packed for" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  case "$declared" in *[!0-9]*)
+    echo "selftest: ${SHARD_PLAN} declares '${declared}' as its shard count, \
+which is not a number -- \"-ne\" on it would report an error to stderr and the \
+\`if\` around it would read that as false, so a corrupt count would be treated \
+as agreeing with --shard rather than refused" >&2
+    exit "$EXIT_MISUSE"
+    ;;
+  esac
+  if [ "$declared" -ne "$SELFTEST_SHARDS" ]; then
+    # The affected range runs from whichever of the two is smaller: a caller
+    # passing a bigger N than the plan was packed for leaves shards
+    # declared+1..N with nothing assigned to them, while a smaller N leaves
+    # N+1..declared assigned to shard numbers no job in this run ever is.
+    # Printing "${declared} .. ${SELFTEST_SHARDS}" unconditionally read
+    # backwards -- "16 .. 8" -- in the second, more common case.
+    local lo hi
+    if [ "$declared" -lt "$SELFTEST_SHARDS" ]; then
+      lo=$(( declared + 1 )); hi="$SELFTEST_SHARDS"
+    else
+      lo=$(( SELFTEST_SHARDS + 1 )); hi="$declared"
+    fi
+    echo "selftest: --shard ${SELFTEST_SHARD}/${SELFTEST_SHARDS} disagrees with \
+${SHARD_PLAN}, which was packed for ${declared} shard(s). N is derived from the \
+harvest and is not the caller's to choose: reinterpreting this one would leave \
+the faults assigned to shards ${lo} .. ${hi} run by nobody" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  [ "$rows" -gt 0 ] || {
+    echo "selftest: ${SHARD_PLAN} assigns no fault to any shard" >&2
+    exit "$EXIT_MISUSE"
+  }
+}
 
 # Whether the next counted fault belongs to this shard, counting it either
 # way. Every counted fault calls this exactly once, in declaration order, so
 # the ordinals are the same in every shard and the union of the shards is the
 # whole list -- which is the claim the census script checks rather than trusts.
+#
+# The argument is the fault's MANIFEST ID -- the same string
+# `check-fault-manifest.py` derives for it -- because that is what the
+# assignment is keyed by and what survives a fault being added above this one.
+# The ordinal cannot be the key: inserting one fault renumbers every fault
+# after it, so an assignment keyed by ordinal would silently be about a
+# different list the moment anything moved.
+#
+# unseedable: the sharded selftest's refusals cannot be seeded without re-entering --selftest; proved by hand instead
+#
+# A seeded case runs `verify.sh --only CHECK`; nothing it can run reaches
+# `--selftest --shard`, and an assertion that invoked one would re-enter the
+# function this sits in, whose inner run would do the same. Proved by hand in
+# all four directions instead -- a plan that is not there, a plan packed for a
+# different N, a fault with no row, and the sound plan that must still run --
+# and the transcript is in the commit that added them. The third of those is
+# no longer a refusal (ruled on #108, 2026-09-24): see the hash below.
 in_shard() {
+  local ident="${1-}"
   SELFTEST_UNITS=$(( SELFTEST_UNITS + 1 ))
-  if [ "$SELFTEST_SHARD" -eq 0 ] ||
-     [ "$(( (SELFTEST_UNITS - 1) % SELFTEST_SHARDS + 1 ))" -eq "$SELFTEST_SHARD" ]; then
+  if [ -z "$ident" ]; then
+    echo "selftest: fault ${SELFTEST_UNITS} was counted without an id, so \
+nothing can say which shard runs it" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  if [ "$SELFTEST_SHARD" -eq 0 ]; then
+    SELFTEST_RAN+=("$SELFTEST_UNITS")
+    return 0
+  fi
+  local assigned="${SHARD_OF[$ident]-}"
+  if [ -z "$assigned" ]; then
+    # UNPLANNED, NOT REFUSED (ruled on #108, 2026-09-24). The invariant is
+    # that every fault runs exactly once, and the census proves that on every
+    # run; a plan row was only ever load balance. So a fault the plan does not
+    # name -- one added since the last harvest -- goes to a shard derived from
+    # its own id. `cksum` is POSIX's CRC, the same on every machine and so in
+    # every shard, which is what keeps the union of the shards the whole list.
+    # Counted, and printed once beside the census, rather than refused.
+    local crc
+    crc="$(printf '%s' "$ident" | cksum)"
+    assigned=$(( ${crc%% *} % SELFTEST_SHARDS + 1 ))
+    SELFTEST_UNPLANNED=$(( SELFTEST_UNPLANNED + 1 ))
+  fi
+  case "$assigned" in *[!0-9]*)
+    echo "selftest: ${SHARD_PLAN} assigns '${assigned}' to '${ident}', which \
+is not a shard number -- \"-eq\" on it would report an error to stderr and the \
+\`if\` around it would read that as false, so a corrupt row would be silently \
+treated as belonging to no shard rather than refused" >&2
+    exit "$EXIT_MISUSE"
+    ;;
+  esac
+  if [ "$assigned" -eq "$SELFTEST_SHARD" ]; then
     SELFTEST_RAN+=("$SELFTEST_UNITS")
     return 0
   fi
   return 1
+}
+
+# --- the cost harvest -------------------------------------------------------
+#
+# Where `--derive-shards` writes what each fault cost, and empty when that mode
+# is off. The per-case line the selftest already prints carries whole seconds,
+# which is the resolution a reader needs and not the resolution a packer does:
+# most faults in the list finish well inside one second, and a split that
+# treated every one of them as free would put every one of them in one shard.
+SELFTEST_COST_INDEX=""
+# The directory `--derive-shards` was given, before it is turned into an index
+# path. Kept apart so the mode's own guards can refuse before anything is made.
+SELFTEST_COST_DIR=""
+
+# Milliseconds, into NOW_MS. Set into a global rather than echoed, because
+# `x="$(now_ms)"` runs it in a subshell -- the same reason scratch() gives --
+# and a fork per measurement is a measurement that includes the fork.
+#
+# `EPOCHREALTIME` is bash 5; the selftest requires 4. The fallback is SECONDS,
+# whose epoch is this process rather than 1970 -- which is harmless, because
+# nothing here reads anything but a difference of two readings from one run.
+NOW_MS=0
+now_ms() {
+  case "${EPOCHREALTIME:-}" in
+    *[.,]*)
+      local whole="${EPOCHREALTIME%%[.,]*}" frac="${EPOCHREALTIME#*[.,]}000"
+      NOW_MS=$(( 10#${whole}${frac:0:3} ))
+      ;;
+    *) NOW_MS=$(( SECONDS * 1000 )) ;;
+  esac
+}
+
+# What one fault cost, appended to the harvest index. A no-op outside
+# `--derive-shards`, so the ordinary selftest pays one function call per fault
+# and writes nothing.
+shard_cost() {
+  [ -n "$SELFTEST_COST_INDEX" ] || return 0
+  local ident="$1" since="$2" label="$3"
+  now_ms
+  printf 'fault\t%s\t%d\t%s\n' "$ident" "$(( NOW_MS - since ))" "$label" \
+    >> "$SELFTEST_COST_INDEX"
 }
 
 selftest_cleanup() {
@@ -608,15 +899,25 @@ SELFTEST_BOX=""
 # A signature must appear ONLY when the seeded fault fires. A test NAME is not
 # a signature: `cargo test` prints it on success too, so matching it would
 # certify a dead gate. Match the failure text instead.
+#
+# The sixth word is the fault's MANIFEST ID, and only the lane-fault generator
+# passes one. Every case spelled out in this file derives its id the way
+# `check-fault-manifest.py` derives it -- `${check}.${injection}` without the
+# prefix -- so the two cannot drift. The generated lane cases all share one
+# check and one injection, so that derivation would name every one of them
+# `lanes.lane_fault`; the id they are actually registered under comes from the
+# lane manifest instead, and the generator passes it.
 seeded_case() {
-  local label="$1" check="$2" inject="$3" expect="$4" scope="${5-}"
+  local label="$1" check="$2" inject="$3" expect="$4" scope="${5-}" ident="${6-}"
   local box="$SELFTEST_BOX"
   local started="$SECONDS"
+  now_ms; local started_ms="$NOW_MS"
+  [ -n "$ident" ] || ident="${check}.${inject#inject_}"
   # Recorded before the shard is consulted. This list answers "has every check
   # been seen red", which is a question about what the gate DECLARES, and the
   # answer must not depend on which shard is asking.
   SEEDED_CHECKS+=("$check")
-  in_shard || return 0
+  in_shard "$ident" || return 0
   SELFTEST_CASES=$(( SELFTEST_CASES + 1 ))
 
   # A `test` case says which tests it needs; anything else says nothing,
@@ -636,6 +937,7 @@ seeded_case() {
       printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- NO TEST SCOPE DECLARED\n' \
         "$(( SECONDS - started ))" "$check" "$label"
       SELFTEST_BROKEN+=("${label}: a test case must name the tests it needs")
+      shard_cost "$ident" "$started_ms" "$label"
       return
     fi
     scoped=(--scope "$scope")
@@ -643,6 +945,7 @@ seeded_case() {
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- A SCOPE ON A CHECK THAT TAKES NONE\n' \
       "$(( SECONDS - started ))" "$check" "$label"
     SELFTEST_BROKEN+=("${label}: only the test check takes a scope")
+    shard_cost "$ident" "$started_ms" "$label"
     return
   fi
   # One log per case, kept for the run, because the box itself is overwritten
@@ -670,6 +973,7 @@ seeded_case() {
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE BUILT\n' \
       "$(( SECONDS - started ))" "$check" "$label"
     SELFTEST_BROKEN+=("${label}: the sandbox could not be built")
+    shard_cost "$ident" "$started_ms" "$label"
     return
   fi
 
@@ -697,6 +1001,7 @@ seeded_case() {
       printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE READ\n' \
         "$(( SECONDS - started ))" "$check" "$label"
       SELFTEST_BROKEN+=("${label}: the sandbox's state could not be read")
+      shard_cost "$ident" "$started_ms" "$label"
       return
       ;;
   esac
@@ -728,6 +1033,7 @@ seeded_case() {
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE INJECTION EXITED %d\n' \
       "$(( SECONDS - started ))" "$check" "$label" "$injected"
     SELFTEST_BROKEN+=("${label}: ${inject} exited ${injected}, so whatever it left is not the fault")
+    shard_cost "$ident" "$started_ms" "$label"
     return
   fi
 
@@ -735,6 +1041,7 @@ seeded_case() {
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE INJECTION CHANGED NOTHING\n' \
       "$(( SECONDS - started ))" "$check" "$label"
     SELFTEST_BROKEN+=("${label}: ${inject} changed nothing, so the case proves nothing")
+    shard_cost "$ident" "$started_ms" "$label"
     return
   fi
 
@@ -763,6 +1070,12 @@ seeded_case() {
     printf 'RED    %4ds verify.sh --only %-8s exit %-3d  %s\n' \
       "$(( SECONDS - started ))" "$check" "$rc" "$label"
   fi
+  # ONE OF SEVEN. Every path out of this function records what the fault cost,
+  # including the ones that give up early, because a harvest missing a fault is
+  # a harvest that cannot be packed. An eighth path added without one is not
+  # silent: derive-shards.py refuses an index that does not name every fault
+  # the manifest declares, and says which are missing.
+  shard_cost "$ident" "$started_ms" "$label"
 }
 
 # Apply one `sed` expression to each file, in place, portably.
@@ -3928,6 +4241,79 @@ assert source.count(old) == 1
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
+# The shard packer balancing the COUNT of faults instead of their cost. That
+# is round-robin wearing a bin-packer's clothes, and it is exactly the split
+# #87 was filed against: every shard gets the same number of faults, and the
+# shard that drew the Rust-class ones runs for half as long again as the one
+# that drew the pattern classes.
+inject_derive_shards_packs_by_count() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/derive-shards.py")
+source = path.read_text(encoding="utf-8")
+old = "        load[lightest] += cost[ident]"
+new = "        load[lightest] += 1"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# The balance check grading a shard against the MEAN of the shards rather than
+# their median. The mean is dragged up by the outlier it is being used to find,
+# so the check goes quiet exactly as the imbalance gets bad enough to matter --
+# a guard that fires on a small problem and not on a large one.
+inject_derive_shards_outlier_against_the_mean() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/derive-shards.py")
+source = path.read_text(encoding="utf-8")
+old = "    middle = statistics.median(summed)"
+new = "    middle = sum(summed) / len(summed)"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+# Half the checked-in assignment's faults moved onto shard 1, in the real
+# file `--check` reads on every run of the `ci` check -- not a synthetic
+# index handed to the grading function directly, which is what the sibling
+# outlier fixture in derive-shards.py's own selftest already covers. Every
+# shard keeps at least one fault, so this is distinguishable from the
+# empty-shard refusal; shard 1 alone carries roughly half the harvest's
+# total cost, which is far past 3x any other shard's share for any shard
+# count `--emit` would ever produce.
+inject_shard_assignment_outlier() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("tools/gate/shards.tsv")
+lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+fault_lines = [i for i, line in enumerate(lines) if line.startswith("fault\t")]
+assert len(fault_lines) >= 2, "not enough faults to make an outlier"
+half = fault_lines[: len(fault_lines) // 2]
+for i in half:
+    parts = lines[i].rstrip("\n").split("\t")
+    parts[2] = "1"
+    lines[i] = "\t".join(parts) + "\n"
+path.write_text("".join(lines), encoding="utf-8")
+EOF
+}
+# The declared wall-clock budget deleted. The number is what the shard count is
+# derived from and what every run's report is printed against; without it the
+# gate would carry on, silently, with no ceiling at all -- which is the state
+# #87 found the repository in.
+inject_gate_budget_undeclared() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/gate-budget.tsv")
+lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+kept = [line for line in lines if not line.startswith("wall_clock_seconds\t")]
+if len(kept) != len(lines) - 1:
+    raise SystemExit("wall_clock_seconds is not declared exactly once")
+path.write_text("".join(kept), encoding="utf-8")
+EOF
+}
 # The resolver keying a block on the first injection name anywhere inside it,
 # rationale comment included. A comment reading "the deliberate pair of
 # inject_alpha" then keys the block that introduces inject_beta as
@@ -5226,12 +5612,17 @@ prove_patterns() {
     # Before the shard: whether the brief's required classes are in the table
     # is a question about the table, not about this job's share of it.
     defined+=("$label")
-    in_shard || continue
+    # `${kind}.${label}` is the id check-fault-manifest.py registers this class
+    # under, read there out of REQUIRED_HYGIENE_CLASSES/REQUIRED_PAGES_CLASSES
+    # and here out of the table those pin.
+    in_shard "${kind}.${label}" || continue
+    now_ms; local started_ms="$NOW_MS"
 
     dir="${seed}/${label}"
     if [ ! -d "$dir" ]; then
       printf 'UNSEEDED %s pattern %s  <-- NO CLASS TO PROVE IT AGAINST\n' "$kind" "$label"
       SELFTEST_BROKEN+=("${kind} pattern ${label} has no seeded class")
+      shard_cost "${kind}.${label}" "$started_ms" "${kind} pattern ${label}"
       continue
     fi
 
@@ -5266,6 +5657,7 @@ prove_patterns() {
         printf 'UNSEEDED %s pattern %s  <-- NO %s TO PROVE IT AGAINST\n' \
           "$kind" "$label" "$(printf '%s' "$missing" | tr '[:lower:]' '[:upper:]')"
         SELFTEST_BROKEN+=("${kind} pattern ${label} has no ${missing}")
+        shard_cost "${kind}.${label}" "$started_ms" "${kind} pattern ${label}"
         continue
       fi
     fi
@@ -5307,6 +5699,7 @@ prove_patterns() {
       printf 'GREEN hygiene.sh exit %-3d  %s  <-- PATTERN DID NOT FIRE\n' "$rc" "$label"
       SELFTEST_BROKEN+=("${kind} pattern ${label}")
     fi
+    shard_cost "${kind}.${label}" "$started_ms" "${kind} pattern ${label}"
   done < "${ROOT}/${table}"
 
   local want found
@@ -6179,6 +6572,12 @@ selftest() {
     exit "$EXIT_MISUSE"
   fi
   trap selftest_cleanup EXIT
+  # The assignment, in scope for in_shard and load_shard_plan below. `local`
+  # rather than a file-scope `declare -A`, which the bash 3.2 the ordinary gate
+  # still runs on refuses outright; see load_shard_plan.
+  local -A SHARD_OF=()
+  now_ms; local selftest_started_ms="$NOW_MS"
+  [ "$SELFTEST_SHARD" -eq 0 ] || load_shard_plan
   scratch; SELFTEST_TARGET="${SCRATCH}/target"
   scratch; SELFTEST_LOGS="$SCRATCH"
   # DERIVE MODE KEEPS ITS LOGS. `selftest_cleanup` removes every scratch it
@@ -6194,6 +6593,15 @@ selftest() {
     # Truncated, never appended to. An index carrying rows from two runs is a
     # derivation over a tree that never existed.
     : > "${SELFTEST_LOGS}/derive-scopes.tsv"
+  fi
+  # The cost harvest keeps nothing but its index, so unlike --derive-scopes it
+  # does not move SELFTEST_LOGS: the logs are the scope derivation's evidence
+  # and mean nothing to a packer.
+  if [ -n "$SELFTEST_COST_INDEX" ]; then
+    : > "$SELFTEST_COST_INDEX" || {
+      echo "selftest: the cost index ${SELFTEST_COST_INDEX} could not be written" >&2
+      exit "$EXIT_MISUSE"
+    }
   fi
   # The one sandbox path every case is built into and torn down from. Made
   # here rather than per case; see SELFTEST_BOX for the measurement that says
@@ -6586,6 +6994,14 @@ selftest() {
     'the wrecked target read as'
   seeded_case "a scope past its own failure accepted"  derive   inject_derive_accepts_a_fast_green \
     'a scope naming another target selected something'
+  seeded_case "a shard split balanced by count"        derive   inject_derive_shards_packs_by_count \
+    'not two equal halves'
+  seeded_case "an outlier shard graded against the mean" derive inject_derive_shards_outlier_against_the_mean \
+    'produced 0 finding\(s\)'
+  seeded_case "a shard carrying three times the median" ci      inject_shard_assignment_outlier \
+    'x the median shard'
+  seeded_case "the wall-clock budget left undeclared"  ci       inject_gate_budget_undeclared \
+    'declares no wall_clock_seconds'
   seeded_case "a run directory inside a run directory" results inject_results_nested_directory \
     'a run directory inside a run directory'
   seeded_case "a verdict read by prefix"               test     inject_verdict_prefix_accepted \
@@ -6766,9 +7182,15 @@ selftest() {
   while IFS=$'\t' read -r name want; do
     [ -n "$name" ] && WANT["$name"]="$want"
   done < <(cd "${ROOT}" && python3 scripts/check-fault-manifest.py --fixture-classes)
+  local started_ms
   for dir in "${ROOT}"/tests/fixtures/results-bad/*/; do
-    in_shard || continue
-    rc=0; name="$(basename "$dir")"
+    # Named before the shard is consulted: `results.<directory>` is the id
+    # check-fault-manifest.py registers this fixture under, and the lookup
+    # needs it.
+    name="$(basename "$dir")"
+    in_shard "results.${name}" || continue
+    now_ms; started_ms="$NOW_MS"
+    rc=0
     out="$(python3 "${ROOT}/scripts/check-results.py" "$dir" 2>&1)" || rc=$?
     want="${WANT[$name]-}"
     if [ -z "$want" ]; then
@@ -6784,6 +7206,7 @@ selftest() {
     else
       printf 'RED   exit %-3d %-46s %s\n' "$rc" "$name" "$want"
     fi
+    shard_cost "results.${name}" "$started_ms" "results fixture ${name}"
   done
 
   # LANE-DECLARED FAULTS, ONE `seeded_case` PER FAULT, GENERATED RATHER THAN
@@ -6839,7 +7262,14 @@ selftest() {
     # way), so `${lane}.` here duplicated it -- "lane: isolation.isolation.…"
     # -- a fresh-instance review of #83 found this, cosmetic but repeated
     # across all 123 generated cases.
-    "$sc_call" "lane: ${fault_id}" lanes "$sc_inject" "$signature"
+    # The sixth word is the MANIFEST ID, and this is the one caller that must
+    # pass one: every generated case shares `lanes` and `inject_lane_fault`,
+    # so the id seeded_case would otherwise derive names every one of them
+    # `lanes.lane_fault` and the shard assignment would carry a single row for
+    # the whole lane corpus. The fifth word is the scope, which a `lanes` case
+    # never has; it is spelled empty rather than omitted because bash positions
+    # arguments and does not name them.
+    "$sc_call" "lane: ${fault_id}" lanes "$sc_inject" "$signature" "" "$fault_id"
   done < <(python3 "${ROOT}/scripts/apply-lane-faults.py" --list)
 
   prove_mechanics
@@ -7407,6 +7837,28 @@ EOF
   done
   [ "${#missing[@]}" -eq 0 ] || SELFTEST_BROKEN+=("checks with no seeded fault: ${missing[*]}")
 
+  # --- the cost harvest's own total ---
+  #
+  # The whole run, so that the packer can subtract the faults from it and be
+  # left with what a shard pays WHATEVER faults it draws: the sandbox target
+  # directory, prove_mechanics -- which runs unsharded, in every shard -- and
+  # the fixture loops that are not faults. That residue is the per-shard
+  # overhead, and it is measured here rather than guessed at, because guessing
+  # it wrong is what decides the shard count wrong.
+  if [ -n "$SELFTEST_COST_INDEX" ]; then
+    now_ms
+    printf 'run\twhole\t%d\tthe unsharded selftest, end to end\n' \
+      "$(( NOW_MS - selftest_started_ms ))" >> "$SELFTEST_COST_INDEX"
+
+    # THE PROVENANCE IS PART OF THE HARVEST, not something asserted about it
+    # afterward: a plan is a claim about the runner's own timing, and the claim
+    # travels with the numbers or not at all. `RUNNER_ENVIRONMENT` is GitHub
+    # Actions' own variable for this and is unset outside Actions, so a local
+    # harvest honestly records `local` rather than guessing at a substrate
+    # nobody declared.
+    printf 'substrate\t%s\t%s\n' "${RUNNER_ENVIRONMENT:-local}" "$(uname -srm 2>/dev/null || echo unknown)" >> "$SELFTEST_COST_INDEX"
+  fi
+
   # --- the census ---
   #
   # What this run RAN, by ordinal, so that N shards can be added up afterwards
@@ -7418,11 +7870,20 @@ EOF
   printf 'selftest-census: shard %d of %d ran %d of %d fault(s)\n' \
     "$(( SELFTEST_SHARD == 0 ? 1 : SELFTEST_SHARD ))" \
     "$SELFTEST_SHARDS" "${#SELFTEST_RAN[@]}" "$SELFTEST_UNITS"
+  if [ "$SELFTEST_UNPLANNED" -gt 0 ]; then
+    printf 'selftest: %d fault(s) unplanned in %s; balance approximate -- each is assigned a shard by a hash of its id\n' \
+      "$SELFTEST_UNPLANNED" "$SHARD_PLAN"
+  fi
   if [ -n "$SELFTEST_CENSUS" ]; then
     {
       printf 'shard\t%d\n' "$(( SELFTEST_SHARD == 0 ? 1 : SELFTEST_SHARD ))"
       printf 'shards\t%d\n' "$SELFTEST_SHARDS"
       printf 'total\t%d\n' "$SELFTEST_UNITS"
+      # MEASURED, so the aggregate can report the slowest shard against the
+      # budget from what the runner took rather than from what a plan
+      # predicted (ruled on #108, 2026-09-24). Reported, never graded: the
+      # budget is a printed number, not a gate (#112).
+      printf 'elapsed\t%d\n' "$SECONDS"
       printf 'ordinal\t%s\n' ${SELFTEST_RAN+"${SELFTEST_RAN[@]}"}
     } > "$SELFTEST_CENSUS" || {
       echo "selftest: the census could not be written to ${SELFTEST_CENSUS}" >&2
@@ -7445,11 +7906,13 @@ EOF
   # about a run that saw no gate.
   #
   # Found by a fresh instance, reproduced live. Not reachable through CI --
-  # the matrix is eight against a fault list far longer, and the census
-  # refuses an incomplete union whatever any single shard claims -- so this
-  # is a foot-gun for a person running --shard by hand, and a comment that
-  # overclaimed what the bound guards against. Both are the same defect: the
-  # thing that made it safe was somewhere else, and nothing said so here.
+  # `grade_shape` refuses an empty shard in the checked-in plan and LPT packing
+  # cannot produce one, so the matrix CI derives never contains a K this empty,
+  # and the census refuses an incomplete union whatever any single shard
+  # claims -- so this is a foot-gun for a person running --shard by hand, and a
+  # comment that overclaimed what the bound guards against. Both are the same
+  # defect: the thing that made it safe was somewhere else, and nothing said
+  # so here.
   #
   # unseedable: a re-entrant --selftest call would recurse into the function containing it; proved by hand instead
   #
@@ -7501,6 +7964,16 @@ while [ "$#" -gt 0 ]; do
     --derive-scopes)
       [ "$#" -ge 2 ] || { echo "verify: --derive-scopes needs a directory" >&2; exit "$EXIT_MISUSE"; }
       SELFTEST_DERIVE="$2"
+      shift 2
+      ;;
+    --derive-shards)
+      [ "$#" -ge 2 ] || { echo "verify: --derive-shards needs a directory" >&2; exit "$EXIT_MISUSE"; }
+      # Resolved against the caller's directory for the same reason --census is:
+      # parsing happens before the `cd "$ROOT"` below.
+      case "$2" in
+        /*) SELFTEST_COST_DIR="$2" ;;
+        *)  SELFTEST_COST_DIR="$(pwd)/$2" ;;
+      esac
       shift 2
       ;;
     --scope)
@@ -7605,6 +8078,37 @@ if [ -n "$SELFTEST_DERIVE" ] && [ "$mode" != "selftest" ]; then
   exit "$EXIT_MISUSE"
 fi
 
+# `--derive-shards` measures what each fault costs, and three things would make
+# that measurement about something other than the run CI performs.
+if [ -n "$SELFTEST_COST_DIR" ]; then
+  if [ "$mode" != "selftest" ]; then
+    echo "verify: --derive-shards derives from a selftest run, so it needs --selftest" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  # A sharded harvest measures one shard's faults and nothing else, so the
+  # packer would be balancing a list it has costs for a fraction of -- and it
+  # would be balancing them against the split they came from.
+  if [ "$SELFTEST_SHARD" -ne 0 ]; then
+    echo "verify: --derive-shards harvests the whole fault list, so it does not \
+take --shard; the split is what it exists to derive" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  # `--derive-scopes` runs every `test` case UNSCOPED on purpose. That is the
+  # opposite of what a cost harvest needs: CI runs those cases scoped, and a
+  # cost measured with the declaration switched off is several times the cost
+  # the shard will actually pay.
+  if [ -n "$SELFTEST_DERIVE" ]; then
+    echo "verify: --derive-shards and --derive-scopes want opposite runs -- one \
+needs every scope on, the other needs them all off -- so one run cannot be both" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  mkdir -p "$SELFTEST_COST_DIR" || {
+    echo "verify: --derive-shards ${SELFTEST_COST_DIR} could not be made" >&2
+    exit "$EXIT_MISUSE"
+  }
+  SELFTEST_COST_INDEX="${SELFTEST_COST_DIR}/derive-shards.tsv"
+fi
+
 if [ "$mode" = "selftest" ]; then
   rc=0
   selftest || rc=$?
@@ -7614,6 +8118,14 @@ if [ "$mode" = "selftest" ]; then
     printf '  python3 scripts/derive-scopes.py --index %s\n' \
       "${SELFTEST_LOGS}/derive-scopes.tsv"
   fi
+  if [ -n "$SELFTEST_COST_INDEX" ]; then
+    printf '\nderive-shards: the index is %s\n' "$SELFTEST_COST_INDEX"
+    printf 'derive-shards: read it with\n'
+    printf '  python3 scripts/derive-shards.py --index %s\n' "$SELFTEST_COST_INDEX"
+    printf '  python3 scripts/derive-shards.py --index %s --emit > %s\n' \
+      "$SELFTEST_COST_INDEX" "$SHARD_PLAN"
+  fi
+  report_wall_clock
   exit "$rc"
 fi
 
@@ -7629,6 +8141,8 @@ echo
 if [ "${#FAILED[@]}" -gt 0 ]; then
   printf 'verify: %d of %d check(s) failed:\n' "${#FAILED[@]}" "${#selected[@]}"
   printf '  - %s\n' "${FAILED[@]}"
+  report_wall_clock
   exit "$EXIT_FAIL"
 fi
 printf 'verify: %d check(s) passed.\n' "${#selected[@]}"
+report_wall_clock
