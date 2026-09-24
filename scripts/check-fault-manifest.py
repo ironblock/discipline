@@ -175,7 +175,7 @@ def observed() -> dict[str, set[str]]:
 
 
 def main() -> int:
-    # `--count-red` prints the number `red_faults` must carry and nothing
+    # `--count-red` prints the number of faults proven red and nothing
     # else, so a tool that has just assembled the fault list can ask THIS
     # reader for the count rather than reimplementing the arithmetic or
     # scraping it out of a failure message. One reader, structured answer.
@@ -434,10 +434,12 @@ def main() -> int:
                 f"have drifted apart"
             )
 
+    # No `red_faults` comparison: the red count is DERIVED, from the entries
+    # this has just read, and never hand-kept in `[meta]` (ruled on #108,
+    # 2026-09-24). It is printed below and answered by `--count-red`; a copy
+    # typed into the manifest was only ever a second place for it to be wrong,
+    # and a conflict between every two PRs that added a fault.
     meta = doc.get("meta") or {}
-    red = sum(len(seen[k]) for k in seen if k != "mechanics")
-    if meta.get("red_faults") != red:
-        failures.append(f"[meta] red_faults is {meta.get('red_faults')}, observed {red}")
     if meta.get("mechanics_assertions") != len(seen["mechanics"]):
         failures.append(
             f"[meta] mechanics_assertions is {meta.get('mechanics_assertions')}, "
@@ -451,7 +453,7 @@ def main() -> int:
 
     # Asked for the count, answer the count. Deliberately before the failure
     # report: the caller is a tool that has just assembled the fault list and
-    # is asking what `red_faults` must say, so the one failure it is about to
+    # is asking what the red count is, so the one failure it is about to
     # fix must not silence the answer.
     if counting:
         print(sum(len(seen[k]) for k in seen if k != "mechanics"))

@@ -38,14 +38,18 @@ the budget rather than against optimal, which is the only comparison that
 decides anything, and `--index` prints the spread it achieved so the choice is
 checkable rather than asserted.
 
-`--check` grades what is checked in, on every run of the `ci` check, and asks
-three things of it:
+`--check` grades what is checked in, on every run of the `ci` check. It
+REPORTS one thing and grades three:
 
-  * COVERAGE. Every fault the manifest declares has exactly one assignment, and
-    no assignment names a fault that no longer exists. A fault nobody assigned
-    is run by every shard or by none, and both are a census that adds up to the
-    wrong list -- so a PR that adds a fault must re-derive before it is green,
-    which is the drift #87 was filed against and could not otherwise recur.
+  * DRIFT, reported and never refused (ruled on #108, 2026-09-24). A fault the
+    manifest declares and the plan does not name still runs in exactly one
+    shard -- verify.sh's `in_shard` assigns it by a hash of its id -- so a
+    plan that predates it is balanced approximately, not wrong. The invariant
+    is that every fault runs once, and the census proves that on every run; a
+    plan row was only ever load balance. Refusing a stale row made every PR
+    that added a fault pay an unsharded harvest before it could be green, and
+    made parallel PRs conflict on a file whose only purpose was speed. The
+    same for a row naming a fault that no longer exists: it is ignored.
   * BALANCE. No shard carries three times the median shard's measured cost. An
     assignment can be complete and still be a hand edit that moved forty faults
     into one job, and the run that finds that out is the run that overran.
@@ -59,9 +63,10 @@ three things of it:
     through a PR this check would have blocked) or passing it silently (which
     would read as the same clean state a real harvest produces).
 
-Exit 0 when the assignment covers the manifest, no shard is an outlier, and the
-substrate is either the runner or a declared placeholder; 1 when it does not;
-2 when the question cannot be answered at all.
+Exit 0 when the plan is a partition of its own shards, no shard is an outlier,
+and the substrate is either the runner or a declared placeholder -- whatever
+its drift, which is printed; 1 when it is not; 2 when the question cannot be
+answered at all.
 
 THE READER IS EXERCISED BEFORE IT IS TRUSTED. `--selftest` runs the fixture
 suite at the foot of this file and `verify.sh --only derive` is that suite,
@@ -382,37 +387,43 @@ def slowest(assign: dict[str, int], cost: dict[str, int], shards: int, overhead_
 # --------------------------------------------------------------------------
 
 
-def grade_coverage(declared: dict[str, str], assign: dict[str, int]) -> list[str]:
-    """Every declared fault assigned once, and nothing assigned that is gone."""
-    failures = []
+def plan_drift(declared: dict[str, str], assign: dict[str, int]) -> list[str]:
+    """How far the manifest has moved past the plan. WARNINGS, never failures.
+
+    Ruled on #108 (2026-09-24): a fault with no row runs in the shard a hash of
+    its id picks (`in_shard` in verify.sh), so coverage holds by construction
+    and the census proves it; only the balance is approximate. A row naming a
+    fault that no longer exists is never consulted. Neither is a reason to
+    refuse a run -- that was a load-balancing plan promoted to a gate.
+    """
+    warnings = []
     missing = sorted(set(declared) - set(assign))
     if missing:
-        failures.append(
-            f"{len(missing)} fault(s) the manifest declares have no shard: "
+        warnings.append(
+            f"{len(missing)} fault(s) unplanned; balance approximate -- each "
+            f"runs in the shard a hash of its id picks: "
             + ", ".join(missing[:10])
             + (" ..." if len(missing) > 10 else "")
-            + ". A fault no shard is assigned is run by every shard or by none. "
-            + "Re-harvest: ./verify.sh --selftest --derive-shards DIR"
         )
     stray = sorted(set(assign) - set(declared))
     if stray:
-        failures.append(
-            f"{len(stray)} assignment(s) name a fault the manifest does not "
-            f"declare: "
+        warnings.append(
+            f"{len(stray)} planned fault(s) the manifest no longer declares; "
+            f"their rows are ignored: "
             + ", ".join(stray[:10])
             + (" ..." if len(stray) > 10 else "")
-            + ". The assignment is about a fault list that no longer exists"
         )
-    return failures
+    return warnings
 
 
 def grade_harvest(declared: dict[str, str], cost: dict[str, int]) -> list[str]:
     """The harvest measured this tree's fault list, and only it.
 
-    Separate from `grade_coverage` because the two refusals mean different
-    things to whoever reads them. An assignment missing a fault is drift to
-    re-derive; a HARVEST missing one is a run that did not measure everything
-    it ran, and the answer is to run it again rather than to edit anything.
+    Separate from `plan_drift`, and a refusal where that is only a warning,
+    because the two mean different things. A plan missing a fault is drift,
+    and the fault still runs; a HARVEST missing one is a run that did not
+    measure everything it ran, and packing from it would pack that fault as
+    free. The answer is to run it again rather than to edit anything.
     """
     failures = []
     missing = sorted(set(declared) - set(cost))
@@ -547,7 +558,7 @@ def emit(cost: dict[str, int], run_ms: int, budget: dict[str, int], substrate: s
         "#",
         "# Readers: verify.sh's `in_shard`, which runs a fault when this file",
         "# gives it this job's number, and scripts/derive-shards.py --check,",
-        "# which refuses an assignment that has drifted from the manifest.",
+        "# which reports how far the manifest has moved past it.",
         "#",
         "# Its own file rather than a field in faults.toml: an entry there is",
         "# author-facing and stable -- a label, a signature, a failure class",
@@ -714,31 +725,52 @@ def _count_is_bounded():
     return None
 
 
-@fixture("a fault the manifest declares and nothing assigns is refused")
-def _missing_fault_is_refused():
-    # THE DRIFT THIS EXISTS FOR. A PR adds a fault; the assignment predates it;
-    # the fault is then in no shard's list and in every shard's census total.
-    # Silently rebalancing it would be worse than refusing -- the rebalance
-    # would be against a cost nobody measured.
+@fixture("a fault the manifest declares and nothing plans is reported, by name")
+def _missing_fault_is_reported():
+    # A PR adds a fault; the plan predates it. The fault still runs -- in the
+    # shard a hash of its id picks -- so this is a warning about balance and
+    # never a refusal (#108). Silent would be wrong too: the plan is stale,
+    # and whoever reads the run should be able to see by how much.
     declared = {"a": "seeded-gate", "b": "seeded-gate", "c": "seeded-gate"}
-    found = grade_coverage(declared, {"a": 1, "b": 2})
+    found = plan_drift(declared, {"a": 1, "b": 2})
     if not found:
-        return "an unassigned fault was accepted"
-    if "c" not in found[0]:
-        return f"the refusal does not name the fault: {found[0]!r}"
+        return "an unplanned fault was not reported"
+    if "c" not in found[0] or "balance approximate" not in found[0]:
+        return f"the warning does not name the fault and what it costs: {found[0]!r}"
     return None
 
 
-@fixture("an assignment naming a retired fault is refused")
-def _stray_fault_is_refused():
-    # The other direction, and not cosmetic: the row carries a COST, and the
-    # packing that produced the file counted it. An assignment holding costs
-    # for faults that no longer run is balanced for a list nobody runs.
-    found = grade_coverage({"a": "seeded-gate"}, {"a": 1, "gone": 2})
+@fixture("an assignment naming a retired fault is reported, by name")
+def _stray_fault_is_reported():
+    # The other direction: a row for a fault that no longer runs is never
+    # consulted by in_shard, but its cost was counted when the plan was
+    # packed, so the balance is about a list nobody runs. Reported, not refused.
+    found = plan_drift({"a": "seeded-gate"}, {"a": 1, "gone": 2})
     if not found:
-        return "an assignment for a fault the manifest does not declare was accepted"
+        return "an assignment for a fault the manifest does not declare was not reported"
     if "gone" not in found[0]:
-        return f"the refusal does not name the stray assignment: {found[0]!r}"
+        return f"the warning does not name the stray assignment: {found[0]!r}"
+    return None
+
+
+@fixture("drift is never a failure of --check")
+def _drift_is_not_a_failure():
+    # THE RULING ITSELF, pinned at the level the gate reads: check()'s exit
+    # code. A plan missing every fault the manifest declares is still a plan
+    # the run can use, so it must not be what turns `ci` red.
+    with tempfile.TemporaryDirectory() as box:
+        path = pathlib.Path(box) / "shards.tsv"
+        path.write_text(
+            "shards\t2\n"
+            "fault\tretired.one\t1\t100\n"
+            "fault\tretired.two\t2\t100\n",
+            encoding="utf-8",
+        )
+        code, failures, warnings = check(path)
+    if code != 0 or failures:
+        return f"a plan that is only stale was refused: {failures!r}"
+    if len(warnings) != 2:
+        return f"both directions of drift were not reported: {warnings!r}"
     return None
 
 
@@ -1035,7 +1067,7 @@ def _emit_round_trips():
             return "the costs did not survive the round trip"
         if overhead != 5000:
             return f"the overhead came back as {overhead}, not 5000"
-        found = (grade_coverage({i: "seeded-gate" for i in cost}, assign)
+        found = (plan_drift({i: "seeded-gate" for i in cost}, assign)
                  + grade_shape(shards, assign, BUDGET_FIXTURE)
                  + grade_balance(shards, assign, back)
                  + grade_substrate(substrate))
@@ -1165,7 +1197,7 @@ def _the_committed_plan_is_sound():
     # regression -- or a real but WRONG substrate -- still reddens it.
     if not PLAN.is_file():
         return f"{PLAN} is not there, so the sharded selftest cannot run at all"
-    code, failures = check()
+    code, failures, _warnings = check()
     _shards, _assign, _cost, _overhead, substrate = read_plan(PLAN)
     expected = grade_substrate(substrate)
     if failures != expected:
@@ -1219,18 +1251,16 @@ def selftest() -> int:
     return EXIT_BAD if broken else 0
 
 
-def check() -> tuple[int, list[str]]:
-    """Grade the checked-in assignment. The code, and why, for both callers."""
+def check(plan: pathlib.Path = PLAN) -> tuple[int, list[str], list[str]]:
+    """Grade an assignment: the code, the failures, and the drift, reported."""
     budget = read_budget(BUDGET)
-    shards, assign, cost, overhead_ms, substrate = read_plan(PLAN)
-    declared = manifest_ids()
+    shards, assign, cost, overhead_ms, substrate = read_plan(plan)
     failures = (
-        grade_coverage(declared, assign)
-        + grade_shape(shards, assign, budget)
+        grade_shape(shards, assign, budget)
         + grade_balance(shards, assign, cost)
         + grade_substrate(substrate)
     )
-    return (EXIT_BAD if failures else 0), failures
+    return (EXIT_BAD if failures else 0), failures, plan_drift(manifest_ids(), assign)
 
 
 def matrix_of(path: pathlib.Path) -> str:
@@ -1298,7 +1328,9 @@ def main(argv: list[str]) -> int:
             return 0
 
         if args.check:
-            code, failures = check()
+            code, failures, warnings = check()
+            for message in warnings:
+                print(f"derive-shards: warning: {message}")
             for message in failures:
                 print(f"derive-shards: {message}", file=sys.stderr)
             if code:

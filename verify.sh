@@ -357,10 +357,11 @@ check_pages() {
 # does not depend on, a path filter that turns a skip into a pass.
 #
 # AND THE SHARD ASSIGNMENT, which is the same kind of wiring: it is what
-# decides how many selftest jobs CI spawns and which faults each one runs. A PR that adds a
-# fault and does not re-derive the split leaves that fault assigned to no
-# shard, and `derive-shards.py --check` is what makes that red here rather than
-# in the run where a job refuses to start.
+# decides how many selftest jobs CI spawns and which faults each one runs.
+# `derive-shards.py --check` refuses a plan that is not a partition of its own
+# shards, or carries an outlier; a PR that adds a fault without re-deriving is
+# REPORTED here and not refused, because `in_shard` runs that fault in the
+# shard a hash of its id picks (ruled on #108, 2026-09-24).
 #
 # Here rather than in a check of its own: a new check needs an owner row, a
 # workflow that runs it and a seeded fault of its own, and this is not a new
@@ -566,6 +567,7 @@ SELFTEST_SHARD=0
 SELFTEST_SHARDS=1
 SELFTEST_UNITS=0
 SELFTEST_RAN=()
+SELFTEST_UNPLANNED=0
 SELFTEST_CENSUS=""
 
 # The checked-in assignment, relative to ROOT. Named once; derive-shards.py
@@ -609,8 +611,11 @@ scripts/derive-shards.py --index DIR/derive-shards.tsv --emit" >&2
       # Harvest provenance, read by derive-shards.py and not by this. Named
       # rather than skipped by default: a key this does not know is a file
       # written by something that is not derive-shards.py, and guessing at
-      # one is how a plan gets read as half a plan.
-      overhead_ms|harvest_ms) ;;
+      # one is how a plan gets read as half a plan. `substrate` is the row
+      # `emit()` has written since the substrate ruling on #87 -- missing from
+      # this list, the first runner harvest's own plan would have been refused
+      # by every shard as a file of unknown keys.
+      overhead_ms|harvest_ms|substrate) ;;
       *)
         echo "selftest: ${SHARD_PLAN}: unknown key '${key}'" >&2
         exit "$EXIT_MISUSE"
@@ -674,7 +679,8 @@ the faults assigned to shards ${lo} .. ${hi} run by nobody" >&2
 # function this sits in, whose inner run would do the same. Proved by hand in
 # all four directions instead -- a plan that is not there, a plan packed for a
 # different N, a fault with no row, and the sound plan that must still run --
-# and the transcript is in the commit that added them.
+# and the transcript is in the commit that added them. The third of those is
+# no longer a refusal (ruled on #108, 2026-09-24): see the hash below.
 in_shard() {
   local ident="${1-}"
   SELFTEST_UNITS=$(( SELFTEST_UNITS + 1 ))
@@ -689,11 +695,17 @@ nothing can say which shard runs it" >&2
   fi
   local assigned="${SHARD_OF[$ident]-}"
   if [ -z "$assigned" ]; then
-    echo "selftest: ${SHARD_PLAN} assigns no shard to '${ident}'. A fault no \
-shard is assigned would be run by every shard or by none, and both are a \
-census that adds up to the wrong list. Re-harvest: ./verify.sh --selftest \
---derive-shards DIR" >&2
-    exit "$EXIT_MISUSE"
+    # UNPLANNED, NOT REFUSED (ruled on #108, 2026-09-24). The invariant is
+    # that every fault runs exactly once, and the census proves that on every
+    # run; a plan row was only ever load balance. So a fault the plan does not
+    # name -- one added since the last harvest -- goes to a shard derived from
+    # its own id. `cksum` is POSIX's CRC, the same on every machine and so in
+    # every shard, which is what keeps the union of the shards the whole list.
+    # Counted, and printed once beside the census, rather than refused.
+    local crc
+    crc="$(printf '%s' "$ident" | cksum)"
+    assigned=$(( ${crc%% *} % SELFTEST_SHARDS + 1 ))
+    SELFTEST_UNPLANNED=$(( SELFTEST_UNPLANNED + 1 ))
   fi
   case "$assigned" in *[!0-9]*)
     echo "selftest: ${SHARD_PLAN} assigns '${assigned}' to '${ident}', which \
@@ -4262,22 +4274,6 @@ assert source.count(old) == 1
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
-# A fault the manifest declares with no row in the shard assignment. This is
-# the drift itself, not a defect in a reader: it is the state every PR that
-# adds a fault without re-harvesting is in, and `--selftest --shard` over it
-# would run that fault in no job while every shard's census counted it.
-inject_shard_assignment_drops_a_fault() {
-  python3 - <<'EOF'
-import pathlib
-
-path = pathlib.Path("tools/gate/shards.tsv")
-lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-kept = [line for line in lines if not line.startswith("fault\tfmt.fmt\t")]
-if len(kept) != len(lines) - 1:
-    raise SystemExit(f"fmt.fmt is assigned {len(lines) - len(kept)} time(s), not once")
-path.write_text("".join(kept), encoding="utf-8")
-EOF
-}
 # Half the checked-in assignment's faults moved onto shard 1, in the real
 # file `--check` reads on every run of the `ci` check -- not a synthetic
 # index handed to the grading function directly, which is what the sibling
@@ -7002,8 +6998,6 @@ selftest() {
     'not two equal halves'
   seeded_case "an outlier shard graded against the mean" derive inject_derive_shards_outlier_against_the_mean \
     'produced 0 finding\(s\)'
-  seeded_case "a fault in the manifest and in no shard" ci      inject_shard_assignment_drops_a_fault \
-    'fault\(s\) the manifest declares have no shard'
   seeded_case "a shard carrying three times the median" ci      inject_shard_assignment_outlier \
     'x the median shard'
   seeded_case "the wall-clock budget left undeclared"  ci       inject_gate_budget_undeclared \
@@ -7876,11 +7870,20 @@ EOF
   printf 'selftest-census: shard %d of %d ran %d of %d fault(s)\n' \
     "$(( SELFTEST_SHARD == 0 ? 1 : SELFTEST_SHARD ))" \
     "$SELFTEST_SHARDS" "${#SELFTEST_RAN[@]}" "$SELFTEST_UNITS"
+  if [ "$SELFTEST_UNPLANNED" -gt 0 ]; then
+    printf 'selftest: %d fault(s) unplanned in %s; balance approximate -- each is assigned a shard by a hash of its id\n' \
+      "$SELFTEST_UNPLANNED" "$SHARD_PLAN"
+  fi
   if [ -n "$SELFTEST_CENSUS" ]; then
     {
       printf 'shard\t%d\n' "$(( SELFTEST_SHARD == 0 ? 1 : SELFTEST_SHARD ))"
       printf 'shards\t%d\n' "$SELFTEST_SHARDS"
       printf 'total\t%d\n' "$SELFTEST_UNITS"
+      # MEASURED, so the aggregate can report the slowest shard against the
+      # budget from what the runner took rather than from what a plan
+      # predicted (ruled on #108, 2026-09-24). Reported, never graded: the
+      # budget is a printed number, not a gate (#112).
+      printf 'elapsed\t%d\n' "$SECONDS"
       printf 'ordinal\t%s\n' ${SELFTEST_RAN+"${SELFTEST_RAN[@]}"}
     } > "$SELFTEST_CENSUS" || {
       echo "selftest: the census could not be written to ${SELFTEST_CENSUS}" >&2

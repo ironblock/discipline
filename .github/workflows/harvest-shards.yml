@@ -10,12 +10,14 @@ name: harvest-shards
 #     needs a fresh harvest -- `main` for a routine re-balance as the fault
 #     list grows at large.
 #   * AUTOMATICALLY, on a `push` that touches `tools/gate/faults.toml`, on
-#     ANY branch (not only `main`): a PR that adds a fault fails
-#     `derive-shards.py --check`'s coverage grade on its own branch until
-#     that branch is harvested, per the placeholder ruling below, and this
-#     is what heals it without a dispatch nobody but this workflow itself
-#     can perform. Excluded on `harvest-shards/**`, this workflow's own
-#     landing branches, so its own commit does not retrigger itself.
+#     ANY branch (not only `main`), to re-balance the plan for the faults
+#     that push added. NOTHING WAITS ON IT (ruled on #108, 2026-09-24): an
+#     unplanned fault already runs in the shard a hash of its id picks, and
+#     `derive-shards.py --check` reports the drift rather than refusing it.
+#     When this trigger was added it healed a coverage refusal; that
+#     refusal is gone, and this workflow retires with the shard plan under
+#     #112. Excluded on `harvest-shards/**`, this workflow's own landing
+#     branches, so its own commit does not retrigger itself.
 #
 # `paths: ['tools/gate/faults.toml']` IS THE BUDGET, ruled on #87
 # (2026-09-24): one ~76-minute unsharded run per push that actually touches

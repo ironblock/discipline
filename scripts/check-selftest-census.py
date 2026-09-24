@@ -40,8 +40,14 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MANIFEST_READER = ROOT / "scripts" / "check-fault-manifest.py"
+BUDGET = ROOT / ".github" / "gate-budget.tsv"
 
 SCALARS = ("shard", "shards", "total")
+# What the shard MEASURED, not what it claims: the seconds its selftest step
+# took. Optional, so a census from before it existed still reads. Reported
+# against the budget and never graded -- the budget is a printed number, not a
+# gate (ruled on #108, 2026-09-24; #112).
+MEASURED = ("elapsed",)
 
 
 class Census:
@@ -73,7 +79,7 @@ class Census:
             except ValueError:
                 self.errors.append(f"{self.path.name}:{number}: `{raw}` is not a number")
                 continue
-            if key in SCALARS:
+            if key in SCALARS or key in MEASURED:
                 if key in self.scalars:
                     self.errors.append(f"{self.path.name}:{number}: `{key}` given twice")
                 self.scalars[key] = value
@@ -109,6 +115,36 @@ def manifest_total(failures: list[str]) -> int | None:
     except ValueError:
         failures.append(f"{MANIFEST_READER.name} did not answer with a number")
         return None
+
+
+def report_slowest(reports: list[Census]) -> None:
+    """The slowest shard as MEASURED, against the budget. Printed, never graded.
+
+    What a shard plan predicted is a claim about the runner made from a
+    harvest; this is the runner's own answer, from every shard that ran, and
+    it is the number the budget is about (ruled on #108, 2026-09-24).
+    """
+    timed = [(r.scalars["elapsed"], r.scalars.get("shard", 0)) for r in reports
+             if "elapsed" in r.scalars]
+    if not timed:
+        return
+    slowest, shard = max(timed)
+    budget = None
+    try:
+        for line in BUDGET.read_text(encoding="utf-8").splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 2 and parts[0] == "wall_clock_seconds" and parts[1].isdigit():
+                budget = int(parts[1])
+    except OSError:
+        pass
+    against = ("no declared budget" if budget is None else
+               f"the {budget}s budget ({BUDGET.relative_to(ROOT)}), "
+               + (f"{budget - slowest}s to spare" if slowest <= budget
+                  else f"OVER BY {slowest - budget}s"))
+    print(
+        f"check-selftest-census: slowest shard measured {slowest}s "
+        f"(shard {shard} of {len(reports)}) against {against} -- reported, not graded"
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -205,6 +241,8 @@ def main(argv: list[str]) -> int:
     stray = [n for n in ran if len(totals) == 1 and (n < 1 or n > total)]
     if stray:
         failures.append(f"ordinals outside 1..{total} were reported: {sorted(stray)[:10]}")
+
+    report_slowest(reports)
 
     for message in failures:
         print(message, file=sys.stderr)

@@ -7,7 +7,7 @@
 #
 # Readers: verify.sh's `in_shard`, which runs a fault when this file
 # gives it this job's number, and scripts/derive-shards.py --check,
-# which refuses an assignment that has drifted from the manifest.
+# which reports how far the manifest has moved past it.
 #
 # Its own file rather than a field in faults.toml: an entry there is
 # author-facing and stable -- a label, a signature, a failure class

@@ -4,6 +4,10 @@
 # The counts live in `[meta]`, where check-fault-manifest.py compares them
 # against what verify.sh actually does; a count restated in prose is a count
 # that goes stale, and this header carried a stale one for three commits.
+# The RED count is not among them: it is derived from the entries below and
+# printed by check-fault-manifest.py, never hand-edited (ruled on #108,
+# 2026-09-24) -- a number every fault-adding PR had to retype was a conflict
+# between every two of them, and the same class as the shard plan's rows.
 #
 # The replacement gate retires the old one only when it proves EVERY entry
 # here -- equivalence before retirement, the program's instrument law applied
@@ -34,7 +38,6 @@
 
 [meta]
 source = "verify.sh"
-red_faults = 510
 mechanics_assertions = 119
 unseedable_guards = 2
 migrated = 0
@@ -3554,14 +3557,6 @@ check = "ci"
 label = "one workflow renaming the trunk"
 failure_class = "wiring.trunk-disagreed"
 legacy_signature = "disagree about which branch is the trunk"
-migrated = false
-[[fault]]
-id = "ci.shard_assignment_drops_a_fault"
-kind = "seeded-gate"
-check = "ci"
-label = "a fault in the manifest and in no shard"
-failure_class = "wiring.shard-assignment-incomplete"
-legacy_signature = "fault\\(s\\) the manifest declares have no shard"
 migrated = false
 [[fault]]
 id = "ci.shard_assignment_outlier"
