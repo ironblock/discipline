@@ -17,7 +17,13 @@ use std::process::Command;
 fn discipline_diet_links_no_cdylib() {
     let workspace_manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml");
     let output = Command::new(env!("CARGO"))
-        .args(["metadata", "--no-deps", "--format-version", "1", "--manifest-path"])
+        .args([
+            "metadata",
+            "--no-deps",
+            "--format-version",
+            "1",
+            "--manifest-path",
+        ])
         .arg(&workspace_manifest)
         .output()
         .unwrap_or_else(|err| panic!("could not run cargo metadata: {err}"));
@@ -34,17 +40,24 @@ fn discipline_diet_links_no_cdylib() {
         .expect("cargo metadata lists packages")
         .iter()
         .filter(|package| package["name"] == "discipline-diet")
-        .flat_map(|package| package["targets"].as_array().expect("a package lists targets"))
+        .flat_map(|package| {
+            package["targets"]
+                .as_array()
+                .expect("a package lists targets")
+        })
         .filter(|target| {
             target["kind"].as_array().is_some_and(|kinds| {
                 kinds.iter().any(|kind| {
-                    ["lib", "rlib", "dylib", "cdylib", "staticlib"].contains(
-                        &kind.as_str().expect("a target kind is a string"),
-                    )
+                    ["lib", "rlib", "dylib", "cdylib", "staticlib"]
+                        .contains(&kind.as_str().expect("a target kind is a string"))
                 })
             })
         })
-        .flat_map(|target| target["crate_types"].as_array().expect("a target lists crate types"))
+        .flat_map(|target| {
+            target["crate_types"]
+                .as_array()
+                .expect("a target lists crate types")
+        })
         .map(|crate_type| crate_type.as_str().expect("a crate type is a string"))
         .collect();
 
