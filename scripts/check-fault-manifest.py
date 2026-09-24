@@ -175,7 +175,7 @@ def observed() -> dict[str, set[str]]:
 
 
 def main() -> int:
-    # `--count-red` prints the number `red_faults` must carry and nothing
+    # `--count-red` prints the number of faults proven red and nothing
     # else, so a tool that has just assembled the fault list can ask THIS
     # reader for the count rather than reimplementing the arithmetic or
     # scraping it out of a failure message. One reader, structured answer.
@@ -188,6 +188,13 @@ def main() -> int:
     # subtracting one number from another, because a subtraction is a second
     # opinion about which kinds the selftest runs.
     counting_selftest = "--count-selftest-red" in sys.argv
+    # The same question again, answered with the NAMES rather than the number.
+    # `derive-shards.py` has to say which faults an assignment is missing and
+    # which it names that no longer exist, and neither is answerable from a
+    # count. Emitted from here for the reason `--fixture-classes` is: the set
+    # of faults `--selftest` runs has one reader, and a second one free to
+    # disagree with it is how a fault ends up in nobody's shard.
+    listing_selftest = "--list-selftest-red" in sys.argv
 
     # Asked for the count, answer the count -- before the manifest is read at
     # all. The count derives from `verify.sh` and the fixture directories and
@@ -208,6 +215,17 @@ def main() -> int:
         return 0
     if counting_selftest:
         print(sum(len(seen[k]) for k in SELFTEST_KINDS))
+        return 0
+    if listing_selftest:
+        # `id<TAB>kind`, in the order the kinds are declared and sorted within
+        # each. Not declaration order -- this reader does not have one, since
+        # three of the four kinds come from directory listings and a program's
+        # output rather than from verify.sh's text -- and nothing downstream
+        # needs one: the assignment is keyed by id precisely so that where a
+        # fault sits in the list stops mattering.
+        for kind in SELFTEST_KINDS:
+            for ident in sorted(seen[kind]):
+                print(f"{ident}\t{kind}")
         return 0
     # The selftest greps each results fixture's output for the class declared
     # here. It is emitted from THIS script because the manifest has one reader
@@ -416,10 +434,12 @@ def main() -> int:
                 f"have drifted apart"
             )
 
+    # No `red_faults` comparison: the red count is DERIVED, from the entries
+    # this has just read, and never hand-kept in `[meta]` (ruled on #108,
+    # 2026-09-24). It is printed below and answered by `--count-red`; a copy
+    # typed into the manifest was only ever a second place for it to be wrong,
+    # and a conflict between every two PRs that added a fault.
     meta = doc.get("meta") or {}
-    red = sum(len(seen[k]) for k in seen if k != "mechanics")
-    if meta.get("red_faults") != red:
-        failures.append(f"[meta] red_faults is {meta.get('red_faults')}, observed {red}")
     if meta.get("mechanics_assertions") != len(seen["mechanics"]):
         failures.append(
             f"[meta] mechanics_assertions is {meta.get('mechanics_assertions')}, "
@@ -433,7 +453,7 @@ def main() -> int:
 
     # Asked for the count, answer the count. Deliberately before the failure
     # report: the caller is a tool that has just assembled the fault list and
-    # is asking what `red_faults` must say, so the one failure it is about to
+    # is asking what the red count is, so the one failure it is about to
     # fix must not silence the answer.
     if counting:
         print(sum(len(seen[k]) for k in seen if k != "mechanics"))

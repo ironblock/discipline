@@ -1,0 +1,144 @@
+name: harvest-shards
+
+# The step below runs the WHOLE fault list unsharded, isolation lane
+# included, which is a 70+ minute run -- exactly the cost sharding exists so
+# that no ordinary push has to pay it. This workflow is how
+# tools/gate/shards.tsv gets that cost paid on purpose, on the two occasions
+# that call for it:
+#
+#   * MANUALLY, via `workflow_dispatch`, against whichever ref's shards.tsv
+#     needs a fresh harvest -- `main` for a routine re-balance as the fault
+#     list grows at large.
+#   * AUTOMATICALLY, on a `push` that touches `tools/gate/faults.toml`, on
+#     ANY branch (not only `main`), to re-balance the plan for the faults
+#     that push added. NOTHING WAITS ON IT (ruled on #108, 2026-09-24): an
+#     unplanned fault already runs in the shard a hash of its id picks, and
+#     `derive-shards.py --check` reports the drift rather than refusing it.
+#     When this trigger was added it healed a coverage refusal; that
+#     refusal is gone, and this workflow retires with the shard plan under
+#     #112. Excluded on `harvest-shards/**`, this workflow's own landing
+#     branches, so its own commit does not retrigger itself.
+#
+# `paths: ['tools/gate/faults.toml']` IS THE BUDGET, ruled on #87
+# (2026-09-24): one ~76-minute unsharded run per push that actually touches
+# the manifest, and nothing wider by default. `concurrency` cancels a
+# superseded run on the same ref rather than queuing a second 76-minute job
+# behind it -- a second push to the same branch means the first harvest's
+# numbers are already stale.
+#
+# Composes with scripts/derive-shards.py --check's substrate refusal (the
+# ruling on #87's defect 1, 2026-09-23: "re-harvest on the runner, and make
+# that the only place a harvest is valid") and its placeholder ruling
+# (2026-09-24: an undeclared substrate is a disclosed placeholder, not a
+# refusal -- which is what let this workflow reach the default branch at
+# all, since `workflow_dispatch` only lists a workflow that is already
+# there). Either trigger opens its PR against the ref it ran on, never
+# against `main` regardless of where it ran. `--check` refuses a plan
+# harvested anywhere else, by name, so a plan this workflow did not produce
+# cannot pass as if it had.
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore:
+      - 'harvest-shards/**'
+    paths:
+      - 'tools/gate/faults.toml'
+
+concurrency:
+  group: harvest-shards-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harvest:
+    name: harvest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve the pinned toolchain
+        run: cargo --version
+
+      # The isolation lane's seeded faults need a sandbox to execute
+      # against, same as `pkg-diet.yml`'s own copy of these three steps --
+      # without `bwrap` the lane asserts a correct REFUSAL and passes, which
+      # is exactly what let `lane: isolation.isolation.the-escape-census-
+      # under-reports` fire GREEN here rather than RED (#83): #76's applier
+      # is what wires lane faults into `--selftest` at all, so this gap was
+      # unreachable before it and is this PR's to close. Every shard gets
+      # it, not just whichever one draws an isolation fault -- sharding is a
+      # division of labour, never a selection, per this file's own header,
+      # so which shard that lands on is not something to predict.
+      - name: Install the sandbox the isolation lane confines with
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
+      # THE ONE RELAXED CONTROL, NAMED, per `pkg-diet.yml` and its ruling on
+      # #74: Ubuntu 24.04 refuses unprivileged user namespaces, which is
+      # what `bwrap` builds every sandbox out of, so without this no
+      # composition starts and the isolation lane's seeded escapes cannot
+      # execute here either. Tolerant rather than fatal: if the sysctl
+      # cannot be set, the honest signal is the isolation tests failing
+      # with their own message about the mechanism, not this step erroring
+      # first and hiding it.
+      - name: Permit the user namespaces the sandbox is built from
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 \
+            || echo "::warning::the userns restriction could not be relaxed; the isolation tests will say so"
+
+      # And say so, which is what makes the refusal branch a failure HERE
+      # and nowhere a contributor's own machine lacks `bwrap`.
+      - name: Declare this a host where the sandbox is required
+        run: echo "DIET_REQUIRE_SANDBOX=1" >> "$GITHUB_ENV"
+
+      # THE HARVEST ITSELF. Unsharded, so the run's own total is measured
+      # once rather than once per shard -- that total, minus every fault's
+      # own cost, is the per-shard overhead `emit()` subtracts before it
+      # picks a shard count, and a sharded run would measure that overhead
+      # wrong by a factor of the shard count.
+      - name: ./verify.sh --selftest --derive-shards
+        run: ./verify.sh --selftest --derive-shards "${{ runner.temp }}/derive-shards"
+
+      - name: Pack the harvest into a shard plan
+        run: |
+          python3 scripts/derive-shards.py \
+            --index "${{ runner.temp }}/derive-shards/derive-shards.tsv" --emit \
+            > tools/gate/shards.tsv
+
+      # Uploaded regardless of whether the plan below turns out to differ
+      # from what is checked in, so a harvest that changed nothing is still
+      # a harvest somebody can look at.
+      - name: Keep the harvest as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: harvested-shards
+          path: tools/gate/shards.tsv
+          retention-days: 7
+
+      # LANDS BY PR, not a direct push to the ref this ran against: a shard
+      # plan is a claim to check, per its own file header, and a push with
+      # no review is a claim nobody checked. `git diff --quiet` compares the
+      # freshly emitted file against what checkout put there, so a harvest
+      # that agrees with what is already committed opens nothing.
+      - name: Open a PR with the fresh harvest, if it changed anything
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- tools/gate/shards.tsv; then
+            echo "tools/gate/shards.tsv is unchanged by this harvest; nothing to land"
+            exit 0
+          fi
+          branch="harvest-shards/${{ github.ref_name }}-${{ github.run_id }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add tools/gate/shards.tsv
+          git commit -m "derive-shards: re-harvest against ${{ github.ref_name }}"
+          git push origin "$branch"
+          gh pr create \
+            --base "${{ github.ref_name }}" \
+            --head "$branch" \
+            --title "derive-shards: re-harvest against ${{ github.ref_name }}" \
+            --body "A runner harvest from this workflow (dispatch, or a push touching \`tools/gate/faults.toml\`) against \`${{ github.ref_name }}\`. \`derive-shards.py --check\` refuses a plan harvested anywhere else, by name; this is what makes it pass."
