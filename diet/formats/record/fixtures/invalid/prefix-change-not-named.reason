@@ -1,0 +1,8 @@
+A live record whose `q/2` hashes to a different head than `q/1`, the request
+before it on the same lane, with no `prefix.changed` row naming the change.
+
+This is the direction none of the other `prefix.changed` refusals check: they
+all confirm an EXISTING row is true of the two heads it names. A live record
+computed both digests to write them, so a head that moved with no row
+attributing it is a writer bug, not a fact about the run -- exactly the silent
+miss #79 exists to replace.

@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 45
+faults = 48
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -100,15 +100,9 @@ failure_class = "drive.the-record-keeps-no-payloads"
 target = "diet/src/drive/mod.rs"
 expect_exit = 101
 anchor = '''
-            Event::Request { id, text, .. } => {
-                if let Some(attempt) = call.attempts.iter().find(|a| &a.id == id) {
-                    *text = Some(wire::body(&attempt.sent));
-                }
-            }'''
+                    *text = Some(wire::body(&attempt.sent));'''
 becomes = '''
-            Event::Request { id, .. } => {
-                let _ = id;
-            }'''
+                    *text = None;'''
 catches = [
     "drive::tests::a_retried_call_archives_each_attempt_with_what_that_attempt_sent",
     "drive::tests::a_stripped_retry_archives_the_body_that_attempt_actually_sent",
@@ -122,14 +116,9 @@ failure_class = "drive.the-request-body-is-whichever-attempt-was-last"
 target = "diet/src/drive/mod.rs"
 expect_exit = 101
 anchor = '''
-                if let Some(attempt) = call.attempts.iter().find(|a| &a.id == id) {
-                    *text = Some(wire::body(&attempt.sent));
-                }'''
+call.attempts.iter().find(|a| &a.id == id)'''
 becomes = '''
-                let _ = id;
-                if let Some(attempt) = call.attempts.last() {
-                    *text = Some(wire::body(&attempt.sent));
-                }'''
+call.attempts.last()'''
 catches = [
     "drive::tests::a_stripped_retry_archives_the_body_that_attempt_actually_sent",
 ]
@@ -783,4 +772,60 @@ becomes = '''
             let thinking_exhausted = false;'''
 catches = [
     "drive::tests::a_fork_whose_budget_went_inside_the_think_block_is_thinking_exhausted",
+]
+
+# ---------------------------------------------------------------------------
+# #79: the lint before the call, the row after the request, the census beside
+# ---------------------------------------------------------------------------
+
+[[fault]]
+# The lint's verdict discarded. The drive then sends a head carrying a
+# calendar date, which is the miss #79's first specimen is about -- and a
+# refusal nobody acts on is a warning wearing a Halt's clothes.
+id = "drive.head-not-linted"
+failure_class = "drive.head-not-linted"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+        linted_head(&shape, index, MAIN)?;'''
+becomes = '''
+        let _ = linted_head(&shape, index, MAIN);'''
+catches = [
+    "drive::tests::a_head_carrying_a_date_stops_the_drive_before_the_call",
+]
+
+[[fault]]
+# The head moved and the record does not say so. The digests are still on the
+# request rows, so the file contradicts itself silently: two fingerprints that
+# differ, and nothing naming the change.
+id = "drive.prefix-change-unrecorded"
+failure_class = "drive.prefix-change-unrecorded"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+        if let Some((at_request, change)) = changed_at {
+            events.push(change.event(heads.ids.take(), at_request));
+        }'''
+becomes = '''
+        let _ = changed_at;'''
+catches = [
+    "drive::tests::the_seams_own_render_is_recorded_as_a_prefix_change_naming_the_lines",
+]
+
+[[fault]]
+# Calls left out of the census. Every register then reads zero, which is what
+# a run with no misses looks like -- the one shape a cache-miss census must
+# never produce by accident.
+id = "drive.cache-census-skips-a-call"
+failure_class = "drive.cache-census-skips-a-call"
+target = "diet/src/drive/mod.rs"
+expect_exit = 101
+anchor = '''
+    if let Some(answer) = answered {
+        heads.observations.push(crate::client::cache::Observation {'''
+becomes = '''
+    if let Some(answer) = answered.filter(|_| false) {
+        heads.observations.push(crate::client::cache::Observation {'''
+catches = [
+    "drive::tests::the_cache_census_counts_every_call_and_names_the_undeclared_lifetime",
 ]

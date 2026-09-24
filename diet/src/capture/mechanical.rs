@@ -832,6 +832,10 @@ impl Lane {
             | Event::Rejected { .. }
             | Event::Claim { .. }
             | Event::Summary { .. }
+            // A prefix that moved and a history a harness discarded carry no
+            // tool call either, so they move nothing here.
+            | Event::PrefixChanged { .. }
+            | Event::Compaction { .. }
             // A row no adapter could map carries no tool call, so it moves
             // nothing here. Listed rather than wildcarded, like the rest.
             | Event::Unknown { .. } => {}

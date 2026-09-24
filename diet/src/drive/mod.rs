@@ -65,6 +65,24 @@
 //! A regime that declares no reasoning control makes no reasoning-state
 //! claim, so it pays for no control. #94 design point 4.
 //!
+//! # A head carrying a timestamp never leaves this module
+//!
+//! #79's fourth acceptance row. Before every call the drive renders the head
+//! it is about to send and lints it; a calendar date or a clock in it is a
+//! [`Halt::HeadCarriesATimestamp`], because a head that expires at midnight
+//! takes every session's prefix with it and no cache census can name the
+//! reason. It is run against the REAL regimen this lane ships --
+//! `the_reference_regimens_own_rendered_head_carries_no_timestamp` parses
+//! `diet/drive/dev-loop.toml`, crosses it into a regime, renders it through
+//! the seam's own renderer and puts the result to the lint -- and the same
+//! test appends a date and requires the refusal, so the pass is not vacuous.
+//!
+//! `diet-drive` exits [`Halt::EXIT`] (two) on any halt rather than one: that
+//! is this program's existing code for "could not start", and redefining it
+//! would collapse a drive that never began into a drive that failed. The
+//! row's exit-1 discipline is carried by the seeded fault
+//! `drive.head-not-linted` under the `test` check, as its sibling rows are.
+//!
 //! **What is NOT here, and is disclosed rather than half-built:** the
 //! RESOLVED effort level, echoed from the rendered prompt head. #94 design
 //! point 2 asks for it because the injected sentence differs per level, so
@@ -84,6 +102,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use crate::client::journal::{self, Unspellable};
 use crate::client::shape::{Message, RequestShape, Role};
@@ -237,6 +256,29 @@ pub enum Halt {
         /// for.
         reasoning_chars: usize,
     },
+    /// The head this drive was about to send carries a timestamp.
+    ///
+    /// **Refused before the call, not reported after it.** A rendered head
+    /// carrying a calendar date or a clock is a head that expires at
+    /// midnight: #79's first second-implementor specimen is exactly that, a
+    /// system prompt with the current date in it, invalidating every
+    /// session's prefix when local midnight passes -- found by a person
+    /// vowing to track down every miss. Volatile facts belong in the turn
+    /// envelope, in the mutable tail, where they cost one turn's prefill
+    /// rather than the whole prefix.
+    ///
+    /// The drive halts rather than warns because a warning is a thing a
+    /// harness prints past. Every number a run under a dated head produced
+    /// about prefix stability would be about the date.
+    HeadCarriesATimestamp {
+        /// The turn it was about to be sent in. Zero for the pre-turn
+        /// control, the spelling the other pre-turn refusals already use.
+        turn: u32,
+        /// The lane that was about to send it.
+        lane: String,
+        /// What was found, and where.
+        found: crate::client::head::Timestamped,
+    },
     /// The record this drive built is not a record.
     ///
     /// The one variant that is a defect in this module rather than a fact
@@ -301,6 +343,15 @@ impl fmt::Display for Halt {
                  `--jinja`, or something between here and the template is dropping what \
                  it does not recognise. Nothing this drive could bank about a reasoning \
                  state would be about the state it set"
+            ),
+            Self::HeadCarriesATimestamp { turn, lane, found } => write!(
+                f,
+                "turn {turn}: the `{lane}` lane's rendered head carries `{}` in {}, and a \
+                 head carrying a timestamp is a head that expires at midnight -- every \
+                 session's prefix goes cold when the date rolls over, for a reason no \
+                 cache census could name. A volatile fact belongs in the turn envelope, \
+                 in the mutable tail",
+                found.found, found.site
             ),
             Self::Unrecordable { why } => write!(
                 f,
@@ -452,6 +503,19 @@ pub struct Drive {
     /// grammar is not built, so every one of these is an ask put and an
     /// answer kept and not folded.
     pub audits: Vec<Audit>,
+    /// What this run's calls came to, as far as the substrate's cache is
+    /// concerned: hits, and misses in three registers.
+    ///
+    /// **Beside the record rather than in it, and the split is exact.**
+    /// `mutation` is re-derivable from the file alone -- every `request` row
+    /// carries `head_sha256` and every head that moved has a `prefix.changed`
+    /// row -- so nobody has to take this field's word for it. `expected`
+    /// cannot be: it needs an inter-call gap, record v0 carries no clock, and
+    /// inventing a timestamp field here would be #82's territory settled by
+    /// whoever needed it first. The gap is measured with an
+    /// [`std::time::Instant`] taken immediately before each call, so the
+    /// record stays byte-identical run to run while this number does not.
+    pub cache: crate::client::cache::Census,
 }
 
 /// The ratifier a drive uses: it puts the seam's ask to the substrate.
@@ -474,6 +538,18 @@ struct Interviewer<'a, T: Transport> {
     turn: Cell<u32>,
     calls: Vec<crate::client::Call>,
     audits: Vec<Audit>,
+    /// When this lane last called.
+    ///
+    /// **Measured here rather than by [`Heads`], and the difference is a
+    /// measurement rather than a tidiness.** A ratify call happens inside
+    /// `Controller::settle`, where the drive's own bookkeeping cannot reach
+    /// it -- so a gap stamped from outside would be whichever lane called
+    /// last, the interview fork's, attributed to a ratification. That is a
+    /// measurement of the wrong thing that reads like a measurement of the
+    /// right one, which is the defect the cache telemetry's own doc names.
+    called: Option<Instant>,
+    /// The gap before each of `calls`, in the same order.
+    gaps: Vec<Option<Duration>>,
 }
 
 impl<T: Transport> Ratifier for Interviewer<'_, T> {
@@ -483,6 +559,12 @@ impl<T: Transport> Ratifier for Interviewer<'_, T> {
             role: Role::User,
             content: ask.text.clone(),
         }];
+        // Immediately before the call, like `Heads::about_to_call`: what a
+        // cache lifetime is compared against is the gap between two
+        // REQUESTS, not the gap between an answer and the next ask.
+        let now = Instant::now();
+        self.gaps
+            .push(self.called.replace(now).map(|was| now.duration_since(was)));
         let call = self.client.call(&shape, RATIFY, &mut self.ids);
         // NOTHING IS FOLDED. See [`Audit`]: the ask demands a verdict
         // vocabulary that is not implemented, and the interview grammar is a
@@ -591,6 +673,92 @@ fn fold(
     Ok((patches, census))
 }
 
+/// What the drive keeps about the heads it sends, across the whole run.
+///
+/// One value rather than five locals threaded through [`archive`], because
+/// the three questions it answers are one question asked three ways: what
+/// head did this lane last send, how long ago did this lane last call, and
+/// what did the server say about its cache when it did. A `prefix.changed`
+/// row and a cache-miss register are two readings of the same measurement.
+struct Heads {
+    /// The last head each lane sent, so a change is noticed as it happens.
+    watch: crate::client::head::Watch,
+    /// Identifiers for the `prefix.changed` rows, derived like every other
+    /// id this drive writes: a random one would make two replays of one
+    /// drive differ in bytes that mean nothing.
+    ids: IdSource,
+    /// When each lane last called.
+    ///
+    /// An [`Instant`] rather than a wall clock: the census needs a DURATION
+    /// between two calls, and a monotonic one cannot be moved by an NTP step
+    /// in the middle of a drive. It also never reaches the record, which is
+    /// what keeps two replays of one drive byte-identical.
+    called: BTreeMap<String, Instant>,
+    /// The gap before the call currently being archived.
+    ///
+    /// Set by [`Heads::about_to_call`] for the lanes [`run`] calls itself,
+    /// and by `run` from the ratifier's own stamp for the one it does not --
+    /// see [`Interviewer::called`]. Whoever sets it takes the reading BEFORE
+    /// the call, which is the only place the question a cache lifetime
+    /// answers can be asked.
+    gap: Option<Duration>,
+    /// One per answered call.
+    observations: Vec<crate::client::cache::Observation>,
+}
+
+impl Heads {
+    fn new() -> Self {
+        Self {
+            watch: crate::client::head::Watch::new(),
+            // `x` for the prefix-change rows, beside `q`, `i`, `t`, `p`, `s`,
+            // `c` and `r`. One letter per kind of row, so a reader of the
+            // record can tell what an id names without looking it up.
+            ids: IdSource::new("x"),
+            called: BTreeMap::new(),
+            gap: None,
+            observations: Vec::new(),
+        }
+    }
+
+    /// Start the clock for a call about to be made on `lane`.
+    ///
+    /// TAKEN IMMEDIATELY BEFORE THE CALL, not after the answer: the question
+    /// a TTL answers is how long the server's cache sat idle, which is the
+    /// gap between the two REQUESTS. Measuring from the previous answer would
+    /// shorten every gap by however long that answer took to generate, and
+    /// would shorten it most on exactly the slow calls where a lifetime is
+    /// most likely to have run out.
+    fn about_to_call(&mut self, lane: &str) {
+        let now = Instant::now();
+        self.gap = self
+            .called
+            .insert(lane.to_owned(), now)
+            .map(|before| now.duration_since(before));
+    }
+}
+
+/// The head `shape` would send, refused if it carries a timestamp.
+///
+/// # Errors
+///
+/// [`Halt::HeadCarriesATimestamp`] for a head carrying a calendar date or a
+/// clock. See that variant for why this is a refusal rather than a warning.
+fn linted_head(
+    shape: &RequestShape,
+    turn: u32,
+    lane: &str,
+) -> Result<crate::client::head::Head, Halt> {
+    let head = crate::client::head::Head::of(shape);
+    if let Some(found) = head.timestamp() {
+        return Err(Halt::HeadCarriesATimestamp {
+            turn,
+            lane: lane.to_owned(),
+            found,
+        });
+    }
+    Ok(head)
+}
+
 /// Run `script` in `gym`.
 ///
 /// # Errors
@@ -631,6 +799,8 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             turn: Cell::new(0),
             calls: Vec::new(),
             audits: Vec::new(),
+            called: None,
+            gaps: Vec::new(),
         },
     );
 
@@ -645,6 +815,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
     let mut seams: Vec<Seam> = Vec::new();
     let mut prefill_total = Count::default();
 
+    let mut heads = Heads::new();
     let mut main_ids = IdSource::new("q");
     let mut fork_ids = IdSource::new("i");
     let mut tool_ids = IdSource::new("t");
@@ -681,6 +852,11 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         asking
             .template_kwargs
             .insert(ENABLE_THINKING.to_owned(), Value::Boolean(false));
+        // Linted before the bytes go out, like every other call this
+        // function makes. Turn zero, which is not a turn: this happens
+        // before the session begins.
+        linted_head(&asking, 0, CONTROL)?;
+        heads.about_to_call(CONTROL);
         let call = gym.client.call(&asking, CONTROL, &mut control_ids);
         let Some(answered) = call.outcome.answer() else {
             // Turn zero, which is not a turn: this happened before the
@@ -718,7 +894,14 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         }
         // Archived like every other call. A control whose evidence is not in
         // the record is a control a later reader has to take on trust.
-        archive(&call, 0, &substrate, &mut events, &mut unspellable)?;
+        archive(
+            &call,
+            0,
+            &substrate,
+            &mut events,
+            &mut unspellable,
+            &mut heads,
+        )?;
     }
 
     for turn in &script.turns {
@@ -737,6 +920,15 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 content: turn.ask.clone(),
             },
         ];
+        // THE LINT, before the call. The main lane is the one whose head
+        // carries anything: every other lane this drive opens sends a single
+        // user message, which is the mutable tail, so its head is the model
+        // line and an empty array -- which is why
+        // `the_reference_regimens_own_rendered_head_carries_no_timestamp`
+        // asks this question of a main-lane shape built from the real
+        // regimen rather than of an invented one.
+        linted_head(&shape, index, MAIN)?;
+        heads.about_to_call(MAIN);
         let call = gym.client.call(&shape, MAIN, &mut main_ids);
         let Some(answer) = call.outcome.answer() else {
             return Err(Halt::NoAnswer {
@@ -757,7 +949,14 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             prefill_tokens: prefill,
         });
         prefill_total = prefill_total.saturating_add(prefill);
-        archive(&call, index, &substrate, &mut events, &mut unspellable)?;
+        archive(
+            &call,
+            index,
+            &substrate,
+            &mut events,
+            &mut unspellable,
+            &mut heads,
+        )?;
 
         // The commands. Each is a tool call, run under the confinement, with
         // its exit status and output as the row says.
@@ -789,6 +988,8 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 role: Role::User,
                 content: question.clone(),
             }];
+            linted_head(&asking, index, INTERVIEW)?;
+            heads.about_to_call(INTERVIEW);
             let forked = gym.client.call(&asking, INTERVIEW, &mut fork_ids);
             let Some(reply) = forked.outcome.answer() else {
                 return Err(Halt::NoAnswer {
@@ -825,7 +1026,14 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 substrate: substrate.clone(),
                 of_turn: index,
             });
-            archive(&forked, index, &substrate, &mut events, &mut unspellable)?;
+            archive(
+                &forked,
+                index,
+                &substrate,
+                &mut events,
+                &mut unspellable,
+                &mut heads,
+            )?;
 
             let (patches, census) =
                 fold(&text, index, INTERVIEW, Some(&fork_id)).map_err(|why| Halt::Unreadable {
@@ -908,7 +1116,10 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             .settle(&mut object)
             .map_err(|why| Halt::SeamRefused { turn: index, why })?;
         let asked: Vec<_> = controller.ratifier().calls[before..].to_vec();
-        for one in &asked {
+        // Taken from the ratifier, which is the only thing that was present
+        // when these calls were made. See `Interviewer::called`.
+        let gaps: Vec<_> = controller.ratifier().gaps[before..].to_vec();
+        for (one, gap) in asked.iter().zip(gaps) {
             // The same rule as the other two lanes, and it was missing here:
             // a ratify call that never answered used to produce a seam row
             // anyway, asserting the prompt was rebuilt after an audit that did
@@ -921,7 +1132,15 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                     outcome: Box::new(one.outcome.clone()),
                 });
             }
-            archive(one, index, &substrate, &mut events, &mut unspellable)?;
+            heads.gap = gap;
+            archive(
+                one,
+                index,
+                &substrate,
+                &mut events,
+                &mut unspellable,
+                &mut heads,
+            )?;
         }
         if let Some(seam) = settled {
             // No `unwrap_or_default()`. A render this module could not
@@ -973,6 +1192,10 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         crate::formats::record::parse(&rendered).map_err(|why: ParseError| Halt::Unrecordable {
             why: format!("{why:?}"),
         })?;
+    // Read out of the regime the RECORD declares -- the one that was written
+    // down and read back -- rather than out of the script, so that this
+    // census and a later reader of the same file apply one set of lifetimes.
+    let cache = crate::client::cache::Census::of(record.regime(), &heads.observations);
 
     Ok(Drive {
         record,
@@ -982,6 +1205,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         unspellable,
         uncaptured,
         audits: controller.ratifier().audits.clone(),
+        cache,
     })
 }
 
@@ -994,12 +1218,18 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
 /// what a drive is supposed to leave behind, so the texts are filled here --
 /// from the attempt's own `sent` shape and the answer that named the attempt
 /// that produced it, never from "the last one", which retries make wrong.
+/// It is also where a head that moved becomes a row. The `prefix.changed`
+/// goes in IMMEDIATELY AFTER the `request` it names, because every link in a
+/// record resolves backwards: a row naming a request that has not been
+/// written yet is a lineage nobody can walk while the record is being
+/// written, which is the only time anyone would want to walk it.
 fn archive(
     call: &crate::client::Call,
     turn: u32,
     substrate: &str,
     events: &mut Vec<Event>,
     unspellable: &mut Vec<Unspellable>,
+    heads: &mut Heads,
 ) -> Result<(), Halt> {
     // `response.output_tokens` is required and zero is a measurement, and
     // this is where that rule is enforced for EVERY lane. The module header
@@ -1020,11 +1250,25 @@ fn archive(
     }
     let projected = journal::project(&call.journal, substrate);
     let answered = call.outcome.answer();
+    let mut head_changed = false;
     for mut event in projected.events {
+        let mut changed_at: Option<(String, crate::client::head::Change)> = None;
         match &mut event {
             Event::Request { id, text, .. } => {
                 if let Some(attempt) = call.attempts.iter().find(|a| &a.id == id) {
                     *text = Some(wire::body(&attempt.sent));
+                }
+                // THE HEAD THE JOURNAL ALREADY HASHED, read back rather than
+                // computed again. `head_sha256` on this very row came out of
+                // that entry, so a diff derived from a second rendering --
+                // even the same pure function over the same shape -- would be
+                // a second answer to a question the record asks once. One
+                // value, two readings.
+                if let Some(head) = issued_head(call, id)
+                    && let Some(change) = heads.watch.observe(&call.lane, head)
+                {
+                    head_changed = true;
+                    changed_at = Some((id.clone(), change));
                 }
             }
             Event::Response { text, .. } => {
@@ -1046,13 +1290,51 @@ fn archive(
             _ => {}
         }
         events.push(event);
+        if let Some((at_request, change)) = changed_at {
+            events.push(change.event(heads.ids.take(), at_request));
+        }
     }
     for lost in projected.unspellable {
         if !unspellable.contains(&lost) {
             unspellable.push(lost);
         }
     }
+    // ONE OBSERVATION PER ANSWERED CALL, not per attempt. A retry is more
+    // requests and one answer, and the cache telemetry this reads is on the
+    // answer: counting each attempt would count a call that eventually
+    // answered as several misses.
+    if let Some(answer) = answered {
+        heads.observations.push(crate::client::cache::Observation {
+            lane: call.lane.clone(),
+            substrate: substrate.to_owned(),
+            head_changed,
+            since_previous: heads.gap,
+            prompt_tokens: answer.cache.prompt_tokens,
+            cached_tokens: answer.cache.cached_tokens,
+            // Whether the DIALECT declared anywhere to read the reused count
+            // from. Without it, a server that reported nothing and a client
+            // that never asked are the same empty field, and only one of them
+            // is a miss.
+            measured: answer.cache.cached_path.is_some(),
+        });
+    }
     Ok(())
+}
+
+/// The head the journal recorded for the attempt `id` names.
+///
+/// The journal is the client's own record and it is authoritative for the
+/// transport layer, which is where a head is rendered and hashed. Looking it
+/// up here rather than re-rendering from `attempt.sent` is what makes the
+/// digest on a `request` row and the diff on the `prefix.changed` beside it
+/// two readings of ONE value instead of two values that agree today.
+fn issued_head(call: &crate::client::Call, id: &str) -> Option<crate::client::head::Head> {
+    call.journal.entries().iter().find_map(|entry| match entry {
+        journal::Entry::Issued {
+            id: issued, head, ..
+        } if issued == id => Some(head.clone()),
+        _ => None,
+    })
 }
 
 /// The working object, dumped: one entry per line, id first.
@@ -1095,7 +1377,10 @@ mod tests {
 
     use super::canned;
     use super::script::{Command, Script};
-    use super::{CONTROL, Drive, ENABLE_THINKING, ForkOutcome, Gym, Halt, run};
+    use super::{
+        CONTROL, Drive, ENABLE_THINKING, ForkOutcome, Gym, Halt, MAIN, WorkingObject, linted_head,
+        run,
+    };
 
     /// A working tree the drive's commands run in.
     struct Ground {
@@ -1155,6 +1440,7 @@ mod tests {
                 // does.
                 reasoning_control: None,
                 chat_template_sha256: None,
+                cache_ttl: None,
             }],
             dogma_version: 0,
         }
@@ -1178,6 +1464,7 @@ mod tests {
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),
+            tools: Vec::new(),
         }
     }
 
@@ -2395,6 +2682,181 @@ mod tests {
                 "`{gone}` names weights this substrate does not have, and                  nothing reads it any more"
             );
         }
+    }
+
+    /// #79's fourth acceptance row, asked of the REAL regimen this lane
+    /// ships -- parsed, crossed into a regime, rendered through the seam's
+    /// own renderer, and put to the lint.
+    ///
+    /// A test that built its own regimen would be a test about a fixture.
+    /// `canned::DEV_LOOP` is `include_str!` of `diet/drive/dev-loop.toml`, so
+    /// this reads the file the lane actually runs; a date templated into that
+    /// file fails HERE rather than as a red lane on somebody else's branch.
+    ///
+    /// **And the pass is not vacuous.** The same head with a date appended IS
+    /// refused, in the second half. A lint asserted clean against a head it
+    /// could never have found anything in is a lint nobody has seen fire.
+    #[test]
+    fn the_reference_regimens_own_rendered_head_carries_no_timestamp() {
+        let regimen =
+            crate::formats::regimen::parse(canned::DEV_LOOP).expect("the shipped regimen parses");
+        let declared = crate::drive::regimen::regime_of(&regimen, false)
+            .expect("the shipped regimen crosses into a regime");
+        let object = WorkingObject::open(declared);
+        let prefix = crate::seam::render::render(&object, None);
+
+        let sending = RequestShape {
+            messages: vec![
+                Message::new(Role::System, prefix.clone()),
+                Message::new(Role::User, "the turn"),
+            ],
+            ..shape()
+        };
+        let linted = linted_head(&sending, 1, MAIN)
+            .unwrap_or_else(|why| panic!("the reference regimen's own rendered head: {why}"));
+        assert_eq!(
+            linted.digest(),
+            crate::client::head::Head::of(&sending).digest(),
+            "and what the lint passed is the head that would be sent"
+        );
+
+        // The vacuity guard: the same head, dated.
+        let dated = RequestShape {
+            messages: vec![
+                Message::new(Role::System, format!("{prefix}today: 2026-09-13\n")),
+                Message::new(Role::User, "the turn"),
+            ],
+            ..shape()
+        };
+        let Err(Halt::HeadCarriesATimestamp { found, .. }) = linted_head(&dated, 1, MAIN) else {
+            panic!("a dated head is refused, or the half above proves nothing");
+        };
+        assert_eq!(found.found, "2026-09-13");
+    }
+
+    /// The lint fires BEFORE the call, and the drive stops.
+    ///
+    /// A dated regime tag is how this arrives in practice -- an arm named for
+    /// the day it was run -- and the seam's render puts the arm at the top of
+    /// every system prompt, so the date is in the frozen head of every turn.
+    #[test]
+    fn a_head_carrying_a_date_stops_the_drive_before_the_call() {
+        let ground = Ground::make("dated-head");
+        let mut dated = regime();
+        dated.arm = "dev-loop-2026-09-13".to_owned();
+        let script = canned::script(dated);
+
+        let halted = against(&script, canned::acts(), &ground)
+            .expect_err("a head carrying a date is refused");
+        let Halt::HeadCarriesATimestamp { turn, lane, found } = &halted else {
+            panic!("the drive stopped for the wrong reason: {halted:?}");
+        };
+        assert_eq!(*turn, 1, "before the first call, not after the run");
+        assert_eq!(lane, MAIN);
+        assert_eq!(found.found, "2026-09-13");
+        assert!(
+            format!("{halted}").contains("midnight"),
+            "the complaint says what a dated head costs: {halted}"
+        );
+    }
+
+    /// #79's first acceptance row, end to end on this crate's own seam.
+    ///
+    /// The seam re-renders the working set into the system prompt at turn
+    /// two, so turn three's head is not turn two's -- and the record says so,
+    /// with a diff naming the lines the render added.
+    ///
+    /// **The DATE case specifically cannot be driven end to end here, and
+    /// that is a tension between two of #79's own design points rather than a
+    /// gap.** Design point 4's lint refuses to send a head carrying a date,
+    /// so this harness cannot both send one and record the change. Building
+    /// an escape hatch for the test would weaken the lint, which is the
+    /// half that actually prevents the miss. The date case is pinned at the
+    /// unit (`client::head::tests::a_date_that_moved_is_a_text_change_\
+    /// naming_the_line`) and as a fixture
+    /// (`valid/head-date-changed-between-turns.jsonl`); what runs here is the
+    /// same mechanism on the same code path.
+    #[test]
+    fn the_seams_own_render_is_recorded_as_a_prefix_change_naming_the_lines() {
+        let ground = Ground::make("prefix-changed");
+        let drive = against(&three_turns(), canned::acts(), &ground).expect("the drive ran");
+
+        let changes: Vec<_> = drive
+            .record
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::PrefixChanged {
+                    at_request,
+                    reason,
+                    diff,
+                    ..
+                } => Some((at_request.as_str(), *reason, diff.len())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            changes.len(),
+            1,
+            "one seam fired, so the head moved once: {changes:?}"
+        );
+        let (at_request, reason, deltas) = changes[0];
+        assert_eq!(
+            at_request, "q/3",
+            "at the first request sent under the re-rendered prefix"
+        );
+        assert_eq!(
+            reason,
+            crate::formats::record::PrefixReason::Text,
+            "the working set is lines of the system message"
+        );
+        assert!(deltas > 0, "and the diff names them");
+
+        // The digests are on the REQUEST rows, where they cannot contradict
+        // the change row. Turn two's head and turn three's differ; turn one's
+        // and turn two's do not, which is the seam controller's own claim.
+        let heads: Vec<_> = drive
+            .record
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Request {
+                    id,
+                    lane,
+                    head_sha256: Some(digest),
+                    ..
+                } if lane == MAIN => Some((id.as_str(), digest.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(heads.len(), 3, "three turns on the main lane: {heads:?}");
+        assert_eq!(
+            heads[0].1, heads[1].1,
+            "the prefix is byte-identical within a phase"
+        );
+        assert_ne!(heads[1].1, heads[2].1, "and the seam moved it");
+    }
+
+    /// The census reports every register, and reads its lifetimes out of the
+    /// regime the record declares.
+    #[test]
+    fn the_cache_census_counts_every_call_and_names_the_undeclared_lifetime() {
+        let ground = Ground::make("cache-census");
+        let drive = against(&three_turns(), canned::acts(), &ground).expect("the drive ran");
+
+        assert_eq!(
+            drive.cache.hits, 6,
+            "the canned server reports reuse on every call"
+        );
+        assert_eq!(drive.cache.misses(), 0);
+        assert_eq!(drive.cache.unmeasured, 0);
+        assert_eq!(
+            drive.cache.ttl_undeclared,
+            vec!["canned".to_owned()],
+            "`dev-loop.toml` declares no lifetime for the canned server on \
+             purpose, and the census names the substrate rather than reading \
+             its misses as a provider expiry"
+        );
     }
 
     #[test]

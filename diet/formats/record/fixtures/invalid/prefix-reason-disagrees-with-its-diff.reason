@@ -1,0 +1,8 @@
+A `prefix.changed` naming `text` over a diff that moved a tool. The reason must
+be the strongest class the diff itself supports, and `PrefixReason`'s
+declaration order IS that precedence -- `tools` outranks `text`.
+
+A row that names the wrong class has attributed a miss to the wrong part of the
+head, which is worse than not attributing it: the reader stops looking.
+`PrefixDelta::reason` is the single statement of which delta supports which
+class, and both the writer and this check read it.

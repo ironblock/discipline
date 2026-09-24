@@ -1230,6 +1230,98 @@ path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
 
+# #79: the precedence over prefix reasons, reordered. `PrefixReason`'s
+# DECLARATION ORDER is the precedence -- `Ord` is derived from it -- so
+# swapping two variants compiles, passes every other test, and silently
+# changes what every future record attributes a cache miss to, while leaving
+# the rows already written saying something they no longer mean.
+inject_record_prefix_precedence_reordered() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+first = '        Model => "model",'
+second = '        Tools => "tools",'
+for line in (first, second):
+    if source.count(line) != 1:
+        raise SystemExit(f"{line!r} appears {source.count(line)} times")
+source = source.replace(first, "        PRECEDENCE_SWAP", 1)
+source = source.replace(second, first, 1)
+source = source.replace("        PRECEDENCE_SWAP", second, 1)
+path.write_text(source, encoding="utf-8")
+EOF
+}
+
+# #79: the check that a `prefix.changed` is a change at all. Disabled, a row
+# over two requests that hash the same is accepted -- and a cache census reads
+# a mutation the file itself denies.
+inject_record_prefix_change_not_a_change() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Predecessor::Digest(before) if before == digest => {"
+new = "            Predecessor::Digest(before) if false && before == digest => {"
+if source.count(old) != 1:
+    raise SystemExit(f"the not-a-change check appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# #79: the reason checked against its own diff. Disabled, a row may name any
+# class over any evidence -- which is worse than naming none, because the
+# reader stops looking.
+inject_record_prefix_reason_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "        let supports = reason_of(diff);\n        if reason != supports {"
+new = "        let supports = reason_of(diff);\n        if false && reason != supports {"
+if source.count(old) != 1:
+    raise SystemExit(f"the reason check appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# #79: the head fingerprint checked as a digest. Disabled, prose sits where an
+# identity belongs -- the sentinel class the hardware fingerprint already
+# caught once -- and every comparison against it reads as a change.
+inject_record_head_fingerprint_not_digested() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "    if !digest_ok(&text) {\n        return Err(StructureError::BadDigest(text).into());\n    }\n    Ok(Some(text))"
+new = "    if false && !digest_ok(&text) {\n        return Err(StructureError::BadDigest(text).into());\n    }\n    Ok(Some(text))"
+if source.count(old) != 1:
+    raise SystemExit(f"the optional-digest check appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# #79: a live record's request rows required to carry a head fingerprint.
+# Disabled, a live record silently loses the measurement the whole issue
+# exists to take -- the same state `Reasoning::Undeclared` and `Kind::Unknown`
+# are each refused for, one field over.
+inject_record_head_unhashed_in_live_record() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "            } if live => {\n                return Err(StructureError::PrefixChange("
+new = "            } if false && live => {\n                return Err(StructureError::PrefixChange("
+if source.count(old) != 1:
+    raise SystemExit(f"the live-record head check appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_record_weights_named_not_digested() {
   python3 - <<'EOF'
 import pathlib
@@ -6161,6 +6253,16 @@ selftest() {
     'regimen/fixtures/invalid/reasoning-effort-without-budget\.toml' 'test:conformance/formats::regimen'
   seeded_case "two ids over one substrate"            test     inject_record_substrates_indistinguishable \
     'record/fixtures/invalid/substrates-indistinguishable\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a head change that is not a change"    test     inject_record_prefix_change_not_a_change \
+    'record/fixtures/invalid/prefix-change-that-is-not-a-change\.jsonl' 'test:conformance/formats::record'
+  seeded_case "the miss classes reordered"           test     inject_record_prefix_precedence_reordered \
+    'formats::record::tests::the_precedence_over_prefix_reasons_is_the_order_they_are_declared_in \.\.\. FAILED' 'lib/formats::record'
+  seeded_case "a head change attributed to anything"  test     inject_record_prefix_reason_unchecked \
+    'record/fixtures/invalid/prefix-reason-disagrees-with-its-diff\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a head fingerprint that is prose"      test     inject_record_head_fingerprint_not_digested \
+    'record/fixtures/invalid/head-fingerprint-not-a-digest\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a live request with no head hashed"    test     inject_record_head_unhashed_in_live_record \
+    'record/fixtures/invalid/request-unhashed-in-a-live-record\.jsonl' 'test:conformance/formats::record'
   seeded_case "an injection only GNU sed accepts"     injections inject_injection_needs_gnu_sed \
     'sed forms only GNU accepts'
   seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \

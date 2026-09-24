@@ -287,6 +287,67 @@ pub struct Substrate {
     /// field is declared and the schema enforces what it means. Disclosed
     /// rather than left to look computed.
     pub chat_template_sha256: Option<String>,
+    /// How long this provider path keeps a prompt prefix before it expires.
+    ///
+    /// A SUBSTRATE FACTOR, like the chat template beside it, and for a
+    /// sharper reason: cache lifetime is a property of the PROVIDER PATH, not
+    /// of the weights. #79's own specimen is one model served two ways --
+    /// first-party at roughly thirty minutes, Bedrock at roughly five -- and a
+    /// record that cannot say which was in force can only estimate why a miss
+    /// happened. With this declared, a gap past the lifetime is an EXPECTED
+    /// miss and a gap inside it is not, which is the split
+    /// [`crate::client::cache::Census`] reports.
+    ///
+    /// Optional, and the absence is not a zero: "this path expires in no
+    /// time" and "nobody wrote the lifetime down" are different facts, and
+    /// the census names the substrates in the second state
+    /// (`ttl_undeclared`) rather than reading them as a provider expiry.
+    /// Every other undeclared-reads-as-a-value refusal in this file is the
+    /// same rule.
+    ///
+    /// Counted by [`StructureError::SubstratesIndistinguishable`] like every
+    /// other declared field, which is what makes two provider paths behind
+    /// one weights digest two substrates rather than one written twice.
+    pub cache_ttl: Option<CacheTtl>,
+}
+
+vocabulary! {
+    /// How a cache lifetime is spelled.
+    ///
+    /// Tagged, for the reason [`BudgetKind`] is: a field that is a number
+    /// when there is a lifetime and a word when there is not is one field
+    /// with two readings.
+    CacheTtlKind {
+        /// A lifetime, in seconds.
+        Seconds => "seconds",
+        /// The path caches nothing, and somebody said so.
+        Uncached => "none",
+    }
+}
+
+/// How long a provider path keeps a prompt prefix.
+///
+/// `Uncached` is a DECLARATION and not an absence, exactly as [`Budget`]'s is:
+/// a path that reuses nothing is a fact about the path, and a miss under one
+/// is `expected` at any gap. "Nobody wrote it down" has no spelling here at
+/// all -- it is the absent field, and the census names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheTtl {
+    /// The prefix survives this many seconds since the last call.
+    Seconds(Count),
+    /// Nothing is cached on this path. Declared, never inferred.
+    Uncached,
+}
+
+impl CacheTtl {
+    /// Which kind this is.
+    #[must_use]
+    pub fn kind(self) -> CacheTtlKind {
+        match self {
+            Self::Seconds(_) => CacheTtlKind::Seconds,
+            Self::Uncached => CacheTtlKind::Uncached,
+        }
+    }
 }
 
 /// The reasoning controls a substrate was asked to run under.
@@ -460,6 +521,10 @@ vocabulary! {
         Seam => "seam",
         /// A tool was called.
         ToolCall => "tool_call",
+        /// The frozen head a lane sends changed between two of its requests.
+        PrefixChanged => "prefix.changed",
+        /// A harness discarded its own history and put a summary in its place.
+        Compaction => "compaction",
         /// A lane's output rejected whole by the groundedness floor.
         Rejected => "rejected",
         /// One hypothesis, one result, and what recomputing it consumes.
@@ -648,6 +713,292 @@ impl Source {
     }
 }
 
+vocabulary! {
+    /// Which part of the frozen head moved.
+    ///
+    /// **THE DECLARATION ORDER IS THE PRECEDENCE.** A head that moved in two
+    /// places at once gets the FIRST of these its diff supports, and
+    /// [`PrefixDelta::reason`] is the single statement of which delta
+    /// supports which class. Two orders -- one here and one in a reader --
+    /// would be two answers to "what caused this miss", which is the question
+    /// the whole event exists to answer once.
+    PrefixReason {
+        /// The model the request names is not the model the last one named.
+        /// A different model is a different cache, whatever else matched.
+        Model => "model",
+        /// A tool definition moved, arrived, left, or was edited. #79's
+        /// second-implementor specimen: MCP definitions emitted in object-key
+        /// order, so reopening the client reorders them and busts the cache.
+        Tools => "tools",
+        /// The arguments handed to the chat template changed.
+        ///
+        /// **DELIBERATELY WIDER THAN AN EFFORT LEVEL, and disclosed as such.**
+        /// What is detected is that a template kwarg moved, and which key it
+        /// was; which key carries a reasoning level is the TEMPLATE's to
+        /// choose -- which is why [`ReasoningControl::effort`] is an open
+        /// string -- so a list of key names here would be this library
+        /// guessing at a foreign template's vocabulary. A non-reasoning kwarg
+        /// change therefore lands here too. The over-breadth is written down
+        /// rather than hidden: a reader sees the key and can decide.
+        Effort => "effort",
+        /// A message arrived in the frozen history, or left it.
+        ///
+        /// #79's live-incident class 2: a plugin injecting a reminder after
+        /// every tool call, hidden from the operator's view. The delta
+        /// carries the role **as sent**. The role *as the chat template
+        /// rendered it* is not obtainable -- no server this client speaks to
+        /// returns its rendered head, the same gap `drive`'s module header
+        /// declares for #94's resolved effort level -- so the record says the
+        /// half it measured and does not claim the other.
+        ///
+        /// **What this cannot say is that what left was REASONING.** #79's
+        /// class 1 is a harness dropping the model's own thinking between
+        /// tool calls; nothing in a head marks a message as reasoning, so
+        /// this names a message that left and declines to name it thinking. A
+        /// rule that guessed would fire on every edited system prompt.
+        Injection => "injection",
+        /// A line of a frozen message changed, arrived, or left. #79's first
+        /// specimen: a system prompt carrying the current date, so crossing
+        /// local midnight invalidates every session's prefix.
+        Text => "text",
+        /// The head moved and no part of it names what moved.
+        ///
+        /// The residual, and it is a measurement rather than a shrug: the two
+        /// digests differ and this reader could attribute none of it. A
+        /// `prefix.changed` carrying this is the one that may have an empty
+        /// diff, and the one that must.
+        Unattributed => "unattributed",
+    }
+}
+
+vocabulary! {
+    /// Which part of a head one delta is about.
+    ///
+    /// Separated from [`PrefixDelta`] for the reason [`Kind`] is separated
+    /// from [`Event`]: a coverage test can walk the kinds without building one
+    /// of each, and a variant cannot exist without a tag.
+    DeltaKind {
+        /// The model name moved.
+        ModelChanged => "model_changed",
+        /// A tool kept its definition and changed position.
+        ToolMoved => "tool_moved",
+        /// A tool that was not declared before is declared now.
+        ToolAdded => "tool_added",
+        /// A tool that was declared before is not declared now.
+        ToolRemoved => "tool_removed",
+        /// A tool kept its name and position and changed definition. Its own
+        /// kind rather than the residual: a reordering that also edited a
+        /// schema is two facts, and only one of them is a reordering.
+        ToolChanged => "tool_changed",
+        /// A template argument kept its key and changed value.
+        KwargChanged => "kwarg_changed",
+        /// A template argument that was not sent before is sent now.
+        KwargAdded => "kwarg_added",
+        /// A template argument that was sent before is not sent now.
+        KwargRemoved => "kwarg_removed",
+        /// A message arrived in the frozen history.
+        MessageAdded => "message_added",
+        /// A message left the frozen history.
+        MessageRemoved => "message_removed",
+        /// One line of one frozen message changed.
+        LineChanged => "line_changed",
+        /// One line arrived in a frozen message.
+        LineAdded => "line_added",
+        /// One line left a frozen message.
+        LineRemoved => "line_removed",
+    }
+}
+
+/// One attributable difference between two frozen heads.
+///
+/// Tagged for the reason [`Weights`] is: kind first, then only that kind's
+/// fields, so a delta carrying a field of another kind is an unknown key
+/// rather than a value nobody reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrefixDelta {
+    /// The model the request names moved.
+    ModelChanged {
+        /// What the previous request named.
+        was: String,
+        /// What this one names.
+        now: String,
+    },
+    /// A tool kept its definition and changed position.
+    ToolMoved {
+        /// Which tool, by the name it declares.
+        tool: String,
+        /// Where it was, counted from zero.
+        was: u32,
+        /// Where it is now.
+        now: u32,
+    },
+    /// A tool arrived.
+    ToolAdded {
+        /// Which tool.
+        tool: String,
+    },
+    /// A tool left.
+    ToolRemoved {
+        /// Which tool.
+        tool: String,
+    },
+    /// A tool kept its name and position and changed definition.
+    ToolChanged {
+        /// Which tool.
+        tool: String,
+    },
+    /// A template argument changed value.
+    KwargChanged {
+        /// Which argument.
+        key: String,
+        /// What it held, as the request spelled it.
+        was: String,
+        /// What it holds now.
+        now: String,
+    },
+    /// A template argument arrived.
+    KwargAdded {
+        /// Which argument.
+        key: String,
+        /// What it holds.
+        now: String,
+    },
+    /// A template argument left.
+    KwargRemoved {
+        /// Which argument.
+        key: String,
+        /// What it held.
+        was: String,
+    },
+    /// A message arrived in the frozen history.
+    MessageAdded {
+        /// Its position in the frozen history, counted from zero.
+        at: u32,
+        /// Who it is from, **as sent**. An open string rather than a closed
+        /// vocabulary: the roles a wire carries belong to the surface being
+        /// spoken, and an adapted record may carry one this library has never
+        /// met. What the template rendered it as is not obtainable; see
+        /// [`PrefixReason::Injection`].
+        role: String,
+        /// How many characters it carries.
+        chars: Count,
+    },
+    /// A message left the frozen history.
+    MessageRemoved {
+        /// Where it was, counted from zero.
+        at: u32,
+        /// Who it was from, as it had been sent.
+        role: String,
+        /// How many characters it carried.
+        chars: Count,
+    },
+    /// One line of one frozen message changed.
+    LineChanged {
+        /// Which message, counted from zero.
+        message: u32,
+        /// Which line of it, counted from zero.
+        line: u32,
+        /// What the line said.
+        was: String,
+        /// What it says now.
+        now: String,
+    },
+    /// One line arrived in a frozen message.
+    LineAdded {
+        /// Which message.
+        message: u32,
+        /// Which line.
+        line: u32,
+        /// What it says.
+        now: String,
+    },
+    /// One line left a frozen message.
+    LineRemoved {
+        /// Which message.
+        message: u32,
+        /// Which line.
+        line: u32,
+        /// What it said.
+        was: String,
+    },
+}
+
+impl PrefixDelta {
+    /// Which kind this delta is.
+    #[must_use]
+    pub fn kind(&self) -> DeltaKind {
+        match self {
+            Self::ModelChanged { .. } => DeltaKind::ModelChanged,
+            Self::ToolMoved { .. } => DeltaKind::ToolMoved,
+            Self::ToolAdded { .. } => DeltaKind::ToolAdded,
+            Self::ToolRemoved { .. } => DeltaKind::ToolRemoved,
+            Self::ToolChanged { .. } => DeltaKind::ToolChanged,
+            Self::KwargChanged { .. } => DeltaKind::KwargChanged,
+            Self::KwargAdded { .. } => DeltaKind::KwargAdded,
+            Self::KwargRemoved { .. } => DeltaKind::KwargRemoved,
+            Self::MessageAdded { .. } => DeltaKind::MessageAdded,
+            Self::MessageRemoved { .. } => DeltaKind::MessageRemoved,
+            Self::LineChanged { .. } => DeltaKind::LineChanged,
+            Self::LineAdded { .. } => DeltaKind::LineAdded,
+            Self::LineRemoved { .. } => DeltaKind::LineRemoved,
+        }
+    }
+
+    /// The class this delta supports.
+    ///
+    /// THE SINGLE STATEMENT of which delta supports which reason. The writer
+    /// picks a row's reason by taking the minimum of this over the diff --
+    /// minimum, because [`PrefixReason`]'s declaration order is its
+    /// precedence -- and [`validate`] refuses a row whose named reason is not
+    /// that minimum. One function, two readers, no second opinion.
+    #[must_use]
+    pub fn reason(&self) -> PrefixReason {
+        match self.kind() {
+            DeltaKind::ModelChanged => PrefixReason::Model,
+            DeltaKind::ToolMoved
+            | DeltaKind::ToolAdded
+            | DeltaKind::ToolRemoved
+            | DeltaKind::ToolChanged => PrefixReason::Tools,
+            DeltaKind::KwargChanged | DeltaKind::KwargAdded | DeltaKind::KwargRemoved => {
+                PrefixReason::Effort
+            }
+            DeltaKind::MessageAdded | DeltaKind::MessageRemoved => PrefixReason::Injection,
+            DeltaKind::LineChanged | DeltaKind::LineAdded | DeltaKind::LineRemoved => {
+                PrefixReason::Text
+            }
+        }
+    }
+}
+
+/// The class a diff as a whole supports, which is the reason a row may name.
+///
+/// The minimum over the diff's own classes, and [`PrefixReason::Unattributed`]
+/// for an empty one. Here rather than in the writer, so that the rule
+/// [`validate`] enforces and the rule a writer applies are one function.
+#[must_use]
+pub fn reason_of(diff: &[PrefixDelta]) -> PrefixReason {
+    diff.iter()
+        .map(PrefixDelta::reason)
+        .min()
+        .unwrap_or(PrefixReason::Unattributed)
+}
+
+vocabulary! {
+    /// What discarded a session's history.
+    ///
+    /// One variant, and it is a vocabulary rather than a boolean because the
+    /// next source -- an operator's own `/clear`, a server-side eviction a
+    /// provider reports -- is a different fact about who threw the cache
+    /// away. A tag makes room for it; a flag named `compacted` would not.
+    CompactionSource {
+        /// The harness itself: a synthetic summary message and a moved
+        /// session-start marker. #79's third specimen, and the SPA's most
+        /// persuasive single frame -- a session's own tooling discarding its
+        /// cache while the model is reused.
+        HarnessCompaction => "harness_compaction",
+    }
+}
+
 /// One row of a session record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -692,6 +1043,74 @@ pub enum Event {
         /// ledger, and a ledger is still a record -- provenance never
         /// depended on the payload being kept, only on its being named.
         text: Option<String>,
+        /// The digest of the frozen head these bytes were sent with.
+        ///
+        /// THE MEASUREMENT #79 EXISTS FOR. The client already records cache
+        /// telemetry per request; it did not record *what the head was*, so a
+        /// miss could not be attributed to head mutation versus provider
+        /// expiry and the split had to be estimated by residual. The head is
+        /// a byte string the harness controls, so it can be hashed, and this
+        /// is that hash: `crate::client::wire::head` rendered and put through
+        /// the crate's one digest.
+        ///
+        /// Digest-checked, like every other identity claim here.
+        ///
+        /// `None` ONLY for an ADAPTED record. A foreign harness's log records
+        /// what was said, not the bytes that were sent, so an adapter has no
+        /// head to hash and inventing one would be a digest of this library's
+        /// guess. A `live` record whose request row carries none is refused
+        /// ([`StructureError::PrefixChange`]), on the same rule as
+        /// `Reasoning::Undeclared` and `Kind::Unknown`: a session this
+        /// library drove knows the bytes it sent.
+        head_sha256: Option<String>,
+    },
+    /// The frozen head a lane sends changed between two of its requests.
+    ///
+    /// **It carries no digest of its own, and that is the point.** Both
+    /// digests are on the `request` rows -- the one this names and the one
+    /// before it on the same lane -- so this row cannot contradict them. It is
+    /// the rule that keeps `substrate` off `rejected`, applied to a
+    /// measurement: a fact written twice is a fact that can disagree with
+    /// itself. The LANE is inherited the same way, through `at_request`.
+    PrefixChanged {
+        /// This event's identifier.
+        id: String,
+        /// The request sent under the new head. Its predecessor on the same
+        /// lane is what it changed FROM, and [`validate`] checks that the two
+        /// digests actually differ -- a `prefix.changed` over a head that did
+        /// not change is a row nothing could have produced.
+        at_request: String,
+        /// What moved, named. See [`PrefixReason`]: the declaration order is
+        /// the precedence, and this must be the minimum over `diff`'s own
+        /// classes.
+        reason: PrefixReason,
+        /// What moved, in detail. Empty exactly when `reason` is
+        /// [`PrefixReason::Unattributed`], and never otherwise: a residual
+        /// with evidence is not a residual, and evidence with no residual is
+        /// a class nobody named.
+        diff: Vec<PrefixDelta>,
+    },
+    /// A harness discarded its own history and put a summary in its place.
+    ///
+    /// A SEAM-LIKE EVENT AND NOT A SEAM. A seam is this architecture's own
+    /// deliberate re-render, with the dumps either side; this is somebody
+    /// else's harness throwing the prefix away -- a synthetic summary message
+    /// injected mid-history and the session-start marker moved, which is a
+    /// double-cold event even when the model is reused. Written by an adapter
+    /// reading a flag the harness itself set, never by sniffing prose.
+    Compaction {
+        /// This event's identifier.
+        id: String,
+        /// The turn it happened in. Every id-bearing row links to something
+        /// already seen, and a compaction names the turn it interrupted.
+        at_turn: u32,
+        /// What discarded the history.
+        source: CompactionSource,
+        /// How many characters the summary that replaced it carries. A
+        /// measurement rather than a flag: what compaction cost is the
+        /// difference between what was there and what stands in for it, and
+        /// this is the half the log affords.
+        summary_chars: Count,
     },
     /// A response came back.
     Response {
@@ -906,6 +1325,8 @@ impl Event {
             Self::Start { .. } => Kind::Start,
             Self::Turn { .. } => Kind::Turn,
             Self::Request { .. } => Kind::Request,
+            Self::PrefixChanged { .. } => Kind::PrefixChanged,
+            Self::Compaction { .. } => Kind::Compaction,
             Self::Response { .. } => Kind::Response,
             Self::Fork { .. } => Kind::Fork,
             Self::Capture { .. } => Kind::Capture,
@@ -923,6 +1344,8 @@ impl Event {
     pub fn id(&self) -> Option<&str> {
         match self {
             Self::Request { id, .. }
+            | Self::PrefixChanged { id, .. }
+            | Self::Compaction { id, .. }
             | Self::Response { id, .. }
             | Self::Fork { id, .. }
             | Self::Capture { id, .. }
@@ -1244,6 +1667,156 @@ pub enum StructureError {
     /// word for. A live record's rows were written by this library, which has
     /// a word for every row it writes.
     UnknownRowInLiveRecord(String),
+    /// A head fingerprint, or a `prefix.changed` row, that cannot be true.
+    ///
+    /// A SUB-ENUM rather than five more variants here, for the reason
+    /// [`indistinguishable_complaint`] is out of line one screen up: this
+    /// enum's `Display` is at the file's line ceiling, and five complaints
+    /// worth reading do not fit inside it. Shortening them to fit would trade
+    /// what the next reader is told for where the text happens to sit, and an
+    /// `#[allow]` would be spending the 2026-09-12 ruling's one exemption on
+    /// a `match` that is not an enumeration of a vocabulary.
+    PrefixChange(PrefixChangeError),
+}
+
+/// Why a head fingerprint or a `prefix.changed` row cannot be true.
+///
+/// Every one of these is a row that nothing which actually hashed a head
+/// could have produced. They are refusals rather than warnings because a
+/// cache-miss census reads these rows as a measurement: a `prefix.changed`
+/// nobody can check is the residual estimate #79 replaces, wearing the
+/// clothes of the measurement that was supposed to replace it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrefixChangeError {
+    /// A `prefix.changed` over a request that carries no head digest, so
+    /// there is nothing for it to be a change of.
+    Unhashed {
+        /// The `prefix.changed` row.
+        id: String,
+        /// The request it names.
+        at_request: String,
+    },
+    /// A `prefix.changed` over the FIRST request on its lane. The first head
+    /// a lane sends is the head it started with; there is no predecessor for
+    /// it to differ from, and a row saying otherwise is counting a lane's
+    /// first call as a mutation.
+    FirstOnItsLane {
+        /// The `prefix.changed` row.
+        id: String,
+        /// The request it names.
+        at_request: String,
+        /// The lane that request was sent on.
+        lane: String,
+    },
+    /// A `prefix.changed` whose two heads are the same digest. Nothing
+    /// changed, so nothing produced this row.
+    NotAChange {
+        /// The `prefix.changed` row.
+        id: String,
+        /// The digest on both sides.
+        digest: String,
+    },
+    /// A `prefix.changed` whose named reason is not the one its own diff
+    /// supports.
+    ///
+    /// Checked in BOTH directions, because both are wrong in the same way. A
+    /// row naming `text` over a diff that moved a tool has attributed a miss
+    /// to the wrong part of the head; a row naming `unattributed` over a diff
+    /// that names three lines has thrown away evidence it was carrying. The
+    /// named class must equal the minimum over the diff's own classes, and
+    /// `unattributed` is the one class whose diff is empty.
+    ReasonDisagreesWithDiff {
+        /// The `prefix.changed` row.
+        id: String,
+        /// What it says.
+        says: PrefixReason,
+        /// What its diff supports.
+        supports: PrefixReason,
+    },
+    /// A `live` record whose `request` row carries no head digest.
+    ///
+    /// Absence is an ADAPTED-record state: a foreign log records what was
+    /// said, not the bytes that were sent. A session this library drove
+    /// rendered the head itself, so "there was no head to hash" in a live
+    /// record is a bug in the writer rather than a fact about the run -- the
+    /// same rule `UndeclaredInLiveRecord` and `UnknownRowInLiveRecord` apply
+    /// one field over, and it was missing here while the field's own doc
+    /// claimed it.
+    HeadUnhashedInLiveRecord {
+        /// The request row with no digest.
+        id: String,
+    },
+    /// A `live` record's request whose head digest differs from its
+    /// predecessor's on the same lane, with no `prefix.changed` naming it.
+    ///
+    /// The four refusals above this one all run row -> digests: they check
+    /// that an EXISTING `prefix.changed` row is true of the two heads it
+    /// names. None of them run the other way, digests -> row, which is the
+    /// direction #79's own design states ("A change... emits a typed
+    /// `prefix.changed` event... never silently"). Checked once, at the end
+    /// of the walk, against every head this format already proves changed --
+    /// a live record has one writer, and a writer that computed the change to
+    /// classify a cache miss but did not also emit the row is a bug in that
+    /// writer, not a fact about the run.
+    ChangeNotNamed {
+        /// The request whose head changed unannounced.
+        at_request: String,
+        /// The lane it was sent on.
+        lane: String,
+    },
+}
+
+impl fmt::Display for PrefixChangeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unhashed { id, at_request } => write!(
+                f,
+                "`{id}` reports the head changed at `{at_request}`, which carries no \
+                 `head_sha256`; a change is a difference between two digests, and this \
+                 row names a request that has none"
+            ),
+            Self::FirstOnItsLane {
+                id,
+                at_request,
+                lane,
+            } => write!(
+                f,
+                "`{id}` reports the head changed at `{at_request}`, which is the first \
+                 request on the `{lane}` lane; the head a lane opens with is not a head \
+                 that moved, and counting it as one would make every lane's first call a \
+                 mutation"
+            ),
+            Self::NotAChange { id, digest } => write!(
+                f,
+                "`{id}` reports a head change and both requests hash to `{digest}`; a \
+                 `prefix.changed` over a head that did not change is a row nothing that \
+                 compared two digests could have written"
+            ),
+            Self::ReasonDisagreesWithDiff { id, says, supports } => write!(
+                f,
+                "`{id}` names `{}` and its diff supports `{}`; the reason is the strongest \
+                 class the diff itself carries, and `unattributed` is the one class whose \
+                 diff is empty",
+                says.tag(),
+                supports.tag()
+            ),
+            Self::HeadUnhashedInLiveRecord { id } => write!(
+                f,
+                "request `{id}` carries no `head_sha256` in a record whose source is \
+                 `live`, and a session this library drove rendered the head itself; an \
+                 absent fingerprint is an adapted record's state, where the log records \
+                 what was said rather than the bytes that were sent"
+            ),
+            Self::ChangeNotNamed { at_request, lane } => write!(
+                f,
+                "request `{at_request}` on lane `{lane}` hashes to a different head than \
+                 the request before it on that lane, and no `prefix.changed` row names the \
+                 change; a live record computed both digests to write this one, and a head \
+                 that moved without a row attributing it is exactly the silent miss #79 \
+                 exists to replace"
+            ),
+        }
+    }
 }
 
 impl fmt::Display for ParseError {
@@ -1415,6 +1988,7 @@ impl fmt::Display for StructureError {
                 write!(f, "turn {found} follows where turn {want} was expected")
             }
             Self::SummaryNotLast => write!(f, "`summary` is not the last row, or there are two"),
+            Self::PrefixChange(why) => write!(f, "{why}"),
         }
     }
 }
@@ -1607,7 +2181,14 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             substrate: take_string(&mut members, of, "substrate")?,
             retry_of: take_optional_string(&mut members, of, "retry_of")?,
             text: take_optional_text(&mut members, of, "text")?,
+            // Digest-checked here rather than in the structural pass, like
+            // `weights.sha256`: a fingerprint that is not a digest is a SHAPE
+            // error -- nothing downstream can compare it -- and reporting it
+            // as a disagreement about a head would name the wrong defect.
+            head_sha256: take_optional_digest(&mut members, of, "head_sha256")?,
         },
+        Kind::PrefixChanged => prefix_changed(&mut members, of)?,
+        Kind::Compaction => compaction(&mut members, of)?,
         Kind::Response => Event::Response {
             id: take_string(&mut members, of, "id")?,
             to_request: take_string(&mut members, of, "to_request")?,
@@ -1645,20 +2226,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             grounded: take_u64(&mut members, of, "grounded")?,
             of: take_u64(&mut members, of, "of")?,
         },
-        Kind::Claim => Event::Claim {
-            id: take_string(&mut members, of, "id")?,
-            hypothesis: take_string(&mut members, of, "hypothesis")?,
-            result: {
-                let text = take_string(&mut members, of, "result")?;
-                Verdict::from_tag(&text).ok_or(SchemaError::BadValue {
-                    of,
-                    field: "result",
-                    found: text,
-                })?
-            },
-            consumes: take_artifacts(&mut members, of)?,
-            supersedes: take_optional_string(&mut members, of, "supersedes")?,
-        },
+        Kind::Claim => claim(&mut members, of)?,
         Kind::Summary => Event::Summary {
             summary: summary(&mut members, of)?,
             // Read here rather than inside `summary`, because it belongs to
@@ -1709,6 +2277,78 @@ fn summary(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Su
             targets_matched: take_u32(members, of, "targets_matched")?,
             digests: take_digests(members, of)?,
         },
+    })
+}
+
+/// A `claim` row, from its members.
+///
+/// Its own function for the reason [`summary`], [`prefix_changed`] and
+/// [`compaction`] are: it dispatches on a second vocabulary. It was inline
+/// until [`event`] grew two kinds and ran past the line ceiling, and moving a
+/// vocabulary arm out is the split that ceiling exists to ask for -- the
+/// `#[allow]` beside `event_value` is the one exemption the 2026-09-12 ruling
+/// grants, and it is granted to an exhaustive match, not to inlined helpers.
+fn claim(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Event, ParseError> {
+    let id = take_string(members, of, "id")?;
+    let hypothesis = take_string(members, of, "hypothesis")?;
+    let written = take_string(members, of, "result")?;
+    let result = Verdict::from_tag(&written).ok_or(SchemaError::BadValue {
+        of,
+        field: "result",
+        found: written,
+    })?;
+    Ok(Event::Claim {
+        id,
+        hypothesis,
+        result,
+        consumes: take_artifacts(members, of)?,
+        supersedes: take_optional_string(members, of, "supersedes")?,
+    })
+}
+
+/// A `prefix.changed` row, from its members.
+///
+/// Its own function for the reason [`summary`] is: the arm dispatches on a
+/// second vocabulary, and a reader looking for what a prefix change may say
+/// should not have to read ten other kinds first.
+fn prefix_changed(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Event, ParseError> {
+    let id = take_string(members, of, "id")?;
+    let at_request = take_string(members, of, "at_request")?;
+    let written = take_string(members, of, "reason")?;
+    let reason = PrefixReason::from_tag(&written).ok_or(SchemaError::BadValue {
+        of,
+        field: "reason",
+        found: written,
+    })?;
+    Ok(Event::PrefixChanged {
+        id,
+        at_request,
+        reason,
+        diff: take_diff(members, of)?,
+    })
+}
+
+/// A `compaction` row, from its members.
+fn compaction(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Event, ParseError> {
+    let id = take_string(members, of, "id")?;
+    let at_turn = take_u32(members, of, "at_turn")?;
+    let written = take_string(members, of, "source")?;
+    let source = CompactionSource::from_tag(&written).ok_or(SchemaError::BadValue {
+        of,
+        field: "source",
+        found: written,
+    })?;
+    Ok(Event::Compaction {
+        id,
+        at_turn,
+        source,
+        summary_chars: take_u64(members, of, "summary_chars")?,
     })
 }
 
@@ -1816,6 +2456,7 @@ fn indistinguishable(one: &Substrate, other: &Substrate) -> bool {
         reasoning,
         reasoning_control,
         chat_template_sha256,
+        cache_ttl,
     } = one;
     *engine == other.engine
         && *weights == other.weights
@@ -1824,6 +2465,13 @@ fn indistinguishable(one: &Substrate, other: &Substrate) -> bool {
         && *reasoning == other.reasoning
         && *reasoning_control == other.reasoning_control
         && *chat_template_sha256 == other.chat_template_sha256
+        // TWO PROVIDER PATHS BEHIND ONE WEIGHTS DIGEST ARE TWO SUBSTRATES
+        // when their declared lifetimes differ -- #79's own specimen, one
+        // model served first-party at roughly thirty minutes and through
+        // Bedrock at roughly five. Declare them and they are two; leave the
+        // key out on both and they are one, written twice, which is what this
+        // refusal says.
+        && *cache_ttl == other.cache_ttl
 }
 
 /// Which weights a substrate ran, from its `weights` object.
@@ -1970,6 +2618,60 @@ fn reasoning_control(
     })
 }
 
+/// The cache lifetime a substrate declares, from its object.
+///
+/// KIND FIRST, the shape [`reasoning_control`]'s budget uses and for the same
+/// reason: `{"kind":"none","seconds":1800}` leaves `seconds` behind and the
+/// caller refuses it as unknown. A lifetime recorded under a declaration of
+/// no caching is exactly the contradiction one untagged field would swallow.
+fn cache_ttl(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<CacheTtl, ParseError> {
+    let tag = take_string(members, of, "kind")?;
+    let kind = CacheTtlKind::from_tag(&tag).ok_or(SchemaError::BadValue {
+        of,
+        field: "cache_ttl.kind",
+        found: tag,
+    })?;
+    Ok(match kind {
+        CacheTtlKind::Seconds => CacheTtl::Seconds(take_u64(members, of, "seconds")?),
+        CacheTtlKind::Uncached => CacheTtl::Uncached,
+    })
+}
+
+/// The cache lifetime a substrate declares, or the absence of one.
+///
+/// OPTIONAL, and taken with `remove` for the reason `reasoning_control` is: a
+/// substrate whose provider path nobody documented declares no lifetime, and
+/// [`substrate`]'s unknown-field check is what stops the key being misspelled
+/// into silence.
+fn declared_cache_ttl(
+    fields: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<CacheTtl>, ParseError> {
+    match fields.remove("cache_ttl") {
+        None => Ok(None),
+        Some(Value::Object(mut members)) => {
+            let built = cache_ttl(&mut members, of)?;
+            if let Some(field) = members.keys().next() {
+                return Err(SchemaError::UnknownField {
+                    of,
+                    field: format!("substrates[].cache_ttl.{field}"),
+                }
+                .into());
+            }
+            Ok(Some(built))
+        }
+        Some(_) => Err(SchemaError::WrongType {
+            of,
+            field: "substrates[].cache_ttl".to_owned(),
+            want: "an object carrying `kind`",
+        }
+        .into()),
+    }
+}
+
 /// One substrate, from its object.
 fn substrate(
     fields: &mut BTreeMap<String, Value>,
@@ -2088,6 +2790,7 @@ fn substrate(
                 .into());
             }
         },
+        cache_ttl: declared_cache_ttl(fields, of)?,
     };
     if let Some(field) = fields.keys().next() {
         return Err(SchemaError::UnknownField {
@@ -2142,6 +2845,128 @@ fn take_artifacts(
         artifacts.push(artifact);
     }
     Ok(artifacts)
+}
+
+/// The diff a `prefix.changed` row carries, with every delta read kind-first.
+///
+/// Modelled on [`take_artifacts`]. Empty is a legal diff and means the
+/// residual: [`validate`] is what pairs an empty diff with
+/// [`PrefixReason::Unattributed`] and refuses either without the other, so
+/// this reader does not have to know the rule and cannot become a second
+/// opinion about it.
+fn take_diff(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Vec<PrefixDelta>, ParseError> {
+    let Some(value) = members.remove("diff") else {
+        return Err(SchemaError::MissingField { of, field: "diff" }.into());
+    };
+    let Value::Array(items) = value else {
+        return Err(SchemaError::WrongType {
+            of,
+            field: "diff".to_owned(),
+            want: "a list of deltas",
+        }
+        .into());
+    };
+    let mut diff = Vec::with_capacity(items.len());
+    for item in items {
+        let Value::Object(mut fields) = item else {
+            return Err(SchemaError::WrongType {
+                of,
+                field: "diff[]".to_owned(),
+                want: "a delta",
+            }
+            .into());
+        };
+        diff.push(delta(&mut fields, of)?);
+    }
+    Ok(diff)
+}
+
+/// One delta, from its object.
+///
+/// KIND FIRST, then only that kind's fields -- the shape [`weights`] and
+/// [`summary`] use, and for the same reason: a field belonging to another
+/// kind is left behind and refused as unknown, so a `tool_moved` carrying a
+/// `line` is an error rather than a number nobody reads.
+fn delta(
+    fields: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<PrefixDelta, ParseError> {
+    let tag = take_string(fields, of, "kind")?;
+    let kind = DeltaKind::from_tag(&tag).ok_or(SchemaError::BadValue {
+        of,
+        field: "diff[].kind",
+        found: tag,
+    })?;
+    let built = match kind {
+        DeltaKind::ModelChanged => PrefixDelta::ModelChanged {
+            was: take_string(fields, of, "was")?,
+            now: take_string(fields, of, "now")?,
+        },
+        DeltaKind::ToolMoved => PrefixDelta::ToolMoved {
+            tool: take_string(fields, of, "tool")?,
+            was: take_u32(fields, of, "was")?,
+            now: take_u32(fields, of, "now")?,
+        },
+        DeltaKind::ToolAdded => PrefixDelta::ToolAdded {
+            tool: take_string(fields, of, "tool")?,
+        },
+        DeltaKind::ToolRemoved => PrefixDelta::ToolRemoved {
+            tool: take_string(fields, of, "tool")?,
+        },
+        DeltaKind::ToolChanged => PrefixDelta::ToolChanged {
+            tool: take_string(fields, of, "tool")?,
+        },
+        DeltaKind::KwargChanged => PrefixDelta::KwargChanged {
+            key: take_string(fields, of, "key")?,
+            was: take_payload(fields, of, "was")?,
+            now: take_payload(fields, of, "now")?,
+        },
+        DeltaKind::KwargAdded => PrefixDelta::KwargAdded {
+            key: take_string(fields, of, "key")?,
+            now: take_payload(fields, of, "now")?,
+        },
+        DeltaKind::KwargRemoved => PrefixDelta::KwargRemoved {
+            key: take_string(fields, of, "key")?,
+            was: take_payload(fields, of, "was")?,
+        },
+        DeltaKind::MessageAdded => PrefixDelta::MessageAdded {
+            at: take_u32(fields, of, "at")?,
+            role: take_string(fields, of, "role")?,
+            chars: take_u64(fields, of, "chars")?,
+        },
+        DeltaKind::MessageRemoved => PrefixDelta::MessageRemoved {
+            at: take_u32(fields, of, "at")?,
+            role: take_string(fields, of, "role")?,
+            chars: take_u64(fields, of, "chars")?,
+        },
+        DeltaKind::LineChanged => PrefixDelta::LineChanged {
+            message: take_u32(fields, of, "message")?,
+            line: take_u32(fields, of, "line")?,
+            was: take_payload(fields, of, "was")?,
+            now: take_payload(fields, of, "now")?,
+        },
+        DeltaKind::LineAdded => PrefixDelta::LineAdded {
+            message: take_u32(fields, of, "message")?,
+            line: take_u32(fields, of, "line")?,
+            now: take_payload(fields, of, "now")?,
+        },
+        DeltaKind::LineRemoved => PrefixDelta::LineRemoved {
+            message: take_u32(fields, of, "message")?,
+            line: take_u32(fields, of, "line")?,
+            was: take_payload(fields, of, "was")?,
+        },
+    };
+    if let Some(field) = fields.keys().next() {
+        return Err(SchemaError::UnknownField {
+            of,
+            field: format!("diff[].{field}"),
+        }
+        .into());
+    }
+    Ok(built)
 }
 
 /// A `digests` list, with every entry checked to be one.
@@ -2262,6 +3087,52 @@ fn take_optional_text(
     }
 }
 
+/// A required string that may legitimately say nothing.
+///
+/// Distinct from [`take_string`] for the reason [`take_optional_text`] is
+/// distinct from [`take_optional_string`], and the distinction is
+/// load-bearing exactly once: a line delta's `was`/`now` can be the EMPTY
+/// LINE. A head that gained or lost a trailing newline gained or lost an
+/// empty final segment, and a reader that refused the empty string there
+/// would refuse the one delta the trailing-newline case produces -- pushing a
+/// real, attributable edit into the residual, which is the defect
+/// [`PrefixReason::Unattributed`] exists to be rare enough to mean something.
+fn take_payload(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+    field: &'static str,
+) -> Result<String, ParseError> {
+    match members.remove(field) {
+        Some(Value::String(text)) => Ok(text),
+        Some(_) => Err(SchemaError::WrongType {
+            of,
+            field: field.to_owned(),
+            want: "a string",
+        }
+        .into()),
+        None => Err(SchemaError::MissingField { of, field }.into()),
+    }
+}
+
+/// An optional digest: absent, or 64 lowercase hex characters.
+///
+/// Checked HERE rather than in the structural pass, for the reason
+/// `take_digests` gives one function up: a string that is not a digest is a
+/// shape error, because nothing downstream can compare it.
+fn take_optional_digest(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+    field: &'static str,
+) -> Result<Option<String>, ParseError> {
+    let Some(text) = take_optional_string(members, of, field)? else {
+        return Ok(None);
+    };
+    if !digest_ok(&text) {
+        return Err(StructureError::BadDigest(text).into());
+    }
+    Ok(Some(text))
+}
+
 /// An optional object. Empty is allowed: a tool called with no arguments has
 /// an argument list, and it is empty.
 fn take_optional_object(
@@ -2376,6 +3247,54 @@ struct Seen<'a> {
     turns: BTreeSet<u32>,
     next_turn: u32,
     prefill_tokens: Count,
+    /// What each request said about its own head, and what the request before
+    /// it on the same lane said.
+    ///
+    /// Held per request rather than per lane because that is what a
+    /// `prefix.changed` names: the row points at ONE request and asserts its
+    /// head differs from its predecessor's, and both halves have to be
+    /// answerable at the moment the row is admitted rather than at the end.
+    heads: BTreeMap<&'a str, Head<'a>>,
+    /// The most recent request on each lane, so far.
+    latest: BTreeMap<&'a str, &'a str>,
+    /// Requests a `prefix.changed` row has already named, once that row has
+    /// passed every other check in [`Seen::admit_prefix_change`].
+    ///
+    /// Checked at the end of the walk against every head change `heads`
+    /// itself proves happened, so a live record cannot carry a head mutation
+    /// that no row attributes -- the direction #79's own design forbids
+    /// ("never silently") and the four in-row refusals above it do not cover,
+    /// since all four run the other way: row -> digests, never digests -> row.
+    named_changes: BTreeSet<&'a str>,
+}
+
+/// What one request row said about the head it was sent under.
+struct Head<'a> {
+    /// The lane it was sent on, which is the lane a `prefix.changed` naming
+    /// it inherits.
+    lane: &'a str,
+    /// Its own fingerprint, when it carries one.
+    digest: Option<&'a str>,
+    /// What the request before it on the same lane said about ITS head.
+    previous: Predecessor<'a>,
+}
+
+/// What came before one request on its own lane.
+///
+/// THREE STATES, as a vocabulary rather than as a nested option, because the
+/// three get different refusals. A lane's first request has no predecessor at
+/// all and cannot have changed from one; a predecessor that carried no digest
+/// is an adapted record's ordinary state, where "the head moved" is still
+/// sayable with only one side known; and a predecessor with a digest is the
+/// case a change is actually computed from.
+#[derive(Clone, Copy)]
+enum Predecessor<'a> {
+    /// This is the first request its lane sent.
+    None,
+    /// There was one, and it carried no fingerprint.
+    Unhashed,
+    /// There was one, and this is what it hashed to.
+    Digest(&'a str),
 }
 
 impl<'a> Seen<'a> {
@@ -2402,7 +3321,7 @@ impl<'a> Seen<'a> {
     }
 
     /// The rules one row carries about rows before it.
-    fn admit(&mut self, event: &Event) -> Result<(), ParseError> {
+    fn admit(&mut self, event: &'a Event) -> Result<(), ParseError> {
         match event {
             Event::Turn {
                 index,
@@ -2419,11 +3338,43 @@ impl<'a> Seen<'a> {
                 self.next_turn += 1;
                 self.prefill_tokens = self.prefill_tokens.saturating_add(*prefill_tokens);
             }
-            Event::Request { id, retry_of, .. } => {
+            Event::Request {
+                id,
+                lane,
+                retry_of,
+                head_sha256,
+                ..
+            } => {
                 if let Some(previous) = retry_of {
                     link(&self.ids, id, "retry_of", previous, Kind::Request)?;
                 }
+                // The lane's own head history, accumulated as the walk goes.
+                // A `prefix.changed` row resolves against THIS, like every
+                // other link here, so a record can be checked while it is
+                // being written rather than only once it is whole.
+                let before = self.latest.insert(lane.as_str(), id.as_str());
+                let previous_on_lane = match before.and_then(|before| self.heads.get(before)) {
+                    None => Predecessor::None,
+                    Some(head) => head
+                        .digest
+                        .map_or(Predecessor::Unhashed, Predecessor::Digest),
+                };
+                self.heads.insert(
+                    id.as_str(),
+                    Head {
+                        lane: lane.as_str(),
+                        digest: head_sha256.as_deref(),
+                        previous: previous_on_lane,
+                    },
+                );
             }
+            Event::PrefixChanged {
+                id,
+                at_request,
+                reason,
+                diff,
+            } => self.admit_prefix_change(id, at_request, *reason, diff)?,
+            Event::Compaction { at_turn, .. } => self.require_turn(*at_turn)?,
             Event::Response { id, to_request, .. } => {
                 link(&self.ids, id, "to_request", to_request, Kind::Request)?;
             }
@@ -2478,6 +3429,81 @@ impl<'a> Seen<'a> {
         } else {
             Err(StructureError::UnknownTurn(index).into())
         }
+    }
+
+    /// What a `prefix.changed` row must be true of.
+    ///
+    /// Four refusals, and every one of them is a row that nothing which
+    /// actually compared two digests could have written. The link is checked
+    /// first, through the same [`link`] every other row uses, so a row naming
+    /// a response or a turn is refused before its arithmetic is examined.
+    fn admit_prefix_change(
+        &mut self,
+        id: &str,
+        at_request: &'a str,
+        reason: PrefixReason,
+        diff: &[PrefixDelta],
+    ) -> Result<(), ParseError> {
+        link(&self.ids, id, "at_request", at_request, Kind::Request)?;
+        // Resolved, because `link` just proved a `request` under this id is
+        // already in `ids`, and every one of those went through `admit`'s
+        // request arm, which is the only writer of `heads`.
+        let head = self
+            .heads
+            .get(at_request)
+            .ok_or_else(|| StructureError::DanglingLink {
+                from: id.to_owned(),
+                field: "at_request",
+                to: at_request.to_owned(),
+            })?;
+        let Some(digest) = head.digest else {
+            return Err(StructureError::PrefixChange(PrefixChangeError::Unhashed {
+                id: id.to_owned(),
+                at_request: at_request.to_owned(),
+            })
+            .into());
+        };
+        match head.previous {
+            Predecessor::None => {
+                return Err(
+                    StructureError::PrefixChange(PrefixChangeError::FirstOnItsLane {
+                        id: id.to_owned(),
+                        at_request: at_request.to_owned(),
+                        lane: head.lane.to_owned(),
+                    })
+                    .into(),
+                );
+            }
+            Predecessor::Digest(before) if before == digest => {
+                return Err(StructureError::PrefixChange(PrefixChangeError::NotAChange {
+                    id: id.to_owned(),
+                    digest: digest.to_owned(),
+                })
+                .into());
+            }
+            // A predecessor that carried NO digest is not a contradiction: an
+            // adapted record can hash one request and not the one before it,
+            // and "the head moved" is still sayable where only one side is
+            // known. What is refused is two digests that are the same one.
+            Predecessor::Unhashed | Predecessor::Digest(_) => {}
+        }
+        let supports = reason_of(diff);
+        if reason != supports {
+            return Err(
+                StructureError::PrefixChange(PrefixChangeError::ReasonDisagreesWithDiff {
+                    id: id.to_owned(),
+                    says: reason,
+                    supports,
+                })
+                .into(),
+            );
+        }
+        // Everything above is a refusal; reaching here means this row is a
+        // real attribution of a real change, so the request it names is
+        // covered and the end-of-walk pass in `validate` will not refuse it
+        // as a silent mutation.
+        self.named_changes.insert(at_request);
+        Ok(())
     }
 
     fn admit_claim(
@@ -2621,6 +3647,20 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
             Event::Unknown { source_kind, .. } if live => {
                 return Err(StructureError::UnknownRowInLiveRecord(source_kind.clone()).into());
             }
+            // The third state that exists only for an adapted record, refused
+            // here beside the other two rather than left to read as a
+            // measurement. A live record's requests were rendered by this
+            // library, so it knows the bytes it sent and can hash them.
+            Event::Request {
+                id,
+                head_sha256: None,
+                ..
+            } if live => {
+                return Err(StructureError::PrefixChange(
+                    PrefixChangeError::HeadUnhashedInLiveRecord { id: id.clone() },
+                )
+                .into());
+            }
             _ if position == 0 => return Err(StructureError::StartNotFirst.into()),
             _ => {}
         }
@@ -2674,6 +3714,35 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
 
     if regime.is_none() {
         return Err(StructureError::NoStart.into());
+    }
+    if live {
+        refuse_unnamed_changes(&seen)?;
+    }
+    Ok(())
+}
+
+/// digests -> row, the direction none of `Seen::admit_prefix_change`'s four
+/// in-row refusals check: every head change the walk itself proved (two
+/// consecutive digests on one lane that differ) must have been named by a
+/// `prefix.changed` that passed those refusals, or a live record's own
+/// computed change is going unreported. Called only for `live` records, like
+/// [`StructureError::PrefixChange`]'s `HeadUnhashedInLiveRecord` beside it: an
+/// adapted record's digests came from a foreign log that may hash one side of
+/// a pair and not the other, so "unnamed" there is not yet a contradiction.
+fn refuse_unnamed_changes(seen: &Seen<'_>) -> Result<(), ParseError> {
+    for (&at_request, head) in &seen.heads {
+        if let (Some(digest), Predecessor::Digest(before)) = (head.digest, head.previous)
+            && before != digest
+            && !seen.named_changes.contains(at_request)
+        {
+            return Err(
+                StructureError::PrefixChange(PrefixChangeError::ChangeNotNamed {
+                    at_request: at_request.to_owned(),
+                    lane: head.lane.to_owned(),
+                })
+                .into(),
+            );
+        }
     }
     Ok(())
 }
@@ -2819,12 +3888,34 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             substrate,
             retry_of,
             text,
+            head_sha256,
             ..
         } => {
             members.put_text("lane", lane);
             members.put_text("substrate", substrate);
             members.put_optional("retry_of", retry_of.clone().map(Value::String));
             members.put_optional("text", text.clone().map(Value::String));
+            members.put_optional("head_sha256", head_sha256.clone().map(Value::String));
+        }
+        Event::PrefixChanged {
+            at_request,
+            reason,
+            diff,
+            ..
+        } => {
+            members.put_text("at_request", at_request);
+            members.put_text("reason", reason.tag());
+            members.put("diff", diff_value(diff));
+        }
+        Event::Compaction {
+            at_turn,
+            source,
+            summary_chars,
+            ..
+        } => {
+            members.put_u32("at_turn", *at_turn);
+            members.put_text("source", source.tag());
+            members.put_count("summary_chars", *summary_chars);
         }
         Event::Response {
             to_request,
@@ -2955,6 +4046,83 @@ fn summary_value(summary: &Summary, product_sha256: &str, members: &mut Members)
     }
 }
 
+/// A `prefix.changed` row's diff, as the value space.
+///
+/// Kind first and then only that kind's fields, so what the writer emits is
+/// what [`delta`] accepts. Written as a table from the variant to its own
+/// members rather than as a second spelling of the reader, for the reason
+/// `weights_value` and [`weights`] are paired: a field added to one of them
+/// has an obvious home in the other, and the round-trip test is what says
+/// they agree.
+fn diff_value(diff: &[PrefixDelta]) -> Value {
+    Value::Array(diff.iter().map(delta_value).collect())
+}
+
+/// One delta, as the value space.
+fn delta_value(delta: &PrefixDelta) -> Value {
+    let text = |value: &str| Value::String(value.to_owned());
+    let number = |value: u32| Value::Integer(i64::from(value));
+    let mut members = BTreeMap::from([("kind".to_owned(), text(delta.kind().tag()))]);
+    let mut put = |key: &str, value: Value| {
+        members.insert(key.to_owned(), value);
+    };
+    match delta {
+        PrefixDelta::ModelChanged { was, now } => {
+            put("was", text(was));
+            put("now", text(now));
+        }
+        PrefixDelta::ToolMoved { tool, was, now } => {
+            put("tool", text(tool));
+            put("was", number(*was));
+            put("now", number(*now));
+        }
+        PrefixDelta::ToolAdded { tool }
+        | PrefixDelta::ToolRemoved { tool }
+        | PrefixDelta::ToolChanged { tool } => put("tool", text(tool)),
+        PrefixDelta::KwargChanged { key, was, now } => {
+            put("key", text(key));
+            put("was", text(was));
+            put("now", text(now));
+        }
+        PrefixDelta::KwargAdded { key, now } => {
+            put("key", text(key));
+            put("now", text(now));
+        }
+        PrefixDelta::KwargRemoved { key, was } => {
+            put("key", text(key));
+            put("was", text(was));
+        }
+        PrefixDelta::MessageAdded { at, role, chars }
+        | PrefixDelta::MessageRemoved { at, role, chars } => {
+            put("at", number(*at));
+            put("role", text(role));
+            put("chars", integer(*chars));
+        }
+        PrefixDelta::LineChanged {
+            message,
+            line,
+            was,
+            now,
+        } => {
+            put("message", number(*message));
+            put("line", number(*line));
+            put("was", text(was));
+            put("now", text(now));
+        }
+        PrefixDelta::LineAdded { message, line, now } => {
+            put("message", number(*message));
+            put("line", number(*line));
+            put("now", text(now));
+        }
+        PrefixDelta::LineRemoved { message, line, was } => {
+            put("message", number(*message));
+            put("line", number(*line));
+            put("was", text(was));
+        }
+    }
+    Value::Object(members)
+}
+
 /// The artifacts a claim consumes, as the value space.
 fn artifacts_value(consumes: &[Artifact]) -> Value {
     Value::Array(
@@ -3047,6 +4215,21 @@ fn reasoning_control_value(control: &ReasoningControl) -> Value {
     ]))
 }
 
+/// A substrate's cache lifetime as a record value.
+fn cache_ttl_value(ttl: CacheTtl) -> Value {
+    let mut members = BTreeMap::from([(
+        "kind".to_owned(),
+        Value::String(ttl.kind().tag().to_owned()),
+    )]);
+    match ttl {
+        CacheTtl::Seconds(count) => {
+            members.insert("seconds".to_owned(), integer(count));
+        }
+        CacheTtl::Uncached => {}
+    }
+    Value::Object(members)
+}
+
 /// The regime as a record value.
 ///
 /// Crate-visible because the object's dump carries it: the dump is the only
@@ -3099,6 +4282,12 @@ pub(crate) fn regime_value(regime: &Regime) -> Value {
                     "chat_template_sha256".to_owned(),
                     Value::String(digest.clone()),
                 );
+            }
+            // Written only when declared, for the reason `reasoning_control`
+            // is: a key standing in for "nobody said" would defeat
+            // `SubstratesIndistinguishable` on the very field #79 added to it.
+            if let Some(ttl) = s.cache_ttl {
+                members.insert("cache_ttl".to_owned(), cache_ttl_value(ttl));
             }
             Value::Object(members)
         })
@@ -3197,8 +4386,9 @@ pub fn project(source: &str) -> Result<Value, String> {
 mod tests {
     use super::json::Value;
     use super::{
-        Budget, Count, Event, Kind, MAX_DEPTH, ParseError, Reasoning, Regime, SchemaError,
-        StructureError, Verdict, Weights, WeightsKind, objects, parse, regime_value, render,
+        Budget, CacheTtl, Count, DeltaKind, Event, Kind, MAX_DEPTH, ParseError, PrefixDelta,
+        PrefixReason, Reasoning, Regime, SchemaError, StructureError, Verdict, Weights,
+        WeightsKind, delta, delta_value, objects, parse, reason_of, regime_value, render,
     };
 
     /// A `start` line whose regime is complete, as every record needs one.
@@ -3250,9 +4440,9 @@ mod tests {
     #[test]
     fn a_retry_names_the_request_it_replaces() {
         let source = record(concat!(
-            r#"{"record":"request","id":"r1","lane":"main","substrate":"local"}"#,
+            r#"{"record":"request","id":"r1","lane":"main","substrate":"local","head_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#,
             "\n",
-            r#"{"record":"request","id":"r2","lane":"main","substrate":"local","retry_of":"r1"}"#,
+            r#"{"record":"request","id":"r2","lane":"main","substrate":"local","retry_of":"r1","head_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#,
             "\n",
             r#"{"record":"response","id":"a1","to_request":"r2","output_tokens":12}"#,
             "\n",
@@ -3392,7 +4582,7 @@ mod tests {
         let source = record(concat!(
             r#"{"record":"turn","index":1,"prefill_tokens":10}"#,
             "\n",
-            r#"{"record":"request","id":"q1","lane":"main","substrate":"local","text":"list the tree"}"#,
+            r#"{"record":"request","id":"q1","lane":"main","substrate":"local","text":"list the tree","head_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#,
             "\n",
             r#"{"record":"response","id":"a1","to_request":"q1","output_tokens":0,"text":""}"#,
             "\n",
@@ -3592,6 +4782,133 @@ mod tests {
         parse(&other_weights).expect("two weights digests are two substrates");
     }
 
+    /// #79: ONE MODEL, TWO PROVIDER PATHS, and the lifetime is what says so.
+    ///
+    /// The specimen is one weights digest served two ways -- first-party at
+    /// roughly thirty minutes, through a gateway at roughly five. A record
+    /// that could not tell them apart would attribute a miss on the slow path
+    /// to the fast path's lifetime, which is the estimate this issue
+    /// replaces wearing a measurement's clothes.
+    ///
+    /// Both halves, for the reason the chat-template pair above gives: the
+    /// accept alone would pass with the refusal deleted, and the refuse alone
+    /// would pass with it fired on every multi-substrate record.
+    #[test]
+    fn one_weights_digest_and_two_cache_lifetimes_are_two_substrates() {
+        let weights = "a".repeat(64);
+        let long = ",\"cache_ttl\":{\"kind\":\"seconds\",\"seconds\":1800}";
+        let short = ",\"cache_ttl\":{\"kind\":\"seconds\",\"seconds\":300}";
+        let never = ",\"cache_ttl\":{\"kind\":\"none\"}";
+
+        let disclosed = start_declaring(&[
+            substrate_row("first-party", &weights, long),
+            substrate_row("through-a-gateway", &weights, short),
+            substrate_row("no-cache-at-all", &weights, never),
+        ]);
+        let parsed = parse(&disclosed).expect("three lifetimes are three substrates");
+        assert_eq!(
+            parsed
+                .regime()
+                .substrates
+                .iter()
+                .map(|s| s.cache_ttl)
+                .collect::<Vec<_>>(),
+            [
+                Some(CacheTtl::Seconds(Count::new(1800).expect("a count"))),
+                Some(CacheTtl::Seconds(Count::new(300).expect("a count"))),
+                Some(CacheTtl::Uncached),
+            ],
+            "and every lifetime survives the read, in its own kind"
+        );
+        // Through the writer too: a kind the renderer cannot spell becomes
+        // another one silently, which is the argument
+        // `every_weights_kind_round_trips` makes one field over.
+        assert_eq!(parse(&render(&parsed)).as_ref().ok(), Some(&parsed));
+
+        // The same three paths with nothing telling them apart.
+        let undisclosed = start_declaring(&[
+            substrate_row("first-party", &weights, ""),
+            substrate_row("through-a-gateway", &weights, ""),
+        ]);
+        assert!(
+            matches!(
+                parse(&undisclosed),
+                Err(ParseError::Structure(
+                    StructureError::SubstratesIndistinguishable { .. }
+                ))
+            ),
+            "two provider paths with no lifetime between them are one \
+             substrate written twice"
+        );
+    }
+
+    /// #79: THE DECLARATION ORDER OF [`PrefixReason`] IS THE PRECEDENCE, and
+    /// this is the test that fails if somebody reorders it.
+    ///
+    /// Nothing else would. The order is expressed as `Ord` derived from the
+    /// declaration, so a reordering compiles, passes every other test, and
+    /// silently changes what every `prefix.changed` row in every future
+    /// record is attributed to -- while leaving the rows already written
+    /// saying something they no longer mean. `reason_of` is the one function
+    /// that reads it and [`validate`] is the one that enforces it, so this
+    /// pins what both of them are reading.
+    #[test]
+    fn the_precedence_over_prefix_reasons_is_the_order_they_are_declared_in() {
+        assert_eq!(
+            PrefixReason::ALL
+                .iter()
+                .map(|r| r.tag())
+                .collect::<Vec<_>>(),
+            [
+                "model",
+                "tools",
+                "effort",
+                "injection",
+                "text",
+                "unattributed"
+            ],
+            "a reordering here changes what every future record attributes a \
+             miss to, and nothing else in the suite would notice"
+        );
+        // And the minimum really is taken over the diff's own classes, in
+        // that order -- asked of a diff holding one delta of every class, so
+        // the answer cannot be right by accident of which came first.
+        let one_of_each = vec![
+            PrefixDelta::LineChanged {
+                message: 0,
+                line: 0,
+                was: "was".to_owned(),
+                now: "now".to_owned(),
+            },
+            PrefixDelta::MessageAdded {
+                at: 1,
+                role: "user".to_owned(),
+                chars: Count::new(3).expect("3 is a count"),
+            },
+            PrefixDelta::KwargAdded {
+                key: "reasoning_effort".to_owned(),
+                now: "\"high\"".to_owned(),
+            },
+            PrefixDelta::ToolAdded {
+                tool: "search".to_owned(),
+            },
+            PrefixDelta::ModelChanged {
+                was: "before".to_owned(),
+                now: "after".to_owned(),
+            },
+        ];
+        assert_eq!(reason_of(&one_of_each), PrefixReason::Model);
+        assert_eq!(reason_of(&one_of_each[..4]), PrefixReason::Tools);
+        assert_eq!(reason_of(&one_of_each[..3]), PrefixReason::Effort);
+        assert_eq!(reason_of(&one_of_each[..2]), PrefixReason::Injection);
+        assert_eq!(reason_of(&one_of_each[..1]), PrefixReason::Text);
+        assert_eq!(
+            reason_of(&[]),
+            PrefixReason::Unattributed,
+            "and the residual is the class of a diff with nothing in it"
+        );
+    }
+
     /// #94 design point 1: the reasoning CONTROL is two fields, and it is not
     /// the reasoning OUTCOME the substrate already carried.
     ///
@@ -3699,6 +5016,92 @@ mod tests {
         }
     }
 
+    // Every `DeltaKind` has to survive a rendering, for the same reason as
+    // `every_weights_kind_round_trips` one type over: `delta_value` is the
+    // only writer and `delta` the only reader, and a variant either misses
+    // could silently become another one.
+    #[test]
+    fn every_delta_kind_round_trips() {
+        let one_of_each = [
+            PrefixDelta::ModelChanged {
+                was: "before".to_owned(),
+                now: "after".to_owned(),
+            },
+            PrefixDelta::ToolMoved {
+                tool: "search".to_owned(),
+                was: 0,
+                now: 2,
+            },
+            PrefixDelta::ToolAdded {
+                tool: "search".to_owned(),
+            },
+            PrefixDelta::ToolRemoved {
+                tool: "search".to_owned(),
+            },
+            PrefixDelta::ToolChanged {
+                tool: "search".to_owned(),
+            },
+            PrefixDelta::KwargChanged {
+                key: "reasoning_effort".to_owned(),
+                was: "\"low\"".to_owned(),
+                now: "\"high\"".to_owned(),
+            },
+            PrefixDelta::KwargAdded {
+                key: "reasoning_effort".to_owned(),
+                now: "\"high\"".to_owned(),
+            },
+            PrefixDelta::KwargRemoved {
+                key: "reasoning_effort".to_owned(),
+                was: "\"high\"".to_owned(),
+            },
+            PrefixDelta::MessageAdded {
+                at: 1,
+                role: "user".to_owned(),
+                chars: Count::new(3).expect("3 is a count"),
+            },
+            PrefixDelta::MessageRemoved {
+                at: 1,
+                role: "user".to_owned(),
+                chars: Count::new(3).expect("3 is a count"),
+            },
+            PrefixDelta::LineChanged {
+                message: 0,
+                line: 0,
+                was: "was".to_owned(),
+                now: "now".to_owned(),
+            },
+            PrefixDelta::LineAdded {
+                message: 0,
+                line: 1,
+                now: "now".to_owned(),
+            },
+            PrefixDelta::LineRemoved {
+                message: 0,
+                line: 1,
+                was: "was".to_owned(),
+            },
+        ];
+        assert_eq!(
+            one_of_each.len(),
+            DeltaKind::ALL.len(),
+            "one of each kind, or this test does not cover what it claims to"
+        );
+        let mut seen = std::collections::BTreeSet::new();
+        for built in one_of_each {
+            assert!(seen.insert(built.kind()), "two cases of {:?}", built.kind());
+            let Value::Object(mut fields) = delta_value(&built) else {
+                panic!("a delta's value is always an object");
+            };
+            let round_tripped =
+                delta(&mut fields, "test").unwrap_or_else(|err| panic!("{built:?}: {err}"));
+            assert_eq!(
+                round_tripped, built,
+                "a delta this module wrote did not read back"
+            );
+        }
+        assert_eq!(seen.len(), DeltaKind::ALL.len(), "every kind, exactly once");
+    }
+
     // A rejected lane has a substrate, and it is the lane's. The rule that
     // makes the lookup total is the one `validate` enforces; this is the half
     // that shows a reader getting an answer out of it.
@@ -3725,8 +5128,8 @@ mod tests {
             "{}\n{}\n{}\n{}\n",
             r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"a","dogma_version":0,"substrates":[{"id":"big","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123","sampler_card":{"seed":0},"reasoning":"on"},{"id":"small","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"hardware_fingerprint":"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123","sampler_card":{"seed":0},"reasoning":"on"}]}}"#,
             r#"{"record":"turn","index":1,"prefill_tokens":10}"#,
-            r#"{"record":"request","id":"q1","lane":"main","substrate":"big"}"#,
-            r#"{"record":"request","id":"q2","lane":"main","substrate":"small"}"#,
+            r#"{"record":"request","id":"q1","lane":"main","substrate":"big","head_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#,
+            r#"{"record":"request","id":"q2","lane":"main","substrate":"small","head_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}"#,
         );
         assert!(matches!(
             parse(&source),
@@ -3924,7 +5327,7 @@ mod tests {
     #[test]
     fn nothing_can_link_to_itself() {
         let retry = record(concat!(
-            r#"{"record":"request","id":"q1","lane":"main","substrate":"local","retry_of":"q1"}"#,
+            r#"{"record":"request","id":"q1","lane":"main","substrate":"local","retry_of":"q1","head_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#,
             "\n"
         ));
         assert!(matches!(

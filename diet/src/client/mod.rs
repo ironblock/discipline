@@ -81,7 +81,9 @@
 //! case turned out to be narrower than the test written for it (the narrower
 //! case is now the test).
 
+pub mod cache;
 pub mod echo;
+pub mod head;
 pub mod journal;
 pub mod shape;
 pub mod stub;
@@ -494,6 +496,12 @@ impl<T: Transport> Client<T> {
                 retry_of: retry_of.clone(),
                 because,
                 sampler: sending.sampler.clone(),
+                // OF WHAT IS ABOUT TO BE SENT, not of what the caller asked
+                // for. A strip-and-retry sends a different shape, and the
+                // head of the bytes that went out is the head the server
+                // keyed its cache on. It is the same `sending` the body is
+                // rendered from one call below.
+                head: head::Head::of(&sending),
             });
 
             let more_attempts_allowed = attempts.len() <= usize::from(sending.limits.retries);
@@ -828,6 +836,7 @@ mod tests {
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),
+            tools: Vec::new(),
         }
     }
 
@@ -1858,6 +1867,7 @@ mod tests {
                 retry_of: None,
                 because: None,
                 sampler: card(),
+                head: crate::client::head::Head::of(&shaped(card(), 50, 50, 0)),
             },
             EntryKind::Received => Entry::Received {
                 to_request: id,
@@ -1940,7 +1950,9 @@ mod tests {
             // wherever its test lives rather than only in this file.
             concat!(
                 include_str!("mod.rs"),
+                include_str!("cache.rs"),
                 include_str!("echo.rs"),
+                include_str!("head.rs"),
                 include_str!("journal.rs"),
                 include_str!("shape.rs"),
                 include_str!("stub.rs"),

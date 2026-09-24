@@ -7,7 +7,7 @@
 //! defect class this repository keeps finding in itself.
 
 use crate::formats::record::json::Value;
-use crate::formats::record::{Engine, Reasoning, Regime, Substrate, Weights};
+use crate::formats::record::{CacheTtl, Count, Engine, Reasoning, Regime, Substrate, Weights};
 use crate::formats::regimen::{self, Regimen};
 
 /// The keys this program reads for the regime facts a regimen v1 has no place
@@ -20,6 +20,23 @@ use crate::formats::regimen::{self, Regimen};
 /// an identity is the one thing the ruling excludes, so this program stopped
 /// reading them rather than keep two keys whose only use was to be misread.
 pub const SUBSTRATE_KEYS: &[&str] = &["substrate_reasoning", "substrate_hardware"];
+
+/// The key a regimen declares a provider path's cache lifetime under.
+///
+/// OPTIONAL, unlike [`SUBSTRATE_KEYS`], and the difference is the point.
+/// Those four are facts the record REQUIRES, so a regimen missing one is
+/// refused rather than defaulted. A cache lifetime is not required: a
+/// substrate nobody has documented a lifetime for has none to declare, and
+/// inventing thirty minutes for it would make every miss under it read as a
+/// provider expiry -- which is the estimate #79 replaces, restated as a
+/// default. Undeclared reaches the census as `ttl_undeclared`, naming the
+/// substrate.
+///
+/// Two spellings, and no others: a whole number of SECONDS, or the word
+/// `"none"` for a path that caches nothing. The word is the regimen's own
+/// spelling for a declared absence, matching `budget_tokens = "none"` one
+/// table over.
+pub const CACHE_TTL_KEY: &str = "substrate_cache_ttl";
 
 /// The regime `regimen` declares, or the list of what it is missing.
 ///
@@ -150,9 +167,54 @@ pub fn regime_of(regimen: &Regimen, endpoint_given: bool) -> Result<Regime, Stri
             // `hardware_fingerprint`. A regimen key for it belongs with the
             // equipment registry, beside the weights it would describe.
             chat_template_sha256: None,
+            cache_ttl: cache_ttl_of(regimen)?,
         }],
         dogma_version,
     })
+}
+
+/// The regimen's word for a path that caches nothing.
+///
+/// The same word `budget_tokens = "none"` uses one table over, because it is
+/// the same kind of statement: a declared absence, told apart from nobody
+/// having said anything by the key being there at all.
+const NO_CACHE: &str = "none";
+
+/// The cache lifetime `regimen` declares, if it declares one.
+///
+/// # Errors
+///
+/// Returns the complaint when the key is bound to something that is neither a
+/// count of seconds nor the word `"none"`. A key bound to nonsense is a
+/// different finding from a key nobody wrote, and defaulting the first to the
+/// second would make a typo read as a deliberate silence.
+fn cache_ttl_of(regimen: &Regimen) -> Result<Option<CacheTtl>, String> {
+    let complaint = |found: &str| {
+        format!(
+            "`{CACHE_TTL_KEY} = {found}` is neither a whole number of seconds nor \
+             `\"none\"`. A cache lifetime is a property of the PROVIDER PATH, and this \
+             program will not guess one: leave the key out and the census names the \
+             substrate as undeclared, which is true, rather than reading its misses as \
+             a provider expiry"
+        )
+    };
+    match regimen.get(CACHE_TTL_KEY) {
+        None => Ok(None),
+        // Through `Count`, like every other number crossing into the record:
+        // a lifetime no record can spell is not a lifetime this regimen may
+        // declare, and a negative one is not a lifetime at all.
+        Some(regimen::Value::Integer(seconds)) => {
+            match u64::try_from(*seconds)
+                .ok()
+                .and_then(|n| Count::new(n).ok())
+            {
+                Some(count) => Ok(Some(CacheTtl::Seconds(count))),
+                None => Err(complaint(&seconds.to_string())),
+            }
+        }
+        Some(regimen::Value::String(word)) if word == NO_CACHE => Ok(Some(CacheTtl::Uncached)),
+        Some(other) => Err(complaint(&format!("{other:?}"))),
+    }
 }
 
 /// What is missing, named, with why it is not defaulted.
