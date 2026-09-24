@@ -1,0 +1,55 @@
+[package]
+name = "discipline-diet-wasm"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The browser-callable read side of `diet` (#78), as its own crate so the
+# `cdylib` it needs costs only this crate. `wasm-bindgen` reads a `cdylib`'s
+# flat export table; an `rlib` alone has none. Cargo has no way to make
+# `crate-type` conditional on target or feature, so while this surface lived
+# inside `discipline-diet` every native build of that crate also linked a
+# `libdiet.so` nothing loaded (40 MB in a debug build, measured on #32).
+#
+# `rlib` stays beside `cdylib` because `tests/wasm_conformance.rs` calls these
+# same functions in-process as the native side of its comparison, and an
+# integration test can only link a crate's `rlib`.
+[lib]
+name = "diet_wasm"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+discipline-diet = { path = ".." }
+# Optional, behind the `wasm` feature, so the workspace-wide native build
+# `verify.sh` runs compiles this crate as empty and never sees it.
+#
+# The version is an EXACT pin, not a range, for a reason semver does not
+# cover: `wasm-bindgen`'s bindgen format is an unstable schema shared between
+# this crate and the separate `wasm-bindgen` CLI that post-processes the
+# compiled `.wasm`. The two must match exactly or the CLI refuses the binary
+# outright -- measured directly: building against an unpinned `"0.2"` (which
+# resolved to 0.2.128) against a 0.2.100 CLI produced "rust Wasm file schema
+# version: 0.2.128, this binary schema version: 0.2.100", not a warning. A
+# caret range would let `cargo update` drift the crate out of lockstep with
+# whatever CLI version the conformance job has installed, silently, until a
+# build that used to pass stops resolving to a matching pair. The CI job that
+# installs the CLI pins the identical version string.
+wasm-bindgen = { version = "=0.2.100", optional = true }
+
+[dev-dependencies]
+serde_json = "1"
+
+[features]
+wasm = ["dep:wasm-bindgen"]
+# Test-only, never shipped: adds one deliberately unsound export so the
+# conformance job's control (row 4 -- a host call reachable from the read
+# path fails the job) is proven against a real failure, not assumed. See
+# `seeded_host_call_trap` and
+# `tests/wasm_conformance.rs::the_seeded_host_call_trap_actually_fails_the_job`.
+wasm-seeded-host-call-trap = ["wasm"]
+
+[lints]
+workspace = true
