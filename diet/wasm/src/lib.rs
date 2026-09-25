@@ -1,20 +1,27 @@
-//! The browser-callable read side (#78).
+//! The browser-callable read side of `diet` (#78).
 //!
 //! `check_record` and `check_regimen` are the wasm-facing form of
 //! `diet check-record` and `diet check-regimen` -- pure pass-throughs to
-//! [`crate::formats::record::project`] and [`crate::formats::regimen::project`].
-//! This module adds no logic of its own on purpose: the conformance test in
+//! [`diet::formats::record::project`] and [`diet::formats::regimen::project`].
+//! This crate adds no logic of its own on purpose: the conformance test in
 //! `tests/wasm_conformance.rs` claims "the same function, compiled for two
 //! targets, reaches the same verdict," and that claim is only true if this
-//! module does not reimplement anything the native path already does.
+//! crate does not reimplement anything the native path already does.
 //!
 //! Both functions are string in, string out -- no `Path`, no file handle, no
-//! process. That is not a restriction this module adds; it is what was
-//! already true of `project` on both formats before this module existed.
+//! process. That is not a restriction this crate adds; it is what was
+//! already true of `project` on both formats before this crate existed.
+//!
+//! Empty unless the `wasm` feature is on, so the workspace-wide native build
+//! and test run `verify.sh` performs compile nothing here. Its own crate
+//! rather than a module of `discipline-diet` for the `cdylib` alone -- see
+//! this crate's `Cargo.toml`.
+
+#![cfg(feature = "wasm")]
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::formats::record::json::{Value, render};
+use diet::formats::record::json::{Value, render};
 
 /// The record's own JSON-shaped envelope around a projection's verdict:
 /// `{"ok":true,"value":<projected value>}` or `{"ok":false,"error":<reason>}`.
@@ -44,14 +51,14 @@ fn envelope(result: Result<Value, String>) -> String {
 #[wasm_bindgen]
 #[must_use]
 pub fn check_record(source: &str) -> String {
-    envelope(crate::formats::record::project(source))
+    envelope(diet::formats::record::project(source))
 }
 
 /// The browser-callable form of `diet check-regimen`.
 #[wasm_bindgen]
 #[must_use]
 pub fn check_regimen(source: &str) -> String {
-    envelope(crate::formats::regimen::project(source))
+    envelope(diet::formats::regimen::project(source))
 }
 
 /// Exists only to prove the conformance job's row-4 control against a real
