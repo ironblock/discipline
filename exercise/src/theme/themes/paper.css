@@ -1,0 +1,31 @@
+/* Theme: paper -- the same meanings on a light page. */
+.ex-root[data-theme='paper'] {
+  color-scheme: light;
+  --page: #f6f5f2;
+  --panel: #efeeea;
+  --rule: #dcd9d2;
+  --ink: #1a1c1f;
+  --ink-muted: #5d636b;
+  --ink-faint: #8f949b;
+  --chip: rgb(0 0 0 / 0.05);
+  --fill-system: #e3edfb;
+  --ink-system: #1d4f8f;
+  --fill-user: #dcf3ec;
+  --ink-user: #0d6b55;
+  --fill-assistant: #ffffff;
+  --ink-assistant: #30343a;
+  --ink-reasoning: #1a1c1f;
+  --fill-tool: #f0efeb;
+  --ink-tool: #30343a;
+  --fill-interview: #e3edfb;
+  --ink-interview: #1d4f8f;
+  --fill-ratify: #efe4fb;
+  --ink-ratify: #7a2a8f;
+  --fill-memory: #ffffff;
+  --ok: #1f8a4c;
+  --warn: #9a6f00;
+  --bad: #b8322f;
+  --fresh: #0d8a6b;
+  --seam: #8e35a8;
+  --gap: #b8620f;
+}
