@@ -93,6 +93,11 @@
   --relief-panel: 0 0 0 transparent;
   --relief-well: 0 0 0 transparent;
   --relief-control: 0 0 0 transparent;
+  /* A thin rim in the block's own role colour, so roles scan apart while
+   * scrolling. An amount; 0% draws nothing. (--relief-tool, optional, is
+   * how a tool call sits apart from a message; it falls back to
+   * --relief-trunk.) */
+  --rim-tone: 0%;
   --glass-overlay: none;
   --glass-backdrop: none;
   --glow-radius: 0px;

@@ -9,10 +9,16 @@
   --page: #17191d;
   --radius: 14px;
 
-  --fill-assistant: #22252b;
-  --fill-tool: #1f2226;
-  --fill-system: color-mix(in oklab, #22252b 80%, #4d8fe8);
-  --fill-user: color-mix(in oklab, #22252b 80%, #2fc49d);
+  /* Four roles, four steps apart in lightness as well as hue, so they scan
+     apart while scrolling: the tool's output sits below the page (a well),
+     the assistant a step above it, system and user tinted further. */
+  --fill-tool: #121417;
+  --ink-tool: #b4bcc6;
+  --fill-assistant: #272b33;
+  --fill-system: color-mix(in oklab, #22252b 70%, #4d8fe8);
+  --fill-user: color-mix(in oklab, #22252b 68%, #2fc49d);
+  --rim-tone: 26%;
+  --relief-tool: inset 0 2px 10px rgb(0 0 0 / 0.6), inset 0 0 0 1px rgb(255 255 255 / 0.03);
 
   --relief-trunk: 0 10px 26px -10px rgb(0 0 0 / 0.7), inset 0 0 0 1px rgb(255 255 255 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.1);
   --relief-trunk-live: 0 16px 34px -12px rgb(0 0 0 / 0.75), inset 0 0 0 1px rgb(255 255 255 / 0.12), inset 0 1px 0 rgb(255 255 255 / 0.14);

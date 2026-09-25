@@ -8,18 +8,23 @@
   padding: 1rem 1.25rem 0.6rem;
   position: relative;
   /* A message is an impression in the prefix; its role's light, if any, spills. */
-  box-shadow: var(--relief-trunk), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--tone-ink) var(--glow-trunk), transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone-ink) var(--rim-tone), transparent), var(--relief-trunk), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--tone-ink) var(--glow-trunk), transparent);
   transition: box-shadow 0.6s ease, opacity 0.6s ease;
 }
 
 .ex-block--live {
-  box-shadow: var(--relief-trunk-live), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--tone-ink) var(--glow-trunk-live), transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone-ink) var(--rim-tone), transparent), var(--relief-trunk-live), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--tone-ink) var(--glow-trunk-live), transparent);
 }
 
 .ex-block--system { --fill: var(--fill-system); --tone-ink: var(--ink-system); }
 .ex-block--user { --fill: var(--fill-user); --tone-ink: var(--ink-user); }
 .ex-block--assistant { --fill: var(--fill-assistant); --tone-ink: var(--ink-assistant); }
 .ex-block--tool { --fill: var(--fill-tool); --tone-ink: var(--ink-tool); border: 1px solid var(--rule); }
+
+/* A tool call is the machine speaking: it may sit apart from the messages (a well, not a slab). */
+.ex-block--tool:not(.ex-block--live) {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone-ink) var(--rim-tone), transparent), var(--relief-tool, var(--relief-trunk)), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--tone-ink) var(--glow-trunk), transparent);
+}
 .ex-block--interview { --fill: var(--fill-interview); --tone-ink: var(--ink-interview); }
 .ex-block--ratify { --fill: var(--fill-ratify); --tone-ink: var(--ink-ratify); }
 
