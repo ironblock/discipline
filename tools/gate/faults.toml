@@ -5705,6 +5705,14 @@ failure_class = "client.streaming-body-drops-usage"
 migrated = false
 
 [[fault]]
+id = "client.stream-reply-cap-ignored"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-reply-cap-ignored"
+failure_class = "client.stream-reply-cap-ignored"
+migrated = false
+
+[[fault]]
 id = "drive.head-not-linted"
 kind = "lane-fault"
 check = "lanes"
