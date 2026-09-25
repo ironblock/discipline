@@ -5753,6 +5753,14 @@ failure_class = "client.stream-a-zero-budget-is-a-budget"
 migrated = false
 
 [[fault]]
+id = "client.stream-a-held-cr-dies-with-the-stream"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-a-held-cr-dies-with-the-stream"
+failure_class = "client.stream-a-held-cr-dies-with-the-stream"
+migrated = false
+
+[[fault]]
 id = "drive.head-not-linted"
 kind = "lane-fault"
 check = "lanes"
@@ -5846,6 +5854,14 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.session-a-crashed-turn-never-settles"
 failure_class = "drive.session-a-crashed-turn-never-settles"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-crash-says-nothing"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-crash-says-nothing"
+failure_class = "drive.session-a-crash-says-nothing"
 migrated = false
 
 [[fault]]
