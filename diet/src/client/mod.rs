@@ -86,6 +86,7 @@ pub mod echo;
 pub mod head;
 pub mod journal;
 pub mod shape;
+pub mod stream;
 pub mod stub;
 pub mod transport;
 pub mod wire;
@@ -1955,6 +1956,7 @@ mod tests {
                 include_str!("head.rs"),
                 include_str!("journal.rs"),
                 include_str!("shape.rs"),
+                include_str!("stream.rs"),
                 include_str!("stub.rs"),
                 include_str!("transport.rs"),
                 include_str!("wire.rs")

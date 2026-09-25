@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 32
+faults = 34
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -638,4 +638,38 @@ becomes = '''
 catches = [
     "client::cache::tests::a_gap_past_the_declared_lifetime_is_expected_and_a_gap_inside_it_is_not",
     "client::cache::tests::an_undeclared_lifetime_is_unexplained_and_the_substrate_is_named",
+]
+
+[[fault]]
+id = "client.cancel-runs-no-stopper"
+failure_class = "client.cancel-runs-no-stopper"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        for stop in stoppers {
+            stop();
+        }'''
+becomes = '''
+        drop(stoppers);'''
+catches = [
+    "client::stream::tests::a_canned_stream_held_mid_answer_is_woken_by_a_cancel_and_says_so",
+    "client::stream::tests::asking_runs_every_stopper_once_and_asking_again_runs_none",
+]
+
+[[fault]]
+id = "client.cancel-misses-a-late-stopper"
+failure_class = "client.cancel-misses-a-late-stopper"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        if self.is_asked() {
+            drop(stoppers);
+            stop();
+        } else {
+            stoppers.push(Box::new(stop));
+        }'''
+becomes = '''
+        stoppers.push(Box::new(stop));'''
+catches = [
+    "client::stream::tests::a_stopper_registered_after_the_ask_runs_at_once",
 ]
