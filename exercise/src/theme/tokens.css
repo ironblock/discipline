@@ -116,7 +116,10 @@
   --field: none;
   /* Optional, falling back to the colour tokens when a theme leaves them unset:
    *   --glass-rim (→ --rule)  --control-rim (→ --rule)  --chrome-bg (→ --page)
-   *   --seam-thickness (→ 0)  --seam-line (→ 1px solid)  --seam-groove (→ none) */
+   *   --seam-thickness (→ 0)  --seam-line (→ 1px solid)  --seam-groove (→ none)
+   *   --composer-fade (→ a fade to --page under the composer)
+   *   --composer-attachment, --composer-mask (→ scroll, none: a strip that repaints the
+   *     page's own fixed field, faded in by a mask, instead of a fade to flat colour) */
 
   /* Geometry */
   --trunk-width: 46rem;

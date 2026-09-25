@@ -38,7 +38,11 @@
   bottom: 0;
   z-index: 3;
   padding: 1rem 1rem 1.25rem;
-  background: linear-gradient(to bottom, transparent, var(--page) 1.25rem);
+  /* Fades the trunk out under the composer; a theme with a lit field may turn it off. */
+  background: var(--composer-fade, linear-gradient(to bottom, transparent, var(--page) 1.25rem));
+  background-attachment: var(--composer-attachment, scroll);
+  -webkit-mask-image: var(--composer-mask, none);
+  mask-image: var(--composer-mask, none);
   display: flex;
   justify-content: center;
 }

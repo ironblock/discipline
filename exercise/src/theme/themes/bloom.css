@@ -23,6 +23,13 @@
   --glow-trunk-live: 65%;
 
   --texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.09 0'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
+  /* Under the composer the strip repaints the page itself -- the same fixed
+     field and grain -- faded in at its top edge, so the pools run unbroken
+     behind the composer and the trunk slides under it. */
+  --composer-fade: var(--field), var(--texture), linear-gradient(var(--page), var(--page));
+  --composer-attachment: fixed;
+  --composer-mask: linear-gradient(to bottom, transparent, #000 1.5rem);
+
   --field:
     radial-gradient(55rem 38rem at 12% 105%, rgb(47 196 157 / 0.16), transparent 70%),
     radial-gradient(48rem 36rem at 62% 35%, rgb(77 143 232 / 0.14), transparent 70%),
