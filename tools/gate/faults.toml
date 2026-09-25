@@ -5633,6 +5633,22 @@ failure_class = "client.unexplained-folded-into-expected"
 migrated = false
 
 [[fault]]
+id = "client.cancel-runs-no-stopper"
+kind = "lane-fault"
+check = "lanes"
+label = "client.cancel-runs-no-stopper"
+failure_class = "client.cancel-runs-no-stopper"
+migrated = false
+
+[[fault]]
+id = "client.cancel-misses-a-late-stopper"
+kind = "lane-fault"
+check = "lanes"
+label = "client.cancel-misses-a-late-stopper"
+failure_class = "client.cancel-misses-a-late-stopper"
+migrated = false
+
+[[fault]]
 id = "drive.head-not-linted"
 kind = "lane-fault"
 check = "lanes"
@@ -5654,6 +5670,62 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.cache-census-skips-a-call"
 failure_class = "drive.cache-census-skips-a-call"
+migrated = false
+
+[[fault]]
+id = "drive.session-rebuilds-the-trunk"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-rebuilds-the-trunk"
+failure_class = "drive.session-rebuilds-the-trunk"
+migrated = false
+
+[[fault]]
+id = "drive.session-accepts-an-ask-mid-turn"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-accepts-an-ask-mid-turn"
+failure_class = "drive.session-accepts-an-ask-mid-turn"
+migrated = false
+
+[[fault]]
+id = "drive.session-cancel-reaches-nothing"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-cancel-reaches-nothing"
+failure_class = "drive.session-cancel-reaches-nothing"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-cancelled-ask-joins-the-trunk"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-cancelled-ask-joins-the-trunk"
+failure_class = "drive.session-a-cancelled-ask-joins-the-trunk"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-refusal-goes-unlogged"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-refusal-goes-unlogged"
+failure_class = "drive.session-a-refusal-goes-unlogged"
+migrated = false
+
+[[fault]]
+id = "drive.session-skips-the-capture-state"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-skips-the-capture-state"
+failure_class = "drive.session-skips-the-capture-state"
+migrated = false
+
+[[fault]]
+id = "drive.session-numbers-the-log-by-something-else"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-numbers-the-log-by-something-else"
+failure_class = "drive.session-numbers-the-log-by-something-else"
 migrated = false
 
 [[fault]]
