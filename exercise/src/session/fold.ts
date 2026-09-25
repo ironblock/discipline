@@ -131,6 +131,8 @@ export interface MemoryEntry extends Provenance {
   readonly state: EntryState;
   /** The patch that last changed it. */
   readonly by: string;
+  /** Log position of the patch that last changed it. */
+  readonly landedAt: number;
   /** Landed since the last ask: what the operator has not seen yet. */
   readonly fresh: boolean;
 }
@@ -220,7 +222,7 @@ export function fold(events: readonly DriveEvent[]): Session {
   const firstRequestOfTurn = new Map<number, string>();
   const tools = new Map<string, { begin: EventOf<'tool.begin'>; end?: EventOf<'tool.end'> }>();
   const forks = new Map<string, { fork: EventOf<'fork'>; request?: string; settled?: EventOf<'fork.settled'>; patches: EventOf<'patch'>[] }>();
-  const entries = new Map<string, Mutable<Omit<MemoryEntry, 'fresh'>> & { seq: number }>();
+  const entries = new Map<string, Mutable<Omit<MemoryEntry, 'fresh' | 'landedAt'>> & { seq: number }>();
 
   type Slot = { kind: 'user'; turn: number } | { kind: 'assistant'; request: string } | { kind: 'tool'; id: string };
   const eras: { seam?: EventOf<'seam'>; system: SystemNode; slots: Slot[] }[] = [
@@ -443,7 +445,7 @@ export function fold(events: readonly DriveEvent[]): Session {
           ? 'capture'
           : 'awaiting';
 
-  const memory = [...entries.values()].map(({ seq, ...entry }) => brand<MemoryEntry>({ ...entry, fresh: seq > lastAskSeq }));
+  const memory = [...entries.values()].map(({ seq, ...entry }) => brand<MemoryEntry>({ ...entry, landedAt: seq, fresh: seq > lastAskSeq }));
 
   return {
     state,

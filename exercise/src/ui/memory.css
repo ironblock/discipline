@@ -75,7 +75,22 @@
 
 .ex-memory__entry[data-fresh] {
   border-left-color: var(--fresh);
-  box-shadow: calc(var(--led-radius) / -4) 0 var(--led-radius) calc(var(--led-radius) / -4) var(--fresh);
+  animation: ex-land 2.4s ease-out 1;
+}
+
+.ex-memory__seen {
+  margin-left: auto;
+  padding: 0.1em 0.5em;
+  border: 1px solid color-mix(in oklab, var(--fresh) 40%, transparent);
+  border-radius: calc(var(--radius) / 2);
+  background: none;
+  color: var(--fresh);
+  font: inherit;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ex-memory__entry[data-fresh] { animation: none; }
 }
 
 .ex-memory__id {

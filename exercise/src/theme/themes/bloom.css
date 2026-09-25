@@ -22,7 +22,14 @@
 
   --relief-trunk: 0 10px 26px -10px rgb(0 0 0 / 0.7), inset 0 0 0 1px rgb(255 255 255 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.1);
   --relief-trunk-live: 0 16px 34px -12px rgb(0 0 0 / 0.75), inset 0 0 0 1px rgb(255 255 255 / 0.12), inset 0 1px 0 rgb(255 255 255 / 0.14);
-  --relief-well: inset 0 0 0 1px rgb(255 255 255 / 0.06);
+  --relief-well: inset 0 0 0 1px rgb(255 255 255 / 0.07);
+  /* The role label is a small frosted chip; the numbers after it are plain
+     low-contrast text, so a footer reads as one quiet line. */
+  --chip: rgb(255 255 255 / 0.05);
+  --stat-chip: transparent;
+  --stat-relief: 0 0 0 transparent;
+  /* An evicted era loses its colour as well as its presence. */
+  --evicted-filter: saturate(0.3);
 
   --glow-radius: 56px;
   --glow-trunk: 32%;

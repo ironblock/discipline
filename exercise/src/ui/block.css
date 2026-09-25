@@ -96,9 +96,9 @@
 
 .ex-stat {
   padding: 0.15em 0.5em;
-  box-shadow: var(--relief-well);
+  box-shadow: var(--stat-relief, var(--relief-well));
   border-radius: calc(var(--radius) / 2);
-  background: var(--chip);
+  background: var(--stat-chip, var(--chip));
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -157,3 +157,17 @@
   letter-spacing: 0.04em;
   z-index: 1;
 }
+
+/* Something lands -- a memory entry, a patch -- with one pulse of the fresh colour,
+   then settles to its thin edge. */
+@keyframes ex-land {
+  0% {
+    background: color-mix(in oklab, var(--fresh) 18%, transparent);
+    box-shadow: 0 0 calc(var(--led-radius) * 3) color-mix(in oklab, var(--fresh) 45%, transparent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 transparent;
+  }
+}
+

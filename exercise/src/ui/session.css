@@ -152,10 +152,17 @@
   text-shadow: 0 0 var(--led-radius) var(--ink-interview);
 }
 
-/* Eras before the latest seam were evicted from the prefix: kept in the archive, drawn as such. */
+/* Eras before the latest seam were evicted from the prefix: kept in the archive,
+   drawn as such -- and so are the side calls that hung off them. */
 .ex-era:not(:last-of-type) .ex-block {
   box-shadow: var(--relief-evicted);
   opacity: var(--evicted-opacity);
+  filter: var(--evicted-filter, none);
+}
+
+.ex-branchcell[data-evicted] {
+  opacity: var(--evicted-opacity);
+  filter: var(--evicted-filter, none);
 }
 
 .ex-trunk,

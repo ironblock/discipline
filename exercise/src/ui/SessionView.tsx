@@ -4,7 +4,7 @@ import type { BranchNode, Folded, Session, TrunkNode } from '../session/fold.ts'
 import { Branch } from './Branch.tsx';
 import { Composer } from './Composer.tsx';
 import type { ComposerProps } from './Composer.tsx';
-import { Memory } from './Memory.tsx';
+import { Memory, isUnseen } from './Memory.tsx';
 import { AssistantMessage, SystemMessage, UserMessage } from './Message.tsx';
 import { Seam } from './Seam.tsx';
 import { SessionHeader } from './SessionHeader.tsx';
@@ -49,6 +49,9 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
   const [height, setHeight] = useState(0);
   const seams = useRef(new Map<number, HTMLElement>());
   const [seamPad, setSeamPad] = useState<ReadonlyMap<number, number>>(new Map());
+  // What the person has acknowledged in working memory: a log position, local to this view.
+  const [seenThrough, setSeenThrough] = useState(-1);
+  const lastEra = session.eras.length - 1;
 
   const trunkOrder = session.eras.flatMap((era) => era.nodes.map((n) => n.id));
   const eraOf = new Map(session.eras.flatMap((era) => era.nodes.map((n) => [n.id, era.index] as const)));
@@ -131,7 +134,7 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
         style={{ ['--lanes' as string]: lanes.length }}
         data-state={session.state}
         data-lanes-busy={session.occupancy.some((holder, slot) => holder !== undefined && slot !== session.trunkSlot) ? '' : undefined}
-        data-fresh={session.memory.some((m) => m.fresh && m.state === 'live') ? '' : undefined}
+        data-fresh={session.memory.some((m) => isUnseen(m, seenThrough)) ? '' : undefined}
       >
         <div className="ex-session__header">
           <SessionHeader session={session} surface={surface} {...(onSurface ? { onSurface } : {})} />
@@ -187,7 +190,13 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
               {lanes.map((slot) => (
                 <div className="ex-lane" key={slot} data-slot={slot} style={{ minHeight: height }}>
                   {laneBranches(slot).map((branch) => (
-                    <BranchCell key={branch.id} branch={branch} placement={placed.get(branch.id)} cellRef={cellRef(branch.id)} />
+                    <BranchCell
+                      key={branch.id}
+                      branch={branch}
+                      placement={placed.get(branch.id)}
+                      cellRef={cellRef(branch.id)}
+                      evicted={(eraOf.get(branch.at) ?? lastEra) < lastEra}
+                    />
                   ))}
                 </div>
               ))}
@@ -195,7 +204,7 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
           </div>
           {surface.curtain ? (
             <aside className="ex-session__memory">
-              <Memory entries={session.memory} />
+              <Memory entries={session.memory} seenThrough={seenThrough} onSeen={() => setSeenThrough(session.events - 1)} />
             </aside>
           ) : null}
         </div>
@@ -222,10 +231,13 @@ function BranchCell({
   branch,
   placement,
   cellRef,
+  evicted,
 }: {
   readonly branch: Folded<BranchNode>;
   readonly placement: Placement | undefined;
   readonly cellRef: (el: HTMLElement | null) => void;
+  /** Its trunk node was evicted at a later seam. */
+  readonly evicted: boolean;
 }) {
   // Until the first layout pass the cell is measured in place, invisibly.
   const drop = placement ? placement.top - placement.anchor : 0;
@@ -235,6 +247,7 @@ function BranchCell({
       ref={cellRef}
       style={placement ? { top: placement.top } : { top: 0, visibility: 'hidden' }}
       data-branch={branch.id}
+      data-evicted={evicted ? '' : undefined}
     >
       <span className="ex-connector" aria-hidden="true" style={{ top: ATTACH - drop, height: drop }} data-bent={drop > 0 ? '' : undefined}>
         <span className="ex-connector__tip" />

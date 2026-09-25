@@ -62,6 +62,7 @@
 }
 
 .ex-patch {
+  animation: ex-land 2.4s ease-out 1;
   display: flex;
   gap: 0.5rem;
   align-items: baseline;
@@ -110,4 +111,8 @@
   margin-left: auto;
   color: var(--ink-faint);
   white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ex-patch { animation: none; }
 }
