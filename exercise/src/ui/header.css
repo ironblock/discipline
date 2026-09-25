@@ -38,14 +38,19 @@
   border: 1px solid var(--ink-faint);
 }
 
+/* A busy slot is an LED lit in the colour of the lane it is serving. */
+.ex-header__slot { --led: var(--ink-interview); }
+.ex-header__slot[data-lane='trunk'] { --led: var(--ink-assistant); }
+.ex-header__slot[data-lane='ratify'] { --led: var(--ink-ratify); }
+
 .ex-header__slot[data-busy] .ex-header__dot {
-  background: var(--ink-interview);
-  border-color: var(--ink-interview);
-  box-shadow: 0 0 var(--led-radius) var(--ink-interview), 0 0 calc(var(--led-radius) * 2.5) color-mix(in oklab, var(--ink-interview) 50%, transparent);
+  background: var(--led);
+  border-color: var(--led);
+  box-shadow: 0 0 var(--led-radius) var(--led), 0 0 calc(var(--led-radius) * 2.5) color-mix(in oklab, var(--led) 50%, transparent);
 }
 
 .ex-header__holder {
-  color: var(--ink-interview);
+  color: var(--led);
 }
 
 .ex-header__spacer {
@@ -60,7 +65,7 @@
 }
 
 .ex-header__state[data-state='awaiting'] { color: var(--ink-user); }
-.ex-header__state[data-state='turn'],
+.ex-header__state[data-state='turn'] { color: var(--ink-assistant); }
 .ex-header__state[data-state='capture'] { color: var(--ink-interview); }
 .ex-header__state[data-state='ratify'] { color: var(--ink-ratify); }
 
@@ -72,5 +77,5 @@
 }
 
 .ex-header__toggle input {
-  accent-color: var(--ink-interview);
+  accent-color: var(--focus, var(--ink-interview));
 }

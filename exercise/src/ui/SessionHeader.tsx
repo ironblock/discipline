@@ -21,11 +21,11 @@ export function SessionHeader({ session, surface, onSurface }: SessionHeaderProp
       </span>
       <span className="ex-header__slots" title="the server's slots, and what each is serving now">
         {session.occupancy.map((holder, slot) => (
-          <span key={slot} className="ex-header__slot" data-busy={holder === undefined ? undefined : ''}>
+          <span key={slot} className="ex-header__slot" data-busy={holder === undefined ? undefined : ''} data-lane={holder?.lane}>
             <span className="ex-header__dot" aria-hidden="true" />
             {slot}
             {slot === session.trunkSlot ? '·trunk' : ''}
-            {holder !== undefined ? <span className="ex-header__holder"> {holder}</span> : null}
+            {holder !== undefined ? <span className="ex-header__holder"> {holder.id}</span> : null}
           </span>
         ))}
       </span>

@@ -143,6 +143,12 @@ export interface MemoryEntry extends Provenance {
 
 export type SessionState = 'connecting' | 'awaiting' | 'turn' | 'capture' | 'ratify' | 'ended';
 
+/** Who holds a slot: the request, or the fork it serves, and its lane. */
+export interface Holder {
+  readonly id: string;
+  readonly lane: Lane;
+}
+
 export interface Session {
   readonly state: SessionState;
   readonly arm: string;
@@ -154,8 +160,8 @@ export interface Session {
   /** Branches keyed by the trunk node they came from. */
   readonly branches: ReadonlyMap<string, readonly Folded<BranchNode>[]>;
   readonly memory: readonly Folded<MemoryEntry>[];
-  /** What each slot is serving right now, by id; absent when idle. */
-  readonly occupancy: readonly (string | undefined)[];
+  /** What each slot is serving right now, and for which lane; absent when idle. */
+  readonly occupancy: readonly (Holder | undefined)[];
   /** Session time of the last event. */
   readonly now: number;
   readonly events: number;
@@ -436,9 +442,9 @@ export function fold(events: readonly DriveEvent[]): Session {
   }
 
   // Slot occupancy: whatever request is generating, per slot.
-  const occupancy: (string | undefined)[] = Array.from({ length: start.slots }, () => undefined);
+  const occupancy: (Holder | undefined)[] = Array.from({ length: start.slots }, () => undefined);
   for (const g of generations.values()) {
-    if (!g.response) occupancy[g.request.slot] = g.request.fork ?? g.request.id;
+    if (!g.response) occupancy[g.request.slot] = { id: g.request.fork ?? g.request.id, lane: g.request.lane };
   }
 
   const state: SessionState = ended

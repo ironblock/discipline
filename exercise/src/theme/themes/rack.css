@@ -1,0 +1,53 @@
+/*
+ * Layer: rack, over bloom -- a palette, not a treatment. Every colour on the
+ * page is an LED, and each one keeps the meaning it has on the front of a
+ * server: BLUE is the identify light ("this one is yours") -- you; WHITE
+ * is the model; GREEN is link and activity -- a tool at work, a clean exit;
+ * AMBER wants attention; RED is a fault. What the curtain hides has its
+ * own family, the one colour a rack never has: VIOLET, diet asking (the
+ * system prompt it renders, its interviews, what they land in memory), and
+ * MAGENTA, diet deciding (ratify, the seam).
+ *
+ * One lamp per meaning; every other colour is derived from it. A fill is
+ * the lamp seen through the frosted slab, an ink is the lamp lifted toward
+ * white so it reads, and a rim, a glow and a pool are the lamp itself.
+ * The `--lamp-*` names are this layer's own and nothing binds to them.
+ */
+.ex-root[data-theme~='rack'] {
+  --lamp-you: #2f86ff;
+  --lamp-model: #dde4ee;
+  --lamp-work: #3ccf7e;
+  --lamp-attention: #ffae1f;
+  --lamp-fault: #ff5a4f;
+  --lamp-diet-asks: #9575ff;
+  --lamp-diet-decides: #e05cf0;
+
+  --slab: #22252b;
+
+  --fill-user: color-mix(in oklab, var(--slab) 52%, var(--lamp-you));
+  --ink-user: color-mix(in oklab, var(--lamp-you) 34%, white);
+  --fill-system: color-mix(in oklab, var(--slab) 74%, var(--lamp-diet-asks));
+  --ink-system: color-mix(in oklab, var(--lamp-diet-asks) 45%, white);
+  --fill-assistant: #272b33;
+  --ink-assistant: color-mix(in oklab, var(--lamp-model) 80%, #9aa3ae);
+  --ink-tool: color-mix(in oklab, #b4bcc6 82%, var(--lamp-work));
+
+  --fill-interview: color-mix(in oklab, var(--lamp-diet-asks) 8%, transparent);
+  --ink-interview: color-mix(in oklab, var(--lamp-diet-asks) 55%, white);
+  --fill-ratify: color-mix(in oklab, var(--lamp-diet-decides) 8%, transparent);
+  --ink-ratify: color-mix(in oklab, var(--lamp-diet-decides) 60%, white);
+
+  --ok: color-mix(in oklab, var(--lamp-work) 75%, white);
+  --warn: color-mix(in oklab, var(--lamp-attention) 80%, white);
+  --bad: color-mix(in oklab, var(--lamp-fault) 80%, white);
+  --fresh: color-mix(in oklab, var(--lamp-diet-asks) 65%, white);
+  --seam: color-mix(in oklab, var(--lamp-diet-decides) 70%, white);
+  /* Focus is yours. */
+  --focus: var(--ink-user);
+
+  /* The room is lit from two sides: you from below, where you type; diet
+     from the right, behind the curtain. */
+  --field:
+    radial-gradient(60rem 40rem at 40% 115%, color-mix(in oklab, var(--lamp-you) 7%, transparent), transparent 70%),
+    radial-gradient(40rem 34rem at 100% 10%, color-mix(in oklab, var(--lamp-diet-asks) 7%, transparent), transparent 70%);
+}

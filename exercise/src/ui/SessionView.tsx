@@ -158,8 +158,8 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
               <div className="ex-lanehead-row" aria-hidden="true">
                 <div className="ex-lanehead">slot {session.trunkSlot} · trunk</div>
                 {lanes.map((slot) => (
-                  <div className="ex-lanehead" key={slot} data-busy={session.occupancy[slot] === undefined ? undefined : ''}>
-                    slot {slot} · {session.occupancy[slot] ?? 'idle'}
+                  <div className="ex-lanehead" key={slot} data-busy={session.occupancy[slot] === undefined ? undefined : ''} data-lane={session.occupancy[slot]?.lane}>
+                    slot {slot} · {session.occupancy[slot]?.id ?? 'idle'}
                   </div>
                 ))}
               </div>

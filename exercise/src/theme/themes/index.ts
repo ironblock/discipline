@@ -13,6 +13,7 @@ import './colo.css';
 import './lantern.css';
 import './emboss.css';
 import './bloom.css';
+import './rack.css';
 
 export const THEMES = [
   { name: 'mockup', layers: 'mockup', title: 'mockup — the author’s sketch' },
@@ -24,6 +25,7 @@ export const THEMES = [
   { name: 'emboss', layers: 'fabric emboss', title: 'emboss — the prefix raised, square, light sweeping across' },
   { name: 'hybrid', layers: 'fabric glass colo lantern', title: 'hybrid — colo’s emission, lantern’s lit glass' },
   { name: 'bloom', layers: 'fabric glass colo bloom', title: 'bloom — frosted slabs over pools of their own light' },
+  { name: 'rack', layers: 'fabric glass colo bloom rack', title: 'rack — bloom, every colour an LED: blue you, white the model, green work, violet diet' },
 ] as const;
 
 export type ThemeName = (typeof THEMES)[number]['name'];

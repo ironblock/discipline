@@ -150,9 +150,12 @@
   letter-spacing: 0.08em;
 }
 
+.ex-lanehead { --led: var(--ink-interview); }
+.ex-lanehead[data-lane='ratify'] { --led: var(--ink-ratify); }
+
 .ex-lanehead[data-busy] {
-  color: var(--ink-interview);
-  text-shadow: 0 0 var(--led-radius) var(--ink-interview);
+  color: var(--led);
+  text-shadow: 0 0 var(--led-radius) var(--led);
 }
 
 /* Eras before the latest seam were evicted from the prefix: kept in the archive,

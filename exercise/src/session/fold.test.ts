@@ -22,7 +22,7 @@ describe('fold over the specimen', () => {
     const last = s.eras[0]?.nodes.at(-1);
     expect(last?.kind).toBe('assistant');
     expect(last?.kind === 'assistant' && last.progress).toBe('streaming');
-    expect(s.occupancy[0]).toBe('q/3');
+    expect(s.occupancy[0]).toEqual({ id: 'q/3', lane: 'trunk' });
     expect(s.occupancy[1]).toBeUndefined();
   });
 
@@ -39,7 +39,7 @@ describe('fold over the specimen', () => {
   it('is in capture after settlement, with the interview in slot 1 hung off the tool call it was about', () => {
     const s = at(2, 28_000);
     expect(s.state).toBe('capture');
-    expect(s.occupancy[1]).toBe('i/1');
+    expect(s.occupancy[1]).toEqual({ id: 'i/1', lane: 'interview' });
     const branch = s.branches.get('t/2')?.[0];
     expect(branch?.lane).toBe('interview');
     expect(branch?.slot).toBe(1);
@@ -68,7 +68,9 @@ describe('fold over the specimen', () => {
   });
 
   it('is ratifying while the seam-time fork runs', () => {
-    expect(at(4, 1000).state).toBe('ratify');
+    const s = at(4, 1000);
+    expect(s.state).toBe('ratify');
+    expect(s.occupancy[1]).toEqual({ id: 'r/1', lane: 'ratify' });
   });
 
   it('opens a second era at the seam, whose system prompt is the render', () => {
@@ -92,7 +94,7 @@ describe('fold over the specimen', () => {
     expect(s.state).toBe('turn');
     const tool = s.eras[1]?.nodes.find((n) => n.kind === 'tool' && n.id === 't/5');
     expect(tool?.kind === 'tool' && tool.running).toBe(true);
-    expect(s.occupancy[1]).toBe('i/4');
+    expect(s.occupancy[1]).toEqual({ id: 'i/4', lane: 'interview' });
   });
 
   it('ends the specimen settled, every node carrying where it came from and what it needs', () => {
