@@ -30,8 +30,10 @@
   --composer-attachment: fixed;
   --composer-mask: linear-gradient(to bottom, transparent, #000 1.5rem);
 
+  /* The live field carries the meaning; the fixed field is only ambience. */
+  --pool-rest: 9%;
+  --pool-live: 26%;
   --field:
-    radial-gradient(55rem 38rem at 12% 105%, rgb(47 196 157 / 0.16), transparent 70%),
-    radial-gradient(48rem 36rem at 62% 35%, rgb(77 143 232 / 0.14), transparent 70%),
-    radial-gradient(36rem 28rem at 96% 12%, rgb(226 140 240 / 0.11), transparent 70%);
+    radial-gradient(60rem 40rem at 10% 110%, rgb(47 196 157 / 0.06), transparent 70%),
+    radial-gradient(40rem 30rem at 96% 8%, rgb(226 140 240 / 0.06), transparent 70%);
 }

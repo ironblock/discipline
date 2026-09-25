@@ -129,6 +129,9 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
       <div
         className={`ex-session${surface.gaps ? ' ex-gaps' : ''}${surface.curtain ? ' ex-session--curtain' : ''}`}
         style={{ ['--lanes' as string]: lanes.length }}
+        data-state={session.state}
+        data-lanes-busy={session.occupancy.some((holder, slot) => holder !== undefined && slot !== session.trunkSlot) ? '' : undefined}
+        data-fresh={session.memory.some((m) => m.fresh && m.state === 'live') ? '' : undefined}
       >
         <div className="ex-session__header">
           <SessionHeader session={session} surface={surface} {...(onSurface ? { onSurface } : {})} />

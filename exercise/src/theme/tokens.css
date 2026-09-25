@@ -111,6 +111,11 @@
   /* TEXTURE: images layered on surfaces. A sweep across a trunk block (light
    * falling across a raised or pressed face), a grain on every surface, and
    * a field of light pooled on the page itself. All `none` by default. */
+  /* THE LIVE FIELD: pools of light on the page where the work is -- under
+   * the trunk and composer, behind the busy lane, behind fresh memory --
+   * brightening with the session's state. Amounts only; 0% draws nothing. */
+  --pool-rest: 0%;
+  --pool-live: 0%;
   --sweep: none;
   --texture: none;
   --field: none;

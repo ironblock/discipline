@@ -1,7 +1,7 @@
 import type { Preview } from '@storybook/react-vite';
 
 import '../src/theme/tokens.css';
-import { THEMES, layersOf } from '../src/theme/themes/index.ts';
+import { DEFAULT_THEME, THEMES, layersOf } from '../src/theme/themes/index.ts';
 
 // Every story renders on the surface's own page and tokens, so a component
 // that hard-codes a colour or a face is visible as the odd one out. The
@@ -23,10 +23,10 @@ const preview: Preview = {
       },
     },
   },
-  initialGlobals: { theme: 'mockup' },
+  initialGlobals: { theme: DEFAULT_THEME },
   decorators: [
     (Story, context) => (
-      <div className="ex-root" data-theme={layersOf(String(context.globals['theme'] ?? 'mockup'))}>
+      <div className="ex-root" data-theme={layersOf(String(context.globals['theme'] ?? DEFAULT_THEME))}>
         <Story />
       </div>
     ),

@@ -2,7 +2,8 @@
  * The themes to try, one file per layer beside this one. A layer overrides
  * token VALUES under `.ex-root[data-theme~=<layer>]` and nothing else, and a
  * theme is a stack of layers, later ones winning: `glass` is fabric + glass.
- * `mockup` is the default in `tokens.css` and has no file. This list is the
+ * `mockup` is the base in `tokens.css` and has no file; `DEFAULT_THEME` is
+ * what a session opens in. This list is the
  * one source the Storybook toolbar and the app's `?theme=` read.
  */
 import './paper.css';
@@ -27,11 +28,14 @@ export const THEMES = [
 
 export type ThemeName = (typeof THEMES)[number]['name'];
 
+/** The theme a session opens in. */
+export const DEFAULT_THEME: ThemeName = 'bloom';
+
 export function isTheme(name: string | null): name is ThemeName {
   return THEMES.some((t) => t.name === name);
 }
 
 /** The `data-theme` value for a theme: its layers, space-separated. */
 export function layersOf(name: string): string {
-  return THEMES.find((t) => t.name === name)?.layers ?? 'mockup';
+  return THEMES.find((t) => t.name === name)?.layers ?? layersOf(DEFAULT_THEME);
 }

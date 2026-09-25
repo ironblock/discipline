@@ -3,13 +3,13 @@ import { createRoot } from 'react-dom/client';
 
 import { App } from './App.tsx';
 import './theme/tokens.css';
-import { isTheme, layersOf } from './theme/themes/index.ts';
+import { DEFAULT_THEME, isTheme, layersOf } from './theme/themes/index.ts';
 
 // `?speed=4` plays the canned session four times as fast; `?theme=paper` tries a theme.
 const params = new URLSearchParams(window.location.search);
 const speed = Number(params.get('speed') ?? '1') || 1;
 const requested = params.get('theme');
-const theme = isTheme(requested) ? requested : 'mockup';
+const theme = isTheme(requested) ? requested : DEFAULT_THEME;
 
 const root = document.getElementById('root');
 if (!root) throw new Error('index.html has no #root');
