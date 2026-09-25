@@ -1,0 +1,23 @@
+# The decision rule for the parity fire of extraction-acceptance-inverts, as
+# ratified on #115 (2026-09-24). Written as a file after the fire, transcribing
+# the ratified text; the operative form is apply.py, pinned below by the digest
+# the ratification named before the first fork.
+
+[claim]
+effect = "deduped gate-accept rate, seat B minus seat A, pooled over the extraction forks from integer tallies"
+band = [0.024877, 0.21789]
+band_derived_by = "band.py a2427d8175bc7c5728aaab98011ccaf06bacce47fc520fd7b3f27c266ba06d52 over the archived row's committed tallies"
+
+[rule]
+supported = "the re-fired effect lands within the band on the current declared instance"
+refuted = "outside the band with the sign reversed"
+inconclusive = "outside the band with the sign preserved"
+disclosure = "a refuted or inconclusive word carries the disclosure that the original substrate was unmeasured and is a candidate explanation the record cannot exclude, extended to seat B's unrecorded engine and weights and the unrecorded harness build"
+applier_sha256 = "2da448c49328993507c9cc026de86646bb15b310009d7d4fea603790a1809c2b"
+
+[readings]
+within = "endpoints inclusive, the effect compared unrounded against the six-place endpoints"
+sign_reversed = "effect <= 0"
+unadjudicated = "box, logs, routing, forks or offered failing, as apply.py's docstring lists them, asked before the effect is compared with the band"
+one_fire = "exactly one fire per seat, the first"
+weight = "supported says little here; refuted would say a great deal"

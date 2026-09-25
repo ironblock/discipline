@@ -416,6 +416,39 @@ this instance and no other, which is what ties the digest to this instance \
 rather than to the substrate at large."""
 current = false
 
+[substrate.cpu-beellama-qwen3-1p7b-q4km]
+equipment = "linux-pc"
+description = "Qwen3 1.7B at Q4_K_M on the host's CPU cores, the accelerator hidden, served by the beellama engine's own binary; seat B of the extraction bakeoff's parity fire (the archived fire's own seat-B server was not recorded)"
+pinned = true
+
+engine_name = "beellama"
+engine_identity = "980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4"
+engine_identity_is = "sha256 of the llama-server binary, hashed through `/proc/<pid>/exe` of the running seat-B server at its launch on 2026-09-25 -- the same binary as the accelerator substrate's, run with the accelerator hidden"
+
+weights_main = "b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897"
+weights_main_file = "Qwen3-1.7B-Q4_K_M.gguf"
+
+serving_context = 8192
+serving_flags = "--parallel 1, --threads 8, CUDA_VISIBLE_DEVICES empty (zero VRAM), no template or sampler flags"
+serving_flags_are = """
+The launch line of the research program's provisioning script as it stood on \
+2026-08-12, which called this the shape the bakeoff validated; the bakeoff of \
+2026-08-10 itself recorded neither its binary nor its weights. Read back from \
+the running process's command line and environment at launch, not from the \
+script."""
+sampler_card = "none on the serving line; a fire's requests set it"
+
+[[substrate.cpu-beellama-qwen3-1p7b-q4km.instance]]
+id = "2026-09-25"
+os_deployment_version = "44.20260914"
+os_deployment_digest = "d27ee45ffa3efa320b8c90a526b1105e0a8bb3bb4b4be1c796c3128d2c91e423"
+kernel = "7.2.4-ogc3.1.fc44.x86_64"
+pinned_by = "the parity fire's launch record (#115): the command line, the binary and weights digests read at launch, and the fingerprint check of the same host's accelerator substrate, identical to its `2026-09-20` capture before and after the fire"
+engine_identity_measured = true
+engine_identity_measured_on = "2026-09-25"
+current = false
+current_note = "launched for one fire and stopped after it by its recorded pid; nothing serves this substrate between fires"
+
 [substrate.canned]
 equipment = "canned-loopback"
 description = "diet-drive's canned server, replaying its committed acts on loopback; the substrate the first drive in the gym ran on"

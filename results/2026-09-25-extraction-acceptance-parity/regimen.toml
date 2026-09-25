@@ -1,0 +1,9 @@
+# The regimen this run applied: the parity fire of the extraction-seat bakeoff,
+# seats A and B re-fired once each through the harness the archived row fired
+# with, replaying the same human-driven drive's main lane byte for byte. Seat A
+# extracts on the accelerator substrate; seat B's extraction lane is routed to
+# the CPU substrate, and its spine, warm calls and interviews run on the
+# accelerator one.
+arm = "extraction-seat-parity-refire"
+substrates = ["accel24-beellama-qwen27b-q4kxl", "cpu-beellama-qwen3-1p7b-q4km"]
+dogma_version = 0

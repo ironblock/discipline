@@ -1,0 +1,27 @@
+{
+ "effect": "deduped gate-accept rate, seat B minus seat A, pooled over the extraction forks from the integer tallies",
+ "forks": 31,
+ "seat_a": {
+  "offered": 937,
+  "accepted_deduped": 18
+ },
+ "seat_b": {
+  "offered": 1545,
+  "accepted_deduped": 171
+ },
+ "point": 0.091469,
+ "level": 0.95,
+ "resamples": 10000,
+ "seed": 20260810,
+ "resamples_undefined": 0,
+ "band": [
+  0.024877,
+  0.21789
+ ],
+ "reads": {
+  "grade.py": "01765abb034eee57db7d573fb5414d6e394322afdae99008b9ff344523812778",
+  "report.json": "f99a8c5c92ee619088a06313dc27bf95daeee0ed28af817a7d68d2b4ec48a083",
+  "seat-a/events.jsonl": "1b1fdd414fb63f9da75b2a15ccc7f13131c519c731e3f3b4e70394b75c55d749",
+  "seat-b/events.jsonl": "030813139cf9bd0065f003816a55b8bacbb46ec6c22b40e11340a53793867e36"
+ }
+}
