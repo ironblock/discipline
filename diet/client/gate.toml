@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 41
+faults = 42
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -778,4 +778,17 @@ becomes = '''
 catches = [
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::wire::tests::a_streaming_body_is_the_body_with_streaming_asked_for_and_the_same_head",
+]
+
+[[fault]]
+id = "client.stream-reply-cap-ignored"
+failure_class = "client.stream-reply-cap-ignored"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        if self.total > cap {'''
+becomes = '''
+        if false && self.total > cap {'''
+catches = [
+    "client::stream::tests::a_stream_past_the_reply_cap_is_refused_rather_than_read_forever",
 ]

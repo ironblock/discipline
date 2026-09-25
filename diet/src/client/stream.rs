@@ -207,6 +207,17 @@ impl HttpStream {
             reply_cap: transport::MAX_REPLY_BYTES,
         }
     }
+
+    /// The same, with a smaller cap -- the unstreamed transport's reason,
+    /// and its name: a 64 MiB guard is one no test can afford to fire, and a
+    /// guard nobody has seen fire is not a guard. This is how it is seen.
+    #[must_use]
+    pub fn with_reply_cap(endpoint: Endpoint, reply_cap: usize) -> Self {
+        Self {
+            endpoint,
+            reply_cap,
+        }
+    }
 }
 
 impl Streaming for HttpStream {
@@ -952,6 +963,24 @@ mod tests {
             })
         );
         assert_eq!(seen, ["whole"]);
+    }
+
+    #[test]
+    fn a_stream_past_the_reply_cap_is_refused_rather_than_read_forever() {
+        let piece =
+            r#"data: {"choices":[{"index":0,"delta":{"content":"more"},"finish_reason":null}]}"#;
+        let stub = Stub::serving(vec![Act::StreamThenHold(vec![format!("{piece}\n\n"); 8])])
+            .expect("loopback");
+        let ended = HttpStream::with_reply_cap(endpoint(&stub), 256).stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |_| {},
+        );
+        assert!(
+            matches!(ended, Err(TransportFailure::Read(ref why)) if why.contains("passed 256 bytes")),
+            "{ended:?}"
+        );
     }
 
     #[test]
