@@ -41,8 +41,8 @@
      field and grain -- faded in at its top edge, so the pools run unbroken
      behind the composer and the trunk slides under it. */
   /* The chrome is lighter glass here, so the field shows through it. */
-  --chrome-bg: rgb(23 25 29 / 0.55);
-  --chrome-mask: linear-gradient(to bottom, #000 45%, transparent);
+  --chrome-bg: rgb(23 25 29 / 0.82);
+  --lanehead-bg: linear-gradient(to bottom, rgb(23 25 29 / 0.9) 70%, rgb(23 25 29 / 0));
 
   --composer-fade: var(--field), var(--texture), linear-gradient(var(--page), var(--page));
   --composer-attachment: fixed;

@@ -113,6 +113,18 @@
   box-shadow: none;
   color: var(--ink-faint);
   padding-inline: 0;
+  /* Where this came from is there when you look for it: in the block's corner,
+     on hover or focus, out of the footer's line. */
+  position: absolute;
+  top: 0.45rem;
+  right: 0.8rem;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.ex-block:hover .ex-stat--cite,
+.ex-block:focus-within .ex-stat--cite {
+  opacity: 1;
 }
 
 /* Something is still generating or running in this block. */

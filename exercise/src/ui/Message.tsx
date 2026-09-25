@@ -71,9 +71,8 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
               { value: rate(t.predicted_n, t.predicted_ms), unit: 'tg t/s', title: 'generation speed' },
               { value: tokens(t.prompt_n), unit: 'new', title: 'prompt tokens evaluated' },
               { value: rate(t.prompt_n, t.prompt_ms), unit: 'pp t/s', title: 'prefill speed' },
-              { value: `${node.slot}`, unit: 'slot', title: 'the server slot that served it' },
             ]
-          : [{ value: node.progress === 'prefill' ? 'prefill…' : 'generating…' }, { value: `${node.slot}`, unit: 'slot' }]
+          : [{ value: node.progress === 'prefill' ? 'prefill…' : 'generating…' }]
       }
       provenance={node}
       id={node.id}

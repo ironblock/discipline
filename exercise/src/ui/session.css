@@ -40,10 +40,15 @@
 }
 
 .ex-session--curtain {
+  /* The layout is centred at its full width and, when the viewport is narrower,
+     keeps its right-hand columns and shrinks the trunk: so every pool is placed
+     from the right edge, and the trunk's from what is left of the row. */
   --stage-w: calc(var(--trunk-width) + var(--lanes) * (var(--lane-width) + var(--gutter)) + var(--gutter) + var(--memory-width));
-  --x-trunk: calc(50% - var(--stage-w) / 2 + var(--trunk-width) / 2);
-  --x-lane: calc(50% - var(--stage-w) / 2 + var(--trunk-width) + var(--gutter) + var(--lane-width) / 2);
-  --x-memory: calc(50% + var(--stage-w) / 2 - var(--memory-width) / 2);
+  --edge-l: max(1rem, 50% - var(--stage-w) / 2);
+  --edge-r: min(50% + var(--stage-w) / 2, 100% - 1rem);
+  --x-memory: calc(var(--edge-r) - var(--memory-width) / 2);
+  --x-lane: calc(var(--edge-r) - var(--memory-width) - var(--gutter) - var(--lane-width) / 2);
+  --x-trunk: calc((var(--edge-l) + var(--edge-r) - var(--memory-width) - var(--gutter) - var(--lanes) * (var(--lane-width) + var(--gutter))) / 2);
   --pool-lane: var(--pool-rest);
   --pool-memory: var(--pool-rest);
 }
@@ -97,7 +102,7 @@
   position: sticky;
   bottom: 0;
   z-index: 3;
-  padding: 1rem 1rem 1.25rem;
+  padding: 1rem 0 1.25rem;
   /* Fades the trunk out under the composer; a theme with a lit field may turn it off. */
   /* The live field is repainted here too, fixed like the page's, so a theme
      that repaints its field under the composer keeps the pools unbroken. */
@@ -105,39 +110,35 @@
   background-attachment: fixed, var(--composer-attachment, scroll);
   -webkit-mask-image: var(--composer-mask, none);
   mask-image: var(--composer-mask, none);
-  display: flex;
-  justify-content: center;
 }
 
 .ex-session__composer > * {
-  width: min(100%, var(--trunk-width));
+  grid-column: 1;
 }
 
-.ex-session--curtain .ex-session__composer {
-  justify-content: flex-start;
-  padding-left: max(1rem, calc((100vw - var(--trunk-width) - var(--lanes) * (var(--lane-width) + var(--gutter)) - var(--memory-width) - var(--gutter)) / 2));
-}
-
-/* The trunk flows; each other slot is a column its branches are placed in. */
+/* The trunk flows; each other slot is a column its branches are placed in. The
+   composer uses the same columns, so it always sits exactly under the trunk. */
 .ex-lanehead-row,
-.ex-stage {
+.ex-stage,
+.ex-session__composer {
   display: grid;
   grid-template-columns: minmax(0, var(--trunk-width)) repeat(var(--lanes), var(--lane-width));
   column-gap: var(--gutter);
 }
 
-.ex-session:not(.ex-session--curtain) .ex-stage {
+.ex-session:not(.ex-session--curtain) .ex-stage,
+.ex-session:not(.ex-session--curtain) .ex-session__composer {
   grid-template-columns: minmax(0, var(--trunk-width));
 }
 
 .ex-lanehead-row {
   position: sticky;
-  top: 2.4rem;
+  /* Tucked a little under the header (which sits above it), so nothing
+     scrolling past can show in a gap between the two. */
+  top: 1.8rem;
   z-index: 2;
-  padding: 0.6rem 0 0.5rem;
-  background: var(--chrome-bg, var(--page));
-  -webkit-mask-image: var(--chrome-mask, none);
-  mask-image: var(--chrome-mask, none);
+  padding: 0.95rem 0 0.6rem;
+  background: var(--lanehead-bg, var(--chrome-bg, var(--page)));
   -webkit-backdrop-filter: var(--glass-backdrop);
   backdrop-filter: var(--glass-backdrop);
 }

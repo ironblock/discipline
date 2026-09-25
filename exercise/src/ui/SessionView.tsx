@@ -207,15 +207,16 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
                 </div>
               ))}
             </div>
+            {/* The composer sits in the trunk's own grid column, so it lines up with the trunk at any width. */}
+            <div className="ex-session__composer">
+              <Composer key={session.phase} state={session.state} phase={session.phase} {...composer} />
+            </div>
           </div>
           {surface.curtain ? (
             <aside className="ex-session__memory">
               <Memory entries={session.memory} seenThrough={seenThrough} onSeen={() => setSeenThrough(session.events - 1)} />
             </aside>
           ) : null}
-        </div>
-        <div className="ex-session__composer">
-          <Composer key={session.phase} state={session.state} phase={session.phase} {...composer} />
         </div>
       </div>
     </SurfaceContext.Provider>

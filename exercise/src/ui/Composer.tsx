@@ -21,9 +21,9 @@ export interface ComposerProps {
 const STATE_LINE: Readonly<Record<SessionState, string>> = {
   connecting: 'connecting…',
   awaiting: 'your turn',
-  turn: 'the trunk is working · cancel stops it',
-  capture: 'an interview is running in the idle gap · you can type; send when it settles',
-  ratify: 'ratifying working memory before the refill',
+  turn: 'working · cancel stops it',
+  capture: 'interview running · send when it settles',
+  ratify: 'ratifying before the refill',
   ended: 'the session has ended',
 };
 
