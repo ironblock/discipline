@@ -28,3 +28,36 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
+
+/* Prefill: nothing to show yet but the fact of reading -- two soft lines where the answer will be. */
+.ex-waiting {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.2rem 0 0.35rem;
+}
+
+.ex-waiting__line {
+  height: 0.7rem;
+  border-radius: 999px;
+  background-color: color-mix(in oklab, var(--tone-ink) 7%, transparent);
+  background-image: linear-gradient(90deg, transparent, color-mix(in oklab, var(--tone-ink) 24%, transparent), transparent);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: ex-sweep 1.8s ease-in-out infinite;
+  opacity: 0.8;
+}
+
+.ex-waiting__line:nth-child(2) {
+  width: 62%;
+  animation-delay: 0.25s;
+}
+
+.ex-waiting__label {
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ex-waiting__line { animation: none; background-size: 100% 100%; opacity: 0.4; }
+}

@@ -94,6 +94,13 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
           ) : null}
         </div>
       ) : null}
+      {node.progress === 'prefill' ? (
+        <div className="ex-waiting" role="status">
+          <span className="ex-waiting__line" />
+          <span className="ex-waiting__line" />
+          <span className="ex-waiting__label">reading the prompt</span>
+        </div>
+      ) : null}
       {node.text !== '' ? <Prose text={node.text} kind="answer" /> : null}
       {node.progress === 'cancelled' ? <p className="ex-cancelled">cancelled</p> : null}
     </Block>

@@ -30,6 +30,7 @@
   --stat-relief: 0 0 0 transparent;
   /* An evicted era loses its colour as well as its presence. */
   --evicted-filter: saturate(0.3);
+  --evicted-opacity: 0.62;
 
   --glow-radius: 56px;
   --glow-trunk: 32%;
@@ -39,6 +40,10 @@
   /* Under the composer the strip repaints the page itself -- the same fixed
      field and grain -- faded in at its top edge, so the pools run unbroken
      behind the composer and the trunk slides under it. */
+  /* The chrome is lighter glass here, so the field shows through it. */
+  --chrome-bg: rgb(23 25 29 / 0.55);
+  --chrome-mask: linear-gradient(to bottom, #000 45%, transparent);
+
   --composer-fade: var(--field), var(--texture), linear-gradient(var(--page), var(--page));
   --composer-attachment: fixed;
   --composer-mask: linear-gradient(to bottom, transparent, #000 1.5rem);

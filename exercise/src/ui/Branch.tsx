@@ -3,7 +3,6 @@ import { useState } from 'react';
 import type { BranchNode, Folded, PatchNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { ms, rate, tokens } from './format.ts';
-import { Prose } from './Prose.tsx';
 import './branch.css';
 
 const OP_GLYPH = { add: '+', supersede: '↻', retire: '−' } as const;
@@ -46,7 +45,7 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
           <p className="ex-branch__question">{node.question}</p>
           {node.text !== undefined && node.text !== '' ? (
             <div className="ex-branch__answer">
-              <Prose text={node.text} kind="answer" />
+              <TaggedAnswer text={node.text} />
             </div>
           ) : (
             <p className="ex-branch__waiting">{node.progress === 'prefill' ? 'prefill…' : 'generating…'}</p>
@@ -60,6 +59,32 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
           ))}
         </ul>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * An interview answer in its grammar: `TAG: text` lines, the tag set apart
+ * in the harness's face so the answer scans as the record it is. Lines
+ * without a tag are left as prose. Display only: the grammar is parsed by
+ * `diet`, and nothing here decides what a tag means.
+ */
+function TaggedAnswer({ text }: { readonly text: string }) {
+  return (
+    <div className="ex-tagged">
+      {text.split('\n').map((line, i) => {
+        const m = /^([A-Z][A-Z_]+):\s?(.*)$/.exec(line);
+        return m ? (
+          <p key={i} className="ex-tagged__line">
+            <span className="ex-tagged__tag">{m[1]}</span>
+            <span className="ex-tagged__text">{m[2]}</span>
+          </p>
+        ) : (
+          <p key={i} className="ex-tagged__line ex-tagged__line--plain">
+            {line}
+          </p>
+        );
+      })}
     </div>
   );
 }

@@ -165,6 +165,12 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
                       </div>
                     ) : null}
                     <SystemMessage node={era.system} />
+                    {era.index === 0 && era.nodes.length === 0 && session.state === 'awaiting' ? (
+                      <p className="ex-hint">
+                        Your turn. Ask for something, and the answer lands here. Behind the curtain, side calls run in the
+                        slots to the right while you read, and what they learn lands in working memory.
+                      </p>
+                    ) : null}
                     {era.nodes.map((node) => {
                       const branches = session.branches.get(node.id) ?? [];
                       return (

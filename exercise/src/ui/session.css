@@ -136,6 +136,8 @@
   z-index: 2;
   padding: 0.6rem 0 0.5rem;
   background: var(--chrome-bg, var(--page));
+  -webkit-mask-image: var(--chrome-mask, none);
+  mask-image: var(--chrome-mask, none);
   -webkit-backdrop-filter: var(--glass-backdrop);
   backdrop-filter: var(--glass-backdrop);
 }
@@ -158,6 +160,13 @@
   box-shadow: var(--relief-evicted);
   opacity: var(--evicted-opacity);
   filter: var(--evicted-filter, none);
+}
+
+/* Reading back into evicted history brings it back to full presence while you read it. */
+.ex-era:not(:last-of-type) .ex-block:hover,
+.ex-era:not(:last-of-type) .ex-block:focus-within {
+  opacity: 1;
+  filter: none;
 }
 
 .ex-branchcell[data-evicted] {
@@ -278,4 +287,13 @@
   .ex-session__columns {
     overflow-x: auto;
   }
+}
+
+/* The first screen, before anything is asked. */
+.ex-hint {
+  margin: 0.25rem 0 0;
+  max-width: 34rem;
+  padding: 0 1.25rem;
+  font: 14px / 1.6 var(--font-system);
+  color: var(--ink-faint);
 }
