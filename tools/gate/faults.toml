@@ -5761,6 +5761,14 @@ failure_class = "client.stream-a-held-cr-dies-with-the-stream"
 migrated = false
 
 [[fault]]
+id = "client.stream-a-close-reads-no-held-event"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-a-close-reads-no-held-event"
+failure_class = "client.stream-a-close-reads-no-held-event"
+migrated = false
+
+[[fault]]
 id = "drive.head-not-linted"
 kind = "lane-fault"
 check = "lanes"
