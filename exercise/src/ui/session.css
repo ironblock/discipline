@@ -285,9 +285,8 @@
     max-height: none;
     margin-top: 0;
   }
-  .ex-session__columns {
-    overflow-x: auto;
-  }
+  /* No scroll container here: one would trap the sticky slot labels and
+     composer inside it. The trunk column shrinks instead. */
 }
 
 /* The first screen, before anything is asked. */
