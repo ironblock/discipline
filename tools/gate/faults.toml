@@ -5649,6 +5649,62 @@ failure_class = "client.cancel-misses-a-late-stopper"
 migrated = false
 
 [[fault]]
+id = "client.stream-cancel-leaves-the-socket-open"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-cancel-leaves-the-socket-open"
+failure_class = "client.stream-cancel-leaves-the-socket-open"
+migrated = false
+
+[[fault]]
+id = "client.stream-never-hears-done"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-never-hears-done"
+failure_class = "client.stream-never-hears-done"
+migrated = false
+
+[[fault]]
+id = "client.stream-reads-the-wrong-field"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-reads-the-wrong-field"
+failure_class = "client.stream-reads-the-wrong-field"
+migrated = false
+
+[[fault]]
+id = "client.stream-an-unfinished-stream-is-an-answer"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-an-unfinished-stream-is-an-answer"
+failure_class = "client.stream-an-unfinished-stream-is-an-answer"
+migrated = false
+
+[[fault]]
+id = "client.stream-a-refusal-is-read-as-a-stream"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-a-refusal-is-read-as-a-stream"
+failure_class = "client.stream-a-refusal-is-read-as-a-stream"
+migrated = false
+
+[[fault]]
+id = "client.stream-events-cut-per-read"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-events-cut-per-read"
+failure_class = "client.stream-events-cut-per-read"
+migrated = false
+
+[[fault]]
+id = "client.streaming-body-drops-usage"
+kind = "lane-fault"
+check = "lanes"
+label = "client.streaming-body-drops-usage"
+failure_class = "client.streaming-body-drops-usage"
+migrated = false
+
+[[fault]]
 id = "drive.head-not-linted"
 kind = "lane-fault"
 check = "lanes"
@@ -5726,6 +5782,14 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.session-numbers-the-log-by-something-else"
 failure_class = "drive.session-numbers-the-log-by-something-else"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-rejected-ask-joins-the-trunk"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-rejected-ask-joins-the-trunk"
+failure_class = "drive.session-a-rejected-ask-joins-the-trunk"
 migrated = false
 
 [[fault]]
