@@ -2,9 +2,19 @@
   display: grid;
   gap: 0.5rem;
   padding: 0.75rem 0.9rem 0.6rem;
-  background: var(--panel);
-  border: 1px solid var(--rule);
+  --light-colour: var(--ink-user);
+  --light: var(--light-panel);
+  --glow: var(--glow-panel);
+  background-color: var(--panel);
+  background-image:
+    var(--glass-overlay),
+    radial-gradient(120% 90% at 50% 100%, color-mix(in oklab, var(--light-colour) var(--light), transparent), transparent 75%);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-rim, var(--rule));
   border-radius: var(--radius);
+  box-shadow: var(--relief-panel), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--light-colour) var(--glow), transparent);
+  transition: box-shadow 0.6s ease;
   font: var(--size-chrome) / 1.4 var(--font-chrome);
   color: var(--ink-muted);
 }
@@ -58,7 +68,8 @@
 .ex-composer select,
 .ex-composer button {
   padding: 0.25em 0.6em;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--control-rim, var(--rule));
+  box-shadow: var(--relief-control);
   border-radius: var(--radius);
   background: var(--chip);
   color: var(--ink);
@@ -91,3 +102,8 @@
   margin: 0;
   color: var(--ink-faint);
 }
+
+/* The composer is lit by what the session is doing: your turn, the trunk, an interview, ratify. */
+.ex-composer[data-state='turn'] { --light-colour: var(--ink-assistant); --light: var(--light-panel-live); --glow: var(--glow-panel-live); }
+.ex-composer[data-state='capture'] { --light-colour: var(--ink-interview); --light: var(--light-panel-live); --glow: var(--glow-panel-live); }
+.ex-composer[data-state='ratify'] { --light-colour: var(--ink-ratify); --light: var(--light-panel-live); --glow: var(--glow-panel-live); }

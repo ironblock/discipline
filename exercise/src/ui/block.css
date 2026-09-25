@@ -6,6 +6,13 @@
   border-radius: var(--radius);
   padding: 1rem 1.25rem 0.6rem;
   position: relative;
+  /* A message is an impression in the prefix; its role's light, if any, spills. */
+  box-shadow: var(--relief-trunk), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--tone-ink) var(--glow-trunk), transparent);
+  transition: box-shadow 0.6s ease, opacity 0.6s ease;
+}
+
+.ex-block--live {
+  box-shadow: var(--relief-trunk-live), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--tone-ink) var(--glow-trunk-live), transparent);
 }
 
 .ex-block--system { --fill: var(--fill-system); --tone-ink: var(--ink-system); }
@@ -17,6 +24,27 @@
 
 .ex-block--thin {
   padding: 0.45rem 0.75rem;
+}
+
+/* A lane bar sits beside the prefix: it may be glass, and it may be lit from within. */
+.ex-block--interview,
+.ex-block--ratify {
+  --light: var(--light-lane);
+  --glow: var(--glow-lane);
+  background-color: var(--fill);
+  background-image:
+    var(--glass-overlay),
+    radial-gradient(130% 110% at 50% 0%, color-mix(in oklab, var(--tone-ink) var(--light), transparent), transparent 75%);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-rim, transparent);
+  box-shadow: var(--relief-lane), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--tone-ink) var(--glow), transparent);
+}
+
+.ex-block--interview.ex-block--live,
+.ex-block--ratify.ex-block--live {
+  --light: var(--light-lane-live);
+  --glow: var(--glow-lane-live);
 }
 
 .ex-block__body {
@@ -39,6 +67,8 @@
 
 .ex-block__label {
   padding: 0.15em 0.5em;
+  box-shadow: var(--relief-well);
+  border-radius: calc(var(--radius) / 2);
   background: var(--chip);
   color: var(--tone-ink);
   text-transform: uppercase;
@@ -59,6 +89,8 @@
 
 .ex-stat {
   padding: 0.15em 0.5em;
+  box-shadow: var(--relief-well);
+  border-radius: calc(var(--radius) / 2);
   background: var(--chip);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -71,6 +103,7 @@
 
 .ex-stat--cite {
   background: none;
+  box-shadow: none;
   color: var(--ink-faint);
   padding-inline: 0;
 }

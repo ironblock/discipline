@@ -10,8 +10,11 @@
 
 .ex-seam__rule {
   flex: 1 1 2rem;
-  border-top: 1px solid var(--seam);
-  opacity: 0.6;
+  height: var(--seam-thickness, 0);
+  border-top: var(--seam-line, 1px solid);
+  border-color: color-mix(in oklab, var(--seam) 60%, transparent);
+  border-radius: 999px;
+  box-shadow: var(--seam-groove, 0 0 0 transparent), 0 0 var(--glow-radius) color-mix(in oklab, var(--seam) var(--glow-seam), transparent);
 }
 
 .ex-seam__label {

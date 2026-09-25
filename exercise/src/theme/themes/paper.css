@@ -1,5 +1,5 @@
 /* Theme: paper -- the same meanings on a light page. */
-.ex-root[data-theme='paper'] {
+.ex-root[data-theme~='paper'] {
   color-scheme: light;
   --page: #f6f5f2;
   --panel: #efeeea;

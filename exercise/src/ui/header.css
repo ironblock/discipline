@@ -4,8 +4,10 @@
   align-items: center;
   gap: 0.4rem 1.1rem;
   padding: 0.55rem 1rem;
-  border-bottom: 1px solid var(--rule);
-  background: var(--page);
+  border-bottom: 1px solid var(--glass-rim, var(--rule));
+  background: var(--chrome-bg, var(--page));
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
   font: var(--size-chrome) / 1.4 var(--font-chrome);
   color: var(--ink-muted);
 }
@@ -39,6 +41,7 @@
 .ex-header__slot[data-busy] .ex-header__dot {
   background: var(--ink-interview);
   border-color: var(--ink-interview);
+  box-shadow: 0 0 var(--led-radius) var(--ink-interview), 0 0 calc(var(--led-radius) * 2.5) color-mix(in oklab, var(--ink-interview) 50%, transparent);
 }
 
 .ex-header__holder {

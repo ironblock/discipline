@@ -1,18 +1,32 @@
 /**
- * The themes to try, one file each beside this one. A theme overrides token
- * values under `.ex-root[data-theme=<name>]` and nothing else; `mockup` is the
- * default in `tokens.css` and has no file. This list is the one source the
- * Storybook toolbar and the app's `?theme=` read.
+ * The themes to try, one file per layer beside this one. A layer overrides
+ * token VALUES under `.ex-root[data-theme~=<layer>]` and nothing else, and a
+ * theme is a stack of layers, later ones winning: `glass` is fabric + glass.
+ * `mockup` is the default in `tokens.css` and has no file. This list is the
+ * one source the Storybook toolbar and the app's `?theme=` read.
  */
 import './paper.css';
+import './fabric.css';
+import './glass.css';
+import './colo.css';
+import './lantern.css';
 
 export const THEMES = [
-  { name: 'mockup', title: 'mockup — the author’s sketch, dark' },
-  { name: 'paper', title: 'paper — the same meanings, light' },
+  { name: 'mockup', layers: 'mockup', title: 'mockup — the author’s sketch' },
+  { name: 'paper', layers: 'paper', title: 'paper — the sketch, light' },
+  { name: 'fabric', layers: 'fabric', title: 'fabric — the prefix pressed into one material' },
+  { name: 'glass', layers: 'fabric glass', title: 'glass — fabric, with glass beside the prefix' },
+  { name: 'colo', layers: 'fabric glass colo', title: 'colo — glass, and things glow while they work' },
+  { name: 'lantern', layers: 'fabric glass lantern', title: 'lantern — glass, and the glass is the light' },
 ] as const;
 
 export type ThemeName = (typeof THEMES)[number]['name'];
 
 export function isTheme(name: string | null): name is ThemeName {
   return THEMES.some((t) => t.name === name);
+}
+
+/** The `data-theme` value for a theme: its layers, space-separated. */
+export function layersOf(name: string): string {
+  return THEMES.find((t) => t.name === name)?.layers ?? 'mockup';
 }

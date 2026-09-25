@@ -1,0 +1,46 @@
+/*
+ * Layer: fabric. The page is one material under a key light from the top
+ * left. What is IN THE PREFIX is pressed into it: every trunk message is an
+ * impression, tinted by its role. What is being written rises out of it
+ * until it settles. What is beside the prefix (lanes, panels) sits raised
+ * on it. A seam is a groove; the eras before it -- evicted from the
+ * prefix, kept in the archive -- lose their relief.
+ */
+.ex-root[data-theme~='fabric'] {
+  color-scheme: dark;
+  --page: #1d2025;
+  --panel: #1d2025;
+  --rule: #272b31;
+  --ink: #e4e6ea;
+  --ink-muted: #939aa5;
+  --ink-faint: #646a75;
+  --chip: transparent;
+
+  --fill-system: color-mix(in oklab, #1d2025 88%, #4d8fe8);
+  --ink-system: #9cc6ff;
+  --fill-user: color-mix(in oklab, #1d2025 88%, #2fc49d);
+  --ink-user: #72e8c8;
+  --fill-assistant: #1d2025;
+  --ink-assistant: #c3c7cd;
+  --ink-reasoning: #e2e5e9;
+  --fill-tool: #1d2025;
+  --fill-interview: #1d2025;
+  --fill-ratify: #1d2025;
+  --fill-memory: #1d2025;
+
+  --radius: 12px;
+
+  --relief-trunk: inset 6px 6px 14px rgb(0 0 0 / 0.62), inset -5px -5px 12px rgb(255 255 255 / 0.055), 0 1px 0 rgb(255 255 255 / 0.04);
+  --relief-trunk-live: 8px 8px 20px rgb(0 0 0 / 0.62), -6px -6px 18px rgb(255 255 255 / 0.055);
+  --relief-evicted: 0 0 0 transparent;
+  --evicted-opacity: 0.5;
+  --relief-lane: 6px 6px 14px rgb(0 0 0 / 0.6), -5px -5px 12px rgb(255 255 255 / 0.05);
+  --relief-panel: 9px 9px 22px rgb(0 0 0 / 0.6), -7px -7px 18px rgb(255 255 255 / 0.05);
+  --relief-well: inset 2px 2px 4px rgb(0 0 0 / 0.6), inset -1px -1px 3px rgb(255 255 255 / 0.07);
+  --relief-control: 3px 3px 7px rgb(0 0 0 / 0.5), -2px -2px 6px rgb(255 255 255 / 0.04);
+  --control-rim: transparent;
+
+  --seam-thickness: 7px;
+  --seam-line: 0 solid;
+  --seam-groove: inset 2px 2px 4px rgb(0 0 0 / 0.6), inset -1px -1px 3px rgb(255 255 255 / 0.05);
+}

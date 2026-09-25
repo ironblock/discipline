@@ -1,0 +1,21 @@
+/*
+ * Layer: lantern, over glass -- the alternative to colo. The GLASS IS THE
+ * LIGHT SOURCE: panes beside the prefix are lit from within in their own
+ * colour, dimly at rest and brightly while they work, and that light falls
+ * onto the fabric around them. The prefix itself emits nothing; it is lit
+ * by what works beside it. The composer glows with whoever holds the turn.
+ */
+.ex-root[data-theme~='lantern'] {
+  --glass-rim: rgb(255 255 255 / 0.14);
+  --glow-radius: 44px;
+  --glow-lane: 16%;
+  --glow-lane-live: 70%;
+  --light-lane: 14%;
+  --light-lane-live: 45%;
+  --glow-panel: 10%;
+  --glow-panel-live: 40%;
+  --light-panel: 10%;
+  --light-panel-live: 35%;
+  --glow-seam: 50%;
+  --led-radius: 5px;
+}

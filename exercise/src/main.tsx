@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 
 import { App } from './App.tsx';
 import './theme/tokens.css';
-import { isTheme } from './theme/themes/index.ts';
+import { isTheme, layersOf } from './theme/themes/index.ts';
 
 // `?speed=4` plays the canned session four times as fast; `?theme=paper` tries a theme.
 const params = new URLSearchParams(window.location.search);
@@ -16,7 +16,7 @@ if (!root) throw new Error('index.html has no #root');
 
 createRoot(root).render(
   <StrictMode>
-    <div className="ex-root" data-theme={theme}>
+    <div className="ex-root" data-theme={layersOf(theme)}>
       <App speed={speed} />
     </div>
   </StrictMode>,

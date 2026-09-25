@@ -73,6 +73,45 @@
   --size-tool: 12.5px;
   --leading-prose: 1.6;
 
+  /*
+   * Surfaces: how each kind of thing sits on the page. Every default is
+   * neutral, so a theme that sets none of them looks like the mockup.
+   * RELIEF is a box-shadow list (never `none`: it is composed with glows).
+   *   in the prefix · being written · evicted at a seam · beside it (lanes)
+   *   · a panel (memory, composer) · a well (stat chip) · a control
+   * GLASS is a layer over a surface: an overlay image, a backdrop filter,
+   * a rim. LIGHT is emitted: a glow's reach, its strength per surface at
+   * rest and while live, a surface's own inner light, and an LED's reach.
+   * Colour always comes from the element (its tone, its state), never from
+   * the token -- a token here is an amount.
+   */
+  --relief-trunk: 0 0 0 transparent;
+  --relief-trunk-live: 0 0 0 transparent;
+  --relief-evicted: 0 0 0 transparent;
+  --evicted-opacity: 1;
+  --relief-lane: 0 0 0 transparent;
+  --relief-panel: 0 0 0 transparent;
+  --relief-well: 0 0 0 transparent;
+  --relief-control: 0 0 0 transparent;
+  --glass-overlay: none;
+  --glass-backdrop: none;
+  --glow-radius: 0px;
+  --glow-trunk: 0%;
+  --glow-trunk-live: 0%;
+  --glow-lane: 0%;
+  --glow-lane-live: 0%;
+  --glow-panel: 0%;
+  --glow-panel-live: 0%;
+  --glow-seam: 0%;
+  --light-lane: 0%;
+  --light-lane-live: 0%;
+  --light-panel: 0%;
+  --light-panel-live: 0%;
+  --led-radius: 0px;
+  /* Optional, falling back to the colour tokens when a theme leaves them unset:
+   *   --glass-rim (→ --rule)  --control-rim (→ --rule)  --chrome-bg (→ --page)
+   *   --seam-thickness (→ 0)  --seam-line (→ 1px solid)  --seam-groove (→ none) */
+
   /* Geometry */
   --trunk-width: 46rem;
   --lane-width: 22rem;

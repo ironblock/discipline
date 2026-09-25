@@ -1,0 +1,18 @@
+/*
+ * Layer: colo, over glass. Light is WHAT IS HAPPENING NOW, and it comes
+ * from the things themselves, like LEDs in a rack: a message's role spills
+ * faintly onto the fabric around it; whatever is generating glows in its
+ * colour; a busy slot is a lit LED; fresh memory entries are lit; the seam
+ * glows. Idle is dark.
+ */
+.ex-root[data-theme~='colo'] {
+  --glow-radius: 28px;
+  --glow-trunk: 9%;
+  --glow-trunk-live: 45%;
+  --glow-lane: 10%;
+  --glow-lane-live: 60%;
+  --glow-panel: 0%;
+  --glow-panel-live: 30%;
+  --glow-seam: 70%;
+  --led-radius: 6px;
+}

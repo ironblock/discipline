@@ -2,11 +2,28 @@
   display: grid;
   gap: 0.9rem;
   padding: 0.9rem 1rem;
-  background: var(--fill-memory);
-  border: 1px solid var(--rule);
+  --light-colour: var(--ink-muted);
+  --light: var(--light-panel);
+  --glow: var(--glow-panel);
+  background-color: var(--fill-memory);
+  background-image:
+    var(--glass-overlay),
+    radial-gradient(120% 70% at 50% 0%, color-mix(in oklab, var(--light-colour) var(--light), transparent), transparent 75%);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-rim, var(--rule));
   border-radius: var(--radius);
+  box-shadow: var(--relief-panel), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--light-colour) var(--glow), transparent);
+  transition: box-shadow 0.8s ease;
   font: var(--size-chrome) / 1.45 var(--font-chrome);
   color: var(--ink-muted);
+}
+
+/* Something landed that the person has not seen: memory lights up in the fresh colour. */
+.ex-memory:has(.ex-memory__entry[data-fresh]) {
+  --light-colour: var(--fresh);
+  --light: var(--light-panel-live);
+  --glow: var(--glow-panel-live);
 }
 
 .ex-memory__head {
@@ -57,6 +74,7 @@
 
 .ex-memory__entry[data-fresh] {
   border-left-color: var(--fresh);
+  box-shadow: calc(var(--led-radius) / -4) 0 var(--led-radius) calc(var(--led-radius) / -4) var(--fresh);
 }
 
 .ex-memory__id {
