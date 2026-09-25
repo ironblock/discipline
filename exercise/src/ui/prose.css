@@ -72,3 +72,21 @@
 @media (prefers-reduced-motion: reduce) {
   .ex-caret { animation: none; }
 }
+
+.ex-prose__codebox {
+  position: relative;
+}
+
+.ex-prose__copy {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.5rem;
+  font: var(--size-stats) / 1.4 var(--font-stats);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.ex-prose__codebox:hover .ex-prose__copy,
+.ex-prose__codebox:focus-within .ex-prose__copy {
+  opacity: 1;
+}

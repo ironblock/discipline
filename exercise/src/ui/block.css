@@ -108,23 +108,49 @@
   color: var(--ink-faint);
 }
 
-.ex-stat--cite {
-  background: none;
-  box-shadow: none;
-  color: var(--ink-faint);
-  padding-inline: 0;
-  /* Where this came from is there when you look for it: in the block's corner,
-     on hover or focus, out of the footer's line. */
+/* The corner: what you can do with a block, and where it came from -- there
+   when you look for it, on hover or focus, out of the footer's line. */
+.ex-block__corner {
   position: absolute;
-  top: 0.45rem;
-  right: 0.8rem;
+  /* In the gap above the block's top-right edge, so it never covers the text. */
+  top: -0.95rem;
+  right: 0.7rem;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font: var(--size-stats) / 1.4 var(--font-stats);
+  color: var(--ink-faint);
   opacity: 0;
   transition: opacity 0.2s ease;
 }
 
-.ex-block:hover .ex-stat--cite,
-.ex-block:focus-within .ex-stat--cite {
+.ex-block:hover > .ex-block__corner,
+.ex-block:focus-within > .ex-block__corner {
   opacity: 1;
+}
+
+/* A lane bar is too small for a corner of its own. */
+.ex-block--thin > .ex-block__corner {
+  display: none;
+}
+
+.ex-action {
+  padding: 0.1em 0.45em;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) / 2);
+  background: var(--chip);
+  color: var(--ink-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ex-action:hover {
+  color: var(--ink);
+}
+
+.ex-action[data-done] {
+  color: var(--fresh);
 }
 
 /* Something is still generating or running in this block. */
@@ -187,3 +213,9 @@
 /* Something still running says for how long, and colours it once that is worrying. */
 .ex-elapsed[data-level='slow'] { color: var(--warn); }
 .ex-elapsed[data-level='stalled'] { color: var(--bad); }
+
+/* Keyboard focus is always visible, in the interview hue, on every control. */
+.ex-root :focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--ink-interview) 75%, transparent);
+  outline-offset: 2px;
+}

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { AssistantNode, Folded, SystemNode, UserNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { counter, ms, rate, tokens } from './format.ts';
+import { Copy } from './Copy.tsx';
 import { Prose } from './Prose.tsx';
 import { elapsed, useNow } from './surface.tsx';
 import './message.css';
@@ -46,6 +47,7 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
       }
       provenance={node}
       id={node.id}
+      actions={<Copy text={node.text} />}
     >
       <Prose text={node.text} kind="ask" />
     </Block>
@@ -93,6 +95,7 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
       }
       provenance={node}
       id={node.id}
+      {...(node.text !== '' && !live ? { actions: <Copy text={node.text} /> } : {})}
     >
       {node.reasoning !== '' ? (
         <div className="ex-reasoning">

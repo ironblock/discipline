@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 
+import { Copy } from './Copy.tsx';
 import './prose.css';
 
 /**
@@ -38,9 +39,12 @@ function blocks(text: string): ReactNode[] {
       while (i < lines.length && !(lines[i] ?? '').startsWith('```')) body.push(lines[i++] ?? '');
       i += 1;
       out.push(
-        <pre className="ex-prose__code" key={key++}>
-          {body.join('\n')}
-        </pre>,
+        <div className="ex-prose__codebox" key={key++}>
+          <pre className="ex-prose__code">{body.join('\n')}</pre>
+          <span className="ex-prose__copy">
+            <Copy text={body.join('\n')} />
+          </span>
+        </div>,
       );
       continue;
     }

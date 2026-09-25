@@ -21,7 +21,7 @@ export interface ComposerProps {
 const STATE_LINE: Readonly<Record<SessionState, string>> = {
   connecting: 'connecting…',
   awaiting: 'your turn',
-  turn: 'working · cancel stops it',
+  turn: 'working · esc cancels',
   capture: 'interview running · send when it settles',
   ratify: 'ratifying before the refill',
   ended: 'the session has ended',
@@ -55,6 +55,10 @@ export function Composer({ state, phase, phases, onSend, onCancel, onSeam, hint 
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) void send(e);
+    if (e.key === 'Escape' && running && onCancel) {
+      e.preventDefault();
+      void onCancel().then(answer);
+    }
   };
 
   return (

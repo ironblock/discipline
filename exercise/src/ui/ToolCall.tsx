@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { Folded, ToolNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { bytes, counter, lines, ms } from './format.ts';
+import { Copy } from './Copy.tsx';
 import { elapsed, useNow } from './surface.tsx';
 import './tool.css';
 
@@ -28,6 +29,12 @@ export function ToolCall({ node, open: initiallyOpen = false }: { readonly node:
       }
       provenance={node}
       id={node.id}
+      actions={
+        <>
+          <Copy text={node.command} label="copy command" />
+          {output !== '' ? <Copy text={output} label="copy output" /> : null}
+        </>
+      }
     >
       <button type="button" className="ex-tool__head" aria-expanded={open} onClick={() => setOpen(!open)} disabled={output === '' && rest.length === 0}>
         <span className="ex-tool__caret" aria-hidden="true">

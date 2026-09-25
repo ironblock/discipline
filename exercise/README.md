@@ -43,4 +43,13 @@ pnpm verify           # typecheck, lint, unit tests, every story as a browser te
 
 Theme tokens (`src/theme/tokens.css`) are named for kinds of text and
 meanings, never for faces or hues; several resolve to the same value on
-purpose.
+purpose. Surfaces bind to tokens that say how a thing sits -- relief (in
+the prefix, being written, evicted at a seam, beside it), glass, light,
+texture, the live field -- and every default is neutral.
+
+A theme is a stack of value-only layers in `src/theme/themes/`, listed once
+in `themes/index.ts`, switched from Storybook's toolbar or the app's
+`?theme=`. The session opens in `bloom`: frosted slabs over pools of their
+own colour, light pooled where the work is, what runs glowing while it runs.
+The mapping behind all of them: material = in the prefix, glass = beside it,
+light = happening now.

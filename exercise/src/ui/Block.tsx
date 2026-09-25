@@ -25,6 +25,8 @@ export interface BlockProps {
   readonly thin?: boolean;
   readonly live?: boolean;
   readonly id?: string;
+  /** Per-block actions -- copy today; retry, annotate, link later -- shown in the corner on hover or focus. */
+  readonly actions?: ReactNode;
   readonly children?: ReactNode;
 }
 
@@ -33,7 +35,7 @@ export interface BlockProps {
  * footer of what the harness measured. Every message, tool call and lane
  * step on the surface is one of these, refined.
  */
-export function Block({ tone, label, stats = [], provenance, thin = false, live = false, id, children }: BlockProps) {
+export function Block({ tone, label, stats = [], provenance, thin = false, live = false, id, actions, children }: BlockProps) {
   const { curtain } = useSurface();
   const shown = stats.filter((s): s is Stat => Boolean(s));
   return (
@@ -55,12 +57,17 @@ export function Block({ tone, label, stats = [], provenance, thin = false, live 
             {s.unit ? <span className="ex-stat__unit">{s.unit}</span> : null}
           </span>
         ))}
-        {curtain ? (
-          <span className="ex-stat ex-stat--cite" title="log positions this block was folded from">
-            #{provenance.from.join(' #')}
-          </span>
-        ) : null}
       </footer>
+      {actions !== undefined || curtain ? (
+        <div className="ex-block__corner">
+          {actions}
+          {curtain ? (
+            <span className="ex-cite" title="log positions this block was folded from">
+              #{provenance.from.join(' #')}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
