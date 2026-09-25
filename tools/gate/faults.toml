@@ -5713,6 +5713,46 @@ failure_class = "client.stream-reply-cap-ignored"
 migrated = false
 
 [[fault]]
+id = "client.stream-socket-outlives-the-call"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-socket-outlives-the-call"
+failure_class = "client.stream-socket-outlives-the-call"
+migrated = false
+
+[[fault]]
+id = "client.stream-connects-after-a-stop"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-connects-after-a-stop"
+failure_class = "client.stream-connects-after-a-stop"
+migrated = false
+
+[[fault]]
+id = "client.stream-a-bare-cr-ends-no-line"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-a-bare-cr-ends-no-line"
+failure_class = "client.stream-a-bare-cr-ends-no-line"
+migrated = false
+
+[[fault]]
+id = "client.stream-a-split-crlf-decided-early"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-a-split-crlf-decided-early"
+failure_class = "client.stream-a-split-crlf-decided-early"
+migrated = false
+
+[[fault]]
+id = "client.stream-a-zero-budget-is-a-budget"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-a-zero-budget-is-a-budget"
+failure_class = "client.stream-a-zero-budget-is-a-budget"
+migrated = false
+
+[[fault]]
 id = "drive.head-not-linted"
 kind = "lane-fault"
 check = "lanes"
@@ -5798,6 +5838,14 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.session-a-rejected-ask-joins-the-trunk"
 failure_class = "drive.session-a-rejected-ask-joins-the-trunk"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-crashed-turn-never-settles"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-crashed-turn-never-settles"
+failure_class = "drive.session-a-crashed-turn-never-settles"
 migrated = false
 
 [[fault]]
