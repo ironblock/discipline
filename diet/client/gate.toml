@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 42
+faults = 47
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -654,6 +654,7 @@ anchor = '''
 becomes = '''
         drop(stoppers);'''
 catches = [
+    "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
     "client::stream::tests::a_canned_stream_held_mid_answer_is_woken_by_a_cancel_and_says_so",
     "client::stream::tests::asking_runs_every_stopper_once_and_asking_again_runs_none",
 ]
@@ -682,9 +683,9 @@ failure_class = "client.stream-cancel-leaves-the-socket-open"
 target = "diet/src/client/stream.rs"
 expect_exit = 101
 anchor = '''
-            let _ = waker.shutdown(Shutdown::Both);'''
+        cancel.on_cancel(move || close(&waker));'''
 becomes = '''
-            let _ = &waker;'''
+        cancel.on_cancel(move || drop(waker));'''
 catches = [
     "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
 ]
@@ -758,7 +759,7 @@ failure_class = "client.stream-events-cut-per-read"
 target = "diet/src/client/stream.rs"
 expect_exit = 101
 anchor = '''
-            let event: Vec<u8> = self.pending.drain(..at + width).collect();'''
+            let event: Vec<u8> = self.pending.drain(..at + 2).collect();'''
 becomes = '''
             let event: Vec<u8> = std::mem::take(&mut self.pending);'''
 catches = [
@@ -791,4 +792,73 @@ becomes = '''
         if false && self.total > cap {'''
 catches = [
     "client::stream::tests::a_stream_past_the_reply_cap_is_refused_rather_than_read_forever",
+    "client::stream::tests::a_stream_that_fails_on_its_own_closes_its_connection_while_the_cancel_lives",
+]
+
+[[fault]]
+id = "client.stream-socket-outlives-the-call"
+failure_class = "client.stream-socket-outlives-the-call"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        let _closing = Closing(handle);'''
+becomes = '''
+        let _closing = handle;'''
+catches = [
+    "client::stream::tests::a_stream_that_fails_on_its_own_closes_its_connection_while_the_cancel_lives",
+]
+
+[[fault]]
+id = "client.stream-connects-after-a-stop"
+failure_class = "client.stream-connects-after-a-stop"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        if cancel.is_asked() {
+            return Ok(Ended::Cancelled);
+        }
+        let address'''
+becomes = '''
+        let address'''
+catches = [
+    "client::stream::tests::a_stop_asked_before_the_call_opens_no_connection",
+]
+
+[[fault]]
+id = "client.stream-a-bare-cr-ends-no-line"
+failure_class = "client.stream-a-bare-cr-ends-no-line"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            (b'\r', Some(_)) => out.push(b'\n'),'''
+becomes = '''
+            (b'\r', Some(_)) => {}'''
+catches = [
+    "client::stream::tests::every_legal_line_ending_ends_an_event_and_a_split_crlf_is_one_ending",
+]
+
+[[fault]]
+id = "client.stream-a-split-crlf-decided-early"
+failure_class = "client.stream-a-split-crlf-decided-early"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            (b'\r', None) => out.push(b'\r'),'''
+becomes = '''
+            (b'\r', None) => out.push(b'\n'),'''
+catches = [
+    "client::stream::tests::every_legal_line_ending_ends_an_event_and_a_split_crlf_is_one_ending",
+]
+
+[[fault]]
+id = "client.stream-a-zero-budget-is-a-budget"
+failure_class = "client.stream-a-zero-budget-is-a-budget"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        .filter(|left| !left.is_zero())'''
+becomes = '''
+        .filter(|_| true)'''
+catches = [
+    "client::stream::tests::a_deadline_that_has_arrived_is_arrived_even_at_the_exact_instant",
 ]

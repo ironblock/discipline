@@ -232,8 +232,16 @@ impl Streaming for HttpStream {
         let timeout = || TransportFailure::Timeout {
             after: started.elapsed(),
         };
-        let remaining = || deadline.checked_duration_since(Instant::now());
+        let remaining = || left_before(deadline, Instant::now());
 
+        // A stop already asked for is honoured before anything is opened.
+        // One asked for DURING the connect is not: `std` offers no way to
+        // interrupt a `connect_timeout` from another thread, so it lands
+        // when the connect returns -- immediate on loopback, up to the
+        // budget against a host that drops SYNs. Disclosed on #120.
+        if cancel.is_asked() {
+            return Ok(Ended::Cancelled);
+        }
         let address = (self.endpoint.host.as_str(), self.endpoint.port)
             .to_socket_addrs()
             .map_err(|why| TransportFailure::Connect(why.to_string()))?
@@ -253,12 +261,20 @@ impl Streaming for HttpStream {
         // The stopper: a second handle on the same socket, shut from
         // whichever thread asks. Shutting it is what makes a read blocked
         // below return, and what the server sees as the client leaving.
-        let waker = socket.try_clone().map_err(|why| {
+        //
+        // The same handle is shut when this call returns, WHATEVER it
+        // returns with -- a cap passed, a framing failure, an `error` event.
+        // Otherwise the stopper's handle kept the connection open for as
+        // long as the `Cancel` lived, and against llama-server an open
+        // connection is a slot still generating (measured; see above).
+        // Taken out of its slot either way, so the socket closes once and a
+        // reused `Cancel` holds no open connection per call.
+        let handle = Arc::new(Mutex::new(Some(socket.try_clone().map_err(|why| {
             TransportFailure::Connect(format!("no second handle to cancel through: {why}"))
-        })?;
-        cancel.on_cancel(move || {
-            let _ = waker.shutdown(Shutdown::Both);
-        });
+        })?)));
+        let waker = Arc::clone(&handle);
+        cancel.on_cancel(move || close(&waker));
+        let _closing = Closing(handle);
 
         let body = wire::streaming_body(shape);
         let request = format!(
@@ -290,9 +306,15 @@ impl Streaming for HttpStream {
         let mut reading = Reading::default();
         let mut buffer = [0_u8; 16 * 1024];
         loop {
-            if cancel.is_asked() {
-                return Ok(Ended::Cancelled);
-            }
+            // NO flag check here, before the read. A check here only races
+            // the stopper -- it wins when a stop lands between two reads and
+            // loses when the read is already blocked -- so a test cancelling
+            // right after a piece passed whether or not the stopper worked
+            // (#120's review, and the fault that left the socket open). The
+            // stopper is what ends a blocked read; the check below, after a
+            // read returns, is what stops pieces that were already buffered
+            // from being delivered after the stop.
+            //
             // Re-armed on every pass, as the unstreamed transport does: one
             // timeout bounds one read, not the call.
             let budget = remaining().ok_or_else(timeout)?;
@@ -308,10 +330,10 @@ impl Streaming for HttpStream {
                 Err(why) if is_timeout(&why) => return Err(timeout()),
                 Err(why) => return Err(TransportFailure::Read(why.to_string())),
             };
+            if cancel.is_asked() {
+                return Ok(Ended::Cancelled);
+            }
             if count == 0 {
-                if cancel.is_asked() {
-                    return Ok(Ended::Cancelled);
-                }
                 return reading.at_close();
             }
             if let Some(ended) = reading.feed(&buffer[..count], self.reply_cap, on_delta)? {
@@ -326,6 +348,34 @@ impl Streaming for HttpStream {
             self.endpoint.host, self.endpoint.port, self.endpoint.path
         )
     }
+}
+
+/// Shut the connection behind `handle` and release the handle, once.
+fn close(handle: &Mutex<Option<TcpStream>>) {
+    let taken = handle.lock().unwrap_or_else(PoisonError::into_inner).take();
+    if let Some(socket) = taken {
+        let _ = socket.shutdown(Shutdown::Both);
+    }
+}
+
+/// Closes a streamed call's connection when the call returns.
+struct Closing(Arc<Mutex<Option<TcpStream>>>);
+
+impl Drop for Closing {
+    fn drop(&mut self) {
+        close(&self.0);
+    }
+}
+
+/// How long is left before `deadline`, or `None` when it has arrived.
+///
+/// `Duration::ZERO` counts as arrived: a zero timeout is `InvalidInput` to a
+/// socket, so the exact instant of the deadline would otherwise surface as a
+/// `Read` or `Connect` failure for what is really time running out.
+fn left_before(deadline: Instant, now: Instant) -> Option<Duration> {
+    deadline
+        .checked_duration_since(now)
+        .filter(|left| !left.is_zero())
 }
 
 /// A streamed reply, read as it arrives: headers, then a body in whatever
@@ -499,6 +549,13 @@ impl Reading {
 /// line, and its `data:` lines are its payload. Nothing is decoded as text
 /// until its event is whole, so a character split across two reads -- or two
 /// chunks -- is never split in what the caller sees.
+///
+/// A line may end in `\r\n`, `\n` or a bare `\r` (the SSE rule), and one
+/// event may mix them. Every ending is normalised to `\n` before events are
+/// cut -- except a `\r` that is the LAST byte so far, which stays undecided
+/// until the next byte says whether it was half of a `\r\n`. Deciding early
+/// would read a `\r\n` split across two reads as two line endings, and
+/// that is a blank line: an event cut where there is none.
 #[derive(Debug, Default)]
 struct Events {
     pending: Vec<u8>,
@@ -507,14 +564,13 @@ struct Events {
 impl Events {
     fn feed(&mut self, bytes: &[u8]) -> Result<Vec<String>, TransportFailure> {
         self.pending.extend_from_slice(bytes);
+        self.pending = normalised(&self.pending);
         let mut out = Vec::new();
         loop {
-            let lf = find(&self.pending, b"\n\n").map(|at| (at, 2));
-            let crlf = find(&self.pending, b"\r\n\r\n").map(|at| (at, 4));
-            let Some((at, width)) = [lf, crlf].into_iter().flatten().min() else {
+            let Some(at) = find(&self.pending, b"\n\n") else {
                 break;
             };
-            let event: Vec<u8> = self.pending.drain(..at + width).collect();
+            let event: Vec<u8> = self.pending.drain(..at + 2).collect();
             let text = std::str::from_utf8(&event[..at]).map_err(|why| {
                 TransportFailure::Framing(format!("an event is not UTF-8: {why}"))
             })?;
@@ -531,6 +587,23 @@ impl Events {
         }
         Ok(out)
     }
+}
+
+/// Every line ending in `bytes` as `\n`, except a trailing `\r`, which is
+/// kept as it is: it may be the first half of a `\r\n` not yet arrived.
+fn normalised(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        match (bytes[at], bytes.get(at + 1)) {
+            (b'\r', None) => out.push(b'\r'),
+            (b'\r', Some(b'\n')) => {}
+            (b'\r', Some(_)) => out.push(b'\n'),
+            (byte, _) => out.push(byte),
+        }
+        at += 1;
+    }
+    out
 }
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -981,6 +1054,87 @@ mod tests {
             matches!(ended, Err(TransportFailure::Read(ref why)) if why.contains("passed 256 bytes")),
             "{ended:?}"
         );
+    }
+
+    #[test]
+    fn a_stream_that_fails_on_its_own_closes_its_connection_while_the_cancel_lives() {
+        // The cap fires and the call returns -- but the `Cancel` it was given
+        // is still alive, holding the stopper and its handle on the socket.
+        // The server must still see the client leave: against llama-server
+        // an open connection is a slot still generating.
+        let piece =
+            r#"data: {"choices":[{"index":0,"delta":{"content":"more"},"finish_reason":null}]}"#;
+        let stub = Stub::serving(vec![Act::StreamThenHold(vec![format!("{piece}\n\n"); 8])])
+            .expect("loopback");
+        let cancel = Cancel::new();
+        let ended = HttpStream::with_reply_cap(endpoint(&stub), 256).stream(
+            &shape(),
+            deadline(),
+            &cancel,
+            &mut |_| {},
+        );
+        assert!(matches!(ended, Err(TransportFailure::Read(_))), "{ended:?}");
+        let seen = wait_for_a_hangup(&stub);
+        let Held::HungUp(after) = seen else {
+            panic!("the connection outlived the call: {seen:?}");
+        };
+        assert!(
+            after < Duration::from_secs(5),
+            "the client left after {after:?}"
+        );
+        drop(cancel);
+    }
+
+    #[test]
+    fn a_stop_asked_before_the_call_opens_no_connection() {
+        // Nothing listens here: a connection attempt is refused, so the only
+        // way to come back `Cancelled` is not to have made one.
+        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+            // Through the type, as `stub.rs` does: the hygiene table reads
+            // the method-call spelling as an internal hostname.
+            .and_then(|listener| std::net::TcpListener::local_addr(&listener))
+            .expect("loopback")
+            .port();
+        let endpoint = Endpoint::parse(&format!("http://127.0.0.1:{port}/v1/chat/completions"))
+            .expect("an endpoint");
+        let cancel = Cancel::new();
+        cancel.ask();
+        let ended = HttpStream::new(endpoint).stream(&shape(), deadline(), &cancel, &mut |_| {
+            panic!("a stopped call delivered a piece")
+        });
+        assert_eq!(ended, Ok(Ended::Cancelled));
+    }
+
+    #[test]
+    fn a_deadline_that_has_arrived_is_arrived_even_at_the_exact_instant() {
+        let now = Instant::now();
+        assert_eq!(left_before(now, now), None, "a zero budget is not a budget");
+        assert_eq!(
+            left_before(now + Duration::from_secs(2), now),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(left_before(now, now + Duration::from_secs(1)), None);
+    }
+
+    #[test]
+    fn every_legal_line_ending_ends_an_event_and_a_split_crlf_is_one_ending() {
+        let read = |reads: &[&[u8]]| {
+            let mut events = Events::default();
+            let mut out = Vec::new();
+            for bytes in reads {
+                out.extend(events.feed(bytes).expect("well-formed"));
+            }
+            out
+        };
+        assert_eq!(read(&[b"data: a\r\rdata: b\r\r"]), ["a"], "bare CR");
+        assert_eq!(read(&[b"data: a\n\r\n"]), ["a"], "LF then CRLF");
+        assert_eq!(read(&[b"data: a\r\n\r\n"]), ["a"], "CRLF");
+        assert_eq!(
+            read(&[b"data: a\r", b"\n", b"data: b\r\n\r\n"]),
+            ["a\nb"],
+            "a CRLF split across two reads is one line ending, not a blank line"
+        );
+        assert_eq!(read(&[b"data: a\r", b"\n\r", b"\n"]), ["a"]);
     }
 
     #[test]

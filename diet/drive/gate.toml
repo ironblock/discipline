@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 56
+faults = 57
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -871,6 +871,7 @@ becomes = '''
                 return Ok(());'''
 catches = [
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
+    "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_client_leave",
 ]
 
 [[fault]]
@@ -947,4 +948,21 @@ becomes = '''
             state.push(Event::Rejected {'''
 catches = [
     "drive::session::tests::a_turn_the_server_refused_is_logged_as_refused_and_leaves_the_trunk_alone",
+]
+
+[[fault]]
+id = "drive.session-a-crashed-turn-never-settles"
+failure_class = "drive.session-a-crashed-turn-never-settles"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        if self.settled {
+            return;
+        }'''
+becomes = '''
+        if true {
+            return;
+        }'''
+catches = [
+    "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
 ]

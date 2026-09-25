@@ -155,6 +155,10 @@ pub enum Event {
         /// What arrived before the refusal.
         partial: String,
     },
+    /// The turn's own thread panicked before it could settle. Neither its
+    /// ask nor anything that arrived is on the trunk; what arrived is in the
+    /// [`Event::Delta`]s before this.
+    Crashed,
     /// The turn's call failed. Neither its ask nor `partial` is on the trunk.
     Failed {
         /// How it failed.
@@ -434,6 +438,12 @@ fn from(log: &[Logged], first: u64) -> Vec<Logged> {
 /// One turn's call, on its own thread: stream the answer into the log, then
 /// settle.
 fn turn<S: Streaming>(shared: &Shared<S>, shape: &RequestShape, cancel: &Cancel, ask: String) {
+    // Armed first, so anything below that panics -- a transport, an
+    // overflowing deadline -- still settles the turn on the way out.
+    let mut unwinding = Unwinding {
+        shared,
+        settled: false,
+    };
     let deadline = Instant::now() + shared.template.limits.call;
     let mut partial = String::new();
     let result = shared
@@ -480,8 +490,36 @@ fn turn<S: Streaming>(shared: &Shared<S>, shape: &RequestShape, cancel: &Cancel,
             state.move_to(Settlement::Awaiting);
         }
     }
+    unwinding.settled = true;
     drop(state);
     shared.changed.notify_all();
+}
+
+/// Settles a turn whose thread unwinds before [`turn`] settles it.
+///
+/// Without it a panic on the detached thread left the session in `turn` for
+/// good: every later ask refused as in flight, and a cancel logging
+/// [`Event::StopAsked`] with no terminal event ever following -- found by
+/// #120's fresh-instance review, probing with a transport that panics.
+struct Unwinding<'a, S> {
+    shared: &'a Shared<S>,
+    settled: bool,
+}
+
+impl<S> Drop for Unwinding<'_, S> {
+    fn drop(&mut self) {
+        if self.settled {
+            return;
+        }
+        let mut state = self.shared.lock();
+        if state.settlement == Settlement::Turn {
+            state.cancel = None;
+            state.push(Event::Crashed);
+            state.move_to(Settlement::Awaiting);
+        }
+        drop(state);
+        self.shared.changed.notify_all();
+    }
 }
 
 #[cfg(test)]
@@ -795,6 +833,93 @@ mod tests {
             "a refusal was logged as an answer"
         );
         assert_eq!(session.trunk(), [Message::new(Role::System, HEAD)]);
+    }
+
+    /// A transport that panics mid-call: the one thing a turn's thread can
+    /// do that no `Ended` or `TransportFailure` describes.
+    struct Panics;
+
+    impl Streaming for Panics {
+        fn stream(
+            &self,
+            _shape: &RequestShape,
+            _deadline: Instant,
+            _cancel: &Cancel,
+            on_delta: &mut dyn FnMut(&str),
+        ) -> Result<StreamEnded, TransportFailure> {
+            on_delta("half");
+            panic!("a transport that panics mid-answer (seeded by this test)");
+        }
+
+        fn describes(&self) -> String {
+            "a transport that panics".to_owned()
+        }
+    }
+
+    #[test]
+    fn a_turn_whose_thread_panics_still_settles_and_the_session_goes_on() {
+        let session = Session::open(Panics, template());
+        session.ask("first").expect("accepted");
+        let log = wait_until(&session, "the crashed turn to settle", settled);
+        let tail = events(&log[log.len() - 2..]);
+        assert_eq!(
+            tail,
+            [
+                Event::Crashed,
+                Event::Settled {
+                    from: Settlement::Turn,
+                    to: Settlement::Awaiting
+                },
+            ]
+        );
+        assert_eq!(session.trunk(), [Message::new(Role::System, HEAD)]);
+        assert!(
+            session.ask("again").is_ok(),
+            "a crashed turn left the session refusing asks"
+        );
+    }
+
+    #[test]
+    fn a_session_over_http_cancels_and_the_server_sees_the_client_leave() {
+        use crate::client::stream::HttpStream;
+        use crate::client::stub::{Act, Held, Stub};
+        use crate::client::transport::Endpoint;
+
+        let piece =
+            r#"data: {"choices":[{"index":0,"delta":{"content":"Hel"},"finish_reason":null}]}"#;
+        let stub = Stub::serving(vec![Act::StreamThenHold(vec![format!("{piece}\n\n")])])
+            .expect("loopback");
+        let transport =
+            HttpStream::new(Endpoint::parse(&stub.url()).expect("the stub's URL is an endpoint"));
+        let session = Session::open(transport, template());
+        session.ask("first").expect("accepted");
+        wait_until(&session, "the first piece", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::Delta { .. }))
+        });
+        // The server is holding the connection open and sending nothing: the
+        // turn's thread is blocked in a read that only the stopper can end.
+        assert_eq!(session.cancel(), Ok(()));
+        let log = wait_until(&session, "the stopped turn to settle", settled);
+        assert!(
+            log.iter().any(|logged| logged.event
+                == Event::Cancelled {
+                    partial: "Hel".to_owned()
+                }),
+            "{log:#?}"
+        );
+        let give_up = Instant::now() + Duration::from_secs(10);
+        let held = loop {
+            if let Some(held) = stub.hangups().first().copied() {
+                break held;
+            }
+            assert!(Instant::now() < give_up, "the stub recorded nothing");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(
+            matches!(held, Held::HungUp(after) if after < Duration::from_secs(5)),
+            "{held:?}"
+        );
     }
 
     #[test]
