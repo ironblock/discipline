@@ -145,6 +145,16 @@ pub enum Event {
         /// What arrived before the stop. Never an answer.
         partial: String,
     },
+    /// The server refused the turn rather than answering it. Neither its ask
+    /// nor `partial` is on the trunk.
+    Rejected {
+        /// The HTTP status, or `200` for an `error` event inside a stream.
+        status: u16,
+        /// What the server said.
+        body: String,
+        /// What arrived before the refusal.
+        partial: String,
+    },
     /// The turn's call failed. Neither its ask nor `partial` is on the trunk.
     Failed {
         /// How it failed.
@@ -457,6 +467,14 @@ fn turn<S: Streaming>(shared: &Shared<S>, shape: &RequestShape, cancel: &Cancel,
             state.push(Event::Cancelled { partial });
             state.move_to(Settlement::Awaiting);
         }
+        Ok(StreamEnded::Rejected { status, body }) => {
+            state.push(Event::Rejected {
+                status,
+                body,
+                partial,
+            });
+            state.move_to(Settlement::Awaiting);
+        }
         Err(failure) => {
             state.push(Event::Failed { failure, partial });
             state.move_to(Settlement::Awaiting);
@@ -752,6 +770,29 @@ mod tests {
             !log.iter()
                 .any(|logged| matches!(logged.event, Event::Answered { .. })),
             "a failed call was logged as an answer"
+        );
+        assert_eq!(session.trunk(), [Message::new(Role::System, HEAD)]);
+    }
+
+    #[test]
+    fn a_turn_the_server_refused_is_logged_as_refused_and_leaves_the_trunk_alone() {
+        let canned = Canned::new([vec![
+            Step::Delta("par".to_owned()),
+            Step::Reject(503, "busy".to_owned()),
+        ]]);
+        let session = Session::open(canned, template());
+        session.ask("first").expect("accepted");
+        let log = wait_until(&session, "the refused turn to settle", settled);
+        assert!(log.iter().any(|logged| logged.event
+            == Event::Rejected {
+                status: 503,
+                body: "busy".to_owned(),
+                partial: "par".to_owned()
+            }));
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::Answered { .. })),
+            "a refusal was logged as an answer"
         );
         assert_eq!(session.trunk(), [Message::new(Role::System, HEAD)]);
     }

@@ -18,8 +18,8 @@
 use std::fmt::Write as _;
 use std::io::{self, Read as _, Write as _};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -48,6 +48,26 @@ pub enum Act {
     Undercount(String, usize),
     /// Accept the connection and close it without answering.
     Hangup,
+    /// Write these bytes verbatim -- status line, headers, framing and all --
+    /// then close. For replaying a reply captured off a real server, byte
+    /// for byte, rather than one this module composed.
+    Raw(Vec<u8>),
+    /// Answer `200` as an event stream, one chunk per piece, each flushed on
+    /// its own; then HOLD the connection open, sending nothing, until the
+    /// client hangs up or [`IDLE_CAP`] passes. How long the client took to
+    /// hang up is recorded, and [`Stub::hangups`] says -- which is how a
+    /// cancel is seen from the SERVER's side of the socket, where "the
+    /// client stopped" actually has to land.
+    StreamThenHold(Vec<String>),
+}
+
+/// What an [`Act::StreamThenHold`] saw of its client while it held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Held {
+    /// The client hung up this long after the last piece was sent.
+    HungUp(Duration),
+    /// The client was still connected when the idle cap ran out.
+    NeverHungUp,
 }
 
 /// A running stub server.
@@ -60,6 +80,7 @@ pub enum Act {
 pub struct Stub {
     address: SocketAddr,
     stop: Arc<AtomicBool>,
+    hangups: Arc<Mutex<Vec<Held>>>,
     worker: Option<JoinHandle<Vec<String>>>,
 }
 
@@ -90,10 +111,13 @@ impl Stub {
         let address = TcpListener::local_addr(&listener)?;
         let stop = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&stop);
-        let worker = thread::spawn(move || serve(&listener, acts, &flag));
+        let hangups = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&hangups);
+        let worker = thread::spawn(move || serve(&listener, acts, &flag, &seen));
         Ok(Self {
             address,
             stop,
+            hangups,
             worker: Some(worker),
         })
     }
@@ -102,6 +126,16 @@ impl Stub {
     #[must_use]
     pub fn url(&self) -> String {
         format!("http://{}/v1/chat/completions", self.address)
+    }
+
+    /// For each [`Act::StreamThenHold`] served so far, in order, what it saw
+    /// of its client.
+    #[must_use]
+    pub fn hangups(&self) -> Vec<Held> {
+        self.hangups
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// Stop the stub and return the request bodies it received, in order.
@@ -135,7 +169,12 @@ impl Drop for Stub {
 }
 
 /// Serve every act, and collect what was asked.
-fn serve(listener: &TcpListener, acts: Vec<Act>, stop: &AtomicBool) -> Vec<String> {
+fn serve(
+    listener: &TcpListener,
+    acts: Vec<Act>,
+    stop: &AtomicBool,
+    hangups: &Mutex<Vec<Held>>,
+) -> Vec<String> {
     let mut asked = Vec::new();
     for act in acts {
         let Some(mut stream) = accept(listener, stop) else {
@@ -149,7 +188,12 @@ fn serve(listener: &TcpListener, acts: Vec<Act>, stop: &AtomicBool) -> Vec<Strin
             // subject is not confusing those two.
             Err(why) => asked.push(format!("<unread: {why}>")),
         }
-        act_on(&mut stream, &act);
+        if let Some(hung_up) = act_on(&mut stream, &act) {
+            hangups
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(hung_up);
+        }
     }
     asked
 }
@@ -178,7 +222,8 @@ fn accept(listener: &TcpListener, stop: &AtomicBool) -> Option<TcpStream> {
     }
 }
 
-fn act_on(stream: &mut TcpStream, act: &Act) {
+/// Carry out one act. For [`Act::StreamThenHold`], what the hold saw.
+fn act_on(stream: &mut TcpStream, act: &Act) -> Option<Held> {
     match act {
         Act::Answer(body) => write_reply(stream, 200, body, Closing::Yes),
         Act::Status(status, body) => write_reply(stream, *status, body, Closing::Yes),
@@ -193,7 +238,43 @@ fn act_on(stream: &mut TcpStream, act: &Act) {
             thread::sleep(*hold);
         }
         Act::Hangup => {}
+        Act::Raw(bytes) => {
+            let _ = stream.write_all(bytes);
+            let _ = stream.flush();
+        }
+        Act::StreamThenHold(pieces) => return Some(stream_then_hold(stream, pieces)),
     }
+    None
+}
+
+/// Stream `pieces` as chunks, then wait for the client to hang up.
+fn stream_then_hold(stream: &mut TcpStream, pieces: &[String]) -> Held {
+    let _ = stream.write_all(
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+          Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+    );
+    for piece in pieces {
+        let _ = stream.write_all(format!("{:x}\r\n{piece}\r\n", piece.len()).as_bytes());
+        let _ = stream.flush();
+    }
+    // A read that returns zero bytes, or fails, is the client closing. The
+    // client sends nothing after its request, so nothing else can arrive.
+    let held = Instant::now();
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(50)));
+    let mut buffer = [0_u8; 64];
+    while held.elapsed() < IDLE_CAP {
+        match stream.read(&mut buffer) {
+            Ok(0) => return Held::HungUp(held.elapsed()),
+            Ok(_) => {}
+            Err(why)
+                if matches!(
+                    why.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) => {}
+            Err(_) => return Held::HungUp(held.elapsed()),
+        }
+    }
+    Held::NeverHungUp
 }
 
 /// Whether a reply announces that the connection ends with it.

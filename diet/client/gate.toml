@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 34
+faults = 41
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -261,6 +261,7 @@ anchor = '''
 becomes = '''
 '''
 catches = [
+    "client::stream::tests::a_chunk_boundary_inside_an_event_is_invisible_to_the_reader",
     "client::tests::a_chunked_reply_is_decoded_rather_than_handed_to_the_reader_with_its_framing",
     "client::transport::tests::the_framing_is_read_from_the_headers_and_chunked_wins",
 ]
@@ -284,6 +285,7 @@ becomes = '''
     }
     None'''
 catches = [
+    "client::stream::tests::a_chunk_boundary_inside_an_event_is_invisible_to_the_reader",
     "client::tests::a_chunked_reply_is_decoded_rather_than_handed_to_the_reader_with_its_framing",
     "client::tests::a_content_length_reply_is_answered_without_waiting_for_the_connection_to_close",
     "client::tests::a_reply_that_announces_more_than_it_sends_is_truncated_not_a_shorter_answer",
@@ -672,4 +674,108 @@ becomes = '''
         stoppers.push(Box::new(stop));'''
 catches = [
     "client::stream::tests::a_stopper_registered_after_the_ask_runs_at_once",
+]
+
+[[fault]]
+id = "client.stream-cancel-leaves-the-socket-open"
+failure_class = "client.stream-cancel-leaves-the-socket-open"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            let _ = waker.shutdown(Shutdown::Both);'''
+becomes = '''
+            let _ = &waker;'''
+catches = [
+    "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
+]
+
+[[fault]]
+id = "client.stream-never-hears-done"
+failure_class = "client.stream-never-hears-done"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        if data == "[DONE]" {'''
+becomes = '''
+        if data == "[NEVER]" {'''
+catches = [
+    "client::stream::tests::a_chunk_boundary_inside_an_event_is_invisible_to_the_reader",
+    "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
+    "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
+]
+
+[[fault]]
+id = "client.stream-reads-the-wrong-field"
+failure_class = "client.stream-reads-the-wrong-field"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            if let Some(piece) = choice.pointer("/delta/content").and_then(Value::as_str)'''
+becomes = '''
+            if let Some(piece) = choice.pointer("/delta/role").and_then(Value::as_str)'''
+catches = [
+    "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
+    "client::stream::tests::a_chunk_boundary_inside_an_event_is_invisible_to_the_reader",
+    "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
+    "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
+]
+
+[[fault]]
+id = "client.stream-an-unfinished-stream-is-an-answer"
+failure_class = "client.stream-an-unfinished-stream-is-an-answer"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            None => Err(TransportFailure::Framing(
+                "the stream ended before the server said it was done".to_owned(),
+            )),'''
+becomes = '''
+            None => Ok(Ended::Finished {
+                finish_reason: None,
+            }),'''
+catches = [
+    "client::stream::tests::a_stream_that_ends_without_saying_it_is_done_is_a_failure_not_an_answer",
+]
+
+[[fault]]
+id = "client.stream-a-refusal-is-read-as-a-stream"
+failure_class = "client.stream-a-refusal-is-read-as-a-stream"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        if status != 200 {
+            self.refusal.extend_from_slice(&decoded);'''
+becomes = '''
+        if status == 0 {
+            self.refusal.extend_from_slice(&decoded);'''
+catches = [
+    "client::stream::tests::a_status_other_than_200_is_a_rejection_carrying_what_the_server_said",
+]
+
+[[fault]]
+id = "client.stream-events-cut-per-read"
+failure_class = "client.stream-events-cut-per-read"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            let event: Vec<u8> = self.pending.drain(..at + width).collect();'''
+becomes = '''
+            let event: Vec<u8> = std::mem::take(&mut self.pending);'''
+catches = [
+    "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
+    "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
+]
+
+[[fault]]
+id = "client.streaming-body-drops-usage"
+failure_class = "client.streaming-body-drops-usage"
+target = "diet/src/client/wire.rs"
+expect_exit = 101
+anchor = '''
+    format!("{open},\"stream\":true,\"stream_options\":{{\"include_usage\":true}}}}")'''
+becomes = '''
+    format!("{open},\"stream\":true}}")'''
+catches = [
+    "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
+    "client::wire::tests::a_streaming_body_is_the_body_with_streaming_asked_for_and_the_same_head",
 ]

@@ -29,12 +29,20 @@
 
 use std::collections::VecDeque;
 use std::fmt;
+use std::io::{self, Read as _, Write as _};
+use std::net::{Shutdown, TcpStream, ToSocketAddrs as _};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use serde_json::Value;
+
 use super::shape::RequestShape;
-use super::transport::TransportFailure;
+use super::transport::{
+    self, Dechunker, Endpoint, Framing, TransportFailure, framing, header_end, is_timeout,
+    status_of,
+};
+use super::wire;
 
 /// A request to stop, shared between whoever may ask and the call it stops.
 ///
@@ -123,6 +131,16 @@ pub enum Ended {
     /// A stop was asked for and the call stopped. What arrived before it is
     /// partial, and is the caller's to keep as partial.
     Cancelled,
+    /// The server answered, and the answer was a refusal rather than a
+    /// stream: a status other than `200`, or an `error` event in place of
+    /// the answer. A reply, so not a [`TransportFailure`]; not an answer, so
+    /// never text on the trunk.
+    Rejected {
+        /// The HTTP status (`200` for an `error` event inside a stream).
+        status: u16,
+        /// What the server said, as it said it.
+        body: String,
+    },
 }
 
 /// A transport that delivers an answer as it arrives.
@@ -147,6 +165,367 @@ pub trait Streaming: Send + Sync {
 
     /// Where this transport sends, for the record.
     fn describes(&self) -> String;
+}
+
+/// Streamed chat completions over HTTP/1.1, in llama-server's dialect.
+///
+/// **The dialect is MEASURED, not read from documentation**: llama-server at
+/// commit `4df29be`, driven over a raw socket on 2026-09-25 with a tiny
+/// random-weight model (#117). `fixtures/llama-server-4df29be-stream.http`
+/// is that reply, and [`tests::the_real_servers_stream_is_read_piece_by_piece`]
+/// replays it byte for byte. What was seen, and what this reads because of it:
+///
+/// * `text/event-stream` inside `Transfer-Encoding: chunked`, and ONE chunk
+///   carrying TWO events -- so events are cut from the decoded byte stream,
+///   never from a chunk;
+/// * each event a `data: {json}` line and a blank line; `delta.content`
+///   carries the answer, `null` on the first chunk (the role);
+/// * `finish_reason` on a chunk with an empty delta, then (because
+///   `include_usage` is asked for) a chunk with `choices: []` carrying
+///   `usage` and `timings`, then `data: [DONE]`;
+/// * closing the connection mid-answer CANCELS the server's task: the log
+///   read `stop: cancel task` and `/slots` showed the slot idle within
+///   0.5 s, at 47 of 1500 tokens. A client that merely stopped READING did
+///   not: the slot kept generating for as long as the socket stayed open.
+///   So [`Cancel`] shuts the socket; it does not just stop the loop.
+///
+/// What is NOT measured and is read by shape only: an `error` event mid-
+/// stream (read as [`Ended::Rejected`]), and any server but this one.
+#[derive(Debug, Clone)]
+pub struct HttpStream {
+    endpoint: Endpoint,
+    reply_cap: usize,
+}
+
+impl HttpStream {
+    /// A streaming transport pointed at `endpoint`, reading at most
+    /// [`transport::MAX_REPLY_BYTES`].
+    #[must_use]
+    pub fn new(endpoint: Endpoint) -> Self {
+        Self {
+            endpoint,
+            reply_cap: transport::MAX_REPLY_BYTES,
+        }
+    }
+}
+
+impl Streaming for HttpStream {
+    fn stream(
+        &self,
+        shape: &RequestShape,
+        deadline: Instant,
+        cancel: &Cancel,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<Ended, TransportFailure> {
+        let started = Instant::now();
+        let timeout = || TransportFailure::Timeout {
+            after: started.elapsed(),
+        };
+        let remaining = || deadline.checked_duration_since(Instant::now());
+
+        let address = (self.endpoint.host.as_str(), self.endpoint.port)
+            .to_socket_addrs()
+            .map_err(|why| TransportFailure::Connect(why.to_string()))?
+            .next()
+            .ok_or_else(|| {
+                TransportFailure::Connect("the host resolves to no address".to_owned())
+            })?;
+        let budget = remaining().ok_or_else(timeout)?;
+        let mut socket = TcpStream::connect_timeout(&address, budget).map_err(|why| {
+            if is_timeout(&why) {
+                timeout()
+            } else {
+                TransportFailure::Connect(why.to_string())
+            }
+        })?;
+
+        // The stopper: a second handle on the same socket, shut from
+        // whichever thread asks. Shutting it is what makes a read blocked
+        // below return, and what the server sees as the client leaving.
+        let waker = socket.try_clone().map_err(|why| {
+            TransportFailure::Connect(format!("no second handle to cancel through: {why}"))
+        })?;
+        cancel.on_cancel(move || {
+            let _ = waker.shutdown(Shutdown::Both);
+        });
+
+        let body = wire::streaming_body(shape);
+        let request = format!(
+            "POST {} HTTP/1.1\r\nHost: {}:{}\r\nContent-Type: application/json\r\n\
+             Accept: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            self.endpoint.path,
+            self.endpoint.host,
+            self.endpoint.port,
+            body.len(),
+            body
+        );
+        let budget = remaining().ok_or_else(timeout)?;
+        socket
+            .set_write_timeout(Some(budget))
+            .map_err(|why| TransportFailure::Connect(why.to_string()))?;
+        if let Err(why) = socket
+            .write_all(request.as_bytes())
+            .and_then(|()| socket.flush())
+        {
+            return if cancel.is_asked() {
+                Ok(Ended::Cancelled)
+            } else if is_timeout(&why) {
+                Err(timeout())
+            } else {
+                Err(TransportFailure::Write(why.to_string()))
+            };
+        }
+
+        let mut reading = Reading::default();
+        let mut buffer = [0_u8; 16 * 1024];
+        loop {
+            if cancel.is_asked() {
+                return Ok(Ended::Cancelled);
+            }
+            // Re-armed on every pass, as the unstreamed transport does: one
+            // timeout bounds one read, not the call.
+            let budget = remaining().ok_or_else(timeout)?;
+            socket
+                .set_read_timeout(Some(budget))
+                .map_err(|why| TransportFailure::Read(why.to_string()))?;
+            let count = match socket.read(&mut buffer) {
+                Ok(count) => count,
+                Err(why) if why.kind() == io::ErrorKind::Interrupted => continue,
+                // A read that fails because the socket was shut under it is
+                // the stop landing, not the transport failing.
+                Err(_) if cancel.is_asked() => return Ok(Ended::Cancelled),
+                Err(why) if is_timeout(&why) => return Err(timeout()),
+                Err(why) => return Err(TransportFailure::Read(why.to_string())),
+            };
+            if count == 0 {
+                if cancel.is_asked() {
+                    return Ok(Ended::Cancelled);
+                }
+                return reading.at_close();
+            }
+            if let Some(ended) = reading.feed(&buffer[..count], self.reply_cap, on_delta)? {
+                return Ok(ended);
+            }
+        }
+    }
+
+    fn describes(&self) -> String {
+        format!(
+            "http://{}:{}{} (streamed)",
+            self.endpoint.host, self.endpoint.port, self.endpoint.path
+        )
+    }
+}
+
+/// A streamed reply, read as it arrives: headers, then a body in whatever
+/// framing they declared, then events cut from that body.
+#[derive(Debug, Default)]
+struct Reading {
+    /// Everything before the headers were whole.
+    raw: Vec<u8>,
+    /// Every byte read, against the cap.
+    total: usize,
+    /// The status and framing, once the headers are whole.
+    head: Option<(u16, Framing)>,
+    /// Body bytes received under `Framing::Length`.
+    received: usize,
+    chunks: Dechunker,
+    events: Events,
+    /// The body of a refusal, kept whole.
+    refusal: Vec<u8>,
+    finish_reason: Option<String>,
+}
+
+impl Reading {
+    fn feed(
+        &mut self,
+        bytes: &[u8],
+        cap: usize,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<Option<Ended>, TransportFailure> {
+        self.total += bytes.len();
+        if self.total > cap {
+            return Err(TransportFailure::Read(format!(
+                "the reply passed {cap} bytes and was not finished"
+            )));
+        }
+        let body = if self.head.is_some() {
+            bytes.to_vec()
+        } else {
+            self.raw.extend_from_slice(bytes);
+            let Some(end) = header_end(&self.raw) else {
+                return Ok(None);
+            };
+            let headers = String::from_utf8_lossy(&self.raw[..end]).into_owned();
+            self.head = Some((status_of(&headers)?, framing(&headers)));
+            let rest = self.raw[end + 4..].to_vec();
+            self.raw.clear();
+            rest
+        };
+        self.body(&body, on_delta)
+    }
+
+    fn body(
+        &mut self,
+        bytes: &[u8],
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<Option<Ended>, TransportFailure> {
+        let Some((status, framing)) = self.head else {
+            return Ok(None);
+        };
+        let (decoded, whole) = match framing {
+            Framing::Chunked => {
+                let decoded = self.chunks.feed(bytes).map_err(TransportFailure::Framing)?;
+                (decoded, self.chunks.is_done())
+            }
+            Framing::Length(announced) => {
+                let take = bytes.len().min(announced.saturating_sub(self.received));
+                self.received += take;
+                (bytes[..take].to_vec(), self.received >= announced)
+            }
+            Framing::ToClose => (bytes.to_vec(), false),
+        };
+        if status != 200 {
+            self.refusal.extend_from_slice(&decoded);
+            return Ok(whole.then(|| self.refused(status)));
+        }
+        for data in self.events.feed(&decoded)? {
+            if let Some(ended) = self.event(&data, on_delta)? {
+                return Ok(Some(ended));
+            }
+        }
+        if whole {
+            return self.at_close().map(Some);
+        }
+        Ok(None)
+    }
+
+    fn refused(&self, status: u16) -> Ended {
+        Ended::Rejected {
+            status,
+            body: String::from_utf8_lossy(&self.refusal).into_owned(),
+        }
+    }
+
+    /// One event's data. `Some` when it ends the stream.
+    fn event(
+        &mut self,
+        data: &str,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<Option<Ended>, TransportFailure> {
+        if data == "[DONE]" {
+            return Ok(Some(Ended::Finished {
+                finish_reason: self.finish_reason.take(),
+            }));
+        }
+        let value: Value = serde_json::from_str(data).map_err(|why| {
+            TransportFailure::Framing(format!("an event's data is not JSON ({why}): {data}"))
+        })?;
+        if value.get("error").is_some() {
+            return Ok(Some(Ended::Rejected {
+                status: 200,
+                body: data.to_owned(),
+            }));
+        }
+        if let Some(choice) = value
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+        {
+            if let Some(piece) = choice.pointer("/delta/content").and_then(Value::as_str)
+                && !piece.is_empty()
+            {
+                on_delta(piece);
+            }
+            if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
+                self.finish_reason = Some(reason.to_owned());
+            }
+        }
+        Ok(None)
+    }
+
+    /// The server closed, or the body's framing said it was whole.
+    fn at_close(&mut self) -> Result<Ended, TransportFailure> {
+        let Some((status, framing)) = self.head else {
+            return Err(TransportFailure::Malformed(
+                String::from_utf8_lossy(&self.raw)
+                    .chars()
+                    .take(120)
+                    .collect(),
+            ));
+        };
+        match framing {
+            Framing::Chunked if !self.chunks.is_done() => {
+                return Err(TransportFailure::Framing(
+                    "the connection closed inside a chunked body".to_owned(),
+                ));
+            }
+            Framing::Length(announced) if self.received < announced => {
+                return Err(TransportFailure::Truncated {
+                    announced,
+                    received: self.received,
+                });
+            }
+            _ => {}
+        }
+        if status != 200 {
+            return Ok(self.refused(status));
+        }
+        // A server that said why it stopped and then closed without `[DONE]`
+        // finished; one that never said why did not.
+        match self.finish_reason.take() {
+            Some(reason) => Ok(Ended::Finished {
+                finish_reason: Some(reason),
+            }),
+            None => Err(TransportFailure::Framing(
+                "the stream ended before the server said it was done".to_owned(),
+            )),
+        }
+    }
+}
+
+/// Server-sent events cut from a decoded body: each event ends at a blank
+/// line, and its `data:` lines are its payload. Nothing is decoded as text
+/// until its event is whole, so a character split across two reads -- or two
+/// chunks -- is never split in what the caller sees.
+#[derive(Debug, Default)]
+struct Events {
+    pending: Vec<u8>,
+}
+
+impl Events {
+    fn feed(&mut self, bytes: &[u8]) -> Result<Vec<String>, TransportFailure> {
+        self.pending.extend_from_slice(bytes);
+        let mut out = Vec::new();
+        loop {
+            let lf = find(&self.pending, b"\n\n").map(|at| (at, 2));
+            let crlf = find(&self.pending, b"\r\n\r\n").map(|at| (at, 4));
+            let Some((at, width)) = [lf, crlf].into_iter().flatten().min() else {
+                break;
+            };
+            let event: Vec<u8> = self.pending.drain(..at + width).collect();
+            let text = std::str::from_utf8(&event[..at]).map_err(|why| {
+                TransportFailure::Framing(format!("an event is not UTF-8: {why}"))
+            })?;
+            let data: Vec<&str> = text
+                .lines()
+                .filter_map(|line| line.strip_prefix("data:"))
+                .map(|value| value.strip_prefix(' ').unwrap_or(value))
+                .collect();
+            // An event with no data line -- a comment, a keep-alive -- says
+            // nothing about the answer.
+            if !data.is_empty() {
+                out.push(data.join("\n"));
+            }
+        }
+        Ok(out)
+    }
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 /// A latch a canned stream waits at until it is opened.
@@ -215,6 +594,8 @@ pub enum Step {
     Hold(Gate),
     /// Fail as a transport would.
     Fail(TransportFailure),
+    /// Answer with a refusal rather than a stream.
+    Reject(u16, String),
 }
 
 /// Scripted streams, one per call, in call order; and every request it was
@@ -286,6 +667,7 @@ impl Streaming for Canned {
                     gate.wait();
                 }
                 Step::Fail(failure) => return Err(failure),
+                Step::Reject(status, body) => return Ok(Ended::Rejected { status, body }),
             }
         }
         if cancel.is_asked() {
@@ -399,5 +781,229 @@ mod tests {
         let canned = Canned::new([]);
         let ended = canned.stream(&shape(), Instant::now(), &Cancel::new(), &mut |_| {});
         assert!(matches!(ended, Err(TransportFailure::Connect(_))));
+    }
+
+    // ---- the HTTP transport, against real bytes and a real socket ----
+
+    use crate::client::stub::{Act, Held, Stub};
+
+    /// llama-server `4df29be`'s reply to a streamed request with
+    /// `include_usage`, captured off the wire. One edit: the `model` field
+    /// held the capturing machine's absolute path and now reads `tiny.gguf`,
+    /// with each chunk's size recomputed and its boundary kept where the
+    /// server put it -- including the chunk that carries two events.
+    const CAPTURED: &[u8] =
+        include_bytes!("../../client/fixtures/llama-server-4df29be-stream.http");
+
+    /// What the captured stream's deltas say, in order: the model is random
+    /// weights, so the words mean nothing, and `су` is two two-byte
+    /// characters -- which is why they are here.
+    const CAPTURED_PIECES: [&str; 6] = ["mittel", "су", " polity", " polity", " polity", " polity"];
+
+    fn endpoint(stub: &Stub) -> Endpoint {
+        Endpoint::parse(&stub.url()).expect("the stub's URL is an endpoint")
+    }
+
+    fn deadline() -> Instant {
+        Instant::now() + Duration::from_secs(10)
+    }
+
+    #[test]
+    fn the_real_servers_stream_is_read_piece_by_piece() {
+        let stub = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");
+        let transport = HttpStream::new(endpoint(&stub));
+        let mut pieces = Vec::new();
+        let ended = transport.stream(&shape(), deadline(), &Cancel::new(), &mut |piece| {
+            pieces.push(piece.to_owned());
+        });
+        assert_eq!(
+            ended,
+            Ok(Ended::Finished {
+                finish_reason: Some("length".to_owned())
+            })
+        );
+        assert_eq!(pieces, CAPTURED_PIECES);
+        let sent = stub.received();
+        assert!(
+            sent[0].contains(r#""stream":true"#) && sent[0].contains(r#""include_usage":true"#),
+            "the request did not ask to stream with usage: {}",
+            sent[0]
+        );
+    }
+
+    #[test]
+    fn the_real_servers_stream_read_one_byte_at_a_time_says_the_same() {
+        // Every boundary a read can fall on: inside a chunk-size line, inside
+        // `\r\n`, inside an event's blank line, and between the two bytes of
+        // a character.
+        let mut reading = Reading::default();
+        let mut pieces = Vec::new();
+        let mut ended = None;
+        for byte in CAPTURED {
+            if let Some(done) = reading
+                .feed(std::slice::from_ref(byte), usize::MAX, &mut |piece| {
+                    pieces.push(piece.to_owned());
+                })
+                .expect("the captured bytes are a well-formed stream")
+            {
+                ended = Some(done);
+                break;
+            }
+        }
+        assert_eq!(
+            ended,
+            Some(Ended::Finished {
+                finish_reason: Some("length".to_owned())
+            })
+        );
+        assert_eq!(pieces, CAPTURED_PIECES);
+    }
+
+    #[test]
+    fn a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it() {
+        let piece =
+            r#"data: {"choices":[{"index":0,"delta":{"content":"Hel"},"finish_reason":null}]}"#;
+        let stub = Stub::serving(vec![Act::StreamThenHold(vec![format!("{piece}\n\n")])])
+            .expect("loopback");
+        let transport = HttpStream::new(endpoint(&stub));
+        let cancel = Cancel::new();
+        let asker = cancel.clone();
+        let (first, arrived) = std::sync::mpsc::channel();
+        let (result, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let ended = transport.stream(&shape(), deadline(), &cancel, &mut |piece| {
+                let _ = first.send(piece.to_owned());
+            });
+            let _ = result.send(ended);
+        });
+        assert_eq!(
+            arrived.recv_timeout(Duration::from_secs(10)).as_deref(),
+            Ok("Hel"),
+            "the first piece never arrived"
+        );
+        // The server is now holding the connection open and sending nothing:
+        // the client is blocked in a read. Only the stopper can reach it.
+        cancel_and_expect(&asker, &finished);
+
+        // And from the SERVER's side of the socket: the client left, promptly.
+        let seen = wait_for_a_hangup(&stub);
+        let Held::HungUp(after) = seen else {
+            panic!("the server never saw the client leave: {seen:?}");
+        };
+        assert!(
+            after < Duration::from_secs(5),
+            "the client left after {after:?}"
+        );
+    }
+
+    fn cancel_and_expect(
+        asker: &Cancel,
+        finished: &std::sync::mpsc::Receiver<Result<Ended, TransportFailure>>,
+    ) {
+        asker.ask();
+        assert_eq!(
+            finished.recv_timeout(Duration::from_secs(5)),
+            Ok(Ok(Ended::Cancelled)),
+            "a cancel did not reach a call blocked mid-stream"
+        );
+    }
+
+    /// Bounded, and read on the server's own schedule: the stub records the
+    /// hang-up when its read returns, which is after the client's call has
+    /// already come back.
+    fn wait_for_a_hangup(stub: &Stub) -> Held {
+        let give_up = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(held) = stub.hangups().first() {
+                return *held;
+            }
+            assert!(Instant::now() < give_up, "the stub recorded nothing");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn a_chunk_boundary_inside_an_event_is_invisible_to_the_reader() {
+        // The captured server only ever cut chunks at event boundaries, so a
+        // reader that never de-chunked would read it anyway: a chunk-size line
+        // lands between events, where it looks like a line with no `data:`.
+        // Cut INSIDE the JSON and it lands in the middle of a value.
+        let event = concat!(
+            r#"data: {"choices":[{"index":0,"delta":{"content":"whole"},"finish_reason":"stop"}]}"#,
+            "\n\ndata: [DONE]\n\n"
+        );
+        let pieces = vec![
+            event[..20].to_owned(),
+            event[20..47].to_owned(),
+            event[47..].to_owned(),
+        ];
+        let stub = Stub::serving(vec![Act::Chunked(pieces)]).expect("loopback");
+        let mut seen = Vec::new();
+        let ended = HttpStream::new(endpoint(&stub)).stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |piece| seen.push(piece.to_owned()),
+        );
+        assert_eq!(
+            ended,
+            Ok(Ended::Finished {
+                finish_reason: Some("stop".to_owned())
+            })
+        );
+        assert_eq!(seen, ["whole"]);
+    }
+
+    #[test]
+    fn a_status_other_than_200_is_a_rejection_carrying_what_the_server_said() {
+        let stub = Stub::serving(vec![Act::Status(503, r#"{"error":"busy"}"#.to_owned())])
+            .expect("loopback");
+        let ended = HttpStream::new(endpoint(&stub)).stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |_| panic!("a refusal delivered a piece"),
+        );
+        assert_eq!(
+            ended,
+            Ok(Ended::Rejected {
+                status: 503,
+                body: r#"{"error":"busy"}"#.to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn a_stream_that_ends_without_saying_it_is_done_is_a_failure_not_an_answer() {
+        let piece =
+            r#"data: {"choices":[{"index":0,"delta":{"content":"par"},"finish_reason":null}]}"#;
+        let stub =
+            Stub::serving(vec![Act::Chunked(vec![format!("{piece}\n\n")])]).expect("loopback");
+        let ended = HttpStream::new(endpoint(&stub)).stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |_| {},
+        );
+        assert!(
+            matches!(ended, Err(TransportFailure::Framing(ref why)) if why.contains("before the server said it was done")),
+            "{ended:?}"
+        );
+    }
+
+    #[test]
+    fn an_event_whose_data_is_not_json_is_a_framing_failure() {
+        let stub = Stub::serving(vec![Act::Chunked(vec!["data: not json\n\n".to_owned()])])
+            .expect("loopback");
+        let ended = HttpStream::new(endpoint(&stub)).stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |_| {},
+        );
+        assert!(
+            matches!(ended, Err(TransportFailure::Framing(ref why)) if why.contains("not JSON")),
+            "{ended:?}"
+        );
     }
 }

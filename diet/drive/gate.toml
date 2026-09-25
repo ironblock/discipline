@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 55
+faults = 56
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -931,4 +931,20 @@ becomes = '''
         let seq = u64::try_from(self.log.len() / 2)'''
 catches = [
     "drive::session::tests::the_log_is_numbered_by_position_and_a_reader_can_resume_from_any_point",
+]
+
+[[fault]]
+id = "drive.session-a-rejected-ask-joins-the-trunk"
+failure_class = "drive.session-a-rejected-ask-joins-the-trunk"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        Ok(StreamEnded::Rejected { status, body }) => {
+            state.push(Event::Rejected {'''
+becomes = '''
+        Ok(StreamEnded::Rejected { status, body }) => {
+            state.trunk.push(Message::new(Role::User, ask));
+            state.push(Event::Rejected {'''
+catches = [
+    "drive::session::tests::a_turn_the_server_refused_is_logged_as_refused_and_leaves_the_trunk_alone",
 ]
