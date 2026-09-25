@@ -1,0 +1,18 @@
+{
+ "unadjudicated_checks": "all passed",
+ "band": [
+  0.024877,
+  0.21789
+ ],
+ "seat_a": {
+  "offered": 912,
+  "accepted_deduped": 26
+ },
+ "seat_b": {
+  "offered": 1590,
+  "accepted_deduped": 186
+ },
+ "effect": 0.08847236014564713,
+ "word": "supported",
+ "disclosure": null
+}

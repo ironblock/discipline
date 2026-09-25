@@ -1,0 +1,7 @@
+source spine: 76 steps across 5 turns (human-drive-20260810T051802Z/events.jsonl)
+wrote 76 warm/probe rows to <refire>/seat-a/probes.jsonl
+probe turn  2: cache_n observed Some(109) / recorded Some(371) (Δ -262)
+probe turn  3: cache_n observed Some(0) / recorded Some(0) (Δ +0)
+probe turn  4: cache_n observed Some(5177) / recorded Some(5177) (Δ +0)
+probe turn  5: cache_n observed Some(0) / recorded Some(0) (Δ +0)
+replayed 5 turns / 76 steps → <refire>/seat-a/events.jsonl

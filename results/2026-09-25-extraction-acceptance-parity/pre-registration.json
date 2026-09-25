@@ -1,0 +1,68 @@
+{
+ "claim": "gym #115: the pre-registration in the issue body as edited once before ratification (comment 5823848071), the planning seat's recommendation 5823830372, and the maintainer's answers posted 2026-09-25 (UTC) as comment 5826194209",
+ "written": "as a file after the fire, summarising the ratified issue text rather than quoting it; the operative rule is apply.py, whose digest the issue body carried and the ratification pinned before the first fork",
+ "hypothesis": "Re-fired on today's declared substrate, under the configuration the archived row declares, the extraction-seat bakeoff reproduces the archived row's result. Seat B is the small extractor answering a self-contained ask off the accelerator. Seat A is the large model extracting off the warm session prefix. Seat B has the larger deduped gate-accept rate, by an amount within the band derived from the archived row's committed tallies.",
+ "archived_row": "results/2026-08-10-extraction-acceptance-inverts",
+ "effect": "the deduped gate-accept rate of seat B minus seat A, each pooled over the extraction forks (sum accepted, capped per fork at its tagged FACT lines, over sum offered) from integer tallies read through the archived row's own grade.py, in IEEE double",
+ "band": {
+  "derived_by": "band.py",
+  "band_py_sha256": "a2427d8175bc7c5728aaab98011ccaf06bacce47fc520fd7b3f27c266ba06d52",
+  "band_json_sha256": "e32eae7aab07590e33c3f25012ff32f83de4fe4db13e61ba1d2f524cf34c6cf6",
+  "method": "paired percentile bootstrap over the 31 extraction forks paired by (turn, step), 10,000 resamples, seed 20260810, level 0.95",
+  "point": 0.091469,
+  "band": [
+   0.024877,
+   0.21789
+  ],
+  "stated_as": "derived from the committed tallies by band.py, never a value the archived row reported"
+ },
+ "rule": {
+  "applier": "apply.py",
+  "applier_sha256": "2da448c49328993507c9cc026de86646bb15b310009d7d4fea603790a1809c2b",
+  "supported": "the re-fired effect lies within the band, endpoints inclusive, compared unrounded",
+  "refuted": "the effect is <= 0 (sign reversed)",
+  "inconclusive": "the effect is above the band, or between 0 and the band",
+  "unadjudicated": "any check of box, logs, routing, forks or offered failing, asked before the effect is compared with the band",
+  "disclosure": "a refuted or inconclusive word carries apply.py's fixed disclosure: the archived baseline's unmeasured parts are candidate explanations the record cannot exclude",
+  "weight": "supported is the easy word here and says little beyond that the inversion held; refuted would say a great deal; the verdict is read at that weight"
+ },
+ "one_fire": "exactly one fire per seat, the first; an abort, a non-zero harness exit, a crashed seat-B server or a partial log is committed as it stands and the claim is unadjudicated; no seat is fired again once any of its forks has answered",
+ "regime": {
+  "seats": "A then B re-fired, one fire each; seat C not re-fired, the archived seat C given to the grader for containment reported beside",
+  "harness": "the research program's exercise replay-capture at commit 0e14292, rebuilt with cargo build --release --locked under rustc 1.94.1 for x86_64-apple-darwin, binary sha256 f5682886c82bfe826583f578f32d136643b3576da8fb4bddfebd7ad424937d89",
+  "source_drive": "the human-driven drive of 2026-08-10 the archived row replayed, pinned-only by digest 2115a3045ab0623102c768416829e3b629d4b308b5ad70c518e3e69a2be52102",
+  "environment": {
+   "both": [
+    "DIET_BASE_URL = the production server",
+    "DIET_MODEL_ID = Qwen3.6-27B"
+   ],
+   "seat_b_only": [
+    "DIET_ROUTE_EXTRACTION = 1",
+    "DIET_EXTRACT_URL = the seat-B server",
+    "DIET_EXTRACT_MODEL_ID = its model id"
+   ],
+   "seat_a": "DIET_ROUTE_EXTRACTION unset"
+  },
+  "substrates": [
+   "accel24-beellama-qwen27b-q4kxl",
+   "cpu-beellama-qwen3-1p7b-q4km"
+  ],
+  "sampler": {
+   "temperature": 0.6,
+   "top_k": 20,
+   "top_p": 1.0,
+   "max_tokens": 4096,
+   "thinking": "off"
+  },
+  "arms": "the archived seat arms at the harness commit, pinned-only by digest: seat A ad3e68ea3d6c3877ef8de1393ee2430acb8280b8188101b0a9a49a93101d263d, seat B 57a69a104f742fb41a63e7590042ae510b45f1818be7db496bdfea1c251e9cc8 (measured after the fire; the pre-registration required them posted before it)"
+ },
+ "box_record": "box.json, one field per command from its exit code or printed verdict, the raw outputs committed under window/",
+ "ratified_answers": [
+  "harness pinned at 0e14292, rebuilt --locked",
+  "seat B's server is the production binary run CPU-only, hashed at launch, registered as its own substrate; both servers declared; any wrongly routed fork makes the claim unadjudicated, never graded as a row, the seat not re-fired",
+  "95% percentile bootstrap, 10,000 resamples, seed 20260810; not changed after the fact",
+  "sign reversed means an effect <= 0",
+  "the disclosure covers seat B's unrecorded engine and weights and the unrecorded harness build, not only the substrate",
+  "the archived different-set half is reported beside the verdict, not adjudicated"
+ ]
+}
