@@ -98,6 +98,16 @@
    * how a tool call sits apart from a message; it falls back to
    * --relief-trunk.) */
   --rim-tone: 0%;
+  /* How much of the block's own ink its footer takes: numbers mix it with
+     --ink-muted, units with --ink-faint. 0% is the neutral footer. */
+  --foot-tone: 0%;
+  --foot-unit-tone: 0%;
+  /* The footer as a full-width band: 1 bleeds it to the block's edges, 0
+     leaves it inline; its shade (black mixed in) and a rule in the block's
+     ink along its top, as amounts. */
+  --foot-band: 0;
+  --foot-shade: 0%;
+  --foot-rule: 0%;
   --glass-overlay: none;
   --glass-backdrop: none;
   --glow-radius: 0px;

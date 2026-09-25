@@ -1,0 +1,11 @@
+/*
+ * Layer: band -- the footer as the foot of a card. It runs the block's full
+ * width in a shaded band under a hairline of the block's own ink, so what
+ * was said and what the harness measured about it are two parts of one
+ * object rather than a line of text trailing the prose.
+ */
+.ex-root[data-theme~='band'] {
+  --foot-band: 1;
+  --foot-shade: 26%;
+  --foot-rule: 14%;
+}

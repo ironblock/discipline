@@ -12,6 +12,7 @@ import { AssistantMessage, SystemMessage, UserMessage } from '../ui/Message.tsx'
 import { Seam } from '../ui/Seam.tsx';
 import { ToolCall } from '../ui/ToolCall.tsx';
 import { PHASES } from '../App.tsx';
+import { contrast } from './contrast.ts';
 import { MOMENTS, branchAt, sessionAt, trunkNodeAt } from './moments.ts';
 
 /**
@@ -38,6 +39,7 @@ type Story = StoryObj<typeof meta>;
 // ---------------------------------------------------------------- Block
 
 const TONES: readonly Tone[] = ['system', 'user', 'assistant', 'tool', 'interview', 'ratify'];
+const TRUNK_TONES: readonly Tone[] = ['system', 'user', 'assistant', 'tool'];
 
 /** The session event: every fill, with and without a body. The footer is what the harness measured. */
 export const BlockTones: Story = {
@@ -59,6 +61,36 @@ export const BlockTones: Story = {
     </div>
   ),
 };
+
+/**
+ * The footer is quiet, not illegible: on every trunk fill, a number reads at
+ * WCAG AA for small text (4.5:1), and its unit and the role chip at 3:1.
+ * Checked in the theme the session opens in, and in its banded variant.
+ */
+export const BlockFooterContrast: Story = {
+  name: 'Block · footer contrast',
+  render: () => (
+    <div style={{ display: 'grid', gap: '0.9rem' }}>
+      {TRUNK_TONES.map((tone) => (
+        <Block key={tone} tone={tone} label={tone} stats={[{ value: '2.65 s' }, { value: '64', unit: 'tok' }, { value: '1,507', unit: 'pp t/s' }]} provenance={{ from: [0], needs: [] }}>
+          <p style={{ margin: 0 }}>The {tone} fill.</p>
+        </Block>
+      ))}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const floors = [['.ex-stat', 4.5], ['.ex-stat__unit', 3], ['.ex-block__label', 3]] as const;
+    const failing = floors.flatMap(([selector, floor]) =>
+      [...canvasElement.querySelectorAll(selector)]
+        .map((el) => ({ el, ratio: contrast(el) }))
+        .filter(({ ratio }) => ratio < floor)
+        .map(({ el, ratio }) => `${el.closest('[data-tone]')?.getAttribute('data-tone') ?? '?'} ${selector} ${ratio.toFixed(2)} < ${floor}`),
+    );
+    await expect([...new Set(failing)]).toEqual([]);
+  },
+};
+
+export const BlockFooterContrastBanded: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, banded', globals: { theme: 'band' } };
 
 // ---------------------------------------------------------------- Messages
 

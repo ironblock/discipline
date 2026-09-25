@@ -51,5 +51,9 @@ A theme is a stack of value-only layers in `src/theme/themes/`, listed once
 in `themes/index.ts`, switched from Storybook's toolbar or the app's
 `?theme=`. The session opens in `bloom`: frosted slabs over pools of their
 own colour, light pooled where the work is, what runs glowing while it runs.
+Its palette (`rack`) makes every colour an LED with the meaning it has on a
+server: blue is you, white the model, green work, amber attention, red a
+fault; violet and magenta are diet, asking and deciding. `band` is bloom
+with each footer a full-width shaded band.
 The mapping behind all of them: material = in the prefix, glass = beside it,
 light = happening now.

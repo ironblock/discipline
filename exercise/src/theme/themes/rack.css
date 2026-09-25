@@ -25,7 +25,7 @@
   --slab: #22252b;
 
   --fill-user: color-mix(in oklab, var(--slab) 52%, var(--lamp-you));
-  --ink-user: color-mix(in oklab, var(--lamp-you) 34%, white);
+  --ink-user: color-mix(in oklab, var(--lamp-you) 28%, white);
   --fill-system: color-mix(in oklab, var(--slab) 74%, var(--lamp-diet-asks));
   --ink-system: color-mix(in oklab, var(--lamp-diet-asks) 45%, white);
   --fill-assistant: #272b33;
@@ -42,6 +42,11 @@
   --bad: color-mix(in oklab, var(--lamp-fault) 80%, white);
   --fresh: color-mix(in oklab, var(--lamp-diet-asks) 65%, white);
   --seam: color-mix(in oklab, var(--lamp-diet-decides) 70%, white);
+  /* A footer is the block's own light, dimmed: its numbers stay legible on
+     every fill (see the footer-contrast story). */
+  --foot-tone: 85%;
+  --foot-unit-tone: 55%;
+
   /* Focus is yours. */
   --focus: var(--ink-user);
 
