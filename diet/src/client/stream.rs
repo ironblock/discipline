@@ -1220,6 +1220,33 @@ mod tests {
     }
 
     #[test]
+    fn a_close_framed_stream_whose_last_bytes_are_a_bare_cr_is_read_when_it_closes() {
+        // No `Content-Length`, not chunked: the body ends when the server
+        // closes, so the held `\r` is resolved on the CLOSE path, not the
+        // framing path the chunked case above takes (#120's third review).
+        let event =
+            r#"data: {"choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"stop"}]}"#;
+        let reply = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{event}\r\r"
+        );
+        let stub = Stub::serving(vec![Act::Raw(reply.into_bytes())]).expect("loopback");
+        let mut seen = Vec::new();
+        let ended = HttpStream::new(endpoint(&stub)).stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |piece| seen.push(piece.to_owned()),
+        );
+        assert_eq!(
+            ended,
+            Ok(Ended::Finished {
+                finish_reason: Some("stop".to_owned())
+            })
+        );
+        assert_eq!(seen, ["x"]);
+    }
+
+    #[test]
     fn a_status_other_than_200_is_a_rejection_carrying_what_the_server_said() {
         let stub = Stub::serving(vec![Act::Status(503, r#"{"error":"busy"}"#.to_owned())])
             .expect("loopback");

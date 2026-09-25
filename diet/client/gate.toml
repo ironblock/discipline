@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 48
+faults = 49
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -876,4 +876,17 @@ becomes = '''
             *last = b'\r';'''
 catches = [
     "client::stream::tests::an_event_ended_by_a_bare_cr_as_the_last_bytes_of_the_stream_is_read",
+]
+
+[[fault]]
+id = "client.stream-a-close-reads-no-held-event"
+failure_class = "client.stream-a-close-reads-no-held-event"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                return reading.closed(on_delta);'''
+becomes = '''
+                return reading.at_close();'''
+catches = [
+    "client::stream::tests::a_close_framed_stream_whose_last_bytes_are_a_bare_cr_is_read_when_it_closes",
 ]
