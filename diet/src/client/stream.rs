@@ -324,17 +324,22 @@ impl Streaming for HttpStream {
             let count = match socket.read(&mut buffer) {
                 Ok(count) => count,
                 Err(why) if why.kind() == io::ErrorKind::Interrupted => continue,
+                // A timeout is a timeout, even after a stop. A stop that WORKED
+                // ends the read by shutting the socket, not by the clock; a
+                // read that ran to its deadline after a stop is the stopper
+                // failing, and calling it `Cancelled` hid exactly that (#120's
+                // second review: the session test passed with no stopper).
+                Err(why) if is_timeout(&why) => return Err(timeout()),
                 // A read that fails because the socket was shut under it is
                 // the stop landing, not the transport failing.
                 Err(_) if cancel.is_asked() => return Ok(Ended::Cancelled),
-                Err(why) if is_timeout(&why) => return Err(timeout()),
                 Err(why) => return Err(TransportFailure::Read(why.to_string())),
             };
             if cancel.is_asked() {
                 return Ok(Ended::Cancelled);
             }
             if count == 0 {
-                return reading.at_close();
+                return reading.closed(on_delta);
             }
             if let Some(ended) = reading.feed(&buffer[..count], self.reply_cap, on_delta)? {
                 return Ok(ended);
@@ -456,9 +461,22 @@ impl Reading {
             }
         }
         if whole {
-            return self.at_close().map(Some);
+            return self.closed(on_delta).map(Some);
         }
         Ok(None)
+    }
+
+    /// The body is over, by its framing or by the connection closing: read
+    /// whatever event a held line ending was keeping back, then settle.
+    fn closed(&mut self, on_delta: &mut dyn FnMut(&str)) -> Result<Ended, TransportFailure> {
+        if matches!(self.head, Some((200, _))) {
+            for data in self.events.finish()? {
+                if let Some(ended) = self.event(&data, on_delta)? {
+                    return Ok(ended);
+                }
+            }
+        }
+        self.at_close()
     }
 
     fn refused(&self, status: u16) -> Ended {
@@ -556,6 +574,12 @@ impl Reading {
 /// until the next byte says whether it was half of a `\r\n`. Deciding early
 /// would read a `\r\n` split across two reads as two line endings, and
 /// that is a blank line: an event cut where there is none.
+///
+/// Linear in what arrives: only the new bytes (and a held `\r`) are
+/// normalised, and the search for a blank line starts where the last one
+/// stopped. Re-normalising and re-searching the whole pending buffer on every
+/// read was quadratic in one long event, which a server may grow to the reply
+/// cap (#120's second review measured 20 s for one 4 MiB event).
 #[derive(Debug, Default)]
 struct Events {
     pending: Vec<u8>,
@@ -563,13 +587,41 @@ struct Events {
 
 impl Events {
     fn feed(&mut self, bytes: &[u8]) -> Result<Vec<String>, TransportFailure> {
-        self.pending.extend_from_slice(bytes);
-        self.pending = normalised(&self.pending);
+        let mut incoming = Vec::with_capacity(bytes.len() + 1);
+        if self.pending.last() == Some(&b'\r') {
+            self.pending.pop();
+            incoming.push(b'\r');
+        }
+        incoming.extend_from_slice(bytes);
+        // A blank line can straddle the old end: its first `\n` already
+        // pending, its second just arrived.
+        let from = self.pending.len().saturating_sub(1);
+        self.pending.extend(normalised(&incoming));
+        self.cut(from)
+    }
+
+    /// The body is over: a `\r` held for a `\n` that never came was a line
+    /// ending after all.
+    fn finish(&mut self) -> Result<Vec<String>, TransportFailure> {
+        let from = self.pending.len().saturating_sub(2);
+        if let Some(last) = self.pending.last_mut()
+            && *last == b'\r'
+        {
+            *last = b'\n';
+        }
+        self.cut(from)
+    }
+
+    /// Every whole event from `from` on. Everything before `from` has been
+    /// searched and holds no blank line.
+    fn cut(&mut self, mut from: usize) -> Result<Vec<String>, TransportFailure> {
         let mut out = Vec::new();
         loop {
-            let Some(at) = find(&self.pending, b"\n\n") else {
+            let Some(at) = find(&self.pending[from..], b"\n\n").map(|at| at + from) else {
                 break;
             };
+            // What is left after this event was all past `from`: unsearched.
+            from = 0;
             let event: Vec<u8> = self.pending.drain(..at + 2).collect();
             let text = std::str::from_utf8(&event[..at]).map_err(|why| {
                 TransportFailure::Framing(format!("an event is not UTF-8: {why}"))
@@ -1087,13 +1139,15 @@ mod tests {
 
     #[test]
     fn a_stop_asked_before_the_call_opens_no_connection() {
-        // Nothing listens here: a connection attempt is refused, so the only
-        // way to come back `Cancelled` is not to have made one.
-        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
-            // Through the type, as `stub.rs` does: the hygiene table reads
-            // the method-call spelling as an internal hostname.
-            .and_then(|listener| std::net::TcpListener::local_addr(&listener))
-            .expect("loopback")
+        // Listening, and never accepting: a connection made would sit in this
+        // listener's backlog, where `accept` finds it. A stopped call that
+        // connected anyway would still come back `Cancelled` -- its stopper
+        // shuts the socket before the request is written -- so the verdict
+        // is read off the listener, not off the return value.
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("loopback");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let port = std::net::TcpListener::local_addr(&listener)
+            .expect("a bound address")
             .port();
         let endpoint = Endpoint::parse(&format!("http://127.0.0.1:{port}/v1/chat/completions"))
             .expect("an endpoint");
@@ -1103,6 +1157,10 @@ mod tests {
             panic!("a stopped call delivered a piece")
         });
         assert_eq!(ended, Ok(Ended::Cancelled));
+        match listener.accept() {
+            Err(why) if why.kind() == io::ErrorKind::WouldBlock => {}
+            other => panic!("a stopped call connected anyway: {other:?}"),
+        }
     }
 
     #[test]
@@ -1135,6 +1193,30 @@ mod tests {
             "a CRLF split across two reads is one line ending, not a blank line"
         );
         assert_eq!(read(&[b"data: a\r", b"\n\r", b"\n"]), ["a"]);
+    }
+
+    #[test]
+    fn an_event_ended_by_a_bare_cr_as_the_last_bytes_of_the_stream_is_read() {
+        // Its blank line is the final `\r`, held for a `\n` that never comes:
+        // the end of the body is what says it was a line ending.
+        let event =
+            r#"data: {"choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"stop"}]}"#;
+        let stub =
+            Stub::serving(vec![Act::Chunked(vec![format!("{event}\r\r")])]).expect("loopback");
+        let mut seen = Vec::new();
+        let ended = HttpStream::new(endpoint(&stub)).stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |piece| seen.push(piece.to_owned()),
+        );
+        assert_eq!(
+            ended,
+            Ok(Ended::Finished {
+                finish_reason: Some("stop".to_owned())
+            })
+        );
+        assert_eq!(seen, ["x"]);
     }
 
     #[test]

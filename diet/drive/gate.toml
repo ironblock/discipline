@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 57
+faults = 58
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -871,7 +871,7 @@ becomes = '''
                 return Ok(());'''
 catches = [
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
-    "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_client_leave",
+    "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
 ]
 
 [[fault]]
@@ -956,13 +956,26 @@ failure_class = "drive.session-a-crashed-turn-never-settles"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-        if self.settled {
-            return;
-        }'''
+    if state.settlement == Settlement::Turn {
+        state.cancel = None;
+        state.push(Event::Crashed { why });'''
 becomes = '''
-        if true {
-            return;
-        }'''
+    if false {
+        state.cancel = None;
+        state.push(Event::Crashed { why });'''
+catches = [
+    "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
+]
+
+[[fault]]
+id = "drive.session-a-crash-says-nothing"
+failure_class = "drive.session-a-crash-says-nothing"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+                    crashed(&shared, panic_message(payload.as_ref()));'''
+becomes = '''
+                    crashed(&shared, String::new());'''
 catches = [
     "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
 ]

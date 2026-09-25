@@ -130,8 +130,10 @@ pub enum Event {
         text: String,
     },
     /// A stop was asked for the call in flight. What the call did about it
-    /// is the next terminal event: [`Event::Cancelled`] if it stopped, or
-    /// [`Event::Answered`] if the answer was already done.
+    /// is the next terminal event of the turn, which may be any of them:
+    /// [`Event::Cancelled`] if it stopped, [`Event::Answered`] if the answer
+    /// was already done, or [`Event::Rejected`], [`Event::Failed`] or
+    /// [`Event::Crashed`] if the call ended some other way first.
     StopAsked,
     /// The trunk answered. The ask and this answer are now on the trunk.
     Answered {
@@ -155,10 +157,13 @@ pub enum Event {
         /// What arrived before the refusal.
         partial: String,
     },
-    /// The turn's own thread panicked before it could settle. Neither its
-    /// ask nor anything that arrived is on the trunk; what arrived is in the
-    /// [`Event::Delta`]s before this.
-    Crashed,
+    /// The turn's own thread panicked, or could not be started, before it
+    /// could settle. Neither its ask nor anything that arrived is on the
+    /// trunk; what arrived is in the [`Event::Delta`]s before this.
+    Crashed {
+        /// Why: the panic's message, or the operating system's refusal.
+        why: String,
+    },
     /// The turn's call failed. Neither its ask nor `partial` is on the trunk.
     Failed {
         /// How it failed.
@@ -305,7 +310,29 @@ impl<S: Streaming + 'static> Session<S> {
 
         let shared = Arc::clone(&self.shared);
         let ask = text.to_owned();
-        std::thread::spawn(move || turn(&shared, &shape, &cancel, ask));
+        let spawned = std::thread::Builder::new()
+            .name("diet-turn".to_owned())
+            .spawn(move || {
+                // Caught rather than left to unwind: a panicking transport, or
+                // an overflowing deadline, must still settle the turn -- and
+                // say why -- or the session sits in `turn` for good, refusing
+                // every ask (#120's first review).
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    turn(&shared, &shape, &cancel, ask);
+                }));
+                if let Err(payload) = outcome {
+                    crashed(&shared, panic_message(payload.as_ref()));
+                }
+            });
+        if let Err(why) = spawned {
+            // The same outcome by the other door: `std::thread::spawn` would
+            // have panicked on the caller with the session already in `turn`
+            // (#120's second review).
+            crashed(
+                &self.shared,
+                format!("the turn's thread could not start: {why}"),
+            );
+        }
         Ok(seq)
     }
 
@@ -438,12 +465,6 @@ fn from(log: &[Logged], first: u64) -> Vec<Logged> {
 /// One turn's call, on its own thread: stream the answer into the log, then
 /// settle.
 fn turn<S: Streaming>(shared: &Shared<S>, shape: &RequestShape, cancel: &Cancel, ask: String) {
-    // Armed first, so anything below that panics -- a transport, an
-    // overflowing deadline -- still settles the turn on the way out.
-    let mut unwinding = Unwinding {
-        shared,
-        settled: false,
-    };
     let deadline = Instant::now() + shared.template.limits.call;
     let mut partial = String::new();
     let result = shared
@@ -490,36 +511,29 @@ fn turn<S: Streaming>(shared: &Shared<S>, shape: &RequestShape, cancel: &Cancel,
             state.move_to(Settlement::Awaiting);
         }
     }
-    unwinding.settled = true;
     drop(state);
     shared.changed.notify_all();
 }
 
-/// Settles a turn whose thread unwinds before [`turn`] settles it.
-///
-/// Without it a panic on the detached thread left the session in `turn` for
-/// good: every later ask refused as in flight, and a cancel logging
-/// [`Event::StopAsked`] with no terminal event ever following -- found by
-/// #120's fresh-instance review, probing with a transport that panics.
-struct Unwinding<'a, S> {
-    shared: &'a Shared<S>,
-    settled: bool,
+/// Settle a turn that ended without [`turn`] settling it.
+fn crashed<S>(shared: &Shared<S>, why: String) {
+    let mut state = shared.lock();
+    if state.settlement == Settlement::Turn {
+        state.cancel = None;
+        state.push(Event::Crashed { why });
+        state.move_to(Settlement::Awaiting);
+    }
+    drop(state);
+    shared.changed.notify_all();
 }
 
-impl<S> Drop for Unwinding<'_, S> {
-    fn drop(&mut self) {
-        if self.settled {
-            return;
-        }
-        let mut state = self.shared.lock();
-        if state.settlement == Settlement::Turn {
-            state.cancel = None;
-            state.push(Event::Crashed);
-            state.move_to(Settlement::Awaiting);
-        }
-        drop(state);
-        self.shared.changed.notify_all();
-    }
+/// What a panic said, when it said it as text.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|text| (*text).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a panic with no message".to_owned())
 }
 
 #[cfg(test)]
@@ -865,12 +879,15 @@ mod tests {
         assert_eq!(
             tail,
             [
-                Event::Crashed,
+                Event::Crashed {
+                    why: "a transport that panics mid-answer (seeded by this test)".to_owned()
+                },
                 Event::Settled {
                     from: Settlement::Turn,
                     to: Settlement::Awaiting
                 },
-            ]
+            ],
+            "the crash was not settled, or its reason was lost"
         );
         assert_eq!(session.trunk(), [Message::new(Role::System, HEAD)]);
         assert!(
@@ -880,7 +897,7 @@ mod tests {
     }
 
     #[test]
-    fn a_session_over_http_cancels_and_the_server_sees_the_client_leave() {
+    fn a_session_over_http_cancels_and_the_server_sees_the_caller_leave() {
         use crate::client::stream::HttpStream;
         use crate::client::stub::{Act, Held, Stub};
         use crate::client::transport::Endpoint;
@@ -891,7 +908,14 @@ mod tests {
             .expect("loopback");
         let transport =
             HttpStream::new(Endpoint::parse(&stub.url()).expect("the stub's URL is an endpoint"));
-        let session = Session::open(transport, template());
+        // A call limit far past every bound below, so nothing but the stopper
+        // can end the read in time: at 5 s the deadline could, and the test
+        // passed with the stopper broken whenever the clock overshot by less
+        // than the stub's head start (#120's second review).
+        let mut template = template();
+        template.limits.call = Duration::from_secs(30);
+        template.limits.attempt = Duration::from_secs(30);
+        let session = Session::open(transport, template);
         session.ask("first").expect("accepted");
         wait_until(&session, "the first piece", |log| {
             log.iter()

@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 47
+faults = 48
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -717,6 +717,7 @@ becomes = '''
 catches = [
     "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
     "client::stream::tests::a_chunk_boundary_inside_an_event_is_invisible_to_the_reader",
+    "client::stream::tests::an_event_ended_by_a_bare_cr_as_the_last_bytes_of_the_stream_is_read",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
 ]
@@ -834,6 +835,7 @@ anchor = '''
 becomes = '''
             (b'\r', Some(_)) => {}'''
 catches = [
+    "client::stream::tests::an_event_ended_by_a_bare_cr_as_the_last_bytes_of_the_stream_is_read",
     "client::stream::tests::every_legal_line_ending_ends_an_event_and_a_split_crlf_is_one_ending",
 ]
 
@@ -861,4 +863,17 @@ becomes = '''
         .filter(|_| true)'''
 catches = [
     "client::stream::tests::a_deadline_that_has_arrived_is_arrived_even_at_the_exact_instant",
+]
+
+[[fault]]
+id = "client.stream-a-held-cr-dies-with-the-stream"
+failure_class = "client.stream-a-held-cr-dies-with-the-stream"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            *last = b'\n';'''
+becomes = '''
+            *last = b'\r';'''
+catches = [
+    "client::stream::tests::an_event_ended_by_a_bare_cr_as_the_last_bytes_of_the_stream_is_read",
 ]
