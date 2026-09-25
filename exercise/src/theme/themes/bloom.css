@@ -1,0 +1,30 @@
+/*
+ * Layer: bloom, over colo -- after the author's colour study, in the dark.
+ * Frosted, matte slabs with a fine grain and a thin rim of light; beneath
+ * each one, its own colour pools on the field around it, as if the slab
+ * sat over a lamp of that colour. The field carries faint pools of the
+ * surface's hues. What works still glows brightest (colo).
+ */
+.ex-root[data-theme~='bloom'] {
+  --page: #17191d;
+  --radius: 14px;
+
+  --fill-assistant: #22252b;
+  --fill-tool: #1f2226;
+  --fill-system: color-mix(in oklab, #22252b 80%, #4d8fe8);
+  --fill-user: color-mix(in oklab, #22252b 80%, #2fc49d);
+
+  --relief-trunk: 0 10px 26px -10px rgb(0 0 0 / 0.7), inset 0 0 0 1px rgb(255 255 255 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.1);
+  --relief-trunk-live: 0 16px 34px -12px rgb(0 0 0 / 0.75), inset 0 0 0 1px rgb(255 255 255 / 0.12), inset 0 1px 0 rgb(255 255 255 / 0.14);
+  --relief-well: inset 0 0 0 1px rgb(255 255 255 / 0.06);
+
+  --glow-radius: 56px;
+  --glow-trunk: 32%;
+  --glow-trunk-live: 65%;
+
+  --texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.09 0'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
+  --field:
+    radial-gradient(55rem 38rem at 12% 105%, rgb(47 196 157 / 0.16), transparent 70%),
+    radial-gradient(48rem 36rem at 62% 35%, rgb(77 143 232 / 0.14), transparent 70%),
+    radial-gradient(36rem 28rem at 96% 12%, rgb(226 140 240 / 0.11), transparent 70%);
+}

@@ -108,6 +108,12 @@
   --light-panel: 0%;
   --light-panel-live: 0%;
   --led-radius: 0px;
+  /* TEXTURE: images layered on surfaces. A sweep across a trunk block (light
+   * falling across a raised or pressed face), a grain on every surface, and
+   * a field of light pooled on the page itself. All `none` by default. */
+  --sweep: none;
+  --texture: none;
+  --field: none;
   /* Optional, falling back to the colour tokens when a theme leaves them unset:
    *   --glass-rim (→ --rule)  --control-rim (→ --rule)  --chrome-bg (→ --page)
    *   --seam-thickness (→ 0)  --seam-line (→ 1px solid)  --seam-groove (→ none) */
@@ -128,7 +134,9 @@ body {
 }
 
 .ex-root {
-  background: var(--page);
+  background-color: var(--page);
+  background-image: var(--field), var(--texture);
+  background-attachment: fixed;
   color: var(--ink);
   font: var(--size-chrome) / 1.5 var(--font-chrome);
   -webkit-font-smoothing: antialiased;

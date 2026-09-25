@@ -1,0 +1,21 @@
+/*
+ * Layer: emboss, over fabric -- the author's alternate. The same material,
+ * but what is in the prefix is RAISED out of it instead of pressed in:
+ * square-edged slabs, lit from the top left (the highlight on that corner,
+ * the shadow off the opposite one), with the light sweeping across each
+ * face. What is being written lifts higher; stat chips are pressed into
+ * the slab; the eras before a seam lie flat.
+ */
+.ex-root[data-theme~='emboss'] {
+  --radius: 0px;
+  --relief-trunk:
+    7px 7px 16px rgb(0 0 0 / 0.6), -6px -6px 14px rgb(255 255 255 / 0.05),
+    inset 1px 1px 0 rgb(255 255 255 / 0.07), inset -1px -1px 0 rgb(0 0 0 / 0.35);
+  --relief-trunk-live:
+    13px 13px 28px rgb(0 0 0 / 0.66), -10px -10px 24px rgb(255 255 255 / 0.06),
+    inset 1px 1px 0 rgb(255 255 255 / 0.09), inset -1px -1px 0 rgb(0 0 0 / 0.35);
+  --relief-lane: 5px 5px 12px rgb(0 0 0 / 0.55), -4px -4px 10px rgb(255 255 255 / 0.045), inset 1px 1px 0 rgb(255 255 255 / 0.06);
+  --relief-panel: 8px 8px 20px rgb(0 0 0 / 0.6), -6px -6px 16px rgb(255 255 255 / 0.05), inset 1px 1px 0 rgb(255 255 255 / 0.06);
+  --relief-control: 3px 3px 7px rgb(0 0 0 / 0.55), -2px -2px 6px rgb(255 255 255 / 0.05), inset 1px 1px 0 rgb(255 255 255 / 0.06);
+  --sweep: linear-gradient(135deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0) 40%, rgb(0 0 0 / 0) 60%, rgb(0 0 0 / 0.2));
+}

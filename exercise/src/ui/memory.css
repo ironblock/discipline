@@ -8,7 +8,8 @@
   background-color: var(--fill-memory);
   background-image:
     var(--glass-overlay),
-    radial-gradient(120% 70% at 50% 0%, color-mix(in oklab, var(--light-colour) var(--light), transparent), transparent 75%);
+    radial-gradient(120% 70% at 50% 0%, color-mix(in oklab, var(--light-colour) var(--light), transparent), transparent 75%),
+    var(--texture);
   -webkit-backdrop-filter: var(--glass-backdrop);
   backdrop-filter: var(--glass-backdrop);
   border: 1px solid var(--glass-rim, var(--rule));

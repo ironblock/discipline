@@ -1,7 +1,8 @@
 .ex-block {
   --fill: var(--fill-assistant);
   --tone-ink: var(--ink-assistant);
-  background: var(--fill);
+  background-color: var(--fill);
+  background-image: var(--sweep), var(--texture);
   color: var(--tone-ink);
   border-radius: var(--radius);
   padding: 1rem 1.25rem 0.6rem;
@@ -34,7 +35,8 @@
   background-color: var(--fill);
   background-image:
     var(--glass-overlay),
-    radial-gradient(130% 110% at 50% 0%, color-mix(in oklab, var(--tone-ink) var(--light), transparent), transparent 75%);
+    radial-gradient(130% 110% at 50% 0%, color-mix(in oklab, var(--tone-ink) var(--light), transparent), transparent 75%),
+    var(--texture);
   -webkit-backdrop-filter: var(--glass-backdrop);
   backdrop-filter: var(--glass-backdrop);
   border: 1px solid var(--glass-rim, transparent);
