@@ -2,8 +2,9 @@ import { useState } from 'react';
 
 import type { AssistantNode, Folded, SystemNode, UserNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
-import { ms, rate, tokens } from './format.ts';
+import { counter, ms, rate, tokens } from './format.ts';
 import { Prose } from './Prose.tsx';
+import { elapsed, useNow } from './surface.tsx';
 import './message.css';
 
 /** The trunk's system prompt: the phase's priming, or working memory rendered. */
@@ -58,6 +59,13 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
   const t = node.timings;
   const long = node.reasoning.length > 280;
   const showReasoning = node.reasoning !== '' && (thinking || !long || (live && node.text === ''));
+  const now = useNow();
+  const since = elapsed(now, node.startedAt);
+  // Prefill is silent by nature, and a long one is the cost worth flagging: it
+  // escalates on its total. A generation escalates only on silence -- time
+  // since its last token -- never while tokens are arriving.
+  const worry = node.progress === 'prefill' ? since.level : elapsed(now, node.lastActivityAt).level;
+  const streamingInto = node.progress === 'streaming' ? (node.text === '' ? 'reasoning' : 'answer') : undefined;
   return (
     <Block
       tone="assistant"
@@ -72,7 +80,16 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
               { value: tokens(t.prompt_n), unit: 'new', title: 'prompt tokens evaluated' },
               { value: rate(t.prompt_n, t.prompt_ms), unit: 'pp t/s', title: 'prefill speed' },
             ]
-          : [{ value: node.progress === 'prefill' ? 'prefill…' : 'generating…' }]
+          : [
+              {
+                value: (
+                  <span className="ex-elapsed" data-level={worry}>
+                    {node.progress === 'prefill' ? 'prefill' : 'generating'} · {counter(since.ms)}
+                  </span>
+                ),
+                title: 'how long since the request',
+              },
+            ]
       }
       provenance={node}
       id={node.id}
@@ -80,7 +97,7 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
       {node.reasoning !== '' ? (
         <div className="ex-reasoning">
           {showReasoning ? (
-            <Prose text={node.reasoning} kind="reasoning" />
+            <Prose text={node.reasoning} kind="reasoning" caret={streamingInto === 'reasoning'} />
           ) : (
             <div className="ex-reasoning__clip">
               <Prose text={node.reasoning.slice(0, 200) + '…'} kind="reasoning" />
@@ -100,7 +117,7 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
           <span className="ex-waiting__label">reading the prompt</span>
         </div>
       ) : null}
-      {node.text !== '' ? <Prose text={node.text} kind="answer" /> : null}
+      {node.text !== '' ? <Prose text={node.text} kind="answer" caret={streamingInto === 'answer'} /> : null}
       {node.progress === 'cancelled' ? <p className="ex-cancelled">cancelled</p> : null}
     </Block>
   );

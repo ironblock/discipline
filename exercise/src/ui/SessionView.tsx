@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import type { BranchNode, Folded, Session, TrunkNode } from '../session/fold.ts';
 import { Branch } from './Branch.tsx';
@@ -8,7 +8,7 @@ import { Memory, isUnseen } from './Memory.tsx';
 import { AssistantMessage, SystemMessage, UserMessage } from './Message.tsx';
 import { Seam } from './Seam.tsx';
 import { SessionHeader } from './SessionHeader.tsx';
-import { SurfaceContext } from './surface.tsx';
+import { ClockContext, SurfaceContext } from './surface.tsx';
 import type { Surface } from './surface.tsx';
 import { ToolCall } from './ToolCall.tsx';
 import './session.css';
@@ -52,6 +52,18 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
   // What the person has acknowledged in working memory: a log position, local to this view.
   const [seenThrough, setSeenThrough] = useState(-1);
   const lastEra = session.eras.length - 1;
+
+  // The clock: in the live app (`follow`), session time advances between events
+  // while something runs, a tick a second; otherwise it is the last event's time.
+  const receivedAt = useMemo(() => performance.now(), [session.events]);
+  const running = session.state === 'turn' || session.state === 'capture' || session.state === 'ratify';
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!follow || !running) return;
+    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [follow, running]);
+  const now = follow && running ? session.now + (performance.now() - receivedAt) : session.now;
 
   const trunkOrder = session.eras.flatMap((era) => era.nodes.map((n) => n.id));
   const eraOf = new Map(session.eras.flatMap((era) => era.nodes.map((n) => [n.id, era.index] as const)));
@@ -129,6 +141,7 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
 
   return (
     <SurfaceContext.Provider value={surface}>
+      <ClockContext.Provider value={now}>
       <div
         className={`ex-session${surface.gaps ? ' ex-gaps' : ''}${surface.curtain ? ' ex-session--curtain' : ''}`}
         style={{ ['--lanes' as string]: lanes.length }}
@@ -219,6 +232,7 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
           ) : null}
         </div>
       </div>
+      </ClockContext.Provider>
     </SurfaceContext.Provider>
   );
 }

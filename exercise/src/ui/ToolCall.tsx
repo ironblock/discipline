@@ -2,13 +2,15 @@ import { useState } from 'react';
 
 import type { Folded, ToolNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
-import { bytes, lines, ms } from './format.ts';
+import { bytes, counter, lines, ms } from './format.ts';
+import { elapsed, useNow } from './surface.tsx';
 import './tool.css';
 
 /** A bash call on the trunk: the command, then its output, collapsed until asked for. */
 export function ToolCall({ node, open: initiallyOpen = false }: { readonly node: Folded<ToolNode>; readonly open?: boolean }) {
   const [open, setOpen] = useState(initiallyOpen);
   const [first, ...rest] = node.command.split('\n');
+  const since = elapsed(useNow(), node.startedAt);
   const output = node.output ?? '';
   return (
     <Block
@@ -17,7 +19,7 @@ export function ToolCall({ node, open: initiallyOpen = false }: { readonly node:
       live={node.running}
       stats={
         node.running
-          ? [{ value: 'running…' }]
+          ? [{ value: <span className="ex-elapsed" data-level={since.level}>running · {counter(since.ms)}</span>, title: 'how long it has run' }]
           : [
               node.ms !== undefined && { value: ms(node.ms), title: 'wall clock' },
               { value: output === '' ? 'no output' : `${lines(output).toLocaleString('en-US')} lines · ${bytes(output)}`, title: 'what it printed' },

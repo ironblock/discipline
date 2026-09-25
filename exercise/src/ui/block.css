@@ -183,3 +183,7 @@
   }
 }
 
+
+/* Something still running says for how long, and colours it once that is worrying. */
+.ex-elapsed[data-level='slow'] { color: var(--warn); }
+.ex-elapsed[data-level='stalled'] { color: var(--bad); }

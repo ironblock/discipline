@@ -7,8 +7,22 @@ import './prose.css';
  * paragraphs, `-` and `1.` lists, inline code, fenced code. Built as elements,
  * never as HTML, so nothing a model says can become markup.
  */
-export function Prose({ text, kind }: { readonly text: string; readonly kind: 'ask' | 'answer' | 'reasoning' | 'system' }) {
-  return <div className={`ex-prose ex-prose--${kind}`}>{blocks(text)}</div>;
+export function Prose({
+  text,
+  kind,
+  caret = false,
+}: {
+  readonly text: string;
+  readonly kind: 'ask' | 'answer' | 'reasoning' | 'system';
+  /** Streaming: a caret at the point the text is growing from. */
+  readonly caret?: boolean;
+}) {
+  return (
+    <div className={`ex-prose ex-prose--${kind}`}>
+      {blocks(text)}
+      {caret ? <span className="ex-caret" aria-hidden="true" /> : null}
+    </div>
+  );
 }
 
 function blocks(text: string): ReactNode[] {

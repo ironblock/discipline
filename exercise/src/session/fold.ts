@@ -52,6 +52,8 @@ export interface Generation {
   readonly stop?: Stop;
   readonly slot: number;
   readonly startedAt: number;
+  /** Session time of the last sign of life: the request, the latest delta, the response. */
+  readonly lastActivityAt: number;
   readonly timings?: Timings;
   /** Request to response, wall clock. */
   readonly wallMs?: number;
@@ -69,6 +71,8 @@ export interface ToolNode extends Provenance {
   readonly id: string;
   readonly turn: number;
   readonly command: string;
+  /** Session time the call began. */
+  readonly startedAt: number;
   readonly running: boolean;
   readonly exit?: number;
   readonly output?: string;
@@ -191,6 +195,7 @@ function generation(g: GenerationBuilder): Generation {
     text,
     slot: request.slot,
     startedAt: request.t,
+    lastActivityAt: response?.t ?? g.deltas.at(-1)?.t ?? request.t,
     ...(response ? { stop: response.stop, timings: response.timings, wallMs: response.t - request.t } : {}),
   };
 }
@@ -360,6 +365,7 @@ export function fold(events: readonly DriveEvent[]): Session {
             id: begin.id,
             turn: begin.turn,
             command: begin.command,
+            startedAt: begin.t,
             running: end === undefined,
             ...(end ? { exit: end.exit, output: end.output, ms: end.t - begin.t } : {}),
             ...provenance(begin, end),

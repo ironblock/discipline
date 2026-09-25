@@ -8,6 +8,12 @@ export function ms(value: number): string {
   return `${m}m ${s}s`;
 }
 
+/** A running counter: whole seconds, so it ticks rather than flickers. */
+export function counter(value: number): string {
+  const s = Math.floor(value / 1000);
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+}
+
 export function tokens(value: number): string {
   if (value < 1000) return `${value}`;
   if (value < 10_000) return `${(value / 1000).toFixed(1)}k`;

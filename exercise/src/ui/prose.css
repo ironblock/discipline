@@ -45,3 +45,30 @@
   overflow-x: auto;
   white-space: pre;
 }
+
+/* The streaming caret sits at the end of the last line: the last block is
+   inline-flowing so the caret follows its text rather than starting a line. */
+.ex-prose:has(> .ex-caret) > p:nth-last-child(2) {
+  display: inline;
+}
+
+.ex-caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1.05em;
+  margin-left: 0.15em;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.7;
+  animation: ex-caret 1s steps(2, jump-none) infinite;
+}
+
+@keyframes ex-caret {
+  from { opacity: 0.75; }
+  to { opacity: 0.15; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ex-caret { animation: none; }
+}

@@ -26,6 +26,16 @@ describe('fold over the specimen', () => {
     expect(s.occupancy[1]).toBeUndefined();
   });
 
+  it('tracks a generation\'s last sign of life, so silence -- not length -- is what worries', () => {
+    const s = at(2, 22_000);
+    const node = s.eras[0]?.nodes.at(-1);
+    expect(node?.kind).toBe('assistant');
+    if (node?.kind !== 'assistant') return;
+    expect(node.timings).toBeUndefined();
+    expect(node.lastActivityAt).toBeGreaterThan(node.startedAt);
+    expect(s.now - node.lastActivityAt).toBeLessThan(1_000);
+  });
+
   it('is in capture after settlement, with the interview in slot 1 hung off the tool call it was about', () => {
     const s = at(2, 28_000);
     expect(s.state).toBe('capture');
