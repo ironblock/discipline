@@ -37,6 +37,11 @@
   filter: drop-shadow(0 0 var(--cable-glow) var(--c));
 }
 
+/* Waiting for its slot: the cable is laid, dashed. */
+.ex-cable[data-pending] .ex-cable__line {
+  stroke-dasharray: 3 4;
+}
+
 /* The light: one dash, a tenth of the cable long, from the trunk to the slot, again and again. */
 .ex-cable .ex-cable__pulse {
   display: none;

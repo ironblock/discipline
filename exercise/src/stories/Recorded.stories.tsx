@@ -108,6 +108,33 @@ export const Minimap: Story = {
   },
 };
 
+/**
+ * A side call starts below the bottom of the last thing that finished before
+ * it started. In this drive the extraction after turn 2's first reply waited
+ * out 56 trunk nodes; it is drawn beside where it ran, cabled back up.
+ */
+export const StartsWhereItRan: Story = {
+  name: '7 · a side call is drawn where it ran, not where it was asked',
+  play: async ({ canvasElement }) => {
+    const events = recording.events as readonly Record<string, unknown>[];
+    const request = events.find((e) => e['kind'] === 'request' && e['fork'] === 'e0100');
+    const start = Number(request?.['t']);
+    const trunkRequests = new Set(events.filter((e) => e['kind'] === 'request' && e['lane'] === 'trunk').map((e) => e['id']));
+    const finished = events.filter(
+      (e) => Number(e['t']) <= start && ((e['kind'] === 'response' && trunkRequests.has(e['to_request'])) || e['kind'] === 'tool.end'),
+    );
+    const last = finished.at(-1);
+    const id = String(last?.['kind'] === 'response' ? last['to_request'] : last?.['id']);
+    const cell = canvasElement.querySelector('[data-branch="e0100"]');
+    const node = canvasElement.querySelector(`.ex-trunk [data-id="${id}"]`);
+    await expect(node).not.toBeNull();
+    await waitFor(async () => expect(cell?.getBoundingClientRect().top).toBeGreaterThanOrEqual(node?.getBoundingClientRect().bottom ?? Number.POSITIVE_INFINITY));
+    // Its cable still runs back up to the node it was asked about.
+    const cable = cell?.querySelector('.ex-cable')?.getBoundingClientRect();
+    await expect(cable?.height).toBeGreaterThan(1000);
+  },
+};
+
 /** The whole drive condensed: 94 side calls as bars, each level with its trunk node, the trunk given back its width. */
 export const WholeCondensed: Story = {
   name: '6 · the whole drive, condensed',

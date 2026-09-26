@@ -169,4 +169,27 @@ describe('fold over what went wrong', () => {
     const plain = variant(2, undefined, (e) => e);
     expect(plain.eras[0]?.nodes.some((n) => n.kind === 'settled')).toBe(false);
   });
+  it('says when each node finished: an ask when asked, a reply at its response, a tool at its end, a side call when it settled', () => {
+    const s = at(2);
+    const ended = Object.fromEntries((s.eras[0]?.nodes ?? []).map((n) => [n.id, n.endedAt]));
+    const ask = snapshot(SPECIMEN, { beat: 2 }).find((e) => e.kind === 'ask');
+    expect(ended['ask/1']).toBe(ask?.t);
+    expect(ended['t/2']).toBeGreaterThan(0);
+    // The specimen's times are from the start of the beat, which begins at the ask.
+    const beatStart = ask?.t ?? 0;
+    expect(ended['q/3']).toBe(beatStart + 27_600);
+    expect(s.branches.get('t/2')?.[0]?.endedAt).toBeGreaterThan(beatStart + 27_710);
+    // Still running: no end.
+    const running = at(2, 22_000).eras[0]?.nodes.at(-1);
+    expect(running?.endedAt).toBeUndefined();
+  });
+
+  it('keeps a fork waiting for its slot as pending: declared, not started', () => {
+    const s = variant(2, 28_000, (e) => (e.kind === 'request' && e.fork === 'i/1' ? [] : e));
+    const branch = s.branches.get('t/2')?.[0];
+    expect(branch?.id).toBe('i/1');
+    expect(branch?.startedAt).toBeUndefined();
+    expect(branch?.progress).toBeUndefined();
+    expect(s.occupancy[1]).toBeUndefined();
+  });
 });

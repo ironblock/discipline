@@ -14,7 +14,22 @@ const PAD = 6;
  * while the side call runs, light travels down it, from the trunk it read
  * to the slot doing the work.
  */
-export function Cable({ reach, drop, live, top, style }: { readonly reach: number; readonly drop: number; readonly live: boolean; readonly top: number; readonly style?: CSSProperties }) {
+export function Cable({
+  reach,
+  drop,
+  live,
+  pending = false,
+  top,
+  style,
+}: {
+  readonly reach: number;
+  readonly drop: number;
+  readonly live: boolean;
+  /** Its side call is waiting for its slot: the cable is drawn, dashed, and nothing travels it yet. */
+  readonly pending?: boolean;
+  readonly top: number;
+  readonly style?: CSSProperties;
+}) {
   if (reach <= 0) return null;
   const d = cable(reach, drop);
   return (
@@ -26,6 +41,7 @@ export function Cable({ reach, drop, live, top, style }: { readonly reach: numbe
       viewBox={`0 ${-PAD} ${reach} ${drop + 2 * PAD}`}
       style={{ left: -reach, top: top - PAD, ...style }}
       data-live={live ? '' : undefined}
+      data-pending={pending ? '' : undefined}
     >
       <path className="ex-cable__line" d={d} />
       <path className="ex-cable__pulse" d={d} pathLength={100} />

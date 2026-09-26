@@ -4,6 +4,8 @@ import type { Link } from '../drive/transport.ts';
 import type { BranchNode, Folded, Session, TrunkNode } from '../session/fold.ts';
 import { Branch, BranchBar } from './Branch.tsx';
 import { Cable } from './Cable.tsx';
+import { ENTER, place } from './placement.ts';
+import type { Placed, Side, Span } from './placement.ts';
 import { Composer } from './Composer.tsx';
 import type { ComposerProps } from './Composer.tsx';
 import { Memory, isUnseen } from './Memory.tsx';
@@ -31,12 +33,7 @@ export interface SessionViewProps {
 /** Vertical space between two branches stacked in one slot: whole, and condensed to bars. */
 const STACK_GAP = 14;
 const STACK_GAP_CONDENSED = 4;
-/** Where on a block the cable attaches: the middle of a thin bar. */
-const ATTACH = 15;
-
-interface Placement {
-  readonly top: number;
-  readonly anchor: number;
+interface Placement extends Placed {
   /** From the trunk's right edge to the side call's left: what the cable spans. */
   readonly reach: number;
 }
@@ -113,25 +110,46 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
     const root = stage.current;
     if (!root) return;
     const base = root.getBoundingClientRect().top;
+    // What the trunk drew, where, and when each node finished: the rule in placement.ts reads time down the page.
+    const trunk: Span[] = session.eras.flatMap((era) =>
+      era.nodes.flatMap((n) => {
+        const r = anchors.current.get(n.id)?.getBoundingClientRect();
+        return r ? [{ id: n.id, top: r.top - base, bottom: r.bottom - base, ...(n.endedAt !== undefined ? { endedAt: n.endedAt } : {}) }] : [];
+      }),
+    );
+    const sides: Side[] = lanes.flatMap((slot) =>
+      laneBranches(slot).flatMap((b) => {
+        const cellEl = cells.current.get(b.id);
+        if (!cellEl) return [];
+        return [
+          {
+            id: b.id,
+            at: b.at,
+            slot,
+            height: cellEl.offsetHeight,
+            ...(b.startedAt !== undefined ? { startedAt: b.startedAt } : {}),
+            ...(b.endedAt !== undefined ? { endedAt: b.endedAt } : {}),
+          },
+        ];
+      }),
+    );
+    // In trunk order, whatever the slot: `place` orders them by when they started.
+    const order = new Map(trunkOrder.map((id, i) => [id, i] as const));
+    sides.sort((x, y) => (order.get(x.at) ?? 0) - (order.get(y.at) ?? 0));
+    const spots = place(sides, trunk, session.now, gap);
     const next = new Map<string, Placement>();
     // The lowest branch bottom per era, for the seam that closes it.
     const eraBottom = new Map<number, number>();
     let bottom = 0;
-    for (const slot of lanes) {
-      let floor = 0;
-      for (const branch of laneBranches(slot)) {
-        const anchorEl = anchors.current.get(branch.at);
-        const cellEl = cells.current.get(branch.id);
-        if (!anchorEl || !cellEl) continue;
-        const at = anchorEl.getBoundingClientRect();
-        const anchor = at.top - base;
-        const top = Math.max(anchor, floor);
-        next.set(branch.id, { top, anchor, reach: cellEl.getBoundingClientRect().left - at.right });
-        floor = top + cellEl.offsetHeight + gap;
-        const era = eraOf.get(branch.at) ?? 0;
-        eraBottom.set(era, Math.max(eraBottom.get(era) ?? 0, top + cellEl.offsetHeight));
-      }
-      bottom = Math.max(bottom, floor);
+    for (const side of sides) {
+      const spot = spots.get(side.id);
+      const cellEl = cells.current.get(side.id);
+      const anchorEl = anchors.current.get(side.at);
+      if (!spot || !cellEl || !anchorEl) continue;
+      next.set(side.id, { ...spot, reach: cellEl.getBoundingClientRect().left - anchorEl.getBoundingClientRect().right });
+      const era = eraOf.get(side.at) ?? 0;
+      eraBottom.set(era, Math.max(eraBottom.get(era) ?? 0, spot.top + side.height));
+      bottom = Math.max(bottom, spot.top + side.height + gap);
     }
     // A seam is a barrier: the refill happens after every side call before it
     // has finished, so it is drawn below all of them, and only it moves the trunk.
@@ -359,7 +377,8 @@ function BranchCell({
   readonly onOpen?: () => void;
 }) {
   // Until the first layout pass the cell is measured in place, invisibly.
-  const drop = placement ? placement.top - placement.anchor : 0;
+  const drop = placement ? placement.top + ENTER - placement.leave : 0;
+  const pending = placement?.pending ?? false;
   return (
     <div
       className="ex-branchcell"
@@ -367,8 +386,9 @@ function BranchCell({
       style={{ ...laneStyle(branch.lane), ...(placement ? { top: placement.top } : { top: 0, visibility: 'hidden' }) }}
       data-branch={branch.id}
       data-evicted={evicted ? '' : undefined}
+      data-pending={pending ? '' : undefined}
     >
-      {placement ? <Cable reach={placement.reach} drop={drop} top={ATTACH - drop} live={branch.outcome === undefined} /> : null}
+      {placement ? <Cable reach={placement.reach} drop={drop} top={ENTER - drop} live={branch.outcome === undefined && !pending} pending={pending} /> : null}
       {condensed ? <BranchBar node={branch} {...(onOpen ? { onOpen } : {})} /> : <Branch node={branch} open={open} />}
     </div>
   );
@@ -384,7 +404,7 @@ function samePlacements(a: ReadonlyMap<string, Placement>, b: ReadonlyMap<string
   if (a.size !== b.size) return false;
   for (const [id, p] of b) {
     const q = a.get(id);
-    if (!q || Math.abs(q.top - p.top) > 0.5 || Math.abs(q.anchor - p.anchor) > 0.5 || Math.abs(q.reach - p.reach) > 0.5) return false;
+    if (!q || q.pending !== p.pending || Math.abs(q.top - p.top) > 0.5 || Math.abs(q.leave - p.leave) > 0.5 || Math.abs(q.reach - p.reach) > 0.5) return false;
   }
   return true;
 }

@@ -7,7 +7,7 @@ import { useState } from 'react';
 
 import { SessionView } from '../ui/SessionView.tsx';
 import type { Surface } from '../ui/surface.tsx';
-import { MOMENTS, sessionAt } from './moments.ts';
+import { MOMENTS, sessionAt, variantAt } from './moments.ts';
 
 interface MomentArgs {
   readonly cursor: Cursor;
@@ -39,6 +39,8 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const q = (root: HTMLElement, selector: string) => root.querySelector(selector);
+const top = (root: HTMLElement, selector: string) => q(root, selector)?.getBoundingClientRect().top ?? Number.NaN;
+const bottom = (root: HTMLElement, selector: string) => q(root, selector)?.getBoundingClientRect().bottom ?? Number.NaN;
 
 /** DoD 1, before it: the phase's priming as the system prompt, nothing asked yet. */
 export const Opened: Story = {
@@ -74,6 +76,32 @@ export const IdleGapInterview: Story = {
   play: async ({ canvasElement }) => {
     await expect(q(canvasElement, '[data-state="capture"]')).not.toBeNull();
     await expect(q(canvasElement, '[data-branch="i/1"] [data-outcome="running"]')).not.toBeNull();
+    // It started when the answer settled: it is drawn below the answer, in the idle gap it ran in.
+    await waitFor(async () => expect(top(canvasElement, '[data-branch="i/1"]')).toBeGreaterThanOrEqual(bottom(canvasElement, '[data-id="q/3"]')));
+  },
+};
+
+/**
+ * An interview declared but waiting for its slot: it collects below
+ * everything finished so far, unlit and dashed, and is not pinned until its
+ * request starts.
+ */
+export const InterviewQueued: Story = {
+  name: '4b · an interview waiting for its slot',
+  render: () => (
+    <SessionView
+      session={variantAt(MOMENTS.idleGapInterview, (e) => (e['kind'] === 'request' && e['fork'] === 'i/1' ? [] : e))}
+      surface={{ curtain: true, gaps: false }}
+      composer={{ phases: PHASES }}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const cell = '[data-branch="i/1"]';
+    await waitFor(async () => expect(q(canvasElement, `${cell}[data-pending]`)).not.toBeNull());
+    await expect(q(canvasElement, `${cell} [data-outcome="pending"]`)?.textContent).toContain('queued');
+    await expect(q(canvasElement, `${cell} .ex-cable[data-pending]`)).not.toBeNull();
+    await expect(q(canvasElement, `${cell} .ex-cable[data-live]`)).toBeNull();
+    await expect(top(canvasElement, cell)).toBeGreaterThanOrEqual(bottom(canvasElement, '[data-id="q/3"]'));
   },
 };
 

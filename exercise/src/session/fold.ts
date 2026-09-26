@@ -41,6 +41,8 @@ export interface UserNode extends Provenance {
   readonly text: string;
   /** What the ask cost: the next trunk request's prefill, new and reused. */
   readonly prefill?: { readonly fresh: number; readonly cached: number };
+  /** Session time it finished: when it was asked. */
+  readonly endedAt: number;
 }
 
 export type Progress = 'prefill' | 'streaming' | 'done' | 'cancelled' | 'failed';
@@ -54,6 +56,8 @@ export interface Generation {
   readonly startedAt: number;
   /** Session time of the last sign of life: the request, the latest delta, the response. */
   readonly lastActivityAt: number;
+  /** Session time it finished -- its response, or its failure; absent while it runs. */
+  readonly endedAt?: number;
   readonly timings?: Timings;
   /** Request to response, wall clock. */
   readonly wallMs?: number;
@@ -81,6 +85,8 @@ export interface ToolNode extends Provenance {
   readonly output?: string;
   readonly truncated?: boolean;
   readonly ms?: number;
+  /** Session time the call ended; absent while it runs. */
+  readonly endedAt?: number;
 }
 
 /** The end of a turn that did not end on its own: the step limit, a timeout, a reason from a newer drive. */
@@ -89,6 +95,7 @@ export interface SettledNode extends Provenance {
   readonly id: string;
   readonly turn: number;
   readonly reason: SettleReason;
+  readonly endedAt: number;
 }
 
 export type TrunkNode = Folded<UserNode> | Folded<AssistantNode> | Folded<ToolNode> | Folded<SettledNode>;
@@ -229,9 +236,16 @@ function generation(g: GenerationBuilder): Generation {
     slot: request.slot,
     startedAt: request.t,
     lastActivityAt: response?.t ?? failed?.t ?? g.deltas.at(-1)?.t ?? request.t,
+    ...(response || failed ? { endedAt: (response ?? failed)!.t } : {}),
     ...(response ? { stop: response.stop, timings: response.timings, wallMs: response.t - request.t } : {}),
     ...(failed && !response ? { failure: { reason: failed.reason, message: failed.message }, wallMs: failed.t - request.t } : {}),
   };
+}
+
+function unended(g: Generation): Omit<Generation, 'endedAt'> {
+  const { endedAt, ...rest } = g;
+  void endedAt;
+  return rest;
 }
 
 /** Fold a session's log. Pure; the same log always folds the same. */
@@ -416,6 +430,7 @@ export function fold(events: readonly DriveEvent[]): Session {
             id: `ask/${slot.turn}`,
             turn: slot.turn,
             text: ask.text,
+            endedAt: ask.t,
             ...(timings && first?.response?.stop !== 'cancelled' ? { prefill: { fresh: timings.prompt_n, cached: timings.cache_n } } : {}),
             ...provenance(ask, first?.response),
           });
@@ -441,7 +456,7 @@ export function fold(events: readonly DriveEvent[]): Session {
             args: begin.args,
             startedAt: begin.t,
             running: end === undefined,
-            ...(end ? { exit: end.exit, output: end.output, ms: end.t - begin.t, ...(end.truncated ? { truncated: true } : {}) } : {}),
+            ...(end ? { exit: end.exit, output: end.output, ms: end.t - begin.t, endedAt: end.t, ...(end.truncated ? { truncated: true } : {}) } : {}),
             ...provenance(begin, end),
           });
         }
@@ -451,6 +466,7 @@ export function fold(events: readonly DriveEvent[]): Session {
             id: `settled/${slot.event.turn}`,
             turn: slot.event.turn,
             reason: slot.event.reason,
+            endedAt: slot.event.t,
             ...provenance(slot.event),
           });
       }
@@ -497,8 +513,9 @@ export function fold(events: readonly DriveEvent[]): Session {
       why: fork.why,
       question: fork.question,
       prefixTokens: fork.prefix_tokens,
-      ...(g ? generation(g) : {}),
-      ...(settled ? { outcome: settled.outcome } : {}),
+      // A side call has finished when it settles, after its patches -- not at its response.
+      ...(g ? unended(generation(g)) : {}),
+      ...(settled ? { outcome: settled.outcome, endedAt: settled.t } : {}),
       patches: patches.map((p) =>
         brand<PatchNode>({
           id: p.id,

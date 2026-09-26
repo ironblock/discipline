@@ -18,11 +18,12 @@ const PATCHES_SHOWN = 3;
 export function Branch({ node, open: initiallyOpen = false }: { readonly node: Folded<BranchNode>; readonly open?: boolean }) {
   const [open, setOpen] = useState(initiallyOpen);
   const [allPatches, setAllPatches] = useState(false);
-  const live = node.outcome === undefined;
+  const pending = isPending(node);
+  const live = node.outcome === undefined && !pending;
   const outcome = node.outcome !== undefined ? outcomeOf(node.outcome) : undefined;
   const t = node.timings;
   return (
-    <div className="ex-branch" data-lane={node.lane} data-outcome={node.outcome ?? 'running'}>
+    <div className="ex-branch" data-lane={node.lane} data-outcome={node.outcome ?? (pending ? 'pending' : 'running')}>
       <Block
         tone="lane"
         lane={node.lane}
@@ -36,6 +37,14 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
           t && { value: tokens(t.prompt_n), unit: 'new', title: 'prompt tokens evaluated: the question alone, if the fork was warm' },
           t && { value: tokens(t.cache_n), unit: 'warm', title: 'prompt tokens reused from the trunk’s tail' },
           t && { value: rate(t.predicted_n, t.predicted_ms), unit: 't/s' },
+          pending && {
+            value: (
+              <span className="ex-branch__outcome" data-level="quiet" data-known="">
+                queued
+              </span>
+            ),
+            title: `declared, waiting for slot ${node.slot}`,
+          },
           outcome !== undefined &&
             node.outcome !== 'complete' && {
               value: (
@@ -67,7 +76,7 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
               {failOf(node.failure.reason).label}: {node.failure.message}
             </p>
           ) : (
-            <p className="ex-branch__waiting">{node.progress === 'prefill' ? 'prefill…' : 'generating…'}</p>
+            <p className="ex-branch__waiting">{pending ? `waiting for slot ${node.slot}…` : node.progress === 'prefill' ? 'prefill…' : 'generating…'}</p>
           )}
         </div>
       ) : null}
@@ -97,17 +106,20 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
  * seeing is a tick across its top. Pressing it opens the side call.
  */
 export function BranchBar({ node, onOpen }: { readonly node: Folded<BranchNode>; readonly onOpen?: () => void }) {
-  const live = node.outcome === undefined;
+  const pending = isPending(node);
+  const live = node.outcome === undefined && !pending;
   const outcome = node.outcome !== undefined ? outcomeOf(node.outcome) : undefined;
   const alarm = outcome ? alarmOf(outcome.level) : undefined;
   const patches = node.patches.length;
-  const label = `${node.lane} ${node.id}: ${node.why} · ${outcome ? outcome.label : node.progress === 'prefill' ? 'prefill' : 'writing'} · ${patches} patch${patches === 1 ? '' : 'es'}`;
+  const state = outcome ? outcome.label : pending ? 'queued' : node.progress === 'prefill' ? 'prefill' : 'writing';
+  const label = `${node.lane} ${node.id}: ${node.why} · ${state} · ${patches} patch${patches === 1 ? '' : 'es'}`;
   return (
     <button
       type="button"
       className="ex-bar"
       data-lane={node.lane}
       data-live={live ? '' : undefined}
+      data-pending={pending ? '' : undefined}
       data-progress={live ? node.progress : undefined}
       data-alarm={alarm}
       data-from={node.from.join(' ')}
@@ -122,6 +134,11 @@ export function BranchBar({ node, onOpen }: { readonly node: Folded<BranchNode>;
       ))}
     </button>
   );
+}
+
+/** Declared but not started: a fork whose request has not gone to its slot yet. */
+function isPending(node: BranchNode): boolean {
+  return node.startedAt === undefined && node.outcome === undefined;
 }
 
 /**

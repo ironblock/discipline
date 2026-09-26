@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { MIN_BAR, PATCH_TICK, ROW, barHeight, rowsOf } from './condensed.ts';
+import { MAX_BAR, MIN_BAR, PATCH_TICK, ROW, barHeight, rowsOf } from './condensed.ts';
 
 describe('a side call, condensed to a bar', () => {
   it('counts the rows its answer fills, a long line wrapping', () => {
@@ -14,12 +14,17 @@ describe('a side call, condensed to a bar', () => {
   it('grows a row at a time as the answer is written, and a tick for each patch it landed', () => {
     const streaming = ['', 'FACT: a', 'FACT: a\nFACT: b', 'FACT: a\nFACT: b\nDECISION: c'].map((text) => barHeight(rowsOf(text), 0));
     for (let i = 1; i < streaming.length; i++) expect(streaming[i]).toBeGreaterThanOrEqual(streaming[i - 1] ?? 0);
-    expect(barHeight(40, 0) - barHeight(39, 0)).toBe(ROW);
-    expect(barHeight(40, 2) - barHeight(40, 0)).toBe(2 * PATCH_TICK);
+    expect(barHeight(20, 0) - barHeight(19, 0)).toBe(ROW);
+    expect(barHeight(20, 2) - barHeight(20, 0)).toBe(2 * PATCH_TICK);
   });
 
   it('is never shorter than the place its cable jacks in', () => {
     expect(barHeight(0, 0)).toBe(MIN_BAR);
     expect(barHeight(1, 0)).toBe(MIN_BAR);
+  });
+
+  it('stops growing at a ceiling, so one long answer cannot stretch the lane', () => {
+    expect(barHeight(1000, 40)).toBe(MAX_BAR);
+    expect(barHeight(10, 0)).toBeLessThan(MAX_BAR);
   });
 });
