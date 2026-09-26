@@ -186,6 +186,20 @@ export const FollowsTheBottom: Story = {
     const where = (step: string) => `${step}: scrollY ${Math.round(window.scrollY)} + view ${window.innerHeight} of ${page.scrollHeight}`;
     const later = canvasElement.querySelector('[data-advance]') as HTMLElement;
     await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-branchcell .ex-cable').length).toBeGreaterThan(0));
+    // Layout settles over a few passes (placements, seam pads); read heights only once it has.
+    const settled = async () => {
+      let last = -1;
+      await waitFor(
+        () => {
+          const now = page.scrollHeight;
+          const moved = now !== last;
+          last = now;
+          if (moved) throw new Error('still laying out');
+        },
+        { timeout: 4000, interval: 150 },
+      );
+    };
+    await settled();
     window.scrollTo(0, page.scrollHeight);
     await waitFor(async () => expect(atBottom(), where('at first')).toBe(true));
     const before = page.scrollHeight;
