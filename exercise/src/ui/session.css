@@ -20,13 +20,27 @@
 @property --pool-lane-colour { syntax: '<color>'; inherits: true; initial-value: transparent; }
 
 .ex-session {
-  --stage-w: var(--trunk-width);
   /* Room the minimap takes on the left; the row is centred in what is left. */
   --mm-space: 0rem;
-  --x-trunk: calc(50% + var(--mm-space) / 2);
+  /* What sits right of the trunk: the lanes (behind the curtain) and working
+     memory, unless memory is a drawer. The layout is centred at its full
+     width and, when the viewport is narrower, keeps its right-hand columns
+     and shrinks the trunk: so every pool is placed from the right edge, and
+     the trunk's from what is left of the row. */
+  --lanes-w: 0rem;
+  --memory-col: calc(var(--memory-width) + var(--gutter));
+  --stage-w: calc(var(--trunk-width) + var(--lanes-w) + var(--memory-col));
+  --edge-l: max(1rem + var(--mm-space), 50% + var(--mm-space) / 2 - var(--stage-w) / 2);
+  --edge-r: min(50% + var(--mm-space) / 2 + var(--stage-w) / 2, 100% - 1rem);
+  --x-memory: calc(var(--edge-r) - var(--memory-width) / 2);
+  --x-lane: calc(var(--edge-r) - var(--memory-col) - var(--lane-width) / 2);
+  --x-trunk: calc((var(--edge-l) + var(--edge-r) - var(--memory-col) - var(--lanes-w)) / 2);
+  /* The row working memory needs beside it, trunk at its narrowest; below
+     this memory is a drawer (SessionView measures .ex-session__need). */
+  --need: calc(var(--trunk-min) + var(--lanes-w) + var(--memory-width) + var(--gutter) + var(--mm-space) + 2rem);
   --pool-trunk: var(--pool-rest);
   --pool-lane: 0%;
-  --pool-memory: 0%;
+  --pool-memory: var(--pool-rest);
   --pool-trunk-colour: var(--ink-user);
   --pool-lane-colour: var(--lane-ink, var(--ink-interview));
   --live-field:
@@ -42,17 +56,21 @@
 }
 
 .ex-session--curtain {
-  /* The layout is centred at its full width and, when the viewport is narrower,
-     keeps its right-hand columns and shrinks the trunk: so every pool is placed
-     from the right edge, and the trunk's from what is left of the row. */
-  --stage-w: calc(var(--trunk-width) + var(--lanes) * (var(--lane-width) + var(--gutter)) + var(--gutter) + var(--memory-width));
-  --edge-l: max(1rem + var(--mm-space), 50% + var(--mm-space) / 2 - var(--stage-w) / 2);
-  --edge-r: min(50% + var(--mm-space) / 2 + var(--stage-w) / 2, 100% - 1rem);
-  --x-memory: calc(var(--edge-r) - var(--memory-width) / 2);
-  --x-lane: calc(var(--edge-r) - var(--memory-width) - var(--gutter) - var(--lane-width) / 2);
-  --x-trunk: calc((var(--edge-l) + var(--edge-r) - var(--memory-width) - var(--gutter) - var(--lanes) * (var(--lane-width) + var(--gutter))) / 2);
+  --lanes-w: calc(var(--lanes) * (var(--lane-width) + var(--gutter)));
   --pool-lane: var(--pool-rest);
-  --pool-memory: var(--pool-rest);
+}
+
+.ex-session[data-drawer] {
+  --memory-col: 0rem;
+  --x-memory: calc(100% - 1rem);
+}
+
+.ex-session__need {
+  position: absolute;
+  width: var(--need);
+  height: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .ex-session--minimap {
@@ -62,7 +80,7 @@
 .ex-session[data-state='turn'] { --pool-trunk: var(--pool-live); --pool-trunk-colour: var(--ink-assistant); }
 .ex-session[data-state='capture'] { --pool-trunk-colour: var(--lane-ink, var(--ink-interview)); }
 .ex-session--curtain[data-lanes-busy] { --pool-lane: var(--pool-live); }
-.ex-session--curtain[data-fresh] { --pool-memory: var(--pool-live); }
+.ex-session[data-fresh] { --pool-memory: var(--pool-live); }
 .ex-session[data-state='ended'] { --pool-trunk: 0%; --pool-lane: 0%; --pool-memory: 0%; }
 
 .ex-session::before {
@@ -102,10 +120,84 @@
 }
 
 /* A long memory scrolls inside its own panel, so the panel keeps its edges. */
-.ex-session__memory > .ex-memory {
+.ex-drawer__body > .ex-memory {
   max-height: calc(100vh - 7rem);
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+/* Out of room: working memory slides in from the right edge, over the lanes,
+   and a tab on that edge says what it holds -- lit when something new landed. */
+.ex-session[data-drawer] .ex-session__memory {
+  position: fixed;
+  z-index: 5;
+  top: 2.6rem;
+  right: 0;
+  bottom: 0;
+  width: min(calc(var(--memory-width) + 2rem), calc(100vw - 3rem));
+  margin: 0;
+  padding: 0.75rem 1rem 1rem;
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+}
+
+.ex-session[data-drawer] .ex-session__memory[data-open] {
+  transform: none;
+}
+
+.ex-session[data-drawer] .ex-drawer__body,
+.ex-session[data-drawer] .ex-drawer__body > .ex-memory {
+  max-height: 100%;
+}
+
+.ex-session[data-drawer] .ex-drawer__body > .ex-memory {
+  box-shadow: var(--relief-panel), -18px 0 40px -18px rgb(0 0 0 / 0.5);
+}
+
+.ex-drawer__tab {
+  position: absolute;
+  /* Below the sticky slot labels, so it never covers one. */
+  top: 3rem;
+  right: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.8rem 0.35rem;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  border: 1px solid var(--glass-rim, var(--rule));
+  border-left: 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--fill-memory);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--relief-panel);
+  color: var(--ink-muted);
+  font: var(--size-chrome) / 1 var(--font-chrome);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.ex-drawer__tab:hover {
+  color: var(--ink);
+}
+
+.ex-drawer__count {
+  color: var(--ink-faint);
+}
+
+.ex-drawer__tab[data-fresh] {
+  color: var(--fresh);
+  box-shadow: var(--relief-panel), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--fresh) var(--glow-panel-live), transparent);
+}
+
+.ex-drawer__fresh {
+  color: var(--fresh);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ex-session[data-drawer] .ex-session__memory { transition: none; }
 }
 
 .ex-session__composer {
@@ -292,18 +384,6 @@
 @media (max-width: 72rem) {
   .ex-session--minimap {
     --mm-space: 0rem;
-  }
-  .ex-session__main {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .ex-session__memory > .ex-memory {
-    max-height: none;
-  }
-  .ex-session__memory {
-    position: static;
-    width: auto;
-    margin-top: 0;
   }
   /* No scroll container here: one would trap the sticky slot labels and
      composer inside it. The trunk column shrinks instead. */

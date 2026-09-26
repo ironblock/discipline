@@ -57,6 +57,31 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
   // What the person has acknowledged in working memory: a log position, local to this view.
   const [seenThrough, setSeenThrough] = useState(-1);
   const lastEra = session.eras.length - 1;
+  // Working memory is always on the right: a column when the row has room for it, a drawer when not.
+  const root = useRef<HTMLDivElement>(null);
+  const need = useRef<HTMLDivElement>(null);
+  const [drawer, setDrawer] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  useLayoutEffect(() => {
+    const el = root.current;
+    const probe = need.current;
+    if (!el || !probe) return;
+    const fit = () => setDrawer(probe.offsetWidth > el.clientWidth);
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [lanes.length]);
+  useEffect(() => {
+    if (!drawer || !drawerOpen) return;
+    const close = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDrawerOpen(false);
+    };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [drawer, drawerOpen]);
+  const liveEntries = session.memory.filter((m) => m.state === 'live').length;
+  const unseen = session.memory.filter((m) => isUnseen(m, seenThrough)).length;
 
   // The clock: in the live app (`follow`), session time advances between events
   // while something runs, a tick a second; otherwise it is the last event's time.
@@ -148,13 +173,17 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
     <SurfaceContext.Provider value={surface}>
       <ClockContext.Provider value={now}>
       <div
+        ref={root}
         className={`ex-session ex-session--minimap${surface.gaps ? ' ex-gaps' : ''}${surface.curtain ? ' ex-session--curtain' : ''}`}
         style={{ ['--lanes' as string]: lanes.length, ...laneStyle(busyLane(session)) }}
         data-state={session.state}
         data-link={link}
         data-lanes-busy={session.occupancy.some((holder, slot) => holder !== undefined && slot !== session.trunkSlot) ? '' : undefined}
-        data-fresh={session.memory.some((m) => isUnseen(m, seenThrough)) ? '' : undefined}
+        data-fresh={unseen > 0 ? '' : undefined}
+        data-drawer={drawer ? '' : undefined}
       >
+        {/* As wide as the row must be for working memory to sit beside it (session.css, --need). */}
+        <div className="ex-session__need" ref={need} aria-hidden="true" />
         <Minimap stage={stage} revision={[session, placed, seamPad, surface.curtain]} curtain={surface.curtain} />
         <div className="ex-session__header">
           <SessionHeader session={session} link={link} surface={surface} {...(onSurface ? { onSurface } : {})} />
@@ -238,11 +267,23 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
               <Composer key={session.phase} state={session.state} link={link} phase={session.phase} {...composer} />
             </div>
           </div>
-          {surface.curtain ? (
-            <aside className="ex-session__memory">
+          <aside className="ex-session__memory" data-open={drawer && drawerOpen ? '' : undefined}>
+            {drawer ? (
+              <button
+                type="button"
+                className="ex-drawer__tab"
+                aria-expanded={drawerOpen}
+                data-fresh={unseen > 0 ? '' : undefined}
+                onClick={() => setDrawerOpen(!drawerOpen)}
+              >
+                working memory <span className="ex-drawer__count">{liveEntries}</span>
+                {unseen > 0 ? <span className="ex-drawer__fresh">+{unseen}</span> : null}
+              </button>
+            ) : null}
+            <div className="ex-drawer__body" inert={drawer && !drawerOpen}>
               <Memory entries={session.memory} seenThrough={seenThrough} onSeen={() => setSeenThrough(session.events - 1)} />
-            </aside>
-          ) : null}
+            </div>
+          </aside>
         </div>
       </div>
       </ClockContext.Provider>

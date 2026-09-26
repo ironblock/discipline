@@ -169,6 +169,8 @@
 
   /* Geometry */
   --trunk-width: 46rem;
+  /* The narrowest the trunk may get before working memory gives up its column for a drawer. */
+  --trunk-min: 34rem;
   --lane-width: 22rem;
   --memory-width: 20rem;
   --minimap-width: 2.75rem;

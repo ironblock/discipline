@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect } from 'storybook/test';
+import { expect, userEvent, within } from 'storybook/test';
 
 import { PHASES } from '../App.tsx';
 import type { Cursor } from '../drive/canned.ts';
@@ -124,14 +124,53 @@ export const Done: Story = {
   args: { cursor: MOMENTS.done },
 };
 
-/** The same session with the curtain closed: a chat, and a quiet marker where a branch left. */
+/** The same session with the curtain closed: a chat, a quiet marker where a branch left, and working memory still on the right. */
 export const CurtainClosed: Story = {
   name: 'curtain closed',
   args: { cursor: MOMENTS.done, curtain: false },
   play: async ({ canvasElement }) => {
     await expect(q(canvasElement, '.ex-lane')).toBeNull();
-    await expect(q(canvasElement, '.ex-memory')).toBeNull();
+    await expect(q(canvasElement, '.ex-memory')).not.toBeNull();
     await expect(canvasElement.querySelectorAll('.ex-peek').length).toBeGreaterThan(0);
+  },
+};
+
+/** Room for everything: working memory is a column on the right, past the last lane. */
+export const MemoryBeside: Story = {
+  name: 'memory · beside, with room',
+  args: { cursor: MOMENTS.done },
+  render: ({ cursor, curtain, gaps }) => (
+    <div style={{ width: 1900 }}>
+      <SessionView session={sessionAt(cursor)} surface={{ curtain, gaps }} composer={{ phases: PHASES }} />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    await expect(q(canvasElement, '.ex-session[data-drawer]')).toBeNull();
+    const lane = q(canvasElement, '.ex-lane')?.getBoundingClientRect().right ?? Number.POSITIVE_INFINITY;
+    await expect(q(canvasElement, '.ex-memory')?.getBoundingClientRect().left).toBeGreaterThan(lane);
+  },
+};
+
+/** Not enough room: working memory becomes a drawer on the right edge, a tab that opens it over the lanes. */
+export const MemoryDrawer: Story = {
+  name: 'memory · a drawer, when the row runs out',
+  args: { cursor: MOMENTS.done },
+  render: ({ cursor, curtain, gaps }) => (
+    <div style={{ width: 900 }}>
+      <SessionView session={sessionAt(cursor)} surface={{ curtain, gaps }} composer={{ phases: PHASES }} />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const tab = await within(canvasElement).findByRole('button', { name: /working memory/ });
+    const drawer = () => q(canvasElement, '.ex-session__memory') as HTMLElement;
+    await expect(q(canvasElement, '.ex-session[data-drawer]')).not.toBeNull();
+    await expect(drawer().inert).toBe(false);
+    await expect(q(canvasElement, '.ex-session__memory .ex-memory')?.closest('[inert]')).not.toBeNull();
+    await userEvent.click(tab);
+    await expect(tab.getAttribute('aria-expanded')).toBe('true');
+    await expect(q(canvasElement, '.ex-session__memory .ex-memory')?.closest('[inert]')).toBeNull();
+    await userEvent.keyboard('{Escape}');
+    await expect(tab.getAttribute('aria-expanded')).toBe('false');
   },
 };
 
