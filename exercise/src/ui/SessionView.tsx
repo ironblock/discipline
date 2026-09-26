@@ -14,6 +14,7 @@ import type { ComposerProps } from './Composer.tsx';
 import { Memory, isUnseen } from './Memory.tsx';
 import { Minimap } from './Minimap.tsx';
 import { AssistantMessage, SystemMessage, TurnEnd, UserMessage } from './Message.tsx';
+import { Receipt } from './Receipt.tsx';
 import { Seam } from './Seam.tsx';
 import { SessionHeader } from './SessionHeader.tsx';
 import { laneStyle } from './sets.ts';
@@ -420,6 +421,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
             ) : null}
             <div className="ex-drawer__body" inert={drawer && !drawerOpen}>
               <Memory entries={session.memory} seenThrough={seenThrough} onSeen={() => setSeenThrough(session.events - 1)} />
+              <Receipt receipt={session.receipt} />
             </div>
           </aside>
         </div>

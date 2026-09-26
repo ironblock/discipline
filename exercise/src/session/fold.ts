@@ -12,6 +12,8 @@
 
 import type { Authority, DriveEvent, EventOf, FailReason, ForkLane, ForkOutcome, Lane, Need, PatchOp, SeamReason, SettleReason, Stop, Timings, Tool } from '../drive/events.ts';
 import { NEEDS_OF } from '../drive/events.ts';
+import { receiptOf } from './receipt.ts';
+import type { Receipt } from './receipt.ts';
 
 declare const folded: unique symbol;
 
@@ -192,6 +194,8 @@ export interface Session {
   readonly events: number;
   /** Events of a kind this surface does not know, by kind: kept and counted, never dropped silently. */
   readonly unknown: ReadonlyMap<string, number>;
+  /** The six numbers #31 measures a session on. */
+  readonly receipt: Receipt;
 }
 
 function brand<T>(value: T): Folded<T> {
@@ -268,6 +272,7 @@ export function fold(events: readonly DriveEvent[]): Session {
       now: 0,
       events: events.length,
       unknown: new Map(),
+      receipt: { ...receiptOf(events), liveEntries: 0 },
     };
   }
 
@@ -569,5 +574,6 @@ export function fold(events: readonly DriveEvent[]): Session {
     now: events.at(-1)?.t ?? 0,
     events: events.length,
     unknown,
+    receipt: { ...receiptOf(events), liveEntries: memory.filter((m) => m.state === 'live').length },
   };
 }

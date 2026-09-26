@@ -212,3 +212,19 @@ export const FollowsTheBottom: Story = {
     await expect(hit?.closest('.ex-session__composer')).toBeNull();
   },
 };
+
+/** The receipt #31 measures a session on, under working memory: the floor, on this drive. */
+export const ItsReceipt: Story = {
+  name: '9 · the receipt: six numbers, the floor',
+  play: async ({ canvasElement }) => {
+    const receipt = canvasElement.querySelector('.ex-receipt');
+    await expect(receipt).not.toBeNull();
+    const row = (name: string) => receipt?.querySelector(`[data-measure="${name}"] .ex-receipt__value`)?.textContent;
+    await expect(row('side-calls-per-ask')).toBe('18.8');
+    await expect(row('patches-per-ask')).toBe('52.8');
+    await expect(row('live-entries')).toBe('202');
+    await expect(row('mimicry')).toBe('7');
+    await expect(row('idle-before-refill')).toBe('442 s · 637 s');
+    await expect(row('side-call-time-in-gap')).toBe('≤ 100%');
+  },
+};
