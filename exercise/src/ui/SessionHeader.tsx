@@ -1,6 +1,7 @@
 import type { Link } from '../drive/transport.ts';
 import type { Session } from '../session/fold.ts';
 import { LookSetting } from './look.tsx';
+import { Segments } from './Segments.tsx';
 import { laneStyle } from './sets.ts';
 import type { Surface } from './surface.tsx';
 import './header.css';
@@ -11,6 +12,9 @@ export interface SessionHeaderProps {
   readonly surface: Surface;
   readonly onSurface?: (next: Surface) => void;
 }
+
+/** How far behind the curtain to look: not at all, each side call as a bar, or every side call whole. */
+const CURTAIN = ['closed', 'condensed', 'open'] as const;
 
 /** One quiet line: what is running this session, where it is, and the switches for seeing more. */
 export function SessionHeader({ session, link = 'live', surface, onSurface }: SessionHeaderProps) {
@@ -58,10 +62,15 @@ export function SessionHeader({ session, link = 'live', surface, onSurface }: Se
       </span>
       {onSurface ? (
         <>
-          <label className="ex-header__toggle">
-            <input type="checkbox" checked={surface.curtain} onChange={(e) => onSurface({ ...surface, curtain: e.target.checked })} />
-            behind the curtain
-          </label>
+          <span className="ex-header__toggle">
+            curtain
+            <Segments
+              name="curtain"
+              options={CURTAIN}
+              value={!surface.curtain ? 'closed' : surface.condensed === true ? 'condensed' : 'open'}
+              onPick={(next) => onSurface({ ...surface, curtain: next !== 'closed', condensed: next === 'condensed' })}
+            />
+          </span>
           <label className="ex-header__toggle">
             <input type="checkbox" checked={surface.gaps} onChange={(e) => onSurface({ ...surface, gaps: e.target.checked })} />
             what diet can’t emit yet

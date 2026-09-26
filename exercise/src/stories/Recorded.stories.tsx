@@ -11,6 +11,7 @@ interface RecordedArgs {
   readonly t: number;
   readonly curtain: boolean;
   readonly gaps: boolean;
+  readonly condensed?: boolean;
 }
 
 const recording = RECORDINGS['first-drive'];
@@ -27,8 +28,8 @@ const meta = {
   title: 'Session/Recorded',
   parameters: { layout: 'fullscreen' },
   args: { t: Number.POSITIVE_INFINITY, curtain: true, gaps: false },
-  render: ({ t, curtain, gaps }) => (
-    <SessionView session={fold(recordedAt(recording, t))} surface={{ curtain, gaps }} composer={{ phases: PHASES }} />
+  render: ({ t, curtain, gaps, condensed = false }) => (
+    <SessionView session={fold(recordedAt(recording, t))} surface={{ curtain, gaps, condensed }} composer={{ phases: PHASES }} />
   ),
 } satisfies Meta<RecordedArgs>;
 
@@ -104,5 +105,17 @@ export const Minimap: Story = {
     const box = map.getBoundingClientRect();
     await userEvent.pointer({ keys: '[MouseLeft]', target: map, coords: { clientX: box.left + box.width / 2, clientY: box.bottom - 2 } });
     await waitFor(() => expect(window.scrollY).toBeGreaterThan(0.9 * (document.documentElement.scrollHeight - window.innerHeight)));
+  },
+};
+
+/** The whole drive condensed: 94 side calls as bars, each level with its trunk node, the trunk given back its width. */
+export const WholeCondensed: Story = {
+  name: '6 · the whole drive, condensed',
+  args: { condensed: true },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelectorAll('.ex-bar')).toHaveLength(94);
+    await expect(canvasElement.querySelector('.ex-branch')).toBeNull();
+    // Mimicry is still visible condensed: its bar carries the outcome's alarm.
+    await expect(canvasElement.querySelectorAll('.ex-bar[data-alarm]').length).toBeGreaterThanOrEqual(7);
   },
 };

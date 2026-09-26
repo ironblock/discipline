@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 
 import type { Link } from '../drive/transport.ts';
 import type { BranchNode, Folded, Session, TrunkNode } from '../session/fold.ts';
-import { Branch } from './Branch.tsx';
+import { Branch, BranchBar } from './Branch.tsx';
 import { Cable } from './Cable.tsx';
 import { Composer } from './Composer.tsx';
 import type { ComposerProps } from './Composer.tsx';
@@ -28,8 +28,9 @@ export interface SessionViewProps {
   readonly follow?: boolean;
 }
 
-/** Vertical space between two branches stacked in one slot. */
+/** Vertical space between two branches stacked in one slot: whole, and condensed to bars. */
 const STACK_GAP = 14;
+const STACK_GAP_CONDENSED = 4;
 /** Where on a block the cable attaches: the middle of a thin bar. */
 const ATTACH = 15;
 
@@ -49,6 +50,11 @@ interface Placement {
  */
 export function SessionView({ session, link = 'live', surface, onSurface, composer, follow = false }: SessionViewProps) {
   const lanes = surface.curtain ? laneSlots(session) : [];
+  const condensed = surface.curtain && surface.condensed === true;
+  const gap = condensed ? STACK_GAP_CONDENSED : STACK_GAP;
+  // A bar pressed while condensed: that side call, opened, once the curtain is.
+  const [revealed, setRevealed] = useState<string>();
+  const scrolledTo = useRef<string>(undefined);
   const stage = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const anchors = useRef(new Map<string, HTMLElement>());
@@ -121,7 +127,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
         const anchor = at.top - base;
         const top = Math.max(anchor, floor);
         next.set(branch.id, { top, anchor, reach: cellEl.getBoundingClientRect().left - at.right });
-        floor = top + cellEl.offsetHeight + STACK_GAP;
+        floor = top + cellEl.offsetHeight + gap;
         const era = eraOf.get(branch.at) ?? 0;
         eraBottom.set(era, Math.max(eraBottom.get(era) ?? 0, top + cellEl.offsetHeight));
       }
@@ -135,14 +141,14 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
       const natural = el.getBoundingClientRect().top - base;
       let before = 0;
       for (const [e, b] of eraBottom) if (e < era) before = Math.max(before, b);
-      const pad = Math.max(0, Math.ceil(before + STACK_GAP - natural));
+      const pad = Math.max(0, Math.ceil(before + gap - natural));
       if (pad > 0) pads.set(era, pad);
     }
     setPlaced((prev) => (samePlacements(prev, next) ? prev : next));
     setHeight((prev) => (prev === bottom ? prev : bottom));
     setSeamPad((prev) => (sameNumbers(prev, pads) ? prev : pads));
-    // `lanes` and `laneBranches` are derived from `session` and `surface`.
-  }, [session, surface.curtain]);
+    // `lanes`, `laneBranches` and `gap` are derived from `session` and `surface`.
+  }, [session, surface.curtain, condensed]);
 
   useLayoutEffect(() => {
     layout();
@@ -153,6 +159,12 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
     for (const el of cells.current.values()) observer.observe(el);
     return () => observer.disconnect();
   }, [layout]);
+
+  useLayoutEffect(() => {
+    if (revealed === undefined || condensed || scrolledTo.current === revealed || !placed.has(revealed)) return;
+    scrolledTo.current = revealed;
+    cells.current.get(revealed)?.scrollIntoView({ block: 'center' });
+  }, [revealed, condensed, placed]);
 
   useLayoutEffect(() => {
     if (!follow) return;
@@ -178,7 +190,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
       <ClockContext.Provider value={now}>
       <div
         ref={root}
-        className={`ex-session ex-session--minimap${surface.gaps ? ' ex-gaps' : ''}${surface.curtain ? ' ex-session--curtain' : ''}`}
+        className={`ex-session ex-session--minimap${surface.gaps ? ' ex-gaps' : ''}${surface.curtain ? ' ex-session--curtain' : ''}${condensed ? ' ex-session--condensed' : ''}`}
         style={{ ['--lanes' as string]: lanes.length, ...laneStyle(busyLane(session)) }}
         data-state={session.state}
         data-link={link}
@@ -205,7 +217,9 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                     data-lane={session.occupancy[slot]?.lane}
                     style={laneStyle(session.occupancy[slot]?.lane)}
                   >
-                    slot {slot} · {session.occupancy[slot]?.id ?? 'idle'}
+                    <span className="ex-lanehead__long">slot </span>
+                    {slot}
+                    <span className="ex-lanehead__long"> · {session.occupancy[slot]?.id ?? 'idle'}</span>
                   </div>
                 ))}
               </div>
@@ -261,6 +275,17 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                       placement={placed.get(branch.id)}
                       cellRef={cellRef(branch.id)}
                       evicted={(eraOf.get(branch.at) ?? lastEra) < lastEra}
+                      condensed={condensed}
+                      open={branch.id === revealed}
+                      {...(onSurface
+                        ? {
+                            onOpen: () => {
+                              setRevealed(branch.id);
+                              scrolledTo.current = undefined;
+                              onSurface({ ...surface, condensed: false });
+                            },
+                          }
+                        : {})}
                     />
                   ))}
                 </div>
@@ -318,12 +343,20 @@ function BranchCell({
   placement,
   cellRef,
   evicted,
+  condensed,
+  open,
+  onOpen,
 }: {
   readonly branch: Folded<BranchNode>;
   readonly placement: Placement | undefined;
   readonly cellRef: (el: HTMLElement | null) => void;
   /** Its trunk node was evicted at a later seam. */
   readonly evicted: boolean;
+  /** Drawn as a bar that keeps its place (the curtain's `condensed`). */
+  readonly condensed: boolean;
+  /** Opened when it is drawn whole: the person pressed its bar. */
+  readonly open: boolean;
+  readonly onOpen?: () => void;
 }) {
   // Until the first layout pass the cell is measured in place, invisibly.
   const drop = placement ? placement.top - placement.anchor : 0;
@@ -336,7 +369,7 @@ function BranchCell({
       data-evicted={evicted ? '' : undefined}
     >
       {placement ? <Cable reach={placement.reach} drop={drop} top={ATTACH - drop} live={branch.outcome === undefined} /> : null}
-      <Branch node={branch} />
+      {condensed ? <BranchBar node={branch} {...(onOpen ? { onOpen } : {})} /> : <Branch node={branch} open={open} />}
     </div>
   );
 }

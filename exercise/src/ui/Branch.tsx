@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import type { BranchNode, Folded, PatchNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
+import { barHeight, rowsOf } from './condensed.ts';
 import { ms, rate, tokens } from './format.ts';
 import { alarmOf, failOf, opOf, outcomeOf } from './sets.ts';
 import './branch.css';
@@ -85,6 +86,41 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         </ul>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * A side call condensed: a bar in its lane's colour that keeps its place
+ * beside the trunk, as long as what it has written (a row at a time, as it
+ * streams) with a tick per patch it landed, in the op's colour. Running, it
+ * is lit, and its leading edge is where the writing is; an outcome worth
+ * seeing is a tick across its top. Pressing it opens the side call.
+ */
+export function BranchBar({ node, onOpen }: { readonly node: Folded<BranchNode>; readonly onOpen?: () => void }) {
+  const live = node.outcome === undefined;
+  const outcome = node.outcome !== undefined ? outcomeOf(node.outcome) : undefined;
+  const alarm = outcome ? alarmOf(outcome.level) : undefined;
+  const patches = node.patches.length;
+  const label = `${node.lane} ${node.id}: ${node.why} · ${outcome ? outcome.label : node.progress === 'prefill' ? 'prefill' : 'writing'} · ${patches} patch${patches === 1 ? '' : 'es'}`;
+  return (
+    <button
+      type="button"
+      className="ex-bar"
+      data-lane={node.lane}
+      data-live={live ? '' : undefined}
+      data-progress={live ? node.progress : undefined}
+      data-alarm={alarm}
+      data-from={node.from.join(' ')}
+      data-needs={node.needs.join(' ')}
+      aria-label={label}
+      title={label}
+      style={{ height: barHeight(rowsOf(node.text), patches) }}
+      onClick={onOpen}
+    >
+      {node.patches.map((p) => (
+        <span key={p.id} className="ex-bar__tick" data-level={opOf(p.op).level} />
+      ))}
+    </button>
   );
 }
 

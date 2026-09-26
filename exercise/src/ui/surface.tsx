@@ -4,6 +4,8 @@ import { createContext, useContext } from 'react';
 export interface Surface {
   /** Behind the curtain: the slot lanes, working memory, provenance. */
   readonly curtain: boolean;
+  /** Behind the curtain, each side call condensed to a bar that keeps its place and grows as it writes. */
+  readonly condensed?: boolean;
   /** Outline everything drawn from an event `diet` cannot emit yet, naming the step of #117. */
   readonly gaps: boolean;
 }

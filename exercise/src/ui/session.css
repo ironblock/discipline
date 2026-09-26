@@ -60,6 +60,10 @@
   --pool-lane: var(--pool-rest);
 }
 
+.ex-session--condensed {
+  --lane-width: var(--lane-width-condensed);
+}
+
 .ex-session[data-drawer] {
   --memory-col: 0rem;
   --x-memory: calc(100% - 1rem);
@@ -253,6 +257,15 @@
 }
 
 .ex-lanehead { --led: var(--lane-ink, var(--ink-lane)); }
+
+/* Condensed, a lane's head is its slot number alone. */
+.ex-session--condensed .ex-lanehead__long {
+  display: none;
+}
+
+.ex-session--condensed .ex-lanehead:not(:first-child) {
+  text-align: center;
+}
 
 .ex-lanehead[data-busy] {
   color: var(--led);

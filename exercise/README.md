@@ -22,9 +22,12 @@ pnpm verify           # typecheck, lint, unit tests, every story as a browser te
   what the harness measured on every block.
 - **Behind the curtain**, each server slot other than the trunk's is a
   column. An interview sits level with the trunk message it came from, in
-  the slot that served it, with the patches it landed; working memory is on
-  the right. A seam is drawn across every column, as the one deliberate
-  prefill event.
+  the slot that served it, with the patches it landed, cabled to it. A seam
+  is drawn across every column, as the one deliberate prefill event.
+  Condensed, each side call is a bar that keeps its place and grows as it
+  writes.
+- **Working memory** is always on the right: a column when the row has
+  room, a drawer on the right edge when it does not.
 - **"What diet can't emit yet"** outlines everything on screen that is
   drawn from an event `diet` does not produce, naming the step of #117 it
   waits on. Today that is everything, which is the point.
@@ -49,16 +52,22 @@ purpose. Surfaces bind to tokens that say how a thing sits -- relief (in
 the prefix, being written, evicted at a seam, beside it), glass, light,
 texture, the live field -- and every default is neutral.
 
+A person chooses a **look** in the header (`src/theme/look.ts`): a
+material, `colo` or `paper`, and dark, light or the system's. Each of the
+four names one theme: `bloom`, `bloom-light`, `paper`, `paper-dark`.
+
 A theme is a stack of value-only layers in `src/theme/themes/`, listed once
 in `themes/index.ts`, switched from Storybook's toolbar or the app's
-`?theme=`. The session opens in `bloom`: frosted slabs over pools of their
-own colour, light pooled where the work is, what runs glowing while it runs.
+`?theme=` (which pins a lab theme until a look is picked). `bloom`, colo
+in the dark, is frosted slabs over pools of their own colour, light pooled
+where the work is, what runs glowing while it runs.
 Its palette (`rack`) makes every colour an LED with the meaning it has on a
 server: blue is you, white the model, green work, amber attention, red a
 fault; violet, magenta and cyan are diet, asking, deciding and reading
 (the lamps are in `tokens.css`). Each footer is a full-width shaded band
 (`band`); `bloom-inline` keeps it under the text. `paper` is the same
-meanings on a white page, and `bloom-light` is bloom in daylight. A
+meanings on a white page, `paper-dark` the same flat surfaces in the
+dark, and `bloom-light` is bloom in daylight. A
 layer's file must be imported after every layer it overrides.
 The mapping behind all of them: material = in the prefix, glass = beside it,
 light = happening now.

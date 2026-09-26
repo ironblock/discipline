@@ -151,3 +151,84 @@
   letter-spacing: 0.06em;
   color: var(--ink-faint);
 }
+
+/* A side call condensed to a bar (the curtain's `condensed`). */
+.ex-bar {
+  --c: var(--lane-ink, var(--ink-lane));
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  position: relative;
+  width: 100%;
+  padding: 0 0 3px;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--c) 42%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--c) 65%, transparent);
+  cursor: pointer;
+  transition: height 0.3s ease, background-color 0.6s ease, box-shadow 0.6s ease;
+}
+
+.ex-bar:hover {
+  background: color-mix(in oklab, var(--c) 60%, transparent);
+}
+
+.ex-bar[data-live] {
+  background: color-mix(in oklab, var(--c) 70%, transparent);
+  box-shadow: 0 0 var(--led-radius) var(--c), 0 0 calc(var(--led-radius) * 2.5) color-mix(in oklab, var(--c) 50%, transparent);
+}
+
+/* Where the writing is: the running bar's leading edge, brightest. */
+.ex-bar[data-live]::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 8px;
+  border-radius: 0 0 4px 4px;
+  background: linear-gradient(to bottom, transparent, color-mix(in oklab, var(--c) 40%, white));
+}
+
+/* Prefill: nothing written yet, the bar breathes. */
+.ex-bar[data-progress='prefill'] {
+  animation: ex-breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes ex-breathe {
+  50% { opacity: 0.55; }
+}
+
+.ex-bar__tick {
+  flex: none;
+  height: 3px;
+  margin: 0 3px;
+  border-radius: 1px;
+  background: var(--fresh);
+}
+
+.ex-bar__tick[data-level='quiet'] { background: var(--ink-faint); }
+.ex-bar__tick[data-level='warn'] { background: var(--warn); }
+.ex-bar__tick[data-level='bad'] { background: var(--bad); }
+
+.ex-bar[data-alarm]::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: 0;
+  height: 3px;
+  border-radius: 1px;
+  background: var(--warn);
+}
+
+.ex-bar[data-alarm='bad']::before {
+  background: var(--bad);
+  box-shadow: 0 0 4px var(--bad);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ex-bar { transition: none; }
+  .ex-bar[data-progress='prefill'] { animation: none; }
+}

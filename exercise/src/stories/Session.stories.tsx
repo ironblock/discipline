@@ -1,9 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, userEvent, within } from 'storybook/test';
+import { expect, userEvent, waitFor, within } from 'storybook/test';
 
 import { PHASES } from '../App.tsx';
 import type { Cursor } from '../drive/canned.ts';
+import { useState } from 'react';
+
 import { SessionView } from '../ui/SessionView.tsx';
+import type { Surface } from '../ui/surface.tsx';
 import { MOMENTS, sessionAt } from './moments.ts';
 
 interface MomentArgs {
@@ -12,6 +15,8 @@ interface MomentArgs {
   readonly curtain: boolean;
   /** Outline what `diet` cannot emit yet. */
   readonly gaps: boolean;
+  /** Behind the curtain, each side call a bar that keeps its place. */
+  readonly condensed?: boolean;
 }
 
 /**
@@ -22,10 +27,12 @@ interface MomentArgs {
 const meta = {
   title: 'Session/Moments',
   parameters: { layout: 'fullscreen' },
-  args: { cursor: MOMENTS.opened, curtain: true, gaps: false },
-  render: ({ cursor, curtain, gaps }) => (
-    <SessionView session={sessionAt(cursor)} surface={{ curtain, gaps }} composer={{ phases: PHASES }} />
-  ),
+  args: { cursor: MOMENTS.opened, curtain: true, gaps: false, condensed: false },
+  render: function Render({ cursor, curtain, gaps, condensed = false }) {
+    // Stateful, so a story can press what changes the surface (a condensed bar opens the curtain).
+    const [surface, setSurface] = useState<Surface>({ curtain, gaps, condensed });
+    return <SessionView session={sessionAt(cursor)} surface={surface} onSurface={setSurface} composer={{ phases: PHASES }} />;
+  },
 } satisfies Meta<MomentArgs>;
 
 export default meta;
@@ -180,5 +187,38 @@ export const Gaps: Story = {
   args: { cursor: MOMENTS.done, gaps: true },
   play: async ({ canvasElement }) => {
     await expect(q(canvasElement, '.ex-gaps')).not.toBeNull();
+  },
+};
+
+/**
+ * Condensed: every side call keeps its place beside the trunk as a bar in
+ * its lane's colour, the length of what it has written so far, a tick per
+ * patch it landed. The running one is lit, and grows as it streams.
+ */
+export const Condensed: Story = {
+  name: 'condensed · an interview in the idle gap',
+  args: { cursor: MOMENTS.idleGapInterview, condensed: true },
+  play: async ({ canvasElement }) => {
+    await expect(q(canvasElement, '.ex-session--condensed')).not.toBeNull();
+    await expect(q(canvasElement, '.ex-lane')?.getBoundingClientRect().width).toBeLessThan(24);
+    await expect(q(canvasElement, '.ex-branch')).toBeNull();
+    const bars = canvasElement.querySelectorAll('.ex-bar');
+    await expect(bars.length).toBeGreaterThan(0);
+    await expect(bars.length).toBe(canvasElement.querySelectorAll('.ex-branchcell').length);
+    await expect(q(canvasElement, '[data-branch="i/1"] .ex-bar[data-live]')).not.toBeNull();
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-branchcell .ex-cable').length).toBe(bars.length));
+  },
+};
+
+/** A bar is a way in: pressing it opens the curtain on that side call. */
+export const CondensedOpens: Story = {
+  name: 'condensed · pressing a bar opens it',
+  args: { cursor: MOMENTS.done, condensed: true },
+  play: async ({ canvasElement }) => {
+    const bar = q(canvasElement, '[data-branch="i/1"] .ex-bar') as HTMLElement;
+    await expect(bar.getAttribute('aria-label')).toContain('i/1');
+    await userEvent.click(bar);
+    await expect(q(canvasElement, '.ex-session--condensed')).toBeNull();
+    await expect(q(canvasElement, '[data-branch="i/1"] .ex-branch')).not.toBeNull();
   },
 };

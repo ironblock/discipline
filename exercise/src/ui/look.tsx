@@ -5,6 +5,7 @@ import { MATERIALS, SCHEMES, readLook, themeOf } from '../theme/look.ts';
 import type { Look } from '../theme/look.ts';
 import { layersOf } from '../theme/themes/index.ts';
 import type { ThemeName } from '../theme/themes/index.ts';
+import { Segments } from './Segments.tsx';
 
 const STORED = 'exercise.look';
 
@@ -52,19 +53,6 @@ export function LookSetting() {
     <span className="ex-look" role="group" aria-label="look">
       <Segments name="material" options={MATERIALS} value={look.material} onPick={(material) => onLook({ ...look, material })} />
       <Segments name="scheme" options={SCHEMES} value={look.scheme} onPick={(scheme) => onLook({ ...look, scheme })} />
-    </span>
-  );
-}
-
-function Segments<T extends string>({ name, options, value, onPick }: { readonly name: string; readonly options: readonly T[]; readonly value: T; readonly onPick: (next: T) => void }) {
-  return (
-    <span className="ex-segments" role="radiogroup" aria-label={name}>
-      {options.map((option) => (
-        <label key={option} className="ex-segment" data-on={option === value ? '' : undefined}>
-          <input type="radio" name={`ex-look-${name}`} value={option} checked={option === value} onChange={() => onPick(option)} />
-          {option}
-        </label>
-      ))}
     </span>
   );
 }

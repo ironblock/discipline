@@ -183,6 +183,8 @@
   /* The narrowest the trunk may get before working memory gives up its column for a drawer. */
   --trunk-min: 34rem;
   --lane-width: 22rem;
+  /* A lane when the curtain is condensed: one bar wide. */
+  --lane-width-condensed: 0.875rem;
   --memory-width: 20rem;
   --minimap-width: 2.75rem;
   --gutter: 2.5rem;
