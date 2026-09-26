@@ -77,6 +77,10 @@ def timings(t):
 
 
 STOPS = {'tool_call': 'tool', 'final': 'stop'}
+# Kinds read into another event rather than carried: the run's start into
+# session.start, a seam's begin and end around its render.
+READ_ELSEWHERE = {'run.begin', 'seam.begin', 'seam.end'}
+
 # How an entry was known, predecessor name to the ruled one (#117, naming 5).
 AUTHORITY = {'observed-momentum': 'observed'}
 
@@ -143,6 +147,7 @@ def migrate(records):
     render_hash = 'not recorded'
     classified = {'mimicry': 0}
     authorities = {}
+    carried = {}
     pending_seam = None
     entry_text = {}
     called = {r['parent_id'] for r in records if r['event'] == 'tool.exec'}
@@ -238,9 +243,16 @@ def migrate(records):
                             'render': {'version': r.get('render_version') or 0, 'text': ''}}
         elif kind == 'run.end':
             out.append({'kind': 'session.end', 't': t0})
+        elif kind in READ_ELSEWHERE:
+            pass
+        else:
+            # A kind this vocabulary does not have is carried under its own
+            # name, not dropped: the surface counts it, and it is a gap to name.
+            carried[kind] = carried.get(kind, 0) + 1
+            out.append({'kind': kind, 't': t0, 'id': r['id'], **{k: v for k, v in r.items() if k not in ('event', 'id', 'parent_id', 'start', 'end')}})
 
     out.sort(key=lambda e: e['t'])
-    return out, slots, classified, authorities
+    return out, slots, classified, authorities, carried
 
 
 def main():
@@ -252,7 +264,7 @@ def main():
     args = parser.parse_args()
 
     records = [json.loads(line) for line in open(args.source)]
-    events, slots, classified, authorities = migrate(records)
+    events, slots, classified, authorities, carried = migrate(records)
     scrub = scrubber(args.scrub)
     events = scrub(events)
     fixture = {
@@ -266,6 +278,7 @@ def main():
             'Phases and seam reasons were not recorded. The audit forks at a phase boundary are drawn in the ratify lane, which is what the charter calls them.',
             f'Fork outcomes are classified by the migration, in the ruled enum: mimicry if it answers with a bash block (it answered as the agent), otherwise value; an empty answer would be refused ({classified}).',
             f'How each entry was known is carried as `authority`, the predecessor\'s `provenance` mapped to the ruled names ({authorities}).',
+            f'Events of a kind this vocabulary does not have are carried under their own name, not dropped ({carried or "none"}).',
             f'Tool output is cut at {MAX_OUTPUT_LINES} lines or {MAX_OUTPUT_CHARS:,} characters, a fork question at {MAX_QUESTION_CHARS:,}, a render at {MAX_RENDER_CHARS:,}; each cut says so in the text.',
             'Scrubbed: the account name and its home directory (now user and /work), run directories (/tmp/session), internal ticket ids.',
         ],

@@ -17,7 +17,7 @@ describe('the first drive, recorded and migrated', () => {
   });
 
   it('speaks the ruled vocabulary (#117, 2026-09-26): the one outcome enum, diet\'s ops, authority for how an entry was known', () => {
-    for (const log of [recording.events, SPECIMEN.flatMap((beat) => beat.events)] as const) {
+    for (const log of [...Object.values(RECORDINGS).map((rec) => rec.events), SPECIMEN.flatMap((beat) => beat.events)]) {
       const events = log as readonly Record<string, unknown>[];
       const outcomes = new Set(events.filter((e) => e['kind'] === 'fork.settled').map((e) => e['outcome']));
       expect([...outcomes].filter((o) => !RULED_OUTCOMES.includes(o as string))).toEqual([]);
@@ -27,11 +27,13 @@ describe('the first drive, recorded and migrated', () => {
     }
   });
 
-  it('carries no home-directory path and no internal ticket id', () => {
-    const text = JSON.stringify(recording);
-    // Report the match, not the 600 KB it was found in.
-    expect(/(\/Users\/|\/home\/)[A-Za-z0-9._-]+/.exec(text)?.[0]).toBeUndefined();
-    expect(/(^|[^A-Za-z0-9])DIE-?[0-9]+/i.exec(text)?.[0]).toBeUndefined();
+  it('carries no home-directory path and no internal ticket id, in any recording', () => {
+    for (const [name, rec] of Object.entries(RECORDINGS)) {
+      const text = JSON.stringify(rec);
+      // Report the match, not the 600 KB it was found in.
+      expect(/(\/Users\/|\/home\/)[A-Za-z0-9._-]+/.exec(text)?.[0], name).toBeUndefined();
+      expect(/(^|[^A-Za-z0-9])DIE-?[0-9]+/i.exec(text)?.[0], name).toBeUndefined();
+    }
   });
 
   it('folds whole with nothing unknown: three eras, every side call hung off a trunk node', () => {
@@ -60,6 +62,22 @@ describe('the first drive, recorded and migrated', () => {
     const ratifying = fold(recordedAt(recording, 530_000));
     expect(ratifying.state).toBe('ratify');
     expect(ratifying.occupancy.some((h) => h?.lane === 'ratify')).toBe(true);
+  });
+});
+
+describe('the other recordings: where the first drive never went', () => {
+  it('a capture round the person cancelled: carried under its own name, which this vocabulary does not have yet', () => {
+    const s = fold(placed(RECORDINGS['cancelled-capture']));
+    expect(s.state).toBe('ended');
+    expect([...s.unknown]).toEqual([['capture.cancelled', 1]]);
+    expect(RECORDINGS['cancelled-capture'].migration.join(' ')).toMatch(/capture\.cancelled/);
+  });
+
+  it('a turn stopped at the step limit: the turn end says so', () => {
+    const s = fold(placed(RECORDINGS['step-limit']));
+    const ends = s.eras.flatMap((era) => era.nodes).filter((n) => n.kind === 'settled');
+    expect(ends.map((n) => n.kind === 'settled' && n.reason)).toEqual(['max_steps']);
+    expect(s.unknown.size).toBe(0);
   });
 });
 

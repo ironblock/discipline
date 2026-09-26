@@ -14,6 +14,8 @@ import { deltas } from './canned.ts';
 import type { DriveEvent, EventOf, Unplaced } from './events.ts';
 import type { Ack, DriveTransport } from './transport.ts';
 import firstDrive from './recorded/first-drive.json?raw';
+import cancelledCapture from './recorded/cancelled-capture.json?raw';
+import stepLimit from './recorded/step-limit.json?raw';
 
 export interface Recording {
   readonly title: string;
@@ -35,6 +37,10 @@ function load(text: string): Recording {
 
 export const RECORDINGS = {
   'first-drive': load(firstDrive),
+  /** A capture round the person cancelled: `capture.cancelled`, which the vocabulary does not have yet. */
+  'cancelled-capture': load(cancelledCapture),
+  /** A turn that ran into the step limit (30 steps). */
+  'step-limit': load(stepLimit),
 } as const;
 
 export type RecordingName = keyof typeof RECORDINGS;

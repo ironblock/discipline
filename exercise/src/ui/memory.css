@@ -29,8 +29,14 @@
 
 .ex-memory__head {
   display: flex;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
   align-items: baseline;
+}
+
+/* Each part of the head keeps its words together; the head wraps between parts. */
+.ex-memory__head > * {
+  white-space: nowrap;
 }
 
 .ex-memory__title {

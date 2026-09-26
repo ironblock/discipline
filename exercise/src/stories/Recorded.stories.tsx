@@ -5,6 +5,7 @@ import { expect, userEvent, waitFor } from 'storybook/test';
 import { PHASES } from '../App.tsx';
 import { fillContrast } from './contrast.ts';
 import { RECORDINGS, recordedAt } from '../drive/recorded.ts';
+import type { RecordingName } from '../drive/recorded.ts';
 import { fold } from '../session/fold.ts';
 import { SessionView } from '../ui/SessionView.tsx';
 
@@ -14,6 +15,8 @@ interface RecordedArgs {
   readonly curtain: boolean;
   readonly gaps: boolean;
   readonly condensed?: boolean;
+  /** Which recording; the first drive unless a story says otherwise. */
+  readonly recording?: RecordingName;
 }
 
 const recording = RECORDINGS['first-drive'];
@@ -30,8 +33,8 @@ const meta = {
   title: 'Session/Recorded',
   parameters: { layout: 'fullscreen' },
   args: { t: Number.POSITIVE_INFINITY, curtain: true, gaps: false },
-  render: ({ t, curtain, gaps, condensed = false }) => (
-    <SessionView session={fold(recordedAt(recording, t))} surface={{ curtain, gaps, condensed }} composer={{ phases: PHASES }} />
+  render: ({ t, curtain, gaps, condensed = false, recording: name = 'first-drive' }) => (
+    <SessionView session={fold(recordedAt(RECORDINGS[name], t))} surface={{ curtain, gaps, condensed }} composer={{ phases: PHASES }} />
   ),
 } satisfies Meta<RecordedArgs>;
 
@@ -261,5 +264,32 @@ export const MinimapInDaylight: Story = {
     const ratio = fillContrast(sliver);
     await expect(ratio).toBeGreaterThan(1.2);
     await expect(ratio).toBeLessThan(1.8);
+  },
+};
+
+/**
+ * Another drive: the person cancelled a capture round after turn 2, and the
+ * side calls it had not fired never ran. The record says `capture.cancelled`,
+ * which this vocabulary does not have: it is carried, counted, and named in
+ * the header -- a gap to close, drawn as one.
+ */
+export const CancelledCapture: Story = {
+  name: '10 · a capture round cancelled: a kind the vocabulary lacks',
+  args: { recording: 'cancelled-capture' },
+  play: async ({ canvasElement }) => {
+    const unknown = canvasElement.querySelector('.ex-header__unknown');
+    await expect(unknown?.textContent).toBe('1 unknown');
+    await expect(unknown?.getAttribute('title')).toContain('capture.cancelled');
+    await expect(canvasElement.querySelector('[data-state="ended"]')).not.toBeNull();
+  },
+};
+
+/** Another drive: turn 2 ran thirty steps and was stopped at the limit; the turn end says so. */
+export const StepLimit: Story = {
+  name: '11 · the step limit',
+  args: { recording: 'step-limit' },
+  play: async ({ canvasElement }) => {
+    const end = canvasElement.querySelector('.ex-turnend');
+    await expect(end?.textContent).toMatch(/step limit|max_steps/);
   },
 };

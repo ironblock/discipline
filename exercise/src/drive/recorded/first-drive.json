@@ -9,6 +9,7 @@
 "Phases and seam reasons were not recorded. The audit forks at a phase boundary are drawn in the ratify lane, which is what the charter calls them.",
 "Fork outcomes are classified by the migration, in the ruled enum: mimicry if it answers with a bash block (it answered as the agent), otherwise value; an empty answer would be refused ({'mimicry': 7, 'value': 87}).",
 "How each entry was known is carried as `authority`, the predecessor's `provenance` mapped to the ruled names ({'extracted -> extracted': 5, 'stated -> stated': 249, 'observed-momentum -> observed': 1}).",
+"Events of a kind this vocabulary does not have are carried under their own name, not dropped (none).",
 "Tool output is cut at 120 lines or 12,000 characters, a fork question at 1,500, a render at 24,000; each cut says so in the text.",
 "Scrubbed: the account name and its home directory (now user and /work), run directories (/tmp/session), internal ticket ids."
 ],
