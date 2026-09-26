@@ -61,3 +61,55 @@
 @media (prefers-reduced-motion: reduce) {
   .ex-waiting__line { animation: none; background-size: 100% 100%; opacity: 0.4; }
 }
+
+/* A request that failed: what the server or the drive said, verbatim, under the answer so far. */
+.ex-failed {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.75rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 2px solid var(--bad);
+  background: color-mix(in oklab, var(--bad) 8%, transparent);
+  border-radius: 0 calc(var(--radius) / 2) calc(var(--radius) / 2) 0;
+}
+
+.ex-failed__reason {
+  color: var(--bad);
+  font: var(--size-stats) / 1.4 var(--font-stats);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ex-failed__message {
+  color: var(--ink);
+  font: var(--size-tool) / 1.5 var(--font-tool);
+  overflow-wrap: anywhere;
+}
+
+.ex-failure[data-level='bad'],
+.ex-stop[data-level='bad'] { color: var(--bad); }
+.ex-stop[data-level='warn'] { color: var(--warn); }
+
+/* Where a turn stopped without finishing: a quiet rule across the trunk, the reason in its level's colour. */
+.ex-turnend {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--ink-muted);
+  font: var(--size-stats) / 1.4 var(--font-stats);
+}
+
+.ex-turnend strong {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.ex-turnend[data-level='warn'] strong { color: var(--warn); }
+.ex-turnend[data-level='bad'] strong { color: var(--bad); }
+.ex-turnend:not([data-known]) strong { text-decoration: underline dotted; text-underline-offset: 0.2em; }
+
+.ex-turnend__rule {
+  flex: 1 1 auto;
+  height: 1px;
+  background: color-mix(in oklab, currentColor 30%, transparent);
+}

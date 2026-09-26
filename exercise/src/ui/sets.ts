@@ -10,7 +10,7 @@
 
 import type { CSSProperties } from 'react';
 
-import type { ForkLane, ForkOutcome, PatchOp, SeamReason, SettleReason, Stop, Tool } from '../drive/events.ts';
+import type { FailReason, ForkLane, ForkOutcome, PatchOp, SeamReason, SettleReason, Stop, Tool } from '../drive/events.ts';
 import type { Refusal } from '../drive/transport.ts';
 
 /** How a member reads at a glance. `quiet` is the neutral every unknown member gets. */
@@ -83,6 +83,7 @@ export const outcomeOf = registry<ForkOutcome>({
   thinking_exhausted: { label: 'thinking exhausted', level: 'warn' },
   timeout: { label: 'timed out', level: 'bad' },
   cancelled: { label: 'cancelled', level: 'quiet' },
+  failed: { label: 'failed', level: 'bad' },
   mimicry: { label: 'mimicry', level: 'bad' },
   unparseable: { label: 'unparseable', level: 'bad' },
   rejected: { label: 'rejected', level: 'bad' },
@@ -131,6 +132,15 @@ export const settleOf = registry<SettleReason>({
   cancelled: { label: 'cancelled', level: 'quiet' },
   max_steps: { label: 'stopped at the step limit', level: 'warn' },
   timeout: { label: 'timed out', level: 'bad' },
+  failed: { label: 'a request failed', level: 'bad' },
+});
+
+/** Why a request produced no response. Every one is a failure; the label says which. */
+export const failOf = registry<FailReason>({
+  server: { label: 'the server failed it', level: 'bad' },
+  context_overflow: { label: 'the prompt no longer fits', level: 'bad' },
+  timeout: { label: 'timed out', level: 'bad' },
+  disconnected: { label: 'the connection dropped', level: 'bad' },
 });
 
 // ------------------------------------------------------------------ refusals

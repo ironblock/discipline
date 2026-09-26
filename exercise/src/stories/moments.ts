@@ -44,9 +44,16 @@ export function branchAt(cursor: Cursor, id: string): Folded<BranchNode> {
  * `edit` sees events as plain records, since the point is to say things the
  * types do not name.
  */
-export function variantAt(cursor: Cursor, edit: (event: Readonly<Record<string, unknown>>) => Readonly<Record<string, unknown>> | readonly Readonly<Record<string, unknown>>[]): Session {
-  const log = snapshot(SPECIMEN, cursor).flatMap((e) => edit(e as unknown as Record<string, unknown>));
-  return fold(log.map((e, seq) => ({ ...e, seq }) as unknown as DriveEvent));
+type Loose = Readonly<Record<string, unknown>>;
+
+export function variantAt(
+  cursor: Cursor,
+  edit: (event: Loose) => Loose | readonly Loose[],
+  /** Events to add after the moment, given the log so far: what happens next, in this variant. */
+  append: (log: readonly Loose[]) => readonly Loose[] = () => [],
+): Session {
+  const log = snapshot(SPECIMEN, cursor).flatMap((e) => edit(e as unknown as Loose));
+  return fold([...log, ...append(log)].map((e, seq) => ({ ...e, seq }) as unknown as DriveEvent));
 }
 
 /** Named moments of the specimen, in session order. */

@@ -1,10 +1,11 @@
 import { useState } from 'react';
 
-import type { AssistantNode, Folded, SystemNode, UserNode } from '../session/fold.ts';
+import type { AssistantNode, Folded, SettledNode, SystemNode, UserNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { counter, ms, rate, tokens } from './format.ts';
 import { Copy } from './Copy.tsx';
 import { Prose } from './Prose.tsx';
+import { failOf, settleOf, stopOf } from './sets.ts';
 import { elapsed, useNow } from './surface.tsx';
 import './message.css';
 
@@ -85,6 +86,7 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
   const streamingInto = node.progress === 'streaming' ? (node.text === '' ? 'reasoning' : 'answer') : undefined;
   // A turn that said nothing and only called a tool: a step, not a message.
   const silent = node.progress === 'done' && node.text === '' && node.reasoning === '';
+  const stopped = stopOf(node.stop ?? 'stop');
   return (
     <Block
       tone="assistant"
@@ -92,8 +94,28 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
       thin={silent}
       live={live}
       stats={
-        t
+        node.failure
           ? [
+              node.wallMs !== undefined && { value: ms(node.wallMs), title: 'request to failure, wall clock' },
+              {
+                value: (
+                  <span className="ex-failure" data-level={failOf(node.failure.reason).level}>
+                    failed · {failOf(node.failure.reason).label}
+                  </span>
+                ),
+                title: node.failure.message,
+              },
+            ]
+          : t
+          ? [
+              stopped.level !== 'ok' && {
+                value: (
+                  <span className="ex-stop" data-level={stopped.level}>
+                    {stopped.label}
+                  </span>
+                ),
+                title: 'why generation stopped',
+              },
               node.wallMs !== undefined && { value: ms(node.wallMs), title: 'request to response, wall clock' },
               { value: tokens(t.predicted_n), unit: 'tok', title: 'tokens generated, reasoning included' },
               { value: rate(t.predicted_n, t.predicted_ms), unit: 'tg t/s', title: 'generation speed' },
@@ -164,6 +186,37 @@ function AssistantBody({
       ) : null}
       {node.text !== '' ? <Prose text={node.text} kind="answer" caret={streamingInto === 'answer'} /> : null}
       {node.progress === 'cancelled' ? <p className="ex-cancelled">cancelled</p> : null}
+      {node.failure ? (
+        <p className="ex-failed" role="alert">
+          <span className="ex-failed__reason">{failOf(node.failure.reason).label}</span>
+          <span className="ex-failed__message">{node.failure.message}</span>
+        </p>
+      ) : null}
     </>
+  );
+}
+
+/**
+ * The end of a turn that did not end on its own -- the step limit, a timeout,
+ * a reason from a newer drive -- drawn across the trunk where the turn stopped.
+ */
+export function TurnEnd({ node }: { readonly node: Folded<SettledNode> }) {
+  const settled = settleOf(node.reason);
+  return (
+    <div
+      className="ex-turnend"
+      role="note"
+      data-level={settled.level}
+      data-known={settled.known ? '' : undefined}
+      data-id={node.id}
+      data-from={node.from.join(' ')}
+      data-needs={node.needs.join(' ')}
+    >
+      <span className="ex-turnend__rule" aria-hidden="true" />
+      <span>
+        turn {node.turn} ended · <strong>{settled.label}</strong>
+      </span>
+      <span className="ex-turnend__rule" aria-hidden="true" />
+    </div>
   );
 }

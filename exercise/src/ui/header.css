@@ -84,3 +84,26 @@
   text-decoration: underline dotted;
   text-underline-offset: 0.2em;
 }
+
+/* The connection to the drive, when it is not live: nothing reaches the log while it is down. */
+.ex-header__link {
+  padding: 0.15em 0.5em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--warn);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, currentColor 40%, transparent);
+  animation: ex-link 1.6s ease-in-out infinite;
+}
+
+.ex-header__link[data-link='lost'] {
+  color: var(--bad);
+  animation: none;
+}
+
+@keyframes ex-link {
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ex-header__link { animation: none; }
+}

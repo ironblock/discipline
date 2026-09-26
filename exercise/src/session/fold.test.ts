@@ -138,3 +138,35 @@ describe('fold over what it does not know', () => {
     expect(entry?.text).toBe('parked for later');
   });
 });
+
+describe('fold over what went wrong', () => {
+  /** The specimen at a cursor, edited: the same helper stories use, without a DOM. */
+  const variant = (beatNo: number, t: number | undefined, edit: (e: DriveEvent) => DriveEvent | readonly DriveEvent[]) => {
+    const log = snapshot(SPECIMEN, t === undefined ? { beat: beatNo } : { beat: beatNo, t }).flatMap((e) => edit(e));
+    return fold(log.map((e, seq) => ({ ...e, seq }) as DriveEvent));
+  };
+
+  it('fails a request the server gave up on: the answer so far stays, the reason and message are carried, the slot is free', () => {
+    const s = variant(2, 22_000, (e) => e);
+    const streaming = s.eras[0]?.nodes.at(-1);
+    expect(streaming?.kind).toBe('assistant');
+    if (streaming?.kind !== 'assistant') return;
+    const log = [...snapshot(SPECIMEN, { beat: 2, t: 22_000 })];
+    const failed = { kind: 'request.failed', t: 22_100, seq: log.length, request: streaming.id, reason: 'context_overflow', message: 'the prompt no longer fits in the context' } as DriveEvent;
+    const f = fold([...log, failed]);
+    const node = f.eras[0]?.nodes.find((n) => n.id === streaming.id);
+    expect(node?.kind === 'assistant' && node.progress).toBe('failed');
+    expect(node?.kind === 'assistant' && node.failure).toEqual({ reason: 'context_overflow', message: 'the prompt no longer fits in the context' });
+    expect(node?.kind === 'assistant' && node.text).toBe(streaming.text);
+    expect(f.occupancy[0]).toBeUndefined();
+  });
+
+  it('marks the end of a turn that did not end on its own: the step limit, a timeout', () => {
+    const s = variant(2, undefined, (e) => (e.kind === 'turn.settled' ? { ...e, reason: 'max_steps' } : e));
+    const last = s.eras[0]?.nodes.at(-1);
+    expect(last?.kind).toBe('settled');
+    expect(last?.kind === 'settled' && last.reason).toBe('max_steps');
+    const plain = variant(2, undefined, (e) => e);
+    expect(plain.eras[0]?.nodes.some((n) => n.kind === 'settled')).toBe(false);
+  });
+});

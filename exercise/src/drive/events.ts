@@ -112,6 +112,21 @@ export interface Response extends At {
 /** The tools a model may call. Only `bash` exists today; every other tool is drawn as `name(args)`. */
 export type Tool = Open<'bash'>;
 
+/**
+ * Why a request produced no response: the server refused or failed it, the
+ * prompt no longer fit, the drive gave up waiting. Open.
+ */
+export type FailReason = Open<'server' | 'context_overflow' | 'timeout' | 'disconnected'>;
+
+/** A request that will never have a response. Its slot is free again. */
+export interface RequestFailed extends At {
+  readonly kind: 'request.failed';
+  readonly request: string;
+  readonly reason: FailReason;
+  /** What the server or the drive said, verbatim. */
+  readonly message: string;
+}
+
 export interface ToolBegin extends At {
   readonly kind: 'tool.begin';
   readonly id: string;
@@ -132,7 +147,7 @@ export interface ToolEnd extends At {
   readonly truncated?: boolean;
 }
 
-export type SettleReason = Open<'final' | 'cancelled' | 'max_steps' | 'timeout'>;
+export type SettleReason = Open<'final' | 'cancelled' | 'max_steps' | 'timeout' | 'failed'>;
 
 export interface TurnSettled extends At {
   readonly kind: 'turn.settled';
@@ -162,7 +177,18 @@ export interface Fork extends At {
  * Which list is canonical is a ruling not yet made; both are known here.
  */
 export type ForkOutcome = Open<
-  'complete' | 'empty' | 'truncated' | 'timeout' | 'cancelled' | 'value' | 'decline' | 'mimicry' | 'unparseable' | 'thinking_exhausted' | 'rejected'
+  | 'complete'
+  | 'empty'
+  | 'truncated'
+  | 'timeout'
+  | 'cancelled'
+  | 'failed'
+  | 'value'
+  | 'decline'
+  | 'mimicry'
+  | 'unparseable'
+  | 'thinking_exhausted'
+  | 'rejected'
 >;
 
 export interface ForkSettled extends At {
@@ -226,6 +252,7 @@ export type DriveEvent =
   | Request
   | Delta
   | Response
+  | RequestFailed
   | ToolBegin
   | ToolEnd
   | TurnSettled
@@ -250,6 +277,7 @@ export const NEEDS_OF: { readonly [K in Kind]: readonly Need[] } = {
   request: ['R2', 'R4'],
   delta: ['R3'],
   response: ['R2', 'R3'],
+  'request.failed': ['R2'],
   'tool.begin': ['R2'],
   'tool.end': ['R2'],
   'turn.settled': ['R2'],

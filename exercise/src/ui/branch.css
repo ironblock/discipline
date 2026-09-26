@@ -50,6 +50,12 @@
 
 /* How a side call ended, coloured by the registry's level; a name the surface
    does not know is drawn neutrally, underlined dotted: carried, not understood. */
+.ex-branch__failed {
+  margin: 0;
+  color: var(--bad);
+  overflow-wrap: anywhere;
+}
+
 .ex-branch__outcome {
   color: var(--ink-muted);
   text-transform: uppercase;

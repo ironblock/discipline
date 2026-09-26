@@ -2,12 +2,14 @@ import { useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 
 import type { SessionState } from '../session/fold.ts';
-import type { Ack, Command } from '../drive/transport.ts';
+import type { Ack, Command, Link } from '../drive/transport.ts';
 import { refusalOf } from './sets.ts';
 import './composer.css';
 
 export interface ComposerProps {
   readonly state: SessionState;
+  /** The connection to the drive. While it is down the draft is kept and nothing can be sent. */
+  readonly link?: Link;
   readonly phase: string;
   /** Phases the person may declare a transition to. */
   readonly phases: readonly string[];
@@ -27,12 +29,12 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
   ended: 'the session has ended',
 };
 
-export function Composer({ state, phase, phases, dispatch, hint }: ComposerProps) {
+export function Composer({ state, link = 'live', phase, phases, dispatch, hint }: ComposerProps) {
   const [draft, setDraft] = useState('');
   const [refusal, setRefusal] = useState<string | undefined>();
   const next = phases[phases.indexOf(phase) + 1] ?? phases.find((p) => p !== phase) ?? phase;
   const [to, setTo] = useState(next);
-  const idle = state === 'awaiting';
+  const idle = state === 'awaiting' && link === 'live';
   const running = state === 'turn' || state === 'capture' || state === 'ratify';
 
   const answer = (ack: Ack) => {
@@ -59,7 +61,7 @@ export function Composer({ state, phase, phases, dispatch, hint }: ComposerProps
   };
 
   return (
-    <form className="ex-composer" onSubmit={send} data-state={state}>
+    <form className="ex-composer" onSubmit={send} data-state={state} data-link={link}>
       <textarea
         className="ex-composer__input"
         value={draft}
@@ -72,7 +74,11 @@ export function Composer({ state, phase, phases, dispatch, hint }: ComposerProps
       />
       <div className="ex-composer__bar">
         <span className="ex-composer__state" role="status">
-          {refusal ?? STATE_LINE[state]}
+          {link === 'reconnecting'
+            ? 'reconnecting to the drive · your draft is kept'
+            : link === 'lost'
+              ? 'the connection to the drive is lost · your draft is kept'
+              : (refusal ?? STATE_LINE[state])}
         </span>
         <span className="ex-composer__spacer" />
         <span className="ex-composer__phase">

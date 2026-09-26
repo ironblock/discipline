@@ -4,6 +4,7 @@ import { CannedTransport } from './drive/canned.ts';
 import { RECORDINGS, ReplayTransport } from './drive/recorded.ts';
 import type { RecordingName } from './drive/recorded.ts';
 import { SPECIMEN } from './drive/specimen.ts';
+import type { DriveTransport, Link } from './drive/transport.ts';
 import { useSession } from './session/useSession.ts';
 import { SessionView } from './ui/SessionView.tsx';
 import type { Surface } from './ui/surface.tsx';
@@ -30,11 +31,14 @@ export function App({ speed = 1, recording }: { readonly speed?: number; readonl
   );
   useEffect(() => () => transport.close(), [transport]);
   const session = useSession(transport);
+  const [link, setLink] = useState<Link>('live');
+  useEffect(() => (transport as DriveTransport).watchLink?.(setLink), [transport]);
   const [surface, setSurface] = useState<Surface>({ curtain: true, gaps: false });
   const expects = transport instanceof CannedTransport ? transport.expects : undefined;
   return (
     <SessionView
       session={session}
+      link={link}
       surface={surface}
       onSurface={setSurface}
       follow

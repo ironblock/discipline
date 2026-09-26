@@ -42,8 +42,17 @@ export type Refusal = Open<
 
 export type Ack = { readonly ok: true } | { readonly ok: false; readonly refused: Refusal };
 
+/**
+ * The connection to the drive, which the log cannot carry: while it is down,
+ * nothing reaches the log at all. `live` is the only state a transport that
+ * never drops (canned, a replay) is ever in.
+ */
+export type Link = 'live' | 'reconnecting' | 'lost';
+
 export interface DriveTransport {
   /** Every event so far, in order, then each new one. Returns an unsubscribe. */
   subscribe(listener: (event: DriveEvent) => void): () => void;
   dispatch(command: Command): Promise<Ack>;
+  /** The connection's state now, then each change. Absent: always `live`. */
+  watchLink?(listener: (link: Link) => void): () => void;
 }

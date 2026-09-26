@@ -10,7 +10,7 @@
  * node waits on, which is what the gaps overlay outlines.
  */
 
-import type { DriveEvent, EventOf, ForkLane, ForkOutcome, Lane, Need, PatchOp, SeamReason, Stop, Timings, Tool } from '../drive/events.ts';
+import type { DriveEvent, EventOf, FailReason, ForkLane, ForkOutcome, Lane, Need, PatchOp, SeamReason, SettleReason, Stop, Timings, Tool } from '../drive/events.ts';
 import { NEEDS_OF } from '../drive/events.ts';
 
 declare const folded: unique symbol;
@@ -43,7 +43,7 @@ export interface UserNode extends Provenance {
   readonly prefill?: { readonly fresh: number; readonly cached: number };
 }
 
-export type Progress = 'prefill' | 'streaming' | 'done' | 'cancelled';
+export type Progress = 'prefill' | 'streaming' | 'done' | 'cancelled' | 'failed';
 
 export interface Generation {
   readonly progress: Progress;
@@ -57,6 +57,8 @@ export interface Generation {
   readonly timings?: Timings;
   /** Request to response, wall clock. */
   readonly wallMs?: number;
+  /** Why no response will come: the request failed. */
+  readonly failure?: { readonly reason: FailReason; readonly message: string };
 }
 
 export interface AssistantNode extends Provenance, Generation {
@@ -81,7 +83,15 @@ export interface ToolNode extends Provenance {
   readonly ms?: number;
 }
 
-export type TrunkNode = Folded<UserNode> | Folded<AssistantNode> | Folded<ToolNode>;
+/** The end of a turn that did not end on its own: the step limit, a timeout, a reason from a newer drive. */
+export interface SettledNode extends Provenance {
+  readonly kind: 'settled';
+  readonly id: string;
+  readonly turn: number;
+  readonly reason: SettleReason;
+}
+
+export type TrunkNode = Folded<UserNode> | Folded<AssistantNode> | Folded<ToolNode> | Folded<SettledNode>;
 
 export interface PatchNode extends Provenance {
   readonly id: string;
@@ -196,21 +206,31 @@ interface GenerationBuilder {
   request: EventOf<'request'>;
   deltas: EventOf<'delta'>[];
   response?: EventOf<'response'>;
+  failed?: EventOf<'request.failed'>;
 }
 
 function generation(g: GenerationBuilder): Generation {
-  const { request, response } = g;
+  const { request, response, failed } = g;
   const reasoning = response ? (response.reasoning ?? '') : g.deltas.map((d) => d.reasoning ?? '').join('');
   const text = response ? response.text : g.deltas.map((d) => d.text ?? '').join('');
-  const progress: Progress = response ? (response.stop === 'cancelled' ? 'cancelled' : 'done') : g.deltas.length > 0 ? 'streaming' : 'prefill';
+  const progress: Progress = response
+    ? response.stop === 'cancelled'
+      ? 'cancelled'
+      : 'done'
+    : failed
+      ? 'failed'
+      : g.deltas.length > 0
+        ? 'streaming'
+        : 'prefill';
   return {
     progress,
     reasoning,
     text,
     slot: request.slot,
     startedAt: request.t,
-    lastActivityAt: response?.t ?? g.deltas.at(-1)?.t ?? request.t,
+    lastActivityAt: response?.t ?? failed?.t ?? g.deltas.at(-1)?.t ?? request.t,
     ...(response ? { stop: response.stop, timings: response.timings, wallMs: response.t - request.t } : {}),
+    ...(failed && !response ? { failure: { reason: failed.reason, message: failed.message }, wallMs: failed.t - request.t } : {}),
   };
 }
 
@@ -244,7 +264,11 @@ export function fold(events: readonly DriveEvent[]): Session {
   const forks = new Map<string, { fork: EventOf<'fork'>; request?: string; settled?: EventOf<'fork.settled'>; patches: EventOf<'patch'>[] }>();
   const entries = new Map<string, Mutable<Omit<MemoryEntry, 'fresh' | 'landedAt'>> & { seq: number }>();
 
-  type Slot = { kind: 'user'; turn: number } | { kind: 'assistant'; request: string } | { kind: 'tool'; id: string };
+  type Slot =
+    | { kind: 'user'; turn: number }
+    | { kind: 'assistant'; request: string }
+    | { kind: 'tool'; id: string }
+    | { kind: 'settled'; event: EventOf<'turn.settled'> };
   const eras: { seam?: EventOf<'seam'>; system: SystemNode; slots: Slot[] }[] = [
     {
       system: {
@@ -305,7 +329,14 @@ export function fold(events: readonly DriveEvent[]): Session {
       }
       case 'turn.settled':
         if (openTurn === e.turn) openTurn = undefined;
+        // A turn that ended on its own, or was cancelled (the message says so), needs no mark.
+        if (e.reason !== 'final' && e.reason !== 'cancelled') era().slots.push({ kind: 'settled', event: e });
         break;
+      case 'request.failed': {
+        const g = generations.get(e.request);
+        if (g) g.failed = e;
+        break;
+      }
       case 'fork':
         forks.set(e.id, { fork: e, patches: [] });
         break;
@@ -358,8 +389,11 @@ export function fold(events: readonly DriveEvent[]): Session {
         ended = true;
         break;
       default: {
-        // A kind from a newer drive: the log may carry it before the surface draws it.
-        const kind = (e as { readonly kind: string }).kind;
+        // Every kind the vocabulary names is handled above -- `never` keeps the
+        // compiler checking that. What reaches here at run time is a kind from a
+        // newer drive: the log carries it before the surface draws it.
+        const newer: never = e;
+        const kind = (newer as { readonly kind: string }).kind;
         unknown.set(kind, (unknown.get(kind) ?? 0) + 1);
       }
     }
@@ -393,7 +427,7 @@ export function fold(events: readonly DriveEvent[]): Session {
             id: g.request.id,
             turn: g.request.turn,
             ...generation(g),
-            ...provenance(g.request, ...g.deltas.slice(0, 1), g.response),
+            ...provenance(g.request, ...g.deltas.slice(0, 1), g.response, g.failed),
           };
           return brand(node);
         }
@@ -411,6 +445,14 @@ export function fold(events: readonly DriveEvent[]): Session {
             ...provenance(begin, end),
           });
         }
+        case 'settled':
+          return brand<SettledNode>({
+            kind: 'settled',
+            id: `settled/${slot.event.turn}`,
+            turn: slot.event.turn,
+            reason: slot.event.reason,
+            ...provenance(slot.event),
+          });
       }
     });
     const seamEvent = raw.seam;
@@ -479,7 +521,7 @@ export function fold(events: readonly DriveEvent[]): Session {
   // Slot occupancy: whatever request is generating, per slot.
   const occupancy: (Holder | undefined)[] = Array.from({ length: start.slots }, () => undefined);
   for (const g of generations.values()) {
-    if (!g.response) occupancy[g.request.slot] = { id: g.request.fork ?? g.request.id, lane: g.request.lane };
+    if (!g.response && !g.failed) occupancy[g.request.slot] = { id: g.request.fork ?? g.request.id, lane: g.request.lane };
   }
 
   const state: SessionState = ended

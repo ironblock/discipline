@@ -111,3 +111,6 @@
 .ex-composer[data-state='turn'] { --light-colour: var(--ink-assistant); --light: var(--light-panel-live); --glow: var(--glow-panel-live); }
 .ex-composer[data-state='capture'] { --light-colour: var(--lane-ink, var(--ink-interview)); --light: var(--light-panel-live); --glow: var(--glow-panel-live); }
 .ex-composer[data-state='ratify'] { --light-colour: var(--ink-ratify); --light: var(--light-panel-live); --glow: var(--glow-panel-live); }
+
+.ex-composer[data-link='reconnecting'] .ex-composer__state { color: var(--warn); }
+.ex-composer[data-link='lost'] .ex-composer__state { color: var(--bad); }

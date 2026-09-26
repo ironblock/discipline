@@ -3,7 +3,7 @@ import { useState } from 'react';
 import type { BranchNode, Folded, PatchNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { ms, rate, tokens } from './format.ts';
-import { opOf, outcomeOf } from './sets.ts';
+import { failOf, opOf, outcomeOf } from './sets.ts';
 import './branch.css';
 
 /**
@@ -56,6 +56,10 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
             <div className="ex-branch__answer">
               <TaggedAnswer text={node.text} />
             </div>
+          ) : node.failure ? (
+            <p className="ex-branch__failed">
+              {failOf(node.failure.reason).label}: {node.failure.message}
+            </p>
           ) : (
             <p className="ex-branch__waiting">{node.progress === 'prefill' ? 'prefill…' : 'generating…'}</p>
           )}

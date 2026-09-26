@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
+import type { Link } from '../drive/transport.ts';
 import type { BranchNode, Folded, Session, TrunkNode } from '../session/fold.ts';
 import { Branch } from './Branch.tsx';
 import { Composer } from './Composer.tsx';
 import type { ComposerProps } from './Composer.tsx';
 import { Memory, isUnseen } from './Memory.tsx';
-import { AssistantMessage, SystemMessage, UserMessage } from './Message.tsx';
+import { AssistantMessage, SystemMessage, TurnEnd, UserMessage } from './Message.tsx';
 import { Seam } from './Seam.tsx';
 import { SessionHeader } from './SessionHeader.tsx';
 import { laneStyle } from './sets.ts';
@@ -16,6 +17,8 @@ import './session.css';
 
 export interface SessionViewProps {
   readonly session: Session;
+  /** The connection to the drive. Absent: live. */
+  readonly link?: Link;
   readonly surface: Surface;
   readonly onSurface?: (next: Surface) => void;
   readonly composer: Omit<ComposerProps, 'state' | 'phase'>;
@@ -40,7 +43,7 @@ interface Placement {
  * an earlier branch in the same slot is still in the way it stacks below
  * and its connector bends to reach it. The trunk never moves for a branch.
  */
-export function SessionView({ session, surface, onSurface, composer, follow = false }: SessionViewProps) {
+export function SessionView({ session, link = 'live', surface, onSurface, composer, follow = false }: SessionViewProps) {
   const lanes = surface.curtain ? laneSlots(session) : [];
   const stage = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
@@ -147,11 +150,12 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
         className={`ex-session${surface.gaps ? ' ex-gaps' : ''}${surface.curtain ? ' ex-session--curtain' : ''}`}
         style={{ ['--lanes' as string]: lanes.length, ...laneStyle(busyLane(session)) }}
         data-state={session.state}
+        data-link={link}
         data-lanes-busy={session.occupancy.some((holder, slot) => holder !== undefined && slot !== session.trunkSlot) ? '' : undefined}
         data-fresh={session.memory.some((m) => isUnseen(m, seenThrough)) ? '' : undefined}
       >
         <div className="ex-session__header">
-          <SessionHeader session={session} surface={surface} {...(onSurface ? { onSurface } : {})} />
+          <SessionHeader session={session} link={link} surface={surface} {...(onSurface ? { onSurface } : {})} />
         </div>
         <div className="ex-session__main">
           <div className="ex-session__columns">
@@ -229,7 +233,7 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
             </div>
             {/* The composer sits in the trunk's own grid column, so it lines up with the trunk at any width. */}
             <div className="ex-session__composer">
-              <Composer key={session.phase} state={session.state} phase={session.phase} {...composer} />
+              <Composer key={session.phase} state={session.state} link={link} phase={session.phase} {...composer} />
             </div>
           </div>
           {surface.curtain ? (
@@ -252,6 +256,13 @@ function TrunkBlock({ node }: { readonly node: TrunkNode }) {
       return <AssistantMessage node={node} />;
     case 'tool':
       return <ToolCall node={node} />;
+    case 'settled':
+      return <TurnEnd node={node} />;
+    default: {
+      // Node kinds are the surface's own, a closed set: a new one must be drawn here.
+      const unhandled: never = node;
+      return unhandled;
+    }
   }
 }
 

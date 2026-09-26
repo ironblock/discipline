@@ -1,3 +1,4 @@
+import type { Link } from '../drive/transport.ts';
 import type { Session } from '../session/fold.ts';
 import { laneStyle } from './sets.ts';
 import type { Surface } from './surface.tsx';
@@ -5,12 +6,13 @@ import './header.css';
 
 export interface SessionHeaderProps {
   readonly session: Session;
+  readonly link?: Link;
   readonly surface: Surface;
   readonly onSurface?: (next: Surface) => void;
 }
 
 /** One quiet line: what is running this session, where it is, and the switches for seeing more. */
-export function SessionHeader({ session, surface, onSurface }: SessionHeaderProps) {
+export function SessionHeader({ session, link = 'live', surface, onSurface }: SessionHeaderProps) {
   return (
     <header className="ex-header">
       <span className="ex-header__item">
@@ -43,6 +45,11 @@ export function SessionHeader({ session, surface, onSurface }: SessionHeaderProp
           title={`events of a kind this surface does not draw yet, kept in the log: ${[...session.unknown].map(([kind, n]) => `${kind} ×${n}`).join(', ')}`}
         >
           {[...session.unknown.values()].reduce((a, b) => a + b, 0)} unknown
+        </span>
+      ) : null}
+      {link !== 'live' ? (
+        <span className="ex-header__link" data-link={link} role="status">
+          {link === 'reconnecting' ? 'reconnecting…' : 'connection lost'}
         </span>
       ) : null}
       <span className="ex-header__state" data-state={session.state}>
