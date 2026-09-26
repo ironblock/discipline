@@ -32,3 +32,14 @@ export function elapsed(now: number, since: number): { readonly ms: number; read
   const ms = Math.max(0, now - since);
   return { ms, level: ms >= 45_000 ? 'stalled' : ms >= 12_000 ? 'slow' : 'ok' };
 }
+
+/**
+ * The node the address points at (`#<id>`), if any. Kept as state rather
+ * than left to `:target`, which the browser resolves once, when the address
+ * changes -- a node drawn after that never matches it.
+ */
+export const TargetContext = createContext<string | undefined>(undefined);
+
+export function useTarget(): string | undefined {
+  return useContext(TargetContext);
+}

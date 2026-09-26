@@ -210,6 +210,7 @@ export function TurnEnd({ node }: { readonly node: Folded<SettledNode> }) {
       data-level={settled.level}
       data-alarm={alarmOf(settled.level)}
       data-known={settled.known ? '' : undefined}
+      id={node.id}
       data-id={node.id}
       data-from={node.from.join(' ')}
       data-needs={node.needs.join(' ')}

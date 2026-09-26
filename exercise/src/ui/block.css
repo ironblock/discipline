@@ -246,3 +246,10 @@
 .ex-more:hover {
   color: var(--ink);
 }
+
+/* The node the address points at (`#<id>`): ringed in its own ink. */
+.ex-block[data-target],
+.ex-memory__entry[data-target] {
+  outline: 1.5px solid color-mix(in oklab, var(--tone-ink, var(--ink)) 80%, transparent);
+  outline-offset: 3px;
+}

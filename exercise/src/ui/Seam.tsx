@@ -10,7 +10,7 @@ import './seam.css';
  */
 export function Seam({ node }: { readonly node: Folded<SeamNode> }) {
   return (
-    <div className="ex-seam" role="separator" data-from={node.from.join(' ')} data-needs={node.needs.join(' ')} data-id={node.id}>
+    <div className="ex-seam" role="separator" data-from={node.from.join(' ')} data-needs={node.needs.join(' ')} id={node.id} data-id={node.id}>
       <span className="ex-seam__rule" aria-hidden="true" />
       <div className="ex-seam__label">
         <span className="ex-seam__kind">refill</span>

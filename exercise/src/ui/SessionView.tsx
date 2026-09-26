@@ -14,7 +14,7 @@ import { AssistantMessage, SystemMessage, TurnEnd, UserMessage } from './Message
 import { Seam } from './Seam.tsx';
 import { SessionHeader } from './SessionHeader.tsx';
 import { laneStyle } from './sets.ts';
-import { ClockContext, SurfaceContext } from './surface.tsx';
+import { ClockContext, SurfaceContext, TargetContext } from './surface.tsx';
 import type { Surface } from './surface.tsx';
 import { ToolCall } from './ToolCall.tsx';
 import './session.css';
@@ -185,6 +185,29 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
     cells.current.get(revealed)?.scrollIntoView({ block: 'center' });
   }, [revealed, condensed, placed]);
 
+  // A deep link, `#<id>`: go to that node once it is drawn and placed (the
+  // browser's own jump can come before either), and stop following. `:target`
+  // is not enough to mark it (see TargetContext), so the target is state.
+  const [target, setTarget] = useState<string>();
+  const wentTo = useRef<string>(undefined);
+  useEffect(() => {
+    const read = () => {
+      wentTo.current = undefined;
+      setTarget(decodeURIComponent(window.location.hash.slice(1)) || undefined);
+    };
+    read();
+    window.addEventListener('hashchange', read);
+    return () => window.removeEventListener('hashchange', read);
+  }, []);
+  useLayoutEffect(() => {
+    if (target === undefined || wentTo.current === target) return;
+    const el = document.getElementById(target);
+    if (!el || el.closest('.ex-branchcell')?.getAttribute('style')?.includes('hidden')) return;
+    wentTo.current = target;
+    locked.current = false;
+    el.scrollIntoView({ block: 'center' });
+  }, [target, placed]);
+
   // Following: the bottom of the page is now -- the newest trunk node, or the
   // side calls queued past it -- so the view is locked to it while the page
   // grows, until the person scrolls away from it, and again once they return.
@@ -237,6 +260,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
   return (
     <SurfaceContext.Provider value={surface}>
       <ClockContext.Provider value={now}>
+      <TargetContext.Provider value={target}>
       <div
         ref={root}
         className={`ex-session ex-session--minimap${surface.gaps ? ' ex-gaps' : ''}${surface.curtain ? ' ex-session--curtain' : ''}${condensed ? ' ex-session--condensed' : ''}`}
@@ -363,6 +387,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
           </aside>
         </div>
       </div>
+      </TargetContext.Provider>
       </ClockContext.Provider>
     </SurfaceContext.Provider>
   );

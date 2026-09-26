@@ -250,3 +250,42 @@ export const CondensedOpens: Story = {
     await expect(q(canvasElement, '[data-branch="i/1"] .ex-branch')).not.toBeNull();
   },
 };
+
+/**
+ * Every message, tool call and side call is addressable by its own id, and
+ * every working-memory entry as `memory/<id>`: `#<id>` in the address goes
+ * there and selects it -- including a link opened before the session has
+ * drawn, where the browser's own jump finds nothing to go to.
+ */
+function OpenedByLink({ cursor }: { readonly cursor: MomentArgs['cursor'] }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <>
+      <button type="button" data-open="" style={{ position: 'fixed', top: 0, left: 0, opacity: 0, zIndex: 9 }} onClick={() => setShown(true)}>
+        open
+      </button>
+      {shown ? <SessionView session={sessionAt(cursor)} surface={{ curtain: true, gaps: false }} composer={{ phases: PHASES }} /> : null}
+    </>
+  );
+}
+
+export const DeepLink: Story = {
+  name: 'deep link · #<id> goes there',
+  args: { cursor: MOMENTS.done },
+  render: ({ cursor }) => <OpenedByLink cursor={cursor} />,
+  play: async ({ canvasElement }) => {
+    window.scrollTo(0, 0);
+    window.location.hash = '#i/1';
+    (canvasElement.querySelector('[data-open]') as HTMLElement).click();
+    await waitFor(async () => expect(canvasElement.querySelector('[id="i/1"]')?.hasAttribute('data-target')).toBe(true));
+    await waitFor(async () => {
+      const box = canvasElement.querySelector('[id="i/1"]')?.getBoundingClientRect();
+      await expect((box?.top ?? -1) >= 0 && (box?.bottom ?? Infinity) <= window.innerHeight).toBe(true);
+    });
+    const ids = [...canvasElement.querySelectorAll('[data-id]')].map((el) => [el.id, el.getAttribute('data-id')]);
+    await expect(ids.filter(([id, data]) => id !== data)).toEqual([]);
+    await expect(new Set(ids.map(([id]) => id)).size).toBe(ids.length);
+    await expect(canvasElement.querySelector('[id="memory/d1"]')).not.toBeNull();
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+  },
+};

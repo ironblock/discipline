@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 import type { ForkLane } from '../drive/events.ts';
 import { laneStyle } from './sets.ts';
-import { useSurface } from './surface.tsx';
+import { useSurface, useTarget } from './surface.tsx';
 import './block.css';
 
 /** A block's fill: a role on the trunk (closed), or a lane beside it -- which lane is `lane`, an open set. */
@@ -30,6 +30,7 @@ export interface BlockProps {
   readonly live?: boolean;
   /** Something here went wrong, and how badly: what the minimap marks. */
   readonly alarm?: 'warn' | 'bad' | undefined;
+  /** The node's id: its DOM id too, so `#<id>` links to it. */
   readonly id?: string;
   /** Per-block actions -- copy today; retry, annotate, link later -- shown in the corner on hover or focus. */
   readonly actions?: ReactNode;
@@ -43,6 +44,7 @@ export interface BlockProps {
  */
 export function Block({ tone, lane, label, stats = [], provenance, thin = false, live = false, alarm, id, actions, children }: BlockProps) {
   const { curtain } = useSurface();
+  const target = useTarget();
   const shown = stats.filter((s): s is Stat => Boolean(s));
   return (
     <div
@@ -51,7 +53,9 @@ export function Block({ tone, lane, label, stats = [], provenance, thin = false,
       data-lane={lane}
       data-alarm={alarm}
       style={laneStyle(lane)}
+      id={id}
       data-id={id}
+      data-target={id !== undefined && id === target ? '' : undefined}
       data-from={provenance.from.join(' ')}
       data-needs={provenance.needs.join(' ')}
     >
