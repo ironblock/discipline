@@ -423,7 +423,7 @@ const unknownBranch = () => {
   const session = variantAt(MOMENTS.firstSettled, (e) => {
     if (e['kind'] === 'fork' && e['id'] === 'i/1') return { ...e, lane: 'tangent' };
     if (e['kind'] === 'fork.settled' && e['id'] === 'i/1') return { ...e, outcome: 'deferred' };
-    if (e['kind'] === 'patch' && e['from'] === 'i/1') return { ...e, op: 'amend', provenance: 'observed-momentum' };
+    if (e['kind'] === 'patch' && e['from'] === 'i/1') return { ...e, op: 'amend', authority: 'observed-momentum' };
     return e;
   });
   const branch = [...session.branches.values()].flat().find((b) => b.id === 'i/1');

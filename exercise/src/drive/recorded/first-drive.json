@@ -7,7 +7,8 @@
 "A trunk reply that called a tool ended in the bash block that was the call; the block is removed from the text, since the call is its own event.",
 "Deltas were never recorded; a replay synthesizes them. The system prompt, renders and pre-warms carry no token counts: the record did not measure them.",
 "Phases and seam reasons were not recorded. The audit forks at a phase boundary are drawn in the ratify lane, which is what the charter calls them.",
-"Fork outcomes are classified by the migration: empty if the answer is empty, mimicry if it answers with a bash block (it answered as the agent), otherwise complete ({'mimicry': 7, 'empty': 0, 'complete': 87}).",
+"Fork outcomes are classified by the migration, in the ruled enum: mimicry if it answers with a bash block (it answered as the agent), otherwise value; an empty answer would be refused ({'mimicry': 7, 'value': 87}).",
+"How each entry was known is carried as `authority`, the predecessor's `provenance` mapped to the ruled names ({'extracted -> extracted': 5, 'stated -> stated': 249, 'observed-momentum -> observed': 1}).",
 "Tool output is cut at 120 lines or 12,000 characters, a fork question at 1,500, a render at 24,000; each cut says so in the text.",
 "Scrubbed: the account name and its home directory (now user and /work), run directories (/tmp/session), internal ticket ids."
 ],
@@ -1380,7 +1381,7 @@
 "kind": "patch",
 "t": 106015,
 "from": "e0097",
-"provenance": "extracted",
+"authority": "extracted",
 "id": "e0099/1",
 "op": "add",
 "entry": {
@@ -1392,7 +1393,7 @@
 "kind": "patch",
 "t": 106015,
 "from": "e0097",
-"provenance": "extracted",
+"authority": "extracted",
 "id": "e0099/2",
 "op": "add",
 "entry": {
@@ -1440,13 +1441,13 @@
 "kind": "fork.settled",
 "t": 111758,
 "id": "e0100",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 111758,
 "from": "e0100",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0102/3",
 "op": "add",
 "entry": {
@@ -1458,7 +1459,7 @@
 "kind": "patch",
 "t": 111758,
 "from": "e0100",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0103/4",
 "op": "add",
 "entry": {
@@ -1470,7 +1471,7 @@
 "kind": "patch",
 "t": 111758,
 "from": "e0100",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0104/5",
 "op": "add",
 "entry": {
@@ -1482,7 +1483,7 @@
 "kind": "patch",
 "t": 111758,
 "from": "e0100",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0105/6",
 "op": "add",
 "entry": {
@@ -1494,7 +1495,7 @@
 "kind": "patch",
 "t": 111758,
 "from": "e0100",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0106/7",
 "op": "add",
 "entry": {
@@ -1506,7 +1507,7 @@
 "kind": "patch",
 "t": 111758,
 "from": "e0100",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0107/8",
 "op": "add",
 "entry": {
@@ -1518,7 +1519,7 @@
 "kind": "patch",
 "t": 111758,
 "from": "e0100",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0108/9",
 "op": "add",
 "entry": {
@@ -1608,7 +1609,7 @@
 "kind": "fork.settled",
 "t": 132412,
 "id": "e0111",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -1650,13 +1651,13 @@
 "kind": "fork.settled",
 "t": 138005,
 "id": "e0113",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 138006,
 "from": "e0113",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0115/10",
 "op": "add",
 "entry": {
@@ -1668,7 +1669,7 @@
 "kind": "patch",
 "t": 138006,
 "from": "e0113",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0116/11",
 "op": "add",
 "entry": {
@@ -1680,7 +1681,7 @@
 "kind": "patch",
 "t": 138006,
 "from": "e0113",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0117/12",
 "op": "add",
 "entry": {
@@ -1692,7 +1693,7 @@
 "kind": "patch",
 "t": 138006,
 "from": "e0113",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0118/13",
 "op": "add",
 "entry": {
@@ -1704,7 +1705,7 @@
 "kind": "patch",
 "t": 138006,
 "from": "e0113",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0119/14",
 "op": "add",
 "entry": {
@@ -1794,13 +1795,13 @@
 "kind": "fork.settled",
 "t": 147620,
 "id": "e0122",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 147620,
 "from": "e0122",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0124/15",
 "op": "add",
 "entry": {
@@ -1812,7 +1813,7 @@
 "kind": "patch",
 "t": 147620,
 "from": "e0122",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0125/16",
 "op": "add",
 "entry": {
@@ -1824,7 +1825,7 @@
 "kind": "patch",
 "t": 147620,
 "from": "e0122",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0126/17",
 "op": "add",
 "entry": {
@@ -1836,7 +1837,7 @@
 "kind": "patch",
 "t": 147620,
 "from": "e0122",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0127/18",
 "op": "add",
 "entry": {
@@ -1848,7 +1849,7 @@
 "kind": "patch",
 "t": 147620,
 "from": "e0122",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0128/19",
 "op": "add",
 "entry": {
@@ -1860,7 +1861,7 @@
 "kind": "patch",
 "t": 147620,
 "from": "e0122",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0129/20",
 "op": "add",
 "entry": {
@@ -1872,7 +1873,7 @@
 "kind": "patch",
 "t": 147620,
 "from": "e0122",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0130/21",
 "op": "add",
 "entry": {
@@ -1920,13 +1921,13 @@
 "kind": "fork.settled",
 "t": 152246,
 "id": "e0131",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 152247,
 "from": "e0131",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0133/22",
 "op": "add",
 "entry": {
@@ -1974,13 +1975,13 @@
 "kind": "fork.settled",
 "t": 152633,
 "id": "e0134",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 152634,
 "from": "e0131",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0136/23",
 "op": "add",
 "entry": {
@@ -1992,7 +1993,7 @@
 "kind": "patch",
 "t": 152634,
 "from": "e0131",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0137/24",
 "op": "add",
 "entry": {
@@ -2004,7 +2005,7 @@
 "kind": "patch",
 "t": 152634,
 "from": "e0131",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0138/25",
 "op": "add",
 "entry": {
@@ -2016,7 +2017,7 @@
 "kind": "patch",
 "t": 152634,
 "from": "e0131",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0139/26",
 "op": "add",
 "entry": {
@@ -2028,7 +2029,7 @@
 "kind": "patch",
 "t": 152634,
 "from": "e0131",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0140/27",
 "op": "add",
 "entry": {
@@ -2040,7 +2041,7 @@
 "kind": "patch",
 "t": 152634,
 "from": "e0131",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0141/28",
 "op": "add",
 "entry": {
@@ -2088,13 +2089,13 @@
 "kind": "fork.settled",
 "t": 153167,
 "id": "e0142",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 153167,
 "from": "e0142",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0144/-28",
 "op": "retire",
 "entry": {
@@ -2106,7 +2107,7 @@
 "kind": "patch",
 "t": 153167,
 "from": "e0131",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0145/29",
 "op": "add",
 "entry": {
@@ -2118,7 +2119,7 @@
 "kind": "patch",
 "t": 153167,
 "from": "e0131",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0146/30",
 "op": "add",
 "entry": {
@@ -2130,7 +2131,7 @@
 "kind": "patch",
 "t": 153167,
 "from": "e0131",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0147/31",
 "op": "add",
 "entry": {
@@ -2142,7 +2143,7 @@
 "kind": "patch",
 "t": 153167,
 "from": "e0131",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0148/32",
 "op": "add",
 "entry": {
@@ -2154,7 +2155,7 @@
 "kind": "patch",
 "t": 153167,
 "from": "e0131",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0149/33",
 "op": "add",
 "entry": {
@@ -2202,7 +2203,7 @@
 "kind": "fork.settled",
 "t": 168672,
 "id": "e0150",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -2244,13 +2245,13 @@
 "kind": "fork.settled",
 "t": 196940,
 "id": "e0152",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 196942,
 "from": "e0152",
-"provenance": "extracted",
+"authority": "extracted",
 "id": "e0154/34",
 "op": "add",
 "entry": {
@@ -2298,13 +2299,13 @@
 "kind": "fork.settled",
 "t": 202518,
 "id": "e0155",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 202518,
 "from": "e0155",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0157/35",
 "op": "add",
 "entry": {
@@ -2316,7 +2317,7 @@
 "kind": "patch",
 "t": 202518,
 "from": "e0155",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0158/36",
 "op": "add",
 "entry": {
@@ -2328,7 +2329,7 @@
 "kind": "patch",
 "t": 202518,
 "from": "e0155",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0159/37",
 "op": "add",
 "entry": {
@@ -2340,7 +2341,7 @@
 "kind": "patch",
 "t": 202518,
 "from": "e0155",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0160/38",
 "op": "add",
 "entry": {
@@ -2352,7 +2353,7 @@
 "kind": "patch",
 "t": 202518,
 "from": "e0155",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0161/39",
 "op": "add",
 "entry": {
@@ -2400,7 +2401,7 @@
 "kind": "fork.settled",
 "t": 219159,
 "id": "e0162",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -2442,13 +2443,13 @@
 "kind": "fork.settled",
 "t": 245201,
 "id": "e0164",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 245203,
 "from": "e0164",
-"provenance": "extracted",
+"authority": "extracted",
 "id": "e0166/40",
 "op": "add",
 "entry": {
@@ -2460,7 +2461,7 @@
 "kind": "patch",
 "t": 245203,
 "from": "e0164",
-"provenance": "extracted",
+"authority": "extracted",
 "id": "e0166/41",
 "op": "add",
 "entry": {
@@ -2472,7 +2473,7 @@
 "kind": "patch",
 "t": 245203,
 "from": "e0164",
-"provenance": "extracted",
+"authority": "extracted",
 "id": "e0166/42",
 "op": "add",
 "entry": {
@@ -2520,13 +2521,13 @@
 "kind": "fork.settled",
 "t": 250575,
 "id": "e0167",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 250575,
 "from": "e0167",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0169/43",
 "op": "add",
 "entry": {
@@ -2538,7 +2539,7 @@
 "kind": "patch",
 "t": 250575,
 "from": "e0167",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0170/44",
 "op": "add",
 "entry": {
@@ -2550,7 +2551,7 @@
 "kind": "patch",
 "t": 250575,
 "from": "e0167",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0171/45",
 "op": "add",
 "entry": {
@@ -2562,7 +2563,7 @@
 "kind": "patch",
 "t": 250575,
 "from": "e0167",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0172/46",
 "op": "add",
 "entry": {
@@ -2574,7 +2575,7 @@
 "kind": "patch",
 "t": 250575,
 "from": "e0167",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0173/47",
 "op": "add",
 "entry": {
@@ -2586,7 +2587,7 @@
 "kind": "patch",
 "t": 250575,
 "from": "e0167",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0174/48",
 "op": "add",
 "entry": {
@@ -2634,7 +2635,7 @@
 "kind": "fork.settled",
 "t": 286254,
 "id": "e0175",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -2676,13 +2677,13 @@
 "kind": "fork.settled",
 "t": 288988,
 "id": "e0177",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 288988,
 "from": "e0177",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0179/49",
 "op": "add",
 "entry": {
@@ -2694,7 +2695,7 @@
 "kind": "patch",
 "t": 288988,
 "from": "e0177",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0180/50",
 "op": "add",
 "entry": {
@@ -2742,13 +2743,13 @@
 "kind": "fork.settled",
 "t": 314411,
 "id": "e0181",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 314413,
 "from": "e0181",
-"provenance": "extracted",
+"authority": "extracted",
 "id": "e0183/51",
 "op": "add",
 "entry": {
@@ -2796,13 +2797,13 @@
 "kind": "fork.settled",
 "t": 319703,
 "id": "e0184",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 319704,
 "from": "e0184",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0186/52",
 "op": "add",
 "entry": {
@@ -2814,7 +2815,7 @@
 "kind": "patch",
 "t": 319704,
 "from": "e0184",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0187/53",
 "op": "add",
 "entry": {
@@ -2826,7 +2827,7 @@
 "kind": "patch",
 "t": 319704,
 "from": "e0184",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0188/54",
 "op": "add",
 "entry": {
@@ -2838,7 +2839,7 @@
 "kind": "patch",
 "t": 319704,
 "from": "e0184",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0189/55",
 "op": "add",
 "entry": {
@@ -2886,7 +2887,7 @@
 "kind": "fork.settled",
 "t": 391401,
 "id": "e0190",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -2928,13 +2929,13 @@
 "kind": "fork.settled",
 "t": 399585,
 "id": "e0192",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 399586,
 "from": "e0192",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0194/56",
 "op": "add",
 "entry": {
@@ -2946,7 +2947,7 @@
 "kind": "patch",
 "t": 399586,
 "from": "e0192",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0195/57",
 "op": "add",
 "entry": {
@@ -2994,13 +2995,13 @@
 "kind": "fork.settled",
 "t": 402495,
 "id": "e0196",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 402496,
 "from": "e0196",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0198/58",
 "op": "add",
 "entry": {
@@ -3012,7 +3013,7 @@
 "kind": "patch",
 "t": 402496,
 "from": "e0196",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0199/59",
 "op": "add",
 "entry": {
@@ -3024,7 +3025,7 @@
 "kind": "patch",
 "t": 402496,
 "from": "e0196",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0200/-29",
 "op": "retire",
 "entry": {
@@ -3036,7 +3037,7 @@
 "kind": "patch",
 "t": 402496,
 "from": "e0196",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0200/-30",
 "op": "retire",
 "entry": {
@@ -3048,7 +3049,7 @@
 "kind": "patch",
 "t": 402496,
 "from": "e0196",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0200/-31",
 "op": "retire",
 "entry": {
@@ -3060,7 +3061,7 @@
 "kind": "patch",
 "t": 402496,
 "from": "e0196",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0200/-32",
 "op": "retire",
 "entry": {
@@ -3072,7 +3073,7 @@
 "kind": "patch",
 "t": 402496,
 "from": "e0196",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0200/-33",
 "op": "retire",
 "entry": {
@@ -3120,7 +3121,7 @@
 "kind": "fork.settled",
 "t": 403556,
 "id": "e0201",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -3162,7 +3163,7 @@
 "kind": "fork.settled",
 "t": 403895,
 "id": "e0203",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -3204,13 +3205,13 @@
 "kind": "fork.settled",
 "t": 413740,
 "id": "e0205",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 413741,
 "from": "e0205",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0207/60",
 "op": "add",
 "entry": {
@@ -3222,7 +3223,7 @@
 "kind": "patch",
 "t": 413741,
 "from": "e0205",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0208/61",
 "op": "add",
 "entry": {
@@ -3234,7 +3235,7 @@
 "kind": "patch",
 "t": 413741,
 "from": "e0205",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0209/62",
 "op": "add",
 "entry": {
@@ -3246,7 +3247,7 @@
 "kind": "patch",
 "t": 413741,
 "from": "e0205",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0210/63",
 "op": "add",
 "entry": {
@@ -3258,7 +3259,7 @@
 "kind": "patch",
 "t": 413741,
 "from": "e0205",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0211/64",
 "op": "add",
 "entry": {
@@ -3270,7 +3271,7 @@
 "kind": "patch",
 "t": 413741,
 "from": "e0205",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0212/65",
 "op": "add",
 "entry": {
@@ -3282,7 +3283,7 @@
 "kind": "patch",
 "t": 413741,
 "from": "e0205",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0213/66",
 "op": "add",
 "entry": {
@@ -3294,7 +3295,7 @@
 "kind": "patch",
 "t": 413741,
 "from": "e0205",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0214/67",
 "op": "add",
 "entry": {
@@ -3306,7 +3307,7 @@
 "kind": "patch",
 "t": 413741,
 "from": "e0205",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0215/68",
 "op": "add",
 "entry": {
@@ -3318,7 +3319,7 @@
 "kind": "patch",
 "t": 413741,
 "from": "e0205",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0216/69",
 "op": "add",
 "entry": {
@@ -3330,7 +3331,7 @@
 "kind": "patch",
 "t": 413741,
 "from": "e0205",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0217/70",
 "op": "add",
 "entry": {
@@ -3342,7 +3343,7 @@
 "kind": "patch",
 "t": 413741,
 "from": "e0205",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0218/71",
 "op": "add",
 "entry": {
@@ -3354,7 +3355,7 @@
 "kind": "patch",
 "t": 413741,
 "from": "e0205",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0219/72",
 "op": "add",
 "entry": {
@@ -3402,7 +3403,7 @@
 "kind": "fork.settled",
 "t": 446396,
 "id": "e0220",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -3444,13 +3445,13 @@
 "kind": "fork.settled",
 "t": 451051,
 "id": "e0222",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 451052,
 "from": "e0222",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0224/73",
 "op": "add",
 "entry": {
@@ -3462,7 +3463,7 @@
 "kind": "patch",
 "t": 451052,
 "from": "e0222",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0225/74",
 "op": "add",
 "entry": {
@@ -3510,13 +3511,13 @@
 "kind": "fork.settled",
 "t": 461199,
 "id": "e0226",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 461199,
 "from": "e0226",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0228/75",
 "op": "add",
 "entry": {
@@ -3528,7 +3529,7 @@
 "kind": "patch",
 "t": 461199,
 "from": "e0226",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0229/76",
 "op": "add",
 "entry": {
@@ -3540,7 +3541,7 @@
 "kind": "patch",
 "t": 461199,
 "from": "e0226",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0230/77",
 "op": "add",
 "entry": {
@@ -3552,7 +3553,7 @@
 "kind": "patch",
 "t": 461199,
 "from": "e0226",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0231/78",
 "op": "add",
 "entry": {
@@ -3564,7 +3565,7 @@
 "kind": "patch",
 "t": 461199,
 "from": "e0226",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0232/79",
 "op": "add",
 "entry": {
@@ -3576,7 +3577,7 @@
 "kind": "patch",
 "t": 461199,
 "from": "e0226",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0233/80",
 "op": "add",
 "entry": {
@@ -3624,7 +3625,7 @@
 "kind": "fork.settled",
 "t": 461537,
 "id": "e0234",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -3666,13 +3667,13 @@
 "kind": "fork.settled",
 "t": 467029,
 "id": "e0236",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 467029,
 "from": "e0236",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0238/81",
 "op": "add",
 "entry": {
@@ -3684,7 +3685,7 @@
 "kind": "patch",
 "t": 467029,
 "from": "e0236",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0239/82",
 "op": "add",
 "entry": {
@@ -3696,7 +3697,7 @@
 "kind": "patch",
 "t": 467029,
 "from": "e0236",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0240/83",
 "op": "add",
 "entry": {
@@ -3708,7 +3709,7 @@
 "kind": "patch",
 "t": 467029,
 "from": "e0236",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0241/84",
 "op": "add",
 "entry": {
@@ -3720,7 +3721,7 @@
 "kind": "patch",
 "t": 467029,
 "from": "e0236",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0242/85",
 "op": "add",
 "entry": {
@@ -3732,7 +3733,7 @@
 "kind": "patch",
 "t": 467029,
 "from": "e0236",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0243/86",
 "op": "add",
 "entry": {
@@ -3744,7 +3745,7 @@
 "kind": "patch",
 "t": 467029,
 "from": "e0236",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0244/87",
 "op": "add",
 "entry": {
@@ -3756,7 +3757,7 @@
 "kind": "patch",
 "t": 467029,
 "from": "e0236",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0245/88",
 "op": "add",
 "entry": {
@@ -3768,7 +3769,7 @@
 "kind": "patch",
 "t": 467029,
 "from": "e0236",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0246/89",
 "op": "add",
 "entry": {
@@ -3780,7 +3781,7 @@
 "kind": "patch",
 "t": 467029,
 "from": "e0236",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0247/90",
 "op": "add",
 "entry": {
@@ -3828,7 +3829,7 @@
 "kind": "fork.settled",
 "t": 494601,
 "id": "e0248",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -3870,7 +3871,7 @@
 "kind": "fork.settled",
 "t": 513792,
 "id": "e0250",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -3912,13 +3913,13 @@
 "kind": "fork.settled",
 "t": 519287,
 "id": "e0252",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 519288,
 "from": "e0252",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0254/91",
 "op": "add",
 "entry": {
@@ -3930,7 +3931,7 @@
 "kind": "patch",
 "t": 519288,
 "from": "e0252",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0255/92",
 "op": "add",
 "entry": {
@@ -3942,7 +3943,7 @@
 "kind": "patch",
 "t": 519288,
 "from": "e0252",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0256/93",
 "op": "add",
 "entry": {
@@ -3954,7 +3955,7 @@
 "kind": "patch",
 "t": 519288,
 "from": "e0252",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0257/94",
 "op": "add",
 "entry": {
@@ -3966,7 +3967,7 @@
 "kind": "patch",
 "t": 519288,
 "from": "e0252",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0258/95",
 "op": "add",
 "entry": {
@@ -3978,7 +3979,7 @@
 "kind": "patch",
 "t": 519289,
 "from": "e0252",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0259/96",
 "op": "add",
 "entry": {
@@ -3990,7 +3991,7 @@
 "kind": "patch",
 "t": 519289,
 "from": "e0252",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0260/-59",
 "op": "retire",
 "entry": {
@@ -4038,7 +4039,7 @@
 "kind": "fork.settled",
 "t": 520553,
 "id": "e0261",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -4080,7 +4081,7 @@
 "kind": "fork.settled",
 "t": 520906,
 "id": "e0263",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -4122,7 +4123,7 @@
 "kind": "fork.settled",
 "t": 521250,
 "id": "e0265",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -4164,13 +4165,13 @@
 "kind": "fork.settled",
 "t": 523378,
 "id": "e0267",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 523379,
 "from": "e0267",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0269/-81",
 "op": "retire",
 "entry": {
@@ -4182,7 +4183,7 @@
 "kind": "patch",
 "t": 523379,
 "from": "e0267",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0270/-82",
 "op": "retire",
 "entry": {
@@ -4194,7 +4195,7 @@
 "kind": "patch",
 "t": 523379,
 "from": "e0267",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0271/-83",
 "op": "retire",
 "entry": {
@@ -4206,7 +4207,7 @@
 "kind": "patch",
 "t": 523379,
 "from": "e0267",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0272/-84",
 "op": "retire",
 "entry": {
@@ -4218,7 +4219,7 @@
 "kind": "patch",
 "t": 523379,
 "from": "e0267",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0273/-85",
 "op": "retire",
 "entry": {
@@ -4230,7 +4231,7 @@
 "kind": "patch",
 "t": 523379,
 "from": "e0267",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0274/-86",
 "op": "retire",
 "entry": {
@@ -4242,7 +4243,7 @@
 "kind": "patch",
 "t": 523379,
 "from": "e0267",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0275/-87",
 "op": "retire",
 "entry": {
@@ -4254,7 +4255,7 @@
 "kind": "patch",
 "t": 523379,
 "from": "e0267",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0276/-89",
 "op": "retire",
 "entry": {
@@ -4266,7 +4267,7 @@
 "kind": "patch",
 "t": 523379,
 "from": "e0267",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0277/-90",
 "op": "retire",
 "entry": {
@@ -4314,7 +4315,7 @@
 "kind": "fork.settled",
 "t": 524570,
 "id": "e0278",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -4356,13 +4357,13 @@
 "kind": "fork.settled",
 "t": 537881,
 "id": "e0280",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 537882,
 "from": "e0280",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0282/97",
 "op": "supersede",
 "entry": {
@@ -4375,7 +4376,7 @@
 "kind": "patch",
 "t": 537882,
 "from": "e0280",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0283/98",
 "op": "supersede",
 "entry": {
@@ -4388,7 +4389,7 @@
 "kind": "patch",
 "t": 537882,
 "from": "e0280",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0284/99",
 "op": "supersede",
 "entry": {
@@ -4401,7 +4402,7 @@
 "kind": "patch",
 "t": 537882,
 "from": "e0280",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0285/100",
 "op": "supersede",
 "entry": {
@@ -4414,7 +4415,7 @@
 "kind": "patch",
 "t": 537882,
 "from": "e0280",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0286/101",
 "op": "supersede",
 "entry": {
@@ -4427,7 +4428,7 @@
 "kind": "patch",
 "t": 537882,
 "from": "e0280",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0287/102",
 "op": "supersede",
 "entry": {
@@ -4440,7 +4441,7 @@
 "kind": "patch",
 "t": 537882,
 "from": "e0280",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0288/-91",
 "op": "retire",
 "entry": {
@@ -4452,7 +4453,7 @@
 "kind": "patch",
 "t": 537882,
 "from": "e0280",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0289/-92",
 "op": "retire",
 "entry": {
@@ -4464,7 +4465,7 @@
 "kind": "patch",
 "t": 537882,
 "from": "e0280",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0290/-93",
 "op": "retire",
 "entry": {
@@ -4476,7 +4477,7 @@
 "kind": "patch",
 "t": 537882,
 "from": "e0280",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0291/-94",
 "op": "retire",
 "entry": {
@@ -4488,7 +4489,7 @@
 "kind": "patch",
 "t": 537882,
 "from": "e0280",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0292/-95",
 "op": "retire",
 "entry": {
@@ -4536,13 +4537,13 @@
 "kind": "fork.settled",
 "t": 542834,
 "id": "e0293",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 542835,
 "from": "e0267",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0295/103",
 "op": "add",
 "entry": {
@@ -4554,7 +4555,7 @@
 "kind": "patch",
 "t": 542835,
 "from": "e0267",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0296/104",
 "op": "add",
 "entry": {
@@ -4566,7 +4567,7 @@
 "kind": "patch",
 "t": 542835,
 "from": "e0278",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0297/105",
 "op": "add",
 "entry": {
@@ -4578,7 +4579,7 @@
 "kind": "patch",
 "t": 542835,
 "from": "e0278",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0298/106",
 "op": "add",
 "entry": {
@@ -4590,7 +4591,7 @@
 "kind": "patch",
 "t": 542835,
 "from": "e0293",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0299/107",
 "op": "add",
 "entry": {
@@ -5060,7 +5061,7 @@
 "kind": "patch",
 "t": 593905,
 "from": "e0305",
-"provenance": "observed-momentum",
+"authority": "observed",
 "id": "e0336/108",
 "op": "add",
 "entry": {
@@ -5108,13 +5109,13 @@
 "kind": "fork.settled",
 "t": 596234,
 "id": "e0337",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 596234,
 "from": "e0337",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0339/109",
 "op": "add",
 "entry": {
@@ -5126,7 +5127,7 @@
 "kind": "patch",
 "t": 596234,
 "from": "e0337",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0340/110",
 "op": "add",
 "entry": {
@@ -5138,7 +5139,7 @@
 "kind": "patch",
 "t": 596234,
 "from": "e0337",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0341/-96",
 "op": "retire",
 "entry": {
@@ -6261,7 +6262,7 @@
 "kind": "fork.settled",
 "t": 721856,
 "id": "e0420",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -6345,13 +6346,13 @@
 "kind": "fork.settled",
 "t": 737522,
 "id": "e0424",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 737523,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0426/111",
 "op": "add",
 "entry": {
@@ -6363,7 +6364,7 @@
 "kind": "patch",
 "t": 737523,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0427/112",
 "op": "add",
 "entry": {
@@ -6375,7 +6376,7 @@
 "kind": "patch",
 "t": 737523,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0428/113",
 "op": "add",
 "entry": {
@@ -6387,7 +6388,7 @@
 "kind": "patch",
 "t": 737523,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0429/114",
 "op": "add",
 "entry": {
@@ -6399,7 +6400,7 @@
 "kind": "patch",
 "t": 737523,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0430/115",
 "op": "add",
 "entry": {
@@ -6411,7 +6412,7 @@
 "kind": "patch",
 "t": 737523,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0431/116",
 "op": "add",
 "entry": {
@@ -6423,7 +6424,7 @@
 "kind": "patch",
 "t": 737523,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0432/117",
 "op": "add",
 "entry": {
@@ -6435,7 +6436,7 @@
 "kind": "patch",
 "t": 737523,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0433/118",
 "op": "add",
 "entry": {
@@ -6447,7 +6448,7 @@
 "kind": "patch",
 "t": 737523,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0434/119",
 "op": "add",
 "entry": {
@@ -6459,7 +6460,7 @@
 "kind": "patch",
 "t": 737524,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0435/120",
 "op": "add",
 "entry": {
@@ -6471,7 +6472,7 @@
 "kind": "patch",
 "t": 737524,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0436/121",
 "op": "add",
 "entry": {
@@ -6483,7 +6484,7 @@
 "kind": "patch",
 "t": 737524,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0437/122",
 "op": "add",
 "entry": {
@@ -6495,7 +6496,7 @@
 "kind": "patch",
 "t": 737524,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0438/123",
 "op": "add",
 "entry": {
@@ -6507,7 +6508,7 @@
 "kind": "patch",
 "t": 737524,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0439/124",
 "op": "add",
 "entry": {
@@ -6519,7 +6520,7 @@
 "kind": "patch",
 "t": 737524,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0440/125",
 "op": "add",
 "entry": {
@@ -6531,7 +6532,7 @@
 "kind": "patch",
 "t": 737524,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0441/126",
 "op": "add",
 "entry": {
@@ -6543,7 +6544,7 @@
 "kind": "patch",
 "t": 737524,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0442/127",
 "op": "add",
 "entry": {
@@ -6555,7 +6556,7 @@
 "kind": "patch",
 "t": 737524,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0443/128",
 "op": "add",
 "entry": {
@@ -6567,7 +6568,7 @@
 "kind": "patch",
 "t": 737525,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0444/129",
 "op": "add",
 "entry": {
@@ -6579,7 +6580,7 @@
 "kind": "patch",
 "t": 737525,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0445/130",
 "op": "add",
 "entry": {
@@ -6591,7 +6592,7 @@
 "kind": "patch",
 "t": 737525,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0446/131",
 "op": "add",
 "entry": {
@@ -6603,7 +6604,7 @@
 "kind": "patch",
 "t": 737525,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0447/132",
 "op": "add",
 "entry": {
@@ -6615,7 +6616,7 @@
 "kind": "patch",
 "t": 737525,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0448/133",
 "op": "add",
 "entry": {
@@ -6627,7 +6628,7 @@
 "kind": "patch",
 "t": 737525,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0449/134",
 "op": "add",
 "entry": {
@@ -6639,7 +6640,7 @@
 "kind": "patch",
 "t": 737525,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0450/135",
 "op": "add",
 "entry": {
@@ -6651,7 +6652,7 @@
 "kind": "patch",
 "t": 737525,
 "from": "e0424",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0451/136",
 "op": "add",
 "entry": {
@@ -6741,7 +6742,7 @@
 "kind": "fork.settled",
 "t": 739151,
 "id": "e0454",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -6783,7 +6784,7 @@
 "kind": "fork.settled",
 "t": 739443,
 "id": "e0456",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -6825,7 +6826,7 @@
 "kind": "fork.settled",
 "t": 755918,
 "id": "e0458",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -6867,7 +6868,7 @@
 "kind": "fork.settled",
 "t": 773578,
 "id": "e0460",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -6909,13 +6910,13 @@
 "kind": "fork.settled",
 "t": 782567,
 "id": "e0462",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 782567,
 "from": "e0462",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0464/137",
 "op": "add",
 "entry": {
@@ -6927,7 +6928,7 @@
 "kind": "patch",
 "t": 782568,
 "from": "e0462",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0465/138",
 "op": "add",
 "entry": {
@@ -6939,7 +6940,7 @@
 "kind": "patch",
 "t": 782568,
 "from": "e0462",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0466/139",
 "op": "add",
 "entry": {
@@ -6951,7 +6952,7 @@
 "kind": "patch",
 "t": 782568,
 "from": "e0462",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0467/140",
 "op": "add",
 "entry": {
@@ -6963,7 +6964,7 @@
 "kind": "patch",
 "t": 782568,
 "from": "e0462",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0468/141",
 "op": "add",
 "entry": {
@@ -6975,7 +6976,7 @@
 "kind": "patch",
 "t": 782568,
 "from": "e0462",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0469/142",
 "op": "add",
 "entry": {
@@ -7023,13 +7024,13 @@
 "kind": "fork.settled",
 "t": 785683,
 "id": "e0470",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 785683,
 "from": "e0470",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0472/143",
 "op": "add",
 "entry": {
@@ -7041,7 +7042,7 @@
 "kind": "patch",
 "t": 785683,
 "from": "e0470",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0473/144",
 "op": "add",
 "entry": {
@@ -7053,7 +7054,7 @@
 "kind": "patch",
 "t": 785683,
 "from": "e0470",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0474/145",
 "op": "add",
 "entry": {
@@ -7065,7 +7066,7 @@
 "kind": "patch",
 "t": 785683,
 "from": "e0470",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0475/-110",
 "op": "retire",
 "entry": {
@@ -7113,7 +7114,7 @@
 "kind": "fork.settled",
 "t": 804067,
 "id": "e0476",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -7155,13 +7156,13 @@
 "kind": "fork.settled",
 "t": 811261,
 "id": "e0478",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 811261,
 "from": "e0478",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0480/146",
 "op": "add",
 "entry": {
@@ -7173,7 +7174,7 @@
 "kind": "patch",
 "t": 811261,
 "from": "e0478",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0481/147",
 "op": "add",
 "entry": {
@@ -7185,7 +7186,7 @@
 "kind": "patch",
 "t": 811262,
 "from": "e0478",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0482/148",
 "op": "add",
 "entry": {
@@ -7197,7 +7198,7 @@
 "kind": "patch",
 "t": 811262,
 "from": "e0478",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0483/149",
 "op": "add",
 "entry": {
@@ -7209,7 +7210,7 @@
 "kind": "patch",
 "t": 811262,
 "from": "e0478",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0484/150",
 "op": "add",
 "entry": {
@@ -7257,7 +7258,7 @@
 "kind": "fork.settled",
 "t": 839746,
 "id": "e0485",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -7299,13 +7300,13 @@
 "kind": "fork.settled",
 "t": 850806,
 "id": "e0487",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 850807,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0489/151",
 "op": "add",
 "entry": {
@@ -7317,7 +7318,7 @@
 "kind": "patch",
 "t": 850807,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0490/152",
 "op": "add",
 "entry": {
@@ -7329,7 +7330,7 @@
 "kind": "patch",
 "t": 850807,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0491/153",
 "op": "add",
 "entry": {
@@ -7341,7 +7342,7 @@
 "kind": "patch",
 "t": 850807,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0492/154",
 "op": "add",
 "entry": {
@@ -7353,7 +7354,7 @@
 "kind": "patch",
 "t": 850807,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0493/155",
 "op": "add",
 "entry": {
@@ -7365,7 +7366,7 @@
 "kind": "patch",
 "t": 850807,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0494/156",
 "op": "add",
 "entry": {
@@ -7377,7 +7378,7 @@
 "kind": "patch",
 "t": 850808,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0495/157",
 "op": "add",
 "entry": {
@@ -7389,7 +7390,7 @@
 "kind": "patch",
 "t": 850808,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0496/158",
 "op": "add",
 "entry": {
@@ -7401,7 +7402,7 @@
 "kind": "patch",
 "t": 850808,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0497/159",
 "op": "add",
 "entry": {
@@ -7413,7 +7414,7 @@
 "kind": "patch",
 "t": 850808,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0498/160",
 "op": "add",
 "entry": {
@@ -7425,7 +7426,7 @@
 "kind": "patch",
 "t": 850808,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0499/161",
 "op": "add",
 "entry": {
@@ -7437,7 +7438,7 @@
 "kind": "patch",
 "t": 850808,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0500/162",
 "op": "add",
 "entry": {
@@ -7449,7 +7450,7 @@
 "kind": "patch",
 "t": 850808,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0501/163",
 "op": "add",
 "entry": {
@@ -7461,7 +7462,7 @@
 "kind": "patch",
 "t": 850809,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0502/164",
 "op": "add",
 "entry": {
@@ -7473,7 +7474,7 @@
 "kind": "patch",
 "t": 850809,
 "from": "e0487",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0503/165",
 "op": "add",
 "entry": {
@@ -7521,7 +7522,7 @@
 "kind": "fork.settled",
 "t": 886078,
 "id": "e0504",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -7563,13 +7564,13 @@
 "kind": "fork.settled",
 "t": 893410,
 "id": "e0506",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 893410,
 "from": "e0506",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0508/166",
 "op": "add",
 "entry": {
@@ -7581,7 +7582,7 @@
 "kind": "patch",
 "t": 893410,
 "from": "e0506",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0509/167",
 "op": "add",
 "entry": {
@@ -7593,7 +7594,7 @@
 "kind": "patch",
 "t": 893411,
 "from": "e0506",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0510/168",
 "op": "add",
 "entry": {
@@ -7605,7 +7606,7 @@
 "kind": "patch",
 "t": 893411,
 "from": "e0506",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0511/169",
 "op": "add",
 "entry": {
@@ -7617,7 +7618,7 @@
 "kind": "patch",
 "t": 893411,
 "from": "e0506",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0512/170",
 "op": "add",
 "entry": {
@@ -7629,7 +7630,7 @@
 "kind": "patch",
 "t": 893411,
 "from": "e0506",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0513/171",
 "op": "add",
 "entry": {
@@ -7641,7 +7642,7 @@
 "kind": "patch",
 "t": 893411,
 "from": "e0506",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0514/172",
 "op": "add",
 "entry": {
@@ -7653,7 +7654,7 @@
 "kind": "patch",
 "t": 893411,
 "from": "e0506",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0515/173",
 "op": "add",
 "entry": {
@@ -7665,7 +7666,7 @@
 "kind": "patch",
 "t": 893412,
 "from": "e0506",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0516/174",
 "op": "add",
 "entry": {
@@ -7677,7 +7678,7 @@
 "kind": "patch",
 "t": 893412,
 "from": "e0506",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0517/175",
 "op": "add",
 "entry": {
@@ -7767,13 +7768,13 @@
 "kind": "fork.settled",
 "t": 935586,
 "id": "e0520",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 935586,
 "from": "e0520",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0522/176",
 "op": "add",
 "entry": {
@@ -7785,7 +7786,7 @@
 "kind": "patch",
 "t": 935586,
 "from": "e0520",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0523/177",
 "op": "add",
 "entry": {
@@ -7797,7 +7798,7 @@
 "kind": "patch",
 "t": 935586,
 "from": "e0520",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0524/178",
 "op": "add",
 "entry": {
@@ -7809,7 +7810,7 @@
 "kind": "patch",
 "t": 935587,
 "from": "e0520",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0525/179",
 "op": "add",
 "entry": {
@@ -7821,7 +7822,7 @@
 "kind": "patch",
 "t": 935587,
 "from": "e0520",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0526/180",
 "op": "add",
 "entry": {
@@ -7833,7 +7834,7 @@
 "kind": "patch",
 "t": 935587,
 "from": "e0520",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0527/181",
 "op": "add",
 "entry": {
@@ -7845,7 +7846,7 @@
 "kind": "patch",
 "t": 935587,
 "from": "e0520",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0528/182",
 "op": "add",
 "entry": {
@@ -7857,7 +7858,7 @@
 "kind": "patch",
 "t": 935587,
 "from": "e0520",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0529/183",
 "op": "add",
 "entry": {
@@ -7869,7 +7870,7 @@
 "kind": "patch",
 "t": 935588,
 "from": "e0520",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0530/184",
 "op": "add",
 "entry": {
@@ -7917,7 +7918,7 @@
 "kind": "fork.settled",
 "t": 962809,
 "id": "e0531",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -7959,13 +7960,13 @@
 "kind": "fork.settled",
 "t": 971823,
 "id": "e0533",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 971824,
 "from": "e0533",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0535/185",
 "op": "add",
 "entry": {
@@ -7977,7 +7978,7 @@
 "kind": "patch",
 "t": 971824,
 "from": "e0533",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0536/186",
 "op": "add",
 "entry": {
@@ -7989,7 +7990,7 @@
 "kind": "patch",
 "t": 971824,
 "from": "e0533",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0537/187",
 "op": "add",
 "entry": {
@@ -8001,7 +8002,7 @@
 "kind": "patch",
 "t": 971825,
 "from": "e0533",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0538/188",
 "op": "add",
 "entry": {
@@ -8013,7 +8014,7 @@
 "kind": "patch",
 "t": 971825,
 "from": "e0533",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0539/189",
 "op": "add",
 "entry": {
@@ -8025,7 +8026,7 @@
 "kind": "patch",
 "t": 971825,
 "from": "e0533",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0540/190",
 "op": "add",
 "entry": {
@@ -8037,7 +8038,7 @@
 "kind": "patch",
 "t": 971825,
 "from": "e0533",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0541/191",
 "op": "add",
 "entry": {
@@ -8049,7 +8050,7 @@
 "kind": "patch",
 "t": 971826,
 "from": "e0533",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0542/192",
 "op": "add",
 "entry": {
@@ -8097,13 +8098,13 @@
 "kind": "fork.settled",
 "t": 1014643,
 "id": "e0543",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 1014646,
 "from": "e0543",
-"provenance": "extracted",
+"authority": "extracted",
 "id": "e0545/193",
 "op": "add",
 "entry": {
@@ -8151,13 +8152,13 @@
 "kind": "fork.settled",
 "t": 1023182,
 "id": "e0546",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 1023183,
 "from": "e0546",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0548/194",
 "op": "add",
 "entry": {
@@ -8169,7 +8170,7 @@
 "kind": "patch",
 "t": 1023183,
 "from": "e0546",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0549/195",
 "op": "add",
 "entry": {
@@ -8181,7 +8182,7 @@
 "kind": "patch",
 "t": 1023183,
 "from": "e0546",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0550/196",
 "op": "add",
 "entry": {
@@ -8193,7 +8194,7 @@
 "kind": "patch",
 "t": 1023184,
 "from": "e0546",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0551/197",
 "op": "add",
 "entry": {
@@ -8205,7 +8206,7 @@
 "kind": "patch",
 "t": 1023184,
 "from": "e0546",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0552/198",
 "op": "add",
 "entry": {
@@ -8217,7 +8218,7 @@
 "kind": "patch",
 "t": 1023184,
 "from": "e0546",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0553/199",
 "op": "add",
 "entry": {
@@ -8229,7 +8230,7 @@
 "kind": "patch",
 "t": 1023184,
 "from": "e0546",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0554/200",
 "op": "add",
 "entry": {
@@ -8241,7 +8242,7 @@
 "kind": "patch",
 "t": 1023184,
 "from": "e0546",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0555/201",
 "op": "add",
 "entry": {
@@ -8289,7 +8290,7 @@
 "kind": "fork.settled",
 "t": 1051780,
 "id": "e0556",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -8331,13 +8332,13 @@
 "kind": "fork.settled",
 "t": 1058382,
 "id": "e0558",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 1058383,
 "from": "e0558",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0560/202",
 "op": "add",
 "entry": {
@@ -8349,7 +8350,7 @@
 "kind": "patch",
 "t": 1058383,
 "from": "e0558",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0561/203",
 "op": "add",
 "entry": {
@@ -8361,7 +8362,7 @@
 "kind": "patch",
 "t": 1058384,
 "from": "e0558",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0562/204",
 "op": "add",
 "entry": {
@@ -8373,7 +8374,7 @@
 "kind": "patch",
 "t": 1058384,
 "from": "e0558",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0563/205",
 "op": "add",
 "entry": {
@@ -8385,7 +8386,7 @@
 "kind": "patch",
 "t": 1058384,
 "from": "e0558",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0564/206",
 "op": "add",
 "entry": {
@@ -8397,7 +8398,7 @@
 "kind": "patch",
 "t": 1058385,
 "from": "e0558",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0565/207",
 "op": "add",
 "entry": {
@@ -8445,7 +8446,7 @@
 "kind": "fork.settled",
 "t": 1096708,
 "id": "e0566",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -8487,13 +8488,13 @@
 "kind": "fork.settled",
 "t": 1103288,
 "id": "e0568",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 1103289,
 "from": "e0568",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0570/208",
 "op": "add",
 "entry": {
@@ -8505,7 +8506,7 @@
 "kind": "patch",
 "t": 1103289,
 "from": "e0568",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0571/209",
 "op": "add",
 "entry": {
@@ -8553,7 +8554,7 @@
 "kind": "fork.settled",
 "t": 1103865,
 "id": "e0572",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -8595,7 +8596,7 @@
 "kind": "fork.settled",
 "t": 1104229,
 "id": "e0574",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -8637,7 +8638,7 @@
 "kind": "fork.settled",
 "t": 1104806,
 "id": "e0576",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -8679,7 +8680,7 @@
 "kind": "fork.settled",
 "t": 1147825,
 "id": "e0578",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -8721,13 +8722,13 @@
 "kind": "fork.settled",
 "t": 1156642,
 "id": "e0580",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 1156643,
 "from": "e0580",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0582/210",
 "op": "add",
 "entry": {
@@ -8739,7 +8740,7 @@
 "kind": "patch",
 "t": 1156643,
 "from": "e0580",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0583/211",
 "op": "add",
 "entry": {
@@ -8751,7 +8752,7 @@
 "kind": "patch",
 "t": 1156644,
 "from": "e0580",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0584/212",
 "op": "add",
 "entry": {
@@ -8763,7 +8764,7 @@
 "kind": "patch",
 "t": 1156644,
 "from": "e0580",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0585/213",
 "op": "add",
 "entry": {
@@ -8775,7 +8776,7 @@
 "kind": "patch",
 "t": 1156644,
 "from": "e0580",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0586/214",
 "op": "add",
 "entry": {
@@ -8787,7 +8788,7 @@
 "kind": "patch",
 "t": 1156644,
 "from": "e0580",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0587/215",
 "op": "add",
 "entry": {
@@ -8799,7 +8800,7 @@
 "kind": "patch",
 "t": 1156645,
 "from": "e0580",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0588/216",
 "op": "add",
 "entry": {
@@ -8847,7 +8848,7 @@
 "kind": "fork.settled",
 "t": 1196740,
 "id": "e0589",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -8889,13 +8890,13 @@
 "kind": "fork.settled",
 "t": 1203177,
 "id": "e0591",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 1203178,
 "from": "e0591",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0593/217",
 "op": "add",
 "entry": {
@@ -8907,7 +8908,7 @@
 "kind": "patch",
 "t": 1203178,
 "from": "e0591",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0594/218",
 "op": "add",
 "entry": {
@@ -8919,7 +8920,7 @@
 "kind": "patch",
 "t": 1203178,
 "from": "e0591",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0595/219",
 "op": "add",
 "entry": {
@@ -8967,13 +8968,13 @@
 "kind": "fork.settled",
 "t": 1204505,
 "id": "e0596",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 1204506,
 "from": "e0596",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0598/220",
 "op": "add",
 "entry": {
@@ -8985,7 +8986,7 @@
 "kind": "patch",
 "t": 1204506,
 "from": "e0596",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0599/221",
 "op": "add",
 "entry": {
@@ -8997,7 +8998,7 @@
 "kind": "patch",
 "t": 1204506,
 "from": "e0596",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0600/-143",
 "op": "retire",
 "entry": {
@@ -9009,7 +9010,7 @@
 "kind": "patch",
 "t": 1204506,
 "from": "e0596",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0600/-144",
 "op": "retire",
 "entry": {
@@ -9021,7 +9022,7 @@
 "kind": "patch",
 "t": 1204506,
 "from": "e0596",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0600/-145",
 "op": "retire",
 "entry": {
@@ -9069,7 +9070,7 @@
 "kind": "fork.settled",
 "t": 1205628,
 "id": "e0601",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -9111,7 +9112,7 @@
 "kind": "fork.settled",
 "t": 1206356,
 "id": "e0603",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -9153,7 +9154,7 @@
 "kind": "fork.settled",
 "t": 1207079,
 "id": "e0605",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -9195,7 +9196,7 @@
 "kind": "fork.settled",
 "t": 1242325,
 "id": "e0607",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -9237,13 +9238,13 @@
 "kind": "fork.settled",
 "t": 1246897,
 "id": "e0609",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 1246897,
 "from": "e0609",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0611/222",
 "op": "add",
 "entry": {
@@ -9255,7 +9256,7 @@
 "kind": "patch",
 "t": 1246898,
 "from": "e0609",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0612/223",
 "op": "add",
 "entry": {
@@ -9303,7 +9304,7 @@
 "kind": "fork.settled",
 "t": 1247263,
 "id": "e0613",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -9345,7 +9346,7 @@
 "kind": "fork.settled",
 "t": 1247638,
 "id": "e0615",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -9387,7 +9388,7 @@
 "kind": "fork.settled",
 "t": 1248005,
 "id": "e0617",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -9429,7 +9430,7 @@
 "kind": "fork.settled",
 "t": 1277470,
 "id": "e0619",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -9471,13 +9472,13 @@
 "kind": "fork.settled",
 "t": 1281467,
 "id": "e0621",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 1281467,
 "from": "e0621",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0623/224",
 "op": "add",
 "entry": {
@@ -9489,7 +9490,7 @@
 "kind": "patch",
 "t": 1281468,
 "from": "e0621",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0624/225",
 "op": "add",
 "entry": {
@@ -9537,7 +9538,7 @@
 "kind": "fork.settled",
 "t": 1334571,
 "id": "e0625",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -9579,13 +9580,13 @@
 "kind": "fork.settled",
 "t": 1348240,
 "id": "e0627",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 1348241,
 "from": "e0627",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0629/226",
 "op": "add",
 "entry": {
@@ -9597,7 +9598,7 @@
 "kind": "patch",
 "t": 1348242,
 "from": "e0627",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0630/227",
 "op": "add",
 "entry": {
@@ -9609,7 +9610,7 @@
 "kind": "patch",
 "t": 1348242,
 "from": "e0627",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0631/228",
 "op": "add",
 "entry": {
@@ -9621,7 +9622,7 @@
 "kind": "patch",
 "t": 1348242,
 "from": "e0627",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0632/229",
 "op": "add",
 "entry": {
@@ -9633,7 +9634,7 @@
 "kind": "patch",
 "t": 1348243,
 "from": "e0627",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0633/230",
 "op": "add",
 "entry": {
@@ -9645,7 +9646,7 @@
 "kind": "patch",
 "t": 1348243,
 "from": "e0627",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0634/231",
 "op": "add",
 "entry": {
@@ -9657,7 +9658,7 @@
 "kind": "patch",
 "t": 1348243,
 "from": "e0627",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0635/232",
 "op": "add",
 "entry": {
@@ -9669,7 +9670,7 @@
 "kind": "patch",
 "t": 1348244,
 "from": "e0627",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0636/233",
 "op": "add",
 "entry": {
@@ -9681,7 +9682,7 @@
 "kind": "patch",
 "t": 1348244,
 "from": "e0627",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0637/234",
 "op": "add",
 "entry": {
@@ -10064,7 +10065,7 @@
 "kind": "fork.settled",
 "t": 1390942,
 "id": "e0665",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -10106,13 +10107,13 @@
 "kind": "fork.settled",
 "t": 1392029,
 "id": "e0667",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "patch",
 "t": 1392030,
 "from": "e0667",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0669/-109",
 "op": "retire",
 "entry": {
@@ -10124,7 +10125,7 @@
 "kind": "patch",
 "t": 1392030,
 "from": "e0665",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0670/235",
 "op": "add",
 "entry": {
@@ -10136,7 +10137,7 @@
 "kind": "patch",
 "t": 1392030,
 "from": "e0665",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0671/236",
 "op": "add",
 "entry": {
@@ -10148,7 +10149,7 @@
 "kind": "patch",
 "t": 1392030,
 "from": "e0665",
-"provenance": "stated",
+"authority": "stated",
 "id": "e0672/-221",
 "op": "retire",
 "entry": {
@@ -10196,7 +10197,7 @@
 "kind": "fork.settled",
 "t": 1394529,
 "id": "e0673",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -10238,7 +10239,7 @@
 "kind": "fork.settled",
 "t": 1395064,
 "id": "e0675",
-"outcome": "complete"
+"outcome": "value"
 },
 {
 "kind": "fork",
@@ -10280,7 +10281,7 @@
 "kind": "fork.settled",
 "t": 1395352,
 "id": "e0677",
-"outcome": "complete"
+"outcome": "value"
 }
 ]
 }

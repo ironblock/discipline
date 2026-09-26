@@ -78,17 +78,14 @@ export function callOf(tool: Tool, args: Readonly<Record<string, unknown>>): Cal
 
 // ------------------------------------------------------------------ fork outcomes
 
-/** Complete is the expected end and draws nothing; everything else says what happened. */
+/** `value` is the expected end and draws nothing; everything else says what happened. */
 export const outcomeOf = registry<ForkOutcome>({
-  complete: { label: 'complete', level: 'ok' },
   value: { label: 'value', level: 'ok' },
-  empty: { label: 'empty', level: 'warn' },
   decline: { label: 'declined', level: 'quiet' },
   truncated: { label: 'truncated', level: 'warn' },
+  output_too_large: { label: 'output too large', level: 'warn' },
   thinking_exhausted: { label: 'thinking exhausted', level: 'warn' },
   timeout: { label: 'timed out', level: 'bad' },
-  cancelled: { label: 'cancelled', level: 'quiet' },
-  failed: { label: 'failed', level: 'bad' },
   mimicry: { label: 'mimicry', level: 'bad' },
   unparseable: { label: 'unparseable', level: 'bad' },
   rejected: { label: 'rejected', level: 'bad' },
@@ -107,7 +104,6 @@ const OPS: Readonly<Record<string, Omit<Op, 'known'>>> = {
   resolve: { glyph: '✓', label: 'resolve', level: 'ok' },
   park: { glyph: '‖', label: 'park', level: 'quiet' },
   edit: { glyph: '✎', label: 'edit', level: 'ok' },
-  void: { glyph: '∅', label: 'void', level: 'quiet' },
 };
 
 export function opOf(op: PatchOp): Op {

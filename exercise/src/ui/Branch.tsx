@@ -44,7 +44,7 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
             title: `declared, waiting for slot ${node.slot}`,
           },
           outcome !== undefined &&
-            node.outcome !== 'complete' && {
+            node.outcome !== 'value' && {
               value: (
                 <span className="ex-branch__outcome" data-level={outcome.level} data-known={outcome.known ? '' : undefined}>
                   {outcome.label}
@@ -187,7 +187,7 @@ function PatchLine({ patch }: { readonly patch: Folded<PatchNode> }) {
       data-known={op.known ? '' : undefined}
       data-from={patch.from.join(' ')}
       data-needs={patch.needs.join(' ')}
-      title={patch.provenance ? `${op.label} · ${patch.provenance}` : op.label}
+      title={patch.authority ? `${op.label} · ${patch.authority}` : op.label}
     >
       <span className="ex-patch__op" aria-label={op.label} title={op.label}>
         {op.glyph}

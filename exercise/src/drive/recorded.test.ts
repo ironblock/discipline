@@ -2,13 +2,29 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { fold } from '../session/fold.ts';
 import { RECORDINGS, ReplayTransport, placed, recordedAt } from './recorded.ts';
+import { SPECIMEN } from './specimen.ts';
 
 const recording = RECORDINGS['first-drive'];
+
+/** The rulings, restated here on purpose: the vocabulary's own types are open sets and accept anything. */
+const RULED_OUTCOMES = ['value', 'decline', 'mimicry', 'unparseable', 'thinking_exhausted', 'rejected', 'timeout', 'truncated', 'output_too_large'];
+const RULED_OPS = ['add', 'supersede', 'resolve', 'retire', 'park', 'edit'];
 
 describe('the first drive, recorded and migrated', () => {
   it('says what the migration decided rather than the record', () => {
     expect(recording.migration.length).toBeGreaterThan(4);
     expect(recording.migration.join(' ')).toMatch(/mimicry/);
+  });
+
+  it('speaks the ruled vocabulary (#117, 2026-09-26): the one outcome enum, diet\'s ops, authority for how an entry was known', () => {
+    for (const log of [recording.events, SPECIMEN.flatMap((beat) => beat.events)] as const) {
+      const events = log as readonly Record<string, unknown>[];
+      const outcomes = new Set(events.filter((e) => e['kind'] === 'fork.settled').map((e) => e['outcome']));
+      expect([...outcomes].filter((o) => !RULED_OUTCOMES.includes(o as string))).toEqual([]);
+      const patches = events.filter((e) => e['kind'] === 'patch');
+      expect([...new Set(patches.map((p) => p['op']))].filter((op) => !RULED_OPS.includes(op as string))).toEqual([]);
+      expect(patches.filter((p) => 'provenance' in p)).toEqual([]);
+    }
   });
 
   it('carries no home-directory path and no internal ticket id', () => {

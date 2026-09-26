@@ -77,6 +77,8 @@ def timings(t):
 
 
 STOPS = {'tool_call': 'tool', 'final': 'stop'}
+# How an entry was known, predecessor name to the ruled one (#117, naming 5).
+AUTHORITY = {'observed-momentum': 'observed'}
 
 # The predecessor's protocol: a reply ends in one ```bash block, and that block
 # is the tool call. Here a tool call is its own event, so the block leaves the text.
@@ -139,7 +141,8 @@ def migrate(records):
     last_trunk_response = None
     last_settled_turn = 0
     render_hash = 'not recorded'
-    classified = {'mimicry': 0, 'empty': 0}
+    classified = {'mimicry': 0}
+    authorities = {}
     pending_seam = None
     entry_text = {}
     called = {r['parent_id'] for r in records if r['event'] == 'tool.exec'}
@@ -196,13 +199,15 @@ def migrate(records):
                 ev['reasoning'] = r['reasoning']
             out.append(ev)
             if not content.strip():
-                outcome = 'empty'
-            elif '```bash' in content:
+                # The ruled outcomes (#117, naming 6) have no word for an empty
+                # answer, and this migration does not invent one.
+                sys.exit(f'{r["id"]}: an empty side-call answer, which no ruled outcome names')
+            if '```bash' in content:
                 # Classified by this migration: a side call that answers with a
                 # shell command has answered as the agent, not as asked.
                 outcome = 'mimicry'
             else:
-                outcome = 'complete'
+                outcome = 'value'
             classified[outcome] = classified.get(outcome, 0) + 1
             out.append({'kind': 'fork.settled', 't': t1, 'id': r['parent_id'], 'outcome': outcome})
         elif kind == 'object.patch':
@@ -213,7 +218,11 @@ def migrate(records):
             superseded = [s.lstrip('#') for s in r.get('superseded') or []]
             common = {'kind': 'patch', 't': t0, 'from': source}
             if r.get('provenance'):
-                common['provenance'] = r['provenance']
+                # How the entry was known is `authority` (#117, naming 5); the
+                # predecessor's `observed-momentum` is the ruled `observed`.
+                authority = AUTHORITY.get(r['provenance'], r['provenance'])
+                authorities[f"{r['provenance']} -> {authority}"] = authorities.get(f"{r['provenance']} -> {authority}", 0) + 1
+                common['authority'] = authority
             for i, (eid, text) in enumerate(added):
                 entry_text[eid] = text
                 ev = {**common, 'id': f"{r['id']}/{eid}", 'op': 'add', 'entry': {'id': eid, 'text': text}}
@@ -231,7 +240,7 @@ def migrate(records):
             out.append({'kind': 'session.end', 't': t0})
 
     out.sort(key=lambda e: e['t'])
-    return out, slots, classified
+    return out, slots, classified, authorities
 
 
 def main():
@@ -243,7 +252,7 @@ def main():
     args = parser.parse_args()
 
     records = [json.loads(line) for line in open(args.source)]
-    events, slots, classified = migrate(records)
+    events, slots, classified, authorities = migrate(records)
     scrub = scrubber(args.scrub)
     events = scrub(events)
     fixture = {
@@ -255,7 +264,8 @@ def main():
             'A trunk reply that called a tool ended in the bash block that was the call; the block is removed from the text, since the call is its own event.',
             'Deltas were never recorded; a replay synthesizes them. The system prompt, renders and pre-warms carry no token counts: the record did not measure them.',
             'Phases and seam reasons were not recorded. The audit forks at a phase boundary are drawn in the ratify lane, which is what the charter calls them.',
-            f'Fork outcomes are classified by the migration: empty if the answer is empty, mimicry if it answers with a bash block (it answered as the agent), otherwise complete ({classified}).',
+            f'Fork outcomes are classified by the migration, in the ruled enum: mimicry if it answers with a bash block (it answered as the agent), otherwise value; an empty answer would be refused ({classified}).',
+            f'How each entry was known is carried as `authority`, the predecessor\'s `provenance` mapped to the ruled names ({authorities}).',
             f'Tool output is cut at {MAX_OUTPUT_LINES} lines or {MAX_OUTPUT_CHARS:,} characters, a fork question at {MAX_QUESTION_CHARS:,}, a render at {MAX_RENDER_CHARS:,}; each cut says so in the text.',
             'Scrubbed: the account name and its home directory (now user and /work), run directories (/tmp/session), internal ticket ids.',
         ],

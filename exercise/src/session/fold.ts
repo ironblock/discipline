@@ -10,7 +10,7 @@
  * node waits on, which is what the gaps overlay outlines.
  */
 
-import type { DriveEvent, EventOf, FailReason, ForkLane, ForkOutcome, Lane, Need, PatchOp, SeamReason, SettleReason, Stop, Timings, Tool } from '../drive/events.ts';
+import type { Authority, DriveEvent, EventOf, FailReason, ForkLane, ForkOutcome, Lane, Need, PatchOp, SeamReason, SettleReason, Stop, Timings, Tool } from '../drive/events.ts';
 import { NEEDS_OF } from '../drive/events.ts';
 
 declare const folded: unique symbol;
@@ -107,7 +107,8 @@ export interface PatchNode extends Provenance {
   readonly category?: string;
   readonly text: string;
   readonly supersedes?: string;
-  readonly provenance?: string;
+  /** How the entry was known (#117 naming 5). */
+  readonly authority?: Authority;
 }
 
 export interface BranchNode extends Provenance, Partial<Generation> {
@@ -157,7 +158,8 @@ export interface MemoryEntry extends Provenance {
   readonly by: string;
   /** Its last op, when that was not one of the three that set `state`. */
   readonly op?: PatchOp;
-  readonly provenance?: string;
+  /** How it was known, as its last patch said. */
+  readonly authority?: Authority;
   /** Log position of the patch that last changed it. */
   readonly landedAt: number;
   /** Landed since the last ask: what the operator has not seen yet. */
@@ -364,7 +366,7 @@ export function fold(events: readonly DriveEvent[]): Session {
         const old = entries.get(e.entry.id);
         const base = {
           ...(e.entry.category !== undefined ? { category: e.entry.category } : {}),
-          ...(e.provenance !== undefined ? { provenance: e.provenance } : {}),
+          ...(e.authority !== undefined ? { authority: e.authority } : {}),
           text: e.entry.text,
           by: e.id,
           seq: e.seq,
@@ -524,7 +526,7 @@ export function fold(events: readonly DriveEvent[]): Session {
           ...(p.entry.category !== undefined ? { category: p.entry.category } : {}),
           text: p.entry.text,
           ...(p.supersedes ? { supersedes: p.supersedes } : {}),
-          ...(p.provenance ? { provenance: p.provenance } : {}),
+          ...(p.authority ? { authority: p.authority } : {}),
           ...provenance(p),
         }),
       ),

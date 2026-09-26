@@ -5,8 +5,9 @@
  * `diet` has no interactive loop yet, so nothing emits these. This file is the
  * request: every kind below is tagged with the step of #117 that would make
  * `diet` emit it (`NEEDS`), and the surface draws nothing it cannot fold from
- * these. When the loop lands, its generated types replace this file and every
- * difference is a compile error in `src/session/fold.ts`.
+ * these. The log is a format, `diet/formats/log` (ruled on #117, 2026-09-26):
+ * when it lands, its generated types replace this file and every difference
+ * is a compile error in `src/session/fold.ts`.
  *
  * Names follow the record where the record has the concept (`request`,
  * `response`, `fork`, `seam`, `to_request`, `of_turn`, `at_turn`) and the
@@ -172,23 +173,20 @@ export interface Fork extends At {
 }
 
 /**
- * How a fork ended. The first five are the drive's; the rest are what the
- * capture made of a complete answer, named in the record (#92, #94, #7).
- * Which list is canonical is a ruling not yet made; both are known here.
+ * How a fork ended: the one enum, ruled on #117 (2026-09-26, naming 6), which
+ * lives on the fork event in `formats/record`. `value` is an answer the
+ * capture could use; the drive's own outcomes fold into these.
  */
 export type ForkOutcome = Open<
-  | 'complete'
-  | 'empty'
-  | 'truncated'
-  | 'timeout'
-  | 'cancelled'
-  | 'failed'
   | 'value'
   | 'decline'
   | 'mimicry'
   | 'unparseable'
   | 'thinking_exhausted'
   | 'rejected'
+  | 'timeout'
+  | 'truncated'
+  | 'output_too_large'
 >;
 
 export interface ForkSettled extends At {
@@ -205,11 +203,19 @@ export interface Entry {
 }
 
 /**
- * A change to working memory. `add`, `supersede` and `retire` change an
- * entry's state; any other op (`resolve`, `park`, an operator's edit, …)
- * rewrites the entry and is shown by name.
+ * A change to working memory: `diet`'s ops, ruled on #117 (naming 4). `add`,
+ * `supersede` and `retire` change an entry's state; `resolve` and `park`
+ * rewrite it and are shown by name. `edit` is reserved for a person editing
+ * working memory, with authority `stated`. `void` is a state, never an op.
  */
-export type PatchOp = Open<'add' | 'supersede' | 'retire' | 'resolve' | 'park' | 'edit' | 'void'>;
+export type PatchOp = Open<'add' | 'supersede' | 'resolve' | 'retire' | 'park' | 'edit'>;
+
+/**
+ * How an entry was known -- `authority`, ruled on #117 (naming 5), where
+ * `provenance` is its position (turn, lane, fork). Authority follows it: an
+ * entry the arm declared is never rewritten.
+ */
+export type Authority = Open<'stated' | 'extracted' | 'observed' | 'arm'>;
 
 /** A change to working memory, from the fork that produced it. */
 export interface Patch extends At {
@@ -220,8 +226,8 @@ export interface Patch extends At {
   readonly entry: Entry;
   /** For `supersede`: the entry this one replaces. */
   readonly supersedes?: string;
-  /** How the entry was come by: the predecessor's `stated`, `extracted`, `observed-…`. */
-  readonly provenance?: string;
+  /** How the entry was known. */
+  readonly authority?: Authority;
 }
 
 export type SeamReason = Open<'operator' | 'phase' | 'cadence' | 'budget'>;

@@ -59,7 +59,7 @@ export function Memory({ entries, seenThrough = -1, onSeen }: MemoryProps) {
                   data-fresh={isUnseen(e, seenThrough) ? '' : undefined}
                   data-from={e.from.join(' ')}
                   data-needs={e.needs.join(' ')}
-                  title={`${e.state}${e.provenance ? ` · ${e.provenance}` : ''} · last changed by ${e.by}`}
+                  title={`${e.state}${e.authority ? ` · ${e.authority}` : ''} · last changed by ${e.by}`}
                 >
                   <span className="ex-memory__id">#{e.id}</span>
                   <span className="ex-memory__text">
