@@ -70,7 +70,7 @@ export const BlockTones: Story = {
 /**
  * The footer is quiet, not illegible: on every trunk fill, a number reads at
  * WCAG AA for small text (4.5:1), and its unit and the role chip at 3:1.
- * Checked in the theme the session opens in, and in its banded variant.
+ * Checked in the theme the session opens in, and with the footer inline.
  */
 export const BlockFooterContrast: Story = {
   name: 'Block · footer contrast',
@@ -95,7 +95,7 @@ export const BlockFooterContrast: Story = {
   },
 };
 
-export const BlockFooterContrastBanded: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, banded', globals: { theme: 'band' } };
+export const BlockFooterContrastInline: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, inline', globals: { theme: 'bloom-inline' } };
 
 // ---------------------------------------------------------------- Messages
 

@@ -25,8 +25,8 @@ export const THEMES = [
   { name: 'lantern', layers: 'fabric glass lantern', title: 'lantern — glass, and the glass is the light' },
   { name: 'emboss', layers: 'fabric emboss', title: 'emboss — the prefix raised, square, light sweeping across' },
   { name: 'hybrid', layers: 'fabric glass colo lantern', title: 'hybrid — colo’s emission, lantern’s lit glass' },
-  { name: 'bloom', layers: 'fabric glass colo bloom rack', title: 'bloom — frosted slabs over pools of their own light, every colour an LED' },
-  { name: 'band', layers: 'fabric glass colo bloom rack band', title: 'band — bloom, each footer a full-width shaded band' },
+  { name: 'bloom', layers: 'fabric glass colo bloom rack band', title: 'bloom — frosted slabs over pools of their own light, every colour an LED, each footer a shaded band' },
+  { name: 'bloom-inline', layers: 'fabric glass colo bloom rack', title: 'bloom-inline — bloom with the footer inline under the text' },
 ] as const;
 
 export type ThemeName = (typeof THEMES)[number]['name'];
