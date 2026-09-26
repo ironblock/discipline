@@ -35,11 +35,12 @@ export function SessionHeader({ session, link = 'live', surface, onSurface }: Se
             data-busy={holder === undefined ? undefined : ''}
             data-lane={holder?.lane}
             style={laneStyle(holder?.lane)}
+            title={holder !== undefined ? `slot ${slot}: ${holder.lane} ${holder.id}` : `slot ${slot}: idle`}
           >
             <span className="ex-header__dot" aria-hidden="true" />
             {slot}
             {slot === session.trunkSlot ? '·trunk' : ''}
-            {holder !== undefined ? <span className="ex-header__holder"> {holder.id}</span> : null}
+            {holder !== undefined && slot !== session.trunkSlot ? <span className="ex-header__holder"> {holder.lane}</span> : null}
           </span>
         ))}
       </span>

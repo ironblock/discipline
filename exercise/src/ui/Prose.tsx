@@ -103,10 +103,14 @@ function block(token: MarkedToken, caret: boolean): ReactNode {
     case 'list': {
       const List = token.ordered ? 'ol' : 'ul';
       const start = token.ordered && typeof token.start === 'number' && token.start !== 1 ? token.start : undefined;
-      const last = token.items.length - 1;
+      // An answer cut off right after a bullet's marker ends on an empty
+      // item. Streaming, the caret waits in it; finished, it is not drawn.
+      const cut = token.items.at(-1);
+      const items = !caret && cut && cut.text.trim() === '' ? token.items.slice(0, -1) : token.items;
+      const last = items.length - 1;
       return (
         <List start={start} data-loose={token.loose ? '' : undefined}>
-          {token.items.map((item, i) => (
+          {items.map((item, i) => (
             <li key={i} data-task={item.task ? '' : undefined}>
               {item.tokens.map((child, j) => (
                 <Fragment key={j}>{block(child as MarkedToken, caret && i === last && j === item.tokens.length - 1)}</Fragment>

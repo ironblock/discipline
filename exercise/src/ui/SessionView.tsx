@@ -326,10 +326,11 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                     data-busy={session.occupancy[slot] === undefined ? undefined : ''}
                     data-lane={session.occupancy[slot]?.lane}
                     style={laneStyle(session.occupancy[slot]?.lane)}
+                    title={session.occupancy[slot] ? `slot ${slot}: ${session.occupancy[slot]?.lane} ${session.occupancy[slot]?.id}` : `slot ${slot}: idle`}
                   >
                     <span className="ex-lanehead__long">slot </span>
                     {slot}
-                    <span className="ex-lanehead__long"> · {session.occupancy[slot]?.id ?? 'idle'}</span>
+                    <span className="ex-lanehead__long"> · {session.occupancy[slot]?.lane ?? 'idle'}</span>
                   </div>
                 ))}
               </div>

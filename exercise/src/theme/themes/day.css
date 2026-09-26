@@ -47,6 +47,8 @@
   --lanehead-bg: linear-gradient(to bottom, rgb(244 245 247 / 0.92) 70%, rgb(244 245 247 / 0));
 
   --pool-rest: 8%;
+  /* Grey on white weighs more than light on black: the minimap's slivers keep less of it. */
+  --minimap-ink: 0.55;
   --pool-live: 20%;
   --field:
     radial-gradient(60rem 40rem at 40% 115%, color-mix(in oklab, var(--lamp-you) 9%, transparent), transparent 70%),

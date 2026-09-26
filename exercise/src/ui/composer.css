@@ -47,6 +47,26 @@
   flex: 1 1 auto;
 }
 
+/* Narrow -- the trunk's column beside lanes and memory -- the bar is two rows
+   by design: what the session is doing, then the phase controls with the one
+   action at their right end. It follows the composer's own width. */
+.ex-composer {
+  container-type: inline-size;
+}
+
+@container (max-width: 44rem) {
+  .ex-composer__state {
+    flex: 1 0 100%;
+  }
+  .ex-composer__spacer {
+    display: none;
+  }
+  .ex-composer__send,
+  .ex-composer__cancel {
+    margin-left: auto;
+  }
+}
+
 .ex-composer[data-state='turn'] .ex-composer__state {
   color: var(--ink-assistant);
 }

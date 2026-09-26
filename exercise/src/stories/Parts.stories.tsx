@@ -282,6 +282,31 @@ export const ProseWhatModelsWrite: Story = {
   },
 };
 
+/**
+ * An answer cut off just after a bullet's marker -- a failed or cancelled
+ * reply -- ends on no empty bullet. While it streams, the caret still waits
+ * in that bullet, where the next word will land.
+ */
+export const ProseCutAtABullet: Story = {
+  name: 'Prose · cut off at a bullet',
+  render: () => (
+    <div style={{ display: 'grid', gap: '1rem' }}>
+      <div data-case="finished">
+        <Prose text={'Next:\n\n- read the config\n- '} kind="answer" />
+      </div>
+      <div data-case="streaming">
+        <Prose text={'Next:\n\n- read the config\n- '} kind="answer" caret />
+      </div>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const items = (c: string) => canvasElement.querySelectorAll(`[data-case="${c}"] li`);
+    await expect(items('finished')).toHaveLength(1);
+    await expect(items('streaming')).toHaveLength(2);
+    await expect(items('streaming')[1]?.querySelector('.ex-caret')).not.toBeNull();
+  },
+};
+
 export const ProseUnclosedFence: Story = {
   name: 'Prose · cut off inside a code block',
   render: () => <Prose text={UNCLOSED_FENCE} kind="answer" caret />,
@@ -521,3 +546,29 @@ export const ComposerTurn: Story = { name: 'Composer · the trunk is working', r
 export const ComposerCapture: Story = { name: 'Composer · an interview in the idle gap', render: () => composer('capture') };
 export const ComposerRatify: Story = { name: 'Composer · ratifying', render: () => composer('ratify', 'spec') };
 export const ComposerEnded: Story = { name: 'Composer · ended', render: () => composer('ended', 'build') };
+
+/**
+ * Narrow -- the trunk's column beside lanes and memory -- the composer's bar
+ * is two rows by design, not by wrapping: what the session is doing on the
+ * first, the phase controls and the one action (send or cancel) on the second,
+ * the action at its right end.
+ */
+export const ComposerNarrow: Story = {
+  name: 'Composer · narrow: two rows by design',
+  render: () => (
+    <div style={{ width: 560 }}>
+      <Composer state="capture" phase="not recorded" phases={PHASES} dispatch={async () => ({ ok: true })} hint="recorded: a first drive, across two refills" />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const box = (sel: string) => (canvasElement.querySelector(sel) as HTMLElement).getBoundingClientRect();
+    const state = box('.ex-composer__state');
+    const seam = box('.ex-composer__seam');
+    const action = box('.ex-composer__cancel');
+    const bar = box('.ex-composer__bar');
+    await expect(seam.top).toBeGreaterThanOrEqual(state.bottom);
+    await expect(Math.abs(action.top - seam.top)).toBeLessThan(4);
+    await expect(Math.abs(action.right - bar.right)).toBeLessThan(2);
+    await expect(Math.abs(box('.ex-composer__phase').top - seam.top)).toBeLessThan(6);
+  },
+};

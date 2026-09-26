@@ -28,7 +28,7 @@
   --c: var(--ink-assistant);
   left: 3px;
   right: 3px;
-  background: color-mix(in oklab, var(--c) 42%, transparent);
+  background: color-mix(in oklab, var(--c) calc(42% * var(--minimap-ink)), transparent);
 }
 
 .ex-minimap[data-curtain] .ex-mm__trunk {
@@ -37,14 +37,14 @@
 
 .ex-mm__trunk[data-tone='system'] { --c: var(--ink-system); }
 .ex-mm__trunk[data-tone='user'] { --c: var(--ink-user); }
-.ex-mm__trunk[data-tone='tool'] { --c: var(--ink-tool); background: color-mix(in oklab, var(--c) 22%, transparent); }
+.ex-mm__trunk[data-tone='tool'] { --c: var(--ink-tool); background: color-mix(in oklab, var(--c) calc(22% * var(--minimap-ink)), transparent); }
 .ex-mm__trunk[data-tone='turnend'] { --c: var(--ink-muted); background: none; border-top: 1px dashed color-mix(in oklab, var(--c) 60%, transparent); }
 
 .ex-mm__lane {
   --c: var(--lane-ink, var(--ink-lane));
   left: 62%;
   right: 3px;
-  background: color-mix(in oklab, var(--c) 50%, transparent);
+  background: color-mix(in oklab, var(--c) calc(50% * var(--minimap-ink)), transparent);
 }
 
 .ex-mm__seam {

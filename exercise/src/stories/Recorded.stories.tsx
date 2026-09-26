@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { expect, userEvent, waitFor } from 'storybook/test';
 
 import { PHASES } from '../App.tsx';
+import { fillContrast } from './contrast.ts';
 import { RECORDINGS, recordedAt } from '../drive/recorded.ts';
 import { fold } from '../session/fold.ts';
 import { SessionView } from '../ui/SessionView.tsx';
@@ -54,6 +55,14 @@ export const Ratifying: Story = {
   play: async ({ canvasElement }) => {
     await expect(canvasElement.querySelector('[data-state="ratify"]')).not.toBeNull();
     await expect(canvasElement.querySelector('.ex-lanehead[data-lane="ratify"]')).not.toBeNull();
+    // A busy slot says which lane holds it; the side call's own id is on hover.
+    const head = canvasElement.querySelector('.ex-lanehead[data-lane="ratify"]');
+    await expect(head?.textContent).toContain('ratify');
+    await expect(head?.textContent).not.toMatch(/e\d{4}/);
+    await expect(head?.getAttribute('title')).toMatch(/e\d{4}/);
+    const led = canvasElement.querySelector('.ex-header__slot[data-lane="ratify"]');
+    await expect(led?.textContent).toContain('ratify');
+    await expect(led?.textContent).not.toMatch(/e\d{4}/);
   },
 };
 
@@ -226,5 +235,17 @@ export const ItsReceipt: Story = {
     await expect(row('mimicry')).toBe('7');
     await expect(row('idle-before-refill')).toBe('442 s · 637 s');
     await expect(row('side-call-time-in-gap')).toBe('≤ 100%');
+  },
+};
+
+/** In daylight the minimap's slivers are lighter: visible, not heavy -- grey on white weighs more than light on black. */
+export const MinimapInDaylight: Story = {
+  name: '5b · the minimap in daylight',
+  globals: { theme: 'paper' },
+  play: async ({ canvasElement }) => {
+    const sliver = await waitFor(() => canvasElement.querySelector('.ex-mm__trunk[data-tone="assistant"]') ?? Promise.reject(new Error('no sliver yet')));
+    const ratio = fillContrast(sliver);
+    await expect(ratio).toBeGreaterThan(1.2);
+    await expect(ratio).toBeLessThan(1.8);
   },
 };

@@ -47,4 +47,6 @@
   --foot-tone: 70%;
   --foot-unit-tone: 45%;
   --focus: var(--ink-user);
+  /* Grey on white weighs more than light on black: the minimap's slivers keep less of it. */
+  --minimap-ink: 0.55;
 }
