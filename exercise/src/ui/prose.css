@@ -28,6 +28,93 @@
   padding-left: 1.4em;
 }
 
+.ex-prose li > ul,
+.ex-prose li > ol {
+  margin: 0.2em 0 0;
+}
+
+.ex-prose li[data-task] {
+  list-style: none;
+}
+
+.ex-prose__task {
+  margin: 0 0.45em 0 -1.3em;
+  vertical-align: -0.1em;
+  accent-color: currentColor;
+}
+
+/* A heading in an answer labels a section: the answer's own size, weighted. */
+.ex-prose__heading {
+  margin: 1.1em 0 0.4em;
+  font-weight: 650;
+  white-space: normal;
+}
+
+.ex-prose__heading[data-depth='1'] {
+  font-size: 1.08em;
+}
+
+/* Links are underlined in the text's own colour: blue is the person's. */
+.ex-prose a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, currentColor 45%, transparent);
+  text-underline-offset: 0.18em;
+}
+
+.ex-prose a:hover {
+  text-decoration-color: currentColor;
+}
+
+.ex-prose__image {
+  font-style: italic;
+}
+
+.ex-prose del {
+  opacity: 0.65;
+}
+
+.ex-prose blockquote {
+  margin: 0 0 0.75em;
+  padding-left: 0.9em;
+  border-left: 2px solid color-mix(in oklab, currentColor 30%, transparent);
+  opacity: 0.85;
+}
+
+.ex-prose hr {
+  margin: 1em 0;
+  border: 0;
+  border-top: 1px solid color-mix(in oklab, currentColor 18%, transparent);
+}
+
+/* A table scrolls sideways inside the answer rather than widening it. */
+.ex-prose__table {
+  margin: 0 0 0.75em;
+  overflow-x: auto;
+}
+
+.ex-prose table {
+  border-collapse: collapse;
+  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ex-prose th,
+.ex-prose td {
+  padding: 0.3em 0.8em;
+  border-bottom: 1px solid color-mix(in oklab, currentColor 14%, transparent);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ex-prose th {
+  font-weight: 600;
+  border-bottom-color: color-mix(in oklab, currentColor 30%, transparent);
+}
+
+.ex-prose [data-align='center'] { text-align: center; }
+.ex-prose [data-align='right'] { text-align: right; }
+
 .ex-prose code {
   font-family: var(--font-tool);
   font-size: 0.86em;
@@ -46,12 +133,7 @@
   white-space: pre;
 }
 
-/* The streaming caret sits at the end of the last line: the last block is
-   inline-flowing so the caret follows its text rather than starting a line. */
-.ex-prose:has(> .ex-caret) > p:nth-last-child(2) {
-  display: inline;
-}
-
+/* The streaming caret is placed inside the last block, at the end of its last line. */
 .ex-caret {
   display: inline-block;
   width: 0.5em;

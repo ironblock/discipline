@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { expect } from 'storybook/test';
 
 import { Block } from '../ui/Block.tsx';
@@ -8,18 +10,21 @@ import { Branch } from '../ui/Branch.tsx';
 import { Composer } from '../ui/Composer.tsx';
 import type { ComposerProps } from '../ui/Composer.tsx';
 import { Memory } from '../ui/Memory.tsx';
+import { Prose, ProseProbe } from '../ui/Prose.tsx';
 import { AssistantMessage, SystemMessage, UserMessage } from '../ui/Message.tsx';
 import { Seam } from '../ui/Seam.tsx';
 import { ToolCall } from '../ui/ToolCall.tsx';
 import { PHASES } from '../App.tsx';
 import { contrast } from './contrast.ts';
+import { UNCLOSED_FENCE, WHAT_MODELS_WRITE } from './markdown.ts';
 import { MOMENTS, branchAt, sessionAt, trunkNodeAt } from './moments.ts';
 
 /**
  * One component, one story per state it distinguishes. Every node comes out
  * of the folded specimen at a named moment; only `Block` -- the primitive
- * every other part refines -- and `Composer`, which takes no node, get plain
- * props.
+ * every other part refines -- `Prose`, which takes text rather than a node
+ * (its stories use a hand-written fixture, so the specimen never grows to
+ * show off a table), and `Composer`, which takes no node, get plain props.
  */
 const meta = {
   title: 'Parts',
@@ -128,6 +133,10 @@ export const AssistantPrefill: Story = {
 export const AssistantStreaming: Story = {
   name: 'Message · assistant, streaming',
   render: () => <AssistantMessage node={trunkNodeAt(MOMENTS.streaming, 'q/3', 'assistant')} />,
+  // At this moment the answer ends in a list item with nothing in it yet: the caret still has to show.
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelectorAll('.ex-caret')).toHaveLength(1);
+  },
 };
 
 export const AssistantDone: Story = {
@@ -141,6 +150,95 @@ export const AssistantDone: Story = {
 export const AssistantWithCode: Story = {
   name: 'Message · assistant, with a code block',
   render: () => <AssistantMessage node={trunkNodeAt(MOMENTS.done, 'q/8', 'assistant')} />,
+};
+
+// ---------------------------------------------------------------- Prose
+
+/** Every construct a model's answer uses, and the ones the renderer refuses: no markup, no script links, no images fetched. */
+export const ProseWhatModelsWrite: Story = {
+  name: 'Prose · what models write',
+  render: () => <Prose text={WHAT_MODELS_WRITE} kind="answer" />,
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.getByRole('heading', { name: 'What I found' })).toBeVisible();
+    const table = canvas.getByRole('table');
+    await expect(table.querySelectorAll('tbody tr')).toHaveLength(2);
+    await expect([...table.querySelectorAll('th')].map((th) => th.getAttribute('data-align'))).toEqual(['left', 'center', 'right']);
+    // A bolded URL stays bold, and the link stops at the URL (GFM's trailing-punctuation rule).
+    const url = canvas.getByRole('link', { name: 'http://localhost:5173/?speed=4' });
+    await expect(url.getAttribute('href')).toBe('http://localhost:5173/?speed=4');
+    await expect(url.closest('strong')).not.toBeNull();
+    const boxes = canvas.getAllByRole('checkbox');
+    await expect(boxes.map((b) => [(b as HTMLInputElement).checked, (b as HTMLInputElement).disabled])).toEqual([[true, true], [false, true]]);
+    await expect(canvasElement.querySelector('li ul li')?.textContent).toBe('one object per file');
+    await expect(canvasElement.querySelector('ol')?.children).toHaveLength(2);
+    await expect(canvasElement.querySelector('blockquote del')?.textContent).toBe('a new data model');
+    const text = canvasElement.textContent ?? '';
+    await expect(text).toContain('the harness & its canned transport © 2026');
+    await expect(text).toContain('none of this costs $5 or $10');
+    await expect(canvasElement.querySelector('code')?.textContent).toBe('Report::print');
+    await expect(text).toContain('<b>raw html</b>');
+    await expect(canvasElement.querySelector('b')).toBeNull();
+    await expect([...canvasElement.querySelectorAll('a')].some((a) => a.getAttribute('href')?.startsWith('javascript'))).toBe(false);
+    await expect(text).toContain('a script');
+    await expect(canvasElement.querySelector('img')).toBeNull();
+    await expect(canvas.getByRole('link', { name: /diagram/ }).getAttribute('href')).toBe('https://example.com/d.png');
+    await expect(canvasElement.querySelector('pre')?.textContent).toContain('let args = Args::parse();');
+  },
+};
+
+export const ProseUnclosedFence: Story = {
+  name: 'Prose · cut off inside a code block',
+  render: () => <Prose text={UNCLOSED_FENCE} kind="answer" caret />,
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('pre')?.textContent).toContain('cargo test --workspace');
+    await expect(canvasElement.querySelector('pre .ex-caret')).not.toBeNull();
+  },
+};
+
+/** Driven by the play function: the streamed text so far, and how many blocks rendered for it. */
+let stream: ((length: number) => void) | undefined;
+let renders = 0;
+const countRender = () => {
+  renders += 1;
+};
+const STREAMED = Array.from({ length: 6 }, () => WHAT_MODELS_WRITE).join('\n');
+
+function Streaming() {
+  const [length, setLength] = useState(0);
+  useEffect(() => {
+    stream = setLength;
+    return () => {
+      stream = undefined;
+    };
+  }, []);
+  return <Prose text={STREAMED.slice(0, length)} kind="answer" caret />;
+}
+
+/**
+ * Streaming costs the growing block, not the answer: finished blocks keep
+ * their identity and are never rendered again. Every update renders the last
+ * block (and, as a block closes, the one before it) -- one or two, however
+ * long the answer is.
+ */
+export const ProseStreaming: Story = {
+  name: 'Prose · streaming renders only the growing block',
+  render: () => (
+    <ProseProbe.Provider value={countRender}>
+      <Streaming />
+    </ProseProbe.Provider>
+  ),
+  play: async ({ canvasElement }) => {
+    await expect(stream).toBeDefined();
+    const perStep: number[] = [];
+    for (let length = 12; length <= STREAMED.length; length += 12) {
+      renders = 0;
+      flushSync(() => stream?.(length));
+      perStep.push(renders);
+    }
+    await expect(perStep.length).toBeGreaterThan(200);
+    await expect(perStep.filter((n) => n < 1 || n > 2)).toEqual([]);
+    await expect(canvasElement.querySelectorAll('table')).toHaveLength(6);
+  },
 };
 
 // ---------------------------------------------------------------- Tool calls
