@@ -9,6 +9,7 @@
  * without a clock, so a story can stop the session at any moment.
  */
 
+import { frames } from './progress.ts';
 import type { DriveEvent, Response, Unplaced } from './events.ts';
 import type { Beat, Trigger } from './specimen.ts';
 import type { Ack, Command, DriveTransport } from './transport.ts';
@@ -34,7 +35,7 @@ export function expand(beat: Beat, start: number, ask?: string): Unplaced[] {
   for (const event of beat.events) {
     const t = start + event.t;
     if (event.kind === 'request') requestAt.set(event.id, t);
-    if (event.kind === 'response') out.push(...deltas(event, requestAt.get(event.to_request) ?? t, t));
+    if (event.kind === 'response') out.push(...deltas(event, requestAt.get(event.to_request) ?? t, t), ...frames(event, requestAt.get(event.to_request) ?? t, t));
     out.push(event.kind === 'ask' && ask !== undefined ? { ...event, t, text: ask } : { ...event, t });
   }
   return out.sort((a, b) => a.t - b.t);

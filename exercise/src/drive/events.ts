@@ -98,6 +98,21 @@ export interface Delta extends At {
   readonly text?: string;
 }
 
+/**
+ * Where a request is, right now: how much of its prompt is read, and how
+ * many tokens it has generated. Transient, like `delta`: never recorded. From
+ * llama.cpp's stream if it carries prompt progress, else its `/slots`, polled
+ * once a second while busy (#117 R3, ruled 2026-09-26).
+ */
+export interface ProgressFrame extends At {
+  readonly kind: 'progress';
+  readonly request: string;
+  /** The prompt: all of it, the part reused from the slot's cache, and how many of the rest -- the new tokens -- have been read. */
+  readonly prompt: { readonly total: number; readonly cache: number; readonly processed: number };
+  /** Tokens generated so far. */
+  readonly decoded: number;
+}
+
 export type Stop = Open<'stop' | 'tool' | 'length' | 'cancelled'>;
 
 export interface Response extends At {
@@ -257,6 +272,7 @@ export type DriveEvent =
   | Ask
   | Request
   | Delta
+  | ProgressFrame
   | Response
   | RequestFailed
   | ToolBegin
@@ -282,6 +298,7 @@ export const NEEDS_OF: { readonly [K in Kind]: readonly Need[] } = {
   ask: ['R2'],
   request: ['R2', 'R4'],
   delta: ['R3'],
+  progress: ['R3'],
   response: ['R2', 'R3'],
   'request.failed': ['R2'],
   'tool.begin': ['R2'],

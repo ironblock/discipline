@@ -4,6 +4,7 @@ import type { AssistantNode, Folded, SettledNode, SystemNode, UserNode } from '.
 import { Block } from './Block.tsx';
 import { counter, ms, rate, tokens } from './format.ts';
 import { Copy } from './Copy.tsx';
+import { Meter, readFraction } from './Meter.tsx';
 import { Prose } from './Prose.tsx';
 import { alarmOf, failOf, settleOf, stopOf } from './sets.ts';
 import { elapsed, useNow } from './surface.tsx';
@@ -93,6 +94,7 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
       label={silent ? 'assistant · a call, no text' : 'assistant'}
       thin={silent}
       live={live}
+      meter={node.progress === 'prefill' && node.meter ? readFraction(node.meter) : undefined}
       alarm={node.failure ? 'bad' : alarmOf(stopped.level)}
       stats={
         node.failure
@@ -132,6 +134,9 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
                 ),
                 title: 'how long since the request',
               },
+              // Generating, the meter counts as it goes; the response's timings replace these.
+              node.progress === 'streaming' && node.meter !== undefined && { value: tokens(node.meter.decoded), unit: 'tok', title: 'tokens generated so far' },
+              node.progress === 'streaming' && node.meter?.tgRate !== undefined && { value: rate(node.meter.tgRate, 1000), unit: 'tg t/s', title: 'generation speed so far' },
             ]
       }
       provenance={node}
@@ -178,7 +183,9 @@ function AssistantBody({
           ) : null}
         </div>
       ) : null}
-      {node.progress === 'prefill' ? (
+      {node.progress === 'prefill' && node.meter ? (
+        <Meter meter={node.meter} />
+      ) : node.progress === 'prefill' ? (
         <div className="ex-waiting" role="status">
           <span className="ex-waiting__line" />
           <span className="ex-waiting__line" />

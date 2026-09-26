@@ -65,6 +65,22 @@ export interface Generation {
   readonly wallMs?: number;
   /** Why no response will come: the request failed. */
   readonly failure?: { readonly reason: FailReason; readonly message: string };
+  /** Where a running request is, from its progress frames; absent once it has answered. */
+  readonly meter?: Meter;
+}
+
+/**
+ * A running request's progress: its prompt (all of it, the warm part, and
+ * how many new tokens are read -- held at the most any frame said), tokens
+ * generated, and each phase's speed so far, in tokens per second.
+ */
+export interface Meter {
+  readonly total: number;
+  readonly cache: number;
+  readonly processed: number;
+  readonly decoded: number;
+  readonly ppRate?: number;
+  readonly tgRate?: number;
 }
 
 export interface AssistantNode extends Provenance, Generation {
@@ -218,6 +234,7 @@ type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 interface GenerationBuilder {
   request: EventOf<'request'>;
   deltas: EventOf<'delta'>[];
+  frames: EventOf<'progress'>[];
   response?: EventOf<'response'>;
   failed?: EventOf<'request.failed'>;
 }
@@ -245,6 +262,27 @@ function generation(g: GenerationBuilder): Generation {
     ...(response || failed ? { endedAt: (response ?? failed)!.t } : {}),
     ...(response ? { stop: response.stop, timings: response.timings, wallMs: response.t - request.t } : {}),
     ...(failed && !response ? { failure: { reason: failed.reason, message: failed.message }, wallMs: failed.t - request.t } : {}),
+    ...(!response && !failed && g.frames.length > 0 ? { meter: meterOf(g.frames) } : {}),
+  };
+}
+
+function meterOf(frames: readonly EventOf<'progress'>[]): Meter {
+  const last = frames.at(-1)!;
+  const top = frames.reduce((best, f) => (f.prompt.processed > best.prompt.processed ? f : best), frames[0]!);
+  const first = frames[0]!;
+  const perSecond = (n: number, ms: number) => (ms > 0 && n > 0 ? (1000 * n) / ms : undefined);
+  const ppRate = perSecond(top.prompt.processed - first.prompt.processed, top.t - first.t);
+  // Generation is timed from the first frame that had read the whole prompt.
+  const newTokens = last.prompt.total - last.prompt.cache;
+  const read = frames.find((f) => f.prompt.processed >= newTokens);
+  const tgRate = read ? perSecond(last.decoded - read.decoded, last.t - read.t) : undefined;
+  return {
+    total: last.prompt.total,
+    cache: last.prompt.cache,
+    processed: top.prompt.processed,
+    decoded: last.decoded,
+    ...(ppRate !== undefined ? { ppRate } : {}),
+    ...(tgRate !== undefined ? { tgRate } : {}),
   };
 }
 
@@ -321,7 +359,7 @@ export function fold(events: readonly DriveEvent[]): Session {
         era().slots.push({ kind: 'user', turn: e.turn });
         break;
       case 'request':
-        generations.set(e.id, { request: e, deltas: [] });
+        generations.set(e.id, { request: e, deltas: [], frames: [] });
         if (e.lane === 'trunk') {
           if (!firstRequestOfTurn.has(e.turn)) firstRequestOfTurn.set(e.turn, e.id);
           era().slots.push({ kind: 'assistant', request: e.id });
@@ -332,6 +370,9 @@ export function fold(events: readonly DriveEvent[]): Session {
         break;
       case 'delta':
         generations.get(e.request)?.deltas.push(e);
+        break;
+      case 'progress':
+        generations.get(e.request)?.frames.push(e);
         break;
       case 'response': {
         const g = generations.get(e.to_request);

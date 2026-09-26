@@ -226,12 +226,41 @@ export const AssistantPrefill: Story = {
   render: () => <AssistantMessage node={trunkNodeAt({ beat: 2, t: 5_000 }, 'q/3', 'assistant')} />,
 };
 
+/**
+ * A 16k-token prompt, half read: the meter shows the warm part there from the
+ * start, the new part filling, how many of how many, how fast, and how long
+ * is left -- instead of twelve seconds of "reading the prompt".
+ */
+export const AssistantPrefillMetered: Story = {
+  name: 'Message · assistant, prefill metered',
+  render: () => <AssistantMessage node={trunkNodeAt({ beat: 2, t: 10_000 }, 'q/3', 'assistant')} />,
+  play: async ({ canvasElement }) => {
+    const meter = canvasElement.querySelector('.ex-meter') as HTMLElement;
+    await expect(meter).not.toBeNull();
+    const line = meter.querySelector('.ex-meter__line')?.textContent ?? '';
+    await expect(line).toMatch(/of 16\.4k new/);
+    await expect(line).toMatch(/1\.4k warm/);
+    await expect(line).toMatch(/pp t\/s/);
+    await expect(line).toMatch(/s left/);
+    const read = Number(meter.style.getPropertyValue('--read'));
+    await expect(read).toBeGreaterThan(0.4);
+    await expect(read).toBeLessThan(0.6);
+    await expect(Number(meter.style.getPropertyValue('--warm'))).toBeCloseTo(1410 / 17830, 2);
+    // The block's own underline says the same, determinate.
+    await expect(canvasElement.querySelector('.ex-block[data-meter]')).not.toBeNull();
+  },
+};
+
 export const AssistantStreaming: Story = {
   name: 'Message · assistant, streaming',
   render: () => <AssistantMessage node={trunkNodeAt(MOMENTS.streaming, 'q/3', 'assistant')} />,
   // At this moment the answer ends in a list item with nothing in it yet: the caret still has to show.
   play: async ({ canvasElement }) => {
     await expect(canvasElement.querySelectorAll('.ex-caret')).toHaveLength(1);
+    // Generating, the footer counts tokens and speed as they come.
+    const foot = canvasElement.querySelector('.ex-block__foot')?.textContent ?? '';
+    await expect(foot).toMatch(/\d+tok/);
+    await expect(foot).toMatch(/tg t\/s/);
   },
 };
 

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 import type { ForkLane } from '../drive/events.ts';
 import { laneStyle } from './sets.ts';
@@ -28,6 +28,8 @@ export interface BlockProps {
   /** Thin: a bar with a footer and no body, for a harness step. */
   readonly thin?: boolean;
   readonly live?: boolean;
+  /** How far a live block's prefill has got, 0..1: its underline fills rather than sweeps. */
+  readonly meter?: number | undefined;
   /** Something here went wrong, and how badly: what the minimap marks. */
   readonly alarm?: 'warn' | 'bad' | undefined;
   /** The node's id: its DOM id too, so `#<id>` links to it. */
@@ -42,7 +44,7 @@ export interface BlockProps {
  * footer of what the harness measured. Every message, tool call and lane
  * step on the surface is one of these, refined.
  */
-export function Block({ tone, lane, label, stats = [], provenance, thin = false, live = false, alarm, id, actions, children }: BlockProps) {
+export function Block({ tone, lane, label, stats = [], provenance, thin = false, live = false, meter, alarm, id, actions, children }: BlockProps) {
   const { curtain } = useSurface();
   const target = useTarget();
   const shown = stats.filter((s): s is Stat => Boolean(s));
@@ -52,7 +54,8 @@ export function Block({ tone, lane, label, stats = [], provenance, thin = false,
       data-tone={tone}
       data-lane={lane}
       data-alarm={alarm}
-      style={laneStyle(lane)}
+      style={meter !== undefined ? ({ ...laneStyle(lane), '--meter': meter } as CSSProperties) : laneStyle(lane)}
+      data-meter={meter !== undefined ? '' : undefined}
       id={id}
       data-id={id}
       data-target={id !== undefined && id === target ? '' : undefined}

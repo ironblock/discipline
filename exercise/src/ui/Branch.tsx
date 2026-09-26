@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { BranchNode, Folded, PatchNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { barHeight, rowsOf } from './condensed.ts';
+import { readFraction } from './Meter.tsx';
 import { ms, rate, tokens } from './format.ts';
 import { alarmOf, failOf, opOf, outcomeOf } from './sets.ts';
 import './branch.css';
@@ -27,6 +28,7 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         label={node.lane}
         thin
         live={live}
+        meter={live && node.progress === 'prefill' && node.meter ? readFraction(node.meter) : undefined}
         alarm={outcome ? alarmOf(outcome.level) : undefined}
         stats={[
           node.wallMs !== undefined && { value: ms(node.wallMs), title: 'wall clock' },

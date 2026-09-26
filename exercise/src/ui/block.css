@@ -180,6 +180,15 @@
   opacity: 0.6;
 }
 
+/* In prefill with a meter, the underline is determinate: it fills as the prompt is read. */
+.ex-block--live[data-meter]::after {
+  animation: none;
+  background: linear-gradient(90deg, var(--tone-ink) calc(var(--meter) * 100%), transparent 0);
+  background-size: 100% 100%;
+  opacity: 0.8;
+  transition: background 0.25s linear;
+}
+
 @keyframes ex-sweep {
   from { background-position: -40% 0; }
   to { background-position: 140% 0; }

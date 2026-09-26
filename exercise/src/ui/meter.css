@@ -1,0 +1,51 @@
+/*
+ * The prefill meter: the whole prompt as a bar. The warm part (reused from
+ * the slot's cache) is there from the start, dim; the new part fills in the
+ * block's own ink as it is read; the rest is the track.
+ */
+.ex-meter {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.ex-meter__bar {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--tone-ink) 12%, transparent);
+  overflow: hidden;
+}
+
+.ex-meter__warm,
+.ex-meter__read {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.ex-meter__warm {
+  left: 0;
+  width: calc(var(--warm) * 100%);
+  background: color-mix(in oklab, var(--tone-ink) 35%, transparent);
+}
+
+/* The new part: from the end of the warm part, as far as has been read of the rest. */
+.ex-meter__read {
+  left: calc(var(--warm) * 100%);
+  width: calc((1 - var(--warm)) * var(--read) * 100%);
+  background: var(--tone-ink);
+  box-shadow: 0 0 var(--led-radius) var(--tone-ink);
+  transition: width 0.25s linear;
+}
+
+.ex-meter__line {
+  margin: 0;
+  font: var(--size-stats) / 1.4 var(--font-stats);
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ex-meter__read { transition: none; }
+}

@@ -11,6 +11,7 @@
  */
 
 import { deltas } from './canned.ts';
+import { frames } from './progress.ts';
 import type { DriveEvent, EventOf, Unplaced } from './events.ts';
 import type { Ack, DriveTransport } from './transport.ts';
 import firstDrive from './recorded/first-drive.json?raw';
@@ -51,7 +52,12 @@ export function placed(recording: Recording): readonly DriveEvent[] {
   const out: Unplaced[] = [];
   for (const event of recording.events) {
     if (event.kind === 'request') requestAt.set(event.id, event.t);
-    if (event.kind === 'response') out.push(...deltas(event as Omit<EventOf<'response'>, 'seq'>, requestAt.get(event.to_request) ?? event.t, event.t));
+    if (event.kind === 'response') {
+      const response = event as Omit<EventOf<'response'>, 'seq'>;
+      const requested = requestAt.get(event.to_request) ?? event.t;
+      // The record has no progress; frames are made from the response's timings, once a second as `/slots` is polled.
+      out.push(...deltas(response, requested, event.t), ...frames(response, requested, event.t, 1000));
+    }
     out.push(event);
   }
   return out
