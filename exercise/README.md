@@ -17,6 +17,8 @@ pnpm storybook        # the surface at every moment of the specimen, http://loca
 pnpm verify           # typecheck, lint, unit tests, every story as a browser test
 ```
 
+CI runs the same thing as the repository's `exercise` check (`./verify.sh --only exercise`, owned in `.github/check-owners.tsv`, run by `pkg-exercise.yml`); its seeded fault is a type error.
+
 - **The trunk is a conversation.** One block per message, role by fill,
   prose proportional, chain-of-thought italic, a low-contrast mono footer of
   what the harness measured on every block.

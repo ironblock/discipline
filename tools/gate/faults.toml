@@ -859,6 +859,15 @@ legacy_signature = "hygiene: external-subresource:"
 migrated = false
 
 [[fault]]
+id = "exercise.exercise_type_error"
+kind = "seeded-gate"
+check = "exercise"
+label = "a type error in the web surface"
+failure_class = "exercise.typecheck"
+legacy_signature = "error TS2322"
+migrated = false
+
+[[fault]]
 id = "ci.ci"
 kind = "seeded-gate"
 check = "ci"

@@ -84,7 +84,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results recompute regimen lanes metadata hygiene pages ci history injections resolver derive parity)
+readonly CHECKS=(fmt clippy test library results recompute regimen lanes metadata hygiene pages exercise ci history injections resolver derive parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -350,6 +350,22 @@ check_hygiene() { bash scripts/hygiene.sh; }
 # no form, no credential shapes.
 check_pages() {
   bash scripts/hygiene.sh --patterns scripts/pages-patterns.tsv --tree pages
+}
+
+# The web surface in exercise/: its typecheck, its lint, and every story as a
+# browser test (Vitest runs each Storybook story in Chromium, the plain unit
+# tests in Node). It needs Node and pnpm, at the versions exercise/package.json
+# declares. The install is frozen to the lockfile; the browser is fetched only
+# when the machine does not have it yet, and only after the cheap steps pass.
+check_exercise() {
+  (
+    cd exercise &&
+      pnpm install --frozen-lockfile &&
+      pnpm typecheck &&
+      pnpm lint &&
+      pnpm exec playwright install chromium &&
+      pnpm test
+  )
 }
 
 # The wiring between these checks and the CI that runs them. CI can go green
@@ -2510,6 +2526,13 @@ inject_toml_subset() {
 
 inject_metadata() {
   edit_in_place 's/"name": "claim"/"name": "claim-renamed"/' .github/labels.json
+}
+
+# A type error in the surface. `tsc` prints `error TS2322` for exactly this --
+# a string where a number was declared -- and prints nothing like it on a
+# clean tree, so the signature is the fault's own.
+inject_exercise_type_error() {
+  printf '\nexport const seededFault: number = %s;\n' "'not a number'" >> exercise/src/ui/format.ts
 }
 
 inject_hygiene() {
@@ -6852,6 +6875,8 @@ selftest() {
     'hygiene: internal-ticket-id:'
   seeded_case "external subresource on the site"      pages    inject_pages \
     'hygiene: external-subresource:'
+  seeded_case "a type error in the web surface"       exercise inject_exercise_type_error \
+    'error TS2322'
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
     'formats::interview::tests::no_dogma_tag_is_missing_from_the_table \.\.\. FAILED' 'lib/formats::interview'
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \

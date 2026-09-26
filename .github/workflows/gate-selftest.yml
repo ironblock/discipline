@@ -116,6 +116,23 @@ jobs:
       - name: Declare this a host where the sandbox is required
         run: echo "DIET_REQUIRE_SANDBOX=1" >> "$GITHUB_ENV"
 
+      # The web surface's seeded fault runs `verify.sh --only exercise` in a
+      # sandbox, which installs its dependencies and typechecks: it needs Node
+      # and pnpm, at the versions exercise/package.json declares. Every shard
+      # gets them, for the reason every shard gets bubblewrap above. These
+      # are steps around the selftest, so .github/gate-budget.tsv's
+      # `runner_overhead_seconds` is due a re-measure on the first run that
+      # has them.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: exercise/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: exercise/pnpm-lock.yaml
+
       - name: ./verify.sh --selftest --shard ${{ matrix.shard }}
         run: >-
           ./verify.sh --selftest
