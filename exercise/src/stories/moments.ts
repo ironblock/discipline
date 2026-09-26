@@ -9,6 +9,7 @@
 
 import { snapshot } from '../drive/canned.ts';
 import type { Cursor } from '../drive/canned.ts';
+import type { DriveEvent } from '../drive/events.ts';
 import { SPECIMEN } from '../drive/specimen.ts';
 import { fold } from '../session/fold.ts';
 import type { BranchNode, Folded, Session, TrunkNode } from '../session/fold.ts';
@@ -34,6 +35,18 @@ export function branchAt(cursor: Cursor, id: string): Folded<BranchNode> {
     if (found) return found;
   }
   throw new Error(`no branch ${id} at beat ${cursor.beat}`);
+}
+
+/**
+ * The specimen at a cursor with its log edited before folding: how a story
+ * shows what the specimen never says -- a lane, a tool, an outcome this
+ * surface does not know -- while every node still comes out of `fold()`.
+ * `edit` sees events as plain records, since the point is to say things the
+ * types do not name.
+ */
+export function variantAt(cursor: Cursor, edit: (event: Readonly<Record<string, unknown>>) => Readonly<Record<string, unknown>> | readonly Readonly<Record<string, unknown>>[]): Session {
+  const log = snapshot(SPECIMEN, cursor).flatMap((e) => edit(e as unknown as Record<string, unknown>));
+  return fold(log.map((e, seq) => ({ ...e, seq }) as unknown as DriveEvent));
 }
 
 /** Named moments of the specimen, in session order. */

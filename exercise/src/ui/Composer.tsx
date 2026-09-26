@@ -2,7 +2,8 @@ import { useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 
 import type { SessionState } from '../session/fold.ts';
-import type { Ack } from '../drive/transport.ts';
+import type { Ack, Command } from '../drive/transport.ts';
+import { refusalOf } from './sets.ts';
 import './composer.css';
 
 export interface ComposerProps {
@@ -10,9 +11,8 @@ export interface ComposerProps {
   readonly phase: string;
   /** Phases the person may declare a transition to. */
   readonly phases: readonly string[];
-  readonly onSend?: (ask: string) => Promise<Ack>;
-  readonly onCancel?: () => Promise<Ack>;
-  readonly onSeam?: (to: string) => Promise<Ack>;
+  /** Where commands go. Absent: a composer that only shows the session's state. */
+  readonly dispatch?: (command: Command) => Promise<Ack>;
   /** A line under the input, for a transport that has something to say. */
   readonly hint?: string | undefined;
 }
@@ -27,15 +27,7 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
   ended: 'the session has ended',
 };
 
-const REFUSED: Readonly<Record<string, string>> = {
-  busy: 'not taken: something is still running',
-  ended: 'not taken: the session has ended',
-  'nothing-to-seam': 'nothing to refill yet: no turn has settled',
-  'nothing-to-cancel': 'nothing is running',
-  'off-script': 'the canned script expects something else next',
-};
-
-export function Composer({ state, phase, phases, onSend, onCancel, onSeam, hint }: ComposerProps) {
+export function Composer({ state, phase, phases, dispatch, hint }: ComposerProps) {
   const [draft, setDraft] = useState('');
   const [refusal, setRefusal] = useState<string | undefined>();
   const next = phases[phases.indexOf(phase) + 1] ?? phases.find((p) => p !== phase) ?? phase;
@@ -43,21 +35,26 @@ export function Composer({ state, phase, phases, onSend, onCancel, onSeam, hint 
   const idle = state === 'awaiting';
   const running = state === 'turn' || state === 'capture' || state === 'ratify';
 
-  const answer = (ack: Ack) => setRefusal(ack.ok ? undefined : REFUSED[ack.refused]);
+  const answer = (ack: Ack) => {
+    if (ack.ok) return setRefusal(undefined);
+    const refused = refusalOf(ack.refused);
+    setRefusal(refused.known ? refused.label : `not taken: ${refused.label}`);
+  };
+  const run = (command: Command) => dispatch && void dispatch(command).then(answer);
 
   const send = async (e?: FormEvent) => {
     e?.preventDefault();
-    if (!onSend || !idle || draft.trim() === '') return;
-    const ack = await onSend(draft.trim());
+    if (!dispatch || !idle || draft.trim() === '') return;
+    const ack = await dispatch({ kind: 'ask', text: draft.trim() });
     answer(ack);
     if (ack.ok) setDraft('');
   };
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) void send(e);
-    if (e.key === 'Escape' && running && onCancel) {
+    if (e.key === 'Escape' && running && dispatch) {
       e.preventDefault();
-      void onCancel().then(answer);
+      run({ kind: 'cancel' });
     }
   };
 
@@ -90,16 +87,16 @@ export function Composer({ state, phase, phases, onSend, onCancel, onSeam, hint 
                 <option key={p}>{p}</option>
               ))}
           </select>
-          <button type="button" disabled={!idle || !onSeam} onClick={() => onSeam && void onSeam(to).then(answer)}>
+          <button type="button" disabled={!idle || !dispatch} onClick={() => run({ kind: 'seam', to })}>
             refill
           </button>
         </label>
         {running ? (
-          <button type="button" className="ex-composer__cancel" disabled={!onCancel} onClick={() => onCancel && void onCancel().then(answer)}>
+          <button type="button" className="ex-composer__cancel" disabled={!dispatch} onClick={() => run({ kind: 'cancel' })}>
             cancel
           </button>
         ) : (
-          <button type="submit" className="ex-composer__send" disabled={!idle || !onSend || draft.trim() === ''}>
+          <button type="submit" className="ex-composer__send" disabled={!idle || !dispatch || draft.trim() === ''}>
             send
           </button>
         )}

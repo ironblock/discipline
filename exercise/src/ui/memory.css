@@ -107,3 +107,14 @@
   color: var(--ink-faint);
   text-decoration: line-through;
 }
+
+/* An entry's last op, when it was not one that sets its state: `park`, `resolve`, or a name from a newer drive. */
+.ex-memory__op {
+  margin-left: 0.5em;
+  padding: 0 0.35em;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font: var(--size-stats) / 1.4 var(--font-stats);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}

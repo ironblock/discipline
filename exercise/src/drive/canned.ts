@@ -11,7 +11,7 @@
 
 import type { DriveEvent, Response, Unplaced } from './events.ts';
 import type { Beat, Trigger } from './specimen.ts';
-import type { Ack, DriveTransport } from './transport.ts';
+import type { Ack, Command, DriveTransport } from './transport.ts';
 
 /** The gap a snapshot assumes between beats: a person reading, then typing. */
 export const READING_GAP_MS = 20_000;
@@ -124,19 +124,26 @@ export class CannedTransport implements DriveTransport {
     return () => this.#listeners.delete(listener);
   }
 
-  send(ask: string): Promise<Ack> {
-    return Promise.resolve(this.#fire('send', ask));
+  dispatch(command: Command): Promise<Ack> {
+    switch (command.kind) {
+      case 'ask':
+        return Promise.resolve(this.#fire('send', command.text));
+      case 'seam':
+        return Promise.resolve(this.#seam(command.to));
+      case 'cancel':
+        return Promise.resolve(this.#cancel());
+    }
   }
 
-  declareSeam(to: string): Promise<Ack> {
-    if (!this.#log.some((e) => e.kind === 'turn.settled')) return Promise.resolve({ ok: false, refused: 'nothing-to-seam' });
+  #seam(to: string): Ack {
+    if (!this.#log.some((e) => e.kind === 'turn.settled')) return { ok: false, refused: 'nothing-to-seam' };
     const scripted = this.#beats[this.#next]?.events.find((e) => e.kind === 'seam');
-    if (scripted?.kind === 'seam' && scripted.phase.to !== to) return Promise.resolve({ ok: false, refused: 'off-script' });
-    return Promise.resolve(this.#fire('seam'));
+    if (scripted?.kind === 'seam' && scripted.phase && scripted.phase.to !== to) return { ok: false, refused: 'off-script' };
+    return this.#fire('seam');
   }
 
-  cancel(): Promise<Ack> {
-    if (!this.busy) return Promise.resolve({ ok: false, refused: 'nothing-to-cancel' });
+  #cancel(): Ack {
+    if (!this.busy) return { ok: false, refused: 'nothing-to-cancel' };
     for (const timer of this.#timers) clearTimeout(timer);
     this.#timers.clear();
     const now = this.#now();
@@ -156,7 +163,7 @@ export class CannedTransport implements DriveTransport {
     }
     for (const fork of open.forks) this.#emit({ kind: 'fork.settled', t: now, id: fork, outcome: 'cancelled' });
     if (open.turn !== undefined) this.#emit({ kind: 'turn.settled', t: now, turn: open.turn, reason: 'cancelled' });
-    return Promise.resolve({ ok: true });
+    return { ok: true };
   }
 
   /** Stop every timer. The log stays. */

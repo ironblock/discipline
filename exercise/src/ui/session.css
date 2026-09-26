@@ -26,7 +26,7 @@
   --pool-lane: 0%;
   --pool-memory: 0%;
   --pool-trunk-colour: var(--ink-user);
-  --pool-lane-colour: var(--ink-interview);
+  --pool-lane-colour: var(--lane-ink, var(--ink-interview));
   --live-field:
     radial-gradient(34rem 22rem at var(--x-trunk) 100%, color-mix(in oklab, var(--pool-trunk-colour) var(--pool-trunk), transparent), transparent 72%),
     radial-gradient(18rem 34rem at var(--x-lane, -50%) 45%, color-mix(in oklab, var(--pool-lane-colour) var(--pool-lane), transparent), transparent 72%),
@@ -54,8 +54,7 @@
 }
 
 .ex-session[data-state='turn'] { --pool-trunk: var(--pool-live); --pool-trunk-colour: var(--ink-assistant); }
-.ex-session[data-state='capture'] { --pool-trunk-colour: var(--ink-interview); }
-.ex-session[data-state='ratify'] { --pool-lane-colour: var(--ink-ratify); }
+.ex-session[data-state='capture'] { --pool-trunk-colour: var(--lane-ink, var(--ink-interview)); }
 .ex-session--curtain[data-lanes-busy] { --pool-lane: var(--pool-live); }
 .ex-session--curtain[data-fresh] { --pool-memory: var(--pool-live); }
 .ex-session[data-state='ended'] { --pool-trunk: 0%; --pool-lane: 0%; --pool-memory: 0%; }
@@ -150,8 +149,7 @@
   letter-spacing: 0.08em;
 }
 
-.ex-lanehead { --led: var(--ink-interview); }
-.ex-lanehead[data-lane='ratify'] { --led: var(--ink-ratify); }
+.ex-lanehead { --led: var(--lane-ink, var(--ink-lane)); }
 
 .ex-lanehead[data-busy] {
   color: var(--led);
@@ -247,7 +245,7 @@
 }
 
 .ex-branchcell:has(.ex-branch[data-outcome='running']) .ex-connector {
-  color: var(--ink-interview);
+  color: var(--lane-ink, var(--ink-lane));
 }
 
 /* Curtain closed: a quiet marker where a branch left the trunk. */

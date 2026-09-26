@@ -1,5 +1,6 @@
 import type { Folded, SeamNode } from '../session/fold.ts';
 import { ms, tokens } from './format.ts';
+import { seamReasonOf } from './sets.ts';
 import './seam.css';
 
 /**
@@ -13,9 +14,13 @@ export function Seam({ node }: { readonly node: Folded<SeamNode> }) {
       <span className="ex-seam__rule" aria-hidden="true" />
       <div className="ex-seam__label">
         <span className="ex-seam__kind">refill</span>
-        <span>
-          {node.phase.from} → <strong>{node.phase.to}</strong>
-        </span>
+        {node.phase ? (
+          <span>
+            {node.phase.from} → <strong>{node.phase.to}</strong>
+          </span>
+        ) : (
+          <span title="the record does not say which phases this seam moved between">phase not recorded</span>
+        )}
         <span title="the trunk's prefix before and after">
           {node.prefixBefore !== undefined ? `${tokens(node.prefixBefore)} → ` : ''}
           <strong>{tokens(node.prefixAfter)}</strong> tok
@@ -24,7 +29,9 @@ export function Seam({ node }: { readonly node: Folded<SeamNode> }) {
           {node.hashBefore} → {node.hashAfter}
         </span>
         <span title="the pre-warm: the new prefix sent once so the next ask finds it cached">warm {ms(node.warm.prompt_ms)}</span>
-        <span className="ex-seam__reason">{node.reason === 'operator' ? 'declared by you' : node.reason}</span>
+        <span className="ex-seam__reason" data-level={seamReasonOf(node.reason).level}>
+          {seamReasonOf(node.reason).label}
+        </span>
       </div>
       <span className="ex-seam__rule" aria-hidden="true" />
     </div>

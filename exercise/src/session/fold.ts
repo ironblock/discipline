@@ -10,7 +10,7 @@
  * node waits on, which is what the gaps overlay outlines.
  */
 
-import type { DriveEvent, EventOf, ForkOutcome, Lane, Need, PatchOp, SeamReason, Stop, Timings } from '../drive/events.ts';
+import type { DriveEvent, EventOf, ForkLane, ForkOutcome, Lane, Need, PatchOp, SeamReason, Stop, Timings, Tool } from '../drive/events.ts';
 import { NEEDS_OF } from '../drive/events.ts';
 
 declare const folded: unique symbol;
@@ -70,12 +70,14 @@ export interface ToolNode extends Provenance {
   readonly kind: 'tool';
   readonly id: string;
   readonly turn: number;
-  readonly command: string;
+  readonly tool: Tool;
+  readonly args: Readonly<Record<string, unknown>>;
   /** Session time the call began. */
   readonly startedAt: number;
   readonly running: boolean;
   readonly exit?: number;
   readonly output?: string;
+  readonly truncated?: boolean;
   readonly ms?: number;
 }
 
@@ -85,15 +87,16 @@ export interface PatchNode extends Provenance {
   readonly id: string;
   readonly op: PatchOp;
   readonly entryId: string;
-  readonly category: string;
+  readonly category?: string;
   readonly text: string;
   readonly supersedes?: string;
+  readonly provenance?: string;
 }
 
 export interface BranchNode extends Provenance, Partial<Generation> {
   readonly kind: 'branch';
   readonly id: string;
-  readonly lane: Exclude<Lane, 'trunk'>;
+  readonly lane: ForkLane;
   readonly slot: number;
   /** The trunk node it branched from. */
   readonly at: string;
@@ -109,7 +112,7 @@ export interface SeamNode extends Provenance {
   readonly id: string;
   readonly atTurn: number;
   readonly reason: SeamReason;
-  readonly phase: { readonly from: string; readonly to: string };
+  readonly phase?: { readonly from: string; readonly to: string };
   readonly hashBefore: string;
   readonly hashAfter: string;
   /** The trunk's prefix just before the seam: what the refill replaced. */
@@ -130,11 +133,14 @@ export type EntryState = 'live' | 'superseded' | 'retired';
 
 export interface MemoryEntry extends Provenance {
   readonly id: string;
-  readonly category: string;
+  readonly category?: string;
   readonly text: string;
   readonly state: EntryState;
   /** The patch that last changed it. */
   readonly by: string;
+  /** Its last op, when that was not one of the three that set `state`. */
+  readonly op?: PatchOp;
+  readonly provenance?: string;
   /** Log position of the patch that last changed it. */
   readonly landedAt: number;
   /** Landed since the last ask: what the operator has not seen yet. */
@@ -165,6 +171,8 @@ export interface Session {
   /** Session time of the last event. */
   readonly now: number;
   readonly events: number;
+  /** Events of a kind this surface does not know, by kind: kept and counted, never dropped silently. */
+  readonly unknown: ReadonlyMap<string, number>;
 }
 
 function brand<T>(value: T): Folded<T> {
@@ -223,6 +231,7 @@ export function fold(events: readonly DriveEvent[]): Session {
       occupancy: [],
       now: 0,
       events: events.length,
+      unknown: new Map(),
     };
   }
 
@@ -244,6 +253,7 @@ export function fold(events: readonly DriveEvent[]): Session {
   ];
   const era = () => eras[eras.length - 1]!;
 
+  const unknown = new Map<string, number>();
   let phase = start.phase;
   let openTurn: number | undefined;
   let lastAskSeq = -1;
@@ -300,21 +310,33 @@ export function fold(events: readonly DriveEvent[]): Session {
       }
       case 'patch': {
         forks.get(e.from)?.patches.push(e);
-        const base = { category: e.entry.category, text: e.entry.text, by: e.id, seq: e.seq, ...provenance(e) };
+        const old = entries.get(e.entry.id);
+        const base = {
+          ...(e.entry.category !== undefined ? { category: e.entry.category } : {}),
+          ...(e.provenance !== undefined ? { provenance: e.provenance } : {}),
+          text: e.entry.text,
+          by: e.id,
+          seq: e.seq,
+          ...provenance(e),
+        };
         if (e.op === 'retire') {
-          const old = entries.get(e.entry.id);
           if (old) entries.set(e.entry.id, { ...old, state: 'retired', by: e.id, seq: e.seq, from: [...old.from, e.seq] });
           break;
         }
         if (e.op === 'supersede' && e.supersedes) {
-          const old = entries.get(e.supersedes);
-          if (old) entries.set(e.supersedes, { ...old, state: 'superseded', by: e.id, seq: e.seq, from: [...old.from, e.seq] });
+          const replaced = entries.get(e.supersedes);
+          if (replaced) entries.set(e.supersedes, { ...replaced, state: 'superseded', by: e.id, seq: e.seq, from: [...replaced.from, e.seq] });
         }
-        entries.set(e.entry.id, { id: e.entry.id, state: 'live', ...base });
+        if (e.op === 'add' || e.op === 'supersede' || !old) {
+          entries.set(e.entry.id, { id: e.entry.id, state: 'live', ...base, ...(e.op !== 'add' && e.op !== 'supersede' ? { op: e.op } : {}) });
+          break;
+        }
+        // Any other op rewrites the entry, keeps its state, and is shown by name.
+        entries.set(e.entry.id, { ...old, ...base, op: e.op, from: [...old.from, e.seq] });
         break;
       }
       case 'seam': {
-        phase = e.phase.to;
+        if (e.phase) phase = e.phase.to;
         const system: SystemNode = {
           kind: 'system',
           id: `system/${e.id}`,
@@ -329,6 +351,11 @@ export function fold(events: readonly DriveEvent[]): Session {
       case 'session.end':
         ended = true;
         break;
+      default: {
+        // A kind from a newer drive: the log may carry it before the surface draws it.
+        const kind = (e as { readonly kind: string }).kind;
+        unknown.set(kind, (unknown.get(kind) ?? 0) + 1);
+      }
     }
   }
 
@@ -370,10 +397,11 @@ export function fold(events: readonly DriveEvent[]): Session {
             kind: 'tool',
             id: begin.id,
             turn: begin.turn,
-            command: begin.command,
+            tool: begin.tool,
+            args: begin.args,
             startedAt: begin.t,
             running: end === undefined,
-            ...(end ? { exit: end.exit, output: end.output, ms: end.t - begin.t } : {}),
+            ...(end ? { exit: end.exit, output: end.output, ms: end.t - begin.t, ...(end.truncated ? { truncated: true } : {}) } : {}),
             ...provenance(begin, end),
           });
         }
@@ -386,7 +414,7 @@ export function fold(events: readonly DriveEvent[]): Session {
           id: seamEvent.id,
           atTurn: seamEvent.at_turn,
           reason: seamEvent.reason,
-          phase: seamEvent.phase,
+          ...(seamEvent.phase ? { phase: seamEvent.phase } : {}),
           hashBefore: seamEvent.prefix_hash_before,
           hashAfter: seamEvent.prefix_hash_after,
           ...(previousEraEnd ? { prefixBefore: trunkPrefixAt(previousEraEnd)! } : {}),
@@ -428,9 +456,10 @@ export function fold(events: readonly DriveEvent[]): Session {
           id: p.id,
           op: p.op,
           entryId: p.entry.id,
-          category: p.entry.category,
+          ...(p.entry.category !== undefined ? { category: p.entry.category } : {}),
           text: p.entry.text,
           ...(p.supersedes ? { supersedes: p.supersedes } : {}),
+          ...(p.provenance ? { provenance: p.provenance } : {}),
           ...provenance(p),
         }),
       ),
@@ -472,5 +501,6 @@ export function fold(events: readonly DriveEvent[]): Session {
     occupancy,
     now: events.at(-1)?.t ?? 0,
     events: events.length,
+    unknown,
   };
 }

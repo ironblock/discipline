@@ -199,7 +199,7 @@ export const SPECIMEN: readonly Beat[] = [
         stop: 'tool',
         timings: timings(1236, 0, 820, 64, 1830),
       },
-      { kind: 'tool.begin', t: 2700, id: 't/1', turn: 1, after: 'q/1#response', command: 'ls src && wc -l src/*.rs' },
+      { kind: 'tool.begin', t: 2700, id: 't/1', turn: 1, after: 'q/1#response', tool: 'bash', args: { command: 'ls src && wc -l src/*.rs' } },
       {
         kind: 'tool.end',
         t: 2740,
@@ -218,7 +218,7 @@ export const SPECIMEN: readonly Beat[] = [
         stop: 'tool',
         timings: timings(108, 1300, 90, 41, 1150),
       },
-      { kind: 'tool.begin', t: 4030, id: 't/2', turn: 1, after: 'q/2#response', command: 'cat src/report.rs' },
+      { kind: 'tool.begin', t: 4030, id: 't/2', turn: 1, after: 'q/2#response', tool: 'bash', args: { command: 'cat src/report.rs' } },
       { kind: 'tool.end', t: 4045, id: 't/2', exit: 0, output: reportRs() },
       { kind: 'request', t: 4060, id: 'q/3', lane: 'trunk', slot: 0, turn: 1 },
       {
@@ -395,7 +395,7 @@ export const SPECIMEN: readonly Beat[] = [
         stop: 'tool',
         timings: timings(12, 1512, 20, 48, 1380),
       },
-      { kind: 'tool.begin', t: 1920, id: 't/3', turn: 3, after: 'q/5#response', command: 'sed -n 40,88p src/report.rs' },
+      { kind: 'tool.begin', t: 1920, id: 't/3', turn: 3, after: 'q/5#response', tool: 'bash', args: { command: 'sed -n 40,88p src/report.rs' } },
       { kind: 'tool.end', t: 1935, id: 't/3', exit: 0, output: REPORT_40_88 },
       { kind: 'request', t: 1950, id: 'q/6', lane: 'trunk', slot: 0, turn: 3 },
       {
@@ -408,7 +408,7 @@ export const SPECIMEN: readonly Beat[] = [
         stop: 'tool',
         timings: timings(468, 1572, 330, 252, 7300),
       },
-      { kind: 'tool.begin', t: 9720, id: 't/4', turn: 3, after: 'q/6#response', command: JSON_DIFF },
+      { kind: 'tool.begin', t: 9720, id: 't/4', turn: 3, after: 'q/6#response', tool: 'bash', args: { command: JSON_DIFF } },
       { kind: 'tool.end', t: 9790, id: 't/4', exit: 0, output: '' },
       { kind: 'request', t: 9800, id: 'q/7', lane: 'trunk', slot: 0, turn: 3 },
       {
@@ -421,7 +421,7 @@ export const SPECIMEN: readonly Beat[] = [
         stop: 'tool',
         timings: timings(16, 2290, 20, 34, 1000),
       },
-      { kind: 'tool.begin', t: 10920, id: 't/5', turn: 3, after: 'q/7#response', command: 'cargo test --quiet' },
+      { kind: 'tool.begin', t: 10920, id: 't/5', turn: 3, after: 'q/7#response', tool: 'bash', args: { command: 'cargo test --quiet' } },
       {
         kind: 'fork',
         t: 11000,

@@ -4,19 +4,21 @@ import type { Folded, ToolNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { bytes, counter, lines, ms } from './format.ts';
 import { Copy } from './Copy.tsx';
+import { callOf } from './sets.ts';
 import { elapsed, useNow } from './surface.tsx';
 import './tool.css';
 
-/** A bash call on the trunk: the command, then its output, collapsed until asked for. */
+/** A tool call on the trunk: the call, then its output, collapsed until asked for. */
 export function ToolCall({ node, open: initiallyOpen = false }: { readonly node: Folded<ToolNode>; readonly open?: boolean }) {
   const [open, setOpen] = useState(initiallyOpen);
-  const [first, ...rest] = node.command.split('\n');
+  const call = callOf(node.tool, node.args);
+  const [first, ...rest] = call.text.split('\n');
   const since = elapsed(useNow(), node.startedAt);
   const output = node.output ?? '';
   return (
     <Block
       tone="tool"
-      label="bash"
+      label={call.label}
       live={node.running}
       stats={
         node.running
@@ -24,6 +26,7 @@ export function ToolCall({ node, open: initiallyOpen = false }: { readonly node:
           : [
               node.ms !== undefined && { value: ms(node.ms), title: 'wall clock' },
               { value: output === '' ? 'no output' : `${lines(output).toLocaleString('en-US')} lines · ${bytes(output)}`, title: 'what it printed' },
+              node.truncated && { value: <span className="ex-truncated">truncated</span>, title: 'the harness cut the output before the model saw it' },
               { value: <span className={node.exit === 0 ? 'ex-exit ex-exit--ok' : 'ex-exit ex-exit--bad'}>exit {node.exit}</span> },
             ]
       }
@@ -31,7 +34,7 @@ export function ToolCall({ node, open: initiallyOpen = false }: { readonly node:
       id={node.id}
       actions={
         <>
-          <Copy text={node.command} label="copy command" />
+          <Copy text={call.text} label={call.prompt === '$' ? 'copy command' : 'copy call'} />
           {output !== '' ? <Copy text={output} label="copy output" /> : null}
         </>
       }
@@ -40,7 +43,7 @@ export function ToolCall({ node, open: initiallyOpen = false }: { readonly node:
         <span className="ex-tool__caret" aria-hidden="true">
           {open ? '▾' : '▸'}
         </span>
-        <span className="ex-tool__prompt">$</span>
+        {call.prompt ? <span className="ex-tool__prompt">{call.prompt}</span> : null}
         <span className="ex-tool__command">{first}</span>
         {rest.length > 0 && !open ? <span className="ex-tool__more">+{rest.length} lines</span> : null}
       </button>

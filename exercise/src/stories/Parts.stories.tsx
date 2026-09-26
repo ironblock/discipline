@@ -13,11 +13,12 @@ import { Memory } from '../ui/Memory.tsx';
 import { Prose, ProseProbe } from '../ui/Prose.tsx';
 import { AssistantMessage, SystemMessage, UserMessage } from '../ui/Message.tsx';
 import { Seam } from '../ui/Seam.tsx';
+import { SessionHeader } from '../ui/SessionHeader.tsx';
 import { ToolCall } from '../ui/ToolCall.tsx';
 import { PHASES } from '../App.tsx';
 import { contrast } from './contrast.ts';
 import { UNCLOSED_FENCE, WHAT_MODELS_WRITE } from './markdown.ts';
-import { MOMENTS, branchAt, sessionAt, trunkNodeAt } from './moments.ts';
+import { MOMENTS, branchAt, sessionAt, trunkNodeAt, variantAt } from './moments.ts';
 
 /**
  * One component, one story per state it distinguishes. Every node comes out
@@ -43,28 +44,34 @@ type Story = StoryObj<typeof meta>;
 
 // ---------------------------------------------------------------- Block
 
-const TONES: readonly Tone[] = ['system', 'user', 'assistant', 'tool', 'interview', 'ratify'];
 const TRUNK_TONES: readonly Tone[] = ['system', 'user', 'assistant', 'tool'];
+/** Every lane the registry knows, and one it does not. */
+const LANES = ['interview', 'ratify', 'extraction', 'tangent'] as const;
 
 /** The session event: every fill, with and without a body. The footer is what the harness measured. */
 export const BlockTones: Story = {
   name: 'Block · every tone',
   render: () => (
     <div style={{ display: 'grid', gap: '0.9rem' }}>
-      {TONES.map((tone) => (
-        <Block
-          key={tone}
-          tone={tone}
-          label={tone}
-          thin={tone === 'interview' || tone === 'ratify'}
-          stats={[{ value: '2.12 s' }, { value: '71', unit: 'tok' }]}
-          provenance={{ from: [0], needs: [] }}
-        >
-          {tone === 'interview' || tone === 'ratify' ? undefined : <p style={{ margin: 0 }}>The {tone} fill.</p>}
+      {TRUNK_TONES.map((tone) => (
+        <Block key={tone} tone={tone} label={tone} stats={[{ value: '2.12 s' }, { value: '71', unit: 'tok' }]} provenance={{ from: [0], needs: [] }}>
+          <p style={{ margin: 0 }}>The {tone} fill.</p>
         </Block>
+      ))}
+      {LANES.map((lane) => (
+        <Block key={lane} tone="lane" lane={lane} label={lane} thin stats={[{ value: '2.12 s' }, { value: '71', unit: 'tok' }]} provenance={{ from: [0], needs: [] }} />
       ))}
     </div>
   ),
+  // A lane the registry does not know is drawn, neutrally, under its own name.
+  play: async ({ canvasElement }) => {
+    const bar = (lane: string) => canvasElement.querySelector(`[data-lane='${lane}']`);
+    await expect(bar('tangent')?.textContent).toContain('tangent');
+    const ink = (lane: string) => getComputedStyle(bar(lane) as Element).color;
+    await expect(ink('tangent')).not.toBe(ink('interview'));
+    await expect(ink('extraction')).not.toBe(ink('interview'));
+    await expect(new Set(LANES.map(ink)).size).toBe(LANES.length);
+  },
 };
 
 /**
@@ -316,10 +323,105 @@ export const SeamRefill: Story = {
   render: () => <Seam node={sessionAt(MOMENTS.refilled).eras[1]!.seam!} />,
 };
 
+// ---------------------------------------------------------------- What this surface does not know
+
+/**
+ * The open sets' fallbacks. Each story folds the specimen with one event
+ * saying something this surface has no entry for; each thing is drawn
+ * neutrally, under its own name, and nothing else changes.
+ */
+const unknownBranch = () => {
+  const session = variantAt(MOMENTS.firstSettled, (e) => {
+    if (e['kind'] === 'fork' && e['id'] === 'i/1') return { ...e, lane: 'tangent' };
+    if (e['kind'] === 'fork.settled' && e['id'] === 'i/1') return { ...e, outcome: 'deferred' };
+    if (e['kind'] === 'patch' && e['from'] === 'i/1') return { ...e, op: 'amend', provenance: 'observed-momentum' };
+    return e;
+  });
+  const branch = [...session.branches.values()].flat().find((b) => b.id === 'i/1');
+  if (!branch) throw new Error('no branch i/1');
+  return branch;
+};
+
+export const UnknownLaneOutcomeOp: Story = {
+  name: 'Unknown · a lane, an outcome and a patch op',
+  render: () => <Branch node={unknownBranch()} />,
+  play: async ({ canvasElement }) => {
+    const bar = canvasElement.querySelector('[data-lane="tangent"]');
+    await expect(bar?.textContent).toContain('tangent');
+    const outcome = canvasElement.querySelector('.ex-branch__outcome');
+    await expect(outcome?.textContent).toBe('deferred');
+    await expect(outcome?.hasAttribute('data-known')).toBe(false);
+    const patch = canvasElement.querySelector('.ex-patch');
+    await expect(patch?.textContent).toContain('amend');
+    await expect(patch?.hasAttribute('data-known')).toBe(false);
+    await expect(patch?.textContent).toContain('observed-momentum');
+  },
+};
+
+export const UnknownTool: Story = {
+  name: 'Unknown · a tool',
+  render: () => {
+    const session = variantAt(MOMENTS.firstSettled, (e) =>
+      e['kind'] === 'tool.begin' && e['id'] === 't/1' ? { ...e, tool: 'read', args: { path: 'src/report.rs', lines: [40, 88] } } : e,
+    );
+    const node = session.eras[0]?.nodes.find((n) => n.id === 't/1');
+    if (node?.kind !== 'tool') throw new Error('no tool t/1');
+    return <ToolCall node={node} />;
+  },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('.ex-block__label')?.textContent).toBe('read');
+    await expect(canvasElement.textContent).toContain('read({"path":"src/report.rs","lines":[40,88]})');
+    await expect(canvasElement.querySelector('.ex-tool__prompt')).toBeNull();
+  },
+};
+
+export const UnknownSeam: Story = {
+  name: 'Unknown · a seam reason, with no phase recorded',
+  render: () => {
+    const session = variantAt(MOMENTS.refilled, (e) => {
+      if (e['kind'] !== 'seam') return e;
+      const rest: Record<string, unknown> = { ...e, reason: 'drift' };
+      delete rest['phase'];
+      return rest;
+    });
+    const seam = session.eras[1]?.seam;
+    if (!seam) throw new Error('no seam');
+    return <Seam node={seam} />;
+  },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.textContent).toContain('drift');
+    await expect(canvasElement.textContent).toContain('phase not recorded');
+  },
+};
+
+export const UnknownEvents: Story = {
+  name: 'Unknown · event kinds, counted in the header',
+  render: () => (
+    <SessionHeader
+      session={variantAt(MOMENTS.firstSettled, (e) => (e['kind'] === 'turn.settled' ? [e, { kind: 'gate.verdict', t: e['t'], verdict: 'pass' }] : e))}
+      surface={{ curtain: true, gaps: false }}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const chip = canvasElement.querySelector('.ex-header__unknown');
+    await expect(chip?.textContent).toBe('1 unknown');
+    await expect(chip?.getAttribute('title')).toContain('gate.verdict ×1');
+  },
+};
+
+export const UnknownRefusal: Story = {
+  name: 'Unknown · a refusal',
+  render: () => <Composer state="awaiting" phase="spec" phases={PHASES} dispatch={async () => ({ ok: false, refused: 'quota' })} />,
+  play: async ({ canvas, userEvent }) => {
+    await userEvent.type(canvas.getByRole('textbox'), 'go{Enter}');
+    await expect(await canvas.findByText('not taken: quota')).toBeVisible();
+  },
+};
+
 // ---------------------------------------------------------------- Composer
 
 const composer = (state: ComposerProps['state'], phase = 'spec') => (
-  <Composer state={state} phase={phase} phases={PHASES} onSend={async () => ({ ok: true })} onCancel={async () => ({ ok: true })} onSeam={async () => ({ ok: true })} />
+  <Composer state={state} phase={phase} phases={PHASES} dispatch={async () => ({ ok: true })} />
 );
 
 export const ComposerAwaiting: Story = { name: 'Composer · your turn', render: () => composer('awaiting') };

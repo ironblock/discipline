@@ -42,6 +42,11 @@
   --ink-interview: #8cc0ff;
   --fill-ratify: #251d52;
   --ink-ratify: #e28cf0;
+  --fill-extraction: #0b2a30;
+  --ink-extraction: #7fd6e0;
+  /* A lane the surface does not know: neutral, named by its label. */
+  --fill-lane: #1d1f22;
+  --ink-lane: #aab0b8;
   --fill-memory: #1d1f22;
 
   /* Meanings */

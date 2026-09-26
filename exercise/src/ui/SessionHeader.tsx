@@ -1,4 +1,5 @@
 import type { Session } from '../session/fold.ts';
+import { laneStyle } from './sets.ts';
 import type { Surface } from './surface.tsx';
 import './header.css';
 
@@ -21,7 +22,13 @@ export function SessionHeader({ session, surface, onSurface }: SessionHeaderProp
       </span>
       <span className="ex-header__slots" title="the server's slots, and what each is serving now">
         {session.occupancy.map((holder, slot) => (
-          <span key={slot} className="ex-header__slot" data-busy={holder === undefined ? undefined : ''} data-lane={holder?.lane}>
+          <span
+            key={slot}
+            className="ex-header__slot"
+            data-busy={holder === undefined ? undefined : ''}
+            data-lane={holder?.lane}
+            style={laneStyle(holder?.lane)}
+          >
             <span className="ex-header__dot" aria-hidden="true" />
             {slot}
             {slot === session.trunkSlot ? '·trunk' : ''}
@@ -30,6 +37,14 @@ export function SessionHeader({ session, surface, onSurface }: SessionHeaderProp
         ))}
       </span>
       <span className="ex-header__spacer" />
+      {surface.curtain && session.unknown.size > 0 ? (
+        <span
+          className="ex-header__unknown"
+          title={`events of a kind this surface does not draw yet, kept in the log: ${[...session.unknown].map(([kind, n]) => `${kind} ×${n}`).join(', ')}`}
+        >
+          {[...session.unknown.values()].reduce((a, b) => a + b, 0)} unknown
+        </span>
+      ) : null}
       <span className="ex-header__state" data-state={session.state}>
         {session.state}
       </span>

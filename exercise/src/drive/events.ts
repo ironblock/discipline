@@ -25,7 +25,20 @@ export const NEEDS = {
 
 export type Need = keyof typeof NEEDS;
 
-export type Lane = 'trunk' | 'interview' | 'ratify';
+/**
+ * An OPEN set: its members come from `diet`, the regimen or the person and
+ * grow without a surface release. The known members are named (for the
+ * registries in `src/ui/sets.ts`, and for autocomplete); any other string is
+ * carried through the fold and drawn neutrally under its own name. A CLOSED
+ * set -- the surface's own, like a node's kind -- stays a plain union, so
+ * adding a member breaks the build everywhere that must handle it.
+ */
+export type Open<Known extends string> = Known | (string & {});
+
+/** The side lanes a fork runs in. `extraction` is the predecessor's mechanical read of the trunk. */
+export type ForkLane = Open<'interview' | 'ratify' | 'extraction'>;
+
+export type Lane = 'trunk' | ForkLane;
 
 /** llama.cpp's own per-request `timings`, the fields the surface reads. */
 export interface Timings {
@@ -84,7 +97,7 @@ export interface Delta extends At {
   readonly text?: string;
 }
 
-export type Stop = 'stop' | 'tool' | 'length' | 'cancelled';
+export type Stop = Open<'stop' | 'tool' | 'length' | 'cancelled'>;
 
 export interface Response extends At {
   readonly kind: 'response';
@@ -96,13 +109,18 @@ export interface Response extends At {
   readonly timings: Timings;
 }
 
+/** The tools a model may call. Only `bash` exists today; every other tool is drawn as `name(args)`. */
+export type Tool = Open<'bash'>;
+
 export interface ToolBegin extends At {
   readonly kind: 'tool.begin';
   readonly id: string;
   readonly turn: number;
   /** The response whose tool call this is. */
   readonly after: string;
-  readonly command: string;
+  readonly tool: Tool;
+  /** The call's arguments as the model gave them; `bash` takes `{ command }`. */
+  readonly args: Readonly<Record<string, unknown>>;
 }
 
 export interface ToolEnd extends At {
@@ -110,9 +128,11 @@ export interface ToolEnd extends At {
   readonly id: string;
   readonly exit: number;
   readonly output: string;
+  /** The harness cut the output before the model saw it. */
+  readonly truncated?: boolean;
 }
 
-export type SettleReason = 'final' | 'cancelled' | 'max_steps' | 'timeout';
+export type SettleReason = Open<'final' | 'cancelled' | 'max_steps' | 'timeout'>;
 
 export interface TurnSettled extends At {
   readonly kind: 'turn.settled';
@@ -124,7 +144,7 @@ export interface TurnSettled extends At {
 export interface Fork extends At {
   readonly kind: 'fork';
   readonly id: string;
-  readonly lane: 'interview' | 'ratify';
+  readonly lane: ForkLane;
   readonly slot: number;
   readonly of_turn: number;
   /** The trunk node it branches from: a response id or a tool call id. */
@@ -136,7 +156,14 @@ export interface Fork extends At {
   readonly prefix_tokens: number;
 }
 
-export type ForkOutcome = 'complete' | 'empty' | 'truncated' | 'timeout' | 'cancelled';
+/**
+ * How a fork ended. The first five are the drive's; the rest are what the
+ * capture made of a complete answer, named in the record (#92, #94, #7).
+ * Which list is canonical is a ruling not yet made; both are known here.
+ */
+export type ForkOutcome = Open<
+  'complete' | 'empty' | 'truncated' | 'timeout' | 'cancelled' | 'value' | 'decline' | 'mimicry' | 'unparseable' | 'thinking_exhausted' | 'rejected'
+>;
 
 export interface ForkSettled extends At {
   readonly kind: 'fork.settled';
@@ -146,11 +173,17 @@ export interface ForkSettled extends At {
 
 export interface Entry {
   readonly id: string;
-  readonly category: string;
+  /** Absent in the predecessor's record, which kept one flat list. */
+  readonly category?: string;
   readonly text: string;
 }
 
-export type PatchOp = 'add' | 'supersede' | 'retire';
+/**
+ * A change to working memory. `add`, `supersede` and `retire` change an
+ * entry's state; any other op (`resolve`, `park`, an operator's edit, …)
+ * rewrites the entry and is shown by name.
+ */
+export type PatchOp = Open<'add' | 'supersede' | 'retire' | 'resolve' | 'park' | 'edit' | 'void'>;
 
 /** A change to working memory, from the fork that produced it. */
 export interface Patch extends At {
@@ -161,9 +194,11 @@ export interface Patch extends At {
   readonly entry: Entry;
   /** For `supersede`: the entry this one replaces. */
   readonly supersedes?: string;
+  /** How the entry was come by: the predecessor's `stated`, `extracted`, `observed-…`. */
+  readonly provenance?: string;
 }
 
-export type SeamReason = 'operator' | 'phase' | 'cadence' | 'budget';
+export type SeamReason = Open<'operator' | 'phase' | 'cadence' | 'budget'>;
 
 /** The one deliberate prefill event: the trunk rebuilt from working memory. */
 export interface Seam extends At {
@@ -171,7 +206,8 @@ export interface Seam extends At {
   readonly id: string;
   readonly at_turn: number;
   readonly reason: SeamReason;
-  readonly phase: { readonly from: string; readonly to: string };
+  /** Absent when the record did not say (the predecessor's seams). */
+  readonly phase?: { readonly from: string; readonly to: string };
   readonly prefix_hash_before: string;
   readonly prefix_hash_after: string;
   /** The new system prompt: working memory rendered, with the phase's priming. */

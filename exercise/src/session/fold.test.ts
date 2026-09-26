@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { beatLength, snapshot } from '../drive/canned.ts';
 import { SPECIMEN } from '../drive/specimen.ts';
+import type { DriveEvent } from '../drive/events.ts';
 import { fold } from './fold.ts';
 
 const at = (beat: number, t?: number) => fold(snapshot(SPECIMEN, t === undefined ? { beat } : { beat, t }));
@@ -107,5 +108,33 @@ describe('fold over the specimen', () => {
       }
     }
     expect(beatLength(beat(4))).toBeGreaterThan(30_000);
+  });
+});
+
+describe('fold over what it does not know', () => {
+  const withEvent = (extra: Record<string, unknown>) => {
+    const log = [...snapshot(SPECIMEN, { beat: 2 })];
+    const placed = { t: log.at(-1)!.t, seq: log.length, ...extra } as unknown as DriveEvent;
+    return fold([...log, placed]);
+  };
+
+  it('keeps and counts an event kind it does not know, and folds the rest as before', () => {
+    const plain = fold(snapshot(SPECIMEN, { beat: 2 }));
+    const s = withEvent({ kind: 'gate.verdict', verdict: 'pass' });
+    expect(s.unknown.get('gate.verdict')).toBe(1);
+    expect(s.eras[0]?.nodes.map((n) => n.id)).toEqual(plain.eras[0]?.nodes.map((n) => n.id));
+    expect(plain.unknown.size).toBe(0);
+  });
+
+  it('carries a patch op it does not know onto the entry, by name, without changing its state', () => {
+    const log = [...snapshot(SPECIMEN, { beat: 2 })];
+    const add = log.find((e) => e.kind === 'patch');
+    expect(add?.kind).toBe('patch');
+    if (add?.kind !== 'patch') return;
+    const s = withEvent({ kind: 'patch', id: 'p/park', from: add.from, op: 'park', entry: { ...add.entry, text: 'parked for later' } });
+    const entry = s.memory.find((m) => m.id === add.entry.id);
+    expect(entry?.state).toBe('live');
+    expect(entry?.op).toBe('park');
+    expect(entry?.text).toBe('parked for later');
   });
 });

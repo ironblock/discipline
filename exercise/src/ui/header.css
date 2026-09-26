@@ -38,10 +38,9 @@
   border: 1px solid var(--ink-faint);
 }
 
-/* A busy slot is an LED lit in the colour of the lane it is serving. */
-.ex-header__slot { --led: var(--ink-interview); }
+/* A busy slot is an LED lit in the colour of the lane it is serving (from the lane registry). */
+.ex-header__slot { --led: var(--lane-ink, var(--ink-lane)); }
 .ex-header__slot[data-lane='trunk'] { --led: var(--ink-assistant); }
-.ex-header__slot[data-lane='ratify'] { --led: var(--ink-ratify); }
 
 .ex-header__slot[data-busy] .ex-header__dot {
   background: var(--led);
@@ -66,7 +65,7 @@
 
 .ex-header__state[data-state='awaiting'] { color: var(--ink-user); }
 .ex-header__state[data-state='turn'] { color: var(--ink-assistant); }
-.ex-header__state[data-state='capture'] { color: var(--ink-interview); }
+.ex-header__state[data-state='capture'] { color: var(--lane-ink, var(--ink-interview)); }
 .ex-header__state[data-state='ratify'] { color: var(--ink-ratify); }
 
 .ex-header__toggle {
@@ -78,4 +77,10 @@
 
 .ex-header__toggle input {
   accent-color: var(--focus, var(--ink-interview));
+}
+
+.ex-header__unknown {
+  color: var(--ink-faint);
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
 }

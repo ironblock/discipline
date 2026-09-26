@@ -3,9 +3,8 @@ import { useState } from 'react';
 import type { BranchNode, Folded, PatchNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { ms, rate, tokens } from './format.ts';
+import { opOf, outcomeOf } from './sets.ts';
 import './branch.css';
-
-const OP_GLYPH = { add: '+', supersede: '↻', retire: '−' } as const;
 
 /**
  * A side call off the trunk's warm tail, in the slot that served it: a thin
@@ -15,11 +14,13 @@ const OP_GLYPH = { add: '+', supersede: '↻', retire: '−' } as const;
 export function Branch({ node, open: initiallyOpen = false }: { readonly node: Folded<BranchNode>; readonly open?: boolean }) {
   const [open, setOpen] = useState(initiallyOpen);
   const live = node.outcome === undefined;
+  const outcome = node.outcome !== undefined ? outcomeOf(node.outcome) : undefined;
   const t = node.timings;
   return (
     <div className="ex-branch" data-lane={node.lane} data-outcome={node.outcome ?? 'running'}>
       <Block
-        tone={node.lane}
+        tone="lane"
+        lane={node.lane}
         label={node.lane}
         thin
         live={live}
@@ -29,7 +30,15 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
           t && { value: tokens(t.prompt_n), unit: 'new', title: 'prompt tokens evaluated: the question alone, if the fork was warm' },
           t && { value: tokens(t.cache_n), unit: 'warm', title: 'prompt tokens reused from the trunk’s tail' },
           t && { value: rate(t.predicted_n, t.predicted_ms), unit: 't/s' },
-          node.outcome !== undefined && node.outcome !== 'complete' && { value: <span className="ex-branch__outcome">{node.outcome}</span> },
+          outcome !== undefined &&
+            node.outcome !== 'complete' && {
+              value: (
+                <span className="ex-branch__outcome" data-level={outcome.level} data-known={outcome.known ? '' : undefined}>
+                  {outcome.label}
+                </span>
+              ),
+              title: outcome.known ? 'how the side call ended' : 'how the side call ended: a name this surface does not know yet',
+            },
         ]}
         provenance={node}
         id={node.id}
@@ -90,14 +99,24 @@ function TaggedAnswer({ text }: { readonly text: string }) {
 }
 
 function PatchLine({ patch }: { readonly patch: Folded<PatchNode> }) {
+  const op = opOf(patch.op);
   return (
-    <li className="ex-patch" data-op={patch.op} data-from={patch.from.join(' ')} data-needs={patch.needs.join(' ')}>
-      <span className="ex-patch__op" aria-label={patch.op}>
-        {OP_GLYPH[patch.op]}
+    <li
+      className="ex-patch"
+      data-op={patch.op}
+      data-level={op.level}
+      data-known={op.known ? '' : undefined}
+      data-from={patch.from.join(' ')}
+      data-needs={patch.needs.join(' ')}
+    >
+      <span className="ex-patch__op" aria-label={op.label} title={op.label}>
+        {op.glyph}
       </span>
       <span className="ex-patch__id">#{patch.entryId}</span>
       <span className="ex-patch__text">{patch.text}</span>
+      {!op.known ? <span className="ex-patch__note">{op.label}</span> : null}
       {patch.supersedes ? <span className="ex-patch__note">replaces #{patch.supersedes}</span> : null}
+      {patch.provenance ? <span className="ex-patch__note">{patch.provenance}</span> : null}
     </li>
   );
 }

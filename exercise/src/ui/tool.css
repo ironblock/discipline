@@ -67,4 +67,5 @@
 }
 
 .ex-exit--ok { color: var(--ok); }
+.ex-truncated { color: var(--warn); }
 .ex-exit--bad { color: var(--bad); }

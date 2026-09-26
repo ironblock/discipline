@@ -48,10 +48,17 @@
   color: var(--ink-faint);
 }
 
+/* How a side call ended, coloured by the registry's level; a name the surface
+   does not know is drawn neutrally, underlined dotted: carried, not understood. */
 .ex-branch__outcome {
-  color: var(--warn);
+  color: var(--ink-muted);
   text-transform: uppercase;
 }
+
+.ex-branch__outcome[data-level='ok'] { color: var(--ok); }
+.ex-branch__outcome[data-level='warn'] { color: var(--warn); }
+.ex-branch__outcome[data-level='bad'] { color: var(--bad); }
+.ex-branch__outcome:not([data-known]) { text-decoration: underline dotted; text-underline-offset: 0.2em; }
 
 .ex-branch__patches {
   display: grid;
@@ -61,35 +68,26 @@
   list-style: none;
 }
 
+/* A patch line, coloured by its op's level in the registry: what it did to memory at a glance. */
 .ex-patch {
+  --op: var(--fresh);
   animation: ex-land 2.4s ease-out 1;
   display: flex;
   gap: 0.5rem;
   align-items: baseline;
   padding: 0.25rem 0.5rem;
-  border-left: 2px solid var(--fresh);
+  border-left: 2px solid var(--op);
   background: var(--chip);
   position: relative;
 }
 
-.ex-patch[data-op='retire'] {
-  border-left-color: var(--ink-faint);
-}
-
-.ex-patch[data-op='supersede'] {
-  border-left-color: var(--warn);
-}
+.ex-patch[data-level='quiet'] { --op: var(--ink-faint); }
+.ex-patch[data-level='warn'] { --op: var(--warn); }
+.ex-patch[data-level='bad'] { --op: var(--bad); }
+.ex-patch:not([data-known]) { border-left-style: dashed; }
 
 .ex-patch__op {
-  color: var(--fresh);
-}
-
-.ex-patch[data-op='retire'] .ex-patch__op {
-  color: var(--ink-faint);
-}
-
-.ex-patch[data-op='supersede'] .ex-patch__op {
-  color: var(--warn);
+  color: var(--op);
 }
 
 .ex-patch__id {

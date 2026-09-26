@@ -1,4 +1,5 @@
 import type { Folded, MemoryEntry } from '../session/fold.ts';
+import { opOf } from './sets.ts';
 import './memory.css';
 
 export interface MemoryProps {
@@ -38,8 +39,9 @@ export function Memory({ entries, seenThrough = -1, onSeen }: MemoryProps) {
       </header>
       {entries.length === 0 ? <p className="ex-memory__empty">Nothing yet. Interviews write here as the session goes.</p> : null}
       {categories.map((category) => (
-        <div className="ex-memory__category" key={category}>
-          <h3>{category}</h3>
+        <div className="ex-memory__category" key={category ?? ''}>
+          {/* The predecessor kept one flat list: an entry with no category is listed without a heading. */}
+          {category !== undefined ? <h3>{category}</h3> : null}
           <ul>
             {entries
               .filter((e) => e.category === category)
@@ -51,10 +53,13 @@ export function Memory({ entries, seenThrough = -1, onSeen }: MemoryProps) {
                   data-fresh={isUnseen(e, seenThrough) ? '' : undefined}
                   data-from={e.from.join(' ')}
                   data-needs={e.needs.join(' ')}
-                  title={`${e.state} · last changed by ${e.by}`}
+                  title={`${e.state}${e.provenance ? ` · ${e.provenance}` : ''} · last changed by ${e.by}`}
                 >
                   <span className="ex-memory__id">#{e.id}</span>
-                  <span className="ex-memory__text">{e.text}</span>
+                  <span className="ex-memory__text">
+                    {e.text}
+                    {e.op !== undefined ? <span className="ex-memory__op">{opOf(e.op).label}</span> : null}
+                  </span>
                 </li>
               ))}
           </ul>

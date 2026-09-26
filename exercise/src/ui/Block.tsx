@@ -1,10 +1,12 @@
 import type { ReactNode } from 'react';
 
+import type { ForkLane } from '../drive/events.ts';
+import { laneStyle } from './sets.ts';
 import { useSurface } from './surface.tsx';
 import './block.css';
 
-/** A block's fill: a role on the trunk, or a lane beside it. */
-export type Tone = 'system' | 'user' | 'assistant' | 'tool' | 'interview' | 'ratify';
+/** A block's fill: a role on the trunk (closed), or a lane beside it -- which lane is `lane`, an open set. */
+export type Tone = 'system' | 'user' | 'assistant' | 'tool' | 'lane';
 
 export interface Stat {
   readonly value: ReactNode;
@@ -16,6 +18,8 @@ export interface Stat {
 
 export interface BlockProps {
   readonly tone: Tone;
+  /** For tone `lane`: which. Coloured from the lane registry; an unknown lane is neutral. */
+  readonly lane?: ForkLane;
   /** The footer's first chip: the role or lane, in the harness's words. */
   readonly label: string;
   readonly stats?: readonly (Stat | false | undefined)[];
@@ -35,13 +39,15 @@ export interface BlockProps {
  * footer of what the harness measured. Every message, tool call and lane
  * step on the surface is one of these, refined.
  */
-export function Block({ tone, label, stats = [], provenance, thin = false, live = false, id, actions, children }: BlockProps) {
+export function Block({ tone, lane, label, stats = [], provenance, thin = false, live = false, id, actions, children }: BlockProps) {
   const { curtain } = useSurface();
   const shown = stats.filter((s): s is Stat => Boolean(s));
   return (
     <div
       className={`ex-block ex-block--${tone}${thin ? ' ex-block--thin' : ''}${live ? ' ex-block--live' : ''}`}
       data-tone={tone}
+      data-lane={lane}
+      style={laneStyle(lane)}
       data-id={id}
       data-from={provenance.from.join(' ')}
       data-needs={provenance.needs.join(' ')}

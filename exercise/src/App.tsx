@@ -32,9 +32,7 @@ export function App({ speed = 1 }: { readonly speed?: number }) {
       follow
       composer={{
         phases: PHASES,
-        onSend: (ask) => transport.send(ask),
-        onCancel: () => transport.cancel(),
-        onSeam: (to) => transport.declareSeam(to),
+        dispatch: (command) => transport.dispatch(command),
         hint: session.state === 'awaiting' ? (expects ? EXPECTS[expects] : 'canned: the script has ended') : undefined,
       }}
     />

@@ -47,9 +47,12 @@
   flex: 1 1 auto;
 }
 
-.ex-composer[data-state='turn'] .ex-composer__state,
+.ex-composer[data-state='turn'] .ex-composer__state {
+  color: var(--ink-assistant);
+}
+
 .ex-composer[data-state='capture'] .ex-composer__state {
-  color: var(--ink-interview);
+  color: var(--lane-ink, var(--ink-interview));
 }
 
 .ex-composer[data-state='ratify'] .ex-composer__state {
@@ -106,5 +109,5 @@
 
 /* The composer is lit by what the session is doing: your turn, the trunk, an interview, ratify. */
 .ex-composer[data-state='turn'] { --light-colour: var(--ink-assistant); --light: var(--light-panel-live); --glow: var(--glow-panel-live); }
-.ex-composer[data-state='capture'] { --light-colour: var(--ink-interview); --light: var(--light-panel-live); --glow: var(--glow-panel-live); }
+.ex-composer[data-state='capture'] { --light-colour: var(--lane-ink, var(--ink-interview)); --light: var(--light-panel-live); --glow: var(--glow-panel-live); }
 .ex-composer[data-state='ratify'] { --light-colour: var(--ink-ratify); --light: var(--light-panel-live); --glow: var(--glow-panel-live); }

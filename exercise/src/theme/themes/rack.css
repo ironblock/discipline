@@ -5,8 +5,9 @@
  * is the model; GREEN is link and activity -- a tool at work, a clean exit;
  * AMBER wants attention; RED is a fault. What the curtain hides has its
  * own family, the one colour a rack never has: VIOLET, diet asking (the
- * system prompt it renders, its interviews, what they land in memory), and
- * MAGENTA, diet deciding (ratify, the seam).
+ * system prompt it renders, its interviews, what they land in memory),
+ * MAGENTA, diet deciding (ratify, the seam), and CYAN, diet reading (the
+ * mechanical extraction lane).
  *
  * One lamp per meaning; every other colour is derived from it. A fill is
  * the lamp seen through the frosted slab, an ink is the lamp lifted toward
@@ -21,6 +22,7 @@
   --lamp-fault: #ff5a4f;
   --lamp-diet-asks: #9575ff;
   --lamp-diet-decides: #e05cf0;
+  --lamp-diet-reads: #33c3d6;
 
   --slab: #22252b;
 
@@ -36,6 +38,8 @@
   --ink-interview: color-mix(in oklab, var(--lamp-diet-asks) 55%, white);
   --fill-ratify: color-mix(in oklab, var(--lamp-diet-decides) 8%, transparent);
   --ink-ratify: color-mix(in oklab, var(--lamp-diet-decides) 60%, white);
+  --fill-extraction: color-mix(in oklab, var(--lamp-diet-reads) 8%, transparent);
+  --ink-extraction: color-mix(in oklab, var(--lamp-diet-reads) 55%, white);
 
   --ok: color-mix(in oklab, var(--lamp-work) 75%, white);
   --warn: color-mix(in oklab, var(--lamp-attention) 80%, white);

@@ -8,6 +8,7 @@ import { Memory, isUnseen } from './Memory.tsx';
 import { AssistantMessage, SystemMessage, UserMessage } from './Message.tsx';
 import { Seam } from './Seam.tsx';
 import { SessionHeader } from './SessionHeader.tsx';
+import { laneStyle } from './sets.ts';
 import { ClockContext, SurfaceContext } from './surface.tsx';
 import type { Surface } from './surface.tsx';
 import { ToolCall } from './ToolCall.tsx';
@@ -144,7 +145,7 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
       <ClockContext.Provider value={now}>
       <div
         className={`ex-session${surface.gaps ? ' ex-gaps' : ''}${surface.curtain ? ' ex-session--curtain' : ''}`}
-        style={{ ['--lanes' as string]: lanes.length }}
+        style={{ ['--lanes' as string]: lanes.length, ...laneStyle(busyLane(session)) }}
         data-state={session.state}
         data-lanes-busy={session.occupancy.some((holder, slot) => holder !== undefined && slot !== session.trunkSlot) ? '' : undefined}
         data-fresh={session.memory.some((m) => isUnseen(m, seenThrough)) ? '' : undefined}
@@ -158,7 +159,13 @@ export function SessionView({ session, surface, onSurface, composer, follow = fa
               <div className="ex-lanehead-row" aria-hidden="true">
                 <div className="ex-lanehead">slot {session.trunkSlot} · trunk</div>
                 {lanes.map((slot) => (
-                  <div className="ex-lanehead" key={slot} data-busy={session.occupancy[slot] === undefined ? undefined : ''} data-lane={session.occupancy[slot]?.lane}>
+                  <div
+                    className="ex-lanehead"
+                    key={slot}
+                    data-busy={session.occupancy[slot] === undefined ? undefined : ''}
+                    data-lane={session.occupancy[slot]?.lane}
+                    style={laneStyle(session.occupancy[slot]?.lane)}
+                  >
                     slot {slot} · {session.occupancy[slot]?.id ?? 'idle'}
                   </div>
                 ))}
@@ -266,7 +273,7 @@ function BranchCell({
     <div
       className="ex-branchcell"
       ref={cellRef}
-      style={placement ? { top: placement.top } : { top: 0, visibility: 'hidden' }}
+      style={{ ...laneStyle(branch.lane), ...(placement ? { top: placement.top } : { top: 0, visibility: 'hidden' }) }}
       data-branch={branch.id}
       data-evicted={evicted ? '' : undefined}
     >
@@ -291,6 +298,11 @@ function samePlacements(a: ReadonlyMap<string, Placement>, b: ReadonlyMap<string
     if (!q || Math.abs(q.top - p.top) > 0.5 || Math.abs(q.anchor - p.anchor) > 0.5) return false;
   }
   return true;
+}
+
+/** The lane of the first side call running now: the session's light while it runs. */
+function busyLane(session: Session) {
+  return session.occupancy.find((holder, slot) => holder !== undefined && slot !== session.trunkSlot)?.lane;
 }
 
 /** Every slot but the trunk's, in order. */
