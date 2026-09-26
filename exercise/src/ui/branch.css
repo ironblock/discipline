@@ -247,3 +247,15 @@
   box-shadow: none;
   border: 1px dashed color-mix(in oklab, var(--c) 65%, transparent);
 }
+
+/* A side call's patches, counted by op in the op's glyph and colour: `+3 ↻1 −1`. */
+.ex-patchsum {
+  display: inline-flex;
+  gap: 0.5em;
+}
+
+.ex-patchsum__op { color: var(--fresh); }
+.ex-patchsum__op[data-level='quiet'] { color: var(--ink-faint); }
+.ex-patchsum__op[data-level='warn'] { color: var(--warn); }
+.ex-patchsum__op[data-level='bad'] { color: var(--bad); }
+.ex-patchsum__op:not([data-known]) { text-decoration: underline dotted; text-underline-offset: 0.2em; }

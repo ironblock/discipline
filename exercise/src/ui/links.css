@@ -1,0 +1,43 @@
+/*
+ * Lines from side calls into working memory (Links.tsx): in the side call's
+ * lane colour, as faint as --link-rest at rest, lit when either end is
+ * pointed at. Over the lanes and the gutter; under the header and a drawer.
+ */
+.ex-links {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.ex-link {
+  --c: var(--lane-ink, var(--ink-lane));
+  fill: none;
+  stroke: color-mix(in oklab, var(--c) var(--link-rest), transparent);
+  stroke-width: var(--cable-width);
+  stroke-linecap: round;
+  transition: stroke 0.25s ease;
+}
+
+.ex-link[data-clipped] {
+  stroke-dasharray: 3 4;
+}
+
+.ex-link[data-hot] {
+  stroke: var(--c);
+  filter: drop-shadow(0 0 var(--cable-glow) var(--c));
+}
+
+/* Either end of a lit line is lit too. */
+.ex-branchcell[data-hot] .ex-block,
+.ex-branchcell[data-hot] .ex-bar {
+  outline: 1px solid color-mix(in oklab, var(--lane-ink, var(--ink-lane)) 70%, transparent);
+  outline-offset: 2px;
+}
+
+.ex-memory__entry[data-hot] {
+  background: color-mix(in oklab, var(--ink-interview) 12%, transparent);
+}

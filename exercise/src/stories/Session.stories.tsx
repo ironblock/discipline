@@ -289,3 +289,57 @@ export const DeepLink: Story = {
     history.replaceState(null, '', window.location.pathname + window.location.search);
   },
 };
+
+/**
+ * What a side call wrote is a line into working memory, not a list under the
+ * side call: its footer counts its patches by op, and a line runs from it to
+ * each entry it touched -- faint at rest, lit when either end is pointed at.
+ * The list is still there when the side call is opened.
+ */
+export const LinesIntoMemory: Story = {
+  name: 'memory · lines from side calls to what they wrote',
+  args: { cursor: MOMENTS.done },
+  render: (args) => (
+    <div style={{ width: 1900 }}>
+      {meta.render(args)}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const cell = q(canvasElement, '[data-branch="i/1"]') as HTMLElement;
+    await expect(cell.querySelector('.ex-branch__patches')).toBeNull();
+    await expect(cell.querySelector('.ex-patchsum')?.textContent).toMatch(/\+\s*\d/);
+    // Lines are drawn for the side calls on screen.
+    await waitFor(async () => expect(cell.style.visibility).not.toBe('hidden'));
+    cell.scrollIntoView({ block: 'center' });
+    const lines = () => [...document.querySelectorAll('.ex-links path.ex-link[data-branch="i/1"]')];
+    await waitFor(async () => expect(lines().length).toBeGreaterThan(0));
+    const entries = [...new Set([...document.querySelectorAll('.ex-links path.ex-link[data-branch="i/1"]')].map((l) => l.getAttribute('data-entry')))];
+    await waitFor(async () => expect(lines().length).toBeGreaterThan(0));
+    for (const entry of entries) await expect(canvasElement.querySelector(`[id="memory/${entry}"]`)).not.toBeNull();
+    await expect(lines().some((l) => l.hasAttribute('data-hot'))).toBe(false);
+    await userEvent.hover(cell.querySelector('.ex-block') as HTMLElement);
+    await waitFor(async () => expect(lines().every((l) => l.hasAttribute('data-hot'))).toBe(true));
+    for (const entry of entries) await expect(canvasElement.querySelector(`[id="memory/${entry}"]`)?.hasAttribute('data-hot')).toBe(true);
+    await userEvent.hover(canvasElement.querySelector(`[id="memory/${entries[0]}"]`) as HTMLElement);
+    await waitFor(async () => expect(cell.hasAttribute('data-hot')).toBe(true));
+    // Opened, the side call lists its patches again.
+    await userEvent.click(cell.querySelector('.ex-branch__why') as HTMLElement);
+    await expect(cell.querySelector('.ex-branch__patches')).not.toBeNull();
+  },
+};
+
+/** Working memory shut in its drawer: no lines into it. */
+export const LinesDrawerShut: Story = {
+  name: 'memory · no lines into a shut drawer',
+  args: { cursor: MOMENTS.done },
+  render: (args) => <div style={{ width: 900 }}>{meta.render(args)}</div>,
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(q(canvasElement, '.ex-session[data-drawer]')).not.toBeNull());
+    // A side call with patches on screen: the only thing a line could come from.
+    const cell = q(canvasElement, '[data-branch="i/1"]') as HTMLElement;
+    await waitFor(async () => expect(cell.style.visibility).not.toBe('hidden'));
+    cell.scrollIntoView({ block: 'center' });
+    await new Promise((r) => setTimeout(r, 300));
+    await expect(document.querySelectorAll('.ex-links path.ex-link')).toHaveLength(0);
+  },
+};

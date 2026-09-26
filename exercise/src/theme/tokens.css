@@ -156,6 +156,9 @@
   --cable-ports: none;
   --cable-glow: 0px;
   --cable-pulse: inline;
+  /* How much of its lane's colour a line from a side call into working
+     memory keeps at rest; lit, it is the colour itself. */
+  --link-rest: 22%;
   /* TEXTURE: images layered on surfaces. A sweep across a trunk block (light
    * falling across a raised or pressed face), a grain on every surface, and
    * a field of light pooled on the page itself. All `none` by default. */

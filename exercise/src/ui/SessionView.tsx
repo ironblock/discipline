@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent } from 'react';
 
 import type { Link } from '../drive/transport.ts';
 import type { BranchNode, Folded, Session, TrunkNode } from '../session/fold.ts';
 import { Branch, BranchBar } from './Branch.tsx';
 import { Cable } from './Cable.tsx';
+import { Links } from './Links.tsx';
+import type { Wire } from './Links.tsx';
 import { ENTER, place } from './placement.ts';
 import type { Placed, Side, Span } from './placement.ts';
 import { Composer } from './Composer.tsx';
@@ -14,7 +17,7 @@ import { AssistantMessage, SystemMessage, TurnEnd, UserMessage } from './Message
 import { Seam } from './Seam.tsx';
 import { SessionHeader } from './SessionHeader.tsx';
 import { laneStyle } from './sets.ts';
-import { ClockContext, SurfaceContext, TargetContext } from './surface.tsx';
+import { ClockContext, HotEntriesContext, SurfaceContext, TargetContext } from './surface.tsx';
 import type { Surface } from './surface.tsx';
 import { ToolCall } from './ToolCall.tsx';
 import './session.css';
@@ -87,6 +90,37 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
     window.addEventListener('keydown', close);
     return () => window.removeEventListener('keydown', close);
   }, [drawer, drawerOpen]);
+  // The address's `#<id>`, if any (see the deep-link effect below).
+  const [target, setTarget] = useState<string>();
+  const wentTo = useRef<string>(undefined);
+  // What each side call wrote, as wires into working memory; and what is lit.
+  const wires = useMemo<readonly Wire[]>(
+    () =>
+      surface.curtain
+        ? [...session.branches.values()].flat().flatMap((b) => b.patches.map((p) => ({ branch: b.id, entry: p.entryId, lane: b.lane, op: p.op })))
+        : [],
+    [session, surface.curtain],
+  );
+  const [pointed, setPointed] = useState<{ readonly branch?: string; readonly entry?: string }>({});
+  const hot = useMemo(() => {
+    const branches = new Set<string>();
+    const entries = new Set<string>();
+    const branch = pointed.branch ?? (target !== undefined && !target.startsWith('memory/') ? target : undefined);
+    const entry = pointed.entry ?? (target?.startsWith('memory/') ? target.slice('memory/'.length) : undefined);
+    for (const w of wires) {
+      if (w.branch === branch || w.entry === entry) {
+        branches.add(w.branch);
+        entries.add(w.entry);
+      }
+    }
+    return { branches, entries };
+  }, [wires, pointed, target]);
+  const point = (e: PointerEvent) => {
+    const el = e.target as Element;
+    const branch = el.closest('[data-branch]')?.getAttribute('data-branch') ?? undefined;
+    const entry = el.closest('.ex-memory__entry')?.id.replace(/^memory\//, '') ?? undefined;
+    if (branch !== pointed.branch || entry !== pointed.entry) setPointed({ ...(branch ? { branch } : {}), ...(entry ? { entry } : {}) });
+  };
   const liveEntries = session.memory.filter((m) => m.state === 'live').length;
   const unseen = session.memory.filter((m) => isUnseen(m, seenThrough)).length;
 
@@ -188,8 +222,6 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
   // A deep link, `#<id>`: go to that node once it is drawn and placed (the
   // browser's own jump can come before either), and stop following. `:target`
   // is not enough to mark it (see TargetContext), so the target is state.
-  const [target, setTarget] = useState<string>();
-  const wentTo = useRef<string>(undefined);
   useEffect(() => {
     const read = () => {
       wentTo.current = undefined;
@@ -261,6 +293,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
     <SurfaceContext.Provider value={surface}>
       <ClockContext.Provider value={now}>
       <TargetContext.Provider value={target}>
+      <HotEntriesContext.Provider value={hot.entries}>
       <div
         ref={root}
         className={`ex-session ex-session--minimap${surface.gaps ? ' ex-gaps' : ''}${surface.curtain ? ' ex-session--curtain' : ''}${condensed ? ' ex-session--condensed' : ''}`}
@@ -270,7 +303,10 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
         data-lanes-busy={session.occupancy.some((holder, slot) => holder !== undefined && slot !== session.trunkSlot) ? '' : undefined}
         data-fresh={unseen > 0 ? '' : undefined}
         data-drawer={drawer ? '' : undefined}
+        onPointerOver={point}
+        onPointerLeave={() => setPointed({})}
       >
+        <Links wires={wires} hot={hot} revision={[session, placed, seamPad, drawer, drawerOpen, condensed]} />
         {/* As wide as the row must be for working memory to sit beside it (session.css, --need). */}
         <div className="ex-session__need" ref={need} aria-hidden="true" />
         <Minimap stage={stage} revision={[session, placed, seamPad, surface.curtain]} curtain={surface.curtain} />
@@ -348,6 +384,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                       cellRef={cellRef(branch.id)}
                       evicted={(eraOf.get(branch.at) ?? lastEra) < lastEra}
                       condensed={condensed}
+                      hot={hot.branches.has(branch.id)}
                       open={branch.id === revealed}
                       {...(onSurface
                         ? {
@@ -387,6 +424,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
           </aside>
         </div>
       </div>
+      </HotEntriesContext.Provider>
       </TargetContext.Provider>
       </ClockContext.Provider>
     </SurfaceContext.Provider>
@@ -417,6 +455,7 @@ function BranchCell({
   cellRef,
   evicted,
   condensed,
+  hot,
   open,
   onOpen,
 }: {
@@ -427,6 +466,8 @@ function BranchCell({
   readonly evicted: boolean;
   /** Drawn as a bar that keeps its place (the curtain's `condensed`). */
   readonly condensed: boolean;
+  /** Lit: it, or an entry it wrote, is pointed at. */
+  readonly hot: boolean;
   /** Opened when it is drawn whole: the person pressed its bar. */
   readonly open: boolean;
   readonly onOpen?: () => void;
@@ -442,6 +483,7 @@ function BranchCell({
       data-branch={branch.id}
       data-evicted={evicted ? '' : undefined}
       data-pending={pending ? '' : undefined}
+      data-hot={hot ? '' : undefined}
     >
       {placement ? <Cable reach={placement.reach} drop={drop} top={ENTER - drop} live={branch.outcome === undefined && !pending} pending={pending} /> : null}
       {condensed ? <BranchBar node={branch} {...(onOpen ? { onOpen } : {})} /> : <Branch node={branch} open={open} />}

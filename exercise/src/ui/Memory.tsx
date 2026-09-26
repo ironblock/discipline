@@ -1,6 +1,6 @@
 import type { Folded, MemoryEntry } from '../session/fold.ts';
 import { opOf } from './sets.ts';
-import { useTarget } from './surface.tsx';
+import { useHotEntries, useTarget } from './surface.tsx';
 import './memory.css';
 
 export interface MemoryProps {
@@ -24,6 +24,7 @@ export function isUnseen(entry: MemoryEntry, seenThrough = -1): boolean {
  */
 export function Memory({ entries, seenThrough = -1, onSeen }: MemoryProps) {
   const target = useTarget();
+  const hot = useHotEntries();
   const live = entries.filter((e) => e.state === 'live').length;
   const fresh = entries.filter((e) => isUnseen(e, seenThrough)).length;
   const categories = [...new Set(entries.map((e) => e.category))];
@@ -52,6 +53,7 @@ export function Memory({ entries, seenThrough = -1, onSeen }: MemoryProps) {
                   key={e.id}
                   id={`memory/${e.id}`}
                   data-target={target === `memory/${e.id}` ? '' : undefined}
+                  data-hot={hot.has(e.id) ? '' : undefined}
                   className="ex-memory__entry"
                   data-state={e.state}
                   data-fresh={isUnseen(e, seenThrough) ? '' : undefined}

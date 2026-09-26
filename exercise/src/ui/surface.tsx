@@ -43,3 +43,10 @@ export const TargetContext = createContext<string | undefined>(undefined);
 export function useTarget(): string | undefined {
   return useContext(TargetContext);
 }
+
+/** Working-memory entries lit because something they are linked to is pointed at (Links.tsx). */
+export const HotEntriesContext = createContext<ReadonlySet<string>>(new Set());
+
+export function useHotEntries(): ReadonlySet<string> {
+  return useContext(HotEntriesContext);
+}

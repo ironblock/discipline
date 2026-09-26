@@ -7,17 +7,14 @@ import { ms, rate, tokens } from './format.ts';
 import { alarmOf, failOf, opOf, outcomeOf } from './sets.ts';
 import './branch.css';
 
-/** Patches a side call shows before "N more": enough to see what it did, few enough that side calls stay level with the trunk. */
-const PATCHES_SHOWN = 3;
-
 /**
  * A side call off the trunk's warm tail, in the slot that served it: a thin
- * bar saying what `diet` noticed and asked, the answer when opened, and the
- * patches it landed in working memory.
+ * bar saying what `diet` noticed and asked, and how many patches of each op
+ * it landed -- what they say is in working memory, a line away (Links.tsx);
+ * opened, the question, the answer and the patches themselves.
  */
 export function Branch({ node, open: initiallyOpen = false }: { readonly node: Folded<BranchNode>; readonly open?: boolean }) {
   const [open, setOpen] = useState(initiallyOpen);
-  const [allPatches, setAllPatches] = useState(false);
   const pending = isPending(node);
   const live = node.outcome === undefined && !pending;
   const outcome = node.outcome !== undefined ? outcomeOf(node.outcome) : undefined;
@@ -37,6 +34,7 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
           t && { value: tokens(t.prompt_n), unit: 'new', title: 'prompt tokens evaluated: the question alone, if the fork was warm' },
           t && { value: tokens(t.cache_n), unit: 'warm', title: 'prompt tokens reused from the trunk’s tail' },
           t && { value: rate(t.predicted_n, t.predicted_ms), unit: 't/s' },
+          node.patches.length > 0 && { value: <PatchSummary patches={node.patches} />, title: 'patches it landed in working memory, by op' },
           pending && {
             value: (
               <span className="ex-branch__outcome" data-level="quiet" data-known="">
@@ -78,21 +76,14 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
           ) : (
             <p className="ex-branch__waiting">{pending ? `waiting for slot ${node.slot}…` : node.progress === 'prefill' ? 'prefill…' : 'generating…'}</p>
           )}
-        </div>
-      ) : null}
-      {node.patches.length > 0 ? (
-        <ul className="ex-branch__patches">
-          {(allPatches ? node.patches : node.patches.slice(0, PATCHES_SHOWN)).map((p) => (
-            <PatchLine key={p.id} patch={p} />
-          ))}
-          {node.patches.length > PATCHES_SHOWN ? (
-            <li>
-              <button type="button" className="ex-more" aria-expanded={allPatches} onClick={() => setAllPatches(!allPatches)}>
-                {allPatches ? 'fewer' : `${node.patches.length - PATCHES_SHOWN} more patches`}
-              </button>
-            </li>
+          {node.patches.length > 0 ? (
+            <ul className="ex-branch__patches">
+              {node.patches.map((p) => (
+                <PatchLine key={p.id} patch={p} />
+              ))}
+            </ul>
           ) : null}
-        </ul>
+        </div>
       ) : null}
     </div>
   );
@@ -164,6 +155,25 @@ function TaggedAnswer({ text }: { readonly text: string }) {
         );
       })}
     </div>
+  );
+}
+
+/** How many patches of each op, in the op's glyph and colour: `+3 ↻1 −1`. */
+function PatchSummary({ patches }: { readonly patches: readonly Folded<PatchNode>[] }) {
+  const counts = new Map<string, number>();
+  for (const p of patches) counts.set(p.op, (counts.get(p.op) ?? 0) + 1);
+  return (
+    <span className="ex-patchsum">
+      {[...counts].map(([op, n]) => {
+        const drawn = opOf(op);
+        return (
+          <span key={op} className="ex-patchsum__op" data-level={drawn.level} data-known={drawn.known ? '' : undefined} title={drawn.label}>
+            {drawn.glyph}
+            {n}
+          </span>
+        );
+      })}
+    </span>
   );
 }
 

@@ -433,8 +433,11 @@ const unknownBranch = () => {
 
 export const UnknownLaneOutcomeOp: Story = {
   name: 'Unknown · a lane, an outcome and a patch op',
-  render: () => <Branch node={unknownBranch()} />,
+  render: () => <Branch node={unknownBranch()} open />,
   play: async ({ canvasElement }) => {
+    // At rest the footer counts the op under its own name; opened, the patch is listed.
+    const counted = canvasElement.querySelector('.ex-patchsum__op:not([data-known])');
+    await expect(counted?.getAttribute('title')).toBe('amend');
     const bar = canvasElement.querySelector('[data-lane="tangent"]');
     await expect(bar?.textContent).toContain('tangent');
     const outcome = canvasElement.querySelector('.ex-branch__outcome');
