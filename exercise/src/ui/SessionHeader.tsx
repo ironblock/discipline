@@ -1,5 +1,6 @@
 import type { Link } from '../drive/transport.ts';
 import type { Session } from '../session/fold.ts';
+import { LookSetting } from './look.tsx';
 import { laneStyle } from './sets.ts';
 import type { Surface } from './surface.tsx';
 import './header.css';
@@ -67,6 +68,7 @@ export function SessionHeader({ session, link = 'live', surface, onSurface }: Se
           </label>
         </>
       ) : null}
+      <LookSetting />
     </header>
   );
 }

@@ -6,7 +6,8 @@
  * theme lists it in: import a layer after every layer it must override.
  * `mockup` is the base in `tokens.css` and has no file; `DEFAULT_THEME` is
  * what a session opens in. This list is the one source the Storybook toolbar
- * and the app's `?theme=` read.
+ * and the app's `?theme=` read; a person chooses a look instead (`../look.ts`),
+ * which names one of four of these.
  */
 import './fabric.css';
 import './glass.css';
@@ -17,11 +18,13 @@ import './bloom.css';
 import './rack.css';
 import './band.css';
 import './paper.css';
+import './paper-dark.css';
 import './day.css';
 
 export const THEMES = [
   { name: 'mockup', layers: 'mockup', title: 'mockup — the author’s sketch' },
   { name: 'paper', layers: 'paper', title: 'paper — the sketch, light: the same meanings on a white page' },
+  { name: 'paper-dark', layers: 'rack paper-dark', title: 'paper-dark — paper’s dark twin: flat surfaces in the LED palette, nothing lit' },
   { name: 'fabric', layers: 'fabric', title: 'fabric — the prefix pressed into one material' },
   { name: 'glass', layers: 'fabric glass', title: 'glass — fabric, with glass beside the prefix' },
   { name: 'colo', layers: 'fabric glass colo', title: 'colo — glass, and things glow while they work' },

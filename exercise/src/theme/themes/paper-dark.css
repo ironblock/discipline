@@ -1,0 +1,13 @@
+/*
+ * Layer: paper-dark, over rack -- paper's dark twin. The sketch's flat
+ * surfaces (no glass, no grain, no glow) in the rack's LED palette: every
+ * meaning keeps its lamp, nothing is lit. The room's pools go too.
+ */
+.ex-root[data-theme~='paper-dark'] {
+  --field: none;
+  --radius: 6px;
+  --rim-tone: 18%;
+  /* Without bloom's shaded footer band, the rack's blue is a little deeper,
+     so a footer's numbers still read on it (the footer-contrast story). */
+  --fill-user: color-mix(in oklab, var(--slab) 62%, var(--lamp-you));
+}

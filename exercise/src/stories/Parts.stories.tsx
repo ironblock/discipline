@@ -2,13 +2,14 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { flushSync } from 'react-dom';
-import { expect } from 'storybook/test';
+import { expect, userEvent, within as canvas } from 'storybook/test';
 
 import { Block } from '../ui/Block.tsx';
 import type { Tone } from '../ui/Block.tsx';
 import { Branch } from '../ui/Branch.tsx';
 import { Composer } from '../ui/Composer.tsx';
 import type { ComposerProps } from '../ui/Composer.tsx';
+import { LookSetting, Looked } from '../ui/look.tsx';
 import { Memory } from '../ui/Memory.tsx';
 import { Prose, ProseProbe } from '../ui/Prose.tsx';
 import { AssistantMessage, SystemMessage, UserMessage } from '../ui/Message.tsx';
@@ -16,6 +17,7 @@ import { Seam } from '../ui/Seam.tsx';
 import { SessionHeader } from '../ui/SessionHeader.tsx';
 import { ToolCall } from '../ui/ToolCall.tsx';
 import { PHASES } from '../App.tsx';
+import { layersOf } from '../theme/themes/index.ts';
 import { contrast } from './contrast.ts';
 import { UNCLOSED_FENCE, WHAT_MODELS_WRITE } from './markdown.ts';
 import { MOMENTS, branchAt, sessionAt, trunkNodeAt, variantAt } from './moments.ts';
@@ -77,7 +79,7 @@ export const BlockTones: Story = {
 /**
  * The footer is quiet, not illegible: on every trunk fill, a number reads at
  * WCAG AA for small text (4.5:1), and its unit and the role chip at 3:1.
- * Checked in the theme the session opens in, with the footer inline, and in both light themes.
+ * Checked in every canonical look (colo and paper, dark and light), and with bloom's footer inline.
  */
 export const BlockFooterContrast: Story = {
   name: 'Block · footer contrast',
@@ -105,6 +107,30 @@ export const BlockFooterContrast: Story = {
 export const BlockFooterContrastInline: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, inline', globals: { theme: 'bloom-inline' } };
 export const BlockFooterContrastPaper: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, paper', globals: { theme: 'paper' } };
 export const BlockFooterContrastLight: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, bloom in daylight', globals: { theme: 'bloom-light' } };
+export const BlockFooterContrastPaperDark: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, paper in the dark', globals: { theme: 'paper-dark' } };
+
+/** The look is two settings; each pick redraws the root in the canonical theme it names, and is remembered. */
+export const LookSettings: Story = {
+  name: 'Look · the two settings',
+  render: () => (
+    <Looked>
+      <LookSetting />
+    </Looked>
+  ),
+  play: async ({ canvasElement }) => {
+    const root = canvasElement.querySelector('.ex-look')?.closest('.ex-root');
+    const pick = async (name: string) => userEvent.click(canvas(canvasElement).getByRole('radio', { name }));
+    await pick('paper');
+    await pick('light');
+    await expect(root?.getAttribute('data-theme')).toBe(layersOf('paper'));
+    await pick('dark');
+    await expect(root?.getAttribute('data-theme')).toBe(layersOf('paper-dark'));
+    await pick('colo');
+    await expect(root?.getAttribute('data-theme')).toBe(layersOf('bloom'));
+    await expect(JSON.parse(localStorage.getItem('exercise.look') ?? '{}')).toEqual({ material: 'colo', scheme: 'dark' });
+    localStorage.removeItem('exercise.look');
+  },
+};
 
 // ---------------------------------------------------------------- Messages
 
