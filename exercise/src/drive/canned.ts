@@ -40,7 +40,8 @@ export function expand(beat: Beat, start: number, ask?: string): Unplaced[] {
   return out.sort((a, b) => a.t - b.t);
 }
 
-function deltas(response: Omit<Response, 'seq'>, requested: number, done: number): Unplaced[] {
+/** The deltas a response would have streamed: reasoning first, then text, spread from the end of prefill to the response. */
+export function deltas(response: Omit<Response, 'seq'>, requested: number, done: number): Unplaced[] {
   const from = requested + response.timings.prompt_ms;
   const reasoning = chunks(response.reasoning ?? '');
   const text = chunks(response.text);

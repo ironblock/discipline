@@ -92,9 +92,14 @@
   top: 3.5rem;
   margin-top: 2.2rem;
   width: var(--memory-width);
-  max-height: calc(100vh - 12rem);
-  overflow-y: auto;
   flex: 0 0 auto;
+}
+
+/* A long memory scrolls inside its own panel, so the panel keeps its edges. */
+.ex-session__memory > .ex-memory {
+  max-height: calc(100vh - 7rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .ex-session__composer {
@@ -179,6 +184,9 @@
 .ex-trunk,
 .ex-era {
   display: grid;
+  /* One column that never grows past the trunk: a long command or a wide
+     table scrolls or ellipsizes inside its block instead of widening the era. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.9rem;
   align-content: start;
   min-width: 0;
@@ -280,10 +288,12 @@
     flex-direction: column;
     align-items: stretch;
   }
+  .ex-session__memory > .ex-memory {
+    max-height: none;
+  }
   .ex-session__memory {
     position: static;
     width: auto;
-    max-height: none;
     margin-top: 0;
   }
   /* No scroll container here: one would trap the sticky slot labels and

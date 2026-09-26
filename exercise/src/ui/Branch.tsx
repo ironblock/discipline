@@ -108,6 +108,7 @@ function PatchLine({ patch }: { readonly patch: Folded<PatchNode> }) {
       data-known={op.known ? '' : undefined}
       data-from={patch.from.join(' ')}
       data-needs={patch.needs.join(' ')}
+      title={patch.provenance ? `${op.label} · ${patch.provenance}` : op.label}
     >
       <span className="ex-patch__op" aria-label={op.label} title={op.label}>
         {op.glyph}
@@ -116,7 +117,6 @@ function PatchLine({ patch }: { readonly patch: Folded<PatchNode> }) {
       <span className="ex-patch__text">{patch.text}</span>
       {!op.known ? <span className="ex-patch__note">{op.label}</span> : null}
       {patch.supersedes ? <span className="ex-patch__note">replaces #{patch.supersedes}</span> : null}
-      {patch.provenance ? <span className="ex-patch__note">{patch.provenance}</span> : null}
     </li>
   );
 }

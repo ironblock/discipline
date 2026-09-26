@@ -36,6 +36,8 @@ export type Refusal = Open<
   | 'nothing-to-cancel'
   /** Canned transport only: the script expects a different command next. */
   | 'off-script'
+  /** A recording plays; it takes no commands. */
+  | 'recording'
 >;
 
 export type Ack = { readonly ok: true } | { readonly ok: false; readonly refused: Refusal };

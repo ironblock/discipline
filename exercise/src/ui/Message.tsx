@@ -8,23 +8,38 @@ import { Prose } from './Prose.tsx';
 import { elapsed, useNow } from './surface.tsx';
 import './message.css';
 
+/**
+ * The first lines of a text, cut where Markdown allows: never inside a code
+ * block the preview opened, which would render as an empty box.
+ */
+export function preview(text: string, lines: number): { readonly shown: string; readonly hidden: number } {
+  const all = text.split('\n');
+  let cut = Math.min(lines, all.length);
+  const fences = all.slice(0, cut).filter((line) => /^\s*(```|~~~)/.test(line)).length;
+  if (fences % 2 === 1) {
+    const opened = all.slice(0, cut).findLastIndex((line) => /^\s*(```|~~~)/.test(line));
+    if (opened > 0) cut = opened;
+  }
+  return { shown: all.slice(0, cut).join('\n'), hidden: all.length - cut };
+}
+
 /** The trunk's system prompt: the phase's priming, or working memory rendered. */
 export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
   const [open, setOpen] = useState(false);
-  const lineCount = node.text.split('\n').length;
-  const shown = open ? node.text : node.text.split('\n').slice(0, 3).join('\n');
+  const clipped = preview(node.text, 3);
+  const shown = open ? node.text : clipped.shown;
   return (
     <Block
       tone="system"
       label={node.render === undefined ? 'system' : `system · render v${node.render}`}
-      stats={[{ value: tokens(node.tokens), unit: 'tok', title: 'tokens in the prefix' }]}
+      stats={[node.tokens !== undefined && { value: tokens(node.tokens), unit: 'tok', title: 'tokens in the prefix' }]}
       provenance={node}
       id={node.id}
     >
       <Prose text={shown} kind="system" />
-      {lineCount > 3 ? (
+      {clipped.hidden > 0 ? (
         <button type="button" className="ex-more" onClick={() => setOpen(!open)}>
-          {open ? 'less' : `${lineCount - 3} more lines`}
+          {open ? 'less' : `${clipped.hidden} more lines`}
         </button>
       ) : null}
     </Block>
@@ -68,10 +83,13 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
   // since its last token -- never while tokens are arriving.
   const worry = node.progress === 'prefill' ? since.level : elapsed(now, node.lastActivityAt).level;
   const streamingInto = node.progress === 'streaming' ? (node.text === '' ? 'reasoning' : 'answer') : undefined;
+  // A turn that said nothing and only called a tool: a step, not a message.
+  const silent = node.progress === 'done' && node.text === '' && node.reasoning === '';
   return (
     <Block
       tone="assistant"
-      label="assistant"
+      label={silent ? 'assistant · a call, no text' : 'assistant'}
+      thin={silent}
       live={live}
       stats={
         t
@@ -97,6 +115,30 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
       id={node.id}
       {...(node.text !== '' && !live ? { actions: <Copy text={node.text} /> } : {})}
     >
+      {silent ? undefined : <AssistantBody node={node} live={live} long={long} showReasoning={showReasoning} thinking={thinking} setThinking={setThinking} streamingInto={streamingInto} />}
+    </Block>
+  );
+}
+
+function AssistantBody({
+  node,
+  live,
+  long,
+  showReasoning,
+  thinking,
+  setThinking,
+  streamingInto,
+}: {
+  readonly node: Folded<AssistantNode>;
+  readonly live: boolean;
+  readonly long: boolean;
+  readonly showReasoning: boolean;
+  readonly thinking: boolean;
+  readonly setThinking: (next: boolean) => void;
+  readonly streamingInto: 'reasoning' | 'answer' | undefined;
+}) {
+  return (
+    <>
       {node.reasoning !== '' ? (
         <div className="ex-reasoning">
           {showReasoning ? (
@@ -122,6 +164,6 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
       ) : null}
       {node.text !== '' ? <Prose text={node.text} kind="answer" caret={streamingInto === 'answer'} /> : null}
       {node.progress === 'cancelled' ? <p className="ex-cancelled">cancelled</p> : null}
-    </Block>
+    </>
   );
 }

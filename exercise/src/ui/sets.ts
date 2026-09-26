@@ -142,4 +142,5 @@ export const refusalOf = registry<Refusal>({
   'nothing-to-seam': { label: 'nothing to refill yet: no turn has settled', level: 'quiet' },
   'nothing-to-cancel': { label: 'nothing is running', level: 'quiet' },
   'off-script': { label: 'the canned script expects something else next', level: 'quiet' },
+  recording: { label: 'a recording: it plays, and takes no commands', level: 'quiet' },
 });

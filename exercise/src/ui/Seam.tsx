@@ -21,14 +21,20 @@ export function Seam({ node }: { readonly node: Folded<SeamNode> }) {
         ) : (
           <span title="the record does not say which phases this seam moved between">phase not recorded</span>
         )}
-        <span title="the trunk's prefix before and after">
-          {node.prefixBefore !== undefined ? `${tokens(node.prefixBefore)} → ` : ''}
-          <strong>{tokens(node.prefixAfter)}</strong> tok
-        </span>
+        {node.prefixAfter !== undefined ? (
+          <span title="the trunk's prefix before and after">
+            {node.prefixBefore !== undefined ? `${tokens(node.prefixBefore)} → ` : ''}
+            <strong>{tokens(node.prefixAfter)}</strong> tok
+          </span>
+        ) : null}
         <span title="prefix hash before and after">
           {node.hashBefore} → {node.hashAfter}
         </span>
-        <span title="the pre-warm: the new prefix sent once so the next ask finds it cached">warm {ms(node.warm.prompt_ms)}</span>
+        {node.warm ? (
+          <span title="the pre-warm: the new prefix sent once so the next ask finds it cached">warm {ms(node.warm.prompt_ms)}</span>
+        ) : (
+          <span title="the record has no pre-warm for this seam">no pre-warm recorded</span>
+        )}
         <span className="ex-seam__reason" data-level={seamReasonOf(node.reason).level}>
           {seamReasonOf(node.reason).label}
         </span>

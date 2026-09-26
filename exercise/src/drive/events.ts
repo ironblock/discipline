@@ -68,8 +68,8 @@ export interface SessionStart extends At {
   /** The slot the trunk is pinned to. */
   readonly trunk_slot: number;
   readonly phase: string;
-  /** The trunk's first system prompt, as sent. */
-  readonly system: { readonly text: string; readonly tokens: number };
+  /** The trunk's first system prompt, as sent; its size in tokens when the record measured it. */
+  readonly system: { readonly text: string; readonly tokens?: number };
 }
 
 /** A person's words: the ask, as a field rather than inside a wire body. */
@@ -211,9 +211,9 @@ export interface Seam extends At {
   readonly prefix_hash_before: string;
   readonly prefix_hash_after: string;
   /** The new system prompt: working memory rendered, with the phase's priming. */
-  readonly render: { readonly version: number; readonly text: string; readonly tokens: number };
-  /** The pre-warm: the new prefix sent once so the next ask finds it cached. */
-  readonly warm: Timings;
+  readonly render: { readonly version: number; readonly text: string; readonly tokens?: number };
+  /** The pre-warm: the new prefix sent once so the next ask finds it cached. Absent: none was recorded. */
+  readonly warm?: Timings;
 }
 
 export interface SessionEnd extends At {

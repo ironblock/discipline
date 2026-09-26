@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { CannedTransport } from './drive/canned.ts';
+import { RECORDINGS, ReplayTransport } from './drive/recorded.ts';
+import type { RecordingName } from './drive/recorded.ts';
 import { SPECIMEN } from './drive/specimen.ts';
 import { useSession } from './session/useSession.ts';
 import { SessionView } from './ui/SessionView.tsx';
@@ -17,13 +19,19 @@ const EXPECTS: Readonly<Record<string, string>> = {
   seam: 'canned: the script expects a refill next (move to build)',
 };
 
-/** The harness, on the canned transport until #117's loop serves a real one. */
-export function App({ speed = 1 }: { readonly speed?: number }) {
-  const transport = useMemo(() => new CannedTransport(SPECIMEN, { speed }), [speed]);
+/**
+ * The harness, on the canned transport until #117's loop serves a real one --
+ * or replaying a recorded session, which plays and takes no commands.
+ */
+export function App({ speed = 1, recording }: { readonly speed?: number; readonly recording?: RecordingName }) {
+  const transport = useMemo(
+    () => (recording ? new ReplayTransport(RECORDINGS[recording], { speed }) : new CannedTransport(SPECIMEN, { speed })),
+    [speed, recording],
+  );
   useEffect(() => () => transport.close(), [transport]);
   const session = useSession(transport);
   const [surface, setSurface] = useState<Surface>({ curtain: true, gaps: false });
-  const expects = transport.expects;
+  const expects = transport instanceof CannedTransport ? transport.expects : undefined;
   return (
     <SessionView
       session={session}
@@ -33,7 +41,13 @@ export function App({ speed = 1 }: { readonly speed?: number }) {
       composer={{
         phases: PHASES,
         dispatch: (command) => transport.dispatch(command),
-        hint: session.state === 'awaiting' ? (expects ? EXPECTS[expects] : 'canned: the script has ended') : undefined,
+        hint: recording
+          ? `recorded: ${RECORDINGS[recording].title}`
+          : session.state === 'awaiting'
+            ? expects
+              ? EXPECTS[expects]
+              : 'canned: the script has ended'
+            : undefined,
       }}
     />
   );

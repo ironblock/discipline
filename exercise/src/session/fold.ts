@@ -29,7 +29,7 @@ export interface SystemNode extends Provenance {
   readonly kind: 'system';
   readonly id: string;
   readonly text: string;
-  readonly tokens: number;
+  readonly tokens?: number;
   /** Set when this system prompt is a render of working memory. */
   readonly render?: number;
 }
@@ -117,8 +117,8 @@ export interface SeamNode extends Provenance {
   readonly hashAfter: string;
   /** The trunk's prefix just before the seam: what the refill replaced. */
   readonly prefixBefore?: number;
-  readonly prefixAfter: number;
-  readonly warm: Timings;
+  readonly prefixAfter?: number;
+  readonly warm?: Timings;
 }
 
 export interface Era {
@@ -247,7 +247,13 @@ export function fold(events: readonly DriveEvent[]): Session {
   type Slot = { kind: 'user'; turn: number } | { kind: 'assistant'; request: string } | { kind: 'tool'; id: string };
   const eras: { seam?: EventOf<'seam'>; system: SystemNode; slots: Slot[] }[] = [
     {
-      system: { kind: 'system', id: 'system/0', text: start.system.text, tokens: start.system.tokens, ...provenance(start) },
+      system: {
+        kind: 'system',
+        id: 'system/0',
+        text: start.system.text,
+        ...(start.system.tokens !== undefined ? { tokens: start.system.tokens } : {}),
+        ...provenance(start),
+      },
       slots: [],
     },
   ];
@@ -341,7 +347,7 @@ export function fold(events: readonly DriveEvent[]): Session {
           kind: 'system',
           id: `system/${e.id}`,
           text: e.render.text,
-          tokens: e.render.tokens,
+          ...(e.render.tokens !== undefined ? { tokens: e.render.tokens } : {}),
           render: e.render.version,
           ...provenance(e),
         };
@@ -418,8 +424,8 @@ export function fold(events: readonly DriveEvent[]): Session {
           hashBefore: seamEvent.prefix_hash_before,
           hashAfter: seamEvent.prefix_hash_after,
           ...(previousEraEnd ? { prefixBefore: trunkPrefixAt(previousEraEnd)! } : {}),
-          prefixAfter: seamEvent.render.tokens,
-          warm: seamEvent.warm,
+          ...(seamEvent.render.tokens !== undefined ? { prefixAfter: seamEvent.render.tokens } : {}),
+          ...(seamEvent.warm ? { warm: seamEvent.warm } : {}),
           ...provenance(seamEvent),
         })
       : undefined;

@@ -354,7 +354,7 @@ export const UnknownLaneOutcomeOp: Story = {
     const patch = canvasElement.querySelector('.ex-patch');
     await expect(patch?.textContent).toContain('amend');
     await expect(patch?.hasAttribute('data-known')).toBe(false);
-    await expect(patch?.textContent).toContain('observed-momentum');
+    await expect(patch?.getAttribute('title')).toContain('observed-momentum');
   },
 };
 

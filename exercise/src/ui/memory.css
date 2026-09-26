@@ -66,7 +66,7 @@
 
 .ex-memory__entry {
   display: grid;
-  grid-template-columns: 2.5rem 1fr;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
   gap: 0.4rem;
   padding: 0.2rem 0 0.2rem 0.5rem;
   border-left: 2px solid transparent;
@@ -100,6 +100,7 @@
 .ex-memory__text {
   color: var(--ink);
   font: 13px / 1.45 var(--font-memory);
+  overflow-wrap: anywhere;
 }
 
 .ex-memory__entry[data-state='superseded'] .ex-memory__text,
