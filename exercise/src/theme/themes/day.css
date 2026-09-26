@@ -1,0 +1,54 @@
+/*
+ * Layer: day, over bloom with paper's palette -- bloom's treatments retuned
+ * for a light room. Slabs are white and frosted, lifted by soft shadow
+ * rather than lit rims; grain is a faint dark speckle; glass is milky; each
+ * slab still sits over a pool of its own colour, and what runs still glows --
+ * a tinted halo, since light on white reads as colour, not brightness.
+ */
+.ex-root[data-theme~='day'] {
+  --rim-tone: 22%;
+  --relief-trunk: 0 1px 2px rgb(20 30 50 / 0.06), 0 10px 26px -14px rgb(20 30 50 / 0.28), inset 0 1px 0 rgb(255 255 255 / 0.9);
+  --relief-trunk-live: 0 2px 4px rgb(20 30 50 / 0.08), 0 16px 34px -14px rgb(20 30 50 / 0.34), inset 0 1px 0 rgb(255 255 255 / 0.9);
+  --relief-tool: inset 0 1px 4px rgb(20 30 50 / 0.1), inset 0 0 0 1px rgb(20 30 50 / 0.04);
+  --relief-well: inset 0 0 0 1px rgb(20 30 50 / 0.08);
+  --relief-lane: 0 1px 2px rgb(20 30 50 / 0.06), 0 12px 28px -14px rgb(20 30 50 / 0.3), inset 0 1px 0 rgb(255 255 255 / 0.8);
+  --relief-panel: 0 1px 2px rgb(20 30 50 / 0.06), 0 16px 38px -16px rgb(20 30 50 / 0.3), inset 0 1px 0 rgb(255 255 255 / 0.8);
+  --relief-control: 0 1px 2px rgb(20 30 50 / 0.12);
+  --control-rim: rgb(20 30 50 / 0.1);
+
+  --glass-overlay: linear-gradient(150deg, rgb(255 255 255 / 0.75), rgb(255 255 255 / 0.4) 45%, rgb(255 255 255 / 0.55));
+  --glass-rim: rgb(20 30 50 / 0.08);
+  --fill-interview: color-mix(in oklab, var(--lamp-diet-asks) 9%, rgb(255 255 255 / 0.55));
+  --fill-ratify: color-mix(in oklab, var(--lamp-diet-decides) 9%, rgb(255 255 255 / 0.55));
+  --fill-extraction: color-mix(in oklab, var(--lamp-diet-reads) 9%, rgb(255 255 255 / 0.55));
+  --fill-lane: rgb(255 255 255 / 0.55);
+  --fill-memory: rgb(255 255 255 / 0.6);
+  --panel: rgb(255 255 255 / 0.6);
+
+  --glow-trunk: 14%;
+  --glow-trunk-live: 40%;
+  --glow-lane: 10%;
+  --glow-lane-live: 40%;
+  --glow-panel-live: 24%;
+  --glow-seam: 40%;
+  --light-lane: 0%;
+  --light-lane-live: 12%;
+  --light-panel: 0%;
+  --light-panel-live: 10%;
+
+  --seam-groove: inset 0 1px 2px rgb(20 30 50 / 0.14), inset 0 -1px 0 rgb(255 255 255 / 0.8);
+  --evicted-opacity: 0.55;
+
+  --foot-shade: 5%;
+  --foot-rule: 18%;
+
+  --texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.05 0'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
+  --chrome-bg: rgb(244 245 247 / 0.85);
+  --lanehead-bg: linear-gradient(to bottom, rgb(244 245 247 / 0.92) 70%, rgb(244 245 247 / 0));
+
+  --pool-rest: 8%;
+  --pool-live: 20%;
+  --field:
+    radial-gradient(60rem 40rem at 40% 115%, color-mix(in oklab, var(--lamp-you) 9%, transparent), transparent 70%),
+    radial-gradient(40rem 34rem at 100% 10%, color-mix(in oklab, var(--lamp-diet-asks) 9%, transparent), transparent 70%);
+}

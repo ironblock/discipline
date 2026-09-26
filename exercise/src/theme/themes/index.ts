@@ -1,12 +1,13 @@
 /**
  * The themes to try, one file per layer beside this one. A layer overrides
  * token VALUES under `.ex-root[data-theme~=<layer>]` and nothing else, and a
- * theme is a stack of layers, later ones winning: `glass` is fabric + glass.
+ * theme is a stack of layers. Every layer's selector is equally specific, so
+ * which one wins is the order its FILE is imported below, not the order a
+ * theme lists it in: import a layer after every layer it must override.
  * `mockup` is the base in `tokens.css` and has no file; `DEFAULT_THEME` is
- * what a session opens in. This list is the
- * one source the Storybook toolbar and the app's `?theme=` read.
+ * what a session opens in. This list is the one source the Storybook toolbar
+ * and the app's `?theme=` read.
  */
-import './paper.css';
 import './fabric.css';
 import './glass.css';
 import './colo.css';
@@ -15,10 +16,12 @@ import './emboss.css';
 import './bloom.css';
 import './rack.css';
 import './band.css';
+import './paper.css';
+import './day.css';
 
 export const THEMES = [
   { name: 'mockup', layers: 'mockup', title: 'mockup — the author’s sketch' },
-  { name: 'paper', layers: 'paper', title: 'paper — the sketch, light' },
+  { name: 'paper', layers: 'paper', title: 'paper — the sketch, light: the same meanings on a white page' },
   { name: 'fabric', layers: 'fabric', title: 'fabric — the prefix pressed into one material' },
   { name: 'glass', layers: 'fabric glass', title: 'glass — fabric, with glass beside the prefix' },
   { name: 'colo', layers: 'fabric glass colo', title: 'colo — glass, and things glow while they work' },
@@ -27,6 +30,7 @@ export const THEMES = [
   { name: 'hybrid', layers: 'fabric glass colo lantern', title: 'hybrid — colo’s emission, lantern’s lit glass' },
   { name: 'bloom', layers: 'fabric glass colo bloom rack band', title: 'bloom — frosted slabs over pools of their own light, every colour an LED, each footer a shaded band' },
   { name: 'bloom-inline', layers: 'fabric glass colo bloom rack', title: 'bloom-inline — bloom with the footer inline under the text' },
+  { name: 'bloom-light', layers: 'fabric glass colo bloom rack band paper day', title: 'bloom-light — bloom in daylight: white frosted slabs over pools of colour' },
 ] as const;
 
 export type ThemeName = (typeof THEMES)[number]['name'];

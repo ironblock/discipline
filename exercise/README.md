@@ -37,9 +37,11 @@ pnpm verify           # typecheck, lint, unit tests, every story as a browser te
 | `src/drive/transport.ts` | The drive interface: subscribe to the session's log; send an ask, cancel, declare a seam. An HTTP + SSE transport implements it against #117's loop. |
 | `src/drive/specimen.ts` | **Authored, not recorded.** One session walking the definition of done, in the provisional vocabulary. Deleted when a recorded session replaces it. |
 | `src/drive/canned.ts` | A transport that plays the specimen with real timing, and `snapshot()`, the same session stopped at any moment. |
+| `src/drive/recorded/` | **Recorded, not authored.** Sessions the predecessor recorded against a real model, migrated once by `scripts/migrate-recorded.py` (each file's `migration` header says what the migration decided) and scrubbed of names and paths. `?session=first-drive` replays one; `Session/Recorded` stops it where it went wrong. |
+| `src/ui/sets.ts` | The registries for the open sets -- lanes, tools, outcomes, patch ops, reasons, refusals: each known member and how it is drawn, and a neutral fallback, under its own name, for everything else. |
 | `src/session/fold.ts` | The only place an event becomes something drawable. Every node is branded `Folded`, carries the log positions it came from, and the steps of #117 it waits on. |
 | `src/ui/` | The parts. `Block` is the session event; messages, tool calls and lane bars refine it. |
-| `src/stories/` | `Session/Moments`: the whole surface at eleven moments of the specimen. `Session/Live`: the canned transport, driven. `Parts`: one story per state each part distinguishes. |
+| `src/stories/` | `Session/Moments`: the whole surface at eleven moments of the specimen. `Session/Recorded`: a real session where it went wrong. `Session/Failures`: every way a session fails, drawn. `Session/Live`: the canned transport, driven. `Parts`: one story per state each part distinguishes, and each open set's fallback. |
 
 Theme tokens (`src/theme/tokens.css`) are named for kinds of text and
 meanings, never for faces or hues; several resolve to the same value on
@@ -53,7 +55,10 @@ in `themes/index.ts`, switched from Storybook's toolbar or the app's
 own colour, light pooled where the work is, what runs glowing while it runs.
 Its palette (`rack`) makes every colour an LED with the meaning it has on a
 server: blue is you, white the model, green work, amber attention, red a
-fault; violet and magenta are diet, asking and deciding. Each footer is a
-full-width shaded band (`band`); `bloom-inline` keeps it under the text.
+fault; violet, magenta and cyan are diet, asking, deciding and reading
+(the lamps are in `tokens.css`). Each footer is a full-width shaded band
+(`band`); `bloom-inline` keeps it under the text. `paper` is the same
+meanings on a white page, and `bloom-light` is bloom in daylight. A
+layer's file must be imported after every layer it overrides.
 The mapping behind all of them: material = in the prefix, glass = beside it,
 light = happening now.

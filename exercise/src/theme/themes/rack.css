@@ -9,21 +9,12 @@
  * MAGENTA, diet deciding (ratify, the seam), and CYAN, diet reading (the
  * mechanical extraction lane).
  *
- * One lamp per meaning; every other colour is derived from it. A fill is
- * the lamp seen through the frosted slab, an ink is the lamp lifted toward
- * white so it reads, and a rim, a glow and a pool are the lamp itself.
- * The `--lamp-*` names are this layer's own and nothing binds to them.
+ * One lamp per meaning (`--lamp-*`, in tokens.css); every other colour is
+ * derived from it. A fill is the lamp seen through the frosted slab, an ink
+ * is the lamp lifted toward white so it reads, and a rim, a glow and a pool
+ * are the lamp itself.
  */
 .ex-root[data-theme~='rack'] {
-  --lamp-you: #2f86ff;
-  --lamp-model: #dde4ee;
-  --lamp-work: #3ccf7e;
-  --lamp-attention: #ffae1f;
-  --lamp-fault: #ff5a4f;
-  --lamp-diet-asks: #9575ff;
-  --lamp-diet-decides: #e05cf0;
-  --lamp-diet-reads: #33c3d6;
-
   --slab: #22252b;
 
   --fill-user: color-mix(in oklab, var(--slab) 52%, var(--lamp-you));

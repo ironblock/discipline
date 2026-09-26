@@ -49,6 +49,23 @@
   --ink-lane: #aab0b8;
   --fill-memory: #1d1f22;
 
+  /*
+   * Lamps: one light source per meaning, which a theme may derive its role
+   * colours from (a fill is the lamp through a surface, an ink the lamp made
+   * legible, a glow the lamp itself). Blue is you, white the model, green
+   * work, amber attention, red a fault; violet, magenta and cyan are diet
+   * asking, deciding and reading. The mockup's own colours above predate
+   * them and do not derive from them.
+   */
+  --lamp-you: #2f86ff;
+  --lamp-model: #dde4ee;
+  --lamp-work: #3ccf7e;
+  --lamp-attention: #ffae1f;
+  --lamp-fault: #ff5a4f;
+  --lamp-diet-asks: #9575ff;
+  --lamp-diet-decides: #e05cf0;
+  --lamp-diet-reads: #33c3d6;
+
   /* Meanings */
   --ok: #6fd38f;
   --warn: #e5c26b;
