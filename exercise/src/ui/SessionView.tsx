@@ -33,6 +33,8 @@ export interface SessionViewProps {
 /** Vertical space between two branches stacked in one slot: whole, and condensed to bars. */
 const STACK_GAP = 14;
 const STACK_GAP_CONDENSED = 4;
+/** How near the bottom still counts as at it, for following. */
+const LOCK_SLACK = 48;
 interface Placement extends Placed {
   /** From the trunk's right edge to the side call's left: what the cable spans. */
   readonly reach: number;
@@ -53,7 +55,6 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
   const [revealed, setRevealed] = useState<string>();
   const scrolledTo = useRef<string>(undefined);
   const stage = useRef<HTMLDivElement>(null);
-  const end = useRef<HTMLDivElement>(null);
   const anchors = useRef(new Map<string, HTMLElement>());
   const cells = useRef(new Map<string, HTMLElement>());
   const [placed, setPlaced] = useState<ReadonlyMap<string, Placement>>(new Map());
@@ -184,11 +185,41 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
     cells.current.get(revealed)?.scrollIntoView({ block: 'center' });
   }, [revealed, condensed, placed]);
 
-  useLayoutEffect(() => {
+  // Following: the bottom of the page is now -- the newest trunk node, or the
+  // side calls queued past it -- so the view is locked to it while the page
+  // grows, until the person scrolls away from it, and again once they return.
+  const locked = useRef(true);
+  useEffect(() => {
     if (!follow) return;
-    const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 240;
-    if (nearBottom) end.current?.scrollIntoView({ block: 'end' });
-  }, [follow, session.events]);
+    const page = document.documentElement;
+    const atBottom = () => window.innerHeight + window.scrollY >= page.scrollHeight - LOCK_SLACK;
+    // Only the person moves the lock: scrolling up away from the bottom lets
+    // go, scrolling down onto it takes hold. The page moves the view too --
+    // scroll anchoring as a placement lands above it, clamping as it briefly
+    // shrinks during a layout pass -- and none of that is someone reading.
+    let last = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (y > last && atBottom()) locked.current = true;
+      else if (y < last - 1 && !atBottom()) locked.current = false;
+      last = y;
+    };
+    const stick = () => {
+      if (!locked.current) return;
+      window.scrollTo(0, page.scrollHeight);
+      // Scroll events are coalesced a frame at a time: a person's scroll in the
+      // same frame as this one must be measured from here, not from before it.
+      last = window.scrollY;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    const observer = new ResizeObserver(stick);
+    if (root.current) observer.observe(root.current);
+    stick();
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      observer.disconnect();
+    };
+  }, [follow]);
 
   const anchorRef = (id: string) => (el: HTMLElement | null) => {
     if (el) anchors.current.set(id, el);
@@ -282,7 +313,6 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                     })}
                   </section>
                 ))}
-                <div ref={end} className="ex-session__end" />
               </div>
               {lanes.map((slot) => (
                 <div className="ex-lane" key={slot} data-slot={slot} style={{ minHeight: height }}>

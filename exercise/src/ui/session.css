@@ -209,17 +209,31 @@
   bottom: 0;
   z-index: 3;
   padding: 1rem 0 1.25rem;
-  /* Fades the trunk out under the composer; a theme with a lit field may turn it off. */
-  /* The live field is repainted here too, fixed like the page's, so a theme
-     that repaints its field under the composer keeps the pools unbroken. */
-  background: var(--live-field), var(--composer-fade, linear-gradient(to bottom, transparent, var(--page) 1.25rem));
-  background-attachment: fixed, var(--composer-attachment, scroll);
-  -webkit-mask-image: var(--composer-mask, none);
-  mask-image: var(--composer-mask, none);
+  /* The strip spans every column, but only the composer in the trunk's column
+     is its: a lane passing under it is neither painted over nor unreachable. */
+  pointer-events: none;
 }
 
 .ex-session__composer > * {
   grid-column: 1;
+  grid-row: 1;
+  pointer-events: auto;
+}
+
+/* Fades the trunk out under the composer, in the trunk's column only; a theme
+   with a lit field may turn it off. The live field is repainted here too,
+   fixed like the page's, so a theme that repaints its field under the
+   composer keeps the pools unbroken. */
+.ex-session__composer::before {
+  content: '';
+  grid-column: 1;
+  grid-row: 1;
+  margin: -1rem 0 -1.25rem;
+  z-index: -1;
+  background: var(--live-field), var(--composer-fade, linear-gradient(to bottom, transparent, var(--page) 1.25rem));
+  background-attachment: fixed, var(--composer-attachment, scroll);
+  -webkit-mask-image: var(--composer-mask, none);
+  mask-image: var(--composer-mask, none);
 }
 
 /* The trunk flows; each other slot is a column its branches are placed in. The
@@ -337,11 +351,6 @@
 /* A seam crosses every column: the refill changes the prefix every slot forks from. */
 .ex-session--curtain .ex-seam {
   margin-right: calc(-1 * var(--lanes) * (var(--lane-width) + var(--gutter)));
-}
-
-/* Following the newest content lands it above the sticky composer, not under it. */
-.ex-session__end {
-  scroll-margin-bottom: 11rem;
 }
 
 @media (max-width: 72rem) {

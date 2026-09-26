@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { useState } from 'react';
 import { expect, userEvent, waitFor } from 'storybook/test';
 
 import { PHASES } from '../App.tsx';
@@ -144,5 +145,70 @@ export const WholeCondensed: Story = {
     await expect(canvasElement.querySelector('.ex-branch')).toBeNull();
     // Mimicry is still visible condensed: its bar carries the outcome's alarm.
     await expect(canvasElement.querySelectorAll('.ex-bar[data-alarm]').length).toBeGreaterThanOrEqual(7);
+  },
+};
+
+/** Three moments in era 0's queue: the trunk went idle at 101 s, and side calls ran one after another until the refill. */
+const QUEUE = [161_000, 261_000, 361_000] as const;
+
+function Following() {
+  const [at, setAt] = useState(0);
+  return (
+    <>
+      <button type="button" data-advance="" style={{ position: 'fixed', top: 0, left: 0, zIndex: 9, opacity: 0 }} onClick={() => setAt((i) => Math.min(i + 1, QUEUE.length - 1))}>
+        later
+      </button>
+      <SessionView session={fold(recordedAt(recording, QUEUE[at] ?? 0))} surface={{ curtain: true, gaps: false }} composer={{ phases: PHASES }} follow />
+    </>
+  );
+}
+
+/**
+ * The bottom of the page is now. Following, the view stays locked to it as
+ * the page grows -- here with side calls queued past the trunk's end -- and
+ * lets go the moment the person scrolls up, staying where they left it.
+ */
+export const FollowsTheBottom: Story = {
+  name: '8 · following: locked to the bottom, where now is',
+  render: () => <Following />,
+  play: async ({ canvasElement }) => {
+    const page = document.scrollingElement ?? document.documentElement;
+    const atBottom = () => window.innerHeight + window.scrollY >= page.scrollHeight - 2;
+    const where = (step: string) => `${step}: scrollY ${Math.round(window.scrollY)} + view ${window.innerHeight} of ${page.scrollHeight}`;
+    const later = canvasElement.querySelector('[data-advance]') as HTMLElement;
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-branchcell .ex-cable').length).toBeGreaterThan(0));
+    window.scrollTo(0, page.scrollHeight);
+    await waitFor(async () => expect(atBottom(), where('at first')).toBe(true));
+    const before = page.scrollHeight;
+    later.click();
+    await waitFor(async () => expect(page.scrollHeight).toBeGreaterThan(before));
+    // The lanes run past the trunk's end: the case following used to lose.
+    const trunkEnd = [...canvasElement.querySelectorAll('.ex-trunk__node')].at(-1)?.getBoundingClientRect().bottom ?? 0;
+    const laneEnd = Math.max(...[...canvasElement.querySelectorAll('.ex-branchcell')].map((c) => c.getBoundingClientRect().bottom));
+    await expect(laneEnd).toBeGreaterThan(trunkEnd);
+    await waitFor(async () => expect(atBottom(), where('after the page grew')).toBe(true));
+    // Scrolled away: what the person was reading stays where it was on screen
+    // while the page grows (the browser may move scrollY to keep it there).
+    window.scrollTo(0, window.scrollY - 800);
+    await new Promise((r) => setTimeout(r, 100));
+    const reading = [...canvasElement.querySelectorAll('.ex-branchcell')].find((c) => {
+      const r = c.getBoundingClientRect();
+      return r.top > 80 && r.bottom < window.innerHeight - 200;
+    });
+    await expect(reading).toBeDefined();
+    const seen = reading?.getBoundingClientRect().top ?? 0;
+    later.click();
+    await new Promise((r) => setTimeout(r, 600));
+    await expect(atBottom(), where('scrolled away, after the page grew')).toBe(false);
+    await expect(Math.abs((reading?.getBoundingClientRect().top ?? 0) - seen)).toBeLessThan(2);
+    // The composer's fade is the trunk's: a lane passing under the composer strip is neither painted over nor unreachable.
+    const strip = canvasElement.querySelector('.ex-session__composer') as HTMLElement;
+    const lane = canvasElement.querySelector('.ex-lane')?.getBoundingClientRect();
+    const band = strip.getBoundingClientRect();
+    await expect(getComputedStyle(strip).backgroundImage).toBe('none');
+    const fade = parseFloat(getComputedStyle(strip, '::before').width);
+    await expect(fade).toBeLessThanOrEqual((canvasElement.querySelector('.ex-trunk')?.getBoundingClientRect().width ?? 0) + 1);
+    const hit = document.elementFromPoint((lane?.left ?? 0) + 20, band.top + 8);
+    await expect(hit?.closest('.ex-session__composer')).toBeNull();
   },
 };
