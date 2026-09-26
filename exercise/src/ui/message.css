@@ -7,20 +7,6 @@
   opacity: 0.85;
 }
 
-.ex-more {
-  margin-top: 0.35rem;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink-muted);
-  font: var(--size-chrome) / 1.4 var(--font-chrome);
-  cursor: pointer;
-}
-
-.ex-more:hover {
-  color: var(--ink);
-}
-
 .ex-cancelled {
   margin: 0.5rem 0 0;
   color: var(--warn);

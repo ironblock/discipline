@@ -16,6 +16,11 @@ import type { Refusal } from '../drive/transport.ts';
 /** How a member reads at a glance. `quiet` is the neutral every unknown member gets. */
 export type Level = 'ok' | 'quiet' | 'warn' | 'bad';
 
+/** The alarm a level raises: warn and bad do, ok and quiet do not. */
+export function alarmOf(level: Level): 'warn' | 'bad' | undefined {
+  return level === 'warn' || level === 'bad' ? level : undefined;
+}
+
 export interface Drawn {
   readonly label: string;
   readonly level: Level;

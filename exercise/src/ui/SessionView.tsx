@@ -6,6 +6,7 @@ import { Branch } from './Branch.tsx';
 import { Composer } from './Composer.tsx';
 import type { ComposerProps } from './Composer.tsx';
 import { Memory, isUnseen } from './Memory.tsx';
+import { Minimap } from './Minimap.tsx';
 import { AssistantMessage, SystemMessage, TurnEnd, UserMessage } from './Message.tsx';
 import { Seam } from './Seam.tsx';
 import { SessionHeader } from './SessionHeader.tsx';
@@ -147,13 +148,14 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
     <SurfaceContext.Provider value={surface}>
       <ClockContext.Provider value={now}>
       <div
-        className={`ex-session${surface.gaps ? ' ex-gaps' : ''}${surface.curtain ? ' ex-session--curtain' : ''}`}
+        className={`ex-session ex-session--minimap${surface.gaps ? ' ex-gaps' : ''}${surface.curtain ? ' ex-session--curtain' : ''}`}
         style={{ ['--lanes' as string]: lanes.length, ...laneStyle(busyLane(session)) }}
         data-state={session.state}
         data-link={link}
         data-lanes-busy={session.occupancy.some((holder, slot) => holder !== undefined && slot !== session.trunkSlot) ? '' : undefined}
         data-fresh={session.memory.some((m) => isUnseen(m, seenThrough)) ? '' : undefined}
       >
+        <Minimap stage={stage} revision={[session, placed, seamPad, surface.curtain]} curtain={surface.curtain} />
         <div className="ex-session__header">
           <SessionHeader session={session} link={link} surface={surface} {...(onSurface ? { onSurface } : {})} />
         </div>

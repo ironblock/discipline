@@ -20,6 +20,7 @@ export function ToolCall({ node, open: initiallyOpen = false }: { readonly node:
       tone="tool"
       label={call.label}
       live={node.running}
+      alarm={node.exit !== undefined && node.exit !== 0 ? 'bad' : undefined}
       stats={
         node.running
           ? [{ value: <span className="ex-elapsed" data-level={since.level}>running · {counter(since.ms)}</span>, title: 'how long it has run' }]

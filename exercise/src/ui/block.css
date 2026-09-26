@@ -231,3 +231,18 @@
   outline: 2px solid color-mix(in oklab, var(--focus, var(--ink-interview)) 75%, transparent);
   outline-offset: 2px;
 }
+
+/* "N more": a quiet control for what a block holds back. Shared by every part that clips. */
+.ex-more {
+  margin-top: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-muted);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+  cursor: pointer;
+}
+
+.ex-more:hover {
+  color: var(--ink);
+}

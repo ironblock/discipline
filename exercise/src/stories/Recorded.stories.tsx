@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect } from 'storybook/test';
+import { expect, userEvent, waitFor } from 'storybook/test';
 
 import { PHASES } from '../App.tsx';
 import { RECORDINGS, recordedAt } from '../drive/recorded.ts';
@@ -77,5 +77,27 @@ export const Whole: Story = {
     const lane = canvasElement.querySelector('.ex-lane')?.getBoundingClientRect().left ?? Number.POSITIVE_INFINITY;
     const over = [...canvasElement.querySelectorAll('.ex-trunk .ex-block')].filter((b) => b.getBoundingClientRect().right > lane);
     await expect(over.map((b) => b.getAttribute('data-id'))).toEqual([]);
+  },
+};
+
+/** The minimap: the whole drive down the left edge -- every message and side call, both refills, every alarm -- and a press goes there. */
+export const Minimap: Story = {
+  name: '5 · the minimap',
+  play: async ({ canvasElement }) => {
+    const map = canvasElement.querySelector<HTMLElement>('.ex-minimap');
+    await expect(map).not.toBeNull();
+    if (!map) return;
+    const stage = canvasElement.querySelector('.ex-stage');
+    await waitFor(() => expect(map.querySelectorAll('.ex-mm__lane')).toHaveLength(94));
+    await expect(map.querySelectorAll('.ex-mm__trunk')).toHaveLength(stage?.querySelectorAll('.ex-trunk .ex-block, .ex-trunk .ex-turnend').length ?? -1);
+    await expect(map.querySelectorAll('.ex-mm__seam')).toHaveLength(2);
+    const alarms = stage?.querySelectorAll('[data-alarm]').length ?? 0;
+    await expect(alarms).toBeGreaterThan(0);
+    await expect(map.querySelectorAll('[data-alarm]')).toHaveLength(alarms);
+    // Press near the bottom of the map: the page goes to the end of the drive.
+    window.scrollTo({ top: 0 });
+    const box = map.getBoundingClientRect();
+    await userEvent.pointer({ keys: '[MouseLeft]', target: map, coords: { clientX: box.left + box.width / 2, clientY: box.bottom - 2 } });
+    await waitFor(() => expect(window.scrollY).toBeGreaterThan(0.9 * (document.documentElement.scrollHeight - window.innerHeight)));
   },
 };

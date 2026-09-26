@@ -1,0 +1,91 @@
+/*
+ * The minimap: a narrow rail down the left edge, the session scaled to its
+ * height. Trunk slivers on the left of it, side calls on the right (behind
+ * the curtain), refills across, alarms over everything.
+ */
+.ex-minimap {
+  position: fixed;
+  z-index: 4;
+  left: 1rem;
+  top: 3.6rem;
+  bottom: 1rem;
+  width: var(--minimap-width);
+  border-radius: calc(var(--radius) / 2);
+  background: color-mix(in oklab, var(--page) 70%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 8%, transparent);
+  cursor: pointer;
+  touch-action: none;
+  overflow: hidden;
+}
+
+.ex-minimap > span {
+  position: absolute;
+  min-height: 2px;
+  border-radius: 1px;
+}
+
+.ex-mm__trunk {
+  --c: var(--ink-assistant);
+  left: 3px;
+  right: 3px;
+  background: color-mix(in oklab, var(--c) 42%, transparent);
+}
+
+.ex-minimap[data-curtain] .ex-mm__trunk {
+  right: 42%;
+}
+
+.ex-mm__trunk[data-tone='system'] { --c: var(--ink-system); }
+.ex-mm__trunk[data-tone='user'] { --c: var(--ink-user); }
+.ex-mm__trunk[data-tone='tool'] { --c: var(--ink-tool); background: color-mix(in oklab, var(--c) 22%, transparent); }
+.ex-mm__trunk[data-tone='turnend'] { --c: var(--ink-muted); background: none; border-top: 1px dashed color-mix(in oklab, var(--c) 60%, transparent); }
+
+.ex-mm__lane {
+  --c: var(--lane-ink, var(--ink-lane));
+  left: 62%;
+  right: 3px;
+  background: color-mix(in oklab, var(--c) 50%, transparent);
+}
+
+.ex-mm__seam {
+  left: 0;
+  right: 0;
+  background: var(--seam);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--seam) 60%, transparent);
+}
+
+/* Running now: lit. */
+.ex-minimap > [data-live] {
+  background: var(--c);
+  box-shadow: 0 0 6px var(--c);
+}
+
+/* Something went wrong: a tick in its alarm colour, over its sliver, the full width. */
+.ex-minimap > [data-alarm]::after {
+  content: '';
+  position: absolute;
+  left: -3px;
+  right: -3px;
+  top: 0;
+  height: 3px;
+  border-radius: 1px;
+  background: var(--warn);
+}
+
+.ex-minimap > [data-alarm='bad']::after {
+  background: var(--bad);
+  box-shadow: 0 0 4px var(--bad);
+}
+
+.ex-mm__lens {
+  left: 0;
+  right: 0;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 30%, transparent);
+  pointer-events: none;
+}
+
+@media (max-width: 72rem) {
+  .ex-minimap { display: none; }
+}

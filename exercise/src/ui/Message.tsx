@@ -5,7 +5,7 @@ import { Block } from './Block.tsx';
 import { counter, ms, rate, tokens } from './format.ts';
 import { Copy } from './Copy.tsx';
 import { Prose } from './Prose.tsx';
-import { failOf, settleOf, stopOf } from './sets.ts';
+import { alarmOf, failOf, settleOf, stopOf } from './sets.ts';
 import { elapsed, useNow } from './surface.tsx';
 import './message.css';
 
@@ -93,6 +93,7 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
       label={silent ? 'assistant · a call, no text' : 'assistant'}
       thin={silent}
       live={live}
+      alarm={node.failure ? 'bad' : alarmOf(stopped.level)}
       stats={
         node.failure
           ? [
@@ -207,6 +208,7 @@ export function TurnEnd({ node }: { readonly node: Folded<SettledNode> }) {
       className="ex-turnend"
       role="note"
       data-level={settled.level}
+      data-alarm={alarmOf(settled.level)}
       data-known={settled.known ? '' : undefined}
       data-id={node.id}
       data-from={node.from.join(' ')}

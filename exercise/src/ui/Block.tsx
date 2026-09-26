@@ -28,6 +28,8 @@ export interface BlockProps {
   /** Thin: a bar with a footer and no body, for a harness step. */
   readonly thin?: boolean;
   readonly live?: boolean;
+  /** Something here went wrong, and how badly: what the minimap marks. */
+  readonly alarm?: 'warn' | 'bad' | undefined;
   readonly id?: string;
   /** Per-block actions -- copy today; retry, annotate, link later -- shown in the corner on hover or focus. */
   readonly actions?: ReactNode;
@@ -39,7 +41,7 @@ export interface BlockProps {
  * footer of what the harness measured. Every message, tool call and lane
  * step on the surface is one of these, refined.
  */
-export function Block({ tone, lane, label, stats = [], provenance, thin = false, live = false, id, actions, children }: BlockProps) {
+export function Block({ tone, lane, label, stats = [], provenance, thin = false, live = false, alarm, id, actions, children }: BlockProps) {
   const { curtain } = useSurface();
   const shown = stats.filter((s): s is Stat => Boolean(s));
   return (
@@ -47,6 +49,7 @@ export function Block({ tone, lane, label, stats = [], provenance, thin = false,
       className={`ex-block ex-block--${tone}${thin ? ' ex-block--thin' : ''}${live ? ' ex-block--live' : ''}`}
       data-tone={tone}
       data-lane={lane}
+      data-alarm={alarm}
       style={laneStyle(lane)}
       data-id={id}
       data-from={provenance.from.join(' ')}

@@ -3,8 +3,11 @@ import { useState } from 'react';
 import type { BranchNode, Folded, PatchNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { ms, rate, tokens } from './format.ts';
-import { failOf, opOf, outcomeOf } from './sets.ts';
+import { alarmOf, failOf, opOf, outcomeOf } from './sets.ts';
 import './branch.css';
+
+/** Patches a side call shows before "N more": enough to see what it did, few enough that side calls stay level with the trunk. */
+const PATCHES_SHOWN = 3;
 
 /**
  * A side call off the trunk's warm tail, in the slot that served it: a thin
@@ -13,6 +16,7 @@ import './branch.css';
  */
 export function Branch({ node, open: initiallyOpen = false }: { readonly node: Folded<BranchNode>; readonly open?: boolean }) {
   const [open, setOpen] = useState(initiallyOpen);
+  const [allPatches, setAllPatches] = useState(false);
   const live = node.outcome === undefined;
   const outcome = node.outcome !== undefined ? outcomeOf(node.outcome) : undefined;
   const t = node.timings;
@@ -24,6 +28,7 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         label={node.lane}
         thin
         live={live}
+        alarm={outcome ? alarmOf(outcome.level) : undefined}
         stats={[
           node.wallMs !== undefined && { value: ms(node.wallMs), title: 'wall clock' },
           t && { value: tokens(t.predicted_n), unit: 'tok', title: 'tokens generated' },
@@ -67,9 +72,16 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
       ) : null}
       {node.patches.length > 0 ? (
         <ul className="ex-branch__patches">
-          {node.patches.map((p) => (
+          {(allPatches ? node.patches : node.patches.slice(0, PATCHES_SHOWN)).map((p) => (
             <PatchLine key={p.id} patch={p} />
           ))}
+          {node.patches.length > PATCHES_SHOWN ? (
+            <li>
+              <button type="button" className="ex-more" aria-expanded={allPatches} onClick={() => setAllPatches(!allPatches)}>
+                {allPatches ? 'fewer' : `${node.patches.length - PATCHES_SHOWN} more patches`}
+              </button>
+            </li>
+          ) : null}
         </ul>
       ) : null}
     </div>
@@ -118,7 +130,9 @@ function PatchLine({ patch }: { readonly patch: Folded<PatchNode> }) {
         {op.glyph}
       </span>
       <span className="ex-patch__id">#{patch.entryId}</span>
-      <span className="ex-patch__text">{patch.text}</span>
+      <span className="ex-patch__text" title={patch.text}>
+        {patch.text}
+      </span>
       {!op.known ? <span className="ex-patch__note">{op.label}</span> : null}
       {patch.supersedes ? <span className="ex-patch__note">replaces #{patch.supersedes}</span> : null}
     </li>
