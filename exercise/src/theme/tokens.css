@@ -145,6 +145,17 @@
   --light-panel: 0%;
   --light-panel-live: 0%;
   --led-radius: 0px;
+  /* CABLES: from a trunk node into a side call off it. Weight; how much of
+   * its lane's colour it keeps at rest (0% is the faint ink); how it ends --
+   * an arrow into the side call, or a port at each end (each a `display`
+   * value: inline or none); how far it glows while live; and whether light
+   * travels down it while live. */
+  --cable-width: 1px;
+  --cable-rest: 0%;
+  --cable-arrow: inline;
+  --cable-ports: none;
+  --cable-glow: 0px;
+  --cable-pulse: inline;
   /* TEXTURE: images layered on surfaces. A sweep across a trunk block (light
    * falling across a raised or pressed face), a grain on every surface, and
    * a field of light pooled on the page itself. All `none` by default. */

@@ -72,6 +72,11 @@ export const Whole: Story = {
   play: async ({ canvasElement }) => {
     await expect(canvasElement.querySelectorAll('.ex-era')).toHaveLength(3);
     await expect(canvasElement.querySelectorAll('.ex-branchcell')).toHaveLength(94);
+    // Every side call is cabled to the trunk node it came from, across the whole gutter.
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-branchcell .ex-cable')).toHaveLength(94));
+    const edge = canvasElement.querySelector('.ex-trunk')?.getBoundingClientRect().right ?? 0;
+    const short = [...canvasElement.querySelectorAll('.ex-cable')].filter((c) => Math.abs(c.getBoundingClientRect().left - edge) > 1);
+    await expect(short).toHaveLength(0);
     await expect(canvasElement.querySelector('.ex-header__unknown')).toBeNull();
     // Real content is wide -- long commands, wide tables -- and never pushes the trunk into the lanes.
     const lane = canvasElement.querySelector('.ex-lane')?.getBoundingClientRect().left ?? Number.POSITIVE_INFINITY;

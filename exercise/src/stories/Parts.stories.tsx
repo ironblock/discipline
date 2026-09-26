@@ -7,6 +7,7 @@ import { expect, userEvent, within as canvas } from 'storybook/test';
 import { Block } from '../ui/Block.tsx';
 import type { Tone } from '../ui/Block.tsx';
 import { Branch } from '../ui/Branch.tsx';
+import { Cable } from '../ui/Cable.tsx';
 import { Composer } from '../ui/Composer.tsx';
 import type { ComposerProps } from '../ui/Composer.tsx';
 import { LookSetting, Looked } from '../ui/look.tsx';
@@ -15,6 +16,7 @@ import { Prose, ProseProbe } from '../ui/Prose.tsx';
 import { AssistantMessage, SystemMessage, UserMessage } from '../ui/Message.tsx';
 import { Seam } from '../ui/Seam.tsx';
 import { SessionHeader } from '../ui/SessionHeader.tsx';
+import { laneStyle } from '../ui/sets.ts';
 import { ToolCall } from '../ui/ToolCall.tsx';
 import { PHASES } from '../App.tsx';
 import { layersOf } from '../theme/themes/index.ts';
@@ -129,6 +131,65 @@ export const LookSettings: Story = {
     await expect(root?.getAttribute('data-theme')).toBe(layersOf('bloom'));
     await expect(JSON.parse(localStorage.getItem('exercise.look') ?? '{}')).toEqual({ material: 'colo', scheme: 'dark' });
     localStorage.removeItem('exercise.look');
+  },
+};
+
+// ---------------------------------------------------------------- Cables
+
+/** The ways a cable can end, as token values a theme sets (tokens.css, `--cable-*`). */
+const CABLE_OPTIONS = [
+  { name: 'line', title: 'A · a line and an arrow, in the faint ink', vars: { '--cable-width': '1px', '--cable-rest': '0%', '--cable-arrow': 'inline', '--cable-ports': 'none', '--cable-glow': '0px' } },
+  { name: 'lane', title: 'B · a line and an arrow, in its lane’s colour', vars: { '--cable-width': '1.5px', '--cable-rest': '60%', '--cable-arrow': 'inline', '--cable-ports': 'none', '--cable-glow': '3px' } },
+  { name: 'patch', title: 'C · a patch cable, jacked in at both ends', vars: { '--cable-width': '1.5px', '--cable-rest': '45%', '--cable-arrow': 'none', '--cable-ports': 'inline', '--cable-glow': '3px' } },
+] as const;
+
+function CableBench({ vars }: { readonly vars: Readonly<Record<string, string>> }) {
+  const side = (lane: string, top: number, live: boolean, drop: number) => (
+    <div style={{ position: 'absolute', left: 170, width: 190, top, ...laneStyle(lane) }}>
+      <Cable reach={40} drop={drop} top={15 - drop} live={live} />
+      <Block tone="lane" lane={lane} label={lane} thin live={live} stats={[{ value: live ? '4.1 s' : '2.12 s' }]} provenance={{ from: [0], needs: [] }} />
+    </div>
+  );
+  return (
+    <div style={{ position: 'relative', height: 190, ...vars }}>
+      <div className="ex-block ex-block--assistant" style={{ position: 'absolute', left: 0, top: 0, width: 130, height: 56 }} />
+      <div className="ex-block ex-block--user" style={{ position: 'absolute', left: 0, top: 72, width: 130, height: 56 }} />
+      {side('extraction', 0, false, 0)}
+      {side('interview', 72, true, 0)}
+      {side('ratify', 130, true, 58)}
+    </div>
+  );
+}
+
+/**
+ * How a cable ends, three ways, each at rest (extraction), running straight
+ * across (interview) and stacked below a busy slot (ratify): the running
+ * ones carry travelling light. `colo` draws C, `paper` A.
+ */
+export const CableOptions: Story = {
+  name: 'Cable · three ways to end',
+  render: () => (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 380px)', gap: '2rem' }}>
+      {CABLE_OPTIONS.map((o) => (
+        <div key={o.name} data-option={o.name}>
+          <p style={{ margin: '0 0 1rem', color: 'var(--ink-muted)' }}>{o.title}</p>
+          <CableBench vars={o.vars} />
+        </div>
+      ))}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const shown = (option: string, selector: string) =>
+      [...canvasElement.querySelectorAll(`[data-option='${option}'] ${selector}`)].some((el) => getComputedStyle(el).display !== 'none');
+    await expect(shown('line', '.ex-cable__arrow')).toBe(true);
+    await expect(shown('line', '.ex-cable__port')).toBe(false);
+    await expect(shown('patch', '.ex-cable__port')).toBe(true);
+    await expect(shown('patch', '.ex-cable__arrow')).toBe(false);
+    // Light travels only down a cable whose side call is running.
+    const moving = (el: Element) => getComputedStyle(el).display !== 'none' && el.getAnimations().length > 0;
+    const pulses = [...canvasElement.querySelectorAll('.ex-cable')].map((c) => [c.hasAttribute('data-live'), moving(c.querySelector('.ex-cable__pulse') as Element)]);
+    await expect(pulses.every(([live, travels]) => live === travels)).toBe(true);
+    await expect(pulses.filter(([live]) => live)).toHaveLength(6);
   },
 };
 

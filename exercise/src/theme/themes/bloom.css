@@ -32,6 +32,12 @@
   --evicted-filter: saturate(0.3);
   --evicted-opacity: 0.62;
 
+  /* A cable is a patch cable in its lane's colour, jacked in at both ends. */
+  --cable-width: 1.5px;
+  --cable-rest: 45%;
+  --cable-arrow: none;
+  --cable-ports: inline;
+
   --glow-radius: 56px;
   --glow-trunk: 32%;
   --glow-trunk-live: 65%;

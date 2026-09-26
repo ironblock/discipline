@@ -1,0 +1,60 @@
+/*
+ * The cable: one stroked path, so a bend is a real curve and every edge is
+ * anti-aliased the same way. Its colour is the lane's, mixed toward the
+ * faint ink by --cable-rest; running, it is the lane's own and glows by
+ * --cable-glow, and a dash of light travels its length.
+ */
+.ex-cable {
+  --c: var(--lane-ink, var(--ink-lane));
+  position: absolute;
+  /* Over the side call's edge, so the port it jacks into shows whole. */
+  z-index: 1;
+  overflow: visible;
+  pointer-events: none;
+  color: color-mix(in oklab, var(--c) var(--cable-rest), var(--ink-faint));
+  transition: color 0.6s ease, filter 0.6s ease;
+}
+
+.ex-cable path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--cable-width);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ex-cable__arrow {
+  display: var(--cable-arrow);
+}
+
+.ex-cable__port {
+  display: var(--cable-ports);
+  fill: currentColor;
+}
+
+.ex-cable[data-live] {
+  color: var(--c);
+  filter: drop-shadow(0 0 var(--cable-glow) var(--c));
+}
+
+/* The light: one dash, a tenth of the cable long, from the trunk to the slot, again and again. */
+.ex-cable .ex-cable__pulse {
+  display: none;
+  stroke: color-mix(in oklab, var(--c) 45%, white);
+  stroke-width: calc(var(--cable-width) + 1px);
+  stroke-dasharray: 10 90;
+}
+
+.ex-cable[data-live] .ex-cable__pulse {
+  display: var(--cable-pulse);
+  animation: ex-travel 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes ex-travel {
+  from { stroke-dashoffset: 10; }
+  to { stroke-dashoffset: -90; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ex-cable[data-live] .ex-cable__pulse { display: none; }
+}

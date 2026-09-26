@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { Link } from '../drive/transport.ts';
 import type { BranchNode, Folded, Session, TrunkNode } from '../session/fold.ts';
 import { Branch } from './Branch.tsx';
+import { Cable } from './Cable.tsx';
 import { Composer } from './Composer.tsx';
 import type { ComposerProps } from './Composer.tsx';
 import { Memory, isUnseen } from './Memory.tsx';
@@ -29,12 +30,14 @@ export interface SessionViewProps {
 
 /** Vertical space between two branches stacked in one slot. */
 const STACK_GAP = 14;
-/** Where on a block the connector attaches: the middle of a thin bar. */
+/** Where on a block the cable attaches: the middle of a thin bar. */
 const ATTACH = 15;
 
 interface Placement {
   readonly top: number;
   readonly anchor: number;
+  /** From the trunk's right edge to the side call's left: what the cable spans. */
+  readonly reach: number;
 }
 
 /**
@@ -42,7 +45,7 @@ interface Placement {
  * curtain, one column per other server slot. A branch sits level with the
  * trunk node it came from, in the column of the slot that served it; when
  * an earlier branch in the same slot is still in the way it stacks below
- * and its connector bends to reach it. The trunk never moves for a branch.
+ * and its cable bends to reach it. The trunk never moves for a branch.
  */
 export function SessionView({ session, link = 'live', surface, onSurface, composer, follow = false }: SessionViewProps) {
   const lanes = surface.curtain ? laneSlots(session) : [];
@@ -114,9 +117,10 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
         const anchorEl = anchors.current.get(branch.at);
         const cellEl = cells.current.get(branch.id);
         if (!anchorEl || !cellEl) continue;
-        const anchor = anchorEl.getBoundingClientRect().top - base;
+        const at = anchorEl.getBoundingClientRect();
+        const anchor = at.top - base;
         const top = Math.max(anchor, floor);
-        next.set(branch.id, { top, anchor });
+        next.set(branch.id, { top, anchor, reach: cellEl.getBoundingClientRect().left - at.right });
         floor = top + cellEl.offsetHeight + STACK_GAP;
         const era = eraOf.get(branch.at) ?? 0;
         eraBottom.set(era, Math.max(eraBottom.get(era) ?? 0, top + cellEl.offsetHeight));
@@ -331,9 +335,7 @@ function BranchCell({
       data-branch={branch.id}
       data-evicted={evicted ? '' : undefined}
     >
-      <span className="ex-connector" aria-hidden="true" style={{ top: ATTACH - drop, height: drop }} data-bent={drop > 0 ? '' : undefined}>
-        <span className="ex-connector__tip" />
-      </span>
+      {placement ? <Cable reach={placement.reach} drop={drop} top={ATTACH - drop} live={branch.outcome === undefined} /> : null}
       <Branch node={branch} />
     </div>
   );
@@ -349,7 +351,7 @@ function samePlacements(a: ReadonlyMap<string, Placement>, b: ReadonlyMap<string
   if (a.size !== b.size) return false;
   for (const [id, p] of b) {
     const q = a.get(id);
-    if (!q || Math.abs(q.top - p.top) > 0.5 || Math.abs(q.anchor - p.anchor) > 0.5) return false;
+    if (!q || Math.abs(q.top - p.top) > 0.5 || Math.abs(q.anchor - p.anchor) > 0.5 || Math.abs(q.reach - p.reach) > 0.5) return false;
   }
   return true;
 }
