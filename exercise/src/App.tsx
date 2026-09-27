@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { CannedTransport } from './drive/canned.ts';
-import { RECORDINGS, ReplayTransport } from './drive/recorded.ts';
-import type { RecordingName } from './drive/recorded.ts';
+import { ReplayTransport } from './drive/recorded.ts';
+import { SESSIONS } from './drive/sessions.ts';
+import type { SessionName } from './drive/sessions.ts';
 import { SPECIMEN } from './drive/specimen.ts';
 import type { DriveTransport, Link } from './drive/transport.ts';
 import { useSession } from './session/useSession.ts';
@@ -24,9 +25,9 @@ const EXPECTS: Readonly<Record<string, string>> = {
  * The harness, on the canned transport until #117's loop serves a real one --
  * or replaying a recorded session, which plays and takes no commands.
  */
-export function App({ speed = 1, recording }: { readonly speed?: number; readonly recording?: RecordingName }) {
+export function App({ speed = 1, recording }: { readonly speed?: number; readonly recording?: SessionName }) {
   const transport = useMemo(
-    () => (recording ? new ReplayTransport(RECORDINGS[recording], { speed }) : new CannedTransport(SPECIMEN, { speed })),
+    () => (recording ? new ReplayTransport(SESSIONS[recording], { speed }) : new CannedTransport(SPECIMEN, { speed })),
     [speed, recording],
   );
   useEffect(() => () => transport.close(), [transport]);
@@ -46,7 +47,7 @@ export function App({ speed = 1, recording }: { readonly speed?: number; readonl
         phases: PHASES,
         dispatch: (command) => transport.dispatch(command),
         hint: recording
-          ? `recorded: ${RECORDINGS[recording].title}`
+          ? `replaying: ${SESSIONS[recording].title}`
           : session.state === 'awaiting'
             ? expects
               ? EXPECTS[expects]
