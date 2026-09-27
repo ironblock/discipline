@@ -126,7 +126,7 @@
 .ex-prose__code {
   margin: 0 0 0.75em;
   padding: 0.75em 1em;
-  background: rgb(0 0 0 / 0.25);
+  background: var(--well);
   border-radius: var(--radius);
   font: var(--size-tool) / 1.5 var(--font-tool);
   overflow-x: auto;

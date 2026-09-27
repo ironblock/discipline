@@ -5,17 +5,7 @@
   --light-colour: var(--ink-muted);
   --light: var(--light-panel);
   --glow: var(--glow-panel);
-  background-color: var(--fill-memory);
-  background-image:
-    var(--glass-overlay),
-    radial-gradient(120% 70% at 50% 0%, color-mix(in oklab, var(--light-colour) var(--light), transparent), transparent 75%),
-    var(--texture);
-  -webkit-backdrop-filter: var(--glass-backdrop);
-  backdrop-filter: var(--glass-backdrop);
-  border: 1px solid var(--glass-rim, var(--rule));
-  border-radius: var(--radius);
-  box-shadow: var(--relief-panel), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--light-colour) var(--glow), transparent);
-  transition: box-shadow 0.8s ease;
+  --panel-fill: var(--fill-memory);
   font: var(--size-chrome) / 1.45 var(--font-chrome);
   color: var(--ink-muted);
 }

@@ -59,8 +59,8 @@ export function ToolPair({ node, caller, first }: { readonly node: Folded<ToolNo
 /**
  * What a tool call returned: its own block, under the call, with the tool's
  * stats rather than tokens -- lines and bytes and how long, its exit. Its
- * first lines show; the rest when opened. Running, or having printed
- * nothing, it is one row.
+ * first lines show, and under them what is held back, to open. Running, or
+ * having printed nothing, it is one row.
  */
 export function ToolResult({ node, open: initiallyOpen = false }: { readonly node: Folded<ToolNode>; readonly open?: boolean }) {
   const [open, setOpen] = useState(initiallyOpen);
@@ -80,18 +80,6 @@ export function ToolResult({ node, open: initiallyOpen = false }: { readonly nod
       thin={row}
       live={node.running}
       alarm={node.exit !== undefined && node.exit !== 0 ? 'bad' : undefined}
-      {...(!row && more
-        ? {
-            lead: (
-              <button type="button" className="ex-tool__head" aria-expanded={open} onClick={() => setOpen(!open)}>
-                <span className="ex-tool__caret" aria-hidden="true">
-                  {open ? '▾' : '▸'}
-                </span>
-                <span className="ex-tool__more">{open ? 'all' : 'first'} {open ? all.length.toLocaleString('en-US') : PEEK} of {all.length.toLocaleString('en-US')} lines</span>
-              </button>
-            ),
-          }
-        : {})}
       output={
         node.running ? (
           <span className="ex-elapsed" data-level={since.level}>
@@ -106,7 +94,16 @@ export function ToolResult({ node, open: initiallyOpen = false }: { readonly nod
       id={node.id}
       {...(output !== '' ? { actions: <Copy text={output} label="copy output" /> } : {})}
     >
-      {row ? undefined : <pre className="ex-tool__output">{open || !more ? output : all.slice(0, PEEK).join('\n')}</pre>}
+      {row ? undefined : (
+        <>
+          <pre className="ex-tool__output">{open || !more ? output : all.slice(0, PEEK).join('\n')}</pre>
+          {more ? (
+            <button type="button" className="ex-more" aria-expanded={open} onClick={() => setOpen(!open)}>
+              {open ? 'less' : `${(all.length - PEEK).toLocaleString('en-US')} more lines`}
+            </button>
+          ) : null}
+        </>
+      )}
     </Block>
   );
 }

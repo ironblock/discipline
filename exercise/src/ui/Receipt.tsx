@@ -1,4 +1,5 @@
 import type { Receipt as Numbers } from '../session/receipt.ts';
+import './panel.css';
 import './receipt.css';
 
 /**
@@ -29,7 +30,7 @@ export function Receipt({ receipt: r }: { readonly receipt: Numbers }) {
     },
   ];
   return (
-    <section className="ex-receipt" aria-label="receipt">
+    <section className="ex-panel ex-receipt" aria-label="receipt">
       <header className="ex-receipt__head">receipt</header>
       <dl>
         {rows.map((row) => (

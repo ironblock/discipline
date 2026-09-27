@@ -35,7 +35,7 @@ export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
     <Block
       tone="system"
       label={node.render === undefined ? 'system' : `system · render v${node.render}`}
-      heads={[node.tokens !== undefined && { value: tokens(node.tokens), unit: 'tok', title: 'tokens in the prefix' }]}
+      {...(node.tokens !== undefined ? { input: <span title="tokens in the prefix">{tokens(node.tokens)} tok</span> } : {})}
       provenance={node}
       id={node.id}
     >
@@ -55,17 +55,15 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
     <Block
       tone="user"
       label="user"
-      heads={
-        node.prefill
-          ? [
-              {
-                value: `+${tokens(node.prefill.fresh)}`,
-                unit: 'tok',
-                title: `new tokens this ask put in front of the model; ${tokens(node.prefill.cached)} before it were warm, reused from the slot`,
-              },
-            ]
-          : []
-      }
+      {...(node.prefill
+        ? {
+            input: (
+              <span title={`new tokens this ask put in front of the model; ${tokens(node.prefill.cached)} before it were warm, reused from the slot`}>
+                +{tokens(node.prefill.fresh)} tok
+              </span>
+            ),
+          }
+        : {})}
       provenance={node}
       id={node.id}
       actions={<Copy text={node.text} />}
@@ -111,11 +109,8 @@ export function AssistantMessage({ node, calls = [] }: { readonly node: Folded<A
       label="assistant"
       thin={bare}
       live={live}
-      intake={{
-        reading: node.progress === 'prefill',
-        edge: edgeOf(node),
-        ...(readLine && !bare ? { line: readLine } : {}),
-      }}
+      intake={{ reading: node.progress === 'prefill', edge: edgeOf(node) }}
+      {...(readLine && !bare ? { input: readLine } : {})}
       {...(writing && !node.failure && !bare ? { output: <Flowing flow={writing} level={worry} title={apart ? 'tokens written before the tool calls began' : 'tokens written, reasoning included'} /> } : {})}
       alarm={node.failure ? 'bad' : alarmOf(stopped.level)}
       stats={[

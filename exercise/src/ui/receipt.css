@@ -1,13 +1,7 @@
 /* The receipt: a small panel under working memory, numbers in the stats face. */
 .ex-receipt {
   padding: 0.7rem 1rem 0.75rem;
-  background-color: var(--fill-memory);
-  background-image: var(--glass-overlay), var(--texture);
-  -webkit-backdrop-filter: var(--glass-backdrop);
-  backdrop-filter: var(--glass-backdrop);
-  border: 1px solid var(--glass-rim, var(--rule));
-  border-radius: var(--radius);
-  box-shadow: var(--relief-panel);
+  --panel-fill: var(--fill-memory);
   font: var(--size-stats) / 1.45 var(--font-stats);
   color: var(--ink-muted);
 }

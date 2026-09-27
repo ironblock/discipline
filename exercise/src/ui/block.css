@@ -8,23 +8,29 @@
   padding: 1rem 1.25rem 0.6rem;
   position: relative;
   /* A message is an impression in the prefix; its role's light, if any, spills. */
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone-ink) var(--rim-tone), transparent), var(--relief-trunk), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--tone-ink) var(--glow-trunk), transparent);
+  --relief: var(--relief-trunk);
+  --glow: var(--glow-trunk);
+  --rim: inset 0 0 0 1px color-mix(in oklab, var(--tone-ink) var(--rim-tone), transparent);
+  box-shadow: var(--rim), var(--relief), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--tone-ink) var(--glow), transparent);
   transition: box-shadow 0.6s ease, opacity 0.6s ease;
 }
 
 .ex-block--live {
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone-ink) var(--rim-tone), transparent), var(--relief-trunk-live), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--tone-ink) var(--glow-trunk-live), transparent);
+  --relief: var(--relief-trunk-live);
+  --glow: var(--glow-trunk-live);
 }
 
 .ex-block--system { --fill: var(--fill-system); --tone-ink: var(--ink-system); }
 .ex-block--user { --fill: var(--fill-user); --tone-ink: var(--ink-user); }
 .ex-block--assistant { --fill: var(--fill-assistant); --tone-ink: var(--ink-assistant); }
-.ex-block--tool { --fill: var(--fill-tool); --tone-ink: var(--ink-tool); border: 1px solid var(--rule); }
-
-/* A tool call is the machine speaking: it may sit apart from the messages (a well, not a slab). */
-.ex-block--tool:not(.ex-block--live) {
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone-ink) var(--rim-tone), transparent), var(--relief-tool, var(--relief-trunk)), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--tone-ink) var(--glow-trunk), transparent);
+/* A tool call is the machine speaking: it may sit apart from the messages (a well, not a slab), ruled. A
+   ring, not a border, so its header and footer bands meet its edges as every other block's do. */
+.ex-block--tool {
+  --fill: var(--fill-tool);
+  --tone-ink: var(--ink-tool);
+  --rim: inset 0 0 0 1px color-mix(in oklab, var(--tone-ink) var(--rim-tone), transparent), inset 0 0 0 1px var(--rule);
 }
+.ex-block--tool:not(.ex-block--live) { --relief: var(--relief-tool, var(--relief-trunk)); }
 /* A lane's colours come from the lane registry (`laneStyle`); an unknown lane is neutral. */
 .ex-block--lane { --fill: var(--lane-fill, var(--fill-lane)); --tone-ink: var(--lane-ink, var(--ink-lane)); }
 
@@ -206,23 +212,33 @@
   color: var(--fresh);
 }
 
-/* Something is still generating or running in this block: light sweeps its
-   bottom edge. The whole block is masked to a 2px ring along its bottom, so
-   the edge follows the corners' radius rather than running past them. */
-.ex-block--live::after {
-  content: '';
+/* A block's edges, top and bottom: the whole block masked to a 2px ring
+   along one side (its padding there), so an edge follows the corners'
+   radius rather than running past them. */
+.ex-block--live::after,
+.ex-block__edge {
   position: absolute;
   inset: 0;
-  padding-bottom: 2px;
   border-radius: inherit;
   pointer-events: none;
   -webkit-mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+
+/* Light sweeping an edge: something is being written (the bottom) or read, with nothing known yet (the top). */
+.ex-block--live::after,
+.ex-block__edge[data-unknown] {
   background: linear-gradient(90deg, transparent, var(--tone-ink), transparent);
   background-size: 40% 100%;
   background-repeat: no-repeat;
   animation: ex-sweep 1.4s linear infinite;
   opacity: 0.6;
+}
+
+/* Something is still generating or running in this block: light sweeps its bottom edge. */
+.ex-block--live::after {
+  content: '';
+  padding-bottom: 2px;
 }
 
 /*
@@ -234,29 +250,15 @@
  * rests: nothing is being written yet.
  */
 .ex-block__edge {
-  position: absolute;
-  inset: 0;
   padding-top: 2px;
-  border-radius: inherit;
-  pointer-events: none;
-  -webkit-mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
-  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
   background: linear-gradient(90deg, var(--tone-ink) 0 calc(var(--read) * 100%), color-mix(in oklab, var(--tone-ink) 12%, transparent) 0);
   opacity: 0.4;
 }
 
-.ex-block__edge[data-reading] {
+/* Lit while reading -- unless nothing is known yet, when it sweeps as above. */
+.ex-block__edge[data-reading]:not([data-unknown]) {
   opacity: 0.9;
   transition: background 0.25s linear;
-}
-
-/* Reading, with nothing known yet: light sweeps the top edge, as writing sweeps the bottom. */
-.ex-block__edge[data-unknown] {
-  background: linear-gradient(90deg, transparent, var(--tone-ink), transparent);
-  background-size: 40% 100%;
-  background-repeat: no-repeat;
-  animation: ex-sweep 1.4s linear infinite;
-  opacity: 0.6;
 }
 
 .ex-block--live[data-reading]::after {
@@ -269,7 +271,7 @@
 }
 
 /* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
-.ex-root[data-motion='still'] .ex-block--live::after { animation: none; background-size: 100% 100%; opacity: 0.3; }
+.ex-root[data-motion='still'] .ex-block--live::after,
 .ex-root[data-motion='still'] .ex-block__edge[data-unknown] { animation: none; background-size: 100% 100%; opacity: 0.3; }
 .ex-root[data-motion='still'] .ex-block__edge[data-reading] { transition: none; }
 

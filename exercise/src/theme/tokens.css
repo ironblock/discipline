@@ -52,6 +52,8 @@
   --ink-muted: #8b9098;
   --ink-faint: #5f646c;
   --chip: rgb(255 255 255 / 0.06);
+  /* Code set into prose: a well in the block. */
+  --well: rgb(0 0 0 / 0.25);
   --slab: #22252b;
 
   /* The trunk, by role */

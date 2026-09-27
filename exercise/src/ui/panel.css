@@ -1,0 +1,20 @@
+/*
+ * A panel beside the trunk -- the composer, working memory, the receipt:
+ * glass where the look has it, and lit from within where the panel says.
+ * Each panel sets its own --panel-fill, --light-colour, --light (how much
+ * its light fills it), --light-at (where from: a radial-gradient's shape
+ * and position) and --glow (how far its light spills); unset, it is dark.
+ */
+.ex-panel {
+  background-color: var(--panel-fill, var(--panel));
+  background-image:
+    var(--glass-overlay),
+    radial-gradient(var(--light-at, 120% 70% at 50% 0%), color-mix(in oklab, var(--light-colour, var(--ink-muted)) var(--light, 0%), transparent), transparent 75%),
+    var(--texture);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-rim, var(--rule));
+  border-radius: var(--radius);
+  box-shadow: var(--relief-panel), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--light-colour, var(--ink-muted)) var(--glow, 0%), transparent);
+  transition: box-shadow 0.6s ease;
+}

@@ -22,10 +22,10 @@ export interface BlockProps {
   readonly lane?: ForkLane;
   /** The role or lane, in the harness's words: the header's chip. */
   readonly label: string;
+  /** What went in, in a line: after the chip -- tokens read, or an ask's new tokens. The header's, as `output` is the footer's. */
+  readonly input?: ReactNode;
   /** What went in, said rather than counted: after the chip -- a tool's command. */
   readonly lead?: ReactNode;
-  /** What went in: the header's numbers, after the chip. */
-  readonly heads?: readonly (Stat | false | undefined)[];
   /** What came out, in a line: the footer's first -- tokens written, or a tool's lines and bytes, and how long. */
   readonly output?: ReactNode;
   /** What came out: the footer's numbers, after the line. No footer without one or the other. */
@@ -36,12 +36,11 @@ export interface BlockProps {
   readonly thin?: boolean;
   readonly live?: boolean;
   /**
-   * What the block read before it wrote: along its top edge, the new part of
+   * What the block read before it wrote, along its top edge: the new part of
    * the prompt as a bar filling as it is read (absent while nothing is
-   * known: light sweeps instead), and, on a block with a header, a line after
-   * the chip. While it reads, the bottom edge rests.
+   * known: light sweeps instead). While it reads, the bottom edge rests.
    */
-  readonly intake?: { readonly reading: boolean; readonly edge?: { readonly read: number } | undefined; readonly line?: ReactNode };
+  readonly intake?: { readonly reading: boolean; readonly edge?: { readonly read: number } | undefined };
   /** Something here went wrong, and how badly: what the minimap marks. */
   readonly alarm?: 'warn' | 'bad' | undefined;
   /** The node's id: its DOM id too, so `#<id>` links to it. */
@@ -57,16 +56,15 @@ export interface BlockProps {
  * came out, in low-contrast mono. Every message, tool call and lane step on
  * the surface is one of these, refined.
  */
-export function Block({ tone, lane, label, lead, heads = [], output, stats = [], provenance, thin = false, live = false, intake, alarm, id, actions, children }: BlockProps) {
+export function Block({ tone, lane, label, input, lead, output, stats = [], provenance, thin = false, live = false, intake, alarm, id, actions, children }: BlockProps) {
   const { curtain } = useSurface();
   const target = useTarget();
-  const inputs = heads.filter((s): s is Stat => Boolean(s));
   const outputs = stats.filter((s): s is Stat => Boolean(s));
   const chip = <span className="ex-block__label">{label}</span>;
   const line =
-    intake?.line !== undefined ? (
-      <span className="ex-block__flow" data-at="head" role={intake.reading ? 'status' : undefined}>
-        {intake.line}
+    input !== undefined ? (
+      <span className="ex-block__flow" data-at="head" role={intake?.reading ? 'status' : undefined}>
+        {input}
       </span>
     ) : null;
   const out = output !== undefined ? <span className="ex-block__flow" data-at="foot">{output}</span> : null;
@@ -96,18 +94,18 @@ export function Block({ tone, lane, label, lead, heads = [], output, stats = [],
       {thin ? (
         <footer className="ex-block__foot">
           {chip}
+          {line}
           {children !== undefined ? <span className="ex-block__inline">{children}</span> : null}
           {out}
           <span className="ex-block__spacer" />
-          {[...inputs, ...outputs].map(stat)}
+          {outputs.map(stat)}
         </footer>
       ) : (
         <>
           <header className="ex-block__head">
             {chip}
             {line}
-            {lead !== undefined ? <span className="ex-block__lead">{lead}</span> : <span className="ex-block__spacer" />}
-            {inputs.map(stat)}
+            {lead !== undefined ? <span className="ex-block__lead">{lead}</span> : null}
           </header>
           {children !== undefined ? <div className="ex-block__body">{children}</div> : null}
           {out || outputs.length > 0 ? (

@@ -4,6 +4,7 @@ import type { FormEvent, KeyboardEvent } from 'react';
 import type { SessionState } from '../session/fold.ts';
 import type { Ack, Command, Link } from '../drive/transport.ts';
 import { refusalOf } from './sets.ts';
+import './panel.css';
 import './composer.css';
 
 export interface ComposerProps {
@@ -61,7 +62,7 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
   };
 
   return (
-    <form className="ex-composer" onSubmit={send} data-state={state} data-link={link}>
+    <form className="ex-panel ex-composer" onSubmit={send} data-state={state} data-link={link}>
       <textarea
         className="ex-composer__input"
         value={draft}

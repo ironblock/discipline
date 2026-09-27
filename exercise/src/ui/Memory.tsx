@@ -1,6 +1,7 @@
 import type { Folded, MemoryEntry } from '../session/fold.ts';
 import { opOf } from './sets.ts';
 import { useHotEntries, useTarget } from './surface.tsx';
+import './panel.css';
 import './memory.css';
 
 export interface MemoryProps {
@@ -29,7 +30,7 @@ export function Memory({ entries, seenThrough = -1, onSeen }: MemoryProps) {
   const fresh = entries.filter((e) => isUnseen(e, seenThrough)).length;
   const categories = [...new Set(entries.map((e) => e.category))];
   return (
-    <section className="ex-memory" aria-label="working memory">
+    <section className="ex-panel ex-memory" aria-label="working memory">
       <header className="ex-memory__head">
         <span className="ex-memory__title">working memory</span>
         <span>{live} live</span>

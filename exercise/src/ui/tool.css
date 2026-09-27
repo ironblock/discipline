@@ -1,11 +1,3 @@
-.ex-block--tool {
-  padding-top: 0.6rem;
-}
-
-.ex-block--tool .ex-block__body {
-  margin-bottom: 0.5rem;
-}
-
 /*
  * A tool call and its result: a pair, like a REPL's input and output, one
  * node of the trunk -- the call's block and the result's, close together.
@@ -22,21 +14,13 @@
   color: var(--ink-faint);
 }
 
-.ex-tool__head {
-  flex: 1 1 0;
-  min-width: 0;
-  width: auto;
-}
-
-.ex-call .ex-tool__script {
-  flex-basis: 100%;
-}
-
+/* A call's command, in its header: opens the rest of a script. */
 .ex-tool__head {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
   width: 100%;
+  min-width: 0;
   padding: 0;
   border: 0;
   background: none;
@@ -55,8 +39,9 @@
   color: var(--ink-faint);
 }
 
+/* Nothing to open: no caret, and no room kept for one -- the command sits after the chip as any header's line does. */
 .ex-tool__head:disabled .ex-tool__caret {
-  visibility: hidden;
+  display: none;
 }
 
 .ex-tool__prompt {
@@ -75,21 +60,15 @@
   white-space: nowrap;
 }
 
+/* The rest of a script, and what it printed: the tool's own text, set as its command is -- on the block, not in a well. */
 .ex-tool__script,
 .ex-tool__output {
-  margin: 0.5rem 0 0;
-  padding: 0.6rem 0.8rem;
+  margin: 0;
   max-height: 22rem;
   overflow: auto;
-  background: rgb(0 0 0 / 0.25);
-  border-radius: var(--radius);
   font: var(--size-tool) / 1.5 var(--font-tool);
   color: var(--ink-tool);
   white-space: pre;
-}
-
-.ex-tool__script {
-  color: var(--ink-muted);
 }
 
 .ex-exit--ok { color: var(--ok); }

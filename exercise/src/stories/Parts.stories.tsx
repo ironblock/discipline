@@ -79,8 +79,9 @@ export const BlockTones: Story = {
 };
 
 /**
- * The footer is quiet, not illegible: on every trunk fill, a number reads at
- * WCAG AA for small text (4.5:1), and its unit and the role chip at 3:1.
+ * The header and footer are quiet, not illegible: on every trunk fill, what
+ * went in and came out, and a number, read at WCAG AA for small text
+ * (4.5:1), and a unit and the role chip at 3:1.
  * Checked in every canonical look (colo and paper, dark and light), and with bloom's footer inline.
  */
 export const BlockFooterContrast: Story = {
@@ -88,14 +89,14 @@ export const BlockFooterContrast: Story = {
   render: () => (
     <div style={{ display: 'grid', gap: '0.9rem' }}>
       {TRUNK_TONES.map((tone) => (
-        <Block key={tone} tone={tone} label={tone} stats={[{ value: '2.65 s' }, { value: '64', unit: 'tok' }, { value: '1,507', unit: 'pp t/s' }]} provenance={{ from: [0], needs: [] }}>
+        <Block key={tone} tone={tone} label={tone} input="+1,507 tok in 1.2 s (1,256 t/s pp)" output="+64 tok in 2.6 s (24.2 t/s tg)" stats={[{ value: 'exit 0' }, { value: '64', unit: 'tok' }]} provenance={{ from: [0], needs: [] }}>
           <p style={{ margin: 0 }}>The {tone} fill.</p>
         </Block>
       ))}
     </div>
   ),
   play: async ({ canvasElement }) => {
-    const floors = [['.ex-stat', 4.5], ['.ex-stat__unit', 3], ['.ex-block__label', 3]] as const;
+    const floors = [['.ex-block__flow', 4.5], ['.ex-stat', 4.5], ['.ex-stat__unit', 3], ['.ex-block__label', 3]] as const;
     const failing = floors.flatMap(([selector, floor]) =>
       [...canvasElement.querySelectorAll(selector)]
         .map((el) => ({ el, ratio: contrast(el) }))
@@ -266,9 +267,11 @@ export const UserAfterRefill: Story = {
   render: () => <UserMessage node={trunkNodeAt(MOMENTS.done, 'ask/3', 'user')} />,
   play: async ({ canvasElement }) => {
     // What the ask put in front of the model: new tokens, in its header; the warm part says why so few.
-    const stat = canvasElement.querySelector('.ex-block__head .ex-stat') as HTMLElement;
-    await expect(stat.textContent).toBe('+12tok');
-    await expect(stat.title).toMatch(/1\.5k before it were warm/);
+    // A line after the chip, as the assistant's reading is: not a chip of its own.
+    await expect(canvasElement.querySelector('.ex-block__head .ex-stat')).toBeNull();
+    const line = canvasElement.querySelector('.ex-block__head > .ex-block__label + .ex-block__flow') as HTMLElement;
+    await expect(line.textContent).toBe('+12 tok');
+    await expect((line.querySelector('[title]') as HTMLElement).title).toMatch(/1\.5k before it were warm/);
   },
 };
 
@@ -560,8 +563,13 @@ export const ToolPairWhole: Story = {
     await expect(foot).not.toMatch(/tok/);
     await expect(result?.querySelector('.ex-block__head .ex-block__label')?.textContent).toBe('result');
     await expect(result?.querySelector('.ex-tool__output')?.textContent?.split('\n')).toHaveLength(3);
-    await userEvent.click(result?.querySelector('.ex-block__head .ex-tool__head') as HTMLElement);
+    // What it holds back is said under what it shows, not in the header.
+    await expect(result?.querySelector('.ex-block__head button')).toBeNull();
+    const more = result?.querySelector('.ex-block__body > .ex-tool__output + .ex-more') as HTMLElement;
+    await expect(more.textContent).toBe('1,857 more lines');
+    await userEvent.click(more);
     await expect(result?.querySelector('.ex-tool__output')?.textContent?.split('\n')).toHaveLength(1860);
+    await expect(more.textContent).toBe('less');
   },
 };
 
@@ -573,6 +581,12 @@ export const ToolPairApart: Story = {
     const [message, call] = [...canvasElement.querySelectorAll('.ex-block')] as HTMLElement[];
     await expect(message?.querySelector('.ex-block__foot')?.textContent).toBe('+14 tok in 400 ms (35.0 t/s tg)');
     await expect(call?.querySelector('.ex-block__foot')?.textContent).toBe('+27 tok in 750 ms (36.0 t/s tg)');
+    // Every header is set alike: its band meets the block's top and sides, a tool's as a message's.
+    for (const block of canvasElement.querySelectorAll('.ex-block')) {
+      const outer = block.getBoundingClientRect();
+      const head = block.querySelector(':scope > .ex-block__head')?.getBoundingClientRect();
+      await expect([head?.top, head?.left, head?.right].map((v, i) => Math.round((v ?? NaN) - [outer.top, outer.left, outer.right][i]!))).toEqual([0, 0, 0]);
+    }
   },
 };
 
