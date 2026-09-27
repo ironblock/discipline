@@ -318,9 +318,16 @@ impl Streaming for HttpStream {
             // Re-armed on every pass, as the unstreamed transport does: one
             // timeout bounds one read, not the call.
             let budget = remaining().ok_or_else(timeout)?;
-            socket
-                .set_read_timeout(Some(budget))
-                .map_err(|why| TransportFailure::Read(why.to_string()))?;
+            if let Err(why) = socket.set_read_timeout(Some(budget)) {
+                // A stop that landed since the last read has shut the socket,
+                // and on macOS an option set on a shut socket fails (`EINVAL`).
+                // That is the stop landing too.
+                return if cancel.is_asked() {
+                    Ok(Ended::Cancelled)
+                } else {
+                    Err(TransportFailure::Read(why.to_string()))
+                };
+            }
             let count = match socket.read(&mut buffer) {
                 Ok(count) => count,
                 Err(why) if why.kind() == io::ErrorKind::Interrupted => continue,
@@ -1030,6 +1037,26 @@ mod tests {
             after < Duration::from_secs(5),
             "the client left after {after:?}"
         );
+    }
+
+    #[test]
+    fn a_stop_asked_while_a_piece_is_delivered_is_a_cancel_not_a_failure() {
+        // The stop lands between two reads: asked from inside the delivery of
+        // a piece, so the stopper shuts the socket before the next read's
+        // timeout is set. On macOS setting an option on a shut socket fails
+        // (`EINVAL`), and that failure was reported as `Read` -- a cancel that
+        // worked, logged as a transport failure (found running R2c's tests).
+        let piece =
+            r#"data: {"choices":[{"index":0,"delta":{"content":"Hel"},"finish_reason":null}]}"#;
+        let stub = Stub::serving(vec![Act::StreamThenHold(vec![format!("{piece}\n\n")])])
+            .expect("loopback");
+        let transport = HttpStream::new(endpoint(&stub));
+        let cancel = Cancel::new();
+        let asker = cancel.clone();
+        let ended = transport.stream(&shape(), deadline(), &cancel, &mut |_piece| {
+            asker.ask();
+        });
+        assert_eq!(ended, Ok(Ended::Cancelled));
     }
 
     fn cancel_and_expect(
