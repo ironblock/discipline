@@ -268,9 +268,28 @@ export const UserAfterRefill: Story = {
   },
 };
 
+/** Before the server has said how far it has read: one line, the cursor where the first token will land. */
 export const AssistantPrefill: Story = {
   name: 'Message · assistant, in prefill',
-  render: () => <AssistantMessage node={trunkNodeAt({ beat: 2, t: 5_000 }, 'q/3', 'assistant')} />,
+  render: () => {
+    // No progress frame yet: the first arrives a quarter-second in.
+    const unread = variantAt({ beat: 2, t: 5_000 }, (e) => (e['kind'] === 'progress' ? [] : e));
+    const node = unread.eras.flatMap((era) => era.nodes).find((n) => n.id === 'q/3' && n.kind === 'assistant');
+    if (node?.kind !== 'assistant') throw new Error('no assistant q/3 in prefill');
+    return <AssistantMessage node={node} />;
+  },
+  play: async ({ canvasElement }) => {
+    // One line, the answer's first: the cursor where its first token will land.
+    const waiting = canvasElement.querySelector('.ex-waiting') as HTMLElement;
+    await expect(waiting.querySelectorAll('.ex-caret')).toHaveLength(1);
+    const line = parseFloat(getComputedStyle(waiting).lineHeight);
+    await expect(waiting.getBoundingClientRect().height).toBeLessThanOrEqual(line + 1);
+    // The live sweep along the block's bottom follows its corners.
+    const block = canvasElement.querySelector('.ex-block--live') as HTMLElement;
+    const sweep = getComputedStyle(block, '::after');
+    await expect(sweep.borderRadius).toBe(getComputedStyle(block).borderRadius);
+    await expect(parseFloat(sweep.height)).toBeCloseTo(block.getBoundingClientRect().height, 0);
+  },
 };
 
 /**

@@ -475,7 +475,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                 </div>
               ))}
             </div>
-            {/* The composer sits in the trunk's own grid column, so it lines up with the trunk at any width. */}
+            {/* The composer: its own width from the trunk's left edge, whatever the lanes (--composer-width). */}
             <div className="ex-session__composer">
               <Composer key={session.phase} state={session.state} link={link} phase={session.phase} {...composer} />
             </div>

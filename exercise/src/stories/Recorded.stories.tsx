@@ -232,14 +232,16 @@ export const FollowsTheBottom: Story = {
     await new Promise((r) => setTimeout(r, 600));
     await expect(atBottom(), where('scrolled away, after the page grew')).toBe(false);
     await expect(Math.abs((reading?.getBoundingClientRect().top ?? 0) - seen)).toBeLessThan(2);
-    // The composer's fade is the trunk's: a lane passing under the composer strip is neither painted over nor unreachable.
+    // The composer's fade is as wide as the composer: a lane passing under the strip beyond it is neither painted over nor unreachable.
     const strip = canvasElement.querySelector('.ex-session__composer') as HTMLElement;
+    const composer = strip.querySelector('.ex-composer')?.getBoundingClientRect();
     const lane = canvasElement.querySelector('.ex-lane')?.getBoundingClientRect();
     const band = strip.getBoundingClientRect();
     await expect(getComputedStyle(strip).backgroundImage).toBe('none');
     const fade = parseFloat(getComputedStyle(strip, '::before').width);
-    await expect(fade).toBeLessThanOrEqual((canvasElement.querySelector('.ex-trunk')?.getBoundingClientRect().width ?? 0) + 1);
-    const hit = document.elementFromPoint((lane?.left ?? 0) + 20, band.top + 8);
+    await expect(fade).toBeLessThanOrEqual((composer?.width ?? 0) + 1);
+    await expect(lane?.right ?? 0).toBeGreaterThan((composer?.right ?? 0) + 40);
+    const hit = document.elementFromPoint((lane?.right ?? 0) - 20, band.top + 8);
     await expect(hit?.closest('.ex-session__composer')).toBeNull();
   },
 };

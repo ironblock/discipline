@@ -228,9 +228,12 @@
   position: sticky;
   bottom: 0;
   z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(0, var(--composer-width));
   padding: 1rem 0 1.25rem;
-  /* The strip spans every column, but only the composer in the trunk's column
-     is its: a lane passing under it is neither painted over nor unreachable. */
+  /* The strip spans the columns, but only the composer is its: a lane passing
+     under it beyond the composer's width is neither painted over nor
+     unreachable. */
   pointer-events: none;
 }
 
@@ -240,7 +243,7 @@
   pointer-events: auto;
 }
 
-/* Fades the trunk out under the composer, in the trunk's column only; a theme
+/* Fades what scrolls under the composer, as wide as the composer; a theme
    with a lit field may turn it off. The live field is repainted here too,
    fixed like the page's, so a theme that repaints its field under the
    composer keeps the pools unbroken. */
@@ -256,11 +259,9 @@
   mask-image: var(--composer-mask, none);
 }
 
-/* The trunk flows; each other slot is a column its branches are placed in. The
-   composer uses the same columns, so it always sits exactly under the trunk. */
+/* The trunk flows; each other slot is a column its branches are placed in. */
 .ex-lanehead-row,
-.ex-stage,
-.ex-session__composer {
+.ex-stage {
   display: grid;
   grid-template-columns: minmax(0, var(--trunk-width)) repeat(var(--lanes), var(--lane-width));
   column-gap: var(--gutter);
@@ -271,8 +272,7 @@
   position: relative;
 }
 
-.ex-session:not(.ex-session--curtain) .ex-stage,
-.ex-session:not(.ex-session--curtain) .ex-session__composer {
+.ex-session:not(.ex-session--curtain) .ex-stage {
   grid-template-columns: minmax(0, var(--trunk-width));
 }
 

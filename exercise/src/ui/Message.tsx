@@ -186,11 +186,10 @@ function AssistantBody({
       {node.progress === 'prefill' && node.meter ? (
         <Meter meter={node.meter} />
       ) : node.progress === 'prefill' ? (
-        <div className="ex-waiting" role="status">
-          <span className="ex-waiting__line" />
-          <span className="ex-waiting__line" />
+        <p className="ex-waiting" role="status">
+          <span className="ex-caret" aria-hidden="true" />
           <span className="ex-waiting__label">reading the prompt</span>
-        </div>
+        </p>
       ) : null}
       {node.text !== '' ? <Prose text={node.text} kind="answer" caret={streamingInto === 'answer'} /> : null}
       {node.progress === 'cancelled' ? <p className="ex-cancelled">cancelled</p> : null}

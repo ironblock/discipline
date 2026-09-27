@@ -203,6 +203,8 @@
   /* A lane when the curtain is condensed: one bar wide. */
   --lane-width-condensed: 0.875rem;
   --memory-width: 20rem;
+  /* The composer: a comfortable width to write in, from the trunk's left edge, whatever the lanes are. */
+  --composer-width: 60rem;
   --minimap-width: 2.75rem;
   /* How much of their colour the minimap's slivers keep, as a factor: ink on
      white weighs more than light on black, so a light look turns it down. */
