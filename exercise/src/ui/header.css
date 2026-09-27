@@ -104,15 +104,8 @@
   50% { opacity: 0.55; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ex-header__link { animation: none; }
-}
-
-/* The look: two small segmented switches, material and scheme. */
-.ex-look {
-  display: inline-flex;
-  gap: 0.5rem;
-}
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-header__link { animation: none; }
 
 .ex-segments {
   display: inline-flex;

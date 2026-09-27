@@ -7,7 +7,7 @@ import { link } from './links.ts';
 import type { Box } from './links.ts';
 import { ENTER } from './placement.ts';
 import { laneStyle, opOf } from './sets.ts';
-import type { Surface } from './surface.tsx';
+import type { Wiring } from './prefs.ts';
 import './links.css';
 
 /** One patch: the side call that landed it, and the working-memory entry it touched. */
@@ -54,7 +54,7 @@ export function Links({
 }: {
   readonly wires: readonly Wire[];
   readonly hot: { readonly branches: ReadonlySet<string>; readonly entries: ReadonlySet<string> };
-  readonly wiring?: Surface['wiring'];
+  readonly wiring?: Wiring;
   readonly revision: readonly unknown[];
 }) {
   const [drawn, setDrawn] = useState<readonly Drawn[]>([]);

@@ -27,7 +27,7 @@ export function Wiring({ nets }: { readonly nets: readonly Cabled[] }) {
   return (
     <svg className="ex-wiring" aria-hidden="true">
       {nets.map((net) => (
-        <g key={net.key} className="ex-cable" data-net={net.key} data-pending={net.pending ? '' : undefined} style={laneStyle(net.lane) as CSSProperties}>
+        <g key={net.key} className="ex-cable" data-net={net.key} data-to={net.wires.map((w) => w.id).join(' ')} data-pending={net.pending ? '' : undefined} style={laneStyle(net.lane) as CSSProperties}>
           <path className="ex-cable__line" d={net.d} />
           {net.dots.map((p) => (
             <circle key={`${p.x} ${p.y}`} className="ex-cable__dot" cx={p.x} cy={p.y} r={2} />

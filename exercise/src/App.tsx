@@ -24,7 +24,7 @@ const EXPECTS: Readonly<Record<string, string>> = {
  * The harness, on the canned transport until #117's loop serves a real one --
  * or replaying a recorded session, which plays and takes no commands.
  */
-export function App({ speed = 1, recording, wiring }: { readonly speed?: number; readonly recording?: RecordingName; readonly wiring?: Surface['wiring'] }) {
+export function App({ speed = 1, recording }: { readonly speed?: number; readonly recording?: RecordingName }) {
   const transport = useMemo(
     () => (recording ? new ReplayTransport(RECORDINGS[recording], { speed }) : new CannedTransport(SPECIMEN, { speed })),
     [speed, recording],
@@ -33,7 +33,7 @@ export function App({ speed = 1, recording, wiring }: { readonly speed?: number;
   const session = useSession(transport);
   const [link, setLink] = useState<Link>('live');
   useEffect(() => (transport as DriveTransport).watchLink?.(setLink), [transport]);
-  const [surface, setSurface] = useState<Surface>({ curtain: true, gaps: false, ...(wiring ? { wiring } : {}) });
+  const [surface, setSurface] = useState<Surface>({ curtain: true, gaps: false });
   const expects = transport instanceof CannedTransport ? transport.expects : undefined;
   return (
     <SessionView

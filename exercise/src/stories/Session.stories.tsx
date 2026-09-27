@@ -7,6 +7,7 @@ import { useState } from 'react';
 
 import { SessionView } from '../ui/SessionView.tsx';
 import type { Surface } from '../ui/surface.tsx';
+import { cableOf } from './cables.ts';
 import { MOMENTS, sessionAt, variantAt } from './moments.ts';
 
 interface MomentArgs {
@@ -99,11 +100,14 @@ export const InterviewQueued: Story = {
     const cell = '[data-branch="i/1"]';
     await waitFor(async () => expect(q(canvasElement, `${cell}[data-pending]`)).not.toBeNull());
     await expect(q(canvasElement, `${cell} [data-outcome="pending"]`)?.textContent).toContain('queued');
-    await expect(q(canvasElement, `${cell} .ex-cable[data-pending]`)).not.toBeNull();
-    await expect(q(canvasElement, `${cell} .ex-cable[data-live]`)).toBeNull();
+    // Its cable is laid, dashed, and carries no light yet.
+    await waitFor(async () => expect(cableOf(canvasElement, 'i/1')).toEqual({ pending: true, live: false }));
     await expect(top(canvasElement, cell)).toBeGreaterThanOrEqual(bottom(canvasElement, '[data-id="q/3"]'));
   },
 };
+
+/** The same, with connectors drawn as sweeps. */
+export const InterviewQueuedSwept: Story = { ...InterviewQueued, name: '4b · an interview waiting for its slot, swept', globals: { connectors: 'sweep' } };
 
 /** DoD 3: the patches landed, fresh in working memory. */
 export const FirstSettled: Story = {
@@ -167,23 +171,6 @@ export const CurtainClosed: Story = {
     await expect(q(canvasElement, '.ex-lane')).toBeNull();
     await expect(q(canvasElement, '.ex-memory')).not.toBeNull();
     await expect(canvasElement.querySelectorAll('.ex-peek').length).toBeGreaterThan(0);
-  },
-};
-
-/** The lines switched in the header: routed as a harness, then back to curves. */
-export const LinesSwitched: Story = {
-  name: 'lines · a harness or curves, switched in the header',
-  args: { cursor: MOMENTS.done },
-  play: async ({ canvasElement }) => {
-    const radio = (option: string) => q(canvasElement, `.ex-segments[aria-label="lines"] input[value="${option}"]`) as HTMLInputElement;
-    await expect(radio('curves').checked).toBe(true);
-    await expect(q(canvasElement, '.ex-branchcell .ex-cable')).not.toBeNull();
-    await userEvent.click(radio('hops'));
-    await waitFor(async () => expect(q(canvasElement, '.ex-session[data-wiring="harness"] .ex-wiring [data-net]')).not.toBeNull());
-    await expect(q(canvasElement, '.ex-branchcell .ex-cable')).toBeNull();
-    await userEvent.click(radio('curves'));
-    await waitFor(async () => expect(q(canvasElement, '.ex-branchcell .ex-cable')).not.toBeNull());
-    await expect(q(canvasElement, '.ex-wiring')).toBeNull();
   },
 };
 
@@ -251,7 +238,9 @@ export const Condensed: Story = {
     await expect(bars.length).toBeGreaterThan(0);
     await expect(bars.length).toBe(canvasElement.querySelectorAll('.ex-branchcell').length);
     await expect(q(canvasElement, '[data-branch="i/1"] .ex-bar[data-live]')).not.toBeNull();
-    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-branchcell .ex-cable').length).toBe(bars.length));
+    // Every bar keeps its cable.
+    const ids = [...canvasElement.querySelectorAll('.ex-branchcell')].map((c) => c.getAttribute('data-branch') ?? '');
+    await waitFor(async () => expect(ids.filter((id) => cableOf(canvasElement, id) === undefined)).toEqual([]));
   },
 };
 

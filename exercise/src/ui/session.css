@@ -221,9 +221,8 @@
   color: var(--fresh);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ex-session[data-drawer] .ex-session__memory { transition: none; }
-}
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-session[data-drawer] .ex-session__memory { transition: none; }
 
 .ex-session__composer {
   position: sticky;

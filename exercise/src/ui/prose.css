@@ -151,9 +151,8 @@
   to { opacity: 0.15; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ex-caret { animation: none; }
-}
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-caret { animation: none; }
 
 .ex-prose__codebox {
   position: relative;

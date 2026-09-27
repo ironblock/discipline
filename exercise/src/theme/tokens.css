@@ -3,12 +3,14 @@
  * to the same value today, and that is deliberate -- a component binds to
  * `--font-answer`, not to "sans", so the face can change without touching it.
  *
- * COLOUR starts from the author's mockup: the trunk's roles as block fills
- * (system blue, user teal, assistant grey), the side lanes as bars, stats as
- * low-contrast mono. `:root` is the default theme ("mockup"); every other
- * theme is a block that overrides tokens under `.ex-root[data-theme=…]`, one
- * file per theme in `src/theme/themes/`. A theme changes values, never
- * meanings: if a theme needs a new token, the token is added here first.
+ * A LOOK is two choices (look.ts): a THEME -- how things sit on the page:
+ * bloom, paper, emboss -- and a MODE, dark or light. `:root` holds the dark
+ * palette and every structural default; `themes/light.css` is the light
+ * palette under `.ex-root[data-mode='light']`; a theme sets only what it
+ * treats differently, under `.ex-root[data-theme=…]`, and what it treats
+ * differently by mode under both attributes. So each token has one home
+ * per look, and nothing depends on the order files are imported in. A theme
+ * changes values, never meanings: a new token is added here first.
  *
  * TYPE: mono for what the harness and its tools say (chrome, stats, commands,
  * output); one proportional face for what a person or a model said. Role is
@@ -17,45 +19,17 @@
 :root {
   color-scheme: dark;
 
-  /* Surfaces */
-  --page: #131415;
-  --panel: #1a1b1d;
-  --rule: #2c2e31;
-  --ink: #e2e4e7;
-  --ink-muted: #8b9098;
-  --ink-faint: #5f646c;
-  --chip: rgb(255 255 255 / 0.06);
-
-  /* The trunk, by role */
-  --fill-system: #0c2140;
-  --ink-system: #8cc0ff;
-  --fill-user: #093a33;
-  --ink-user: #62e3c1;
-  --fill-assistant: #252628;
-  --ink-assistant: #b9bdc3;
-  --ink-reasoning: #dfe2e6;
-  --fill-tool: #18191b;
-  --ink-tool: #c3c7cd;
-
-  /* The side lanes */
-  --fill-interview: #0c2140;
-  --ink-interview: #8cc0ff;
-  --fill-ratify: #251d52;
-  --ink-ratify: #e28cf0;
-  --fill-extraction: #0b2a30;
-  --ink-extraction: #7fd6e0;
-  /* A lane the surface does not know: neutral, named by its label. */
-  --fill-lane: #1d1f22;
-  --ink-lane: #aab0b8;
-  --fill-memory: #1d1f22;
-
   /*
-   * Lamps: one light source per meaning, which a theme may derive its role
-   * colours from (a fill is the lamp through a surface, an ink the lamp made
-   * legible, a glow the lamp itself). Blue is you, white the model, green
-   * work, amber attention, red a fault; violet, magenta and cyan are diet
-   * asking, deciding and reading. The mockup's own colours above predate
-   * them and do not derive from them.
+   * Lamps: one light source per meaning, and every colour below derives from
+   * one, as on the front of a server: BLUE is the identify light ("this one
+   * is yours") -- you; WHITE is the model; GREEN is link and activity -- a
+   * tool at work, a clean exit; AMBER wants attention; RED is a fault. What
+   * the curtain hides has the colours a rack never has: VIOLET, diet asking
+   * (the system prompt it renders, its interviews, what they land in
+   * memory); MAGENTA, diet deciding (ratify, the seam); CYAN, diet reading
+   * (the extraction lane). In the dark a fill is the lamp seen through a
+   * slab and an ink the lamp lifted toward white; in the light (light.css) a
+   * fill is the lamp as a tint on white and an ink the lamp darkened.
    */
   --lamp-you: #2f86ff;
   --lamp-model: #dde4ee;
@@ -66,13 +40,48 @@
   --lamp-diet-decides: #e05cf0;
   --lamp-diet-reads: #33c3d6;
 
+  /* Surfaces */
+  --page: #131415;
+  --panel: #1a1b1d;
+  --rule: #2c2e31;
+  --ink: #e2e4e7;
+  --ink-muted: #8b9098;
+  --ink-faint: #5f646c;
+  --chip: rgb(255 255 255 / 0.06);
+  --slab: #22252b;
+
+  /* The trunk, by role */
+  --fill-system: color-mix(in oklab, var(--slab) 74%, var(--lamp-diet-asks));
+  --ink-system: color-mix(in oklab, var(--lamp-diet-asks) 45%, white);
+  --fill-user: color-mix(in oklab, var(--slab) 52%, var(--lamp-you));
+  --ink-user: color-mix(in oklab, var(--lamp-you) 28%, white);
+  --fill-assistant: #272b33;
+  --ink-assistant: color-mix(in oklab, var(--lamp-model) 80%, #9aa3ae);
+  --ink-reasoning: #dfe2e6;
+  --fill-tool: #18191b;
+  --ink-tool: color-mix(in oklab, #b4bcc6 82%, var(--lamp-work));
+
+  /* The side lanes */
+  --fill-interview: color-mix(in oklab, var(--lamp-diet-asks) 8%, transparent);
+  --ink-interview: color-mix(in oklab, var(--lamp-diet-asks) 55%, white);
+  --fill-ratify: color-mix(in oklab, var(--lamp-diet-decides) 8%, transparent);
+  --ink-ratify: color-mix(in oklab, var(--lamp-diet-decides) 60%, white);
+  --fill-extraction: color-mix(in oklab, var(--lamp-diet-reads) 8%, transparent);
+  --ink-extraction: color-mix(in oklab, var(--lamp-diet-reads) 55%, white);
+  /* A lane the surface does not know: neutral, named by its label. */
+  --fill-lane: #1d1f22;
+  --ink-lane: #aab0b8;
+  --fill-memory: #1d1f22;
+
   /* Meanings */
-  --ok: #6fd38f;
-  --warn: #e5c26b;
-  --bad: #f07f7f;
-  --fresh: #62e3c1;
-  --seam: #e28cf0;
+  --ok: color-mix(in oklab, var(--lamp-work) 75%, white);
+  --warn: color-mix(in oklab, var(--lamp-attention) 80%, white);
+  --bad: color-mix(in oklab, var(--lamp-fault) 80%, white);
+  --fresh: color-mix(in oklab, var(--lamp-diet-asks) 65%, white);
+  --seam: color-mix(in oklab, var(--lamp-diet-decides) 70%, white);
   --gap: #e5a06b;
+  /* Focus is yours. */
+  --focus: var(--ink-user);
 
   /* Faces */
   --face-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
@@ -121,9 +130,10 @@
    * --relief-trunk.) */
   --rim-tone: 0%;
   /* How much of the block's own ink its footer takes: numbers mix it with
-     --ink-muted, units with --ink-faint. 0% is the neutral footer. */
-  --foot-tone: 0%;
-  --foot-unit-tone: 0%;
+     --ink-muted, units with --ink-faint, so they stay legible on every fill
+     (the footer-contrast stories). */
+  --foot-tone: 85%;
+  --foot-unit-tone: 55%;
   /* The footer as a full-width band: 1 bleeds it to the block's edges, 0
      leaves it inline; its shade (black mixed in) and a rule in the block's
      ink along its top, as amounts. */
@@ -176,7 +186,6 @@
    *   --composer-fade (→ a fade to --page under the composer)
    *   --stat-chip, --stat-relief (→ --chip, --relief-well: how a footer number sits)
    *   --lanehead-bg (→ --chrome-bg: behind the sticky slot labels)
-   *   --focus (→ --ink-interview: the keyboard focus ring and checkbox accents)
    *   --evicted-filter (→ none: what an evicted era loses besides opacity)
    *   --composer-attachment, --composer-mask (→ scroll, none: a strip that repaints the
    *     page's own fixed field, faded in by a mask, instead of a fade to flat colour) */

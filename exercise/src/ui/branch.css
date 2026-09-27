@@ -124,9 +124,8 @@
   white-space: nowrap;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ex-patch { animation: none; }
-}
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-patch { animation: none; }
 
 .ex-tagged {
   display: grid;
@@ -230,10 +229,9 @@
   box-shadow: 0 0 4px var(--bad);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ex-bar { transition: none; }
-  .ex-bar[data-progress='prefill'] { animation: none; }
-}
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-bar { transition: none; }
+.ex-root[data-motion='still'] .ex-bar[data-progress='prefill'] { animation: none; }
 
 /* Waiting for its slot: drawn, unlit, its edge dashed -- it has no place of its own yet. */
 .ex-branchcell[data-pending] .ex-block {

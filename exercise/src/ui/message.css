@@ -44,9 +44,8 @@
   letter-spacing: 0.04em;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ex-waiting__line { animation: none; background-size: 100% 100%; opacity: 0.4; }
-}
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-waiting__line { animation: none; background-size: 100% 100%; opacity: 0.4; }
 
 /* A request that failed: what the server or the drive said, verbatim, under the answer so far. */
 .ex-failed {

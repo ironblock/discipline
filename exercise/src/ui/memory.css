@@ -95,9 +95,8 @@
   cursor: pointer;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ex-memory__entry[data-fresh] { animation: none; }
-}
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-memory__entry[data-fresh] { animation: none; }
 
 .ex-memory__id {
   color: var(--ink-faint);

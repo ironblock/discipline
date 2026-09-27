@@ -1,35 +1,43 @@
 import type { Preview } from '@storybook/react-vite';
 
 import '../src/theme/tokens.css';
-import { DEFAULT_THEME, THEMES, layersOf } from '../src/theme/themes/index.ts';
+import '../src/theme/themes/index.ts';
+import { DEFAULT_PREFS, PREFS, PREF_LABELS } from '../src/ui/prefs.ts';
+import type { PrefName, Prefs } from '../src/ui/prefs.ts';
+import { Preferred } from '../src/ui/Prefs.tsx';
 
 // Every story renders on the surface's own page and tokens, so a component
-// that hard-codes a colour or a face is visible as the odd one out. The
-// toolbar's theme switch sets `data-theme` on the root: every story, every
-// theme, the same folded moments.
+// that hard-codes a colour or a face is visible as the odd one out. Each of a
+// person's preferences (prefs.ts) is a toolbar switch here, set on the root
+// the way the app sets it -- and not remembered, so a story stands alone. A
+// story holds a mode of its own (`dark` unless it says), so what it asserts
+// does not depend on the machine running it.
+const names = Object.keys(PREFS) as PrefName[];
+
 const preview: Preview = {
   parameters: {
     backgrounds: { disable: true },
     layout: 'padded',
   },
-  globalTypes: {
-    theme: {
-      description: 'Theme to try',
-      toolbar: {
-        title: 'Theme',
-        icon: 'paintbrush',
-        items: THEMES.map((t) => ({ value: t.name, title: t.title })),
-        dynamicTitle: true,
+  globalTypes: Object.fromEntries(
+    names.map((name) => [
+      name,
+      {
+        description: PREF_LABELS[name],
+        toolbar: { title: PREF_LABELS[name], items: PREFS[name].map((value) => ({ value, title: `${PREF_LABELS[name]}: ${value}` })), dynamicTitle: true },
       },
-    },
-  },
-  initialGlobals: { theme: DEFAULT_THEME },
+    ]),
+  ),
+  initialGlobals: { ...DEFAULT_PREFS, mode: 'dark' },
   decorators: [
-    (Story, context) => (
-      <div className="ex-root" data-theme={layersOf(String(context.globals['theme'] ?? DEFAULT_THEME))}>
-        <Story />
-      </div>
-    ),
+    (Story, context) => {
+      const prefs = Object.fromEntries(names.map((name) => [name, context.globals[name] ?? DEFAULT_PREFS[name]])) as unknown as Prefs;
+      return (
+        <Preferred key={JSON.stringify(prefs)} initial={prefs} remember={false}>
+          <Story />
+        </Preferred>
+      );
+    },
   ],
 };
 

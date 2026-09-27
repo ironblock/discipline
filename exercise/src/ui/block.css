@@ -194,9 +194,8 @@
   to { background-position: 140% 0; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ex-block--live::after { animation: none; background-size: 100% 100%; opacity: 0.3; }
-}
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-block--live::after { animation: none; background-size: 100% 100%; opacity: 0.3; }
 
 /* The gaps overlay: what `diet` cannot emit yet, outlined and named. */
 .ex-gaps [data-needs]:not([data-needs='']) {

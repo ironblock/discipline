@@ -1,13 +1,42 @@
 /*
- * Layer: emboss, over fabric -- the author's alternate. The same material,
- * but what is in the prefix is RAISED out of it instead of pressed in:
- * square-edged slabs, lit from the top left (the highlight on that corner,
- * the shadow off the opposite one), with the light sweeping across each
- * face. What is being written lifts higher; stat chips are pressed into
- * the slab; the eras before a seam lie flat.
+ * Emboss: the page is one material under a key light from the top left,
+ * and what is in the prefix is RAISED out of it: square-edged slabs, the
+ * highlight on the lit corner and the shadow off the other, light sweeping
+ * across each face. What is being written lifts higher; stat chips are
+ * pressed into the slab; the eras before a seam lie flat. Everything is
+ * the page's own material -- a role tints it, it is never a colour laid on
+ * it -- so a slab and the page it rises from are one fill.
  */
-.ex-root[data-theme~='emboss'] {
+.ex-root[data-theme='emboss'] {
   --radius: 0px;
+  --relief-evicted: 0 0 0 transparent;
+  --evicted-opacity: 0.5;
+  --seam-thickness: 7px;
+  --seam-line: 0 solid;
+}
+
+/* In either mode (and as specific as a mode's own block, over the palettes): one material. */
+.ex-root[data-theme='emboss'][data-mode] {
+  --chip: transparent;
+  --fill-assistant: var(--page);
+  --fill-tool: var(--page);
+  --fill-interview: var(--page);
+  --fill-ratify: var(--page);
+  --fill-extraction: var(--page);
+  --fill-lane: var(--page);
+  --fill-memory: var(--page);
+  --panel: var(--page);
+}
+
+.ex-root[data-theme='emboss'][data-mode='dark'] {
+  --page: #1d2025;
+  --rule: #272b31;
+  --ink: #e4e6ea;
+  --ink-muted: #939aa5;
+  --ink-faint: #646a75;
+  --ink-reasoning: #e2e5e9;
+  --fill-system: color-mix(in oklab, var(--page) 88%, var(--lamp-diet-asks));
+  --fill-user: color-mix(in oklab, var(--page) 84%, var(--lamp-you));
   --relief-trunk:
     7px 7px 16px rgb(0 0 0 / 0.6), -6px -6px 14px rgb(255 255 255 / 0.05),
     inset 1px 1px 0 rgb(255 255 255 / 0.07), inset -1px -1px 0 rgb(0 0 0 / 0.35);
@@ -16,6 +45,31 @@
     inset 1px 1px 0 rgb(255 255 255 / 0.09), inset -1px -1px 0 rgb(0 0 0 / 0.35);
   --relief-lane: 5px 5px 12px rgb(0 0 0 / 0.55), -4px -4px 10px rgb(255 255 255 / 0.045), inset 1px 1px 0 rgb(255 255 255 / 0.06);
   --relief-panel: 8px 8px 20px rgb(0 0 0 / 0.6), -6px -6px 16px rgb(255 255 255 / 0.05), inset 1px 1px 0 rgb(255 255 255 / 0.06);
+  --relief-well: inset 2px 2px 4px rgb(0 0 0 / 0.6), inset -1px -1px 3px rgb(255 255 255 / 0.07);
   --relief-control: 3px 3px 7px rgb(0 0 0 / 0.55), -2px -2px 6px rgb(255 255 255 / 0.05), inset 1px 1px 0 rgb(255 255 255 / 0.06);
+  --control-rim: transparent;
+  --seam-groove: inset 2px 2px 4px rgb(0 0 0 / 0.6), inset -1px -1px 3px rgb(255 255 255 / 0.05);
   --sweep: linear-gradient(135deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0) 40%, rgb(0 0 0 / 0) 60%, rgb(0 0 0 / 0.2));
+}
+
+/* In daylight the same light, from the same corner: a white highlight, a cool grey shadow. */
+.ex-root[data-theme='emboss'][data-mode='light'] {
+  --page: #e7eaef;
+  --rule: #d2d7de;
+  --fill-system: color-mix(in oklab, var(--page) 86%, var(--lamp-diet-asks));
+  --fill-user: color-mix(in oklab, var(--page) 82%, var(--lamp-you));
+  --relief-trunk:
+    6px 6px 14px rgb(40 52 72 / 0.2), -6px -6px 14px rgb(255 255 255 / 0.9),
+    inset 1px 1px 0 rgb(255 255 255 / 0.8), inset -1px -1px 0 rgb(40 52 72 / 0.1);
+  --relief-trunk-live:
+    11px 11px 24px rgb(40 52 72 / 0.26), -10px -10px 22px rgb(255 255 255 / 0.95),
+    inset 1px 1px 0 rgb(255 255 255 / 0.85), inset -1px -1px 0 rgb(40 52 72 / 0.1);
+  --relief-lane: 4px 4px 10px rgb(40 52 72 / 0.18), -4px -4px 10px rgb(255 255 255 / 0.85), inset 1px 1px 0 rgb(255 255 255 / 0.7);
+  --relief-panel: 7px 7px 18px rgb(40 52 72 / 0.2), -6px -6px 16px rgb(255 255 255 / 0.9), inset 1px 1px 0 rgb(255 255 255 / 0.7);
+  --relief-well: inset 2px 2px 4px rgb(40 52 72 / 0.18), inset -1px -1px 3px rgb(255 255 255 / 0.9);
+  --relief-control: 3px 3px 7px rgb(40 52 72 / 0.18), -2px -2px 6px rgb(255 255 255 / 0.9), inset 1px 1px 0 rgb(255 255 255 / 0.7);
+  --control-rim: transparent;
+  --seam-groove: inset 2px 2px 4px rgb(40 52 72 / 0.16), inset -1px -1px 3px rgb(255 255 255 / 0.85);
+  --sweep: linear-gradient(135deg, rgb(255 255 255 / 0.45), rgb(255 255 255 / 0) 40%, rgb(40 52 72 / 0) 60%, rgb(40 52 72 / 0.06));
+  --chrome-bg: rgb(231 234 239 / 0.88);
 }

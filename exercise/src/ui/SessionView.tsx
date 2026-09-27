@@ -17,6 +17,8 @@ import { Composer } from './Composer.tsx';
 import type { ComposerProps } from './Composer.tsx';
 import { Memory, isUnseen } from './Memory.tsx';
 import { Minimap } from './Minimap.tsx';
+import { wiringOf } from './prefs.ts';
+import { usePrefs } from './Prefs.tsx';
 import { AssistantMessage, SystemMessage, TurnEnd, UserMessage } from './Message.tsx';
 import { Receipt } from './Receipt.tsx';
 import { Seam } from './Seam.tsx';
@@ -149,7 +151,10 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
     trunkOrder.flatMap((id) => (session.branches.get(id) ?? []).filter((b) => b.slot === slot));
 
   // The trunk's cables routed as a harness (harness.ts), when the surface asks.
-  const wiring = surface.curtain ? surface.wiring : undefined;
+  // How lines are drawn, and which: the person's preferences.
+  const prefs = usePrefs();
+  const wiring = surface.curtain ? wiringOf(prefs) : undefined;
+  const minimap = prefs.minimap === 'on';
   const cabled = useMemo<readonly Cabled[]>(() => {
     if (!wiring || !columns) return [];
     const byId = new Map(lanes.flatMap((slot) => laneBranches(slot).map((b) => [b.id, b] as const)));
@@ -348,21 +353,21 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
       <HotEntriesContext.Provider value={hot.entries}>
       <div
         ref={root}
-        className={`ex-session ex-session--minimap${surface.gaps ? ' ex-gaps' : ''}${surface.curtain ? ' ex-session--curtain' : ''}${condensed ? ' ex-session--condensed' : ''}`}
+        className={`ex-session${minimap ? ' ex-session--minimap' : ''}${surface.gaps ? ' ex-gaps' : ''}${surface.curtain ? ' ex-session--curtain' : ''}${condensed ? ' ex-session--condensed' : ''}`}
         style={{ ['--lanes' as string]: lanes.length, ...laneStyle(busyLane(session)) }}
         data-state={session.state}
         data-link={link}
         data-lanes-busy={session.occupancy.some((holder, slot) => holder !== undefined && slot !== session.trunkSlot) ? '' : undefined}
         data-fresh={unseen > 0 ? '' : undefined}
         data-drawer={drawer ? '' : undefined}
-        data-wiring={surface.wiring ? 'harness' : undefined}
+        data-wiring={wiring ? 'harness' : undefined}
         onPointerOver={point}
         onPointerLeave={() => setPointed({})}
       >
-        <Links wires={wires} hot={hot} {...(surface.wiring ? { wiring: surface.wiring } : {})} revision={[session, placed, seamPad, drawer, drawerOpen, condensed]} />
+        {prefs.memoryLines === 'on' ? <Links wires={wires} hot={hot} {...(wiring ? { wiring } : {})} revision={[session, placed, seamPad, drawer, drawerOpen, condensed]} /> : null}
         {/* As wide as the row must be for working memory to sit beside it (session.css, --need). */}
         <div className="ex-session__need" ref={need} aria-hidden="true" />
-        <Minimap stage={stage} revision={[session, placed, seamPad, surface.curtain]} curtain={surface.curtain} />
+        {minimap ? <Minimap stage={stage} revision={[session, placed, seamPad, surface.curtain]} curtain={surface.curtain} /> : null}
         <div className="ex-session__header">
           <SessionHeader session={session} link={link} surface={surface} {...(onSurface ? { onSurface } : {})} />
         </div>

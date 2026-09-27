@@ -32,11 +32,17 @@ CI runs the same thing as the repository's `exercise` check (`./verify.sh --only
   room, a drawer on the right edge when it does not. Each side call on
   screen has a line into every entry it wrote.
 - **Lines** -- the trunk's cables to its side calls, and those into working
-  memory -- are routed as a wiring harness (`src/ui/harness.ts`): each
-  net on its own track in a gutter, forking to where it goes, hopping what
-  it crosses. The header's `lines` switch draws curves instead, or breaks
-  at crossings; `?wiring=curves` (or `gap`) and `&bend=chamfer` (or
-  `square`) set it from the address.
+  memory -- are traces by default, routed as a wiring harness
+  (`src/ui/harness.ts`): each net on its own track in a gutter, forking to
+  where it goes, hopping what it crosses. They can be sweeps (curves)
+  instead; see settings.
+- **Settings** (the header's `settings`, `src/ui/prefs.ts`) are what a
+  person may prefer: theme, mode (dark, light, the system's), connectors
+  (traces or sweeps, and a trace's crossings and corners), motion (the
+  system's, on, off), lines into memory, the minimap. Remembered in the
+  browser; any may be set for one visit from the address by name
+  (`?theme=paper&mode=light&connectors=sweep`). Each is a toolbar switch in
+  Storybook.
 - **"What diet can't emit yet"** outlines everything on screen that is
   drawn from an event `diet` does not produce, naming the step of #117 it
   waits on. Today that is everything, which is the point.
@@ -61,22 +67,18 @@ purpose. Surfaces bind to tokens that say how a thing sits -- relief (in
 the prefix, being written, evicted at a seam, beside it), glass, light,
 texture, the live field -- and every default is neutral.
 
-A person chooses a **look** in the header (`src/theme/look.ts`): a
-material, `colo` or `paper`, and dark, light or the system's. Each of the
-four names one theme: `bloom`, `bloom-light`, `paper`, `paper-dark`.
-
-A theme is a stack of value-only layers in `src/theme/themes/`, listed once
-in `themes/index.ts`, switched from Storybook's toolbar or the app's
-`?theme=` (which pins a lab theme until a look is picked). `bloom`, colo
-in the dark, is frosted slabs over pools of their own colour, light pooled
-where the work is, what runs glowing while it runs.
-Its palette (`rack`) makes every colour an LED with the meaning it has on a
-server: blue is you, white the model, green work, amber attention, red a
-fault; violet, magenta and cyan are diet, asking, deciding and reading
-(the lamps are in `tokens.css`). Each footer is a full-width shaded band
-(`band`); `bloom-inline` keeps it under the text. `paper` is the same
-meanings on a white page, `paper-dark` the same flat surfaces in the
-dark, and `bloom-light` is bloom in daylight. A
-layer's file must be imported after every layer it overrides.
+A look is a **theme** and a **mode**. `tokens.css` is the dark palette and
+every default, and `themes/light.css` the light palette. A theme's file in
+`src/theme/themes/` sets only what it treats differently, under
+`[data-theme]`, and what it treats differently by mode under
+`[data-theme][data-mode]`, so each token has one home per look and nothing
+depends on import order. The palette makes every colour an LED with the
+meaning it has on a server: blue is you, white the model, green work, amber
+attention, red a fault; violet, magenta and cyan are diet, asking, deciding
+and reading (the lamps are in `tokens.css`). `bloom` is frosted slabs over
+pools of their own colour, glass beside the prefix, light pooled where the
+work is, what runs glowing while it runs, each footer a shaded band.
+`paper` is the same meanings flat and printed. `emboss` raises the prefix
+out of one material, square-edged, lit from the top left.
 The mapping behind all of them: material = in the prefix, glass = beside it,
 light = happening now.

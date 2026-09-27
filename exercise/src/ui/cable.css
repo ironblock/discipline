@@ -60,9 +60,8 @@
   to { stroke-dashoffset: -90; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ex-cable[data-live] .ex-cable__pulse { display: none; }
-}
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-cable[data-live] .ex-cable__pulse { display: none; }
 
 /* Routed as a harness (Wiring.tsx): one overlay over the stage, a dot where a net forks. */
 .ex-wiring {

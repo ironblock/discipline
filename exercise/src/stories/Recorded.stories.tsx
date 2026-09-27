@@ -3,12 +3,12 @@ import { useState } from 'react';
 import { expect, userEvent, waitFor } from 'storybook/test';
 
 import { PHASES } from '../App.tsx';
+import { cableOf } from './cables.ts';
 import { fillContrast } from './contrast.ts';
 import { RECORDINGS, recordedAt } from '../drive/recorded.ts';
 import type { RecordingName } from '../drive/recorded.ts';
 import { fold } from '../session/fold.ts';
 import { SessionView } from '../ui/SessionView.tsx';
-import type { Surface } from '../ui/surface.tsx';
 
 interface RecordedArgs {
   /** Session time, ms. */
@@ -18,8 +18,6 @@ interface RecordedArgs {
   readonly condensed?: boolean;
   /** Which recording; the first drive unless a story says otherwise. */
   readonly recording?: RecordingName;
-  /** Lines into memory routed as a harness, drawn so; curves when absent. */
-  readonly wiring?: Surface['wiring'];
 }
 
 const recording = RECORDINGS['first-drive'];
@@ -36,8 +34,8 @@ const meta = {
   title: 'Session/Recorded',
   parameters: { layout: 'fullscreen' },
   args: { t: Number.POSITIVE_INFINITY, curtain: true, gaps: false },
-  render: ({ t, curtain, gaps, condensed = false, recording: name = 'first-drive', wiring }) => (
-    <SessionView session={fold(recordedAt(RECORDINGS[name], t))} surface={{ curtain, gaps, condensed, ...(wiring ? { wiring } : {}) }} composer={{ phases: PHASES }} />
+  render: ({ t, curtain, gaps, condensed = false, recording: name = 'first-drive' }) => (
+    <SessionView session={fold(recordedAt(RECORDINGS[name], t))} surface={{ curtain, gaps, condensed }} composer={{ phases: PHASES }} />
   ),
 } satisfies Meta<RecordedArgs>;
 
@@ -86,6 +84,8 @@ export const LostAfterRefill: Story = {
 /** The whole drive: three eras, every side call in its slot, nothing the surface does not know. */
 export const Whole: Story = {
   name: '4 · the whole drive',
+  // Its cables' reach is a sweep's geometry; 12b holds the traces to the same count.
+  globals: { connectors: 'sweep' },
   play: async ({ canvasElement }) => {
     await expect(canvasElement.querySelectorAll('.ex-era')).toHaveLength(3);
     await expect(canvasElement.querySelectorAll('.ex-branchcell')).toHaveLength(94);
@@ -131,6 +131,8 @@ export const Minimap: Story = {
  */
 export const StartsWhereItRan: Story = {
   name: '7 · a side call is drawn where it ran, not where it was asked',
+  // Its cable's height is a sweep's geometry.
+  globals: { connectors: 'sweep' },
   play: async ({ canvasElement }) => {
     const events = recording.events as readonly Record<string, unknown>[];
     const request = events.find((e) => e['kind'] === 'request' && e['fork'] === 'e0100');
@@ -191,7 +193,7 @@ export const FollowsTheBottom: Story = {
     const atBottom = () => window.innerHeight + window.scrollY >= page.scrollHeight - 2;
     const where = (step: string) => `${step}: scrollY ${Math.round(window.scrollY)} + view ${window.innerHeight} of ${page.scrollHeight}`;
     const later = canvasElement.querySelector('[data-advance]') as HTMLElement;
-    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-branchcell .ex-cable').length).toBeGreaterThan(0));
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-branchcell .ex-cable, .ex-wiring [data-net]').length).toBeGreaterThan(0));
     // Layout settles over a few passes (placements, seam pads); read heights only once it has.
     const settled = async () => {
       let last = -1;
@@ -261,7 +263,7 @@ export const ItsReceipt: Story = {
 /** In daylight the minimap's slivers are lighter: visible, not heavy -- grey on white weighs more than light on black. */
 export const MinimapInDaylight: Story = {
   name: '5b · the minimap in daylight',
-  globals: { theme: 'paper' },
+  globals: { theme: 'paper', mode: 'light' },
   play: async ({ canvasElement }) => {
     const sliver = await waitFor(() => canvasElement.querySelector('.ex-mm__trunk[data-tone="assistant"]') ?? Promise.reject(new Error('no sliver yet')));
     const ratio = fillContrast(sliver);
@@ -305,7 +307,8 @@ export const StepLimit: Story = {
  */
 export const Harness: Story = {
   name: '12 · lines into memory as a harness',
-  args: { recording: 'step-limit', wiring: { crossing: 'hop', bend: 'round' } },
+  args: { recording: 'step-limit' },
+  globals: { connectors: 'trace', crossings: 'hop', corners: 'round' },
   // Wide enough for working memory beside the lanes, not in its drawer.
   render: (args) => <div style={{ width: 1900 }}>{meta.render(args)}</div>,
   play: async ({ canvasElement }) => {
@@ -336,5 +339,11 @@ export const Harness: Story = {
 /** The same on the first drive, where more side calls write at once: breaking at crossings, corners cut at 45°. */
 export const HarnessFirstDrive: Story = {
   name: '12b · a harness on the first drive, gaps and chamfers',
-  args: { wiring: { crossing: 'gap', bend: 'chamfer' } },
+  globals: { connectors: 'trace', crossings: 'gap', corners: 'chamfer' },
+  play: async ({ canvasElement }) => {
+    // Every side call is cabled to the trunk node it came from.
+    const ids = [...canvasElement.querySelectorAll('.ex-branchcell')].map((c) => c.getAttribute('data-branch') ?? '');
+    await expect(ids).toHaveLength(94);
+    await waitFor(async () => expect(ids.filter((id) => cableOf(canvasElement, id) === undefined)).toEqual([]));
+  },
 };

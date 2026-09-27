@@ -10,7 +10,7 @@ import { Branch } from '../ui/Branch.tsx';
 import { Cable } from '../ui/Cable.tsx';
 import { Composer } from '../ui/Composer.tsx';
 import type { ComposerProps } from '../ui/Composer.tsx';
-import { LookSetting, Looked } from '../ui/look.tsx';
+import { Preferred, Settings } from '../ui/Prefs.tsx';
 import { Memory } from '../ui/Memory.tsx';
 import { Prose, ProseProbe } from '../ui/Prose.tsx';
 import { AssistantMessage, SystemMessage, UserMessage } from '../ui/Message.tsx';
@@ -19,7 +19,6 @@ import { SessionHeader } from '../ui/SessionHeader.tsx';
 import { laneStyle } from '../ui/sets.ts';
 import { ToolCall } from '../ui/ToolCall.tsx';
 import { PHASES } from '../App.tsx';
-import { layersOf } from '../theme/themes/index.ts';
 import { contrast } from './contrast.ts';
 import { UNCLOSED_FENCE, WHAT_MODELS_WRITE } from './markdown.ts';
 import { MOMENTS, branchAt, sessionAt, trunkNodeAt, variantAt } from './moments.ts';
@@ -106,31 +105,40 @@ export const BlockFooterContrast: Story = {
   },
 };
 
-export const BlockFooterContrastInline: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, inline', globals: { theme: 'bloom-inline' } };
-export const BlockFooterContrastPaper: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, paper', globals: { theme: 'paper' } };
-export const BlockFooterContrastLight: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, bloom in daylight', globals: { theme: 'bloom-light' } };
-export const BlockFooterContrastPaperDark: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, paper in the dark', globals: { theme: 'paper-dark' } };
+export const BlockFooterContrastLight: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, bloom in daylight', globals: { theme: 'bloom', mode: 'light' } };
+export const BlockFooterContrastPaper: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, paper', globals: { theme: 'paper', mode: 'light' } };
+export const BlockFooterContrastPaperDark: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, paper in the dark', globals: { theme: 'paper', mode: 'dark' } };
+export const BlockFooterContrastEmboss: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, emboss', globals: { theme: 'emboss', mode: 'dark' } };
+export const BlockFooterContrastEmbossLight: Story = { ...BlockFooterContrast, name: 'Block · footer contrast, emboss in daylight', globals: { theme: 'emboss', mode: 'light' } };
 
-/** The look is two settings; each pick redraws the root in the canonical theme it names, and is remembered. */
-export const LookSettings: Story = {
-  name: 'Look · the two settings',
+/**
+ * The settings, behind a button: each pick redraws the root as it asks, a
+ * trace's details show only while connectors are traces, and every pick is
+ * remembered.
+ */
+export const SettingsPanel: Story = {
+  name: 'Settings · the preferences',
   render: () => (
-    <Looked>
-      <LookSetting />
-    </Looked>
+    <Preferred>
+      <Settings />
+    </Preferred>
   ),
   play: async ({ canvasElement }) => {
-    const root = canvasElement.querySelector('.ex-look')?.closest('.ex-root');
-    const pick = async (name: string) => userEvent.click(canvas(canvasElement).getByRole('radio', { name }));
-    await pick('paper');
-    await pick('light');
-    await expect(root?.getAttribute('data-theme')).toBe(layersOf('paper'));
-    await pick('dark');
-    await expect(root?.getAttribute('data-theme')).toBe(layersOf('paper-dark'));
-    await pick('colo');
-    await expect(root?.getAttribute('data-theme')).toBe(layersOf('bloom'));
-    await expect(JSON.parse(localStorage.getItem('exercise.look') ?? '{}')).toEqual({ material: 'colo', scheme: 'dark' });
-    localStorage.removeItem('exercise.look');
+    const root = canvasElement.querySelector('.ex-settings')?.closest('.ex-root');
+    const group = (label: string) => canvas(canvasElement).getByRole('radiogroup', { name: label });
+    await userEvent.click(canvas(canvasElement).getByRole('button', { name: 'settings' }));
+    await userEvent.click(canvas(group('theme')).getByRole('radio', { name: 'paper' }));
+    await userEvent.click(canvas(group('mode')).getByRole('radio', { name: 'light' }));
+    await expect([root?.getAttribute('data-theme'), root?.getAttribute('data-mode')]).toEqual(['paper', 'light']);
+    await userEvent.click(canvas(group('motion')).getByRole('radio', { name: 'off' }));
+    await expect(root?.getAttribute('data-motion')).toBe('still');
+    await expect(canvas(canvasElement).queryByRole('radiogroup', { name: 'corners' })).not.toBeNull();
+    await userEvent.click(canvas(group('connectors')).getByRole('radio', { name: 'sweep' }));
+    await expect(canvas(canvasElement).queryByRole('radiogroup', { name: 'corners' })).toBeNull();
+    await expect(JSON.parse(localStorage.getItem('exercise.prefs') ?? '{}')).toMatchObject({ theme: 'paper', mode: 'light', motion: 'off', connectors: 'sweep' });
+    localStorage.removeItem('exercise.prefs');
+    await userEvent.keyboard('{Escape}');
+    await expect(canvas(canvasElement).queryByRole('group', { name: 'settings' })).toBeNull();
   },
 };
 
