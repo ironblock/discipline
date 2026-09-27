@@ -129,9 +129,11 @@ export interface Response extends At {
    * per-token timings at the first tool-call chunk. The rest of `timings`'
    * generation is the calls'. Absent when the drive cannot tell: a protocol
    * that parses a call out of text only once it closes, or a record that
-   * kept none. The surface's ask (R3); the name is provisional.
+   * kept none; `predicted_n` alone absent when only the time was kept (a
+   * harness's transcript: OpenCode records when a call part began, not how
+   * many tokens came before it). The surface's ask (R3); the name is provisional.
    */
-  readonly calls_from?: { readonly predicted_n: number; readonly predicted_ms: number };
+  readonly calls_from?: { readonly predicted_n?: number; readonly predicted_ms: number };
 }
 
 /** The tools a model may call. Only `bash` exists today; every other tool is drawn as `name(args)`. */

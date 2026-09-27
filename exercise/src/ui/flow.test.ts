@@ -39,6 +39,9 @@ describe('a flow: tokens in or out, and how long they took', () => {
       calls: { phase: 'tg', n: 28, ms: 800, running: false },
     });
     expect(writtenApart({ timings })).toBeUndefined();
+    // Only the time kept: the shares' times are known, their tokens are not.
+    const timed = writtenApart({ timings, callsFrom: { predicted_ms: 500 } });
+    expect([flowText(timed!.text), flowText(timed!.calls)]).toEqual(['+? tok in 500 ms', '+? tok in 700 ms']);
   });
 
   it('once answered, is what the response measured', () => {

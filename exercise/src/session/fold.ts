@@ -57,7 +57,7 @@ export interface Generation {
   readonly slot: number;
   readonly startedAt: number;
   /** Where its tool calls began in what it wrote (the response's `calls_from`): what came before is its text's. */
-  readonly callsFrom?: { readonly predicted_n: number; readonly predicted_ms: number };
+  readonly callsFrom?: { readonly predicted_n?: number; readonly predicted_ms: number };
   /** Session time it began writing: its first token. Absent while it reads. */
   readonly writingSince?: number;
   /** Session time of the last sign of life: the request, the latest delta, the response. */

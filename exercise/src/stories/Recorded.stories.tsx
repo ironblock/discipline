@@ -349,3 +349,39 @@ export const HarnessFirstDrive: Story = {
     await waitFor(async () => expect(ids.filter((id) => cableOf(canvasElement, id) === undefined)).toEqual([]));
   },
 };
+
+/**
+ * OpenCode, against the same local model: native tool calls, several in one
+ * step, six tools (only `bash` is one this surface knows by name). The
+ * transcript kept when each call began, not how many tokens came before it,
+ * so each call's share reads in time alone. Its side calls did not run --
+ * they are stitched on (scripts/stitch-sides.py) and its header says so --
+ * and OpenCode compacting its context is a kind this vocabulary lacks.
+ */
+export const VoxelStress: Story = {
+  name: '13 · OpenCode: native calls, several a step',
+  args: { recording: 'voxel-stress' },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelectorAll('.ex-pair')).toHaveLength(105);
+    await expect(canvasElement.querySelectorAll('.ex-branchcell')).toHaveLength(14);
+    // The first call of a step says what writing the calls took: a time, with its tokens unknown.
+    const shares = [...canvasElement.querySelectorAll('.ex-pair > .ex-block:first-child .ex-block__foot')].map((f) => f.textContent ?? '');
+    await expect(shares.length).toBeGreaterThan(0);
+    await expect(shares.every((s) => /^\+\? tok in /.test(s))).toBe(true);
+    // A step's calls are pairs in turn: nine of them after one message.
+    const runs = [...canvasElement.querySelectorAll('.ex-trunk__node')].map((n) => n.getAttribute('data-kind'));
+    let longest = 0;
+    let run = 0;
+    for (const kind of runs) {
+      run = kind === 'tool' ? run + 1 : 0;
+      longest = Math.max(longest, run);
+    }
+    await expect(longest).toBe(9);
+    // A later call of a step says nothing of its own: its block is its head, with no room left for a body.
+    const later = [...canvasElement.querySelectorAll('.ex-pair > .ex-block:first-child')].find((b) => b.querySelector('.ex-block__foot') === null) as HTMLElement;
+    const head = later.querySelector('.ex-block__head') as HTMLElement;
+    await expect(Math.abs(later.getBoundingClientRect().bottom - head.getBoundingClientRect().bottom)).toBeLessThan(2);
+    await expect(canvasElement.textContent).not.toMatch(/\b1 lines\b/);
+    await expect(canvasElement.querySelector('.ex-header__unknown')?.getAttribute('title')).toContain('compaction');
+  },
+};

@@ -103,6 +103,13 @@
   box-shadow: none;
 }
 
+/* Nothing after it at all (a later call of a step, which says nothing of its own): the head is the block. */
+.ex-block:not(.ex-block--thin):not(:has(> .ex-block__body, > .ex-block__foot)) > .ex-block__head {
+  margin-bottom: calc(-0.6rem * var(--foot-band));
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+
 /* What went in, said: a tool's command, taking the rest of the header's row. */
 .ex-block__lead {
   flex: 1 1 auto;

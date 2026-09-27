@@ -98,7 +98,7 @@ export function ToolResult({ node, open: initiallyOpen = false }: { readonly nod
             running · {took(since.ms)}
           </span>
         ) : (
-          `${output === '' ? 'no output' : `${lines(output).toLocaleString('en-US')} lines · ${bytes(output)}`} in ${took(node.ms ?? 0)}`
+          `${output === '' ? 'no output' : `${lines(output).toLocaleString('en-US')} ${lines(output) === 1 ? 'line' : 'lines'} · ${bytes(output)}`} in ${took(node.ms ?? 0)}`
         )
       }
       stats={[node.truncated && { value: <span className="ex-truncated">truncated</span>, title: 'the harness cut the output before the model saw it' }, exit]}

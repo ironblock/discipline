@@ -69,9 +69,11 @@ export function writtenApart(g: Generating): { readonly text: Flow; readonly cal
   const t = g.timings;
   const from = g.callsFrom;
   if (!t || !from) return undefined;
+  // Only the time may have been kept: then how many tokens each share took is not known.
+  const n = from.predicted_n;
   return {
-    text: { phase: 'tg', n: from.predicted_n, ms: from.predicted_ms, running: false },
-    calls: { phase: 'tg', n: Math.max(0, t.predicted_n - from.predicted_n), ms: Math.max(0, t.predicted_ms - from.predicted_ms), running: false },
+    text: { phase: 'tg', ...(n !== undefined ? { n } : {}), ms: from.predicted_ms, running: false },
+    calls: { phase: 'tg', ...(n !== undefined ? { n: Math.max(0, t.predicted_n - n) } : {}), ms: Math.max(0, t.predicted_ms - from.predicted_ms), running: false },
   };
 }
 
@@ -91,7 +93,7 @@ export function warmOf(g: Generating): number | undefined {
 
 /** A flow in one line: `+7.9k of 16.4k tok in 5.7 s (1,380 t/s pp)`. */
 export function flowText(f: Flow): string {
-  if (f.n === undefined) return `${f.phase === 'pp' ? 'reading' : 'writing'} · ${took(f.ms)}`;
+  if (f.n === undefined) return f.running ? `${f.phase === 'pp' ? 'reading' : 'writing'} · ${took(f.ms)}` : `+? tok in ${took(f.ms)}`;
   const of = f.of !== undefined ? ` of ${tokens(f.of)}` : '';
   return `+${tokens(f.n)}${of} tok in ${took(f.ms)} (${rate(f.n, f.ms)} t/s ${f.phase})`;
 }

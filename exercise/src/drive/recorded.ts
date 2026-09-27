@@ -1,9 +1,11 @@
 /**
- * Sessions the predecessor recorded against a real model, migrated once into
- * this vocabulary (`scripts/migrate-recorded.py`; each file's `migration`
- * header says what the migration decided rather than the record). Where the
+ * Sessions recorded against a real model, migrated once into this
+ * vocabulary -- the predecessor's (`scripts/migrate-recorded.py`), and one
+ * OpenCode session (`scripts/migrate-opencode.py`) -- each file's `migration`
+ * header saying what the migration decided rather than the record. Where the
  * specimen is authored intent, these are what actually happened -- slow
- * reads, side calls that answered as the agent, junk in working memory.
+ * reads, side calls that answered as the agent, junk in working memory. The
+ * OpenCode session ran no side calls: its are stitched on and say so.
  *
  * A recording carries no deltas (they were never recorded); `placed()`
  * synthesizes them the way the canned transport does, so a moment mid-answer
@@ -17,6 +19,7 @@ import type { Ack, DriveTransport } from './transport.ts';
 import firstDrive from './recorded/first-drive.json?raw';
 import cancelledCapture from './recorded/cancelled-capture.json?raw';
 import stepLimit from './recorded/step-limit.json?raw';
+import voxelStress from './recorded/voxel-stress.json?raw';
 
 export interface Recording {
   readonly title: string;
@@ -42,6 +45,8 @@ export const RECORDINGS = {
   'cancelled-capture': load(cancelledCapture),
   /** A turn that ran into the step limit (30 steps). */
   'step-limit': load(stepLimit),
+  /** OpenCode, native tool calls, several per step, six tools; its side calls authored (stitch-sides.py). */
+  'voxel-stress': load(voxelStress),
 } as const;
 
 export type RecordingName = keyof typeof RECORDINGS;
