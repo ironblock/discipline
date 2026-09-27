@@ -15,8 +15,8 @@
   letter-spacing: 0.08em;
 }
 
-/* Prefill: nothing to show yet but the fact of reading -- one line, the
-   answer's first, with the cursor where its first token will land. */
+/* Prefill: nothing written yet -- one line, the answer's first, with the
+   cursor where its first token will land (what it reads is the header's). */
 .ex-waiting {
   margin: 0;
   font: var(--size-prose) / var(--leading-prose) var(--font-answer);
@@ -24,13 +24,6 @@
 
 .ex-waiting .ex-caret {
   margin-left: 0;
-}
-
-.ex-waiting__label {
-  margin-left: 0.6em;
-  font: var(--size-chrome) / 1.4 var(--font-chrome);
-  color: var(--ink-faint);
-  letter-spacing: 0.04em;
 }
 
 /* A request that failed: what the server or the drive said, verbatim, under the answer so far. */

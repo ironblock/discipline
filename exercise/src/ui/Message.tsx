@@ -4,7 +4,7 @@ import type { AssistantNode, Folded, SettledNode, SystemNode, UserNode } from '.
 import { Block } from './Block.tsx';
 import { counter, ms, rate, tokens } from './format.ts';
 import { Copy } from './Copy.tsx';
-import { IntakeLine, Meter, intakeEdge, intakeOf, readFraction } from './Meter.tsx';
+import { IntakeLine, intakeEdge, intakeOf } from './Intake.tsx';
 import { Prose } from './Prose.tsx';
 import { alarmOf, failOf, settleOf, stopOf } from './sets.ts';
 import { elapsed, useNow } from './surface.tsx';
@@ -34,7 +34,7 @@ export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
     <Block
       tone="system"
       label={node.render === undefined ? 'system' : `system · render v${node.render}`}
-      stats={[node.tokens !== undefined && { value: tokens(node.tokens), unit: 'tok', title: 'tokens in the prefix' }]}
+      heads={[node.tokens !== undefined && { value: tokens(node.tokens), unit: 'tok', title: 'tokens in the prefix' }]}
       provenance={node}
       id={node.id}
     >
@@ -48,13 +48,13 @@ export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
   );
 }
 
-/** A person's ask. Its footer says what it cost: the prefill it caused, new and reused. */
+/** A person's ask. Its header says what it cost to read: the prefill it caused, new and reused. */
 export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
   return (
     <Block
       tone="user"
       label="user"
-      stats={
+      heads={
         node.prefill
           ? [
               { value: tokens(node.prefill.fresh), unit: 'new', title: 'prompt tokens this ask caused to be evaluated' },
@@ -72,12 +72,12 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
 }
 
 /**
- * The model on the trunk: its reasoning in italic, then its answer, streamed.
- * `split` draws what it read apart from what it wrote: the reading in a
- * header along its top (Block's intake), the writing in its body and its
- * footer -- a prototype, beside the footer that holds both.
+ * The model on the trunk: what it read, apart from what it wrote. The
+ * reading is its header, along its top edge (Block's intake) -- right under
+ * the ask or tool output it mostly is; the writing is its body, reasoning in
+ * italic then the answer, streamed from line 1, and its footer.
  */
-export function AssistantMessage({ node, split = false }: { readonly node: Folded<AssistantNode>; readonly split?: boolean }) {
+export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode> }) {
   const [thinking, setThinking] = useState(false);
   const live = node.progress === 'prefill' || node.progress === 'streaming';
   const t = node.timings;
@@ -93,14 +93,13 @@ export function AssistantMessage({ node, split = false }: { readonly node: Folde
   // A turn that said nothing and only called a tool: a step, not a message.
   const silent = node.progress === 'done' && node.text === '' && node.reasoning === '';
   const stopped = stopOf(node.stop ?? 'stop');
-  const intake = split ? intakeOf(node) : undefined;
+  const intake = intakeOf(node);
   return (
     <Block
       tone="assistant"
       label={silent ? 'assistant · a call, no text' : 'assistant'}
       thin={silent}
       live={live}
-      meter={!split && node.progress === 'prefill' && node.meter ? readFraction(node.meter) : undefined}
       {...(intake
         ? {
             intake: {
@@ -140,20 +139,16 @@ export function AssistantMessage({ node, split = false }: { readonly node: Folde
                 ),
                 title: 'why generation stopped',
               },
-              split
-                ? t.predicted_ms !== undefined && { value: ms(t.predicted_ms), title: 'generating, from the first token to the last' }
-                : node.wallMs !== undefined && { value: ms(node.wallMs), title: 'request to response, wall clock' },
+              t.predicted_ms !== undefined && { value: ms(t.predicted_ms), title: 'generating, from the first token to the last' },
               { value: tokens(t.predicted_n), unit: 'tok', title: 'tokens generated, reasoning included' },
               { value: rate(t.predicted_n, t.predicted_ms), unit: 'tg t/s', title: 'generation speed' },
-              !split && { value: tokens(t.prompt_n), unit: 'new', title: 'prompt tokens evaluated' },
-              !split && { value: rate(t.prompt_n, t.prompt_ms), unit: 'pp t/s', title: 'prefill speed' },
             ]
           : [
-              // Split, reading is the header's to say; the footer waits for the first token.
-              !(split && node.progress === 'prefill') && {
+              // Reading is the header's to say; the footer waits for the first token.
+              node.progress !== 'prefill' && {
                 value: (
                   <span className="ex-elapsed" data-level={worry}>
-                    {node.progress === 'prefill' ? 'prefill' : 'generating'} · {counter(since.ms)}
+                    generating · {counter(since.ms)}
                   </span>
                 ),
                 title: 'how long since the request',
@@ -168,7 +163,7 @@ export function AssistantMessage({ node, split = false }: { readonly node: Folde
       {...(node.text !== '' && !live ? { actions: <Copy text={node.text} /> } : {})}
     >
       {silent ? undefined : (
-        <AssistantBody node={node} live={live} long={long} showReasoning={showReasoning} thinking={thinking} setThinking={setThinking} streamingInto={streamingInto} split={split} />
+        <AssistantBody node={node} live={live} long={long} showReasoning={showReasoning} thinking={thinking} setThinking={setThinking} streamingInto={streamingInto} />
       )}
     </Block>
   );
@@ -182,9 +177,7 @@ function AssistantBody({
   thinking,
   setThinking,
   streamingInto,
-  split,
 }: {
-  readonly split: boolean;
   readonly node: Folded<AssistantNode>;
   readonly live: boolean;
   readonly long: boolean;
@@ -211,17 +204,10 @@ function AssistantBody({
           ) : null}
         </div>
       ) : null}
-      {node.progress === 'prefill' && split ? (
+      {node.progress === 'prefill' ? (
         // What it reads is the header's; here is only where its first token will land.
         <p className="ex-waiting">
           <span className="ex-caret" aria-hidden="true" />
-        </p>
-      ) : node.progress === 'prefill' && node.meter ? (
-        <Meter meter={node.meter} />
-      ) : node.progress === 'prefill' ? (
-        <p className="ex-waiting" role="status">
-          <span className="ex-caret" aria-hidden="true" />
-          <span className="ex-waiting__label">reading the prompt</span>
         </p>
       ) : null}
       {node.text !== '' ? <Prose text={node.text} kind="answer" caret={streamingInto === 'answer'} /> : null}

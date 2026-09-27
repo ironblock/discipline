@@ -284,36 +284,39 @@ export const AssistantPrefill: Story = {
     await expect(waiting.querySelectorAll('.ex-caret')).toHaveLength(1);
     const line = parseFloat(getComputedStyle(waiting).lineHeight);
     await expect(waiting.getBoundingClientRect().height).toBeLessThanOrEqual(line + 1);
-    // The live sweep along the block's bottom follows its corners.
+    // The header says it is reading, with nothing known yet: light sweeps the top edge, and follows the corners.
+    await expect(canvasElement.querySelector('.ex-block__head .ex-block__intake')?.textContent).toMatch(/^reading the prompt/);
     const block = canvasElement.querySelector('.ex-block--live') as HTMLElement;
-    const sweep = getComputedStyle(block, '::after');
-    await expect(sweep.borderRadius).toBe(getComputedStyle(block).borderRadius);
-    await expect(parseFloat(sweep.height)).toBeCloseTo(block.getBoundingClientRect().height, 0);
+    const edge = block.querySelector('.ex-block__edge[data-unknown]') as HTMLElement;
+    await expect(getComputedStyle(edge).borderRadius).toBe(getComputedStyle(block).borderRadius);
+    await expect(edge.getBoundingClientRect().height).toBeCloseTo(block.getBoundingClientRect().height, 0);
+    // Nothing is written yet: the bottom edge rests, and there is no footer.
+    await expect(getComputedStyle(block, '::after').display).toBe('none');
+    await expect(block.querySelector('.ex-block__foot')).toBeNull();
   },
 };
 
 /**
- * A 16k-token prompt, half read: the meter shows the warm part there from the
- * start, the new part filling, how many of how many, how fast, and how long
- * is left -- instead of twelve seconds of "reading the prompt".
+ * A 16k-token prompt, half read: the header says how many of how many new,
+ * over how much warm, how fast and how long is left, and the top edge fills
+ * with the new part -- only the new part, so a long session's warm prefix
+ * never dominates it, and a cache miss is a long fill.
  */
 export const AssistantPrefillMetered: Story = {
   name: 'Message · assistant, prefill metered',
   render: () => <AssistantMessage node={trunkNodeAt({ beat: 2, t: 10_000 }, 'q/3', 'assistant')} />,
   play: async ({ canvasElement }) => {
-    const meter = canvasElement.querySelector('.ex-meter') as HTMLElement;
-    await expect(meter).not.toBeNull();
-    const line = meter.querySelector('.ex-meter__line')?.textContent ?? '';
-    await expect(line).toMatch(/of 16\.4k new/);
-    await expect(line).toMatch(/1\.4k warm/);
-    await expect(line).toMatch(/pp t\/s/);
-    await expect(line).toMatch(/s left/);
-    const read = Number(meter.style.getPropertyValue('--read'));
-    await expect(read).toBeGreaterThan(0.4);
-    await expect(read).toBeLessThan(0.6);
-    await expect(Number(meter.style.getPropertyValue('--warm'))).toBeCloseTo(1410 / 17830, 2);
-    // The block's own underline says the same, determinate.
-    await expect(canvasElement.querySelector('.ex-block[data-meter]')).not.toBeNull();
+    const line = canvasElement.querySelector('.ex-block__head .ex-block__intake')?.textContent ?? '';
+    await expect(line).toMatch(/^reading · .+ of 16\.4k new · 1\.4k warm · .+ pp t\/s · .+ s left$/);
+    const edge = canvasElement.querySelector('.ex-block__edge[data-reading]') as HTMLElement;
+    // The edge is the new part alone: nothing of the warm part is drawn.
+    await expect(edge.style.getPropertyValue('--warm')).toBe('');
+    // As far through the new part as the server has read it -- not through the whole prompt.
+    const m = trunkNodeAt({ beat: 2, t: 10_000 }, 'q/3', 'assistant').meter;
+    await expect(m).toBeDefined();
+    await expect(Number(edge.style.getPropertyValue('--read'))).toBeCloseTo((m?.processed ?? 0) / ((m?.total ?? 0) - (m?.cache ?? 0)), 2);
+    // The role's chip leads the header, before what it reads.
+    await expect(canvasElement.querySelector('.ex-block__head > .ex-block__label')?.textContent).toBe('assistant');
   },
 };
 
@@ -331,71 +334,59 @@ export const AssistantStreaming: Story = {
 };
 
 /**
- * PROTOTYPE: what a generation read, apart from what it wrote. Today (left)
- * one footer holds both; split (right), the reading is a header along the
- * block's top edge -- right under the ask or tool output it mostly is, the
- * warm part dim and the new part filling -- and the writing is the body,
- * from line 1, and the footer. A side call's bar shows its reading along its
- * top edge: nearly all warm, the fork's point.
+ * What a generation read, apart from what it wrote: the reading is a header
+ * along the block's top edge -- right under the ask or tool output it mostly
+ * is -- and the writing is the body, from line 1, and the footer. A side
+ * call's bar reads along its top edge, and its opened exchange starts with
+ * what it read.
  */
-export const SplitInputOutput: Story = {
-  name: 'Message · what it read, apart from what it wrote (prototype)',
-  parameters: { layout: 'fullscreen' },
+export const ReadApartFromWritten: Story = {
+  name: 'Message · what it read, apart from what it wrote',
   render: () => {
     const moments = [
       ['reading', trunkNodeAt({ beat: 2, t: 10_000 }, 'q/3', 'assistant')],
       ['writing', trunkNodeAt(MOMENTS.streaming, 'q/3', 'assistant')],
       ['written', trunkNodeAt({ beat: 2 }, 'q/2', 'assistant')],
     ] as const;
-    const side = (t: number | undefined, open: boolean, split: boolean) => (
+    const side = (t: number | undefined, open: boolean) => (
       <div style={laneStyle('interview')}>
-        <Branch node={branchAt(t === undefined ? MOMENTS.firstSettled : { beat: 2, t }, 'i/1')} open={open} split={split} />
+        <Branch node={branchAt(t === undefined ? MOMENTS.firstSettled : { beat: 2, t }, 'i/1')} open={open} />
       </div>
     );
     return (
-      <div style={{ display: 'grid', width: '90rem', gridTemplateColumns: '7rem 40rem 40rem', gap: '1.25rem 2rem', padding: '1.5rem', alignItems: 'start' }}>
-        <span />
-        <p style={{ margin: 0, color: 'var(--ink-muted)' }}>today: one footer</p>
-        <p style={{ margin: 0, color: 'var(--ink-muted)' }}>split: read above, written below</p>
+      <div style={{ display: 'grid', gridTemplateColumns: '7rem minmax(0, 1fr)', gap: '1.25rem 2rem', alignItems: 'start' }}>
         {moments.map(([name, node]) => (
           <Row key={name} name={name}>
-            <AssistantMessage node={node} />
-            <div data-split={name}>
-              <AssistantMessage node={node} split />
+            <div data-moment={name}>
+              <AssistantMessage node={node} />
             </div>
           </Row>
         ))}
         <Row name="side call, reading">
-          {side(27_800, false, false)}
-          <div data-split="side">{side(27_800, false, true)}</div>
+          <div data-moment="side">{side(27_800, false)}</div>
         </Row>
         <Row name="side call, opened">
-          {side(undefined, true, false)}
-          <div data-split="side-open">{side(undefined, true, true)}</div>
+          <div data-moment="side-open">{side(undefined, true)}</div>
         </Row>
       </div>
     );
   },
   play: async ({ canvasElement }) => {
-    const at = (name: string) => canvasElement.querySelector(`[data-split="${name}"]`) as HTMLElement;
+    const at = (name: string) => canvasElement.querySelector(`[data-moment="${name}"]`) as HTMLElement;
     const text = (name: string, sel: string) => at(name).querySelector(sel)?.textContent ?? '';
-    // Reading: the header says how far, the edge fills, the body is one line with the cursor, the footer waits.
-    await expect(text('reading', '.ex-block__intake-line')).toMatch(/reading · .+ of 16\.4k new · 1\.4k warm/);
-    const edge = at('reading').querySelector('.ex-block__intake') as HTMLElement;
-    await expect(Number(edge.style.getPropertyValue('--warm'))).toBeCloseTo(1410 / 17830, 2);
-    await expect(at('reading').querySelector('.ex-meter')).toBeNull();
+    // Reading: the header says how far; the body is one line with the cursor; nothing is written, so no footer.
+    await expect(text('reading', '.ex-block__intake')).toMatch(/reading · .+ of 16\.4k new · 1\.4k warm/);
     await expect(at('reading').querySelectorAll('.ex-block__body .ex-caret')).toHaveLength(1);
-    await expect(text('reading', '.ex-block__foot')).not.toMatch(/new|pp t\/s/);
+    await expect(at('reading').querySelector('.ex-block__foot')).toBeNull();
     // Writing and written: what was read stays at the top; the footer is only what was written.
     for (const name of ['writing', 'written']) {
-      await expect(text(name, '.ex-block__intake-line')).toMatch(/^read .+ new/);
+      await expect(text(name, '.ex-block__intake')).toMatch(/^read .+ new/);
       await expect(text(name, '.ex-block__foot')).toMatch(/tg t\/s/);
       await expect(text(name, '.ex-block__foot')).not.toMatch(/pp t\/s|new/);
     }
-    // A warm fork reads almost nothing new: its edge is nearly all warm from the start.
-    const fork = at('side').querySelector('.ex-block__intake') as HTMLElement;
-    await expect(Number(fork.style.getPropertyValue('--warm'))).toBeGreaterThan(0.95);
-    await expect(text('side-open', '.ex-branch__intake')).toMatch(/warm/);
+    // A side call reads its edge too, and says what it read when opened: a warm fork, a few new tokens.
+    await expect(at('side').querySelector('.ex-block__edge')).not.toBeNull();
+    await expect(text('side-open', '.ex-branch__intake')).toMatch(/new · 17\.8k warm/);
   },
 };
 
@@ -542,9 +533,22 @@ export const ToolRunning: Story = {
   render: () => <ToolCall node={trunkNodeAt(MOMENTS.testsRunning, 't/5', 'tool')} />,
 };
 
+/** What went in is its header -- the tool's chip, then its command; what came out, its footer; the output opens as its body. */
 export const ToolLarge: Story = {
   name: 'ToolCall · 1,860 lines, collapsed',
   render: () => <ToolCall node={trunkNodeAt(MOMENTS.firstSettled, 't/2', 'tool')} />,
+  play: async ({ canvasElement }) => {
+    const head = canvasElement.querySelector('.ex-block__head') as HTMLElement;
+    await expect(head.querySelector('.ex-block__label')?.textContent).toBe('bash');
+    await expect(head.querySelector('.ex-tool__command')?.textContent).toBe('cat src/report.rs');
+    const foot = canvasElement.querySelector('.ex-block__foot')?.textContent ?? '';
+    await expect(foot).toMatch(/1,860 lines/);
+    await expect(foot).not.toMatch(/bash/i);
+    // Closed, there is no body: the head meets the foot.
+    await expect(canvasElement.querySelector('.ex-block__body')).toBeNull();
+    await userEvent.click(head.querySelector('.ex-tool__head') as HTMLElement);
+    await expect(canvasElement.querySelector('.ex-block__body .ex-tool__output')).not.toBeNull();
+  },
 };
 
 export const ToolLargeOpen: Story = {

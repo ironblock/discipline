@@ -56,9 +56,15 @@
   margin-bottom: 0.75rem;
 }
 
-/* The footer: what the harness measured. Low contrast on purpose -- quiet,
-   not illegible -- and, by --foot-tone and --foot-unit-tone, in the block's own hue, so a number
-   on a coloured fill is not grey on colour. */
+.ex-block__body:last-child {
+  margin-bottom: 0.4rem;
+}
+
+/* The header and the footer: who and what went in, and what came out, as
+   the harness measured them. Low contrast on purpose -- quiet, not
+   illegible -- and, by --foot-tone and --foot-unit-tone, in the block's own
+   hue, so a number on a coloured fill is not grey on colour. */
+.ex-block__head,
 .ex-block__foot {
   display: flex;
   flex-wrap: wrap;
@@ -68,16 +74,44 @@
   color: color-mix(in oklab, var(--tone-ink) var(--foot-tone), var(--ink-muted));
 }
 
-/* The footer may run the block's full width as a shaded band, closing the
-   block off like the foot of a card: --foot-band 1 bleeds it to the edges,
-   --foot-shade darkens it, --foot-rule draws the block's ink along its top.
-   A lane bar is all footer, so it never bands. */
+/* Each may run the block's full width as a shaded band, like the head and
+   the foot of a card: --foot-band 1 bleeds them to the edges, --foot-shade
+   darkens them, --foot-rule draws the block's ink along the side that faces
+   the body. A lane bar is one row, so it never bands. */
+.ex-block:not(.ex-block--thin) > .ex-block__head {
+  margin: calc(-1rem * var(--foot-band)) calc(-1.25rem * var(--foot-band)) 0.75rem;
+  padding: calc(0.45rem * var(--foot-band)) calc(1.25rem * var(--foot-band)) calc(0.45rem * var(--foot-band));
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: color-mix(in oklab, black var(--foot-shade), transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in oklab, var(--tone-ink) var(--foot-rule), transparent);
+}
+
 .ex-block:not(.ex-block--thin) > .ex-block__foot {
   margin: 0 calc(-1.25rem * var(--foot-band)) calc(-0.6rem * var(--foot-band));
   padding: calc(0.5rem * var(--foot-band)) calc(1.25rem * var(--foot-band)) calc(0.55rem * var(--foot-band));
   border-radius: 0 0 var(--radius) var(--radius);
   background: color-mix(in oklab, black var(--foot-shade), transparent);
   box-shadow: inset 0 1px 0 color-mix(in oklab, var(--tone-ink) var(--foot-rule), transparent);
+}
+
+/* Nothing between them (a tool call, closed): the head meets the foot, one rule between. */
+.ex-block:not(.ex-block--thin) > .ex-block__head:has(+ .ex-block__foot) {
+  margin-bottom: 0;
+}
+
+.ex-block:not(.ex-block--thin) > .ex-block__head + .ex-block__foot {
+  box-shadow: none;
+}
+
+/* What went in, said: a tool's command, taking the rest of the header's row. */
+.ex-block__lead {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* What it read, after the chip: plain text, not a chip -- a sentence about the numbers. */
+.ex-block__intake {
+  font-variant-numeric: tabular-nums;
 }
 
 .ex-block--thin .ex-block__foot {
@@ -185,39 +219,32 @@
 }
 
 /*
- * The intake (Block's `intake`): what the block read before it wrote, apart
- * from what it wrote. Along its top edge -- masked to a 2px ring, so it
- * follows the corners -- the prompt as a bar: the warm part dim, the new
- * part in the block's ink as far as it is read, the rest a track. Quiet
- * once read; lit while reading, when the bottom edge rests: nothing is
- * being written yet. On a message, a line under it, banded like the footer
- * it mirrors: input at the top, output at the foot.
+ * The intake's edge (Block's `intake`): along the block's top -- masked to a
+ * 2px ring, so it follows the corners -- the NEW part of the prompt, filling
+ * in the block's ink as it is read. Only the new part: late in a session the
+ * warm part would dominate every bar, and a cache miss shows itself anyway,
+ * as a long fill. Quiet once read; lit while reading, when the bottom edge
+ * rests: nothing is being written yet.
  */
 .ex-block__edge {
   position: absolute;
   inset: 0;
   padding-top: 2px;
-  /* The block's own corners: the edge sits in the header, which has none. */
-  border-radius: var(--radius);
+  border-radius: inherit;
   pointer-events: none;
   -webkit-mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
-  background: linear-gradient(
-    90deg,
-    color-mix(in oklab, var(--tone-ink) 45%, transparent) 0 calc(var(--warm) * 100%),
-    var(--tone-ink) 0 calc((var(--warm) + (1 - var(--warm)) * var(--read)) * 100%),
-    color-mix(in oklab, var(--tone-ink) 12%, transparent) 0
-  );
+  background: linear-gradient(90deg, var(--tone-ink) 0 calc(var(--read) * 100%), color-mix(in oklab, var(--tone-ink) 12%, transparent) 0);
   opacity: 0.4;
 }
 
-.ex-block__intake[data-reading] .ex-block__edge {
+.ex-block__edge[data-reading] {
   opacity: 0.9;
   transition: background 0.25s linear;
 }
 
 /* Reading, with nothing known yet: light sweeps the top edge, as writing sweeps the bottom. */
-.ex-block__intake[data-unknown] .ex-block__edge {
+.ex-block__edge[data-unknown] {
   background: linear-gradient(90deg, transparent, var(--tone-ink), transparent);
   background-size: 40% 100%;
   background-repeat: no-repeat;
@@ -229,26 +256,6 @@
   display: none;
 }
 
-.ex-block__intake-line {
-  margin: calc(-1rem * var(--foot-band)) calc(-1.25rem * var(--foot-band)) 0.75rem;
-  padding: calc(0.5rem * var(--foot-band)) calc(1.25rem * var(--foot-band)) calc(0.45rem * var(--foot-band));
-  border-radius: var(--radius) var(--radius) 0 0;
-  background: color-mix(in oklab, black var(--foot-shade), transparent);
-  box-shadow: inset 0 -1px 0 color-mix(in oklab, var(--tone-ink) var(--foot-rule), transparent);
-  font: var(--size-stats) / 1.4 var(--font-stats);
-  color: color-mix(in oklab, var(--tone-ink) var(--foot-tone), var(--ink-muted));
-  font-variant-numeric: tabular-nums;
-}
-
-/* In prefill with a meter, the underline is determinate: it fills as the prompt is read. */
-.ex-block--live[data-meter]::after {
-  animation: none;
-  background: linear-gradient(90deg, var(--tone-ink) calc(var(--meter) * 100%), transparent 0);
-  background-size: 100% 100%;
-  opacity: 0.8;
-  transition: background 0.25s linear;
-}
-
 @keyframes ex-sweep {
   from { background-position: -40% 0; }
   to { background-position: 140% 0; }
@@ -256,8 +263,8 @@
 
 /* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
 .ex-root[data-motion='still'] .ex-block--live::after { animation: none; background-size: 100% 100%; opacity: 0.3; }
-.ex-root[data-motion='still'] .ex-block__intake[data-unknown] .ex-block__edge { animation: none; background-size: 100% 100%; opacity: 0.3; }
-.ex-root[data-motion='still'] .ex-block__intake[data-reading] .ex-block__edge { transition: none; }
+.ex-root[data-motion='still'] .ex-block__edge[data-unknown] { animation: none; background-size: 100% 100%; opacity: 0.3; }
+.ex-root[data-motion='still'] .ex-block__edge[data-reading] { transition: none; }
 
 /* The gaps overlay: what `diet` cannot emit yet, outlined and named. */
 .ex-gaps [data-needs]:not([data-needs='']) {

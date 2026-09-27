@@ -20,8 +20,10 @@ pnpm verify           # typecheck, lint, unit tests, every story as a browser te
 CI runs the same thing as the repository's `exercise` check (`./verify.sh --only exercise`, owned in `.github/check-owners.tsv`, run by `pkg-exercise.yml`); its seeded fault is a type error.
 
 - **The trunk is a conversation.** One block per message, role by fill,
-  prose proportional, chain-of-thought italic, a low-contrast mono footer of
-  what the harness measured on every block.
+  prose proportional, chain-of-thought italic. Each block's header says what
+  went in -- its role, and what it read (new over warm, how fast; while it
+  reads, its top edge fills with the new part) or, for a tool, its command --
+  and its footer what came out, in low-contrast mono.
 - **Behind the curtain**, each server slot other than the trunk's is a
   column. An interview sits level with the trunk message it came from, in
   the slot that served it, with the patches it landed, cabled to it. A seam
@@ -78,7 +80,7 @@ meaning it has on a server: blue is you, white the model, green work, amber
 attention, red a fault; violet, magenta and cyan are diet, asking, deciding
 and reading (the lamps are in `tokens.css`). `bloom` is frosted slabs over
 pools of their own colour, glass beside the prefix, light pooled where the
-work is, what runs glowing while it runs, each footer a shaded band.
+work is, what runs glowing while it runs, each header and footer a shaded band.
 `paper` is the same meanings flat and printed. `emboss` raises the prefix
 out of one material, square-edged, lit from the top left.
 The mapping behind all of them: material = in the prefix, glass = beside it,

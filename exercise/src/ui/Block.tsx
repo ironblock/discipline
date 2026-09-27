@@ -20,49 +20,60 @@ export interface BlockProps {
   readonly tone: Tone;
   /** For tone `lane`: which. Coloured from the lane registry; an unknown lane is neutral. */
   readonly lane?: ForkLane;
-  /** The footer's first chip: the role or lane, in the harness's words. */
+  /** The role or lane, in the harness's words: the header's chip. */
   readonly label: string;
+  /** What went in, said rather than counted: after the chip -- a tool's command. */
+  readonly lead?: ReactNode;
+  /** What went in: the header's numbers, after the chip. */
+  readonly heads?: readonly (Stat | false | undefined)[];
+  /** What came out: the footer's numbers. No footer without them. */
   readonly stats?: readonly (Stat | false | undefined)[];
   /** Where this block came from, and what it waits on. From a folded node. */
   readonly provenance: { readonly from: readonly number[]; readonly needs: readonly string[] };
-  /** Thin: a bar with a footer and no body, for a harness step. */
+  /** Thin: one row -- chip, numbers -- and no body, for a harness step. */
   readonly thin?: boolean;
   readonly live?: boolean;
-  /** How far a live block's prefill has got, 0..1: its underline fills rather than sweeps. */
-  readonly meter?: number | undefined;
+  /**
+   * What the block read before it wrote: along its top edge, the new part of
+   * the prompt as a bar filling as it is read (absent while nothing is
+   * known: light sweeps instead), and, on a block with a header, a line after
+   * the chip. While it reads, the bottom edge rests.
+   */
+  readonly intake?: { readonly reading: boolean; readonly edge?: { readonly read: number } | undefined; readonly line?: ReactNode };
   /** Something here went wrong, and how badly: what the minimap marks. */
   readonly alarm?: 'warn' | 'bad' | undefined;
   /** The node's id: its DOM id too, so `#<id>` links to it. */
   readonly id?: string;
-  /**
-   * What the block read before it wrote, drawn apart from what it wrote: a
-   * bar along its top edge (the warm part and the new part, as fractions of
-   * the prompt; absent while nothing is known) and, on a message, a line
-   * under it. While it reads, the bottom edge rests.
-   */
-  readonly intake?: { readonly reading: boolean; readonly edge?: { readonly warm: number; readonly read: number } | undefined; readonly line?: ReactNode };
   /** Per-block actions -- copy today; retry, annotate, link later -- shown in the corner on hover or focus. */
   readonly actions?: ReactNode;
   readonly children?: ReactNode;
 }
 
 /**
- * The session event: one block, filled by role, with a low-contrast mono
- * footer of what the harness measured. Every message, tool call and lane
- * step on the surface is one of these, refined.
+ * The session event: one block, filled by role. Its header says who and
+ * what went in -- the role's chip, and what it read -- and its footer what
+ * came out, in low-contrast mono. Every message, tool call and lane step on
+ * the surface is one of these, refined.
  */
-export function Block({ tone, lane, label, stats = [], provenance, thin = false, live = false, meter, intake, alarm, id, actions, children }: BlockProps) {
+export function Block({ tone, lane, label, lead, heads = [], stats = [], provenance, thin = false, live = false, intake, alarm, id, actions, children }: BlockProps) {
   const { curtain } = useSurface();
   const target = useTarget();
-  const shown = stats.filter((s): s is Stat => Boolean(s));
+  const inputs = heads.filter((s): s is Stat => Boolean(s));
+  const outputs = stats.filter((s): s is Stat => Boolean(s));
+  const chip = <span className="ex-block__label">{label}</span>;
+  const line =
+    intake?.line !== undefined ? (
+      <span className="ex-block__intake" role={intake.reading ? 'status' : undefined}>
+        {intake.line}
+      </span>
+    ) : null;
   return (
     <div
       className={`ex-block ex-block--${tone}${thin ? ' ex-block--thin' : ''}${live ? ' ex-block--live' : ''}`}
       data-tone={tone}
       data-lane={lane}
       data-alarm={alarm}
-      style={meter !== undefined ? ({ ...laneStyle(lane), '--meter': meter } as CSSProperties) : laneStyle(lane)}
-      data-meter={meter !== undefined ? '' : undefined}
+      style={laneStyle(lane)}
       data-reading={intake?.reading ? '' : undefined}
       id={id}
       data-id={id}
@@ -71,32 +82,33 @@ export function Block({ tone, lane, label, stats = [], provenance, thin = false,
       data-needs={provenance.needs.join(' ')}
     >
       {intake ? (
-        <header
-          className="ex-block__intake"
+        <span
+          className="ex-block__edge"
+          aria-hidden="true"
           data-reading={intake.reading ? '' : undefined}
           data-unknown={intake.edge ? undefined : ''}
-          style={intake.edge ? ({ '--warm': intake.edge.warm, '--read': intake.edge.read } as CSSProperties) : undefined}
-        >
-          <span className="ex-block__edge" aria-hidden="true" />
-          {intake.line !== undefined && !thin ? (
-            <p className="ex-block__intake-line" role={intake.reading ? 'status' : undefined}>
-              {intake.line}
-            </p>
-          ) : null}
-        </header>
+          style={intake.edge ? ({ '--read': intake.edge.read } as CSSProperties) : undefined}
+        />
       ) : null}
-      {children !== undefined && !thin ? <div className="ex-block__body">{children}</div> : null}
-      <footer className="ex-block__foot">
-        <span className="ex-block__label">{label}</span>
-        {thin && children !== undefined ? <span className="ex-block__inline">{children}</span> : null}
-        <span className="ex-block__spacer" />
-        {shown.map((s, i) => (
-          <span className="ex-stat" key={i} title={s.title}>
-            {s.value}
-            {s.unit ? <span className="ex-stat__unit">{s.unit}</span> : null}
-          </span>
-        ))}
-      </footer>
+      {thin ? (
+        <footer className="ex-block__foot">
+          {chip}
+          {children !== undefined ? <span className="ex-block__inline">{children}</span> : null}
+          <span className="ex-block__spacer" />
+          {[...inputs, ...outputs].map(stat)}
+        </footer>
+      ) : (
+        <>
+          <header className="ex-block__head">
+            {chip}
+            {line}
+            {lead !== undefined ? <span className="ex-block__lead">{lead}</span> : <span className="ex-block__spacer" />}
+            {inputs.map(stat)}
+          </header>
+          {children !== undefined ? <div className="ex-block__body">{children}</div> : null}
+          {outputs.length > 0 ? <footer className="ex-block__foot">{outputs.map(stat)}</footer> : null}
+        </>
+      )}
       {actions !== undefined || curtain ? (
         <div className="ex-block__corner">
           {actions}
@@ -108,5 +120,14 @@ export function Block({ tone, lane, label, stats = [], provenance, thin = false,
         </div>
       ) : null}
     </div>
+  );
+}
+
+function stat(s: Stat, i: number) {
+  return (
+    <span className="ex-stat" key={i} title={s.title}>
+      {s.value}
+      {s.unit ? <span className="ex-stat__unit">{s.unit}</span> : null}
+    </span>
   );
 }
