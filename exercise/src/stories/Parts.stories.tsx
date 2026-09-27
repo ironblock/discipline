@@ -330,6 +330,84 @@ export const AssistantStreaming: Story = {
   },
 };
 
+/**
+ * PROTOTYPE: what a generation read, apart from what it wrote. Today (left)
+ * one footer holds both; split (right), the reading is a header along the
+ * block's top edge -- right under the ask or tool output it mostly is, the
+ * warm part dim and the new part filling -- and the writing is the body,
+ * from line 1, and the footer. A side call's bar shows its reading along its
+ * top edge: nearly all warm, the fork's point.
+ */
+export const SplitInputOutput: Story = {
+  name: 'Message · what it read, apart from what it wrote (prototype)',
+  parameters: { layout: 'fullscreen' },
+  render: () => {
+    const moments = [
+      ['reading', trunkNodeAt({ beat: 2, t: 10_000 }, 'q/3', 'assistant')],
+      ['writing', trunkNodeAt(MOMENTS.streaming, 'q/3', 'assistant')],
+      ['written', trunkNodeAt({ beat: 2 }, 'q/2', 'assistant')],
+    ] as const;
+    const side = (t: number | undefined, open: boolean, split: boolean) => (
+      <div style={laneStyle('interview')}>
+        <Branch node={branchAt(t === undefined ? MOMENTS.firstSettled : { beat: 2, t }, 'i/1')} open={open} split={split} />
+      </div>
+    );
+    return (
+      <div style={{ display: 'grid', width: '90rem', gridTemplateColumns: '7rem 40rem 40rem', gap: '1.25rem 2rem', padding: '1.5rem', alignItems: 'start' }}>
+        <span />
+        <p style={{ margin: 0, color: 'var(--ink-muted)' }}>today: one footer</p>
+        <p style={{ margin: 0, color: 'var(--ink-muted)' }}>split: read above, written below</p>
+        {moments.map(([name, node]) => (
+          <Row key={name} name={name}>
+            <AssistantMessage node={node} />
+            <div data-split={name}>
+              <AssistantMessage node={node} split />
+            </div>
+          </Row>
+        ))}
+        <Row name="side call, reading">
+          {side(27_800, false, false)}
+          <div data-split="side">{side(27_800, false, true)}</div>
+        </Row>
+        <Row name="side call, opened">
+          {side(undefined, true, false)}
+          <div data-split="side-open">{side(undefined, true, true)}</div>
+        </Row>
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const at = (name: string) => canvasElement.querySelector(`[data-split="${name}"]`) as HTMLElement;
+    const text = (name: string, sel: string) => at(name).querySelector(sel)?.textContent ?? '';
+    // Reading: the header says how far, the edge fills, the body is one line with the cursor, the footer waits.
+    await expect(text('reading', '.ex-block__intake-line')).toMatch(/reading · .+ of 16\.4k new · 1\.4k warm/);
+    const edge = at('reading').querySelector('.ex-block__intake') as HTMLElement;
+    await expect(Number(edge.style.getPropertyValue('--warm'))).toBeCloseTo(1410 / 17830, 2);
+    await expect(at('reading').querySelector('.ex-meter')).toBeNull();
+    await expect(at('reading').querySelectorAll('.ex-block__body .ex-caret')).toHaveLength(1);
+    await expect(text('reading', '.ex-block__foot')).not.toMatch(/new|pp t\/s/);
+    // Writing and written: what was read stays at the top; the footer is only what was written.
+    for (const name of ['writing', 'written']) {
+      await expect(text(name, '.ex-block__intake-line')).toMatch(/^read .+ new/);
+      await expect(text(name, '.ex-block__foot')).toMatch(/tg t\/s/);
+      await expect(text(name, '.ex-block__foot')).not.toMatch(/pp t\/s|new/);
+    }
+    // A warm fork reads almost nothing new: its edge is nearly all warm from the start.
+    const fork = at('side').querySelector('.ex-block__intake') as HTMLElement;
+    await expect(Number(fork.style.getPropertyValue('--warm'))).toBeGreaterThan(0.95);
+    await expect(text('side-open', '.ex-branch__intake')).toMatch(/warm/);
+  },
+};
+
+function Row({ name, children }: { readonly name: string; readonly children: ReactNode }) {
+  return (
+    <>
+      <span style={{ color: 'var(--ink-faint)', paddingTop: '0.5rem' }}>{name}</span>
+      {children}
+    </>
+  );
+}
+
 export const AssistantDone: Story = {
   name: 'Message · assistant, done, long reasoning clipped',
   render: () => <AssistantMessage node={trunkNodeAt(MOMENTS.firstSettled, 'q/3', 'assistant')} />,

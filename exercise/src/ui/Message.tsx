@@ -4,7 +4,7 @@ import type { AssistantNode, Folded, SettledNode, SystemNode, UserNode } from '.
 import { Block } from './Block.tsx';
 import { counter, ms, rate, tokens } from './format.ts';
 import { Copy } from './Copy.tsx';
-import { Meter, readFraction } from './Meter.tsx';
+import { IntakeLine, Meter, intakeEdge, intakeOf, readFraction } from './Meter.tsx';
 import { Prose } from './Prose.tsx';
 import { alarmOf, failOf, settleOf, stopOf } from './sets.ts';
 import { elapsed, useNow } from './surface.tsx';
@@ -71,8 +71,13 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
   );
 }
 
-/** The model on the trunk: its reasoning in italic, then its answer, streamed. */
-export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode> }) {
+/**
+ * The model on the trunk: its reasoning in italic, then its answer, streamed.
+ * `split` draws what it read apart from what it wrote: the reading in a
+ * header along its top (Block's intake), the writing in its body and its
+ * footer -- a prototype, beside the footer that holds both.
+ */
+export function AssistantMessage({ node, split = false }: { readonly node: Folded<AssistantNode>; readonly split?: boolean }) {
   const [thinking, setThinking] = useState(false);
   const live = node.progress === 'prefill' || node.progress === 'streaming';
   const t = node.timings;
@@ -88,13 +93,29 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
   // A turn that said nothing and only called a tool: a step, not a message.
   const silent = node.progress === 'done' && node.text === '' && node.reasoning === '';
   const stopped = stopOf(node.stop ?? 'stop');
+  const intake = split ? intakeOf(node) : undefined;
   return (
     <Block
       tone="assistant"
       label={silent ? 'assistant · a call, no text' : 'assistant'}
       thin={silent}
       live={live}
-      meter={node.progress === 'prefill' && node.meter ? readFraction(node.meter) : undefined}
+      meter={!split && node.progress === 'prefill' && node.meter ? readFraction(node.meter) : undefined}
+      {...(intake
+        ? {
+            intake: {
+              reading: intake.reading,
+              edge: intakeEdge(intake),
+              line: intake.counts ? (
+                <IntakeLine intake={intake} />
+              ) : (
+                <span className="ex-elapsed" data-level={worry}>
+                  reading the prompt · {counter(since.ms)}
+                </span>
+              ),
+            },
+          }
+        : {})}
       alarm={node.failure ? 'bad' : alarmOf(stopped.level)}
       stats={
         node.failure
@@ -119,14 +140,17 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
                 ),
                 title: 'why generation stopped',
               },
-              node.wallMs !== undefined && { value: ms(node.wallMs), title: 'request to response, wall clock' },
+              split
+                ? t.predicted_ms !== undefined && { value: ms(t.predicted_ms), title: 'generating, from the first token to the last' }
+                : node.wallMs !== undefined && { value: ms(node.wallMs), title: 'request to response, wall clock' },
               { value: tokens(t.predicted_n), unit: 'tok', title: 'tokens generated, reasoning included' },
               { value: rate(t.predicted_n, t.predicted_ms), unit: 'tg t/s', title: 'generation speed' },
-              { value: tokens(t.prompt_n), unit: 'new', title: 'prompt tokens evaluated' },
-              { value: rate(t.prompt_n, t.prompt_ms), unit: 'pp t/s', title: 'prefill speed' },
+              !split && { value: tokens(t.prompt_n), unit: 'new', title: 'prompt tokens evaluated' },
+              !split && { value: rate(t.prompt_n, t.prompt_ms), unit: 'pp t/s', title: 'prefill speed' },
             ]
           : [
-              {
+              // Split, reading is the header's to say; the footer waits for the first token.
+              !(split && node.progress === 'prefill') && {
                 value: (
                   <span className="ex-elapsed" data-level={worry}>
                     {node.progress === 'prefill' ? 'prefill' : 'generating'} · {counter(since.ms)}
@@ -143,7 +167,9 @@ export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode
       id={node.id}
       {...(node.text !== '' && !live ? { actions: <Copy text={node.text} /> } : {})}
     >
-      {silent ? undefined : <AssistantBody node={node} live={live} long={long} showReasoning={showReasoning} thinking={thinking} setThinking={setThinking} streamingInto={streamingInto} />}
+      {silent ? undefined : (
+        <AssistantBody node={node} live={live} long={long} showReasoning={showReasoning} thinking={thinking} setThinking={setThinking} streamingInto={streamingInto} split={split} />
+      )}
     </Block>
   );
 }
@@ -156,7 +182,9 @@ function AssistantBody({
   thinking,
   setThinking,
   streamingInto,
+  split,
 }: {
+  readonly split: boolean;
   readonly node: Folded<AssistantNode>;
   readonly live: boolean;
   readonly long: boolean;
@@ -183,7 +211,12 @@ function AssistantBody({
           ) : null}
         </div>
       ) : null}
-      {node.progress === 'prefill' && node.meter ? (
+      {node.progress === 'prefill' && split ? (
+        // What it reads is the header's; here is only where its first token will land.
+        <p className="ex-waiting">
+          <span className="ex-caret" aria-hidden="true" />
+        </p>
+      ) : node.progress === 'prefill' && node.meter ? (
         <Meter meter={node.meter} />
       ) : node.progress === 'prefill' ? (
         <p className="ex-waiting" role="status">

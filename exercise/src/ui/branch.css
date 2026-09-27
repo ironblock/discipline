@@ -32,6 +32,14 @@
   border-radius: var(--radius);
 }
 
+/* Split (a prototype): what the side call read, above what it was asked. */
+.ex-branch__intake {
+  margin: 0;
+  font: var(--size-stats) / 1.4 var(--font-stats);
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .ex-branch__question {
   margin: 0;
   color: var(--ink-muted);

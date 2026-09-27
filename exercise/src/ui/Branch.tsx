@@ -3,7 +3,7 @@ import { useState } from 'react';
 import type { BranchNode, Folded, PatchNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { barHeight, rowsOf } from './condensed.ts';
-import { readFraction } from './Meter.tsx';
+import { IntakeLine, intakeEdge, intakeOf, readFraction } from './Meter.tsx';
 import { ms, rate, tokens } from './format.ts';
 import { alarmOf, failOf, opOf, outcomeOf } from './sets.ts';
 import './branch.css';
@@ -14,12 +14,14 @@ import './branch.css';
  * it landed -- what they say is in working memory, a line away (Links.tsx);
  * opened, the question, the answer and the patches themselves.
  */
-export function Branch({ node, open: initiallyOpen = false }: { readonly node: Folded<BranchNode>; readonly open?: boolean }) {
+export function Branch({ node, open: initiallyOpen = false, split = false }: { readonly node: Folded<BranchNode>; readonly open?: boolean; readonly split?: boolean }) {
   const [open, setOpen] = useState(initiallyOpen);
   const pending = isPending(node);
   const live = node.outcome === undefined && !pending;
   const outcome = node.outcome !== undefined ? outcomeOf(node.outcome) : undefined;
   const t = node.timings;
+  // Split (a prototype): what it read along its bar's top edge, and at the head of the exchange.
+  const intake = split && !pending ? intakeOf(node) : undefined;
   return (
     <div className="ex-branch" data-lane={node.lane} data-outcome={node.outcome ?? (pending ? 'pending' : 'running')}>
       <Block
@@ -28,13 +30,14 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         label={node.lane}
         thin
         live={live}
-        meter={live && node.progress === 'prefill' && node.meter ? readFraction(node.meter) : undefined}
+        meter={!split && live && node.progress === 'prefill' && node.meter ? readFraction(node.meter) : undefined}
+        {...(intake ? { intake: { reading: intake.reading, edge: intakeEdge(intake) } } : {})}
         alarm={outcome ? alarmOf(outcome.level) : undefined}
         stats={[
           node.wallMs !== undefined && { value: ms(node.wallMs), title: 'wall clock' },
           t && { value: tokens(t.predicted_n), unit: 'tok', title: 'tokens generated' },
-          t && { value: tokens(t.prompt_n), unit: 'new', title: 'prompt tokens evaluated: the question alone, if the fork was warm' },
-          t && { value: tokens(t.cache_n), unit: 'warm', title: 'prompt tokens reused from the trunk’s tail' },
+          !split && t && { value: tokens(t.prompt_n), unit: 'new', title: 'prompt tokens evaluated: the question alone, if the fork was warm' },
+          !split && t && { value: tokens(t.cache_n), unit: 'warm', title: 'prompt tokens reused from the trunk’s tail' },
           t && { value: rate(t.predicted_n, t.predicted_ms), unit: 't/s' },
           node.patches.length > 0 && { value: <PatchSummary patches={node.patches} />, title: 'patches it landed in working memory, by op' },
           pending && {
@@ -66,6 +69,11 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
       </button>
       {open ? (
         <div className="ex-branch__exchange">
+          {intake ? (
+            <p className="ex-branch__intake">
+              <IntakeLine intake={intake} />
+            </p>
+          ) : null}
           <p className="ex-branch__question">{node.question}</p>
           {node.text !== undefined && node.text !== '' ? (
             <div className="ex-branch__answer">

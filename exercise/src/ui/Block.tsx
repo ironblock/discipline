@@ -34,6 +34,13 @@ export interface BlockProps {
   readonly alarm?: 'warn' | 'bad' | undefined;
   /** The node's id: its DOM id too, so `#<id>` links to it. */
   readonly id?: string;
+  /**
+   * What the block read before it wrote, drawn apart from what it wrote: a
+   * bar along its top edge (the warm part and the new part, as fractions of
+   * the prompt; absent while nothing is known) and, on a message, a line
+   * under it. While it reads, the bottom edge rests.
+   */
+  readonly intake?: { readonly reading: boolean; readonly edge?: { readonly warm: number; readonly read: number } | undefined; readonly line?: ReactNode };
   /** Per-block actions -- copy today; retry, annotate, link later -- shown in the corner on hover or focus. */
   readonly actions?: ReactNode;
   readonly children?: ReactNode;
@@ -44,7 +51,7 @@ export interface BlockProps {
  * footer of what the harness measured. Every message, tool call and lane
  * step on the surface is one of these, refined.
  */
-export function Block({ tone, lane, label, stats = [], provenance, thin = false, live = false, meter, alarm, id, actions, children }: BlockProps) {
+export function Block({ tone, lane, label, stats = [], provenance, thin = false, live = false, meter, intake, alarm, id, actions, children }: BlockProps) {
   const { curtain } = useSurface();
   const target = useTarget();
   const shown = stats.filter((s): s is Stat => Boolean(s));
@@ -56,12 +63,28 @@ export function Block({ tone, lane, label, stats = [], provenance, thin = false,
       data-alarm={alarm}
       style={meter !== undefined ? ({ ...laneStyle(lane), '--meter': meter } as CSSProperties) : laneStyle(lane)}
       data-meter={meter !== undefined ? '' : undefined}
+      data-reading={intake?.reading ? '' : undefined}
       id={id}
       data-id={id}
       data-target={id !== undefined && id === target ? '' : undefined}
       data-from={provenance.from.join(' ')}
       data-needs={provenance.needs.join(' ')}
     >
+      {intake ? (
+        <header
+          className="ex-block__intake"
+          data-reading={intake.reading ? '' : undefined}
+          data-unknown={intake.edge ? undefined : ''}
+          style={intake.edge ? ({ '--warm': intake.edge.warm, '--read': intake.edge.read } as CSSProperties) : undefined}
+        >
+          <span className="ex-block__edge" aria-hidden="true" />
+          {intake.line !== undefined && !thin ? (
+            <p className="ex-block__intake-line" role={intake.reading ? 'status' : undefined}>
+              {intake.line}
+            </p>
+          ) : null}
+        </header>
+      ) : null}
       {children !== undefined && !thin ? <div className="ex-block__body">{children}</div> : null}
       <footer className="ex-block__foot">
         <span className="ex-block__label">{label}</span>

@@ -184,6 +184,62 @@
   opacity: 0.6;
 }
 
+/*
+ * The intake (Block's `intake`): what the block read before it wrote, apart
+ * from what it wrote. Along its top edge -- masked to a 2px ring, so it
+ * follows the corners -- the prompt as a bar: the warm part dim, the new
+ * part in the block's ink as far as it is read, the rest a track. Quiet
+ * once read; lit while reading, when the bottom edge rests: nothing is
+ * being written yet. On a message, a line under it, banded like the footer
+ * it mirrors: input at the top, output at the foot.
+ */
+.ex-block__edge {
+  position: absolute;
+  inset: 0;
+  padding-top: 2px;
+  /* The block's own corners: the edge sits in the header, which has none. */
+  border-radius: var(--radius);
+  pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--tone-ink) 45%, transparent) 0 calc(var(--warm) * 100%),
+    var(--tone-ink) 0 calc((var(--warm) + (1 - var(--warm)) * var(--read)) * 100%),
+    color-mix(in oklab, var(--tone-ink) 12%, transparent) 0
+  );
+  opacity: 0.4;
+}
+
+.ex-block__intake[data-reading] .ex-block__edge {
+  opacity: 0.9;
+  transition: background 0.25s linear;
+}
+
+/* Reading, with nothing known yet: light sweeps the top edge, as writing sweeps the bottom. */
+.ex-block__intake[data-unknown] .ex-block__edge {
+  background: linear-gradient(90deg, transparent, var(--tone-ink), transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: ex-sweep 1.4s linear infinite;
+  opacity: 0.6;
+}
+
+.ex-block--live[data-reading]::after {
+  display: none;
+}
+
+.ex-block__intake-line {
+  margin: calc(-1rem * var(--foot-band)) calc(-1.25rem * var(--foot-band)) 0.75rem;
+  padding: calc(0.5rem * var(--foot-band)) calc(1.25rem * var(--foot-band)) calc(0.45rem * var(--foot-band));
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: color-mix(in oklab, black var(--foot-shade), transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in oklab, var(--tone-ink) var(--foot-rule), transparent);
+  font: var(--size-stats) / 1.4 var(--font-stats);
+  color: color-mix(in oklab, var(--tone-ink) var(--foot-tone), var(--ink-muted));
+  font-variant-numeric: tabular-nums;
+}
+
 /* In prefill with a meter, the underline is determinate: it fills as the prompt is read. */
 .ex-block--live[data-meter]::after {
   animation: none;
@@ -200,6 +256,8 @@
 
 /* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
 .ex-root[data-motion='still'] .ex-block--live::after { animation: none; background-size: 100% 100%; opacity: 0.3; }
+.ex-root[data-motion='still'] .ex-block__intake[data-unknown] .ex-block__edge { animation: none; background-size: 100% 100%; opacity: 0.3; }
+.ex-root[data-motion='still'] .ex-block__intake[data-reading] .ex-block__edge { transition: none; }
 
 /* The gaps overlay: what `diet` cannot emit yet, outlined and named. */
 .ex-gaps [data-needs]:not([data-needs='']) {
