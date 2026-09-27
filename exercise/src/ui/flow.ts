@@ -19,7 +19,7 @@ export interface Flow {
   readonly running: boolean;
 }
 
-type Generating = Partial<Pick<Generation, 'progress' | 'meter' | 'timings' | 'startedAt' | 'writingSince' | 'lastActivityAt'>>;
+type Generating = Partial<Pick<Generation, 'progress' | 'meter' | 'timings' | 'startedAt' | 'writingSince' | 'lastActivityAt' | 'callsFrom'>>;
 
 /** Now, as a running count reads it: never before the generation's last sign of life, where no clock runs (a part drawn on its own). */
 function clock(g: Generating, now: number): number {
@@ -58,6 +58,21 @@ export function writingOf(g: Generating, at: number): Flow | undefined {
   // A count only from a frame since writing began: an earlier one's zero is stale, not measured.
   const counted = g.meter && g.meter.at >= since ? { n: g.meter.decoded } : {};
   return { phase: 'tg', ...counted, ms: Math.max(0, now - since), running: true };
+}
+
+/**
+ * What a generation that ended in tool calls wrote, apart: its text's share
+ * and its calls' share, where the drive said where the calls began
+ * (`callsFrom`). Undefined where it did not: then only the whole is known.
+ */
+export function writtenApart(g: Generating): { readonly text: Flow; readonly calls: Flow } | undefined {
+  const t = g.timings;
+  const from = g.callsFrom;
+  if (!t || !from) return undefined;
+  return {
+    text: { phase: 'tg', n: from.predicted_n, ms: from.predicted_ms, running: false },
+    calls: { phase: 'tg', n: Math.max(0, t.predicted_n - from.predicted_n), ms: Math.max(0, t.predicted_ms - from.predicted_ms), running: false },
+  };
 }
 
 /** How far through the new part of its prompt a generation is, for its top edge; absent while nothing has said. */

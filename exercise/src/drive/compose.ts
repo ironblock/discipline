@@ -152,6 +152,9 @@ export function compose(script: Script): Unplaced[] {
       out.push({ kind: 'request', t: request, id: q, lane: 'trunk', slot: 0, turn });
       const said = `${step.think ?? ''}${step.say}${step.run?.command ?? ''}`;
       const tm = timings(added, context, tokensOf(said), RATES.trunkDecode);
+      // A drive calling tools natively knows where each call began: the text's tokens, and the time they took.
+      const text = tokensOf(`${step.think ?? ''}${step.say}`);
+      const callsFrom = step.run ? { predicted_n: text, predicted_ms: round((text / RATES.trunkDecode) * 1000) } : undefined;
       now = request + took(tm);
       context += added + (tm.predicted_n ?? 0);
       last = `${q}#response`;
@@ -164,6 +167,7 @@ export function compose(script: Script): Unplaced[] {
         text: step.say,
         stop: step.run ? 'tool' : 'stop',
         timings: tm,
+        ...(callsFrom ? { calls_from: callsFrom } : {}),
       });
       if (!step.run) continue;
       const tool = `t/${next('t')}`;

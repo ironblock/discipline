@@ -42,6 +42,15 @@ describe('a composed session', () => {
     expect(second?.t).toBeGreaterThanOrEqual(settled?.t ?? Number.POSITIVE_INFINITY);
   });
 
+  it('says where a trunk response’s tool call began, as a drive calling tools natively can', () => {
+    const called = of('response').filter((r) => r['stop'] === 'tool');
+    expect(called.length).toBeGreaterThan(0);
+    for (const r of called) {
+      const from = r['calls_from'] as { predicted_n: number } | undefined;
+      expect(from?.predicted_n).toBeLessThan((r['timings'] as { predicted_n: number }).predicted_n);
+    }
+  });
+
   it('gives every event of a kind its own id', () => {
     for (const kind of ['request', 'response', 'tool.begin', 'fork', 'patch', 'seam']) {
       const ids = of(kind).map((e) => e['id']);

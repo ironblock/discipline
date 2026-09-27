@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import type { Link } from '../drive/transport.ts';
-import type { BranchNode, Folded, Session, ToolNode, TrunkNode } from '../session/fold.ts';
+import type { AssistantNode, BranchNode, Folded, Session, ToolNode, TrunkNode } from '../session/fold.ts';
 import { Branch, BranchBar } from './Branch.tsx';
 import { Cable } from './Cable.tsx';
 import { Wiring } from './Wiring.tsx';
@@ -27,7 +27,7 @@ import { SessionHeader } from './SessionHeader.tsx';
 import { laneStyle } from './sets.ts';
 import { ClockContext, HotEntriesContext, SurfaceContext, TargetContext } from './surface.tsx';
 import type { Surface } from './surface.tsx';
-import { ToolResult } from './ToolCall.tsx';
+import { ToolPair } from './ToolCall.tsx';
 import './session.css';
 
 export interface SessionViewProps {
@@ -432,7 +432,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                           data-hot={hot.nodes.has(node.id) ? '' : undefined}
                           data-kind={node.kind}
                         >
-                          <TrunkBlock node={node} call={era.nodes.find((n): n is Folded<ToolNode> => n.kind === 'tool' && n.after === node.id)} />
+                          <TrunkBlock node={node} era={era.nodes} />
                           {!surface.curtain && branches.length > 0 ? (
                             <button
                               type="button"
@@ -509,15 +509,22 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
   );
 }
 
-/** One node of the trunk; an assistant message draws the tool call it ended in (`call`), and the call's result follows as its own node. */
-function TrunkBlock({ node, call }: { readonly node: TrunkNode; readonly call: Folded<ToolNode> | undefined }) {
+/**
+ * One node of the trunk. A tool node is a call and its result (ToolPair);
+ * the assistant message that wrote the call is found by it, as the calls it
+ * ended in are found by the message, among the era's nodes.
+ */
+function TrunkBlock({ node, era }: { readonly node: TrunkNode; readonly era: readonly TrunkNode[] }) {
   switch (node.kind) {
     case 'user':
       return <UserMessage node={node} />;
     case 'assistant':
-      return <AssistantMessage node={node} call={call} />;
-    case 'tool':
-      return <ToolResult node={node} />;
+      return <AssistantMessage node={node} calls={era.filter((n): n is Folded<ToolNode> => n.kind === 'tool' && n.after === node.id)} />;
+    case 'tool': {
+      const caller = era.find((n): n is Folded<AssistantNode> => n.kind === 'assistant' && n.id === node.after);
+      const first = era.find((n) => n.kind === 'tool' && n.after === node.after) === node;
+      return <ToolPair node={node} caller={caller} first={first} />;
+    }
     case 'settled':
       return <TurnEnd node={node} />;
     default: {

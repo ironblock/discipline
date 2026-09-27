@@ -1,10 +1,12 @@
 import { useState } from 'react';
 
-import type { Folded, ToolNode } from '../session/fold.ts';
+import type { AssistantNode, Folded, ToolNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { bytes, lines, took } from './format.ts';
 import { Copy } from './Copy.tsx';
 import { callOf } from './sets.ts';
+import { writingOf, writtenApart } from './flow.ts';
+import { Flowing } from './Flowing.tsx';
 import { elapsed, useNow } from './surface.tsx';
 import './tool.css';
 
@@ -12,27 +14,44 @@ import './tool.css';
 const PEEK = 3;
 
 /**
- * A tool call as the model wrote it: the end of an assistant message's body
- * (AssistantMessage's `call`), since its tokens are that generation's. The
- * tool's chip and its command; a script's further lines when opened. Its
- * result is the block below -- the two a pair, as a REPL's input and output.
+ * A tool call, and what it returned: a pair, like a REPL's input and output,
+ * drawn as one node of the trunk. The call is what the model wrote after its
+ * message -- the tool's chip and its command; a script's further lines when
+ * opened -- and its footer is what writing it took, where the drive said
+ * where the calls began (`callsFrom`). Where it did not, the message and its
+ * calls were written as one and only the whole is known: it closes the last
+ * thing written, the first call, marked as both. The result follows.
  */
-export function CallCell({ node }: { readonly node: Folded<ToolNode> }) {
+export function ToolPair({ node, caller, first }: { readonly node: Folded<ToolNode>; readonly caller?: Folded<AssistantNode> | undefined; readonly first: boolean }) {
   const [open, setOpen] = useState(false);
   const call = callOf(node.tool, node.args);
-  const [first, ...rest] = call.text.split('\n');
+  const [line, ...rest] = call.text.split('\n');
+  const apart = caller ? writtenApart(caller) : undefined;
+  const whole = caller && !apart ? writingOf(caller, 0) : undefined;
   return (
-    <div className="ex-call" data-tool={node.tool}>
-      <span className="ex-call__label">{call.label}</span>
-      <button type="button" className="ex-tool__head" aria-expanded={open} onClick={() => setOpen(!open)} disabled={rest.length === 0}>
-        <span className="ex-tool__caret" aria-hidden="true">
-          {open ? '▾' : '▸'}
-        </span>
-        {call.prompt ? <span className="ex-tool__prompt">{call.prompt}</span> : null}
-        <span className="ex-tool__command">{first}</span>
-        {rest.length > 0 && !open ? <span className="ex-tool__more">+{rest.length} lines</span> : null}
-      </button>
-      {open && rest.length > 0 ? <pre className="ex-tool__script">{rest.join('\n')}</pre> : null}
+    <div className="ex-pair">
+      <Block
+        tone="tool"
+        label={call.label}
+        lead={
+          <button type="button" className="ex-tool__head" aria-expanded={open} onClick={() => setOpen(!open)} disabled={rest.length === 0}>
+            <span className="ex-tool__caret" aria-hidden="true">
+              {open ? '▾' : '▸'}
+            </span>
+            {call.prompt ? <span className="ex-tool__prompt">{call.prompt}</span> : null}
+            <span className="ex-tool__command">{line}</span>
+            {rest.length > 0 && !open ? <span className="ex-tool__more">+{rest.length} lines</span> : null}
+          </button>
+        }
+        {...(first && apart ? { output: <Flowing flow={apart.calls} title="tokens written for the tool calls" /> } : {})}
+        {...(first && whole ? { output: <Flowing flow={whole} title="tokens written, the message above and its calls together: the drive did not say where the calls began" /> } : {})}
+        stats={[first && whole && { value: <span className="ex-pair__both">message and call</span>, title: 'written as one: the drive did not say where the calls began' }]}
+        provenance={node}
+        actions={<Copy text={call.text} label={call.prompt === '$' ? 'copy command' : 'copy call'} />}
+      >
+        {open && rest.length > 0 ? <pre className="ex-tool__script">{rest.join('\n')}</pre> : undefined}
+      </Block>
+      <ToolResult node={node} />
     </div>
   );
 }

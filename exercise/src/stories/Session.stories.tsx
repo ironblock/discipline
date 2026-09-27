@@ -66,8 +66,8 @@ export const BigRead: Story = {
   name: '3 · a tool call returned 1,860 lines',
   args: { cursor: MOMENTS.bigRead },
   play: async ({ canvasElement }) => {
-    // The call ends the assistant message that wrote it; the result shows its first lines, not all 1,860.
-    await expect(q(canvasElement, '[data-id="q/2"] .ex-call .ex-tool__command')?.textContent).toBe('cat src/report.rs');
+    // The call and its result are a pair after the message that wrote it; the result shows its first lines, not all 1,860.
+    await expect(q(canvasElement, '.ex-pair:has([data-id="t/2"]) > .ex-block:first-child .ex-tool__command')?.textContent).toBe('cat src/report.rs');
     await expect(q(canvasElement, '[data-id="t/2"] .ex-tool__output')?.textContent?.split('\n')).toHaveLength(3);
   },
 };

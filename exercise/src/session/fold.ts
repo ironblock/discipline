@@ -56,6 +56,8 @@ export interface Generation {
   readonly stop?: Stop;
   readonly slot: number;
   readonly startedAt: number;
+  /** Where its tool calls began in what it wrote (the response's `calls_from`): what came before is its text's. */
+  readonly callsFrom?: { readonly predicted_n: number; readonly predicted_ms: number };
   /** Session time it began writing: its first token. Absent while it reads. */
   readonly writingSince?: number;
   /** Session time of the last sign of life: the request, the latest delta, the response. */
@@ -268,6 +270,7 @@ function generation(g: GenerationBuilder): Generation {
     lastActivityAt: response?.t ?? failed?.t ?? g.deltas.at(-1)?.t ?? request.t,
     ...(response || failed ? { endedAt: (response ?? failed)!.t } : {}),
     ...(response ? { stop: response.stop, timings: response.timings, wallMs: response.t - request.t } : {}),
+    ...(response?.calls_from ? { callsFrom: response.calls_from } : {}),
     ...(failed && !response ? { failure: { reason: failed.reason, message: failed.message }, wallMs: failed.t - request.t } : {}),
     ...(!response && !failed && g.frames.length > 0 ? { meter: meterOf(g.frames) } : {}),
   };

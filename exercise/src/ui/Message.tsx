@@ -4,11 +4,10 @@ import type { AssistantNode, Folded, SettledNode, SystemNode, ToolNode, UserNode
 import { Block } from './Block.tsx';
 import { tokens, took } from './format.ts';
 import { Copy } from './Copy.tsx';
-import { edgeOf, readingOf, warmOf, writingOf } from './flow.ts';
+import { edgeOf, readingOf, warmOf, writingOf, writtenApart } from './flow.ts';
 import { Flowing } from './Flowing.tsx';
 import { Prose } from './Prose.tsx';
-import { alarmOf, callOf, failOf, settleOf, stopOf } from './sets.ts';
-import { CallCell } from './ToolCall.tsx';
+import { alarmOf, failOf, settleOf, stopOf } from './sets.ts';
 import { elapsed, useNow } from './surface.tsx';
 import './message.css';
 
@@ -80,11 +79,13 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
  * The model on the trunk: what it read, apart from what it wrote. The
  * reading is its header, along its top edge -- right under the ask or tool
  * output it mostly is; the writing is its body, reasoning in italic then the
- * answer streamed from line 1, then the tool call it ended in, if it did
- * (`call`: the model wrote it, so it is part of what came out); and its
- * footer, what it wrote in all. Both count up while they run.
+ * answer streamed from line 1, and its footer. Both count up while they run.
+ * The tool calls it ended in (`calls`) are the nodes after it (ToolPair):
+ * then its footer is its text's share, where the drive said where the calls
+ * began, and nothing where it did not -- the whole closes the first call.
+ * Having written no text, it is one row: what it read.
  */
-export function AssistantMessage({ node, call }: { readonly node: Folded<AssistantNode>; readonly call?: Folded<ToolNode> | undefined }) {
+export function AssistantMessage({ node, calls = [] }: { readonly node: Folded<AssistantNode>; readonly calls?: readonly Folded<ToolNode>[] }) {
   const [thinking, setThinking] = useState(false);
   const live = node.progress === 'prefill' || node.progress === 'streaming';
   const long = node.reasoning.length > 280;
@@ -95,13 +96,15 @@ export function AssistantMessage({ node, call }: { readonly node: Folded<Assista
   // since its last token -- never while tokens are arriving.
   const worry = node.progress === 'prefill' ? elapsed(now, node.startedAt).level : elapsed(now, node.lastActivityAt).level;
   const streamingInto = node.progress === 'streaming' ? (node.text === '' ? 'reasoning' : 'answer') : undefined;
-  // It said nothing, and its call has not arrived yet: a step, not a message.
-  const bare = node.progress === 'done' && node.text === '' && node.reasoning === '' && !call;
+  // It wrote no text: a step, not a message.
+  const bare = node.progress === 'done' && node.text === '' && node.reasoning === '';
   const stopped = stopOf(node.stop ?? 'stop');
   const reading = readingOf(node, now);
-  const writing = writingOf(node, now);
+  const apart = calls.length > 0 ? writtenApart(node) : undefined;
+  // What it wrote, in its footer: all of it, or its text's share, or -- ending in calls it wrote as one with them -- nothing here.
+  const writing = calls.length === 0 ? writingOf(node, now) : apart?.text;
   const warm = warmOf(node);
-  const command = call ? callOf(call.tool, call.args) : undefined;
+  const readLine = reading ? <Flowing flow={reading} level={worry} {...(warm !== undefined ? { title: `new tokens read; ${tokens(warm)} more were warm, reused from the slot` } : {})} /> : undefined;
   return (
     <Block
       tone="assistant"
@@ -111,9 +114,9 @@ export function AssistantMessage({ node, call }: { readonly node: Folded<Assista
       intake={{
         reading: node.progress === 'prefill',
         edge: edgeOf(node),
-        ...(reading ? { line: <Flowing flow={reading} level={worry} {...(warm !== undefined ? { title: `new tokens read; ${tokens(warm)} more were warm, reused from the slot` } : {})} /> } : {}),
+        ...(readLine && !bare ? { line: readLine } : {}),
       }}
-      {...(writing && !node.failure ? { output: <Flowing flow={writing} level={worry} title="tokens written, reasoning and any tool call included" /> } : {})}
+      {...(writing && !node.failure && !bare ? { output: <Flowing flow={writing} level={worry} title={apart ? 'tokens written before the tool calls began' : 'tokens written, reasoning included'} /> } : {})}
       alarm={node.failure ? 'bad' : alarmOf(stopped.level)}
       stats={[
         node.failure && {
@@ -137,23 +140,9 @@ export function AssistantMessage({ node, call }: { readonly node: Folded<Assista
       ]}
       provenance={node}
       id={node.id}
-      {...(!live && (node.text !== '' || command)
-        ? {
-            actions: (
-              <>
-                {node.text !== '' ? <Copy text={node.text} /> : null}
-                {command ? <Copy text={command.text} label={command.prompt === '$' ? 'copy command' : 'copy call'} /> : null}
-              </>
-            ),
-          }
-        : {})}
+      {...(!live && node.text !== '' ? { actions: <Copy text={node.text} /> } : {})}
     >
-      {bare ? undefined : (
-        <>
-          <AssistantBody node={node} live={live} long={long} showReasoning={showReasoning} thinking={thinking} setThinking={setThinking} streamingInto={streamingInto} />
-          {call ? <CallCell node={call} /> : null}
-        </>
-      )}
+      {bare ? readLine : <AssistantBody node={node} live={live} long={long} showReasoning={showReasoning} thinking={thinking} setThinking={setThinking} streamingInto={streamingInto} />}
     </Block>
   );
 }

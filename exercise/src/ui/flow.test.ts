@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { edgeOf, flowText, readingOf, writingOf } from './flow.ts';
+import { edgeOf, flowText, readingOf, writingOf, writtenApart } from './flow.ts';
 
 const meter = { at: 0, total: 17_830, cache: 1_410, processed: 7_900, decoded: 0 };
 
@@ -30,6 +30,15 @@ describe('a flow: tokens in or out, and how long they took', () => {
   it('says only how long it has written, until a frame since the first token says how much', () => {
     const stale = writingOf({ progress: 'streaming', meter: { ...meter, at: 12_000, decoded: 0 }, startedAt: 1_000, writingSince: 13_000 }, 13_400);
     expect(flowText(stale!)).toBe('writing · 400 ms');
+  });
+
+  it('splits what was written into the text and the calls where the drive said the calls began, and not where it did not', () => {
+    const timings = { prompt_n: 108, cache_n: 1_300, prompt_ms: 90, predicted_n: 42, predicted_ms: 1_200 };
+    expect(writtenApart({ timings, callsFrom: { predicted_n: 14, predicted_ms: 400 } })).toEqual({
+      text: { phase: 'tg', n: 14, ms: 400, running: false },
+      calls: { phase: 'tg', n: 28, ms: 800, running: false },
+    });
+    expect(writtenApart({ timings })).toBeUndefined();
   });
 
   it('once answered, is what the response measured', () => {

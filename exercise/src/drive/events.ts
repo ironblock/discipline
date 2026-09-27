@@ -123,6 +123,15 @@ export interface Response extends At {
   readonly text: string;
   readonly stop: Stop;
   readonly timings: Timings;
+  /**
+   * Where its tool calls began in what it wrote: tokens generated, and ms
+   * spent generating, before the first call's first token -- llama.cpp's
+   * per-token timings at the first tool-call chunk. The rest of `timings`'
+   * generation is the calls'. Absent when the drive cannot tell: a protocol
+   * that parses a call out of text only once it closes, or a record that
+   * kept none. The surface's ask (R3); the name is provisional.
+   */
+  readonly calls_from?: { readonly predicted_n: number; readonly predicted_ms: number };
 }
 
 /** The tools a model may call. Only `bash` exists today; every other tool is drawn as `name(args)`. */

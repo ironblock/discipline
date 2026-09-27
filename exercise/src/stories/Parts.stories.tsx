@@ -17,10 +17,11 @@ import { AssistantMessage, SystemMessage, UserMessage } from '../ui/Message.tsx'
 import { Seam } from '../ui/Seam.tsx';
 import { SessionHeader } from '../ui/SessionHeader.tsx';
 import { laneStyle } from '../ui/sets.ts';
-import { CallCell, ToolResult } from '../ui/ToolCall.tsx';
+import { ToolPair, ToolResult } from '../ui/ToolCall.tsx';
 import { PHASES } from '../App.tsx';
 import { apart, contrast } from './contrast.ts';
 import { UNCLOSED_FENCE, WHAT_MODELS_WRITE } from './markdown.ts';
+import type { Cursor } from '../drive/canned.ts';
 import { MOMENTS, branchAt, sessionAt, trunkNodeAt, variantAt } from './moments.ts';
 
 /**
@@ -536,28 +537,22 @@ export const ToolRunning: Story = {
 };
 
 /**
- * A call and its result, a pair: the call ends the assistant message that
- * wrote it -- its tokens are that message's, in its footer -- and the result
- * is its own block, with the tool's stats: lines and bytes and how long, its
- * exit. The first lines show; the rest when opened.
+ * A message, and the call it ended in with what that returned: the call and
+ * its result a pair, like a REPL's input and output -- the call with the
+ * tool's chip and its command, the result with the tool's stats (lines and
+ * bytes and how long, its exit) and its first lines until opened. The drive
+ * here did not say where the call began: what was written is known only as
+ * a whole, so the message has no footer and the whole closes the call,
+ * marked as both.
  */
-export const ToolPair: Story = {
-  name: 'Tool · a call and its result, 1,860 lines',
-  render: () => {
-    const call = trunkNodeAt(MOMENTS.firstSettled, 't/2', 'tool');
-    return (
-      <div style={{ display: 'grid', gap: '0.4rem' }}>
-        <AssistantMessage node={trunkNodeAt(MOMENTS.firstSettled, 'q/2', 'assistant')} call={call} />
-        <ToolResult node={call} />
-      </div>
-    );
-  },
+export const ToolPairWhole: Story = {
+  name: 'Tool · a message, its call and the result -- written as one',
+  render: () => <Pair at={MOMENTS.firstSettled} message="q/2" tool="t/2" />,
   play: async ({ canvasElement }) => {
-    const [message, result] = [...canvasElement.querySelectorAll('.ex-block')] as HTMLElement[];
-    // The call is the end of what the assistant wrote, and its footer counts the call's tokens with the rest.
-    await expect(message?.querySelector('.ex-block__body > .ex-call .ex-tool__command')?.textContent).toBe('cat src/report.rs');
-    await expect(message?.querySelector('.ex-block__foot')?.textContent).toMatch(/^\+41 tok in 1\.1 s \(35\.\d t\/s tg\)/);
-    await expect(message?.querySelector('.ex-block__head')?.textContent).toMatch(/\+108 tok in 90 ms \(1,200 t\/s pp\)/);
+    const [message, call, result] = [...canvasElement.querySelectorAll('.ex-block')] as HTMLElement[];
+    await expect(message?.querySelector('.ex-block__foot')).toBeNull();
+    await expect(call?.querySelector('.ex-block__head .ex-tool__command')?.textContent).toBe('cat src/report.rs');
+    await expect(call?.querySelector('.ex-block__foot')?.textContent).toMatch(/^\+41 tok in 1\.1 s \(35\.\d t\/s tg\)message and call$/);
     // The result is the tool's: lines and bytes and how long, its exit; no tokens.
     const foot = result?.querySelector('.ex-block__foot')?.textContent ?? '';
     await expect(foot).toMatch(/^1,860 lines · .+ in \d+ ms/);
@@ -570,24 +565,42 @@ export const ToolPair: Story = {
   },
 };
 
+/** The same, where the drive said where the call began (`calls_from`): the message counts its text, the call itself. */
+export const ToolPairApart: Story = {
+  name: 'Tool · a message, its call and the result -- written apart',
+  render: () => <Pair at={MOMENTS.firstSettled} message="q/2" tool="t/2" callsFrom={{ predicted_n: 14, predicted_ms: 400 }} />,
+  play: async ({ canvasElement }) => {
+    const [message, call] = [...canvasElement.querySelectorAll('.ex-block')] as HTMLElement[];
+    await expect(message?.querySelector('.ex-block__foot')?.textContent).toBe('+14 tok in 400 ms (35.0 t/s tg)');
+    await expect(call?.querySelector('.ex-block__foot')?.textContent).toBe('+27 tok in 750 ms (36.0 t/s tg)');
+  },
+};
+
 /** A call whose script runs to several lines, and printed nothing: the result is one row. */
 export const ToolScriptNoOutput: Story = {
   name: 'Tool · a multi-line call that printed nothing',
-  render: () => {
-    const call = trunkNodeAt(MOMENTS.done, 't/4', 'tool');
-    return (
-      <div style={{ display: 'grid', gap: '0.4rem' }}>
-        <AssistantMessage node={trunkNodeAt(MOMENTS.done, 'q/6', 'assistant')} call={call} />
-        <ToolResult node={call} />
-      </div>
-    );
-  },
+  render: () => <Pair at={MOMENTS.done} message="q/6" tool="t/4" />,
   play: async ({ canvasElement }) => {
-    const result = canvasElement.querySelector('.ex-block--tool') as HTMLElement;
+    const result = canvasElement.querySelector('.ex-pair > .ex-block:last-child') as HTMLElement;
     await expect(result.classList.contains('ex-block--thin')).toBe(true);
     await expect(result.textContent).toMatch(/no output in \d+ ms/);
   },
 };
+
+/** A message and the pair after it, as the trunk draws them; `callsFrom` says where the call began, as a drive may. */
+function Pair({ at, message, tool, callsFrom }: { readonly at: Cursor; readonly message: string; readonly tool: string; readonly callsFrom?: { readonly predicted_n: number; readonly predicted_ms: number } }) {
+  const session = callsFrom ? variantAt(at, (e) => (e['kind'] === 'response' && e['to_request'] === message ? { ...e, calls_from: callsFrom } : e)) : sessionAt(at);
+  const nodes = session.eras.flatMap((era) => era.nodes);
+  const caller = nodes.find((n) => n.id === message);
+  const call = nodes.find((n) => n.id === tool);
+  if (caller?.kind !== 'assistant' || call?.kind !== 'tool') throw new Error(`no ${message} and ${tool}`);
+  return (
+    <div style={{ display: 'grid', gap: '0.5rem' }}>
+      <AssistantMessage node={caller} calls={[call]} />
+      <ToolPair node={call} caller={caller} first />
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------- Branches
 
@@ -688,10 +701,10 @@ export const UnknownTool: Story = {
     );
     const node = session.eras[0]?.nodes.find((n) => n.id === 't/1');
     if (node?.kind !== 'tool') throw new Error('no tool t/1');
-    return <CallCell node={node} />;
+    return <ToolPair node={node} first />;
   },
   play: async ({ canvasElement }) => {
-    await expect(canvasElement.querySelector('.ex-call__label')?.textContent).toBe('read');
+    await expect(canvasElement.querySelector('.ex-pair .ex-block__label')?.textContent).toBe('read');
     await expect(canvasElement.textContent).toContain('read({"path":"src/report.rs","lines":[40,88]})');
     await expect(canvasElement.querySelector('.ex-tool__prompt')).toBeNull();
   },
