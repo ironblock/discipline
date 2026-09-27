@@ -94,3 +94,95 @@ This is the reviewing session's critique, dated 2026-09-27. It was written again
 - No browser ran. The EventSource reconnect behaviour and the Vite proxy's forwarding of `Host` and `Origin` are argued from the specification and from configuration defaults.
 - No llama-server ran, so finding 5's reasoning stream is inferred.
 - A probe of Node's `localhost`-to-127.0.0.1 resolution was inconclusive on this host (it resolves only to IPv4), so it is not a finding.
+
+---
+
+## Round 2
+
+This round reviews the revised `r2c-proposal.md` (616 lines) against round 1 (`r2c-proposal.round1.md`), on `origin/main` at `178c012`. The limits are unchanged: no GitHub, no web, and no branch but the consumer's.
+
+**Outcome.** 15 findings resolved, 1 changed severity, 0 stand. Five new findings: 3 minor and 2 notes. No critical or major finding remains.
+
+**Measured in round 2.** Everything below ran against my own copy of the proposer's amended prototype. Before I started, `diff -r` against `scratchpad/exp/sse-std2/src` exited 0. I built it in my own target directory (`scratchpad/critique-r2c/target2`), and `cargo build --offline --examples --tests` exited 0.
+
+- **The boundary probe** (`probe-boundary-r2.sh`): my round-1 requests, unchanged except for the binary path and the address line. The added cases are marked "added".
+  - E1, a `text/plain` POST with a foreign `Origin`: **403**, curl exit 0.
+  - E1b (added), the same POST with no `Origin`: **415**, curl exit 0.
+  - E2, a rebound `Host`: **403**, curl exit 0, **0** data lines.
+  - E3 (added), a reader from 0 on the same host: 0 data lines. Nothing from E1 or E1b reached the log. curl exited 28 on its own `--max-time`.
+- **The restart probe** (`probe-restart-r2.sh`):
+  - my round-1 request, a bare `Last-Event-ID: 20`: **400**, curl exit 0, 0 data lines and 0 heartbeats;
+  - the author's ask on the new process: 200 `{"seq":0}`;
+  - (added) a well-formed id from another process, `<opened-1>-20`: **410**, curl exit 0;
+  - (added) this process's own id `<opened>-2`: 200, and the first id delivered is `<opened>-3`;
+  - a fresh reader from 0: 6 data lines, starting at `<opened>-0`.
+- **The suite and lints.** `cargo test --lib` exited 0, with 8 passed. `cargo clippy --all-targets -- -D warnings` exited 0.
+- **The seeded faults.** I ran the proposer's `seed.py`, re-pointed at my copy and reading the proposer's file only as the pristine reference. Every fault changed the tree, and every one exited **101**:
+
+  | Fault | Test that failed |
+  |---|---|
+  | `serve-accepts-a-simple-post` | its 415 test |
+  | `serve-answers-any-host` | its 403 test |
+  | `serve-answers-any-origin` | its 403 test |
+  | `serve-one-connection-at-a-time` | its re-aimed test, and the replay/cancel test |
+  | `serve-resumes-another-processs-log` | its 410 test |
+
+  The file was restored after each run. At the end, `cmp` against the proposer's file exited 0.
+- **The revision's new pointers** all say what the plan says: `record/mod.rs:513`, `:533-545`; `operating-points.toml:27-28`, `:32`, `:50`, `:63`, `:75`; `bin/drive.rs:405`; `stream.rs:172`, `:971`; `shape.rs:281`; `session.rs:854-871`; `events.ts:83-91`, `:94-99`.
+
+### Round-1 findings
+
+| finding # | resolved / stands / changed severity | why |
+|---|---|---|
+| 1 (critical) | **resolved** | D17 adds the Host, Origin and JSON content-type checks to I4, each with a test and a seeded fault. D9's premise is corrected, D10 says what auth is and is not for, and Q5 is re-asked on the corrected premise. My probe now gets 403, 415 and 403, and nothing reaches the log; each fault exits 101 (above). What is left is stated, not silent: the Vite `changeOrigin` coupling and Vite's own host check are unchecked, and Q5 asks. |
+| 2 | **resolved** | D7 adds the `<opened>-<seq>` identity, with 410 for a foreign id and 400 for a malformed one. `opened` is carried in `session.start`, and I6 handles the 410. Measured: 400, 410, and the page's own resume starting at the next seq. The browser half is spec-argued and says so. New finding 17 is a consequence of this design, not a reopening. |
+| 3 | **resolved** | D16's rationale now rests on the brief's observation. D6's table states the capture case truthfully, and Q6 asks what R4 should do. |
+| 4 (partly) | **resolved** | Request identity is option (ii): a `request` event, cited by its **seq**, which the log issues and nobody invents. The cost of a bump per DoD step is stated, and Q7 asks whether a v0 log must be projectable into a record. The part the proposer did not accept is a fair limit: v0 labels `model` "the name as sent", and nothing claims it identifies the weights. |
+| 5 | **resolved** | D18, I5r and Q10 connect the thinking trunk, the dropped reasoning and the cap to DoD 1. I5r is gated on a measured capture, as `stream.rs:172` requires. Two gaps remain, recorded as new findings 19 and 20. |
+| 6 | **resolved** | `--listen` moves to I7 together with the fail-closed check and its fault. I5 binds loopback only and tests it (`the_binary_binds_loopback_only`, fault `drive.serve-bin-binds-everywhere`). |
+| 7 | **resolved** | Round 1's Q2, Q4 and Q13 are dropped. Q10 is narrowed (now Q8), and D15 (b) is marked excluded. |
+| 8 | **resolved** | D13 (c) takes a gap on any command and keeps it when the command is refused. Q4 carries the sub-questions, including whether R4 reads the gap. I1 waits on Q4 for `idle.gap`. |
+| 9 (partly) | **resolved** | Reuse of `nothing-in-flight` is now offered, as D6 (c) and in Q1. The argument for keeping `stale` holds: `refused {cancel, nothing-in-flight, during: turn}` contradicts itself. It is a fair choice, and planning now sees both. |
+| 10 (partly) | **resolved** | The write timeout, the read timeout and the 400 path each get a test and a fault, and the dedupe and 410 tests are named for track five with faults. The re-aimed test can fail: I measured `serve-one-connection-at-a-time` at exit 101, caught by it. Note that `a_410_marks_the_link_lost` is affected by new finding 17. |
+| 11 | **resolved** | I4 takes `render` as a parameter and waits only on I2. One test waits on I1 and I3. |
+| 12 | **resolved** | D4 states the cost of a bump per DoD step. Cancel, auth and D17 are ranked DoD 1 and 2 by the R2 row. |
+| 13 (partly) | **changed severity: note** | The rebuttal is a fair reading of the brief's test: each direction has one consumer. It is now put to planning as Q12. What remains is that the contract test Q12 relies on ("I6 running against I5") is named nowhere in I6's test list and has no fault. |
+| 14 (partly) | **resolved** | The rebuttal holds: the record's key `record` names the record format itself, so the precedence rule does fall through to `kind`. |
+| 15 | **resolved** | I1's RED step uses a stub `project` that returns `Err`. |
+| 16 | **resolved** | I2 names the `Panics` transport, and the loopback test moved to I5. |
+
+### New findings
+
+| # | severity | where | finding | evidence | what would resolve it |
+|---|---|---|---|---|---|
+| 17 | minor | I6 ("On `410`, or when `readyState` is `CLOSED`, the link is `lost` and the page rebuilds from 0"); D7; D8 | **The page cannot tell a 410 from any other refusal.** `EventSource` exposes neither the status nor the reason, and any non-200 closes it the same way. The revision adds 403 and 415 (D17), I7 adds 401, and the connection cap gives 503. A rebuild from 0 is right only for 410. Against a persistent 403 or 401 the rebuild loops, where `EventSource` itself had stopped, and the author sees a page that keeps resetting and never says why. A plausible trigger: opening the page at `http://127.0.0.1:5173` when diet was started with `--allow-origin http://localhost:5173`. The named test `a_410_marks_the_link_lost` can pass only against a double that exposes the status, which the real transport never has. | The WHATWG EventSource processing model: a non-200 fails the connection, and the `error` event carries no status. D8's table of statuses. Not run in a browser. | On `CLOSED`, learn the status with one `fetch` of the same URL, or read the stream with `fetch` streaming, which does see the status. Rebuild automatically only on 410. Show any other status to the author, with backoff. Write the track-five test against that path. |
+| 18 | note | I4 (`Config` carries … `opened`); I2 (`session.start` carries `opened`); D7 ("measured once") | **`opened` has two inputs.** If `serve` is handed a separately measured `opened`, the stream's identity can disagree with the log's own header by a millisecond. That is the record's own argument against stating a value twice. | The I4 shape and the I2 change list, side by side. | Have `serve` read `opened` from the session's seq 0, or add a test that the id's `opened` equals `session.start.opened`. |
+| 19 | minor | I6 ("DoD 1 end to end is the I5 manual run with the page open"); I5r; §3 order | **DoD 1's acceptance leaves out I5r, which the plan's own premises put on DoD 1's path.** §1 says every dogma model thinks, and Q10 recommends a dogma model with its reasoning streamed. Yet the stated DoD 1 acceptance is the I5 run, which with such a model streams nothing while it thinks (D18). The capture that I5r needs first ("a person with a GPU") has no owner and no place in the order. Declaring DoD 1 done on the I5 run would be a partial result presented as done. | D18; Q10's recommendation; I6's acceptance line. | When Q10 names a thinking model, make I5r part of DoD 1's acceptance. Name who captures the stream, and when. |
+| 20 | minor | D18 (a), I5r | **D18 decides what the page sees of reasoning, but not what the trunk carries.** qwen3.6's operating point sets `preserve_thinking = true`, whose receipt reads "with it off, the prefix a fork re-sends is not byte-identical to what the session sent, and the fork prefills cold" (`operating-points.toml:34`, `:45`). `Message` has only `role` and `content` (`client/shape.rs:43-48`), and the session puts only the answer text on the trunk (`session.rs:484-487`). So even with I5r, each turn re-sends a trunk without the reasoning the server generated. Whether the warm tail survives is what DoD 3's forks depend on. This is inferred from the receipt; nothing here was measured. | The pointers above. | Add to Q10: "When reasoning streams, does it join the trunk's assistant message, as `preserve_thinking` requires?" If it does, I5r extends `Message` (in `diet/src/client/`, which is track three's), and the trunk test covers the reasoning. |
+| 21 | note | I2 (`Requested {turn, lane}` per call); D4 (`request.failed` requires `request`) | **Where `Requested` is pushed is unstated.** v0 makes `request.failed` cite an earlier `request`. The path where the turn's thread cannot start (`session.rs:327-335`) settles a turn whose thread never ran. If `Requested` is pushed where the call begins, in the thread, that path writes a `request.failed` that cites nothing. That is an invalid v0 line, on a path no test can reach. D4's order already implies the right place. | The pointers above. | State that `Requested` is pushed in `ask`, under the lock that admits the ask. |
+
+### Checked in round 2 and found sound
+
+- **`<opened>-<seq>` against the brief.**
+  - The log line's primary key is still `seq`, inside `data:`. `opened` is a measured field of `session.start`. The composite exists only in SSE framing, as the resume cursor.
+  - Replay is still "from a sequence" (`?from=n`, or the seq half of the id), and clients still dedupe by `seq` read from the data.
+  - Nothing is invented: both halves are issued or measured. The record has no start-time field that `opened` would shadow.
+  - The page never parses the id; `EventSource` echoes it back.
+- **The new checks against the Vite-proxy path that D9 recommends.** `--allow-origin http://localhost:5173` admits the page's forwarded `Origin`. It also admits the forwarded `Host` (`localhost:5173`, when `changeOrigin` is off); with `changeOrigin` on, `Host` becomes diet's own, which is also admitted. A same-origin `EventSource` GET carries no `Origin`, and `is_none_or` admits it. A cross-site preflight is refused (403 or 404). With `changeOrigin` on, rebinding through the proxy is left to Vite's own host check. D17 says so, and Q5 asks.
+- **The `request` event.**
+  - It takes the record's name (`record/mod.rs:513`) and the ruled lane `trunk`, not the record's legacy `main`.
+  - References are seqs.
+  - `slot` is left out until R4, as the vocabulary ruling requires.
+- **D17's order of checks.** Host and Origin come before content type, and content type before auth. A cross-site JSON POST needs a preflight, and the preflight meets 403 or 404. This holds whether a browser sends `Origin` or not.
+- **`--listen` in I7.** I5 cannot bind off loopback, and I7 lands the flag, the credential and the fail-closed check together.
+- **The rebuttals to findings 4, 9, 13 and 14.** Each is a fair, stated limit, not a silent gap. For 13, see the note above.
+
+### Questions I would add
+
+- **To Q10:** does streamed reasoning join the trunk's assistant message, as `preserve_thinking` requires? (Finding 20.)
+- **To Q5 or I6:** how does the page learn why its stream closed? (Finding 17.)
+
+### What I did not check in round 2
+
+- No browser ran. How `EventSource` handles 410, and what the Vite proxy forwards, are spec-argued.
+- No llama-server ran, so finding 20 is inferred from the operating point's receipt.
