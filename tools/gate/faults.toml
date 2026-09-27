@@ -5929,6 +5929,134 @@ failure_class = "drive.session-the-clock-stands-still"
 migrated = false
 
 [[fault]]
+id = "drive.serve-an-ask-never-reaches-the-session"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-an-ask-never-reaches-the-session"
+failure_class = "drive.serve-an-ask-never-reaches-the-session"
+migrated = false
+
+[[fault]]
+id = "drive.serve-from-is-ignored"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-from-is-ignored"
+failure_class = "drive.serve-from-is-ignored"
+migrated = false
+
+[[fault]]
+id = "drive.serve-a-resume-repeats-the-last-event"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-a-resume-repeats-the-last-event"
+failure_class = "drive.serve-a-resume-repeats-the-last-event"
+migrated = false
+
+[[fault]]
+id = "drive.serve-resumes-another-processs-log"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-resumes-another-processs-log"
+failure_class = "drive.serve-resumes-another-processs-log"
+migrated = false
+
+[[fault]]
+id = "drive.serve-accepts-a-simple-post"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-accepts-a-simple-post"
+failure_class = "drive.serve-accepts-a-simple-post"
+migrated = false
+
+[[fault]]
+id = "drive.serve-answers-any-host"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-answers-any-host"
+failure_class = "drive.serve-answers-any-host"
+migrated = false
+
+[[fault]]
+id = "drive.serve-answers-any-origin"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-answers-any-origin"
+failure_class = "drive.serve-answers-any-origin"
+migrated = false
+
+[[fault]]
+id = "drive.serve-a-refusal-is-200"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-a-refusal-is-200"
+failure_class = "drive.serve-a-refusal-is-200"
+migrated = false
+
+[[fault]]
+id = "drive.serve-cancel-reaches-nothing"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-cancel-reaches-nothing"
+failure_class = "drive.serve-cancel-reaches-nothing"
+migrated = false
+
+[[fault]]
+id = "drive.serve-no-heartbeat"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-no-heartbeat"
+failure_class = "drive.serve-no-heartbeat"
+migrated = false
+
+[[fault]]
+id = "drive.serve-one-connection-at-a-time"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-one-connection-at-a-time"
+failure_class = "drive.serve-one-connection-at-a-time"
+migrated = false
+
+[[fault]]
+id = "drive.serve-no-write-timeout"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-no-write-timeout"
+failure_class = "drive.serve-no-write-timeout"
+migrated = false
+
+[[fault]]
+id = "drive.serve-no-read-timeout"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-no-read-timeout"
+failure_class = "drive.serve-no-read-timeout"
+migrated = false
+
+[[fault]]
+id = "drive.serve-no-body-cap"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-no-body-cap"
+failure_class = "drive.serve-no-body-cap"
+migrated = false
+
+[[fault]]
+id = "drive.serve-no-connection-cap"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-no-connection-cap"
+failure_class = "drive.serve-no-connection-cap"
+migrated = false
+
+[[fault]]
+id = "drive.serve-a-malformed-ask-is-an-empty-ask"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-a-malformed-ask-is-an-empty-ask"
+failure_class = "drive.serve-a-malformed-ask-is-an-empty-ask"
+migrated = false
+
+[[fault]]
 id = "adapters.compaction-read-as-a-turn"
 kind = "lane-fault"
 check = "lanes"
