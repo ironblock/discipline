@@ -5873,6 +5873,62 @@ failure_class = "drive.session-a-crash-says-nothing"
 migrated = false
 
 [[fault]]
+id = "drive.session-a-stale-cancel-stops-the-next-turn"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-stale-cancel-stops-the-next-turn"
+failure_class = "drive.session-a-stale-cancel-stops-the-next-turn"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-timeout-settles-as-failed"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-timeout-settles-as-failed"
+failure_class = "drive.session-a-timeout-settles-as-failed"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-crash-settles-no-turn"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-crash-settles-no-turn"
+failure_class = "drive.session-a-crash-settles-no-turn"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-delta-names-the-ask"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-delta-names-the-ask"
+failure_class = "drive.session-a-delta-names-the-ask"
+migrated = false
+
+[[fault]]
+id = "drive.session-the-start-omits-the-head"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-the-start-omits-the-head"
+failure_class = "drive.session-the-start-omits-the-head"
+migrated = false
+
+[[fault]]
+id = "drive.session-opened-is-a-constant"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-opened-is-a-constant"
+failure_class = "drive.session-opened-is-a-constant"
+migrated = false
+
+[[fault]]
+id = "drive.session-the-clock-stands-still"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-the-clock-stands-still"
+failure_class = "drive.session-the-clock-stands-still"
+migrated = false
+
+[[fault]]
 id = "adapters.compaction-read-as-a-turn"
 kind = "lane-fault"
 check = "lanes"
