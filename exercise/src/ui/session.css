@@ -346,6 +346,11 @@
   position: relative;
 }
 
+/* A tool's result sits close under the call it answers: a pair, input and output. */
+.ex-trunk__node[data-kind='tool'] {
+  margin-top: -0.5rem;
+}
+
 .ex-lane {
   position: relative;
 }

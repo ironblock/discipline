@@ -17,7 +17,7 @@ import { AssistantMessage, SystemMessage, UserMessage } from '../ui/Message.tsx'
 import { Seam } from '../ui/Seam.tsx';
 import { SessionHeader } from '../ui/SessionHeader.tsx';
 import { laneStyle } from '../ui/sets.ts';
-import { ToolCall } from '../ui/ToolCall.tsx';
+import { CallCell, ToolResult } from '../ui/ToolCall.tsx';
 import { PHASES } from '../App.tsx';
 import { apart, contrast } from './contrast.ts';
 import { UNCLOSED_FENCE, WHAT_MODELS_WRITE } from './markdown.ts';
@@ -261,10 +261,13 @@ export const UserCold: Story = {
 };
 
 export const UserAfterRefill: Story = {
-  name: 'Message · user, after the refill (12 new, 1.5k cached)',
+  name: 'Message · user, after the refill (12 new, 1.5k warm)',
   render: () => <UserMessage node={trunkNodeAt(MOMENTS.done, 'ask/3', 'user')} />,
-  play: async ({ canvas }) => {
-    await expect(canvas.getByText('12')).toBeInTheDocument();
+  play: async ({ canvasElement }) => {
+    // What the ask put in front of the model: new tokens, in its header; the warm part says why so few.
+    const stat = canvasElement.querySelector('.ex-block__head .ex-stat') as HTMLElement;
+    await expect(stat.textContent).toBe('+12tok');
+    await expect(stat.title).toMatch(/1\.5k before it were warm/);
   },
 };
 
@@ -285,7 +288,7 @@ export const AssistantPrefill: Story = {
     const line = parseFloat(getComputedStyle(waiting).lineHeight);
     await expect(waiting.getBoundingClientRect().height).toBeLessThanOrEqual(line + 1);
     // The header says it is reading, with nothing known yet: light sweeps the top edge, and follows the corners.
-    await expect(canvasElement.querySelector('.ex-block__head .ex-block__intake')?.textContent).toMatch(/^reading the prompt/);
+    await expect(canvasElement.querySelector('.ex-block__head .ex-block__flow')?.textContent).toMatch(/^reading · \d/);
     const block = canvasElement.querySelector('.ex-block--live') as HTMLElement;
     const edge = block.querySelector('.ex-block__edge[data-unknown]') as HTMLElement;
     await expect(getComputedStyle(edge).borderRadius).toBe(getComputedStyle(block).borderRadius);
@@ -306,8 +309,9 @@ export const AssistantPrefillMetered: Story = {
   name: 'Message · assistant, prefill metered',
   render: () => <AssistantMessage node={trunkNodeAt({ beat: 2, t: 10_000 }, 'q/3', 'assistant')} />,
   play: async ({ canvasElement }) => {
-    const line = canvasElement.querySelector('.ex-block__head .ex-block__intake')?.textContent ?? '';
-    await expect(line).toMatch(/^reading · .+ of 16\.4k new · 1\.4k warm · .+ pp t\/s · .+ s left$/);
+    // New tokens read of those to read, for how long so far, and the rate those two make.
+    const line = canvasElement.querySelector('.ex-block__head .ex-block__flow')?.textContent ?? '';
+    await expect(line).toMatch(/^\+\d+(\.\d)?k of 16\.4k tok in \d+\.\d s \([\d,]+ t\/s pp\)$/);
     const edge = canvasElement.querySelector('.ex-block__edge[data-reading]') as HTMLElement;
     // The edge is the new part alone: nothing of the warm part is drawn.
     await expect(edge.style.getPropertyValue('--warm')).toBe('');
@@ -326,10 +330,9 @@ export const AssistantStreaming: Story = {
   // At this moment the answer ends in a list item with nothing in it yet: the caret still has to show.
   play: async ({ canvasElement }) => {
     await expect(canvasElement.querySelectorAll('.ex-caret')).toHaveLength(1);
-    // Generating, the footer counts tokens and speed as they come.
+    // Writing, the footer counts tokens and time as they come, from the first token.
     const foot = canvasElement.querySelector('.ex-block__foot')?.textContent ?? '';
-    await expect(foot).toMatch(/\d+tok/);
-    await expect(foot).toMatch(/tg t\/s/);
+    await expect(foot).toMatch(/^\+\d+ tok in \d+\.\d s \([\d.]+ t\/s tg\)$/);
   },
 };
 
@@ -375,18 +378,17 @@ export const ReadApartFromWritten: Story = {
     const at = (name: string) => canvasElement.querySelector(`[data-moment="${name}"]`) as HTMLElement;
     const text = (name: string, sel: string) => at(name).querySelector(sel)?.textContent ?? '';
     // Reading: the header says how far; the body is one line with the cursor; nothing is written, so no footer.
-    await expect(text('reading', '.ex-block__intake')).toMatch(/reading · .+ of 16\.4k new · 1\.4k warm/);
+    await expect(text('reading', '.ex-block__flow')).toMatch(/^\+.+ of 16\.4k tok in .+ pp\)$/);
     await expect(at('reading').querySelectorAll('.ex-block__body .ex-caret')).toHaveLength(1);
     await expect(at('reading').querySelector('.ex-block__foot')).toBeNull();
     // Writing and written: what was read stays at the top; the footer is only what was written.
     for (const name of ['writing', 'written']) {
-      await expect(text(name, '.ex-block__intake')).toMatch(/^read .+ new/);
-      await expect(text(name, '.ex-block__foot')).toMatch(/tg t\/s/);
-      await expect(text(name, '.ex-block__foot')).not.toMatch(/pp t\/s|new/);
+      await expect(text(name, '.ex-block__head .ex-block__flow')).toMatch(/^\+.+ tok in .+ t\/s pp\)$/);
+      await expect(text(name, '.ex-block__foot')).toMatch(/^\+.+ tok in .+ t\/s tg\)/);
     }
     // A side call reads its edge too, and says what it read when opened: a warm fork, a few new tokens.
     await expect(at('side').querySelector('.ex-block__edge')).not.toBeNull();
-    await expect(text('side-open', '.ex-branch__intake')).toMatch(/new · 17\.8k warm/);
+    await expect(text('side-open', '.ex-branch__intake')).toMatch(/^\+38 tok in .+ pp\) over 17\.8k warm$/);
   },
 };
 
@@ -529,36 +531,62 @@ export const ProseStreaming: Story = {
 // ---------------------------------------------------------------- Tool calls
 
 export const ToolRunning: Story = {
-  name: 'ToolCall · running',
-  render: () => <ToolCall node={trunkNodeAt(MOMENTS.testsRunning, 't/5', 'tool')} />,
+  name: 'Tool · the result, running',
+  render: () => <ToolResult node={trunkNodeAt(MOMENTS.testsRunning, 't/5', 'tool')} />,
 };
 
-/** What went in is its header -- the tool's chip, then its command; what came out, its footer; the output opens as its body. */
-export const ToolLarge: Story = {
-  name: 'ToolCall · 1,860 lines, collapsed',
-  render: () => <ToolCall node={trunkNodeAt(MOMENTS.firstSettled, 't/2', 'tool')} />,
+/**
+ * A call and its result, a pair: the call ends the assistant message that
+ * wrote it -- its tokens are that message's, in its footer -- and the result
+ * is its own block, with the tool's stats: lines and bytes and how long, its
+ * exit. The first lines show; the rest when opened.
+ */
+export const ToolPair: Story = {
+  name: 'Tool · a call and its result, 1,860 lines',
+  render: () => {
+    const call = trunkNodeAt(MOMENTS.firstSettled, 't/2', 'tool');
+    return (
+      <div style={{ display: 'grid', gap: '0.4rem' }}>
+        <AssistantMessage node={trunkNodeAt(MOMENTS.firstSettled, 'q/2', 'assistant')} call={call} />
+        <ToolResult node={call} />
+      </div>
+    );
+  },
   play: async ({ canvasElement }) => {
-    const head = canvasElement.querySelector('.ex-block__head') as HTMLElement;
-    await expect(head.querySelector('.ex-block__label')?.textContent).toBe('bash');
-    await expect(head.querySelector('.ex-tool__command')?.textContent).toBe('cat src/report.rs');
-    const foot = canvasElement.querySelector('.ex-block__foot')?.textContent ?? '';
-    await expect(foot).toMatch(/1,860 lines/);
-    await expect(foot).not.toMatch(/bash/i);
-    // Closed, there is no body: the head meets the foot.
-    await expect(canvasElement.querySelector('.ex-block__body')).toBeNull();
-    await userEvent.click(head.querySelector('.ex-tool__head') as HTMLElement);
-    await expect(canvasElement.querySelector('.ex-block__body .ex-tool__output')).not.toBeNull();
+    const [message, result] = [...canvasElement.querySelectorAll('.ex-block')] as HTMLElement[];
+    // The call is the end of what the assistant wrote, and its footer counts the call's tokens with the rest.
+    await expect(message?.querySelector('.ex-block__body > .ex-call .ex-tool__command')?.textContent).toBe('cat src/report.rs');
+    await expect(message?.querySelector('.ex-block__foot')?.textContent).toMatch(/^\+41 tok in 1\.1 s \(35\.\d t\/s tg\)/);
+    await expect(message?.querySelector('.ex-block__head')?.textContent).toMatch(/\+108 tok in 90 ms \(1,200 t\/s pp\)/);
+    // The result is the tool's: lines and bytes and how long, its exit; no tokens.
+    const foot = result?.querySelector('.ex-block__foot')?.textContent ?? '';
+    await expect(foot).toMatch(/^1,860 lines · .+ in \d+ ms/);
+    await expect(foot).toMatch(/exit 0/);
+    await expect(foot).not.toMatch(/tok/);
+    await expect(result?.querySelector('.ex-block__head .ex-block__label')?.textContent).toBe('result');
+    await expect(result?.querySelector('.ex-tool__output')?.textContent?.split('\n')).toHaveLength(3);
+    await userEvent.click(result?.querySelector('.ex-block__head .ex-tool__head') as HTMLElement);
+    await expect(result?.querySelector('.ex-tool__output')?.textContent?.split('\n')).toHaveLength(1860);
   },
 };
 
-export const ToolLargeOpen: Story = {
-  name: 'ToolCall · 1,860 lines, opened',
-  render: () => <ToolCall node={trunkNodeAt(MOMENTS.firstSettled, 't/2', 'tool')} open />,
-};
-
+/** A call whose script runs to several lines, and printed nothing: the result is one row. */
 export const ToolScriptNoOutput: Story = {
-  name: 'ToolCall · a multi-line command that printed nothing',
-  render: () => <ToolCall node={trunkNodeAt(MOMENTS.done, 't/4', 'tool')} open />,
+  name: 'Tool · a multi-line call that printed nothing',
+  render: () => {
+    const call = trunkNodeAt(MOMENTS.done, 't/4', 'tool');
+    return (
+      <div style={{ display: 'grid', gap: '0.4rem' }}>
+        <AssistantMessage node={trunkNodeAt(MOMENTS.done, 'q/6', 'assistant')} call={call} />
+        <ToolResult node={call} />
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const result = canvasElement.querySelector('.ex-block--tool') as HTMLElement;
+    await expect(result.classList.contains('ex-block--thin')).toBe(true);
+    await expect(result.textContent).toMatch(/no output in \d+ ms/);
+  },
 };
 
 // ---------------------------------------------------------------- Branches
@@ -660,10 +688,10 @@ export const UnknownTool: Story = {
     );
     const node = session.eras[0]?.nodes.find((n) => n.id === 't/1');
     if (node?.kind !== 'tool') throw new Error('no tool t/1');
-    return <ToolCall node={node} />;
+    return <CallCell node={node} />;
   },
   play: async ({ canvasElement }) => {
-    await expect(canvasElement.querySelector('.ex-block__label')?.textContent).toBe('read');
+    await expect(canvasElement.querySelector('.ex-call__label')?.textContent).toBe('read');
     await expect(canvasElement.textContent).toContain('read({"path":"src/report.rs","lines":[40,88]})');
     await expect(canvasElement.querySelector('.ex-tool__prompt')).toBeNull();
   },

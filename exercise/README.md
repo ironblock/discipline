@@ -21,9 +21,13 @@ CI runs the same thing as the repository's `exercise` check (`./verify.sh --only
 
 - **The trunk is a conversation.** One block per message, role by fill,
   prose proportional, chain-of-thought italic. Each block's header says what
-  went in -- its role, and what it read (new over warm, how fast; while it
-  reads, its top edge fills with the new part) or, for a tool, its command --
-  and its footer what came out, in low-contrast mono.
+  went in -- its role, and what it read -- and its footer what came out, in
+  one shape for both: `+100 tok in 5.0 s (20 t/s pp)`, counting up while it
+  runs (and, while it reads, its top edge fills with the new part). A tool
+  call is what the model wrote, so it ends the assistant message that wrote
+  it; its result is its own block below, with the tool's stats instead of
+  tokens -- `18 lines · 475 B in 30 ms`, and its exit -- a pair, like a
+  REPL's input and output.
 - **Behind the curtain**, each server slot other than the trunk's is a
   column. An interview sits level with the trunk message it came from, in
   the slot that served it, with the patches it landed, cabled to it. A seam

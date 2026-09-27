@@ -1,12 +1,14 @@
 import { useState } from 'react';
 
-import type { AssistantNode, Folded, SettledNode, SystemNode, UserNode } from '../session/fold.ts';
+import type { AssistantNode, Folded, SettledNode, SystemNode, ToolNode, UserNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
-import { counter, ms, rate, tokens } from './format.ts';
+import { tokens, took } from './format.ts';
 import { Copy } from './Copy.tsx';
-import { IntakeLine, intakeEdge, intakeOf } from './Intake.tsx';
+import { edgeOf, readingOf, warmOf, writingOf } from './flow.ts';
+import { Flowing } from './Flowing.tsx';
 import { Prose } from './Prose.tsx';
-import { alarmOf, failOf, settleOf, stopOf } from './sets.ts';
+import { alarmOf, callOf, failOf, settleOf, stopOf } from './sets.ts';
+import { CallCell } from './ToolCall.tsx';
 import { elapsed, useNow } from './surface.tsx';
 import './message.css';
 
@@ -48,7 +50,7 @@ export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
   );
 }
 
-/** A person's ask. Its header says what it cost to read: the prefill it caused, new and reused. */
+/** A person's ask. Its header says what it will cost to read: the new tokens it put in front of the model. */
 export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
   return (
     <Block
@@ -57,8 +59,11 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
       heads={
         node.prefill
           ? [
-              { value: tokens(node.prefill.fresh), unit: 'new', title: 'prompt tokens this ask caused to be evaluated' },
-              { value: tokens(node.prefill.cached), unit: 'cached', title: 'prompt tokens reused from the slot' },
+              {
+                value: `+${tokens(node.prefill.fresh)}`,
+                unit: 'tok',
+                title: `new tokens this ask put in front of the model; ${tokens(node.prefill.cached)} before it were warm, reused from the slot`,
+              },
             ]
           : []
       }
@@ -73,97 +78,81 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
 
 /**
  * The model on the trunk: what it read, apart from what it wrote. The
- * reading is its header, along its top edge (Block's intake) -- right under
- * the ask or tool output it mostly is; the writing is its body, reasoning in
- * italic then the answer, streamed from line 1, and its footer.
+ * reading is its header, along its top edge -- right under the ask or tool
+ * output it mostly is; the writing is its body, reasoning in italic then the
+ * answer streamed from line 1, then the tool call it ended in, if it did
+ * (`call`: the model wrote it, so it is part of what came out); and its
+ * footer, what it wrote in all. Both count up while they run.
  */
-export function AssistantMessage({ node }: { readonly node: Folded<AssistantNode> }) {
+export function AssistantMessage({ node, call }: { readonly node: Folded<AssistantNode>; readonly call?: Folded<ToolNode> | undefined }) {
   const [thinking, setThinking] = useState(false);
   const live = node.progress === 'prefill' || node.progress === 'streaming';
-  const t = node.timings;
   const long = node.reasoning.length > 280;
   const showReasoning = node.reasoning !== '' && (thinking || !long || (live && node.text === ''));
   const now = useNow();
-  const since = elapsed(now, node.startedAt);
   // Prefill is silent by nature, and a long one is the cost worth flagging: it
   // escalates on its total. A generation escalates only on silence -- time
   // since its last token -- never while tokens are arriving.
-  const worry = node.progress === 'prefill' ? since.level : elapsed(now, node.lastActivityAt).level;
+  const worry = node.progress === 'prefill' ? elapsed(now, node.startedAt).level : elapsed(now, node.lastActivityAt).level;
   const streamingInto = node.progress === 'streaming' ? (node.text === '' ? 'reasoning' : 'answer') : undefined;
-  // A turn that said nothing and only called a tool: a step, not a message.
-  const silent = node.progress === 'done' && node.text === '' && node.reasoning === '';
+  // It said nothing, and its call has not arrived yet: a step, not a message.
+  const bare = node.progress === 'done' && node.text === '' && node.reasoning === '' && !call;
   const stopped = stopOf(node.stop ?? 'stop');
-  const intake = intakeOf(node);
+  const reading = readingOf(node, now);
+  const writing = writingOf(node, now);
+  const warm = warmOf(node);
+  const command = call ? callOf(call.tool, call.args) : undefined;
   return (
     <Block
       tone="assistant"
-      label={silent ? 'assistant · a call, no text' : 'assistant'}
-      thin={silent}
+      label="assistant"
+      thin={bare}
       live={live}
-      {...(intake
-        ? {
-            intake: {
-              reading: intake.reading,
-              edge: intakeEdge(intake),
-              line: intake.counts ? (
-                <IntakeLine intake={intake} />
-              ) : (
-                <span className="ex-elapsed" data-level={worry}>
-                  reading the prompt · {counter(since.ms)}
-                </span>
-              ),
-            },
-          }
-        : {})}
+      intake={{
+        reading: node.progress === 'prefill',
+        edge: edgeOf(node),
+        ...(reading ? { line: <Flowing flow={reading} level={worry} {...(warm !== undefined ? { title: `new tokens read; ${tokens(warm)} more were warm, reused from the slot` } : {})} /> } : {}),
+      }}
+      {...(writing && !node.failure ? { output: <Flowing flow={writing} level={worry} title="tokens written, reasoning and any tool call included" /> } : {})}
       alarm={node.failure ? 'bad' : alarmOf(stopped.level)}
-      stats={
-        node.failure
-          ? [
-              node.wallMs !== undefined && { value: ms(node.wallMs), title: 'request to failure, wall clock' },
-              {
-                value: (
-                  <span className="ex-failure" data-level={failOf(node.failure.reason).level}>
-                    failed · {failOf(node.failure.reason).label}
-                  </span>
-                ),
-                title: node.failure.message,
-              },
-            ]
-          : t
-          ? [
-              stopped.level !== 'ok' && {
-                value: (
-                  <span className="ex-stop" data-level={stopped.level}>
-                    {stopped.label}
-                  </span>
-                ),
-                title: 'why generation stopped',
-              },
-              t.predicted_ms !== undefined && { value: ms(t.predicted_ms), title: 'generating, from the first token to the last' },
-              { value: tokens(t.predicted_n), unit: 'tok', title: 'tokens generated, reasoning included' },
-              { value: rate(t.predicted_n, t.predicted_ms), unit: 'tg t/s', title: 'generation speed' },
-            ]
-          : [
-              // Reading is the header's to say; the footer waits for the first token.
-              node.progress !== 'prefill' && {
-                value: (
-                  <span className="ex-elapsed" data-level={worry}>
-                    generating · {counter(since.ms)}
-                  </span>
-                ),
-                title: 'how long since the request',
-              },
-              // Generating, the meter counts as it goes; the response's timings replace these.
-              node.progress === 'streaming' && node.meter !== undefined && { value: tokens(node.meter.decoded), unit: 'tok', title: 'tokens generated so far' },
-              node.progress === 'streaming' && node.meter?.tgRate !== undefined && { value: rate(node.meter.tgRate, 1000), unit: 'tg t/s', title: 'generation speed so far' },
-            ]
-      }
+      stats={[
+        node.failure && {
+          value: (
+            <span className="ex-failure" data-level={failOf(node.failure.reason).level}>
+              failed · {failOf(node.failure.reason).label}
+              {node.wallMs !== undefined ? ` · ${took(node.wallMs)}` : ''}
+            </span>
+          ),
+          title: node.failure.message,
+        },
+        !node.failure &&
+          stopped.level !== 'ok' && {
+            value: (
+              <span className="ex-stop" data-level={stopped.level}>
+                {stopped.label}
+              </span>
+            ),
+            title: 'why generation stopped',
+          },
+      ]}
       provenance={node}
       id={node.id}
-      {...(node.text !== '' && !live ? { actions: <Copy text={node.text} /> } : {})}
+      {...(!live && (node.text !== '' || command)
+        ? {
+            actions: (
+              <>
+                {node.text !== '' ? <Copy text={node.text} /> : null}
+                {command ? <Copy text={command.text} label={command.prompt === '$' ? 'copy command' : 'copy call'} /> : null}
+              </>
+            ),
+          }
+        : {})}
     >
-      {silent ? undefined : (
-        <AssistantBody node={node} live={live} long={long} showReasoning={showReasoning} thinking={thinking} setThinking={setThinking} streamingInto={streamingInto} />
+      {bare ? undefined : (
+        <>
+          <AssistantBody node={node} live={live} long={long} showReasoning={showReasoning} thinking={thinking} setThinking={setThinking} streamingInto={streamingInto} />
+          {call ? <CallCell node={call} /> : null}
+        </>
       )}
     </Block>
   );

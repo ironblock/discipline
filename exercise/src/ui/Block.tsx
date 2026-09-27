@@ -26,7 +26,9 @@ export interface BlockProps {
   readonly lead?: ReactNode;
   /** What went in: the header's numbers, after the chip. */
   readonly heads?: readonly (Stat | false | undefined)[];
-  /** What came out: the footer's numbers. No footer without them. */
+  /** What came out, in a line: the footer's first -- tokens written, or a tool's lines and bytes, and how long. */
+  readonly output?: ReactNode;
+  /** What came out: the footer's numbers, after the line. No footer without one or the other. */
   readonly stats?: readonly (Stat | false | undefined)[];
   /** Where this block came from, and what it waits on. From a folded node. */
   readonly provenance: { readonly from: readonly number[]; readonly needs: readonly string[] };
@@ -55,7 +57,7 @@ export interface BlockProps {
  * came out, in low-contrast mono. Every message, tool call and lane step on
  * the surface is one of these, refined.
  */
-export function Block({ tone, lane, label, lead, heads = [], stats = [], provenance, thin = false, live = false, intake, alarm, id, actions, children }: BlockProps) {
+export function Block({ tone, lane, label, lead, heads = [], output, stats = [], provenance, thin = false, live = false, intake, alarm, id, actions, children }: BlockProps) {
   const { curtain } = useSurface();
   const target = useTarget();
   const inputs = heads.filter((s): s is Stat => Boolean(s));
@@ -63,10 +65,11 @@ export function Block({ tone, lane, label, lead, heads = [], stats = [], provena
   const chip = <span className="ex-block__label">{label}</span>;
   const line =
     intake?.line !== undefined ? (
-      <span className="ex-block__intake" role={intake.reading ? 'status' : undefined}>
+      <span className="ex-block__flow" data-at="head" role={intake.reading ? 'status' : undefined}>
         {intake.line}
       </span>
     ) : null;
+  const out = output !== undefined ? <span className="ex-block__flow" data-at="foot">{output}</span> : null;
   return (
     <div
       className={`ex-block ex-block--${tone}${thin ? ' ex-block--thin' : ''}${live ? ' ex-block--live' : ''}`}
@@ -94,6 +97,7 @@ export function Block({ tone, lane, label, lead, heads = [], stats = [], provena
         <footer className="ex-block__foot">
           {chip}
           {children !== undefined ? <span className="ex-block__inline">{children}</span> : null}
+          {out}
           <span className="ex-block__spacer" />
           {[...inputs, ...outputs].map(stat)}
         </footer>
@@ -106,7 +110,13 @@ export function Block({ tone, lane, label, lead, heads = [], stats = [], provena
             {inputs.map(stat)}
           </header>
           {children !== undefined ? <div className="ex-block__body">{children}</div> : null}
-          {outputs.length > 0 ? <footer className="ex-block__foot">{outputs.map(stat)}</footer> : null}
+          {out || outputs.length > 0 ? (
+            <footer className="ex-block__foot">
+              {out}
+              {out ? <span className="ex-block__spacer" /> : null}
+              {outputs.map(stat)}
+            </footer>
+          ) : null}
         </>
       )}
       {actions !== undefined || curtain ? (

@@ -109,8 +109,8 @@
   min-width: 0;
 }
 
-/* What it read, after the chip: plain text, not a chip -- a sentence about the numbers. */
-.ex-block__intake {
+/* What went in, or came out, in a line: plain text, not chips -- a sentence about the numbers. */
+.ex-block__flow {
   font-variant-numeric: tabular-nums;
 }
 

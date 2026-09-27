@@ -8,6 +8,14 @@ export function ms(value: number): string {
   return `${m}m ${s}s`;
 }
 
+/** How long something took, or has taken so far: tenths of a second under a minute, so a live count moves. */
+export function took(value: number): string {
+  if (value < 1000) return `${Math.round(value)} ms`;
+  if (value < 60_000) return `${(value / 1000).toFixed(1)} s`;
+  const s = Math.floor(value / 1000);
+  return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+}
+
 /** A running counter: whole seconds, so it ticks rather than flickers. */
 export function counter(value: number): string {
   const s = Math.floor(value / 1000);

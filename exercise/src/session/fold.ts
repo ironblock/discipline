@@ -56,6 +56,8 @@ export interface Generation {
   readonly stop?: Stop;
   readonly slot: number;
   readonly startedAt: number;
+  /** Session time it began writing: its first token. Absent while it reads. */
+  readonly writingSince?: number;
   /** Session time of the last sign of life: the request, the latest delta, the response. */
   readonly lastActivityAt: number;
   /** Session time it finished -- its response, or its failure; absent while it runs. */
@@ -75,6 +77,8 @@ export interface Generation {
  * generated, and each phase's speed so far, in tokens per second.
  */
 export interface Meter {
+  /** Session time of the last frame. */
+  readonly at: number;
   readonly total: number;
   readonly cache: number;
   readonly processed: number;
@@ -96,6 +100,8 @@ export interface ToolNode extends Provenance {
   readonly turn: number;
   readonly tool: Tool;
   readonly args: Readonly<Record<string, unknown>>;
+  /** The assistant node that made the call (its request's id): the model wrote it, as the end of that generation. */
+  readonly after: string;
   /** Session time the call began. */
   readonly startedAt: number;
   readonly running: boolean;
@@ -258,6 +264,7 @@ function generation(g: GenerationBuilder): Generation {
     text,
     slot: request.slot,
     startedAt: request.t,
+    ...(g.deltas[0] ? { writingSince: g.deltas[0].t } : {}),
     lastActivityAt: response?.t ?? failed?.t ?? g.deltas.at(-1)?.t ?? request.t,
     ...(response || failed ? { endedAt: (response ?? failed)!.t } : {}),
     ...(response ? { stop: response.stop, timings: response.timings, wallMs: response.t - request.t } : {}),
@@ -277,6 +284,7 @@ function meterOf(frames: readonly EventOf<'progress'>[]): Meter {
   const read = frames.find((f) => f.prompt.processed >= newTokens);
   const tgRate = read ? perSecond(last.decoded - read.decoded, last.t - read.t) : undefined;
   return {
+    at: last.t,
     total: last.prompt.total,
     cache: last.prompt.cache,
     processed: top.prompt.processed,
@@ -502,6 +510,7 @@ export function fold(events: readonly DriveEvent[]): Session {
             turn: begin.turn,
             tool: begin.tool,
             args: begin.args,
+            after: responseToRequest.get(begin.after) ?? begin.after,
             startedAt: begin.t,
             running: end === undefined,
             ...(end ? { exit: end.exit, output: end.output, ms: end.t - begin.t, endedAt: end.t, ...(end.truncated ? { truncated: true } : {}) } : {}),

@@ -3,8 +3,10 @@ import { useState } from 'react';
 import type { BranchNode, Folded, PatchNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { barHeight, rowsOf } from './condensed.ts';
-import { IntakeLine, intakeEdge, intakeOf } from './Intake.tsx';
-import { ms, rate, tokens } from './format.ts';
+import { edgeOf, flowText, readingOf, warmOf, writingOf } from './flow.ts';
+import { Flowing } from './Flowing.tsx';
+import { useNow } from './surface.tsx';
+import { tokens } from './format.ts';
 import { alarmOf, failOf, opOf, outcomeOf } from './sets.ts';
 import './branch.css';
 
@@ -19,9 +21,11 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
   const pending = isPending(node);
   const live = node.outcome === undefined && !pending;
   const outcome = node.outcome !== undefined ? outcomeOf(node.outcome) : undefined;
-  const t = node.timings;
-  // What it read: along its bar's top edge, and at the head of the exchange.
-  const intake = pending ? undefined : intakeOf(node);
+  const now = useNow();
+  // What it read: along its bar's top edge, and at the head of the exchange; what it wrote, on its bar.
+  const reading = pending ? undefined : readingOf(node, now);
+  const writing = pending ? undefined : writingOf(node, now);
+  const warm = warmOf(node);
   return (
     <div className="ex-branch" data-lane={node.lane} data-outcome={node.outcome ?? (pending ? 'pending' : 'running')}>
       <Block
@@ -30,12 +34,10 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         label={node.lane}
         thin
         live={live}
-        {...(intake ? { intake: { reading: intake.reading, edge: intakeEdge(intake) } } : {})}
+        {...(reading ? { intake: { reading: reading.running, edge: edgeOf(node) } } : {})}
+        {...(writing ? { output: <Flowing flow={writing} title="tokens written" /> } : {})}
         alarm={outcome ? alarmOf(outcome.level) : undefined}
         stats={[
-          node.wallMs !== undefined && { value: ms(node.wallMs), title: 'wall clock' },
-          t && { value: tokens(t.predicted_n), unit: 'tok', title: 'tokens generated' },
-          t && { value: rate(t.predicted_n, t.predicted_ms), unit: 't/s' },
           node.patches.length > 0 && { value: <PatchSummary patches={node.patches} />, title: 'patches it landed in working memory, by op' },
           pending && {
             value: (
@@ -66,9 +68,10 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
       </button>
       {open ? (
         <div className="ex-branch__exchange">
-          {intake ? (
+          {reading ? (
             <p className="ex-branch__intake">
-              <IntakeLine intake={intake} />
+              {flowText(reading)}
+              {warm !== undefined ? ` over ${tokens(warm)} warm` : ''}
             </p>
           ) : null}
           <p className="ex-branch__question">{node.question}</p>

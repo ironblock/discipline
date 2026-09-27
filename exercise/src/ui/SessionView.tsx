@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import type { Link } from '../drive/transport.ts';
-import type { BranchNode, Folded, Session, TrunkNode } from '../session/fold.ts';
+import type { BranchNode, Folded, Session, ToolNode, TrunkNode } from '../session/fold.ts';
 import { Branch, BranchBar } from './Branch.tsx';
 import { Cable } from './Cable.tsx';
 import { Wiring } from './Wiring.tsx';
@@ -27,7 +27,7 @@ import { SessionHeader } from './SessionHeader.tsx';
 import { laneStyle } from './sets.ts';
 import { ClockContext, HotEntriesContext, SurfaceContext, TargetContext } from './surface.tsx';
 import type { Surface } from './surface.tsx';
-import { ToolCall } from './ToolCall.tsx';
+import { ToolResult } from './ToolCall.tsx';
 import './session.css';
 
 export interface SessionViewProps {
@@ -143,7 +143,8 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!follow || !running) return;
-    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    // Five times a second: running counts are said in tenths of a second.
+    const id = setInterval(() => setTick((n) => n + 1), 200);
     return () => clearInterval(id);
   }, [follow, running]);
   const now = follow && running ? session.now + (performance.now() - receivedAt) : session.now;
@@ -429,8 +430,9 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                           ref={anchorRef(node.id)}
                           data-node={surface.curtain && branches.length > 0 ? node.id : undefined}
                           data-hot={hot.nodes.has(node.id) ? '' : undefined}
+                          data-kind={node.kind}
                         >
-                          <TrunkBlock node={node} />
+                          <TrunkBlock node={node} call={era.nodes.find((n): n is Folded<ToolNode> => n.kind === 'tool' && n.after === node.id)} />
                           {!surface.curtain && branches.length > 0 ? (
                             <button
                               type="button"
@@ -507,14 +509,15 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
   );
 }
 
-function TrunkBlock({ node }: { readonly node: TrunkNode }) {
+/** One node of the trunk; an assistant message draws the tool call it ended in (`call`), and the call's result follows as its own node. */
+function TrunkBlock({ node, call }: { readonly node: TrunkNode; readonly call: Folded<ToolNode> | undefined }) {
   switch (node.kind) {
     case 'user':
       return <UserMessage node={node} />;
     case 'assistant':
-      return <AssistantMessage node={node} />;
+      return <AssistantMessage node={node} call={call} />;
     case 'tool':
-      return <ToolCall node={node} />;
+      return <ToolResult node={node} />;
     case 'settled':
       return <TurnEnd node={node} />;
     default: {
