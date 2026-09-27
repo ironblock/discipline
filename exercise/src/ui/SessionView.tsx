@@ -304,10 +304,11 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
         data-lanes-busy={session.occupancy.some((holder, slot) => holder !== undefined && slot !== session.trunkSlot) ? '' : undefined}
         data-fresh={unseen > 0 ? '' : undefined}
         data-drawer={drawer ? '' : undefined}
+        data-wiring={surface.wiring ? 'harness' : undefined}
         onPointerOver={point}
         onPointerLeave={() => setPointed({})}
       >
-        <Links wires={wires} hot={hot} revision={[session, placed, seamPad, drawer, drawerOpen, condensed]} />
+        <Links wires={wires} hot={hot} {...(surface.wiring ? { wiring: surface.wiring } : {})} revision={[session, placed, seamPad, drawer, drawerOpen, condensed]} />
         {/* As wide as the row must be for working memory to sit beside it (session.css, --need). */}
         <div className="ex-session__need" ref={need} aria-hidden="true" />
         <Minimap stage={stage} revision={[session, placed, seamPad, surface.curtain]} curtain={surface.curtain} />

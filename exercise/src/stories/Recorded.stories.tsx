@@ -8,6 +8,7 @@ import { RECORDINGS, recordedAt } from '../drive/recorded.ts';
 import type { RecordingName } from '../drive/recorded.ts';
 import { fold } from '../session/fold.ts';
 import { SessionView } from '../ui/SessionView.tsx';
+import type { Surface } from '../ui/surface.tsx';
 
 interface RecordedArgs {
   /** Session time, ms. */
@@ -17,6 +18,8 @@ interface RecordedArgs {
   readonly condensed?: boolean;
   /** Which recording; the first drive unless a story says otherwise. */
   readonly recording?: RecordingName;
+  /** Lines into memory routed as a harness, drawn so; curves when absent. */
+  readonly wiring?: Surface['wiring'];
 }
 
 const recording = RECORDINGS['first-drive'];
@@ -33,8 +36,8 @@ const meta = {
   title: 'Session/Recorded',
   parameters: { layout: 'fullscreen' },
   args: { t: Number.POSITIVE_INFINITY, curtain: true, gaps: false },
-  render: ({ t, curtain, gaps, condensed = false, recording: name = 'first-drive' }) => (
-    <SessionView session={fold(recordedAt(RECORDINGS[name], t))} surface={{ curtain, gaps, condensed }} composer={{ phases: PHASES }} />
+  render: ({ t, curtain, gaps, condensed = false, recording: name = 'first-drive', wiring }) => (
+    <SessionView session={fold(recordedAt(RECORDINGS[name], t))} surface={{ curtain, gaps, condensed, ...(wiring ? { wiring } : {}) }} composer={{ phases: PHASES }} />
   ),
 } satisfies Meta<RecordedArgs>;
 
@@ -292,4 +295,35 @@ export const StepLimit: Story = {
     const end = canvasElement.querySelector('.ex-turnend');
     await expect(end?.textContent).toMatch(/step limit|max_steps/);
   },
+};
+
+/**
+ * The lines into memory routed as a wiring harness (harness.ts) instead of
+ * curves, on the densest drive: 111 patches an ask. Each side call's lines
+ * share one track in the gutter and fork to what they wrote; crossings hop.
+ */
+export const Harness: Story = {
+  name: '12 · lines into memory as a harness',
+  args: { recording: 'step-limit', wiring: { crossing: 'hop', bend: 'round' } },
+  // Wide enough for working memory beside the lanes, not in its drawer.
+  render: (args) => <div style={{ width: 1900 }}>{meta.render(args)}</div>,
+  play: async ({ canvasElement }) => {
+    const cell = canvasElement.querySelector('[data-branch]:has(.ex-patchsum)') as HTMLElement;
+    cell.scrollIntoView({ block: 'center' });
+    const nets = () => [...document.querySelectorAll('.ex-links .ex-net__run')].map((p) => p.getAttribute('d') ?? '');
+    await waitFor(async () => expect(nets().length).toBeGreaterThan(0));
+    // Straight runs and corners only: no curve anywhere.
+    await expect(nets().every((d) => /^[MLA\d .-]+$/.test(d))).toBe(true);
+    // At rest a line is the net's; pointed at, a side call's own lines are drawn over it.
+    const lit = () => [...document.querySelectorAll(`.ex-links .ex-link[data-branch="${cell.dataset.branch}"]`)].filter((l) => getComputedStyle(l).stroke !== 'rgba(0, 0, 0, 0)');
+    await expect(lit()).toHaveLength(0);
+    await userEvent.hover(cell.querySelector('.ex-block') as HTMLElement);
+    await waitFor(async () => expect(lit().length).toBeGreaterThan(0));
+  },
+};
+
+/** The same on the first drive, where more side calls write at once: breaking at crossings, corners cut at 45°. */
+export const HarnessFirstDrive: Story = {
+  name: '12b · a harness on the first drive, gaps and chamfers',
+  args: { wiring: { crossing: 'gap', bend: 'chamfer' } },
 };

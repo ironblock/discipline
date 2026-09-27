@@ -41,3 +41,31 @@
 .ex-memory__entry[data-hot] {
   background: color-mix(in oklab, var(--ink-interview) 12%, transparent);
 }
+
+/*
+ * Routed as a harness (harness.ts): each side call's lines as one faint net
+ * with a dot where it forks; a lit line is drawn over it whole, and an unlit
+ * one not at all -- the net already shows it.
+ */
+.ex-net {
+  --c: var(--lane-ink, var(--ink-lane));
+}
+
+.ex-net__run {
+  fill: none;
+  stroke: color-mix(in oklab, var(--c) var(--link-rest), transparent);
+  stroke-width: var(--cable-width);
+  stroke-linecap: round;
+}
+
+.ex-net__run[data-clipped] {
+  stroke-dasharray: 3 4;
+}
+
+.ex-net__dot {
+  fill: color-mix(in oklab, var(--c) calc(var(--link-rest) * 2), transparent);
+}
+
+.ex-links[data-route='harness'] .ex-link:not([data-hot]) {
+  stroke: transparent;
+}

@@ -1,5 +1,7 @@
 import { createContext, useContext } from 'react';
 
+import type { Bend, Crossing } from './harness.ts';
+
 /** How much of the machinery the person has asked to see. */
 export interface Surface {
   /** Behind the curtain: the slot lanes, working memory, provenance. */
@@ -8,6 +10,11 @@ export interface Surface {
   readonly condensed?: boolean;
   /** Outline everything drawn from an event `diet` cannot emit yet, naming the step of #117. */
   readonly gaps: boolean;
+  /**
+   * Lines into working memory routed as a wiring harness (harness.ts), with
+   * crossings and corners drawn so; curves when absent. An experiment.
+   */
+  readonly wiring?: { readonly crossing: Crossing; readonly bend: Bend };
 }
 
 export const SurfaceContext = createContext<Surface>({ curtain: true, gaps: false });

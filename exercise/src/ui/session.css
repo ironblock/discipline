@@ -28,7 +28,9 @@
      and shrinks the trunk: so every pool is placed from the right edge, and
      the trunk's from what is left of the row. */
   --lanes-w: 0rem;
-  --memory-col: calc(var(--memory-width) + var(--gutter));
+  /* Between the lanes and working memory: wider when lines are routed through it as a harness. */
+  --memory-gap: var(--gutter);
+  --memory-col: calc(var(--memory-width) + var(--memory-gap));
   --stage-w: calc(var(--trunk-width) + var(--lanes-w) + var(--memory-col));
   --edge-l: max(1rem + var(--mm-space), 50% + var(--mm-space) / 2 - var(--stage-w) / 2);
   --edge-r: min(50% + var(--mm-space) / 2 + var(--stage-w) / 2, 100% - 1rem);
@@ -37,7 +39,7 @@
   --x-trunk: calc((var(--edge-l) + var(--edge-r) - var(--memory-col) - var(--lanes-w)) / 2);
   /* The row working memory needs beside it, trunk at its narrowest; below
      this memory is a drawer (SessionView measures .ex-session__need). */
-  --need: calc(var(--trunk-min) + var(--lanes-w) + var(--memory-width) + var(--gutter) + var(--mm-space) + 2rem);
+  --need: calc(var(--trunk-min) + var(--lanes-w) + var(--memory-width) + var(--memory-gap) + var(--mm-space) + 2rem);
   --pool-trunk: var(--pool-rest);
   --pool-lane: 0%;
   --pool-memory: var(--pool-rest);
@@ -62,6 +64,10 @@
 
 .ex-session--condensed {
   --lane-width: var(--lane-width-condensed);
+}
+
+.ex-session[data-wiring='harness'] {
+  --memory-gap: 4.5rem;
 }
 
 .ex-session[data-drawer] {
@@ -106,7 +112,7 @@
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  gap: var(--gutter);
+  gap: var(--memory-gap);
   padding: 0.5rem 1rem 1rem calc(1rem + var(--mm-space));
   flex: 1 1 auto;
 }
