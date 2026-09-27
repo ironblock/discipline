@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 48
+faults = 58
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -828,4 +828,154 @@ becomes = '''
         heads.observations.push(crate::client::cache::Observation {'''
 catches = [
     "drive::tests::the_cache_census_counts_every_call_and_names_the_undeclared_lifetime",
+]
+
+[[fault]]
+id = "drive.session-rebuilds-the-trunk"
+failure_class = "drive.session-rebuilds-the-trunk"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        shape.messages.clone_from(&state.trunk);'''
+becomes = '''
+        shape.messages.clone_from(&self.shared.template.messages);'''
+catches = [
+    "drive::session::tests::the_trunk_is_appended_never_rebuilt",
+]
+
+[[fault]]
+id = "drive.session-accepts-an-ask-mid-turn"
+failure_class = "drive.session-accepts-an-ask-mid-turn"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            Settlement::Awaiting => {}
+            Settlement::Turn | Settlement::Capture => {'''
+becomes = '''
+            Settlement::Awaiting | Settlement::Turn => {}
+            Settlement::Capture => {'''
+catches = [
+    "drive::session::tests::an_ask_sent_while_a_turn_is_in_flight_is_refused_by_name",
+]
+
+[[fault]]
+id = "drive.session-cancel-reaches-nothing"
+failure_class = "drive.session-cancel-reaches-nothing"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+                cancel.ask();
+                return Ok(());'''
+becomes = '''
+                let _ = &cancel;
+                return Ok(());'''
+catches = [
+    "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
+    "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
+]
+
+[[fault]]
+id = "drive.session-a-cancelled-ask-joins-the-trunk"
+failure_class = "drive.session-a-cancelled-ask-joins-the-trunk"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        Ok(StreamEnded::Cancelled) => {
+            state.push(Event::Cancelled { partial });'''
+becomes = '''
+        Ok(StreamEnded::Cancelled) => {
+            state.trunk.push(Message::new(Role::User, ask));
+            state.push(Event::Cancelled { partial });'''
+catches = [
+    "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
+]
+
+[[fault]]
+id = "drive.session-a-refusal-goes-unlogged"
+failure_class = "drive.session-a-refusal-goes-unlogged"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        self.push(Event::Refused {
+            command,
+            because,
+            during,
+        });'''
+becomes = '''
+        let _ = (command, during);'''
+catches = [
+    "drive::session::tests::a_command_with_nothing_to_act_on_is_refused_and_logged",
+    "drive::session::tests::an_ask_sent_while_a_turn_is_in_flight_is_refused_by_name",
+]
+
+[[fault]]
+id = "drive.session-skips-the-capture-state"
+failure_class = "drive.session-skips-the-capture-state"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            state.move_to(Settlement::Capture);'''
+becomes = '''
+            let _ = Settlement::Capture;'''
+catches = [
+    "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
+]
+
+[[fault]]
+id = "drive.session-numbers-the-log-by-something-else"
+failure_class = "drive.session-numbers-the-log-by-something-else"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        let seq = u64::try_from(self.log.len())'''
+becomes = '''
+        let seq = u64::try_from(self.log.len() / 2)'''
+catches = [
+    "drive::session::tests::the_log_is_numbered_by_position_and_a_reader_can_resume_from_any_point",
+]
+
+[[fault]]
+id = "drive.session-a-rejected-ask-joins-the-trunk"
+failure_class = "drive.session-a-rejected-ask-joins-the-trunk"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        Ok(StreamEnded::Rejected { status, body }) => {
+            state.push(Event::Rejected {'''
+becomes = '''
+        Ok(StreamEnded::Rejected { status, body }) => {
+            state.trunk.push(Message::new(Role::User, ask));
+            state.push(Event::Rejected {'''
+catches = [
+    "drive::session::tests::a_turn_the_server_refused_is_logged_as_refused_and_leaves_the_trunk_alone",
+]
+
+[[fault]]
+id = "drive.session-a-crashed-turn-never-settles"
+failure_class = "drive.session-a-crashed-turn-never-settles"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+    if state.settlement == Settlement::Turn {
+        state.cancel = None;
+        state.push(Event::Crashed { why });'''
+becomes = '''
+    if false {
+        state.cancel = None;
+        state.push(Event::Crashed { why });'''
+catches = [
+    "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
+]
+
+[[fault]]
+id = "drive.session-a-crash-says-nothing"
+failure_class = "drive.session-a-crash-says-nothing"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+                    crashed(&shared, panic_message(payload.as_ref()));'''
+becomes = '''
+                    crashed(&shared, String::new());'''
+catches = [
+    "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
 ]

@@ -96,6 +96,7 @@
 pub mod canned;
 pub mod regimen;
 pub mod script;
+pub mod session;
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -2874,6 +2875,8 @@ mod tests {
                 // manifest; a catcher living beside it has to be findable
                 // here too.
                 include_str!("regimen.rs"),
+                // The interactive session (#117 R2).
+                include_str!("session.rs"),
                 // The binary's own tests, which live outside `src/` and are the
                 // only thing that runs the program. A `catches` naming one of
                 // them has to be checkable here too, or the half of this lane
