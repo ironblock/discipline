@@ -1,17 +1,20 @@
 import type { Box } from './links.ts';
 
 /**
- * Lines into working memory routed as a wiring harness, not as curves: pure,
- * so it is tested without a layout engine (`Links.tsx` measures, this routes).
+ * Lines routed as a wiring harness, not as curves -- into working memory
+ * (`route`, measured by `Links.tsx`) and from the trunk to its side calls
+ * (`cabling`, measured by `SessionView`): pure, so tested without a layout
+ * engine.
  *
- * Channel routing, as on a circuit board: each side call's lines share one
- * vertical TRACK in the gutter before memory, and fan out from it to the
- * entries they wrote. Tracks are assigned greedily in the order the side
- * calls sit on the page (the left-edge algorithm: a track is reused once
- * the run on it has ended), each taking the free track that crosses the
- * fewest lines already placed. So lines run parallel and never share a
- * track; where one must cross another, the horizontal hops the vertical
- * (or breaks, as a gap). Corners are round, chamfered or square.
+ * Channel routing, as on a circuit board: each net's lines share one
+ * vertical TRACK in a gutter and fan out from it to where they go. Tracks
+ * are assigned greedily in the order the runs start down the page (the
+ * left-edge algorithm: a track is reused once the run on it has ended),
+ * each taking the free track that crosses the fewest lines already placed;
+ * when more run at once than the gutter has room for, the tracks close up.
+ * So lines run parallel and never share a track; where one must cross
+ * another, the horizontal hops the vertical (or breaks, as a gap). Corners
+ * are round, chamfered or square.
  */
 
 export interface Pt {
@@ -94,7 +97,6 @@ export function route(nets: readonly Net[], gutter: { readonly left: number; rea
       const want = box.top + at;
       const clipped = want < panel.top ? 'top' : want > panel.bottom ? 'bottom' : undefined;
       const place = clipped ?? `entry:${entry}`;
-      // An edge pin's x is its track's, known once the track is.
       const pin = byPlace.get(place) ??
         (clipped
           ? { y: clipped === 'top' ? panel.top : panel.bottom, x: box.left, clipped: true, toward: clipped === 'top' ? -1 : 1, entries: [] }
@@ -115,19 +117,89 @@ export function route(nets: readonly Net[], gutter: { readonly left: number; rea
     }),
   );
 
-  const count = Math.max(1, Math.floor((gutter.right - gutter.left - 2 * EDGE) / o.spacing) + 1);
-  const xOf = (t: number) => gutter.right - EDGE - t * o.spacing;
+  return lay(
+    order.map((net, i) => ({ key: net.key, source: { x: net.from.right, y: net.from.top + at }, pins: pins[i] ?? [] })),
+    gutter,
+    o,
+  );
+}
+
+/**
+ * A side call off the trunk, placed (placement.ts): its cable leaves the
+ * trunk's edge at `leave` and enters the side call at `enter`.
+ */
+export interface Tap {
+  readonly id: string;
+  /** The trunk node it came from. */
+  readonly anchor: string;
+  readonly slot: number;
+  readonly leave: number;
+  readonly enter: Pt;
+  /** Waiting for its slot: its cable is laid apart from those that ran. */
+  readonly pending: boolean;
+}
+
+/**
+ * The cables from the trunk as a harness: in the gutter before each slot's
+ * column, one net per trunk node, forking to each side call off it in that
+ * slot. A net leaves the trunk where its highest cable would have.
+ */
+export function cabling(taps: readonly Tap[], trunkRight: number, gutters: ReadonlyMap<number, { readonly left: number; readonly right: number }>, o: Options = HARNESS): Routed[] {
+  const nets = new Map<string, { slot: number; taps: Tap[] }>();
+  for (const tap of taps) {
+    const key = `${tap.slot}>${tap.anchor}${tap.pending ? '>pending' : ''}`;
+    const net = nets.get(key) ?? { slot: tap.slot, taps: [] };
+    net.taps.push(tap);
+    nets.set(key, net);
+  }
+  return [...gutters].flatMap(([slot, gutter]) =>
+    lay(
+      [...nets].flatMap(([key, net]) =>
+        net.slot === slot
+          ? [
+              {
+                key,
+                source: { x: trunkRight, y: Math.min(...net.taps.map((t) => t.leave)) },
+                pins: net.taps.map((t) => ({ ...t.enter, entries: [t.id], clipped: false })),
+              },
+            ]
+          : [],
+      ),
+      gutter,
+      o,
+    ),
+  );
+}
+
+/**
+ * Give each net a track in `gutter`, left-edge style: in the order their
+ * runs start down the page, each takes the free track (one whose run has
+ * ended) that crosses fewest of the nets already placed.
+ */
+function lay(nets: readonly { readonly key: string; readonly source: Pt; readonly pins: readonly Pin[] }[], gutter: { readonly left: number; readonly right: number }, o: Options): Routed[] {
+  const clear = o.pinStep;
+  const spans = nets
+    .map((net) => {
+      const ys = [net.source.y, ...net.pins.map((p) => p.y)];
+      return { net, lo: Math.min(...ys), hi: Math.max(...ys) };
+    })
+    // In order of where each run starts: then first-fit needs no more tracks than run at once.
+    .sort((a, b) => a.lo - b.lo);
+  // As many tracks as ever run at once; closer than `spacing` if the gutter is short of room, never shared.
+  let most = 0;
+  for (const { lo } of spans) most = Math.max(most, spans.filter((s) => s.lo <= lo && lo < s.hi + clear).length);
+  const room = Math.max(0, gutter.right - gutter.left - 2 * EDGE);
+  const fits = Math.floor(room / o.spacing) + 1;
+  const spacing = most > fits ? room / Math.max(1, most - 1) : o.spacing;
+  const count = Math.max(fits, most);
+  const xOf = (t: number) => gutter.right - EDGE - t * spacing;
   const placed: Routed[] = [];
   const onTrack: [number, number][][] = Array.from({ length: count }, () => []);
-  const clear = o.pinStep;
 
-  order.forEach((net, i) => {
-    const onto = (x: number) => (pins[i] ?? []).map((p) => (p.clipped ? { ...p, x } : p));
-    const netPins = onto(0);
-    const source = { x: net.from.right, y: net.from.top + at };
-    const ys = [source.y, ...netPins.map((p) => p.y)];
-    const lo = Math.min(...ys);
-    const hi = Math.max(...ys);
+  for (const { net, lo, hi } of spans) {
+    // An edge pin's x is its track's.
+    const onto = (x: number) => net.pins.map((p) => (p.clipped ? { ...p, x } : p));
+    const { source } = net;
     let best = { t: 0, overlap: Number.POSITIVE_INFINITY, cost: Number.POSITIVE_INFINITY };
     for (let t = 0; t < count; t++) {
       const overlap = (onTrack[t] ?? []).reduce((sum, [a, b]) => sum + Math.max(0, Math.min(b, hi + clear) - Math.max(a, lo - clear)), 0);
@@ -136,7 +208,7 @@ export function route(nets: readonly Net[], gutter: { readonly left: number; rea
     }
     onTrack[best.t]?.push([lo, hi]);
     placed.push({ key: net.key, x: xOf(best.t), source, pins: onto(xOf(best.t)), lo, hi });
-  });
+  }
   return placed;
 }
 
@@ -226,7 +298,7 @@ function polyline(raw: readonly Pt[], over: (y: number, a: number, b: number) =>
     const next = points[i + 1];
     if (!prev || !next || o.bend === 'square') return 0;
     // No wider than leaves room to hop the next track over, beside the corner.
-    return Math.min(o.radius, o.spacing - o.hop - 0.5, len(prev, p) / 2, len(p, next) / 2);
+    return Math.max(0, Math.min(o.radius, o.spacing - o.hop - 0.5, len(prev, p) / 2, len(p, next) / 2));
   });
 
   let d = `M${n(start.x)} ${n(start.y)}`;

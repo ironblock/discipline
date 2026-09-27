@@ -5,6 +5,10 @@ import type { Link } from '../drive/transport.ts';
 import type { BranchNode, Folded, Session, TrunkNode } from '../session/fold.ts';
 import { Branch, BranchBar } from './Branch.tsx';
 import { Cable } from './Cable.tsx';
+import { Wiring } from './Wiring.tsx';
+import type { Cabled } from './Wiring.tsx';
+import { cabling, draw, HARNESS } from './harness.ts';
+import type { Tap } from './harness.ts';
 import { Links } from './Links.tsx';
 import type { Wire } from './Links.tsx';
 import { ENTER, place } from './placement.ts';
@@ -62,6 +66,8 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
   const anchors = useRef(new Map<string, HTMLElement>());
   const cells = useRef(new Map<string, HTMLElement>());
   const [placed, setPlaced] = useState<ReadonlyMap<string, Placement>>(new Map());
+  // Where the trunk ends and each slot's gutter lies, in the stage's coordinates: for cables routed as a harness.
+  const [columns, setColumns] = useState<Columns>();
   const [height, setHeight] = useState(0);
   const seams = useRef(new Map<number, HTMLElement>());
   const [seamPad, setSeamPad] = useState<ReadonlyMap<number, number>>(new Map());
@@ -142,6 +148,41 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
   const laneBranches = (slot: number) =>
     trunkOrder.flatMap((id) => (session.branches.get(id) ?? []).filter((b) => b.slot === slot));
 
+  // The trunk's cables routed as a harness (harness.ts), when the surface asks.
+  const wiring = surface.curtain ? surface.wiring : undefined;
+  const cabled = useMemo<readonly Cabled[]>(() => {
+    if (!wiring || !columns) return [];
+    const byId = new Map(lanes.flatMap((slot) => laneBranches(slot).map((b) => [b.id, b] as const)));
+    const taps: Tap[] = lanes.flatMap((slot) =>
+      laneBranches(slot).flatMap((b) => {
+        const p = placed.get(b.id);
+        const gutter = columns.gutters.get(slot);
+        return p && gutter ? [{ id: b.id, anchor: b.at, slot, leave: p.leave, enter: { x: gutter.right, y: p.top + ENTER }, pending: p.pending }] : [];
+      }),
+    );
+    const options = { ...HARNESS, ...wiring };
+    const routed = cabling(taps, columns.trunkRight, columns.gutters, options);
+    const drawn = draw(routed, options);
+    return routed.map((net, i) => {
+      const lines = drawn[i];
+      const first = byId.get(net.pins[0]?.entries[0] ?? '');
+      return {
+        key: net.key,
+        lane: first?.lane ?? '',
+        pending: net.key.endsWith('>pending'),
+        d: lines?.d ?? '',
+        dots: lines?.dots ?? [],
+        source: net.source,
+        pins: net.pins,
+        wires: (lines?.wires ?? []).map((w) => {
+          const b = byId.get(w.entry);
+          return { id: w.entry, lane: b?.lane ?? '', d: w.d, live: b?.outcome === undefined && placed.get(w.entry)?.pending === false };
+        }),
+      };
+    });
+    // `lanes` and `laneBranches` are derived from `session` and `surface`.
+  }, [wiring, columns, placed, session, surface.curtain]);
+
   const layout = useCallback(() => {
     const root = stage.current;
     if (!root) return;
@@ -199,6 +240,16 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
       if (pad > 0) pads.set(era, pad);
     }
     setPlaced((prev) => (samePlacements(prev, next) ? prev : next));
+    const box = root.getBoundingClientRect();
+    const trunkRight = (root.querySelector('.ex-trunk')?.getBoundingClientRect().right ?? box.left) - box.left;
+    const gutters = new Map<number, { left: number; right: number }>();
+    let before = trunkRight;
+    for (const el of root.querySelectorAll<HTMLElement>('.ex-lane')) {
+      const r = el.getBoundingClientRect();
+      gutters.set(Number(el.dataset.slot), { left: before, right: r.left - box.left });
+      before = r.right - box.left;
+    }
+    setColumns((prev) => (prev && sameColumns(prev, { trunkRight, gutters }) ? prev : { trunkRight, gutters }));
     setHeight((prev) => (prev === bottom ? prev : bottom));
     setSeamPad((prev) => (sameNumbers(prev, pads) ? prev : pads));
     // `lanes`, `laneBranches` and `gap` are derived from `session` and `surface`.
@@ -377,6 +428,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                   </section>
                 ))}
               </div>
+              {cabled.length > 0 ? <Wiring nets={cabled} /> : null}
               {lanes.map((slot) => (
                 <div className="ex-lane" key={slot} data-slot={slot} style={{ minHeight: height }}>
                   {laneBranches(slot).map((branch) => (
@@ -387,6 +439,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                       cellRef={cellRef(branch.id)}
                       evicted={(eraOf.get(branch.at) ?? lastEra) < lastEra}
                       condensed={condensed}
+                      wired={wiring !== undefined}
                       hot={hot.branches.has(branch.id)}
                       open={branch.id === revealed}
                       {...(onSurface
@@ -459,6 +512,7 @@ function BranchCell({
   cellRef,
   evicted,
   condensed,
+  wired,
   hot,
   open,
   onOpen,
@@ -470,6 +524,8 @@ function BranchCell({
   readonly evicted: boolean;
   /** Drawn as a bar that keeps its place (the curtain's `condensed`). */
   readonly condensed: boolean;
+  /** Its cable is drawn with the others, routed as a harness (Wiring.tsx), not here. */
+  readonly wired: boolean;
   /** Lit: it, or an entry it wrote, is pointed at. */
   readonly hot: boolean;
   /** Opened when it is drawn whole: the person pressed its bar. */
@@ -489,10 +545,26 @@ function BranchCell({
       data-pending={pending ? '' : undefined}
       data-hot={hot ? '' : undefined}
     >
-      {placement ? <Cable reach={placement.reach} drop={drop} top={ENTER - drop} live={branch.outcome === undefined && !pending} pending={pending} /> : null}
+      {placement && !wired ? <Cable reach={placement.reach} drop={drop} top={ENTER - drop} live={branch.outcome === undefined && !pending} pending={pending} /> : null}
       {condensed ? <BranchBar node={branch} {...(onOpen ? { onOpen } : {})} /> : <Branch node={branch} open={open} />}
     </div>
   );
+}
+
+interface Columns {
+  /** The trunk's right edge. */
+  readonly trunkRight: number;
+  /** Per slot, the gutter before its column. */
+  readonly gutters: ReadonlyMap<number, { readonly left: number; readonly right: number }>;
+}
+
+function sameColumns(a: Columns, b: Columns): boolean {
+  if (Math.abs(a.trunkRight - b.trunkRight) > 0.5 || a.gutters.size !== b.gutters.size) return false;
+  for (const [slot, g] of b.gutters) {
+    const h = a.gutters.get(slot);
+    if (!h || Math.abs(h.left - g.left) > 0.5 || Math.abs(h.right - g.right) > 0.5) return false;
+  }
+  return true;
 }
 
 function sameNumbers(a: ReadonlyMap<number, number>, b: ReadonlyMap<number, number>): boolean {

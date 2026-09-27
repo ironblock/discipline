@@ -63,3 +63,18 @@
 @media (prefers-reduced-motion: reduce) {
   .ex-cable[data-live] .ex-cable__pulse { display: none; }
 }
+
+/* Routed as a harness (Wiring.tsx): one overlay over the stage, a dot where a net forks. */
+.ex-wiring {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.ex-cable__dot {
+  fill: currentColor;
+}

@@ -298,9 +298,10 @@ export const StepLimit: Story = {
 };
 
 /**
- * The lines into memory routed as a wiring harness (harness.ts) instead of
- * curves, on the densest drive: 111 patches an ask. Each side call's lines
- * share one track in the gutter and fork to what they wrote; crossings hop.
+ * The lines into memory and the trunk's cables routed as a wiring harness
+ * (harness.ts) instead of curves, on the densest drive: 111 patches an ask.
+ * Each net's lines share one track in a gutter and fork to where they go;
+ * crossings hop.
  */
 export const Harness: Story = {
   name: '12 · lines into memory as a harness',
@@ -312,8 +313,12 @@ export const Harness: Story = {
     cell.scrollIntoView({ block: 'center' });
     const nets = () => [...document.querySelectorAll('.ex-links .ex-net__run')].map((p) => p.getAttribute('d') ?? '');
     await waitFor(async () => expect(nets().length).toBeGreaterThan(0));
+    // The trunk's cables too, drawn together over the stage rather than each in its side call.
+    const cables = [...canvasElement.querySelectorAll('.ex-wiring [data-net] .ex-cable__line')].map((p) => p.getAttribute('d') ?? '');
+    await expect(cables.length).toBeGreaterThan(0);
+    await expect(canvasElement.querySelector('.ex-branchcell .ex-cable')).toBeNull();
     // Straight runs and corners only: no curve anywhere.
-    await expect(nets().every((d) => /^[MLA\d .-]+$/.test(d))).toBe(true);
+    await expect([...nets(), ...cables].every((d) => /^[MLA\d .-]+$/.test(d))).toBe(true);
     // At rest a line is the net's; pointed at, a side call's own lines are drawn over it.
     const lit = () => [...document.querySelectorAll(`.ex-links .ex-link[data-branch="${cell.dataset.branch}"]`)].filter((l) => getComputedStyle(l).stroke !== 'rgba(0, 0, 0, 0)');
     await expect(lit()).toHaveLength(0);

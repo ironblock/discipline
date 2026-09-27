@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { HARNESS, draw, route } from './harness.ts';
-import type { Net } from './harness.ts';
+import { HARNESS, cabling, draw, route } from './harness.ts';
+import type { Net, Tap } from './harness.ts';
 
 // Side calls at the left, a 40px gutter, working memory's panel at the right, in viewport pixels.
 const gutter = { left: 400, right: 440 };
@@ -84,8 +84,58 @@ describe('lines into memory, routed as a harness', () => {
     expect(drawn?.clipped).toBe('');
   });
 
+  it('closes the tracks up rather than share one, when more lines run at once than the gutter has room for', () => {
+    // Nine lines all running at once; the gutter has room for five at full spacing.
+    const nets = Array.from({ length: 9 }, (_, i) => net(`n${i}`, 300 + 5 * i, [`e${i}`, 150 + 5 * i]));
+    const xs = route(nets, gutter, panel, AT).map((r) => r.x);
+    expect(new Set(xs).size).toBe(9);
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(gutter.left);
+  });
+
   it('runs two lines into one entry side by side, not on top of each other', () => {
     const got = route([net('a', 300, ['e1', 150]), net('b', 400, ['e1', 150])], gutter, panel, AT);
     expect(got.map((r) => r.pins[0]?.y)).toEqual([165, 165 + HARNESS.pinStep]);
+  });
+});
+
+describe('the trunk’s cables, routed as a harness', () => {
+  // The trunk's edge at 300; slot 1's column from 340, slot 2's from 740, each with its gutter before it.
+  const gutters = new Map([
+    [1, { left: 300, right: 340 }],
+    [2, { left: 700, right: 740 }],
+  ]);
+  const tap = (id: string, anchor: string, slot: number, leave: number, enter: number, pending = false): Tap => ({
+    id,
+    anchor,
+    slot,
+    leave,
+    enter: { x: slot === 1 ? 340 : 740, y: enter },
+    pending,
+  });
+  const taps = [
+    tap('s1', 'a', 1, 115, 115), // level with its trunk node
+    tap('s2', 'a', 1, 180, 215), // off the same node, stacked below
+    tap('s3', 'b', 1, 150, 400, true), // waiting for the slot, collecting at its bottom
+    tap('s4', 'a', 2, 180, 300), // off the first node, in the next slot over
+  ];
+  const routed = cabling(taps, 300, gutters);
+  const net = (key: string) => routed.find((r) => r.key === key);
+
+  it('runs the side calls off one trunk node in one slot as one net, forking to each', () => {
+    expect(net('1>a')).toMatchObject({ x: 334, source: { x: 300, y: 115 } });
+    expect(net('1>a')?.pins.map((p) => p.entries)).toEqual([['s1'], ['s2']]);
+    const drawn = draw(routed).find((d) => d.key === '1>a');
+    expect(drawn?.dots).toEqual([{ x: 334, y: 115 }]);
+  });
+
+  it('lays a waiting side call’s cable apart, on a track of its own', () => {
+    expect(net('1>b>pending')?.x).toBe(326);
+  });
+
+  it('runs each slot’s cables in the gutter before its column, hopping the tracks it crosses on the way', () => {
+    expect(net('2>a')?.x).toBe(734);
+    const drawn = draw(routed).find((d) => d.key === '2>a');
+    expect(drawn?.d).toContain('L323.5 180A2.5 2.5 0 0 1 328.5 180');
+    expect(drawn?.d).toContain('L331.5 180A2.5 2.5 0 0 1 336.5 180');
   });
 });
