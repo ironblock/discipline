@@ -6,6 +6,7 @@
 #   verify.sh                 run every check
 #   verify.sh --only CHECK    run one check (repeatable)
 #   verify.sh --only test --scope SPEC   narrow the test check (selftest only)
+#   verify.sh --only injections --scope inject_NAME   apply one injection (selftest only)
 #   verify.sh --only history --range A..B   scan an explicit range, to repro
 #   verify.sh --list          name the checks, in order
 #   verify.sh --selftest      prove the gate goes red on seeded faults (bash 4+)
@@ -132,6 +133,7 @@ check_clippy() { cargo clippy --workspace --all-targets -- -D warnings; }
 # gate depends on.
 VERIFY_TEST_SCOPE=""
 VERIFY_SCOPE=""
+VERIFY_SCOPE_GIVEN=""
 
 # SPEC is TARGET or TARGET/FILTER.
 #   lib            the library's own tests
@@ -956,7 +958,7 @@ seeded_case() {
   elif [ -n "$scope" ]; then
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- A SCOPE ON A CHECK THAT TAKES NONE\n' \
       "$(( SECONDS - started ))" "$check" "$label"
-    SELFTEST_BROKEN+=("${label}: only the test check takes a scope")
+    SELFTEST_BROKEN+=("${label}: only the test and injections checks take a scope")
     shard_cost "$ident" "$started_ms" "$label"
     return
   fi
@@ -6827,7 +6829,7 @@ selftest() {
   seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
     'but the committed file hashes to'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
-    'inject_that_changes_nothing' inject_that_changes_nothing
+    'inject_that_changes_nothing  exit=' inject_that_changes_nothing
   seeded_case "a nested table flattened"              test     inject_regimen_nested_table_flattened \
     'formats::regimen::tests::a_table_may_hold_one_table_and_no_more \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
@@ -7997,6 +7999,7 @@ while [ "$#" -gt 0 ]; do
       # Read now, graded below once the check it narrows is known: a test
       # spec and an injection name are different spellings.
       VERIFY_SCOPE="$2"
+      VERIFY_SCOPE_GIVEN=1
       shift 2
       ;;
     --range)
@@ -8065,7 +8068,10 @@ fi
 # only one asked for. `verify.sh --scope lib` on its own would otherwise read
 # as "run everything" while running a fraction of the tests, and read that way
 # in a workflow, where nobody would see it.
-if [ -n "$VERIFY_SCOPE" ]; then
+# Graded on "was --scope given", never on its value: an empty `--scope ''`
+# -- an unset variable in a caller -- is a spelling nobody defined, and must
+# be a misuse rather than silently no scope at all.
+if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
   if [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ]; then
     echo "verify: --scope narrows one check, so it needs exactly --only test or --only injections" >&2
     exit "$EXIT_MISUSE"

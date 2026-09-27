@@ -61,7 +61,8 @@ WORKFLOW_CALL = re.compile(r"^\s*workflow_call:\s*$", re.MULTILINE)
 # script is refused here by a row, not by whoever remembers this rule exists.
 NARROWING_FLAGS = (
     ("--scope", re.compile(r"--scope\b"),
-     "narrows the test check to part of the suite; the selftest scopes its own "
+     "narrows the test check to part of the suite, or the injections check to "
+     "one injection; the selftest scopes its own "
      "sandboxes and CI must not"),
     ("--range", re.compile(r"--range\b"),
      "narrows the history check to a slice somebody chose; the range CI must "

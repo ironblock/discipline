@@ -578,7 +578,7 @@ kind = "seeded-gate"
 check = "injections"
 label = "an injection that changes nothing"
 failure_class = "gate.injection-inert"
-legacy_signature = "inject_that_changes_nothing"
+legacy_signature = "inject_that_changes_nothing  exit="
 migrated = false
 
 [[fault]]
