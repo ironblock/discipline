@@ -55,3 +55,44 @@ function luminance([r, g, b]: readonly [number, number, number]): number {
   };
   return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 }
+
+/**
+ * How far apart two marks' colours look (the distance between them in
+ * OKLab, where 0.02 is about the least a person can see), each as the page
+ * resolves it: its own colour -- the one its strokes take, `currentColor` --
+ * painted over every ancestor's background. For lines that say what they
+ * are by hue: two lanes' cables.
+ */
+export function apart(a: Element, b: Element): number {
+  const [la, aa, ba] = oklab(painted(a));
+  const [lb, ab, bb] = oklab(painted(b));
+  return Math.hypot(la - lb, aa - ab, ba - bb);
+}
+
+function painted(el: Element): readonly [number, number, number] {
+  const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('no 2d canvas');
+  const paint = (colour: string): readonly [number, number, number] => {
+    ctx.fillStyle = colour;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r = 0, g = 0, bl = 0] = ctx.getImageData(0, 0, 1, 1).data;
+    return [r, g, bl];
+  };
+  const layers: string[] = [];
+  for (let at: Element | null = el.parentElement; at; at = at.parentElement) layers.unshift(getComputedStyle(at).backgroundColor);
+  paint('#000');
+  for (const colour of layers) paint(colour);
+  return paint(getComputedStyle(el).color);
+}
+
+function oklab([r, g, b]: readonly [number, number, number]): readonly [number, number, number] {
+  const lin = (c: number) => {
+    const s = c / 255;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const [lr, lg, lb] = [lin(r), lin(g), lin(b)];
+  const l = Math.cbrt(0.4122214708 * lr + 0.5363019296 * lg + 0.0514459929 * lb);
+  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+  return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+}

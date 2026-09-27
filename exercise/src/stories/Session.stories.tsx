@@ -334,6 +334,80 @@ export const LinesIntoMemory: Story = {
   },
 };
 
+/**
+ * Pointing at a trunk node lights its chain: the node, the side calls off
+ * it, their cables, the lines into memory and the entries they wrote.
+ * Pointing at a cable lights the two things it joins, and their chain.
+ */
+export const ChainFromANode: Story = {
+  name: 'chain · a trunk node, and a cable, light what they join',
+  args: { cursor: MOMENTS.done },
+  render: (args) => <div style={{ width: 1900 }}>{meta.render(args)}</div>,
+  play: async ({ canvasElement }) => {
+    const node = q(canvasElement, '.ex-trunk__node[data-node]') as HTMLElement;
+    const id = node.getAttribute('data-node') ?? '';
+    const sides = [...canvasElement.querySelectorAll('.ex-branchcell')].filter((c) => {
+      const net = [...canvasElement.querySelectorAll(`.ex-wiring [data-point][data-node="${id}"]`)];
+      return net.some((h) => (h.getAttribute('data-branches') ?? '').split(' ').includes(c.getAttribute('data-branch') ?? ''));
+    });
+    await expect(sides.length).toBeGreaterThan(0);
+    const lit = () => ({
+      node: node.hasAttribute('data-hot'),
+      sides: sides.every((c) => c.hasAttribute('data-hot')),
+      cables: sides.every((c) => q(canvasElement, `.ex-wiring [data-hot][data-from="${c.getAttribute('data-branch')}"]`) !== null),
+      others: [...canvasElement.querySelectorAll('.ex-branchcell[data-hot]')].length === sides.length,
+    });
+    await userEvent.hover(node.querySelector('.ex-block') as HTMLElement);
+    await waitFor(async () => expect(lit()).toEqual({ node: true, sides: true, cables: true, others: true }));
+    // Its entries are lit too, and only those.
+    await expect(q(canvasElement, '.ex-memory__entry[data-hot]')).not.toBeNull();
+    await userEvent.unhover(node.querySelector('.ex-block') as HTMLElement);
+    await waitFor(async () => expect(node.hasAttribute('data-hot')).toBe(false));
+    // The cable itself: its node and the side calls on it.
+    await userEvent.hover(q(canvasElement, `.ex-wiring [data-point][data-node="${id}"]`) as Element);
+    await waitFor(async () => expect(lit()).toMatchObject({ node: true, cables: true }));
+  },
+};
+
+/** A line into memory, pointed at: its side call and that one entry, not the rest of what the side call wrote. */
+export const ChainFromALine: Story = {
+  name: 'chain · a line into memory lights its two ends',
+  args: { cursor: MOMENTS.done },
+  globals: { connectors: 'sweep' },
+  render: (args) => <div style={{ width: 1900 }}>{meta.render(args)}</div>,
+  play: async ({ canvasElement }) => {
+    const cell = q(canvasElement, '.ex-branchcell[data-branch="i/1"]') as HTMLElement;
+    cell.scrollIntoView({ block: 'center' });
+    const hits = () => [...document.querySelectorAll('.ex-links [data-point][data-branches="i/1"][data-entry]')];
+    await waitFor(async () => expect(hits().length).toBeGreaterThan(1));
+    const hit = hits()[0] as Element;
+    const entry = hit.getAttribute('data-entry') ?? '';
+    await userEvent.hover(hit);
+    await waitFor(async () => expect(cell.hasAttribute('data-hot')).toBe(true));
+    const hotEntries = [...canvasElement.querySelectorAll('.ex-memory__entry[data-hot]')].map((e) => e.id);
+    await expect(hotEntries).toEqual([`memory/${entry}`]);
+    await expect([...document.querySelectorAll('.ex-links .ex-link[data-hot]')].map((l) => l.getAttribute('data-entry'))).toEqual([entry]);
+    // Its sweep cable to the trunk is lit, and the node it came from.
+    await expect(cell.querySelector('.ex-cable')?.hasAttribute('data-hot')).toBe(true);
+    await expect(q(canvasElement, '.ex-trunk__node[data-hot]')).not.toBeNull();
+  },
+};
+
+/** Focus lights a chain as the pointer does: a control inside a side call, reached by keyboard. */
+export const ChainByFocus: Story = {
+  name: 'chain · focus lights it too',
+  args: { cursor: MOMENTS.done },
+  render: (args) => <div style={{ width: 1900 }}>{meta.render(args)}</div>,
+  play: async ({ canvasElement }) => {
+    const cell = q(canvasElement, '.ex-branchcell[data-branch="i/1"]') as HTMLElement;
+    (cell.querySelector('button, summary, [tabindex]') as HTMLElement).focus();
+    await waitFor(async () => expect(cell.hasAttribute('data-hot')).toBe(true));
+    await expect(q(canvasElement, '.ex-trunk__node[data-hot]')).not.toBeNull();
+    (document.activeElement as HTMLElement).blur();
+    await waitFor(async () => expect(cell.hasAttribute('data-hot')).toBe(false));
+  },
+};
+
 /** Working memory shut in its drawer: no lines into it. */
 export const LinesDrawerShut: Story = {
   name: 'memory · no lines into a shut drawer',

@@ -51,7 +51,7 @@ export function laneKnown(lane: ForkLane): boolean {
  */
 export function laneStyle(lane: ForkLane | undefined): CSSProperties | undefined {
   if (lane === undefined || !LANES.has(lane)) return undefined;
-  return { ['--lane-fill' as string]: `var(--fill-${lane})`, ['--lane-ink' as string]: `var(--ink-${lane})` };
+  return { ['--lane-fill' as string]: `var(--fill-${lane})`, ['--lane-ink' as string]: `var(--ink-${lane})`, ['--lane-lamp' as string]: `var(--lamp-${lane})` };
 }
 
 // ------------------------------------------------------------------ tools

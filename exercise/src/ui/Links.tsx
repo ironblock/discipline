@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 
+import { lineKey } from './chain.ts';
+import type { Chain } from './chain.ts';
 import { draw, HARNESS, route } from './harness.ts';
 import type { Net } from './harness.ts';
 import { link } from './links.ts';
@@ -8,6 +10,7 @@ import type { Box } from './links.ts';
 import { ENTER } from './placement.ts';
 import { laneStyle, opOf } from './sets.ts';
 import type { Wiring } from './prefs.ts';
+import './cable.css';
 import './links.css';
 
 /** One patch: the side call that landed it, and the working-memory entry it touched. */
@@ -38,7 +41,8 @@ interface DrawnNet {
  * What each side call wrote, as a line from it into working memory: one per
  * patch, for the side calls on screen, drawn over the page in viewport
  * coordinates and redrawn as the page or memory's panel scrolls. Faint at
- * rest; lit when either end is `hot` (pointed at, or the address's target).
+ * rest; lit while it is in the `hot` chain (chain.ts: something it joins
+ * is pointed at, or is the address's target). A line can be pointed at.
  * An entry scrolled out of memory's panel is reached at the panel's edge,
  * dashed. Nothing is drawn into a shut drawer.
  *
@@ -53,7 +57,7 @@ export function Links({
   revision,
 }: {
   readonly wires: readonly Wire[];
-  readonly hot: { readonly branches: ReadonlySet<string>; readonly entries: ReadonlySet<string> };
+  readonly hot: Chain;
   readonly wiring?: Wiring;
   readonly revision: readonly unknown[];
 }) {
@@ -147,6 +151,7 @@ export function Links({
       {nets.map((net) => (
         <g key={net.branch} className="ex-net" data-from={net.branch} style={laneStyle(net.lane) as CSSProperties}>
           <path className="ex-net__run" d={net.d} />
+          <path className="ex-hit" d={net.d} data-point="" data-branches={net.branch} />
           {net.clipped ? <path className="ex-net__run" data-clipped="" d={net.clipped} /> : null}
           {net.dots.map((p) => (
             <circle key={`${p.x} ${p.y}`} className="ex-net__dot" cx={p.x} cy={p.y} r={2} />
@@ -154,17 +159,20 @@ export function Links({
         </g>
       ))}
       {drawn.map(({ key, wire, d, clipped }) => (
-        <path
-          key={key}
-          className="ex-link"
-          d={d}
-          data-from={wire.branch}
-          data-entry={wire.entry}
-          data-level={opOf(wire.op).level}
-          data-clipped={clipped ? '' : undefined}
-          data-hot={hot.branches.has(wire.branch) || hot.entries.has(wire.entry) ? '' : undefined}
-          style={laneStyle(wire.lane) as CSSProperties}
-        />
+        <g key={key}>
+          <path
+            className="ex-link"
+            d={d}
+            data-from={wire.branch}
+            data-entry={wire.entry}
+            data-level={opOf(wire.op).level}
+            data-clipped={clipped ? '' : undefined}
+            data-hot={hot.lines.has(lineKey(wire.branch, wire.entry)) ? '' : undefined}
+            style={laneStyle(wire.lane) as CSSProperties}
+          />
+          {/* A harness's net is pointed at as a whole; a curve on its own. */}
+          {wiring ? null : <path className="ex-hit" d={d} data-point="" data-branches={wire.branch} data-entry={wire.entry} />}
+        </g>
       ))}
     </svg>
   );

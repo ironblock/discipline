@@ -19,7 +19,7 @@ import { SessionHeader } from '../ui/SessionHeader.tsx';
 import { laneStyle } from '../ui/sets.ts';
 import { ToolCall } from '../ui/ToolCall.tsx';
 import { PHASES } from '../App.tsx';
-import { contrast } from './contrast.ts';
+import { apart, contrast } from './contrast.ts';
 import { UNCLOSED_FENCE, WHAT_MODELS_WRITE } from './markdown.ts';
 import { MOMENTS, branchAt, sessionAt, trunkNodeAt, variantAt } from './moments.ts';
 
@@ -146,7 +146,7 @@ export const SettingsPanel: Story = {
 
 /** The ways a cable can end, as token values a theme sets (tokens.css, `--cable-*`). */
 const CABLE_OPTIONS = [
-  { name: 'line', title: 'A · a line and an arrow, in the faint ink', vars: { '--cable-width': '1px', '--cable-rest': '0%', '--cable-arrow': 'inline', '--cable-ports': 'none', '--cable-glow': '0px' } },
+  { name: 'line', title: 'A · a hairline and an arrow, no glow', vars: { '--cable-width': '1px', '--cable-rest': '60%', '--cable-arrow': 'inline', '--cable-ports': 'none', '--cable-glow': '0px' } },
   { name: 'lane', title: 'B · a line and an arrow, in its lane’s colour', vars: { '--cable-width': '1.5px', '--cable-rest': '60%', '--cable-arrow': 'inline', '--cable-ports': 'none', '--cable-glow': '3px' } },
   { name: 'patch', title: 'C · a patch cable, jacked in at both ends', vars: { '--cable-width': '1.5px', '--cable-rest': '45%', '--cable-arrow': 'none', '--cable-ports': 'inline', '--cable-glow': '3px' } },
 ] as const;
@@ -172,7 +172,7 @@ function CableBench({ vars }: { readonly vars: Readonly<Record<string, string>> 
 /**
  * How a cable ends, three ways, each at rest (extraction), running straight
  * across (interview) and stacked below a busy slot (ratify): the running
- * ones carry travelling light. `colo` draws C, `paper` A.
+ * ones carry travelling light. `bloom` draws C, `paper` and `emboss` A.
  */
 export const CableOptions: Story = {
   name: 'Cable · three ways to end',
@@ -198,6 +198,45 @@ export const CableOptions: Story = {
     const pulses = [...canvasElement.querySelectorAll('.ex-cable')].map((c) => [c.hasAttribute('data-live'), moving(c.querySelector('.ex-cable__pulse') as Element)]);
     await expect(pulses.every(([live, travels]) => live === travels)).toBe(true);
     await expect(pulses.filter(([live]) => live)).toHaveLength(6);
+  },
+};
+
+/**
+ * A cable says which lane it runs to by its colour, at rest as well as lit:
+ * any two lanes' cables at rest are visibly apart, in every theme and mode
+ * (OKLab distance; 0.02 is about the least a person can see, and this asks
+ * for four times that -- the closest pair is diet asking and deciding,
+ * violet and magenta).
+ */
+export const CableLanesApart: Story = {
+  name: 'Cable · lanes tell apart at rest, every look',
+  render: () => (
+    <div style={{ display: 'flex', gap: '2rem' }}>
+      {['interview', 'extraction', 'ratify'].map((lane) => (
+        <div key={lane} data-lane={lane} style={{ position: 'relative', width: 120, height: 40, ...laneStyle(lane) }}>
+          <div style={{ position: 'absolute', left: 60, top: 0 }}>
+            <Cable reach={60} drop={20} top={10} live={false} />
+          </div>
+        </div>
+      ))}
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const root = canvasElement.querySelector('.ex-root') as HTMLElement;
+    const cable = (lane: string) => canvasElement.querySelector(`[data-lane="${lane}"] .ex-cable`) as Element;
+    // A cable fades between colours; measure where it lands, not where it is fading from.
+    for (const c of canvasElement.querySelectorAll<SVGElement>('.ex-cable')) c.style.transition = 'none';
+    const close: string[] = [];
+    for (const theme of ['bloom', 'paper', 'emboss'])
+      for (const mode of ['dark', 'light']) {
+        root.setAttribute('data-theme', theme);
+        root.setAttribute('data-mode', mode);
+        for (const [a, b] of [['interview', 'extraction'], ['interview', 'ratify'], ['extraction', 'ratify']] as const) {
+          const d = apart(cable(a), cable(b));
+          if (d < 0.08) close.push(`${theme} ${mode}: ${a}/${b} ${d.toFixed(3)}`);
+        }
+      }
+    await expect(close).toEqual([]);
   },
 };
 

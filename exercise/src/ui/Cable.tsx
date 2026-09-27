@@ -19,6 +19,8 @@ export function Cable({
   drop,
   live,
   pending = false,
+  hot = false,
+  point,
   top,
   style,
 }: {
@@ -27,6 +29,10 @@ export function Cable({
   readonly live: boolean;
   /** Its side call is waiting for its slot: the cable is drawn, dashed, and nothing travels it yet. */
   readonly pending?: boolean;
+  /** Its chain is lit: something it joins is pointed at (chain.ts). */
+  readonly hot?: boolean;
+  /** The side call it runs to, named so the cable itself can be pointed at. */
+  readonly point?: string;
   readonly top: number;
   readonly style?: CSSProperties;
 }) {
@@ -42,8 +48,10 @@ export function Cable({
       style={{ left: -reach, top: top - PAD, ...style }}
       data-live={live ? '' : undefined}
       data-pending={pending ? '' : undefined}
+      data-hot={hot ? '' : undefined}
     >
       <path className="ex-cable__line" d={d} />
+      {point !== undefined ? <path className="ex-hit" d={d} data-point="" data-branches={point} /> : null}
       <path className="ex-cable__pulse" d={d} pathLength={100} />
       <path className="ex-cable__arrow" d={`M${reach - 5} ${drop - 3.5}L${reach} ${drop}L${reach - 5} ${drop + 3.5}`} />
       <circle className="ex-cable__port" cx={0} cy={0} r={2.25} />

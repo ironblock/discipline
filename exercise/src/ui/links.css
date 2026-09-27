@@ -31,7 +31,12 @@
   filter: drop-shadow(0 0 var(--cable-glow) var(--c));
 }
 
-/* Either end of a lit line is lit too. */
+/* Everything in a lit chain is lit too (chain.ts): side calls, and the trunk nodes they came from. */
+.ex-trunk__node[data-hot] > .ex-block {
+  outline: 1px solid color-mix(in oklab, var(--ink-muted) 70%, transparent);
+  outline-offset: 2px;
+}
+
 .ex-branchcell[data-hot] .ex-block,
 .ex-branchcell[data-hot] .ex-bar {
   outline: 1px solid color-mix(in oklab, var(--lane-ink, var(--ink-lane)) 70%, transparent);

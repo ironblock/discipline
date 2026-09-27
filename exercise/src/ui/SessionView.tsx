@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { PointerEvent } from 'react';
 
 import type { Link } from '../drive/transport.ts';
 import type { BranchNode, Folded, Session, TrunkNode } from '../session/fold.ts';
@@ -16,6 +15,8 @@ import type { Placed, Side, Span } from './placement.ts';
 import { Composer } from './Composer.tsx';
 import type { ComposerProps } from './Composer.tsx';
 import { Memory, isUnseen } from './Memory.tsx';
+import { chain } from './chain.ts';
+import type { Pointed } from './chain.ts';
 import { Minimap } from './Minimap.tsx';
 import { wiringOf } from './prefs.ts';
 import { usePrefs } from './Prefs.tsx';
@@ -110,25 +111,27 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
         : [],
     [session, surface.curtain],
   );
-  const [pointed, setPointed] = useState<{ readonly branch?: string; readonly entry?: string }>({});
+  // What is pointed at (or focused), and the chain it lights (chain.ts); the address's target when nothing is.
+  const [pointed, setPointed] = useState<Pointed>({});
   const hot = useMemo(() => {
-    const branches = new Set<string>();
-    const entries = new Set<string>();
-    const branch = pointed.branch ?? (target !== undefined && !target.startsWith('memory/') ? target : undefined);
-    const entry = pointed.entry ?? (target?.startsWith('memory/') ? target.slice('memory/'.length) : undefined);
-    for (const w of wires) {
-      if (w.branch === branch || w.entry === entry) {
-        branches.add(w.branch);
-        entries.add(w.entry);
-      }
-    }
-    return { branches, entries };
-  }, [wires, pointed, target]);
-  const point = (e: PointerEvent) => {
-    const el = e.target as Element;
-    const branch = el.closest('[data-branch]')?.getAttribute('data-branch') ?? undefined;
-    const entry = el.closest('.ex-memory__entry')?.id.replace(/^memory\//, '') ?? undefined;
-    if (branch !== pointed.branch || entry !== pointed.entry) setPointed({ ...(branch ? { branch } : {}), ...(entry ? { entry } : {}) });
+    const sideOf = new Map([...session.branches.values()].flat().map((b) => [b.id, b] as const));
+    const aimed: Pointed =
+      pointed.node !== undefined || pointed.branches !== undefined || pointed.entry !== undefined
+        ? pointed
+        : target === undefined
+          ? {}
+          : target.startsWith('memory/')
+            ? { entry: target.slice('memory/'.length) }
+            : sideOf.has(target)
+              ? { branches: [target] }
+              : session.branches.has(target)
+                ? { node: target }
+                : {};
+    return chain(aimed, wires, (node) => (session.branches.get(node) ?? []).map((b) => b.id), (branch) => sideOf.get(branch)?.at);
+  }, [wires, pointed, target, session]);
+  const pointAt = (el: Element | null) => {
+    const next = el ? pointedAt(el) : {};
+    if (!samePointed(pointed, next)) setPointed(next);
   };
   const liveEntries = session.memory.filter((m) => m.state === 'live').length;
   const unseen = session.memory.filter((m) => isUnseen(m, seenThrough)).length;
@@ -173,6 +176,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
       const first = byId.get(net.pins[0]?.entries[0] ?? '');
       return {
         key: net.key,
+        node: first?.at ?? '',
         lane: first?.lane ?? '',
         pending: net.key.endsWith('>pending'),
         d: lines?.d ?? '',
@@ -361,8 +365,12 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
         data-fresh={unseen > 0 ? '' : undefined}
         data-drawer={drawer ? '' : undefined}
         data-wiring={wiring ? 'harness' : undefined}
-        onPointerOver={point}
-        onPointerLeave={() => setPointed({})}
+        onPointerOver={(e) => pointAt(e.target as Element)}
+        onPointerLeave={() => pointAt(null)}
+        onFocus={(e) => pointAt(e.target)}
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) pointAt(null);
+        }}
       >
         {prefs.memoryLines === 'on' ? <Links wires={wires} hot={hot} {...(wiring ? { wiring } : {})} revision={[session, placed, seamPad, drawer, drawerOpen, condensed]} /> : null}
         {/* As wide as the row must be for working memory to sit beside it (session.css, --need). */}
@@ -415,7 +423,13 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                     {era.nodes.map((node) => {
                       const branches = session.branches.get(node.id) ?? [];
                       return (
-                        <div className="ex-trunk__node" key={node.id} ref={anchorRef(node.id)}>
+                        <div
+                          className="ex-trunk__node"
+                          key={node.id}
+                          ref={anchorRef(node.id)}
+                          data-node={surface.curtain && branches.length > 0 ? node.id : undefined}
+                          data-hot={hot.nodes.has(node.id) ? '' : undefined}
+                        >
                           <TrunkBlock node={node} />
                           {!surface.curtain && branches.length > 0 ? (
                             <button
@@ -433,7 +447,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                   </section>
                 ))}
               </div>
-              {cabled.length > 0 ? <Wiring nets={cabled} /> : null}
+              {cabled.length > 0 ? <Wiring nets={cabled} lit={hot.branches} /> : null}
               {lanes.map((slot) => (
                 <div className="ex-lane" key={slot} data-slot={slot} style={{ minHeight: height }}>
                   {laneBranches(slot).map((branch) => (
@@ -550,7 +564,9 @@ function BranchCell({
       data-pending={pending ? '' : undefined}
       data-hot={hot ? '' : undefined}
     >
-      {placement && !wired ? <Cable reach={placement.reach} drop={drop} top={ENTER - drop} live={branch.outcome === undefined && !pending} pending={pending} /> : null}
+      {placement && !wired ? (
+        <Cable reach={placement.reach} drop={drop} top={ENTER - drop} live={branch.outcome === undefined && !pending} pending={pending} hot={hot} point={branch.id} />
+      ) : null}
       {condensed ? <BranchBar node={branch} {...(onOpen ? { onOpen } : {})} /> : <Branch node={branch} open={open} />}
     </div>
   );
@@ -570,6 +586,31 @@ function sameColumns(a: Columns, b: Columns): boolean {
     if (!h || Math.abs(h.left - g.left) > 0.5 || Math.abs(h.right - g.right) > 0.5) return false;
   }
   return true;
+}
+
+/**
+ * What an element under the pointer (or focused) points at: a connector
+ * names its ends (`data-point`); otherwise a side call, a trunk node that
+ * has side calls, or a working-memory entry.
+ */
+function pointedAt(el: Element): Pointed {
+  const hit = el.closest('[data-point]');
+  if (hit) {
+    const node = hit.getAttribute('data-node');
+    const branches = hit.getAttribute('data-branches');
+    const entry = hit.getAttribute('data-entry');
+    return { ...(node ? { node } : {}), ...(branches ? { branches: branches.split(' ') } : {}), ...(entry ? { entry } : {}) };
+  }
+  const side = el.closest('.ex-branchcell')?.getAttribute('data-branch');
+  if (side) return { branches: [side] };
+  const node = el.closest('.ex-trunk__node[data-node]')?.getAttribute('data-node');
+  if (node) return { node };
+  const entry = el.closest('.ex-memory__entry')?.id.replace(/^memory\//, '');
+  return entry ? { entry } : {};
+}
+
+function samePointed(a: Pointed, b: Pointed): boolean {
+  return a.node === b.node && a.entry === b.entry && (a.branches ?? []).join(' ') === (b.branches ?? []).join(' ');
 }
 
 function sameNumbers(a: ReadonlyMap<number, number>, b: ReadonlyMap<number, number>): boolean {
