@@ -559,6 +559,21 @@ impl<S: Streaming + 'static> Session<S> {
         outcome
     }
 
+    /// When the session opened, as its first event says: milliseconds since
+    /// the Unix epoch. What tells this session's log from another's.
+    #[must_use]
+    pub fn opened(&self) -> u64 {
+        let state = self.shared.lock();
+        let Some(Logged {
+            event: Event::Started { opened, .. },
+            ..
+        }) = state.log.first()
+        else {
+            unreachable!("`open` pushes `Started` before anything else can be logged");
+        };
+        *opened
+    }
+
     /// What the session is doing now.
     #[must_use]
     pub fn settlement(&self) -> Settlement {
@@ -741,14 +756,14 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::drive) mod tests {
     use super::*;
     use crate::client::shape::{Limits, SamplerCard};
     use crate::client::stream::{Canned, Gate, Step};
 
     const HEAD: &str = "you are the trunk";
 
-    fn template() -> RequestShape {
+    pub(in crate::drive) fn template() -> RequestShape {
         RequestShape {
             model: "a-model".to_owned(),
             messages: vec![Message::new(Role::System, HEAD)],
@@ -765,7 +780,7 @@ mod tests {
         }
     }
 
-    fn deltas(pieces: &[&str]) -> Vec<Step> {
+    pub(in crate::drive) fn deltas(pieces: &[&str]) -> Vec<Step> {
         pieces
             .iter()
             .map(|piece| Step::Delta((*piece).to_owned()))
@@ -775,7 +790,7 @@ mod tests {
     /// Wait until `done` holds of the whole log, or fail -- never hang. A
     /// cancel that does not reach its call would otherwise show up as a test
     /// that never finishes rather than one that fails.
-    fn wait_until<S: Streaming + 'static>(
+    pub(in crate::drive) fn wait_until<S: Streaming + 'static>(
         session: &Session<S>,
         what: &str,
         done: impl Fn(&[Logged]) -> bool,
@@ -794,7 +809,7 @@ mod tests {
         }
     }
 
-    fn settled(log: &[Logged]) -> bool {
+    pub(in crate::drive) fn settled(log: &[Logged]) -> bool {
         matches!(
             log.last(),
             Some(Logged {
