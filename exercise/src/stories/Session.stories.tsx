@@ -170,6 +170,23 @@ export const CurtainClosed: Story = {
   },
 };
 
+/** The lines switched in the header: routed as a harness, then back to curves. */
+export const LinesSwitched: Story = {
+  name: 'lines · a harness or curves, switched in the header',
+  args: { cursor: MOMENTS.done },
+  play: async ({ canvasElement }) => {
+    const radio = (option: string) => q(canvasElement, `.ex-segments[aria-label="lines"] input[value="${option}"]`) as HTMLInputElement;
+    await expect(radio('curves').checked).toBe(true);
+    await expect(q(canvasElement, '.ex-branchcell .ex-cable')).not.toBeNull();
+    await userEvent.click(radio('hops'));
+    await waitFor(async () => expect(q(canvasElement, '.ex-session[data-wiring="harness"] .ex-wiring [data-net]')).not.toBeNull());
+    await expect(q(canvasElement, '.ex-branchcell .ex-cable')).toBeNull();
+    await userEvent.click(radio('curves'));
+    await waitFor(async () => expect(q(canvasElement, '.ex-branchcell .ex-cable')).not.toBeNull());
+    await expect(q(canvasElement, '.ex-wiring')).toBeNull();
+  },
+};
+
 /** Room for everything: working memory is a column on the right, past the last lane. */
 export const MemoryBeside: Story = {
   name: 'memory · beside, with room',
@@ -311,9 +328,9 @@ export const LinesIntoMemory: Story = {
     // Lines are drawn for the side calls on screen.
     await waitFor(async () => expect(cell.style.visibility).not.toBe('hidden'));
     cell.scrollIntoView({ block: 'center' });
-    const lines = () => [...document.querySelectorAll('.ex-links path.ex-link[data-branch="i/1"]')];
+    const lines = () => [...document.querySelectorAll('.ex-links path.ex-link[data-from="i/1"]')];
     await waitFor(async () => expect(lines().length).toBeGreaterThan(0));
-    const entries = [...new Set([...document.querySelectorAll('.ex-links path.ex-link[data-branch="i/1"]')].map((l) => l.getAttribute('data-entry')))];
+    const entries = [...new Set([...document.querySelectorAll('.ex-links path.ex-link[data-from="i/1"]')].map((l) => l.getAttribute('data-entry')))];
     await waitFor(async () => expect(lines().length).toBeGreaterThan(0));
     for (const entry of entries) await expect(canvasElement.querySelector(`[id="memory/${entry}"]`)).not.toBeNull();
     await expect(lines().some((l) => l.hasAttribute('data-hot'))).toBe(false);

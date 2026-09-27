@@ -16,6 +16,15 @@ export interface SessionHeaderProps {
 /** How far behind the curtain to look: not at all, each side call as a bar, or every side call whole. */
 const CURTAIN = ['closed', 'condensed', 'open'] as const;
 
+/** How the lines are drawn: as curves, or routed as a harness whose crossings hop or break. */
+const LINES = ['curves', 'hops', 'gaps'] as const;
+
+function withLines(surface: Surface, lines: (typeof LINES)[number]): Surface {
+  const { wiring, ...rest } = surface;
+  if (lines === 'curves') return rest;
+  return { ...rest, wiring: { crossing: lines === 'hops' ? 'hop' : 'gap', bend: wiring?.bend ?? 'round' } };
+}
+
 /** One quiet line: what is running this session, where it is, and the switches for seeing more. */
 export function SessionHeader({ session, link = 'live', surface, onSurface }: SessionHeaderProps) {
   return (
@@ -72,6 +81,17 @@ export function SessionHeader({ session, link = 'live', surface, onSurface }: Se
               onPick={(next) => onSurface({ ...surface, curtain: next !== 'closed', condensed: next === 'condensed' })}
             />
           </span>
+          {surface.curtain ? (
+            <span className="ex-header__toggle">
+              lines
+              <Segments
+                name="lines"
+                options={LINES}
+                value={!surface.wiring ? 'curves' : surface.wiring.crossing === 'hop' ? 'hops' : 'gaps'}
+                onPick={(next) => onSurface(withLines(surface, next))}
+              />
+            </span>
+          ) : null}
           <label className="ex-header__toggle">
             <input type="checkbox" checked={surface.gaps} onChange={(e) => onSurface({ ...surface, gaps: e.target.checked })} />
             what diet can’t emit yet

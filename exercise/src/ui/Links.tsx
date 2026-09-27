@@ -60,6 +60,8 @@ export function Links({
   const [drawn, setDrawn] = useState<readonly Drawn[]>([]);
   const [nets, setNets] = useState<readonly DrawnNet[]>([]);
   const frame = useRef(0);
+  // Each net's track last time round: kept while free, so a scroll does not reshuffle them.
+  const tracks = useRef<ReadonlyMap<string, number>>(new Map());
 
   const measure = useCallback(() => {
     cancelAnimationFrame(frame.current);
@@ -71,7 +73,7 @@ export function Links({
       for (const wire of wires) {
         let from = cells.get(wire.branch);
         if (from === undefined) {
-          const cell = document.querySelector(`[data-branch="${CSS.escape(wire.branch)}"]`);
+          const cell = document.querySelector(`.ex-branchcell[data-branch="${CSS.escape(wire.branch)}"]`);
           const bar = cell?.querySelector('.ex-block, .ex-bar');
           const r = bar?.getBoundingClientRect();
           const shown = cell && r && getComputedStyle(cell).visibility !== 'hidden' && r.bottom > 0 && r.top < window.innerHeight;
@@ -98,16 +100,16 @@ export function Links({
         const lanes = document.querySelector('.ex-session__columns')?.getBoundingClientRect().right ?? memory.left;
         const gutter = memory.left - lanes >= 24 ? { left: lanes, right: memory.left } : { left: memory.left - 48, right: memory.left };
         const options = { ...HARNESS, ...wiring };
-        const laid = draw(
-          route(
-            [...routed].map(([key, net]) => ({ key, from: net.from, to: net.to })),
-            gutter,
-            memory,
-            ENTER,
-            options,
-          ),
+        const tracked = route(
+          [...routed].map(([key, net]) => ({ key, from: net.from, to: net.to })),
+          gutter,
+          memory,
+          ENTER,
           options,
+          tracks.current,
         );
+        tracks.current = new Map(tracked.map((r) => [r.key, r.track]));
+        const laid = draw(tracked, options);
         const lit: DrawnNet[] = [];
         for (const net of laid) {
           const own = routed.get(net.key)?.wires ?? [];
@@ -143,7 +145,7 @@ export function Links({
   return (
     <svg className="ex-links" aria-hidden="true" data-route={wiring ? 'harness' : undefined}>
       {nets.map((net) => (
-        <g key={net.branch} className="ex-net" data-branch={net.branch} style={laneStyle(net.lane) as CSSProperties}>
+        <g key={net.branch} className="ex-net" data-from={net.branch} style={laneStyle(net.lane) as CSSProperties}>
           <path className="ex-net__run" d={net.d} />
           {net.clipped ? <path className="ex-net__run" data-clipped="" d={net.clipped} /> : null}
           {net.dots.map((p) => (
@@ -156,7 +158,7 @@ export function Links({
           key={key}
           className="ex-link"
           d={d}
-          data-branch={wire.branch}
+          data-from={wire.branch}
           data-entry={wire.entry}
           data-level={opOf(wire.op).level}
           data-clipped={clipped ? '' : undefined}

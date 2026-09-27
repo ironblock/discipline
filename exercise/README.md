@@ -30,10 +30,13 @@ CI runs the same thing as the repository's `exercise` check (`./verify.sh --only
   writes.
 - **Working memory** is always on the right: a column when the row has
   room, a drawer on the right edge when it does not. Each side call on
-  screen has a line into every entry it wrote. An experiment, `?wiring=hop`
-  (or `gap`, and `&bend=chamfer` or `square`), routes those lines, and the
-  trunk's cables to its side calls, as a wiring harness instead of curves
-  (`src/ui/harness.ts`).
+  screen has a line into every entry it wrote.
+- **Lines** -- the trunk's cables to its side calls, and those into working
+  memory -- are routed as a wiring harness (`src/ui/harness.ts`): each
+  net on its own track in a gutter, forking to where it goes, hopping what
+  it crosses. The header's `lines` switch draws curves instead, or breaks
+  at crossings; `?wiring=curves` (or `gap`) and `&bend=chamfer` (or
+  `square`) set it from the address.
 - **"What diet can't emit yet"** outlines everything on screen that is
   drawn from an event `diet` does not produce, naming the step of #117 it
   waits on. Today that is everything, which is the point.

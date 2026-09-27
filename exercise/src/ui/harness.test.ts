@@ -92,6 +92,33 @@ describe('lines into memory, routed as a harness', () => {
     expect(Math.min(...xs)).toBeGreaterThanOrEqual(gutter.left);
   });
 
+  it('keeps each line on the track it had while that track is free, so scrolling does not reshuffle them', () => {
+    // Fresh, a takes T0 and b T1; last time round they were the other way about.
+    const kept = route([a, b], gutter, panel, AT, HARNESS, new Map([['a', 1], ['b', 0]]));
+    expect(kept.map((r) => r.x)).toEqual([T1, T0]);
+    // Two that had one track now run at once: the first keeps it, the other moves; they never share.
+    const moved = route([a, b], gutter, panel, AT, HARNESS, new Map([['a', 0], ['b', 0]]));
+    expect(moved.map((r) => r.x)).toEqual([T0, T1]);
+  });
+
+  it('lets go of the tracks kept when routing afresh would cross far fewer lines', () => {
+    const p = net('p', 100, ['e0', 110]);
+    const m = net('m', 105, ['m1', 285], ['m2', 305], ['m3', 325]);
+    const nn = net('n', 200, ['n1', 500]);
+    // Kept, n would sit on T0 and cross four times; afresh, on T2, not at all.
+    const got = route([p, m, nn], gutter, panel, AT, HARNESS, new Map([['p', 0], ['m', 1], ['n', 0]]));
+    expect(got.map((r) => r.x)).toEqual([T0, T1, T2]);
+  });
+
+  it('routes afresh rather than share a track, when the tracks kept leave a line nowhere free', () => {
+    const narrow = { left: 420, right: 440 }; // room for two tracks
+    const x = net('x', 300, ['e1', 380]); // 315..395
+    const y = net('y', 600, ['e2', 550]); // 565..615, after x
+    const z = net('z', 350, ['e3', 580]); // 365..595, at once with both
+    const got = route([x, y, z], narrow, panel, AT, HARNESS, new Map([['x', 0], ['y', 1]]));
+    expect(Object.fromEntries(got.map((r) => [r.key, r.x]))).toEqual({ x: T0, z: T1, y: T0 });
+  });
+
   it('runs two lines into one entry side by side, not on top of each other', () => {
     const got = route([net('a', 300, ['e1', 150]), net('b', 400, ['e1', 150])], gutter, panel, AT);
     expect(got.map((r) => r.pins[0]?.y)).toEqual([165, 165 + HARNESS.pinStep]);

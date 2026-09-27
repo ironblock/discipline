@@ -319,8 +319,14 @@ export const Harness: Story = {
     await expect(canvasElement.querySelector('.ex-branchcell .ex-cable')).toBeNull();
     // Straight runs and corners only: no curve anywhere.
     await expect([...nets(), ...cables].every((d) => /^[MLA\d .-]+$/.test(d))).toBe(true);
+    // Scrolled a little, step by step, the lines are redrawn, never lost.
+    for (let step = 0; step < 4; step++) {
+      window.scrollBy(0, 20);
+      await new Promise((settle) => setTimeout(settle, 150));
+      await expect(nets().length).toBeGreaterThan(0);
+    }
     // At rest a line is the net's; pointed at, a side call's own lines are drawn over it.
-    const lit = () => [...document.querySelectorAll(`.ex-links .ex-link[data-branch="${cell.dataset.branch}"]`)].filter((l) => getComputedStyle(l).stroke !== 'rgba(0, 0, 0, 0)');
+    const lit = () => [...document.querySelectorAll(`.ex-links .ex-link[data-from="${cell.dataset.branch}"]`)].filter((l) => getComputedStyle(l).stroke !== 'rgba(0, 0, 0, 0)');
     await expect(lit()).toHaveLength(0);
     await userEvent.hover(cell.querySelector('.ex-block') as HTMLElement);
     await waitFor(async () => expect(lit().length).toBeGreaterThan(0));

@@ -45,7 +45,7 @@ export function Wiring({ nets }: { readonly nets: readonly Cabled[] }) {
         net.wires
           .filter((w) => w.live)
           .map((w) => (
-            <g key={w.id} className="ex-cable" data-live="" data-branch={w.id} style={laneStyle(w.lane) as CSSProperties}>
+            <g key={w.id} className="ex-cable" data-live="" data-from={w.id} style={laneStyle(w.lane) as CSSProperties}>
               <path className="ex-cable__line" d={w.d} />
               <path className="ex-cable__pulse" d={w.d} pathLength={100} />
             </g>

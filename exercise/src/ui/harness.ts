@@ -12,7 +12,9 @@ import type { Box } from './links.ts';
  * left-edge algorithm: a track is reused once the run on it has ended),
  * each taking the free track that crosses the fewest lines already placed;
  * when more run at once than the gutter has room for, the tracks close up.
- * So lines run parallel and never share a track; where one must cross
+ * Lines into memory move as the page scrolls past memory's panel, so each
+ * keeps the track it had while that stays free, and costs no more than a
+ * couple of crossings over routing afresh. So lines run parallel and never share a track; where one must cross
  * another, the horizontal hops the vertical (or breaks, as a gap). Corners
  * are round, chamfered or square.
  */
@@ -61,7 +63,8 @@ export interface Pin extends Pt {
 
 export interface Routed {
   readonly key: string;
-  /** Its track. */
+  /** Its track, counted from the gutter's right; and where that is. */
+  readonly track: number;
   readonly x: number;
   readonly source: Pt;
   readonly pins: readonly Pin[];
@@ -83,11 +86,21 @@ export interface Drawn {
 }
 
 const EDGE = 6;
+/** How many more crossings kept tracks may cost than routing afresh would, before they are let go. */
+const SLACK = 2;
 /** How far a line toward entries out of the panel runs on past its edge, dashed. */
 const TAIL = 10;
 
 /** Assign each net a track in `gutter` and a pin on each entry it wrote. */
-export function route(nets: readonly Net[], gutter: { readonly left: number; readonly right: number }, panel: Box, at: number, o: Options = HARNESS): Routed[] {
+export function route(
+  nets: readonly Net[],
+  gutter: { readonly left: number; readonly right: number },
+  panel: Box,
+  at: number,
+  o: Options = HARNESS,
+  /** The track each net had last time round (by key): kept while free. */
+  keep?: ReadonlyMap<string, number>,
+): Routed[] {
   const order = [...nets].sort((a, b) => a.from.top - b.from.top);
 
   // Pins: one per entry on screen; one per edge for those scrolled out.
@@ -121,6 +134,7 @@ export function route(nets: readonly Net[], gutter: { readonly left: number; rea
     order.map((net, i) => ({ key: net.key, source: { x: net.from.right, y: net.from.top + at }, pins: pins[i] ?? [] })),
     gutter,
     o,
+    keep,
   );
 }
 
@@ -144,7 +158,12 @@ export interface Tap {
  * column, one net per trunk node, forking to each side call off it in that
  * slot. A net leaves the trunk where its highest cable would have.
  */
-export function cabling(taps: readonly Tap[], trunkRight: number, gutters: ReadonlyMap<number, { readonly left: number; readonly right: number }>, o: Options = HARNESS): Routed[] {
+export function cabling(
+  taps: readonly Tap[],
+  trunkRight: number,
+  gutters: ReadonlyMap<number, { readonly left: number; readonly right: number }>,
+  o: Options = HARNESS,
+): Routed[] {
   const nets = new Map<string, { slot: number; taps: Tap[] }>();
   for (const tap of taps) {
     const key = `${tap.slot}>${tap.anchor}${tap.pending ? '>pending' : ''}`;
@@ -176,7 +195,32 @@ export function cabling(taps: readonly Tap[], trunkRight: number, gutters: Reado
  * runs start down the page, each takes the free track (one whose run has
  * ended) that crosses fewest of the nets already placed.
  */
-function lay(nets: readonly { readonly key: string; readonly source: Pt; readonly pins: readonly Pin[] }[], gutter: { readonly left: number; readonly right: number }, o: Options): Routed[] {
+function lay(
+  nets: readonly { readonly key: string; readonly source: Pt; readonly pins: readonly Pin[] }[],
+  gutter: { readonly left: number; readonly right: number },
+  o: Options,
+  keep?: ReadonlyMap<string, number>,
+): Routed[] {
+  // Afresh, there is always a free track: as many are made as ever run at once.
+  const fresh = assign(nets, gutter, o) ?? [];
+  if (!keep) return fresh;
+  // Kept tracks hold still as the page scrolls, until they cost more than SLACK crossings over a fresh routing.
+  const kept = assign(nets, gutter, o, keep);
+  return kept && tangle(kept) <= tangle(fresh) + SLACK ? kept : fresh;
+}
+
+/** How many times the nets of one routing cross each other. */
+function tangle(routed: readonly Routed[]): number {
+  return routed.reduce((sum, n, i) => sum + crossings(n, routed.slice(0, i)), 0);
+}
+
+/** One routing: afresh, or keeping the tracks in `keep` while they are free (undefined if that leaves a net nowhere free). */
+function assign(
+  nets: readonly { readonly key: string; readonly source: Pt; readonly pins: readonly Pin[] }[],
+  gutter: { readonly left: number; readonly right: number },
+  o: Options,
+  keep?: ReadonlyMap<string, number>,
+): Routed[] | undefined {
   const clear = o.pinStep;
   const spans = nets
     .map((net) => {
@@ -195,21 +239,38 @@ function lay(nets: readonly { readonly key: string; readonly source: Pt; readonl
   const xOf = (t: number) => gutter.right - EDGE - t * spacing;
   const placed: Routed[] = [];
   const onTrack: [number, number][][] = Array.from({ length: count }, () => []);
-
-  for (const { net, lo, hi } of spans) {
+  const overlap = (t: number, lo: number, hi: number) =>
+    (onTrack[t] ?? []).reduce((sum, [a, b]) => sum + Math.max(0, Math.min(b, hi + clear) - Math.max(a, lo - clear)), 0);
+  const put = ({ net, lo, hi }: (typeof spans)[number], t: number) => {
     // An edge pin's x is its track's.
-    const onto = (x: number) => net.pins.map((p) => (p.clipped ? { ...p, x } : p));
-    const { source } = net;
+    const pins = net.pins.map((p) => (p.clipped ? { ...p, x: xOf(t) } : p));
+    onTrack[t]?.push([lo, hi]);
+    placed.push({ key: net.key, track: t, x: xOf(t), source: net.source, pins, lo, hi });
+  };
+
+  // First, each net that had a track keeps it, while it is free.
+  const rest = spans.filter((span) => {
+    const t = keep?.get(span.net.key);
+    if (t === undefined || t >= count || overlap(t, span.lo, span.hi) > 0) return true;
+    put(span, t);
+    return false;
+  });
+  // Then the rest, each on the free track that crosses least.
+  for (const span of rest) {
+    const { net, lo, hi } = span;
     let best = { t: 0, overlap: Number.POSITIVE_INFINITY, cost: Number.POSITIVE_INFINITY };
     for (let t = 0; t < count; t++) {
-      const overlap = (onTrack[t] ?? []).reduce((sum, [a, b]) => sum + Math.max(0, Math.min(b, hi + clear) - Math.max(a, lo - clear)), 0);
-      const cost = crossings({ key: net.key, x: xOf(t), source, pins: onto(xOf(t)), lo, hi }, placed);
-      if (overlap < best.overlap || (overlap === best.overlap && cost < best.cost)) best = { t, overlap, cost };
+      const pins = net.pins.map((p) => (p.clipped ? { ...p, x: xOf(t) } : p));
+      const cost = crossings({ key: net.key, track: t, x: xOf(t), source: net.source, pins, lo, hi }, placed);
+      const shared = overlap(t, lo, hi);
+      if (shared < best.overlap || (shared === best.overlap && cost < best.cost)) best = { t, overlap: shared, cost };
     }
-    onTrack[best.t]?.push([lo, hi]);
-    placed.push({ key: net.key, x: xOf(best.t), source, pins: onto(xOf(best.t)), lo, hi });
+    // Kept tracks can leave no free one where a fresh routing would: then they are let go, never shared.
+    if (best.overlap > 0 && keep) return undefined;
+    put(span, best.t);
   }
-  return placed;
+  // In page order, as they were given.
+  return spans.flatMap(({ net }) => placed.filter((r) => r.key === net.key));
 }
 
 /** The horizontal stretches of a net: out of its side call, and into each pin. */
