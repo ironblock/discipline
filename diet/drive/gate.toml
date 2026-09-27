@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 58
+faults = 65
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -872,6 +872,7 @@ becomes = '''
 catches = [
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
+    "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
 ]
 
 [[fault]]
@@ -881,11 +882,11 @@ target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
         Ok(StreamEnded::Cancelled) => {
-            state.push(Event::Cancelled { partial });'''
+            state.push(Event::Cancelled { request, partial });'''
 becomes = '''
         Ok(StreamEnded::Cancelled) => {
             state.trunk.push(Message::new(Role::User, ask));
-            state.push(Event::Cancelled { partial });'''
+            state.push(Event::Cancelled { request, partial });'''
 catches = [
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
 ]
@@ -904,6 +905,7 @@ anchor = '''
 becomes = '''
         let _ = (command, during);'''
 catches = [
+    "drive::session::tests::a_cancel_naming_a_turn_that_already_settled_does_not_stop_the_next_one",
     "drive::session::tests::a_command_with_nothing_to_act_on_is_refused_and_logged",
     "drive::session::tests::an_ask_sent_while_a_turn_is_in_flight_is_refused_by_name",
 ]
@@ -931,6 +933,12 @@ anchor = '''
 becomes = '''
         let seq = u64::try_from(self.log.len() / 2)'''
 catches = [
+    "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
+    "drive::session::tests::a_failed_call_is_typed_and_leaves_the_trunk_alone",
+    "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
+    "drive::session::tests::a_turn_the_server_refused_is_logged_as_refused_and_leaves_the_trunk_alone",
+    "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
+    "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
     "drive::session::tests::the_log_is_numbered_by_position_and_a_reader_can_resume_from_any_point",
 ]
 
@@ -957,14 +965,13 @@ target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
     if state.settlement == Settlement::Turn {
-        state.cancel = None;
-        state.push(Event::Crashed { why });'''
+        if let Some(flight) = state.flight.take() {'''
 becomes = '''
     if false {
-        state.cancel = None;
-        state.push(Event::Crashed { why });'''
+        if let Some(flight) = state.flight.take() {'''
 catches = [
     "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
+    "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
 ]
 
 [[fault]]
@@ -978,4 +985,104 @@ becomes = '''
                     crashed(&shared, String::new());'''
 catches = [
     "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
+]
+
+[[fault]]
+id = "drive.session-a-stale-cancel-stops-the-next-turn"
+failure_class = "drive.session-a-stale-cancel-stops-the-next-turn"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            _ if turn < latest => Refusal::Stale,'''
+becomes = '''
+            _ if false => Refusal::Stale,'''
+catches = [
+    "drive::session::tests::a_cancel_naming_a_turn_that_already_settled_does_not_stop_the_next_one",
+]
+
+[[fault]]
+id = "drive.session-a-timeout-settles-as-failed"
+failure_class = "drive.session-a-timeout-settles-as-failed"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        TransportFailure::Timeout { .. } => SettleReason::Timeout,'''
+becomes = '''
+        TransportFailure::Timeout { .. } => SettleReason::Failed,'''
+catches = [
+    "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
+]
+
+[[fault]]
+id = "drive.session-a-crash-settles-no-turn"
+failure_class = "drive.session-a-crash-settles-no-turn"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            state.push(Event::TurnSettled {
+                turn: flight.turn,
+                reason: SettleReason::Failed,
+            });'''
+becomes = '''
+            let _ = flight.turn;'''
+catches = [
+    "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
+    "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
+]
+
+[[fault]]
+id = "drive.session-a-delta-names-the-ask"
+failure_class = "drive.session-a-delta-names-the-ask"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            shared.lock().push(Event::Delta {
+                request,'''
+becomes = '''
+            shared.lock().push(Event::Delta {
+                request: request.saturating_sub(2),'''
+catches = [
+    "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
+    "drive::session::tests::every_call_is_a_request_and_what_it_produced_names_it",
+]
+
+[[fault]]
+id = "drive.session-the-start-omits-the-head"
+failure_class = "drive.session-the-start-omits-the-head"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            head: template.messages.clone(),'''
+becomes = '''
+            head: Vec::new(),'''
+catches = [
+    "drive::session::tests::the_log_begins_with_the_session_it_describes",
+]
+
+[[fault]]
+id = "drive.session-opened-is-a-constant"
+failure_class = "drive.session-opened-is-a-constant"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        state.push(Event::Started {
+            opened,'''
+becomes = '''
+        state.push(Event::Started {
+            opened: 0,'''
+catches = [
+    "drive::session::tests::the_log_begins_with_the_session_it_describes",
+]
+
+[[fault]]
+id = "drive.session-the-clock-stands-still"
+failure_class = "drive.session-the-clock-stands-still"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        let t = u64::try_from(self.opened_at.elapsed().as_millis()).unwrap_or(u64::MAX);'''
+becomes = '''
+        let t = 0;'''
+catches = [
+    "drive::session::tests::each_event_is_stamped_when_it_was_logged",
 ]

@@ -46,12 +46,15 @@
 //! a turn (R3), no fork in the capture gap (R4), no patches (R5), and no
 //! seam -- [`Session::declare_seam`] is refused as [`Refusal::SeamNotBuilt`]
 //! until R6, so the command exists for the surface to wire and answers
-//! truthfully meanwhile. The log is in memory; how it is serialised for
-//! anything outside this crate is an open question on #117.
+//! truthfully meanwhile. The log is in memory. It is a format,
+//! `diet/formats/log` (ruled on #117), and what each event carries is what
+//! R2c's plan (`diet/drive/plans/r2c-proposal.md`, D4) drafts for it: a
+//! header line, a turn counter, a `request` per call that the call's other
+//! events cite by its sequence number, and a `turn.settled` with a reason.
 
 use std::fmt;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::client::shape::{Message, RequestShape, Role};
 use crate::client::stream::{Cancel, Ended as StreamEnded, Streaming};
@@ -97,16 +100,67 @@ vocabulary! {
         NothingInFlight => "nothing-in-flight",
         /// Seams are not built yet (#117 R6).
         SeamNotBuilt => "seam-not-built",
+        /// A cancel named a turn older than the latest one: it arrived after
+        /// that turn settled and must not stop the next (the admission
+        /// counter ruled on #117).
+        Stale => "stale",
+    }
+}
+
+vocabulary! {
+    /// How a turn ended, as `turn.settled` says it (ruled on #117).
+    SettleReason {
+        /// The trunk answered.
+        Final => "final",
+        /// A stop reached the call.
+        Cancelled => "cancelled",
+        /// The tool loop ran out of steps. Nothing emits it until the tool
+        /// loop exists; it is here because the ruling names it.
+        MaxSteps => "max_steps",
+        /// The call ran out of time.
+        Timeout => "timeout",
+        /// The call failed, was refused by the server, or its thread crashed.
+        Failed => "failed",
+    }
+}
+
+vocabulary! {
+    /// Which lane a request is made on. The trunk is the only one until R4.
+    Lane {
+        /// The canonical session.
+        Trunk => "trunk",
     }
 }
 
 /// One thing that happened in a session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
+    /// The session opened. Always the first event, at sequence number zero.
+    Started {
+        /// When it opened: milliseconds since the Unix epoch, measured once.
+        /// With the sequence number it is what tells one process's log from
+        /// another's.
+        opened: u64,
+        /// The model name every request is sent with. A name, not an
+        /// identity: nothing here claims which weights answer to it.
+        model: String,
+        /// The messages the trunk starts from.
+        head: Vec<Message>,
+    },
     /// An ask was accepted, and a turn begins on it.
     Asked {
+        /// The turn it begins: 1 for the first ask admitted, then counting.
+        turn: u32,
         /// What the person asked.
         text: String,
+    },
+    /// A call was made to the model. Every event the call produces names
+    /// this event by its sequence number.
+    Requested {
+        /// The turn the call belongs to.
+        turn: u32,
+        /// The lane it was made on.
+        lane: Lane,
     },
     /// The settlement moved.
     Settled {
@@ -126,6 +180,8 @@ pub enum Event {
     },
     /// A piece of the trunk's answer arrived.
     Delta {
+        /// The sequence number of the [`Event::Requested`] it answers.
+        request: u64,
         /// The piece, as the server sent it.
         text: String,
     },
@@ -134,9 +190,14 @@ pub enum Event {
     /// [`Event::Cancelled`] if it stopped, [`Event::Answered`] if the answer
     /// was already done, or [`Event::Rejected`], [`Event::Failed`] or
     /// [`Event::Crashed`] if the call ended some other way first.
-    StopAsked,
+    StopAsked {
+        /// The turn the stop was asked for.
+        turn: u32,
+    },
     /// The trunk answered. The ask and this answer are now on the trunk.
     Answered {
+        /// The sequence number of the [`Event::Requested`] it answers.
+        request: u64,
         /// The whole answer: every [`Event::Delta`] of this turn, in order.
         text: String,
         /// Why the server stopped, as it spelled it, if it said.
@@ -144,12 +205,16 @@ pub enum Event {
     },
     /// The turn was stopped. Neither its ask nor `partial` is on the trunk.
     Cancelled {
+        /// The sequence number of the [`Event::Requested`] that was stopped.
+        request: u64,
         /// What arrived before the stop. Never an answer.
         partial: String,
     },
     /// The server refused the turn rather than answering it. Neither its ask
     /// nor `partial` is on the trunk.
     Rejected {
+        /// The sequence number of the [`Event::Requested`] refused.
+        request: u64,
         /// The HTTP status, or `200` for an `error` event inside a stream.
         status: u16,
         /// What the server said.
@@ -161,16 +226,48 @@ pub enum Event {
     /// could settle. Neither its ask nor anything that arrived is on the
     /// trunk; what arrived is in the [`Event::Delta`]s before this.
     Crashed {
+        /// The sequence number of the [`Event::Requested`] whose thread
+        /// crashed.
+        request: u64,
         /// Why: the panic's message, or the operating system's refusal.
         why: String,
     },
     /// The turn's call failed. Neither its ask nor `partial` is on the trunk.
     Failed {
+        /// The sequence number of the [`Event::Requested`] that failed.
+        request: u64,
         /// How it failed.
         failure: TransportFailure,
         /// What arrived before it failed.
         partial: String,
     },
+    /// A turn is over, however it ended. Exactly one per admitted ask, after
+    /// the call's terminal event and before the settlement leaves `turn`.
+    TurnSettled {
+        /// The turn.
+        turn: u32,
+        /// How it ended.
+        reason: SettleReason,
+    },
+}
+
+/// An ask the session admitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Admitted {
+    /// The sequence number of its [`Event::Asked`].
+    pub seq: u64,
+    /// The turn it began; name it to [`Session::cancel`].
+    pub turn: u32,
+}
+
+/// Why [`Session::cancel`] did not stop anything.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelError {
+    /// The session refused it, and logged the refusal.
+    Refused(Refusal),
+    /// It named a turn that was never admitted. That is not a command the
+    /// session can refuse, so nothing is logged.
+    NoSuchTurn(u32),
 }
 
 /// An event and its place in the log.
@@ -178,21 +275,36 @@ pub enum Event {
 pub struct Logged {
     /// Its position in the log: gapless, from zero.
     pub seq: u64,
+    /// When it was logged: milliseconds since the session opened, from a
+    /// monotonic clock read under the same lock that numbers it, so `t`
+    /// never decreases in `seq` order.
+    pub t: u64,
     /// What happened.
     pub event: Event,
+}
+
+/// The call in flight, and what its events must name.
+struct Flight {
+    turn: u32,
+    request: u64,
+    cancel: Cancel,
 }
 
 struct State {
     settlement: Settlement,
     trunk: Vec<Message>,
     log: Vec<Logged>,
-    cancel: Option<Cancel>,
+    flight: Option<Flight>,
+    /// Asks admitted so far: the latest turn's number.
+    turns: u32,
+    opened_at: Instant,
 }
 
 impl State {
     fn push(&mut self, event: Event) -> u64 {
         let seq = u64::try_from(self.log.len()).expect("a log longer than u64 cannot be built");
-        self.log.push(Logged { seq, event });
+        let t = u64::try_from(self.opened_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.log.push(Logged { seq, t, event });
         seq
     }
 
@@ -259,29 +371,42 @@ impl<S: Streaming + 'static> Session<S> {
     #[must_use]
     pub fn open(transport: S, template: RequestShape) -> Self {
         let trunk = template.messages.clone();
+        let opened = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| {
+                u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+            });
+        let mut state = State {
+            settlement: Settlement::Awaiting,
+            trunk,
+            log: Vec::new(),
+            flight: None,
+            turns: 0,
+            opened_at: Instant::now(),
+        };
+        state.push(Event::Started {
+            opened,
+            model: template.model.clone(),
+            head: template.messages.clone(),
+        });
         Self {
             shared: Arc::new(Shared {
                 transport,
                 template,
-                state: Mutex::new(State {
-                    settlement: Settlement::Awaiting,
-                    trunk,
-                    log: Vec::new(),
-                    cancel: None,
-                }),
+                state: Mutex::new(state),
                 changed: Condvar::new(),
             }),
         }
     }
 
     /// Send an ask to the trunk. Returns the sequence number of its
-    /// [`Event::Asked`]; the answer arrives in the log.
+    /// [`Event::Asked`] and the turn it begins; the answer arrives in the log.
     ///
     /// # Errors
     ///
     /// [`Refusal::InFlight`] while a turn or a capture is in flight, and
     /// [`Refusal::Ended`] once the session has ended. Either is also logged.
-    pub fn ask(&self, text: &str) -> Result<u64, Refusal> {
+    pub fn ask(&self, text: &str) -> Result<Admitted, Refusal> {
         let mut state = self.shared.lock();
         match state.settlement {
             Settlement::Awaiting => {}
@@ -296,12 +421,27 @@ impl<S: Streaming + 'static> Session<S> {
                 return Err(refused);
             }
         }
+        state.turns += 1;
+        let turn = state.turns;
         let seq = state.push(Event::Asked {
+            turn,
             text: text.to_owned(),
         });
         state.move_to(Settlement::Turn);
+        // Pushed here, under the lock that admits the ask, and never on the
+        // turn's thread: a thread that cannot start still settles with a
+        // `request.failed` that cites a request that exists (#117, R2c
+        // finding 21).
+        let request = state.push(Event::Requested {
+            turn,
+            lane: Lane::Trunk,
+        });
         let cancel = Cancel::new();
-        state.cancel = Some(cancel.clone());
+        state.flight = Some(Flight {
+            turn,
+            request,
+            cancel: cancel.clone(),
+        });
         let mut shape = self.shared.template.clone();
         shape.messages.clone_from(&state.trunk);
         shape.messages.push(Message::new(Role::User, text));
@@ -318,7 +458,7 @@ impl<S: Streaming + 'static> Session<S> {
                 // say why -- or the session sits in `turn` for good, refusing
                 // every ask (#120's first review).
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    turn(&shared, &shape, &cancel, ask);
+                    call(&shared, &shape, &cancel, ask, turn, request);
                 }));
                 if let Err(payload) = outcome {
                     crashed(&shared, panic_message(payload.as_ref()));
@@ -333,20 +473,34 @@ impl<S: Streaming + 'static> Session<S> {
                 format!("the turn's thread could not start: {why}"),
             );
         }
-        Ok(seq)
+        Ok(Admitted { seq, turn })
     }
 
-    /// Ask the call in flight to stop.
+    /// Ask the call of `turn` to stop.
+    ///
+    /// The turn is named so that a stop sent for one turn cannot land on
+    /// the next: over HTTP a cancel can arrive after its turn settled and a
+    /// new ask was admitted, and it must not stop that one.
     ///
     /// # Errors
     ///
-    /// [`Refusal::NothingInFlight`] when no turn is in flight, and
-    /// [`Refusal::Ended`] once the session has ended. Either is also logged.
-    pub fn cancel(&self) -> Result<(), Refusal> {
+    /// [`CancelError::NoSuchTurn`] for a turn never admitted (not logged).
+    /// Otherwise refused, and logged: [`Refusal::Ended`] once the session
+    /// has ended, [`Refusal::Stale`] for a turn older than the latest, and
+    /// [`Refusal::NothingInFlight`] when the latest turn has no call in
+    /// flight.
+    pub fn cancel(&self, turn: u32) -> Result<(), CancelError> {
         let mut state = self.shared.lock();
-        let refused = match (state.settlement, state.cancel.clone()) {
-            (Settlement::Turn, Some(cancel)) => {
-                state.push(Event::StopAsked);
+        let latest = state.turns;
+        if turn == 0 || turn > latest {
+            return Err(CancelError::NoSuchTurn(turn));
+        }
+        let because = match (state.settlement, state.flight.as_ref()) {
+            (Settlement::Ended, _) => Refusal::Ended,
+            _ if turn < latest => Refusal::Stale,
+            (Settlement::Turn, Some(flight)) => {
+                let cancel = flight.cancel.clone();
+                state.push(Event::StopAsked { turn });
                 drop(state);
                 self.shared.changed.notify_all();
                 // Outside the lock: a stopper may do anything a transport
@@ -355,12 +509,12 @@ impl<S: Streaming + 'static> Session<S> {
                 cancel.ask();
                 return Ok(());
             }
-            (Settlement::Ended, _) => state.refuse(CommandKind::Cancel, Refusal::Ended),
-            _ => state.refuse(CommandKind::Cancel, Refusal::NothingInFlight),
+            _ => Refusal::NothingInFlight,
         };
+        let refused = state.refuse(CommandKind::Cancel, because);
         drop(state);
         self.shared.changed.notify_all();
-        Err(refused)
+        Err(CancelError::Refused(refused))
     }
 
     /// Declare a seam. Not built until #117 R6.
@@ -450,7 +604,12 @@ impl<S: Streaming + 'static> Drop for Session<S> {
     /// A session dropped mid-turn stops its call, rather than leaving it
     /// running to its cap for a log nobody will read.
     fn drop(&mut self) {
-        let cancel = self.shared.lock().cancel.clone();
+        let cancel = self
+            .shared
+            .lock()
+            .flight
+            .as_ref()
+            .map(|flight| flight.cancel.clone());
         if let Some(cancel) = cancel {
             cancel.ask();
         }
@@ -464,7 +623,14 @@ fn from(log: &[Logged], first: u64) -> Vec<Logged> {
 
 /// One turn's call, on its own thread: stream the answer into the log, then
 /// settle.
-fn turn<S: Streaming>(shared: &Shared<S>, shape: &RequestShape, cancel: &Cancel, ask: String) {
+fn call<S: Streaming>(
+    shared: &Shared<S>,
+    shape: &RequestShape,
+    cancel: &Cancel,
+    ask: String,
+    turn: u32,
+    request: u64,
+) {
     let deadline = Instant::now() + shared.template.limits.call;
     let mut partial = String::new();
     let result = shared
@@ -472,13 +638,14 @@ fn turn<S: Streaming>(shared: &Shared<S>, shape: &RequestShape, cancel: &Cancel,
         .stream(shape, deadline, cancel, &mut |piece: &str| {
             partial.push_str(piece);
             shared.lock().push(Event::Delta {
+                request,
                 text: piece.to_owned(),
             });
             shared.changed.notify_all();
         });
 
     let mut state = shared.lock();
-    state.cancel = None;
+    state.flight = None;
     match result {
         Ok(StreamEnded::Finished { finish_reason }) => {
             state.trunk.push(Message::new(Role::User, ask));
@@ -486,8 +653,13 @@ fn turn<S: Streaming>(shared: &Shared<S>, shape: &RequestShape, cancel: &Cancel,
                 .trunk
                 .push(Message::new(Role::Assistant, partial.clone()));
             state.push(Event::Answered {
+                request,
                 text: partial,
                 finish_reason,
+            });
+            state.push(Event::TurnSettled {
+                turn,
+                reason: SettleReason::Final,
             });
             state.move_to(Settlement::Capture);
             // R4's interviews run here. Until they exist there is nothing to
@@ -495,19 +667,34 @@ fn turn<S: Streaming>(shared: &Shared<S>, shape: &RequestShape, cancel: &Cancel,
             state.move_to(Settlement::Awaiting);
         }
         Ok(StreamEnded::Cancelled) => {
-            state.push(Event::Cancelled { partial });
+            state.push(Event::Cancelled { request, partial });
+            state.push(Event::TurnSettled {
+                turn,
+                reason: SettleReason::Cancelled,
+            });
             state.move_to(Settlement::Awaiting);
         }
         Ok(StreamEnded::Rejected { status, body }) => {
             state.push(Event::Rejected {
+                request,
                 status,
                 body,
                 partial,
             });
+            state.push(Event::TurnSettled {
+                turn,
+                reason: SettleReason::Failed,
+            });
             state.move_to(Settlement::Awaiting);
         }
         Err(failure) => {
-            state.push(Event::Failed { failure, partial });
+            let reason = settle_reason_of(&failure);
+            state.push(Event::Failed {
+                request,
+                failure,
+                partial,
+            });
+            state.push(Event::TurnSettled { turn, reason });
             state.move_to(Settlement::Awaiting);
         }
     }
@@ -515,12 +702,29 @@ fn turn<S: Streaming>(shared: &Shared<S>, shape: &RequestShape, cancel: &Cancel,
     shared.changed.notify_all();
 }
 
-/// Settle a turn that ended without [`turn`] settling it.
+/// How a failed call settles its turn: a call that ran out of time is a
+/// `timeout`, and every other failure is `failed`.
+fn settle_reason_of(failure: &TransportFailure) -> SettleReason {
+    match failure {
+        TransportFailure::Timeout { .. } => SettleReason::Timeout,
+        _ => SettleReason::Failed,
+    }
+}
+
+/// Settle a turn that ended without [`call`] settling it.
 fn crashed<S>(shared: &Shared<S>, why: String) {
     let mut state = shared.lock();
     if state.settlement == Settlement::Turn {
-        state.cancel = None;
-        state.push(Event::Crashed { why });
+        if let Some(flight) = state.flight.take() {
+            state.push(Event::Crashed {
+                request: flight.request,
+                why,
+            });
+            state.push(Event::TurnSettled {
+                turn: flight.turn,
+                reason: SettleReason::Failed,
+            });
+        }
         state.move_to(Settlement::Awaiting);
     }
     drop(state);
@@ -618,30 +822,43 @@ mod tests {
     #[test]
     fn an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order() {
         let session = Session::open(Canned::new([deltas(&["Hel", "lo", "!"])]), template());
-        assert_eq!(session.ask("say hello"), Ok(0));
+        assert_eq!(session.ask("say hello"), Ok(Admitted { seq: 1, turn: 1 }));
         let log = wait_until(&session, "the turn to settle", settled);
         assert_eq!(
-            events(&log),
+            events(&log[1..]),
             [
                 Event::Asked {
+                    turn: 1,
                     text: "say hello".to_owned()
                 },
                 Event::Settled {
                     from: Settlement::Awaiting,
                     to: Settlement::Turn
                 },
+                Event::Requested {
+                    turn: 1,
+                    lane: Lane::Trunk
+                },
                 Event::Delta {
+                    request: 3,
                     text: "Hel".to_owned()
                 },
                 Event::Delta {
+                    request: 3,
                     text: "lo".to_owned()
                 },
                 Event::Delta {
+                    request: 3,
                     text: "!".to_owned()
                 },
                 Event::Answered {
+                    request: 3,
                     text: "Hello!".to_owned(),
                     finish_reason: Some("stop".to_owned())
+                },
+                Event::TurnSettled {
+                    turn: 1,
+                    reason: SettleReason::Final
                 },
                 Event::Settled {
                     from: Settlement::Turn,
@@ -769,15 +986,20 @@ mod tests {
             "the call never reached the gate"
         );
 
-        assert_eq!(session.cancel(), Ok(()));
+        assert_eq!(session.cancel(1), Ok(()));
         let log = wait_until(&session, "the stopped turn to settle", settled);
-        let tail = events(&log[log.len() - 3..]);
+        let tail = events(&log[log.len() - 4..]);
         assert_eq!(
             tail,
             [
-                Event::StopAsked,
+                Event::StopAsked { turn: 1 },
                 Event::Cancelled {
+                    request: 3,
                     partial: "Hel".to_owned()
+                },
+                Event::TurnSettled {
+                    turn: 1,
+                    reason: SettleReason::Cancelled
                 },
                 Event::Settled {
                     from: Settlement::Turn,
@@ -815,6 +1037,7 @@ mod tests {
         let log = wait_until(&session, "the failed turn to settle", settled);
         assert!(log.iter().any(|logged| logged.event
             == Event::Failed {
+                request: 3,
                 failure: failure.clone(),
                 partial: "par".to_owned()
             }));
@@ -837,6 +1060,7 @@ mod tests {
         let log = wait_until(&session, "the refused turn to settle", settled);
         assert!(log.iter().any(|logged| logged.event
             == Event::Rejected {
+                request: 3,
                 status: 503,
                 body: "busy".to_owned(),
                 partial: "par".to_owned()
@@ -875,12 +1099,17 @@ mod tests {
         let session = Session::open(Panics, template());
         session.ask("first").expect("accepted");
         let log = wait_until(&session, "the crashed turn to settle", settled);
-        let tail = events(&log[log.len() - 2..]);
+        let tail = events(&log[log.len() - 3..]);
         assert_eq!(
             tail,
             [
                 Event::Crashed {
+                    request: 3,
                     why: "a transport that panics mid-answer (seeded by this test)".to_owned()
+                },
+                Event::TurnSettled {
+                    turn: 1,
+                    reason: SettleReason::Failed
                 },
                 Event::Settled {
                     from: Settlement::Turn,
@@ -923,11 +1152,12 @@ mod tests {
         });
         // The server is holding the connection open and sending nothing: the
         // turn's thread is blocked in a read that only the stopper can end.
-        assert_eq!(session.cancel(), Ok(()));
+        assert_eq!(session.cancel(1), Ok(()));
         let log = wait_until(&session, "the stopped turn to settle", settled);
         assert!(
             log.iter().any(|logged| logged.event
                 == Event::Cancelled {
+                    request: 3,
                     partial: "Hel".to_owned()
                 }),
             "{log:#?}"
@@ -948,13 +1178,23 @@ mod tests {
 
     #[test]
     fn a_command_with_nothing_to_act_on_is_refused_and_logged() {
-        let session = Session::open(Canned::new([]), template());
-        assert_eq!(session.cancel(), Err(Refusal::NothingInFlight));
+        let session = Session::open(Canned::new([deltas(&["done"])]), template());
+        // A cancel for a turn that was never admitted is not a command the
+        // session can refuse: it says so, and logs nothing.
+        assert_eq!(session.cancel(1), Err(CancelError::NoSuchTurn(1)));
+        session.ask("one").expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        assert_eq!(
+            session.cancel(1),
+            Err(CancelError::Refused(Refusal::NothingInFlight))
+        );
+        assert_eq!(session.cancel(0), Err(CancelError::NoSuchTurn(0)));
+        assert_eq!(session.cancel(2), Err(CancelError::NoSuchTurn(2)));
         assert_eq!(session.declare_seam(), Err(Refusal::SeamNotBuilt));
         assert_eq!(session.end(), Ok(()));
         assert_eq!(session.settlement(), Settlement::Ended);
         assert_eq!(session.ask("too late"), Err(Refusal::Ended));
-        assert_eq!(session.cancel(), Err(Refusal::Ended));
+        assert_eq!(session.cancel(1), Err(CancelError::Refused(Refusal::Ended)));
         assert_eq!(session.declare_seam(), Err(Refusal::Ended));
         assert_eq!(session.end(), Err(Refusal::Ended));
         let refusals: Vec<(CommandKind, Refusal, Settlement)> = session
@@ -988,8 +1228,9 @@ mod tests {
                 (CommandKind::End, Refusal::Ended, Settlement::Ended),
             ]
         );
-        assert!(
-            session.shared.transport.sent().is_empty(),
+        assert_eq!(
+            session.shared.transport.sent().len(),
+            1,
             "a refused ask reached the transport"
         );
     }
@@ -1005,6 +1246,249 @@ mod tests {
         assert_eq!(session.events_from(3), log[3..]);
         assert!(session.events_from(log.len() as u64).is_empty());
         assert!(session.events_from(u64::MAX).is_empty());
+    }
+
+    #[test]
+    fn a_cancel_naming_a_turn_that_already_settled_does_not_stop_the_next_one() {
+        let gate = Gate::new();
+        let canned = Canned::new([
+            deltas(&["one"]),
+            vec![
+                Step::Delta("Hel".to_owned()),
+                Step::Hold(gate.clone()),
+                Step::Delta("lo".to_owned()),
+            ],
+        ]);
+        let session = Session::open(canned, template());
+        session.ask("first").expect("accepted");
+        wait_until(&session, "the first turn to settle", settled);
+        assert_eq!(session.ask("second").map(|admitted| admitted.turn), Ok(2));
+        assert!(
+            gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "the second call never reached the gate"
+        );
+
+        // The stop meant for turn 1, arriving late, while turn 2 is in flight.
+        assert_eq!(session.cancel(1), Err(CancelError::Refused(Refusal::Stale)));
+        gate.open();
+        let log = wait_until(&session, "the second turn to settle", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+                && settled(log)
+        });
+        assert!(
+            log.iter().any(|logged| logged.event
+                == Event::Refused {
+                    command: CommandKind::Cancel,
+                    because: Refusal::Stale,
+                    during: Settlement::Turn
+                }),
+            "the stale cancel is not in the log: {log:#?}"
+        );
+        assert!(
+            log.iter().any(|logged| logged.event
+                == Event::TurnSettled {
+                    turn: 2,
+                    reason: SettleReason::Final
+                }),
+            "a stale cancel stopped the next turn: {log:#?}"
+        );
+        assert_eq!(session.trunk().last(), Some(&assistant("Hello")));
+    }
+
+    #[test]
+    fn every_way_a_turn_ends_settles_it_once_with_its_reason() {
+        let gate = Gate::new();
+        let canned = Canned::new([
+            deltas(&["done"]),
+            vec![Step::Delta("par".to_owned()), Step::Hold(gate.clone())],
+            vec![Step::Fail(TransportFailure::Timeout {
+                after: Duration::from_secs(5),
+            })],
+            vec![Step::Fail(TransportFailure::Connect("refused".to_owned()))],
+            vec![Step::Reject(503, "busy".to_owned())],
+        ]);
+        let session = Session::open(canned, template());
+        let expected = [
+            SettleReason::Final,
+            SettleReason::Cancelled,
+            SettleReason::Timeout,
+            SettleReason::Failed,
+            SettleReason::Failed,
+        ];
+        for turn in 1..=5u32 {
+            let admitted = session.ask("go").expect("accepted while awaiting");
+            assert_eq!(admitted.turn, turn);
+            if turn == 2 {
+                assert!(
+                    gate.wait_for_a_waiter(Duration::from_secs(10)),
+                    "the call never reached the gate"
+                );
+                assert_eq!(session.cancel(2), Ok(()));
+            }
+            wait_until(&session, "the turn to settle", |log| {
+                log.iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == turn as usize
+                    && settled(log)
+            });
+        }
+        let log = session.events_from(0);
+
+        // A crashed thread settles its turn too, through the other door.
+        let crashing = Session::open(Panics, template());
+        crashing.ask("go").expect("accepted");
+        let crashed_log = wait_until(&crashing, "the crashed turn to settle", settled);
+
+        for (turn, reason) in (1..=5u32).zip(expected) {
+            assert_settled_once(&log, turn, reason);
+        }
+        assert_settled_once(&crashed_log, 1, SettleReason::Failed);
+    }
+
+    /// Exactly one `TurnSettled` for `turn`, with `reason`, straight after
+    /// the call's terminal event and straight before the settlement leaves
+    /// `turn`.
+    fn assert_settled_once(log: &[Logged], turn: u32, reason: SettleReason) {
+        let at: Vec<usize> = log
+            .iter()
+            .enumerate()
+            .filter(|(_, logged)| {
+                matches!(logged.event, Event::TurnSettled { turn: settled, .. } if settled == turn)
+            })
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(
+            at.len(),
+            1,
+            "turn {turn} settled {} times: {log:#?}",
+            at.len()
+        );
+        let at = at[0];
+        assert_eq!(
+            log[at].event,
+            Event::TurnSettled { turn, reason },
+            "turn {turn} settled for the wrong reason"
+        );
+        assert!(
+            matches!(
+                log[at - 1].event,
+                Event::Answered { .. }
+                    | Event::Cancelled { .. }
+                    | Event::Rejected { .. }
+                    | Event::Failed { .. }
+                    | Event::Crashed { .. }
+            ),
+            "turn {turn}'s settling does not follow its terminal event: {log:#?}"
+        );
+        assert!(
+            matches!(
+                log[at + 1].event,
+                Event::Settled {
+                    from: Settlement::Turn,
+                    ..
+                }
+            ),
+            "turn {turn}'s settling is not followed by the settlement leaving `turn`"
+        );
+    }
+
+    #[test]
+    fn every_call_is_a_request_and_what_it_produced_names_it() {
+        let session = Session::open(Canned::new([deltas(&["a", "b"])]), template());
+        session.ask("go").expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let requests: Vec<u64> = log
+            .iter()
+            .filter(|logged| {
+                logged.event
+                    == Event::Requested {
+                        turn: 1,
+                        lane: Lane::Trunk,
+                    }
+            })
+            .map(|logged| logged.seq)
+            .collect();
+        assert_eq!(requests.len(), 1, "one call, one request: {log:#?}");
+        let request = requests[0];
+        let cited: Vec<u64> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Delta { request, .. } | Event::Answered { request, .. } => Some(*request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(cited, [request, request, request], "{log:#?}");
+    }
+
+    #[test]
+    fn the_log_begins_with_the_session_it_describes() {
+        let unix_ms = || {
+            u64::try_from(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("after the epoch")
+                    .as_millis(),
+            )
+            .expect("fits")
+        };
+        let before = unix_ms();
+        let session = Session::open(Canned::new([]), template());
+        let after = unix_ms();
+        let log = session.events_from(0);
+        let Event::Started {
+            opened,
+            model,
+            head,
+        } = &log[0].event
+        else {
+            panic!("the log does not begin with the session: {log:#?}");
+        };
+        assert_eq!(log[0].seq, 0);
+        assert!(
+            (before..=after).contains(opened),
+            "opened {opened} is not between {before} and {after}"
+        );
+        assert_eq!(model, "a-model");
+        assert_eq!(head, &[Message::new(Role::System, HEAD)]);
+    }
+
+    #[test]
+    fn each_event_is_stamped_when_it_was_logged() {
+        let gate = Gate::new();
+        let canned = Canned::new([vec![
+            Step::Delta("a".to_owned()),
+            Step::Hold(gate.clone()),
+            Step::Delta("b".to_owned()),
+        ]]);
+        let session = Session::open(canned, template());
+        session.ask("go").expect("accepted");
+        assert!(
+            gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "the call never reached the gate"
+        );
+        // Held for at least 50 ms. The assertion below is a lower bound
+        // only, so a slow machine cannot make it flake.
+        std::thread::sleep(Duration::from_millis(60));
+        gate.open();
+        let log = wait_until(&session, "the turn to settle", settled);
+        for pair in log.windows(2) {
+            assert!(pair[0].t <= pair[1].t, "t went backwards: {pair:#?}");
+        }
+        let stamp = |text: &str| {
+            log.iter()
+                .find(|logged| matches!(&logged.event, Event::Delta { text: piece, .. } if piece == text))
+                .map(|logged| logged.t)
+                .expect("the piece is in the log")
+        };
+        assert!(
+            stamp("b") - stamp("a") >= 50,
+            "a 60 ms hold shows as {} ms: {log:#?}",
+            stamp("b") - stamp("a")
+        );
     }
 
     #[test]
@@ -1030,7 +1514,20 @@ mod tests {
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
-            "in-flight ended nothing-in-flight seam-not-built"
+            "in-flight ended nothing-in-flight seam-not-built stale"
+        );
+        assert_eq!(
+            tags(
+                &SettleReason::ALL
+                    .iter()
+                    .map(|it| it.tag())
+                    .collect::<Vec<_>>()
+            ),
+            "final cancelled max_steps timeout failed"
+        );
+        assert_eq!(
+            tags(&Lane::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
+            "trunk"
         );
     }
 }
