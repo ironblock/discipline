@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 120
+mechanics_assertions = 122
 unseedable_guards = 3
 migrated = 0
 
@@ -3567,6 +3567,14 @@ failure_class = "wiring.trunk-disagreed"
 legacy_signature = "disagree about which branch is the trunk"
 migrated = false
 [[fault]]
+id = "derive.scope_ignores_touched"
+kind = "seeded-gate"
+check = "derive"
+label = "a scope that forgets what a fault touched"
+failure_class = "scope.touched-ignored"
+legacy_signature = "FAIL  a file the fault.s injection touched re-proves it"
+migrated = false
+[[fault]]
 id = "ci.shard_assignment_outlier"
 kind = "seeded-gate"
 check = "ci"
@@ -3684,6 +3692,22 @@ kind = "mechanics"
 check = "test"
 label = "a test scope that selects nothing is not a pass"
 failure_class = "scope.selected-nothing"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-whole-with-some-faults-inherited-rather-than-re-proven"
+kind = "mechanics"
+check = "selftest"
+label = "a whole with some faults inherited rather than re-proven"
+failure_class = "census.inherited"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.one-fault-both-re-proven-and-declared-inherited"
+kind = "mechanics"
+check = "selftest"
+label = "one fault both re-proven and declared inherited"
+failure_class = "census.inherited"
 legacy_signature = ""
 migrated = false
 [[fault]]
