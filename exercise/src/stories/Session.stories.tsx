@@ -180,11 +180,7 @@ export const CurtainClosed: Story = {
 export const MemoryBeside: Story = {
   name: 'memory · beside, with room',
   args: { cursor: MOMENTS.done },
-  render: ({ cursor, curtain, gaps }) => (
-    <div style={{ width: 1900 }}>
-      <SessionView session={sessionAt(cursor)} surface={{ curtain, gaps }} composer={{ phases: PHASES }} />
-    </div>
-  ),
+  render: ({ cursor, curtain, gaps }) => <SessionView session={sessionAt(cursor)} surface={{ curtain, gaps }} composer={{ phases: PHASES }} />,
   play: async ({ canvasElement }) => {
     await expect(q(canvasElement, '.ex-session[data-drawer]')).toBeNull();
     const lane = q(canvasElement, '.ex-lane')?.getBoundingClientRect().right ?? Number.POSITIVE_INFINITY;
@@ -312,6 +308,34 @@ export const DeepLink: Story = {
 };
 
 /**
+ * The lines into working memory are drawn over the page, so a scroll moves
+ * the side call under them and they must follow at once: in the frame the
+ * scroll is handled in, not a render later. Checked by the end of that
+ * frame's animation callbacks -- a line still where it was has lagged.
+ */
+export const LinesKeepUp: Story = {
+  name: 'memory · lines keep up with a scroll',
+  args: { cursor: MOMENTS.done },
+  play: async ({ canvasElement }) => {
+    const line = () => document.querySelector('.ex-links .ex-link[data-from="i/1"]')?.getAttribute('d') ?? '';
+    const cell = q(canvasElement, '[data-branch="i/1"]') as HTMLElement;
+    await waitFor(async () => expect(cell.style.visibility).not.toBe('hidden'));
+    cell.scrollIntoView({ block: 'center' });
+    await waitFor(async () => expect(line()).not.toBe(''));
+    await new Promise((settle) => setTimeout(settle, 300));
+    for (const by of [120, -80, 60]) {
+      const before = line();
+      const moved = new Promise<void>((done) =>
+        window.addEventListener('scroll', () => requestAnimationFrame(() => done()), { once: true }),
+      );
+      window.scrollBy(0, by);
+      await moved;
+      await expect(line()).not.toBe(before);
+    }
+  },
+};
+
+/**
  * What a side call wrote is a line into working memory, not a list under the
  * side call: its footer counts its patches by op, and a line runs from it to
  * each entry it touched -- faint at rest, lit when either end is pointed at.
@@ -320,11 +344,6 @@ export const DeepLink: Story = {
 export const LinesIntoMemory: Story = {
   name: 'memory · lines from side calls to what they wrote',
   args: { cursor: MOMENTS.done },
-  render: (args) => (
-    <div style={{ width: 1900 }}>
-      {meta.render(args)}
-    </div>
-  ),
   play: async ({ canvasElement }) => {
     const cell = q(canvasElement, '[data-branch="i/1"]') as HTMLElement;
     await expect(cell.querySelector('.ex-branch__patches')).toBeNull();
@@ -357,7 +376,6 @@ export const LinesIntoMemory: Story = {
 export const ChainFromANode: Story = {
   name: 'chain · a trunk node, and a cable, light what they join',
   args: { cursor: MOMENTS.done },
-  render: (args) => <div style={{ width: 1900 }}>{meta.render(args)}</div>,
   play: async ({ canvasElement }) => {
     const node = q(canvasElement, '.ex-trunk__node[data-node]') as HTMLElement;
     const id = node.getAttribute('data-node') ?? '';
@@ -389,7 +407,6 @@ export const ChainFromALine: Story = {
   name: 'chain · a line into memory lights its two ends',
   args: { cursor: MOMENTS.done },
   globals: { connectors: 'sweep' },
-  render: (args) => <div style={{ width: 1900 }}>{meta.render(args)}</div>,
   play: async ({ canvasElement }) => {
     const cell = q(canvasElement, '.ex-branchcell[data-branch="i/1"]') as HTMLElement;
     cell.scrollIntoView({ block: 'center' });
@@ -412,7 +429,6 @@ export const ChainFromALine: Story = {
 export const ChainByFocus: Story = {
   name: 'chain · focus lights it too',
   args: { cursor: MOMENTS.done },
-  render: (args) => <div style={{ width: 1900 }}>{meta.render(args)}</div>,
   play: async ({ canvasElement }) => {
     const cell = q(canvasElement, '.ex-branchcell[data-branch="i/1"]') as HTMLElement;
     (cell.querySelector('button, summary, [tabindex]') as HTMLElement).focus();

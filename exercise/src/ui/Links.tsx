@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { CSSProperties } from 'react';
 
 import { lineKey } from './chain.ts';
@@ -73,6 +74,7 @@ export function Links({
       const next: Drawn[] = [];
       const cells = new Map<string, DOMRect | null>();
       const routed = new Map<string, { from: Box; wires: Wire[]; to: Net['to'][number][] }>();
+      const lit: DrawnNet[] = [];
       let memory: Box | undefined;
       for (const wire of wires) {
         let from = cells.get(wire.branch);
@@ -114,7 +116,6 @@ export function Links({
         );
         tracks.current = new Map(tracked.map((r) => [r.key, r.track]));
         const laid = draw(tracked, options);
-        const lit: DrawnNet[] = [];
         for (const net of laid) {
           const own = routed.get(net.key)?.wires ?? [];
           const lane = own[0]?.lane ?? '';
@@ -124,9 +125,13 @@ export function Links({
             if (line) next.push({ key: `${w.branch}>${w.entry}>${w.op}`, wire: w, d: line.d, clipped: line.clipped });
           }
         }
+      }
+      // Drawn over the page, the lines must move in the frame a scroll moved what they join, not a render
+      // later: what this frame measured is rendered in it, before it paints.
+      flushSync(() => {
         setNets(lit);
-      } else setNets([]);
-      setDrawn(next);
+        setDrawn(next);
+      });
     });
   }, [wires, wiring]);
 

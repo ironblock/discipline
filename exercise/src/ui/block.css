@@ -173,23 +173,19 @@
 
 /* The corner: what you can do with a block, and where it came from -- over
    its header's right end, there when you look for it, on hover or focus. It
-   takes no room: shown, it covers the end of the header's line, on the
-   band's own colour, faded in from the left. */
+   takes no room and has no backing of its own: shown, the header's line
+   fades out under it, over the corner's width (--corner-w, Block.tsx). */
 .ex-block__head {
   position: relative;
 }
 
 .ex-block__corner {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  right: calc(0.75rem + 0.5rem * var(--foot-band));
+  top: calc(0.45rem * var(--foot-band));
+  right: calc(1.25rem * var(--foot-band));
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding-left: 1.5rem;
-  --under: color-mix(in oklab, black var(--foot-shade), var(--fill));
-  background: linear-gradient(to right, transparent, var(--under) 1.25rem);
   color: var(--ink-faint);
   opacity: 0;
   pointer-events: none;
@@ -200,6 +196,11 @@
 .ex-block:focus-within > .ex-block__head > .ex-block__corner {
   opacity: 1;
   pointer-events: auto;
+}
+
+.ex-block:is(:hover, :focus-within) > .ex-block__head > .ex-block__flow {
+  -webkit-mask-image: linear-gradient(to left, transparent calc(var(--corner-w, 0px) + 0.5rem), #000 calc(var(--corner-w, 0px) + 2rem));
+  mask-image: linear-gradient(to left, transparent calc(var(--corner-w, 0px) + 0.5rem), #000 calc(var(--corner-w, 0px) + 2rem));
 }
 
 .ex-action {

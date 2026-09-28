@@ -27,9 +27,7 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   args: { t: Number.POSITIVE_INFINITY },
   render: ({ t, condensed = false }) => (
-    <div style={{ width: 1900 }}>
-      <SessionView session={fold(recordedAt(KITCHEN_SINK, t))} surface={{ curtain: true, gaps: false, condensed }} composer={{ phases: PHASES }} />
-    </div>
+    <SessionView session={fold(recordedAt(KITCHEN_SINK, t))} surface={{ curtain: true, gaps: false, condensed }} composer={{ phases: PHASES }} />
   ),
 } satisfies Meta<Args>;
 

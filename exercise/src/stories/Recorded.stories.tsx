@@ -312,7 +312,6 @@ export const Harness: Story = {
   args: { recording: 'step-limit' },
   globals: { connectors: 'trace', crossings: 'hop', corners: 'round' },
   // Wide enough for working memory beside the lanes, not in its drawer.
-  render: (args) => <div style={{ width: 1900 }}>{meta.render(args)}</div>,
   play: async ({ canvasElement }) => {
     const cell = canvasElement.querySelector('[data-branch]:has(.ex-patchsum)') as HTMLElement;
     cell.scrollIntoView({ block: 'center' });

@@ -14,10 +14,18 @@ import { Preferred } from '../src/ui/Prefs.tsx';
 // does not depend on the machine running it.
 const names = Object.keys(PREFS) as PrefName[];
 
+// As a test, a story runs on a desktop wide enough for the trunk, two lanes
+// and working memory side by side (addon-vitest sizes the page from the
+// story's `viewport`, 1200 by 900 unless it names one); in Storybook it runs
+// at whatever the viewer's window is. A story that needs a narrower column
+// renders into one (Session: narrow).
+const TESTED_ON = { desktop: { name: 'Desktop', styles: { width: '1900px', height: '1100px' } } };
+
 const preview: Preview = {
   parameters: {
     backgrounds: { disable: true },
     layout: 'padded',
+    ...(import.meta.env.MODE === 'test' ? { viewport: { options: TESTED_ON, defaultViewport: 'desktop' } } : {}),
   },
   globalTypes: Object.fromEntries(
     names.map((name) => [

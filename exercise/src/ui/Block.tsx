@@ -71,7 +71,7 @@ export function Block({ tone, lane, label, input, output, stats = [], provenance
   const needs = gaps && provenance.needs.length > 0 ? <span className="ex-block__needs">needs {provenance.needs.join(' ')}</span> : null;
   const corner =
     actions !== undefined || curtain ? (
-      <span className="ex-block__corner">
+      <span className="ex-block__corner" ref={cornered}>
         {actions}
         {curtain ? (
           <span className="ex-cite" title="log positions this block was folded from">
@@ -133,6 +133,24 @@ export function Block({ tone, lane, label, input, output, stats = [], provenance
       )}
     </div>
   );
+}
+
+/**
+ * How wide each block's corner is, on its header as `--corner-w`: the header's
+ * line fades out under it (block.css) rather than the corner covering it
+ * with a box. One observer for every corner on the page.
+ */
+const corners =
+  typeof ResizeObserver === 'undefined'
+    ? undefined
+    : new ResizeObserver((entries) => {
+        for (const entry of entries) (entry.target.parentElement as HTMLElement | null)?.style.setProperty('--corner-w', `${Math.ceil(entry.borderBoxSize[0]?.inlineSize ?? 0)}px`);
+      });
+
+function cornered(el: HTMLElement | null) {
+  if (!el || !corners) return;
+  corners.observe(el);
+  return () => corners.unobserve(el);
 }
 
 function stat(s: Stat, i: number) {

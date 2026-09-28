@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { flushSync } from 'react-dom';
-import { expect, userEvent, within as canvas } from 'storybook/test';
+import { expect, userEvent, waitFor, within as canvas } from 'storybook/test';
 
 import { Block } from '../ui/Block.tsx';
 import type { Tone } from '../ui/Block.tsx';
@@ -592,6 +592,15 @@ export const ToolWrittenApart: Story = {
     const [message, call] = [...canvasElement.querySelectorAll('.ex-block')] as HTMLElement[];
     await expect(message?.querySelector('.ex-block__foot')?.textContent).toBe('+14 tok in 400 ms (35.0 t/s tg)');
     await expect(call?.querySelector('.ex-block__head .ex-block__flow')?.textContent).toBe('+27 tok in 750 ms (36.0 t/s tg)');
+    // The corner has no backing of its own to clip: shown, the header's line fades out under it, as wide as it is.
+    const corner = call?.querySelector('.ex-block__head > .ex-block__corner') as HTMLElement;
+    await expect([getComputedStyle(corner).backgroundColor, getComputedStyle(corner).backgroundImage]).toEqual(['rgba(0, 0, 0, 0)', 'none']);
+    // Shown by focus as by hover (a synthetic hover does not set :hover).
+    (corner.querySelector('button') as HTMLElement).focus();
+    const head = call?.querySelector('.ex-block__head') as HTMLElement;
+    await waitFor(async () => expect(head.style.getPropertyValue('--corner-w')).toBe(`${Math.ceil(corner.getBoundingClientRect().width)}px`));
+    await expect(getComputedStyle(head.querySelector('.ex-block__flow') as HTMLElement).maskImage).toMatch(/^linear-gradient/);
+    await expect(Math.round(head.getBoundingClientRect().right - corner.getBoundingClientRect().right)).toBe(Math.round(parseFloat(getComputedStyle(head).paddingRight)));
     // Every header is set alike: its band meets the block's top and sides, a tool's as a message's.
     for (const block of canvasElement.querySelectorAll('.ex-block')) {
       const outer = block.getBoundingClientRect();
