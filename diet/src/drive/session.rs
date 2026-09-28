@@ -1226,6 +1226,12 @@ pub(in crate::drive) mod tests {
         // The drive endpoint's own reply to a thinking turn (#117 Q10,
         // measured by track four): re-sent, its reasoning kept 400 of 420
         // prompt tokens warm; dropped, the prompt diverged at this turn.
+        //
+        // This pins the CLIENT's half of that prefix: what streamed goes back
+        // byte for byte. The server's half -- that those bytes re-render to
+        // the same 400 tokens -- is a measurement, not a test, and has no
+        // fault here:
+        // unseedable: the server-side 400-token prefix identity needs the model and its tokenizer; track four measured it on capture b91695d8 (#117 comment 5864110723)
         let capture =
             include_bytes!("../../client/fixtures/llama-server-e7051ef-reasoning-stream.http");
         let stub = Stub::serving(vec![Act::Raw(capture.to_vec()), Act::Raw(capture.to_vec())])
