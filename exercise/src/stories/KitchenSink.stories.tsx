@@ -42,7 +42,9 @@ export const Whole: Story = {
     const row = (name: string) => canvasElement.querySelector(`.ex-receipt [data-measure="${name}"] .ex-receipt__value`)?.textContent;
     await expect(row('side-calls-per-ask')).toBe('2.0');
     await expect(row('patches-per-ask')).toBe('3.7');
-    await expect(row('mimicry')).toBe('0');
+    // Authored, not measured: unmeasured until a driven session under native tool calls (#25); the count on hover.
+    await expect(row('mimicry')).toBe('unmeasured (confounded)');
+    await expect(canvasElement.querySelector('.ex-receipt [data-measure="mimicry"]')?.getAttribute('title')).toContain('0 typed so in this log');
     // Every side call is cabled to the node it came from.
     const ids = [...canvasElement.querySelectorAll('.ex-branchcell')].map((c) => c.getAttribute('data-branch') ?? '');
     await expect(ids).toHaveLength(12);

@@ -272,7 +272,9 @@ export const ItsReceipt: Story = {
     await expect(row('side-calls-per-ask')).toBe('18.8');
     await expect(row('patches-per-ask')).toBe('52.8');
     await expect(row('live-entries')).toBe('202');
-    await expect(row('mimicry')).toBe('7');
+    // The floor's mimicry is confounded (#25): unmeasured, the migration's count of 7 kept on hover.
+    await expect(row('mimicry')).toBe('unmeasured (confounded)');
+    await expect(receipt?.querySelector('[data-measure="mimicry"]')?.getAttribute('title')).toContain('7 typed so in this log');
     await expect(row('idle-before-refill')).toBe('442 s · 637 s');
     await expect(row('side-call-time-in-gap')).toBe('≤ 100%');
   },
