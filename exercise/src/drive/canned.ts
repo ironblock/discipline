@@ -100,6 +100,9 @@ export interface CannedOptions {
   readonly speed?: number;
 }
 
+/** Which command ends a gap with which `ended_by`. */
+const ENDS = { ask: 'ask', seam: 'seam', cancel: 'cancel' } as const satisfies Record<Command['kind'], IdleGapBody['ended_by']>;
+
 export class CannedTransport implements DriveTransport {
   readonly #beats: readonly Beat[];
   readonly #speed: number;
@@ -107,6 +110,10 @@ export class CannedTransport implements DriveTransport {
   readonly #played: Unplaced[] = [];
   readonly #placer = new Placer();
   readonly #log: LogLine[] = [];
+  /** The latest `turn.settled` no gap has been logged against: the only gap a command may carry. */
+  #openGap: number | undefined;
+  /** An admitted command's gap, logged before the next line it pushes. */
+  #gap: IdleGapBody | undefined;
   readonly #listeners = new Set<(line: LogLine) => void>();
   readonly #timers = new Set<ReturnType<typeof setTimeout>>();
   readonly #opened = performance.now();
@@ -134,16 +141,17 @@ export class CannedTransport implements DriveTransport {
   }
 
   dispatch(command: Command, extras?: { readonly idle_gap?: IdleGapBody }): Promise<Ack> {
-    // As the drive will (#117): the gap a command ends is logged just before its outcome, admitted or refused.
-    if (extras?.idle_gap) this.#push(this.#placer.line({ kind: 'idle.gap', t: this.#now(), ...extras.idle_gap }));
-    switch (command.kind) {
-      case 'ask':
-        return Promise.resolve(this.#fire('send', command.text));
-      case 'seam':
-        return Promise.resolve(this.#seam(command.to));
-      case 'cancel':
-        return Promise.resolve(this.#cancel());
-    }
+    // As `diet` does (#146, ruling (b) on #117): a command's gap rides only if the command is admitted -- logged
+    // just before the first line it pushes -- and must be the open gap, ended by this kind of command; a bad one
+    // turns the command away whole, nothing logged (serve.rs answers 400).
+    const gap = extras?.idle_gap;
+    if (gap && (gap.ended_by !== ENDS[command.kind] || gap.opened_by !== this.#openGap)) return Promise.resolve({ ok: false, refused: 'bad-gap' });
+    this.#gap = gap;
+    const ack = command.kind === 'ask' ? this.#fire('send', command.text) : command.kind === 'seam' ? this.#seam(command.to) : this.#cancel();
+    // Refused, it is dropped. Admitted, whatever gap was open closes, carried or not.
+    this.#gap = undefined;
+    if (ack.ok) this.#openGap = undefined;
+    return Promise.resolve(ack);
   }
 
   #seam(to: string): Ack {
@@ -210,11 +218,18 @@ export class CannedTransport implements DriveTransport {
   }
 
   #emit(event: Unplaced): void {
+    // An admitted command's gap: placed, and logged, before the first line the command pushes.
+    if (this.#gap) {
+      const gap = this.#gap;
+      this.#gap = undefined;
+      this.#push(this.#placer.line({ kind: 'idle.gap', t: event.t, ...gap }));
+    }
     this.#played.push(event);
     for (const line of this.#placer.place(event)) this.#push(line);
   }
 
   #push(line: LogLine): void {
+    if (line.kind === 'turn.settled') this.#openGap = line.seq;
     this.#log.push(line);
     for (const listener of this.#listeners) listener(line);
   }

@@ -29,7 +29,16 @@ const MODIFIERS: ReadonlySet<string> = new Set(['Shift', 'Control', 'Alt', 'Meta
  *              the send for that reason
  *   away       the page hidden
  */
-export function useIdleGap(session: Session): { readonly take: (endedBy: GapEnd) => IdleGapBody | undefined } {
+export interface IdleGapCarrier {
+  /** The gap a command would end now, to carry; the meter keeps running until `admitted`. */
+  readonly carry: (endedBy: GapEnd) => IdleGapBody | undefined;
+  /** The carrying command was admitted: the gap is over. */
+  readonly admitted: () => void;
+  /** A send was refused because work was in flight: the person is blocked from here. */
+  readonly refused: () => void;
+}
+
+export function useIdleGap(session: Session): IdleGapCarrier {
   const meter = useRef<GapMeter | undefined>(undefined);
   const opened = useRef<number | undefined>(undefined);
   const lastInput = useRef(Number.NEGATIVE_INFINITY);
@@ -89,10 +98,10 @@ export function useIdleGap(session: Session): { readonly take: (endedBy: GapEnd)
     };
   }, []);
 
-  const take = useCallback((endedBy: GapEnd) => {
-    const m = meter.current;
+  const carry = useCallback((endedBy: GapEnd) => meter.current?.ending(performance.now(), endedBy), []);
+  const admitted = useCallback(() => {
     meter.current = undefined;
-    return m?.end(performance.now(), endedBy);
   }, []);
-  return { take };
+  const refused = useCallback(() => meter.current?.refused(performance.now()), []);
+  return { carry, admitted, refused };
 }

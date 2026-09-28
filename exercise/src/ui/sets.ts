@@ -162,4 +162,5 @@ export const refusalOf = registry<Refusal>({
   'seam-not-built': { label: 'not taken: the drive cannot refill yet', level: 'quiet' },
   stale: { label: 'not taken: that turn is over', level: 'quiet' },
   unreachable: { label: 'not taken: the drive cannot be reached', level: 'bad' },
+  'bad-gap': { label: 'not taken: the drive would not log the idle gap it carried', level: 'warn' },
 });

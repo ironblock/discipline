@@ -194,26 +194,27 @@ describe('HttpTransport: closed and reopened', () => {
   });
 });
 
-describe('HttpTransport: the idle gap a command ends (Q4)', () => {
+describe('HttpTransport: the idle gap a command ends (Q4, #146)', () => {
   const gap = { opened_by: 7, notice: 100, read: 2000, compose: 900, away: 0, blocked: 0, ended_by: 'ask' as const };
 
-  it('holds it, sending the command without it, while diet does not take it (serve.rs 400s an unknown key)', async () => {
+  it('sends it on the command, as serve.rs takes it', async () => {
     const posted: Record<string, unknown>[] = [];
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });
-    await transport.dispatch({ kind: 'ask', text: 'hi' }, { idle_gap: gap });
-    expect(posted).toEqual([{ kind: 'ask', text: 'hi' }]);
-    expect(transport.held()).toEqual([gap]);
+    await expect(transport.dispatch({ kind: 'ask', text: 'hi' }, { idle_gap: gap })).resolves.toEqual({ ok: true });
+    expect(posted).toEqual([{ kind: 'ask', text: 'hi', idle_gap: gap }]);
   });
 
-  it('sends it on the command once told the route exists', async () => {
+  it('sends the command again without it when diet will not log it (400): a measurement never costs the ask', async () => {
     const posted: Record<string, unknown>[] = [];
-    const web: Web = {
-      EventSource: FakeSource,
-      fetch: async (_url, init) => (posted.push(JSON.parse(String(init?.body)) as Record<string, unknown>), new Response('{}', { status: 200 })),
-    };
-    const transport = new HttpTransport('', web, { idleGap: true });
-    await transport.dispatch({ kind: 'ask', text: 'hi' }, { idle_gap: gap });
-    expect(posted).toEqual([{ kind: 'ask', text: 'hi', idle_gap: gap }]);
-    expect(transport.held()).toEqual([]);
+    const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 'idle_gap' in body ? 400 : 200 })) });
+    await expect(transport.dispatch({ kind: 'ask', text: 'hi' }, { idle_gap: gap })).resolves.toEqual({ ok: true });
+    expect(posted).toEqual([{ kind: 'ask', text: 'hi', idle_gap: gap }, { kind: 'ask', text: 'hi' }]);
+  });
+
+  it('does not resend a refusal: a refused command drops its gap, and diet logs none', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{"refused":"in-flight"}', { status: 409 })) });
+    await expect(transport.dispatch({ kind: 'ask', text: 'hi' }, { idle_gap: gap })).resolves.toEqual({ ok: false, refused: 'in-flight' });
+    expect(posted).toHaveLength(1);
   });
 });

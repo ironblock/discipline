@@ -95,6 +95,22 @@ export class GapMeter {
     if (this.#phase !== 'blocked') this.#enter('blocked', now);
   }
 
+  /**
+   * The gap as it would be if a command ended it now -- this meter left
+   * running, since the command may yet be refused (a refused command drops
+   * its gap, #146): what the command carries.
+   */
+  ending(now: number, endedBy: GapEnd): IdleGapBody {
+    const copy = new GapMeter(this.#openedBy, this.#openedAt);
+    copy.#phase = this.#phase;
+    copy.#phaseStart = this.#phaseStart;
+    copy.#hiddenAt = this.#hiddenAt;
+    copy.#awayInPhase = this.#awayInPhase;
+    Object.assign(copy.#spent, this.#spent);
+    copy.#away = this.#away;
+    return copy.end(now, endedBy);
+  }
+
   /** The command that ends the gap was sent: the gap, as `diet` logs it. */
   end(now: number, endedBy: GapEnd): IdleGapBody {
     const t = ms(now);

@@ -46,6 +46,8 @@ export type Refusal = Open<
   | 'stale'
   /** The HTTP transport's: the drive did not answer. */
   | 'unreachable'
+  /** An idle gap the drive would not log (400, #146): the command was turned away whole. */
+  | 'bad-gap'
 >;
 
 export type Ack = { readonly ok: true } | { readonly ok: false; readonly refused: Refusal };

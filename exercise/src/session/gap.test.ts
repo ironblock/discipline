@@ -76,4 +76,16 @@ describe('the idle gap, measured (Q4)', () => {
     expect(sum(g)).toBe(m.wall(4999.9));
     expect(Object.values(g).filter((v) => typeof v === 'number').every(Number.isInteger)).toBe(true);
   });
+
+  it('reads out the gap a command would carry without ending it: refused, it keeps running', () => {
+    const m = new GapMeter(7, 0);
+    m.present(100);
+    m.composing(1000);
+    expect(m.ending(2000, 'ask')).toMatchObject({ notice: 100, read: 900, compose: 1000 });
+    m.refused(2000);
+    expect(m.phase).toBe('blocked');
+    const g = m.end(5000, 'ask');
+    expect(g).toMatchObject({ notice: 100, read: 900, compose: 1000, blocked: 3000 });
+    expect(sum(g)).toBe(5000);
+  });
 });

@@ -35,13 +35,16 @@ export function App({ speed = 1, recording, drive = false }: { readonly speed?: 
   );
   useEffect(() => () => transport.close(), [transport]);
   const session = useSession(transport);
-  // The idle gap a settled turn opens, carried by the command that ends it -- when that command is one the drive
-  // should admit: an ask or a refill with nothing in flight, a cancel with something (Q4).
+  // The idle gap a settled turn opens, carried by the command that ends it (Q4). `diet` logs it only if that
+  // command is admitted and drops it if refused (#146): the gap ends when the command is admitted, and a send
+  // refused because work was in flight blocks the person from there.
   const gap = useIdleGap(session);
-  const dispatch = (command: Command) => {
-    const admissible = command.kind === 'cancel' ? session.state !== 'awaiting' && session.state !== 'ended' : session.state === 'awaiting';
-    const idleGap = admissible ? gap.take(command.kind === 'ask' ? 'ask' : command.kind === 'seam' ? 'seam' : 'cancel') : undefined;
-    return transport.dispatch(command, idleGap ? { idle_gap: idleGap } : undefined);
+  const dispatch = async (command: Command) => {
+    const idleGap = gap.carry(command.kind === 'ask' ? 'ask' : command.kind === 'seam' ? 'seam' : 'cancel');
+    const ack = await transport.dispatch(command, idleGap ? { idle_gap: idleGap } : undefined);
+    if (ack.ok) gap.admitted();
+    else if (ack.refused === 'in-flight' || ack.refused === 'busy') gap.refused();
+    return ack;
   };
   const [link, setLink] = useState<{ readonly link: Link; readonly why?: string }>({ link: 'live' });
   useEffect(() => (transport as DriveTransport).watchLink?.((next, why) => setLink(why === undefined ? { link: next } : { link: next, why })), [transport]);
