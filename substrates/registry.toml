@@ -212,6 +212,33 @@ version of this registry entry stated "non-viable for the 27B" as a bare \
 measured class fact, which put the verdict in public without the evidence that \
 actually supports it and beside a number that does not."""
 
+[equipment.rtx6000ada-host]
+display_name = "a shared RTX 6000 Ada workstation"
+display_name_note = "The registry's form is `<github username>'s <name of thing>`; this machine is not the account holder's, so that form would misattribute it. A neutral name is used until the maintainer rules one (asked on #117)."
+entry_type = "accelerator-host"
+hardware_fingerprint = "19d9fa21007ab8fef48b62d9d8773ac241fa177b2f8b3de670ddd4128aa10c7b"
+role = "the interactive drive's endpoint for DoD 1 (#117, Q10 as amended 2026-09-27); no banked claim runs here"
+measured = "2026-09-28"
+shared = "a multi-user machine, reached without root; GPU windows are coordinated with its other users, and nothing here stops or restarts its server"
+accelerator = "NVIDIA RTX 6000 Ada Generation (AD102GL, PCI 10de:26b1)"
+accelerator_memory_mib = 49140
+accelerator_driver = "615.71.09"
+accelerator_vbios = "95.02.59.00.09"
+accelerator_power_limit_w = 300
+accelerator_power_limit_ceiling_w = 300
+accelerator_max_sm_clock_mhz = 3105
+interconnect = "PCIe 4.0 x16"
+cpu = "AMD Ryzen Threadripper 3970X, 32 cores, SMT off (32 threads), max 4551 MHz"
+memory = "251 GiB usable (MemTotal 263791312 kB); the DIMM population is not read (it needs root)"
+board = "ASUSTeK ROG STRIX TRX40-E GAMING, Rev 1.xx"
+firmware = "BIOS 2502 (2025-10-14)"
+storage = "1 x 1.8 TB NVMe (Corsair Force MP600), 2 x 1 TB NVMe (Sabrent Rocket 4.0)"
+cooling = "not measured: the machine is shared and not this program's, and nothing here reads its cooling"
+interconnect_measured_by = "`nvidia-smi` pcie.link.gen.max 4 and width.max 16, read 2026-09-28; gen.current read 1 at pstate P8, idle, as the Linux PC's entry explains"
+display_gpu = "AMD Radeon RX 7900 XT (Navi 31) drives the desktop; it serves no model"
+accelerator_ecc = "off"
+not_measured = "the DIMM population and speed, the power supply, NVMe firmware, cooling -- each needs root or a physical read this seat does not have"
+
 [equipment.canned-loopback]
 display_name = "the canned loopback server"
 entry_type = "canned-server"
@@ -448,6 +475,33 @@ engine_identity_measured = true
 engine_identity_measured_on = "2026-09-25"
 current = false
 current_note = "launched for one fire and stopped after it by its recorded pid; nothing serves this substrate between fires"
+
+[substrate.ada48-llamacpp-qwen38flashnext-q20]
+equipment = "rtx6000ada-host"
+description = "Qwen3.8-Flash-Next GSQ-RCO at Q2_0 on the 48 GiB accelerator, served by llama.cpp (ironblock's fork) with a Q4_K_M MTP speculative draft; the interactive drive's endpoint, not a claim substrate"
+pinned = true
+engine_name = "llama.cpp (github.com/ironblock/llama.cpp)"
+engine_identity = "41e6591d710fd4b5d81468264bb973a9f0575665dda2f27c69d5e370424d69bb"
+engine_identity_is = "sha256 of the running llama-server binary, read through /proc/<pid>/exe on 2026-09-28"
+engine_commit = "e7051efc8002847f7269c5606318431179b5904e"
+engine_commit_is = "the serving checkout's HEAD (branch q8-sparse-fa: mainline 5836771 plus the qwen4exp MTP port plus a q8_0 sparse-FA fix), read 2026-09-28; the server reports it as system_fingerprint b7-e7051ef"
+weights_main = ["69820c02ec7d0b45ef2ebb19d6620299db749fe2aded7f39f93c6b88b199b720", "316b46f3a2dbd68c900f43136ab9449f9dcc3725dfd8c794847c204bc161e113"]
+weights_main_file = "Qwen3.8-Flash-Next-GSQ-RCO-Q2_0, two shards (00001-of-00002, 00002-of-00002)"
+weights_draft = "b646ef60eaae2a9ed849e75f15f399629ca22633555e99e809959e95f22a1575"
+weights_draft_file = "mtp-Qwen3.8-Flash-Next-Q4_K_M.gguf"
+sampler_card = "none on the serving line; each request sets its own"
+serving_context = 262144
+serving_flags = "-ngl 99, -t 16, -ctk q8_0, -ctv q8_0, -fa on, -b 1024, -ub 512, -np 4, --kv-unified, --jinja, --spec-type draft-mtp, --spec-draft-ngl 99, --spec-draft-n-max 3, --spec-draft-p-min 0.0, --api-key set; no --reasoning-format, so reasoning streams as reasoning_content and the template preserves it"
+serving_flags_are = "read off the running process's command line on 2026-09-28 and identical to the machine's recorded launch file; model paths and the key withheld"
+hazards = "speculative decoding is not output-invariant here (the argmax flips about 2% per step, measured by the inference seat), so nothing may be gated on token identity; a hybrid recurrent model, so warm reuse after a divergence depends on where checkpoints land"
+
+[[substrate.ada48-llamacpp-qwen38flashnext-q20.instance]]
+id = "2026-09-28"
+os = "Ubuntu 26.04.1 LTS"
+kernel = "7.0.0-31-generic"
+cuda = "13.4"
+pinned_by = "the #117 Q10 measurements of 2026-09-28: the running binary, command line and weights read then"
+current = true
 
 [substrate.canned]
 equipment = "canned-loopback"

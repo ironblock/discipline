@@ -1,0 +1,27 @@
+{
+ "reasoning_content": "We need answer user: \"A train leaves at 14:05 and arrives at 17:50. How long is the journey in minutes? Answer with the number and one short sentence.\"\nNeed compute duration: 14:05 to 17:50. Difference 3 hours 45 minutes = 225 minutes. Need answer with number and one short sentence. Could be \"225 minutes. The journey is 225 minutes long.\" But instruction says answer with the number and one short sentence. Maybe \"225 minutes.\" That's number and one short sentence? It has number and sentence. Could be \"225\" plus sentence? They ask answer with the number and one short sentence. Likely output: \"225. The journey is 225 minutes long.\" But number and sentence? Let's satisfy: \"225 minutes. The journey is 225 minutes long.\" That's two sentences? \"225 minutes.\" is a sentence, and \"The journey...\" second. Need one short sentence maybe \"225 minutes.\" That's number and short sentence. But maybe they want number then one short sentence: \"225. The journey is 225 minutes long.\" That's number and one short sentence. I'll output exactly: 225. The journey is 225 minutes long.\n",
+ "content": "225. The journey is 225 minutes long.",
+ "final": {
+  "usage": {
+   "completion_tokens": 312,
+   "prompt_tokens": 89,
+   "total_tokens": 401,
+   "prompt_tokens_details": {
+    "cached_tokens": 0
+   }
+  },
+  "timings": {
+   "cache_n": 0,
+   "prompt_n": 89,
+   "prompt_ms": 297.198,
+   "prompt_per_token_ms": 3.3393033707865167,
+   "prompt_per_second": 299.4636572251496,
+   "predicted_n": 312,
+   "predicted_ms": 2591.561,
+   "predicted_per_token_ms": 8.332993569131833,
+   "predicted_per_second": 120.00489280398956,
+   "draft_n": 312,
+   "draft_n_accepted": 207
+  }
+ }
+}
