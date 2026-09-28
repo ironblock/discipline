@@ -70,10 +70,21 @@ fn start(endpoint: &str, extra: &[&str]) -> Served {
         .stdout(Stdio::piped())
         .spawn()
         .expect("diet-drive starts");
-    let mut first = String::new();
-    BufReader::new(child.stdout.take().expect("stdout is piped"))
-        .read_line(&mut first)
-        .expect("the first line is printed");
+    // The first line, with a deadline: a binary that exits or hangs before
+    // announcing must fail this test, not hang it -- and not leave a server
+    // running after it.
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let (line, announced) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut first = String::new();
+        let _ = BufReader::new(stdout).read_line(&mut first);
+        let _ = line.send(first);
+    });
+    let Ok(first) = announced.recv_timeout(Duration::from_secs(10)) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("diet-drive serve did not announce itself within 10 s");
+    };
     let announced = log_line_object(&first);
     Served {
         listening: announced["listening"]
@@ -198,6 +209,16 @@ fn a_served_drive_streams_a_real_servers_answer_over_sse() {
             ..
         }
     )));
+    assert!(
+        matches!(
+            lines.last().map(|line| &line.event),
+            Some(log::Event::Settlement {
+                to: log::State::Awaiting,
+                ..
+            })
+        ),
+        "the session did not settle back to awaiting: {stream}"
+    );
 }
 
 #[test]
@@ -250,4 +271,24 @@ fn a_drive_server_answers_an_allowed_origin_through_its_proxy_host() {
         |_| false,
     );
     assert_eq!(status(&elsewhere), 403, "{elsewhere}");
+
+    // An origin that could never match a browser's `Origin` is refused at
+    // the command line rather than accepted and ignored.
+    for never in ["localhost:5173", "http://localhost:5173/"] {
+        let refused = Command::new(DRIVE)
+            .args([
+                "serve",
+                "--endpoint",
+                &stub.url(),
+                "--model",
+                "m",
+                "--head",
+                "x",
+                "--allow-origin",
+                never,
+            ])
+            .output()
+            .expect("diet-drive runs");
+        assert_eq!(refused.status.code(), Some(2), "{never}");
+    }
 }

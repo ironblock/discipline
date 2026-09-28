@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 97
+faults = 103
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -857,6 +857,7 @@ becomes = '''
             Settlement::Capture => {'''
 catches = [
     "drive::serve::tests::a_refused_command_is_409_with_its_tag_and_is_in_the_log",
+    "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
     "drive::session::tests::an_ask_sent_while_a_turn_is_in_flight_is_refused_by_name",
 ]
 
@@ -875,8 +876,8 @@ catches = [
     "drive::serve::tests::a_cancel_over_http_reaches_a_call_blocked_mid_answer",
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
+    "drive::session::tests::a_real_sessions_whole_log_is_a_v0_log",
     "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
-    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
     "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
 ]
 
@@ -945,12 +946,12 @@ catches = [
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_failed_call_is_typed_and_leaves_the_trunk_alone",
+    "drive::session::tests::a_real_sessions_whole_log_is_a_v0_log",
     "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
     "drive::session::tests::a_turn_the_server_refused_is_logged_as_refused_and_leaves_the_trunk_alone",
     "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
     "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
-    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
     "drive::session::tests::the_log_is_numbered_by_position_and_a_reader_can_resume_from_any_point",
 ]
 
@@ -1057,10 +1058,11 @@ becomes = '''
                         text: text.to_owned(),'''
 catches = [
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
+    "drive::session::tests::a_real_sessions_whole_log_is_a_v0_log",
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
+    "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
     "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
     "drive::session::tests::every_call_is_a_request_and_what_it_produced_names_it",
-    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
 ]
 
 [[fault]]
@@ -1569,6 +1571,86 @@ anchor = '''
 becomes = '''
         allowed_origins: Vec::new(),
         ..Config::default()'''
+catches = [
+    "a_drive_server_answers_an_allowed_origin_through_its_proxy_host",
+]
+
+[[fault]]
+id = "drive.session-a-reasoning-line-is-text"
+failure_class = "drive.session-a-reasoning-line-is-text"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            piece: log::Piece::Reasoning(text.clone()),'''
+becomes = '''
+            piece: log::Piece::Text(text.clone()),'''
+catches = [
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
+]
+
+[[fault]]
+id = "drive.session-a-crash-line-says-transport"
+failure_class = "drive.session-a-crash-line-says-transport"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            request: *request,
+            reason: log::FailReason::Crashed,'''
+becomes = '''
+            request: *request,
+            reason: log::FailReason::Transport,'''
+catches = [
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
+]
+
+[[fault]]
+id = "drive.session-a-refusal-line-says-another"
+failure_class = "drive.session-a-refusal-line-says-another"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        Refusal::Stale => log::Refusal::Stale,'''
+becomes = '''
+        Refusal::Stale => log::Refusal::InFlight,'''
+catches = [
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
+]
+
+[[fault]]
+id = "drive.session-an-empty-partial-is-written"
+failure_class = "drive.session-an-empty-partial-is-written"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+    (!partial.is_empty()).then(|| partial.to_owned())'''
+becomes = '''
+    Some(partial.to_owned())'''
+catches = [
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
+]
+
+[[fault]]
+id = "drive.session-a-crash-forgets-what-arrived"
+failure_class = "drive.session-a-crash-forgets-what-arrived"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+                    Event::Delta { request, text } if *request == flight.request => {'''
+becomes = '''
+                    Event::Delta { request, text } if false && *request == flight.request => {'''
+catches = [
+    "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
+]
+
+[[fault]]
+id = "drive.serve-bin-accepts-any-allow-origin"
+failure_class = "drive.serve-bin-accepts-any-allow-origin"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            let origin = is_an_origin(value);'''
+becomes = '''
+            let origin = !value.is_empty();'''
 catches = [
     "a_drive_server_answers_an_allowed_origin_through_its_proxy_host",
 ]

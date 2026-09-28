@@ -627,6 +627,7 @@ mod tests {
 
     use super::*;
     use crate::client::stream::{Canned, Gate, Step};
+    use crate::client::transport::TransportFailure;
     use crate::drive::session::Event;
     use crate::drive::session::tests::{deltas, settled, template, wait_until};
 
@@ -957,6 +958,8 @@ mod tests {
             Canned::new([
                 deltas(&["Hel", "lo"]),
                 vec![Step::Delta("par".to_owned()), Step::Hold(gate.clone())],
+                vec![Step::Fail(TransportFailure::Connect("refused".to_owned()))],
+                vec![Step::Reject(503, "busy".to_owned())],
             ]),
             template(),
         ));
@@ -967,19 +970,32 @@ mod tests {
             crate::drive::session::render,
         )
         .expect("the server starts");
+        // Every way a turn ends that a canned transport can play (a crash
+        // needs a transport that panics; `drive::session` covers it), and
+        // every refusal a session in these states gives.
         session.ask("one").expect("accepted");
         wait_until(&session, "the first turn to settle", settled);
         let _ = session.declare_seam();
         session.ask("two").expect("accepted");
         assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        let _ = session.ask("while the second is in flight");
         assert_eq!(session.cancel(2), Ok(()));
-        let log = wait_until(&session, "the second turn to settle", |log| {
-            log.iter()
-                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
-                .count()
-                == 2
-                && settled(log)
-        });
+        for turn in 2..=4_usize {
+            if turn > 2 {
+                session.ask("again").expect("accepted");
+            }
+            wait_until(&session, "the turn to settle", |log| {
+                log.iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == turn
+                    && settled(log)
+            });
+        }
+        let _ = session.cancel(1);
+        assert_eq!(session.end(), Ok(()));
+        let _ = session.ask("after the end");
+        let log = session.events_from(0);
 
         let mut reader = Client::send(&server, &events_request(&server, "?from=0", ""));
         assert!(

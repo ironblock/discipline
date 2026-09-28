@@ -113,8 +113,11 @@ fn serve(args: &[String]) -> ExitCode {
             head = Some(value.clone());
             true
         } else if flag == "--allow-origin" {
-            allowed_origins.push(value.clone());
-            true
+            let origin = is_an_origin(value);
+            if origin {
+                allowed_origins.push(value.clone());
+            }
+            origin
         } else if flag == "--port" {
             value.parse().map(|given| port = given).is_ok()
         } else if flag == "--max-output-tokens" {
@@ -172,13 +175,21 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(server) => server,
         Err(why) => return fail(EXIT_HALT, &format!("the server did not start: {why}")),
     };
+    println!("{}", announcement(&server.addr().to_string(), opened));
+    // Serves until the process is stopped. The server's threads do the work;
+    // this one only keeps the process, and the server, alive.
+    loop {
+        std::thread::park();
+    }
+}
+
+/// The first line `serve` prints: where it listens and when it opened, as
+/// JSON.
+fn announcement(listening: &str, opened: u64) -> String {
     let mut out = String::new();
     json::render(
         &Value::Object(BTreeMap::from([
-            (
-                "listening".to_owned(),
-                Value::String(server.addr().to_string()),
-            ),
+            ("listening".to_owned(), Value::String(listening.to_owned())),
             (
                 "opened".to_owned(),
                 Value::Integer(i64::try_from(opened).unwrap_or(i64::MAX)),
@@ -186,12 +197,16 @@ fn serve(args: &[String]) -> ExitCode {
         ])),
         &mut out,
     );
-    println!("{out}");
-    // Serves until the process is stopped. The server's threads do the work;
-    // this one only keeps the process, and the server, alive.
-    loop {
-        std::thread::park();
-    }
+    out
+}
+
+/// An origin as a browser sends it: a scheme, `://`, a host and port, and
+/// no path -- not even a trailing slash. Anything else could never equal an
+/// `Origin` header, and would be accepted and do nothing.
+fn is_an_origin(value: &str) -> bool {
+    value
+        .split_once("://")
+        .is_some_and(|(_, authority)| !authority.is_empty() && !authority.contains('/'))
 }
 
 fn usage() -> String {

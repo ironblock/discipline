@@ -239,6 +239,9 @@ pub enum Event {
         /// The sequence number of the [`Event::Requested`] whose thread
         /// crashed.
         request: u64,
+        /// What arrived before it crashed: every answer piece logged for this
+        /// request. Never an answer.
+        partial: String,
         /// Why: the panic's message, or the operating system's refusal.
         why: String,
     },
@@ -722,19 +725,23 @@ pub fn line_of(logged: &Logged) -> log::Line {
             reason: log::FailReason::Server,
             message: body.clone(),
             status: Some(*status),
-            partial: Some(partial.clone()),
+            partial: arrived(partial),
         },
         Event::Failed {
             request,
             failure,
             partial,
         } => failed_line(*request, failure, partial),
-        Event::Crashed { request, why } => log::Event::RequestFailed {
+        Event::Crashed {
+            request,
+            partial,
+            why,
+        } => log::Event::RequestFailed {
             request: *request,
             reason: log::FailReason::Crashed,
             message: why.clone(),
             status: None,
-            partial: None,
+            partial: arrived(partial),
         },
         Event::TurnSettled { turn, reason } => log::Event::TurnSettled {
             turn: *turn,
@@ -766,8 +773,14 @@ fn failed_line(request: u64, failure: &TransportFailure, partial: &str) -> log::
         },
         message: failure.to_string(),
         status: None,
-        partial: Some(partial.to_owned()),
+        partial: arrived(partial),
     }
+}
+
+/// `partial` as the log format carries it: "what arrived before it ended,
+/// when anything did" -- absent when nothing did, never an empty string.
+fn arrived(partial: &str) -> Option<String> {
+    (!partial.is_empty()).then(|| partial.to_owned())
 }
 
 fn role_of(role: Role) -> log::Role {
@@ -928,8 +941,21 @@ fn crashed<S>(shared: &Shared<S>, why: String) {
     let mut state = shared.lock();
     if state.settlement == Settlement::Turn {
         if let Some(flight) = state.flight.take() {
+            // The call's own `partial` died with its thread; what it had
+            // delivered is in the log, piece by piece.
+            let partial: String = state
+                .log
+                .iter()
+                .filter_map(|logged| match &logged.event {
+                    Event::Delta { request, text } if *request == flight.request => {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
+                .collect();
             state.push(Event::Crashed {
                 request: flight.request,
+                partial,
                 why,
             });
             state.push(Event::TurnSettled {
@@ -1317,6 +1343,7 @@ pub(in crate::drive) mod tests {
             [
                 Event::Crashed {
                     request: 3,
+                    partial: "half".to_owned(),
                     why: "a transport that panics mid-answer (seeded by this test)".to_owned()
                 },
                 Event::TurnSettled {
@@ -1828,6 +1855,7 @@ pub(in crate::drive) mod tests {
             },
             Event::Crashed {
                 request: 3,
+                partial: String::new(),
                 why: "a panic".to_owned(),
             },
             Event::Failed {
@@ -1885,63 +1913,106 @@ pub(in crate::drive) mod tests {
             );
         }
 
-        // A round trip cannot see a conversion that loses something on the
-        // way in, so what each kind of ending SAYS is pinned too.
-        let said = |event: Event| {
-            line_of(&Logged {
-                seq: 9,
-                t: 0,
-                event,
-            })
-            .event
-        };
-        assert_eq!(
-            said(Event::Cancelled {
+        // A round trip cannot see a conversion that loses or mistranslates
+        // something on the way in -- it reads back whatever was written -- so
+        // what EVERY sample becomes is written out here, one line each, in
+        // `one_of_every_event`'s order (#140's first review).
+        let expected = vec![
+            log::Event::SessionStart {
+                opened: 1_790_000_000_000,
+                model: "a-model".to_owned(),
+                head: vec![log::HeadMessage {
+                    role: log::Role::System,
+                    content: HEAD.to_owned(),
+                }],
+            },
+            log::Event::Ask {
+                turn: 1,
+                text: "say \"hi\"\n".to_owned(),
+            },
+            log::Event::Settlement {
+                from: log::State::Awaiting,
+                to: log::State::Turn,
+            },
+            log::Event::Request {
+                turn: 1,
+                lane: log::Lane::Trunk,
+            },
+            log::Event::Refused {
+                command: log::Command::Cancel,
+                because: log::Refusal::Stale,
+                during: log::State::Turn,
+            },
+            log::Event::Delta {
                 request: 3,
-                partial: "Hel".to_owned()
-            }),
+                piece: log::Piece::Reasoning("thinking\n".to_owned()),
+            },
+            log::Event::Delta {
+                request: 3,
+                piece: log::Piece::Text("Hel".to_owned()),
+            },
+            log::Event::StopAsked { turn: 1 },
+            log::Event::Response {
+                to_request: 3,
+                text: "Hello".to_owned(),
+                finish_reason: Some("stop".to_owned()),
+            },
             log::Event::Cancelled {
                 request: 3,
-                partial: "Hel".to_owned()
-            }
-        );
-        assert_eq!(
-            said(Event::Failed {
-                request: 3,
-                failure: TransportFailure::Timeout {
-                    after: Duration::from_secs(5)
-                },
-                partial: "par".to_owned()
-            }),
-            log::Event::RequestFailed {
-                request: 3,
-                reason: log::FailReason::Timeout,
-                message: TransportFailure::Timeout {
-                    after: Duration::from_secs(5)
-                }
-                .to_string(),
-                status: None,
-                partial: Some("par".to_owned()),
-            }
-        );
-        assert_eq!(
-            said(Event::Rejected {
-                request: 3,
-                status: 503,
-                body: "busy".to_owned(),
-                partial: String::new()
-            }),
+                partial: "Hel".to_owned(),
+            },
             log::Event::RequestFailed {
                 request: 3,
                 reason: log::FailReason::Server,
                 message: "busy".to_owned(),
                 status: Some(503),
-                partial: Some(String::new()),
+                partial: Some("Hel".to_owned()),
+            },
+            // Nothing arrived before this crash: no `partial` at all.
+            log::Event::RequestFailed {
+                request: 3,
+                reason: log::FailReason::Crashed,
+                message: "a panic".to_owned(),
+                status: None,
+                partial: None,
+            },
+            log::Event::RequestFailed {
+                request: 3,
+                reason: log::FailReason::Timeout,
+                message: TransportFailure::Timeout {
+                    after: Duration::from_secs(5),
+                }
+                .to_string(),
+                status: None,
+                partial: Some("Hel".to_owned()),
+            },
+            log::Event::TurnSettled {
+                turn: 1,
+                reason: log::SettleReason::MaxSteps,
+            },
+        ];
+        let written: Vec<log::Event> = one_of_every_event()
+            .iter()
+            .map(|logged| line_of(logged).event)
+            .collect();
+        assert_eq!(written, expected);
+        // A connection that failed is `transport`, not `timeout`.
+        assert_eq!(
+            failed_line(3, &TransportFailure::Connect("refused".to_owned()), ""),
+            log::Event::RequestFailed {
+                request: 3,
+                reason: log::FailReason::Transport,
+                message: TransportFailure::Connect("refused".to_owned()).to_string(),
+                status: None,
+                partial: None,
             }
         );
+    }
 
-        // And a real session's whole log, every rule that spans lines
-        // included: an answer, a cancel, a failure, a refusal by the server.
+    #[test]
+    fn a_real_sessions_whole_log_is_a_v0_log() {
+        // Every rule that spans lines included: an answer, a cancel, a
+        // failure, a refusal by the server.
         let gate = Gate::new();
         let canned = Canned::new([
             vec![
