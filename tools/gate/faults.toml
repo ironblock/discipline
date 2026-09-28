@@ -39,7 +39,7 @@
 [meta]
 source = "verify.sh"
 mechanics_assertions = 126
-unseedable_guards = 3
+unseedable_guards = 2
 migrated = 0
 
 # A guard genuinely too dangerous to seed -- covering it would re-enter
@@ -52,18 +52,6 @@ migrated = 0
 id = "selftest.empty-shard-declares-pass"
 file = "verify.sh"
 reason = "a re-entrant --selftest call would recurse into the function containing it; proved by hand instead"
-
-# The same class, and the same reason. `in_shard` and `load_shard_plan` refuse
-# three states -- a fault the assignment does not name, an assignment packed
-# for a different N than the caller passed, and no assignment at all -- and all
-# three are only reachable under `--selftest --shard`. A seeded case runs
-# `verify.sh --only CHECK`; nothing it can run gets there, and an assertion
-# that invoked `--selftest` would re-enter the function the guards sit in.
-# Proved by hand, transcript in the commit that added them.
-[[unseedable]]
-id = "selftest.shard-assignment-refusals"
-file = "verify.sh"
-reason = "the sharded selftest's refusals cannot be seeded without re-entering --selftest; proved by hand instead"
 
 # The server-side half of R2c I5r's prefix identity (#136): the client test
 # pins that reasoning goes back byte-identical; that the bytes re-render to
@@ -3503,22 +3491,6 @@ failure_class = "gate.derive-accepts-a-fast-green"
 legacy_signature = "a scope naming another target selected something"
 migrated = false
 [[fault]]
-id = "derive.derive_shards_packs_by_count"
-kind = "seeded-gate"
-check = "derive"
-label = "a shard split balanced by count"
-failure_class = "gate.shard-split-balances-the-count"
-legacy_signature = "not two equal halves"
-migrated = false
-[[fault]]
-id = "derive.derive_shards_outlier_against_the_mean"
-kind = "seeded-gate"
-check = "derive"
-label = "an outlier shard graded against the mean"
-failure_class = "gate.shard-outlier-graded-against-the-mean"
-legacy_signature = "produced 0 finding\\(s\\)"
-migrated = false
-[[fault]]
 id = "ci.ci_pr_branch_filter"
 kind = "seeded-gate"
 check = "ci"
@@ -3581,14 +3553,6 @@ check = "derive"
 label = "a scope that forgets what a fault touched"
 failure_class = "scope.touched-ignored"
 legacy_signature = "FAIL  a file the fault.s injection touched re-proves it"
-migrated = false
-[[fault]]
-id = "ci.shard_assignment_outlier"
-kind = "seeded-gate"
-check = "ci"
-label = "a shard carrying three times the median"
-failure_class = "wiring.shard-assignment-unbalanced"
-legacy_signature = "x the median shard"
 migrated = false
 [[fault]]
 id = "ci.gate_budget_undeclared"

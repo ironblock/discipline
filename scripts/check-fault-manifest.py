@@ -189,11 +189,11 @@ def main() -> int:
     # opinion about which kinds the selftest runs.
     counting_selftest = "--count-selftest-red" in sys.argv
     # The same question again, answered with the NAMES rather than the number.
-    # `derive-shards.py` has to say which faults an assignment is missing and
-    # which it names that no longer exist, and neither is answerable from a
-    # count. Emitted from here for the reason `--fixture-classes` is: the set
-    # of faults `--selftest` runs has one reader, and a second one free to
-    # disagree with it is how a fault ends up in nobody's shard.
+    # `scope-selftest.py` decides fault by fault which to re-prove and which
+    # to inherit, which is not answerable from a count. Emitted from here for
+    # the reason `--fixture-classes` is: the set of faults `--selftest` runs has
+    # one reader, and a second one free to disagree with it is how a fault ends
+    # up neither re-proven nor inherited.
     listing_selftest = "--list-selftest-red" in sys.argv
 
     # Asked for the count, answer the count -- before the manifest is read at
