@@ -33,13 +33,15 @@ permissions:
   contents: read
 
 # A pull request's newer push supersedes its older run, which is the saving
-# this key exists for. A push to `main` is never cancelled: that run is the
-# full selftest whose census the next pull request is scoped against (#112),
-# and a merge landing inside its nineteen minutes cancelled it -- 6 of 30
-# trunk pushes, measured on #112. A second merge now waits behind the first
-# rather than cancelling it; GitHub keeps one waiting run per group, so a
-# third replaces the second while it waits, and the census is at most one
-# merge old. check-ci-coverage.py refuses the literal `true`.
+# this key exists for. A RUNNING push to `main` is never cancelled: that run
+# is the full selftest whose census the next pull request is scoped against
+# (#112), and a merge landing inside its nineteen minutes cancelled it -- 6 of
+# 30 trunk pushes, measured on #112. A second merge now waits behind the
+# first; GitHub keeps one WAITING run per group, so a third replaces the
+# second while it waits. Every trunk run that starts finishes, and the census
+# trails the trunk by at most the merges of about two run lengths -- harmless
+# to correctness, since the scope is measured from each fault's own last-red
+# commit. check-ci-coverage.py refuses the literal `true`.
 concurrency:
   group: verify-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

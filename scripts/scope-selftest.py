@@ -626,7 +626,7 @@ def _mechanics_outside_machinery():
     inside = sorted(
         name for name, body in bodies.items()
         if name in MACHINERY_FUNCTIONS | {"selftest"} and name != "expect_exit"
-        and re.search(r"^\s*expect_exit ", body, re.M)
+        and re.search(r"(?<![\w-])expect_exit\s", body)
     )
     if inside:
         return f"expect_exit is called inside machinery: {inside}"

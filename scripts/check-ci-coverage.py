@@ -393,8 +393,11 @@ def main() -> int:
     #    and pull requests are then scoped against an older census. A pull
     #    request superseding its own run is the saving the key exists for, so
     #    an expression is allowed; the literal `true` is what is refused.
-    cancel = CANCEL_IN_PROGRESS.search(root_text)
-    if cancel and cancel.group(1).strip().strip("\"'") == "true":
+    # Every `cancel-in-progress` in the file (a job may carry its own), with a
+    # trailing comment dropped and YAML's own spellings of true folded.
+    literal = [m.group(1).split(" #", 1)[0].strip().strip("\"'").lower()
+               for m in CANCEL_IN_PROGRESS.finditer(root_text)]
+    if any(value in ("true", "yes", "on") for value in literal):
         failures.append(
             f"{ROOT_WORKFLOW}: `cancel-in-progress: true` cancels a push run on the "
             f"trunk when the next merge lands, and the next pull request is scoped "
