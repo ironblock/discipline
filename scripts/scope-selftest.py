@@ -756,11 +756,14 @@ def main(argv: list[str]) -> int:
         return selftest()
     if args.matrix:
         try:
-            total = len(listed_faults(ROOT))
+            listed = set(listed_faults(ROOT))
+            total = len(listed)
             inherited = 0
             if args.plan:
-                inherited = sum(1 for line in pathlib.Path(args.plan).read_text(encoding="utf-8").splitlines()
-                                if line.startswith("inherit\t"))
+                # Distinct ids the manifest lists: a duplicate or stale row must
+                # not make the count of what runs look smaller than it is.
+                inherited = len({line.split("\t")[1] for line in pathlib.Path(args.plan).read_text(encoding="utf-8").splitlines()
+                                 if line.startswith("inherit\t") and len(line.split("\t")) > 1} & listed)
             n = shard_count(total - inherited, total, max_shards())
         except (Unusable, OSError) as err:
             print(f"scope-selftest: {err}", file=sys.stderr)

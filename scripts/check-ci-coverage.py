@@ -411,8 +411,8 @@ def main() -> int:
     #    `max_shards` is the ceiling scope-selftest.py --matrix divides. Both
     #    used to be refused missing by derive-shards.py --check, which retired
     #    with the shard plan (#112); a budget file declaring nothing would
-    #    otherwise leave every run printing "against no budget" and the matrix
-    #    step failing on a pull request's first push.
+    #    otherwise leave every run printing "against no budget" and every
+    #    run's matrix step -- pull request, push and nightly -- failing.
     declared: dict[str, str] = {}
     if BUDGET.is_file():
         for line in BUDGET.read_text(encoding="utf-8").splitlines():
