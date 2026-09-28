@@ -1642,6 +1642,25 @@ path.write_text(source, encoding="utf-8")
 EOF
 }
 
+# The log's TypeScript bindings left behind by a change to log.rs (#31, via
+# #117): the SPA reads `formats/log/log.ts`, so log.rs moving without it
+# being regenerated is a SPA typed against a format that no longer exists.
+# Renames one union the generator emits and nothing the reader reads, so the
+# one test that fails is the staleness test.
+inject_log_bindings_stale() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = 'Self::GapEnd => "GapEnd",'
+new = 'Self::GapEnd => "IdleGapEnd",'
+if source.count(old) != 1:
+    raise SystemExit(f"the union name appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # The session event log's cross-line rules (#117 R2c I1, the courier patch from
 # track three), each disabled in turn: a line the reader must refuse is then
 # read as a log. Measured by track three before the courier; wired here.
@@ -6800,6 +6819,8 @@ selftest() {
     'regimen/fixtures/invalid/reasoning-effort-without-budget\.toml' 'test:conformance/formats::regimen'
   seeded_case "two ids over one substrate"            test     inject_record_substrates_indistinguishable \
     'record/fixtures/invalid/substrates-indistinguishable\.jsonl' 'test:conformance/formats::record'
+  seeded_case "the log's TypeScript bindings stale against log.rs" test inject_log_bindings_stale \
+    'the_checked_in_bindings_are_current \.\.\. FAILED' 'lib/formats::log::tests'
   seeded_case "a gap in a log's seq read as a log" test inject_log_seq_gap_read_as_a_log \
     'a_gap_in_seq_is_refused \.\.\. FAILED' 'lib/formats::log::tests'
   seeded_case "a log reference to anything read as a request" test inject_log_reference_to_anything_read \
