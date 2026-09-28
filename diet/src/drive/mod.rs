@@ -96,6 +96,7 @@
 pub mod canned;
 pub mod regimen;
 pub mod script;
+pub mod serve;
 pub mod session;
 
 use std::cell::Cell;
@@ -2875,7 +2876,8 @@ mod tests {
                 // manifest; a catcher living beside it has to be findable
                 // here too.
                 include_str!("regimen.rs"),
-                // The interactive session (#117 R2).
+                // The interactive session and its HTTP surface (#117 R2).
+                include_str!("serve.rs"),
                 include_str!("session.rs"),
                 // The binary's own tests, which live outside `src/` and are the
                 // only thing that runs the program. A `catches` naming one of
