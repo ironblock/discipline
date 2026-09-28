@@ -28,6 +28,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  # THE NIGHTLY (#112). A pull request re-proves only the faults its diff can
+  # reach, and inherits the rest from the last `main` run; an indirect
+  # dependency -- a helper, the runner image, the toolchain's own drift -- is
+  # what this catches, within a day. It runs the full set on the default
+  # branch, like a push to it, and a fault it finds not red opens an issue.
+  schedule:
+    - cron: "17 6 * * *"
 
 permissions:
   contents: read
@@ -42,8 +49,12 @@ permissions:
 # trails the trunk by at most the merges of about two run lengths -- harmless
 # to correctness, since the scope is measured from each fault's own last-red
 # commit. check-ci-coverage.py refuses the literal `true`.
+#
+# The event is in the key so the nightly has a group of its own: on the same
+# ref as a trunk push, it would otherwise wait behind a merge's run or replace
+# the merge waiting behind it.
 concurrency:
-  group: verify-${{ github.workflow }}-${{ github.ref }}
+  group: verify-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -58,10 +69,12 @@ jobs:
 
   selftest:
     uses: ./.github/workflows/gate-selftest.yml
-    # `actions: read` for the scope plan's `main` censuses (#112).
+    # `actions: read` for the scope plan's `main` censuses, `issues: read` for
+    # the drift issues a pull request is refused on (#112).
     permissions:
       contents: read
       actions: read
+      issues: read
 
   gate:
     name: gate
@@ -76,13 +89,34 @@ jobs:
     permissions:
       contents: read
       actions: read
+      # To open a drift issue on `main` and the nightly (#112). Pull-request
+      # runs never reach the step that uses it.
+      issues: write
     steps:
       - uses: actions/checkout@v5
+
+      # A FAULT NOT SEEN RED ON `main` OPENS AN ISSUE AGAINST ITS CHECK
+      # (#112). Before the verdict below, which stops the job when a shard
+      # failed -- and a failed shard is exactly when there is something to
+      # open. The build's verdict is unchanged by it: the run is still red.
+      - uses: actions/download-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          pattern: selftest-not-red-*
+          path: ${{ runner.temp }}/not-red
+      - name: Open an issue for each fault not seen red
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/selftest-drift.py open "${{ runner.temp }}/not-red"
 
       # The comparison lives in a script rather than inline here, so that it
       # can be run and proven against every result state instead of being
       # trusted because it looks right in YAML.
+      # `always()`: the opener above only fails when a shard already has, and
+      # its failure must not hide this step's message about which job it was.
       - name: Every job must have succeeded
+        if: always()
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: python3 scripts/check-job-results.py

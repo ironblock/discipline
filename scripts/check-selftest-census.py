@@ -88,6 +88,15 @@ class Census:
                 else:
                     self.touched.append((parts[1], parts[2]))
                 continue
+            # A fault the shard did not see red (#112). Its row is what the
+            # drift opener reads off a failed `main` shard; here it is simply
+            # not a whole, whatever else the census says.
+            if key == "not_red":
+                if len(parts) != 4 or not parts[1] or not parts[2]:
+                    self.errors.append(f"{self.path.name}:{number}: not `not_red<TAB>ID<TAB>CHECK<TAB>WHY`")
+                else:
+                    self.errors.append(f"{self.path.name}:{number}: {parts[1]} was not seen red: {parts[3]}")
+                continue
             if key == "inherited":
                 if len(parts) != 4 or not parts[1].isdigit() or not parts[2] or not parts[3]:
                     self.errors.append(
