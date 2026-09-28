@@ -89,11 +89,15 @@ pub struct Config {
 pub struct Credential([u8; 32]);
 
 impl Credential {
-    /// The credential `user:password`, or nothing when there is no `:` or
-    /// the text holds a control character, which no browser prompt produces.
+    /// The credential `user:password`, or nothing when there is no `:`, the
+    /// user is empty, or the text holds a control character, which no
+    /// browser prompt produces. An empty password is the operator's call.
     #[must_use]
     pub fn basic(user_password: &str) -> Option<Self> {
-        let usable = user_password.contains(':') && !user_password.chars().any(char::is_control);
+        let usable = user_password
+            .split_once(':')
+            .is_some_and(|(user, _)| !user.is_empty())
+            && !user_password.chars().any(char::is_control);
         usable.then(|| Self(sha256(base64(user_password.as_bytes()).as_bytes())))
     }
 
@@ -1098,6 +1102,19 @@ mod tests {
         }
         assert_eq!(asked(&session), 0, "a refused request reached the session");
 
+        // D17 comes first: a rebound host is refused as such, with no
+        // challenge that would have a browser prompt a page's visitor.
+        let rebound = Client::send(
+            &server,
+            &format!(
+                "GET /events?from=0 HTTP/1.1\r\nHost: rebound.example:{}\r\n\r\n",
+                server.addr().port()
+            ),
+        )
+        .reply();
+        assert_eq!(status(&rebound), 403, "{rebound}");
+        assert!(!rebound.contains("WWW-Authenticate"), "{rebound}");
+
         // The right pair, with the scheme in any case, is admitted.
         let right = format!("Authorization: basic {}\r\n", base64(b"author:s3cret"));
         let reply = Client::send(&server, &request("POST", "/commands", &right)).reply();
@@ -1117,12 +1134,20 @@ mod tests {
 
     #[test]
     fn a_credential_is_a_user_password_pair_with_no_control_character() {
-        assert!(Credential::basic("author:s3cret").is_some());
+        let credential = Credential::basic("author:s3cret").expect("a usable pair");
+        assert_eq!(format!("{credential:?}"), "Credential(<redacted>)");
         assert!(
             Credential::basic("author:").is_some(),
             "an empty password is the author's call"
         );
-        for unusable in ["", "author", "author:s3cret\n", "author:s3\r\ncret"] {
+        for unusable in [
+            "",
+            "author",
+            ":",
+            ":s3cret",
+            "author:s3cret\n",
+            "author:s3\r\ncret",
+        ] {
             assert!(
                 Credential::basic(unusable).is_none(),
                 "{unusable:?} was accepted"

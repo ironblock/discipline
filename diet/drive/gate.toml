@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 120
+faults = 124
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -1202,6 +1202,7 @@ becomes = '''
             let _ = host_allowed;'''
 catches = [
     "drive::serve::tests::a_request_for_a_rebound_host_name_is_403",
+    "drive::serve::tests::a_wrong_credential_is_401_on_every_route",
 ]
 
 [[fault]]
@@ -1848,9 +1849,9 @@ failure_class = "drive.serve-credential-accepts-a-control-character"
 target = "diet/src/drive/serve.rs"
 expect_exit = 101
 anchor = '''
-        let usable = user_password.contains(':') && !user_password.chars().any(char::is_control);'''
+            && !user_password.chars().any(char::is_control);'''
 becomes = '''
-        let usable = user_password.contains(':');'''
+            && true;'''
 catches = [
     "drive::serve::tests::a_credential_is_a_user_password_pair_with_no_control_character",
 ]
@@ -1907,4 +1908,65 @@ becomes = '''
         ..Config::default()'''
 catches = [
     "a_drive_server_with_an_auth_file_asks_every_request_for_it",
+]
+
+[[fault]]
+id = "drive.serve-bin-accepts-a-mapped-wildcard"
+failure_class = "drive.serve-bin-accepts-a-mapped-wildcard"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    let listen = listen.to_canonical();'''
+becomes = '''
+'''
+catches = [
+    "a_drive_server_refuses_a_wildcard_listen_even_with_a_credential",
+]
+
+[[fault]]
+id = "drive.serve-credential-accepts-an-empty-user"
+failure_class = "drive.serve-credential-accepts-an-empty-user"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+            .is_some_and(|(user, _)| !user.is_empty())'''
+becomes = '''
+            .is_some_and(|_| true)'''
+catches = [
+    "drive::serve::tests::a_credential_is_a_user_password_pair_with_no_control_character",
+]
+
+[[fault]]
+id = "drive.serve-credential-debug-prints-its-digest"
+failure_class = "drive.serve-credential-debug-prints-its-digest"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        f.write_str("Credential(<redacted>)")'''
+becomes = '''
+        write!(f, "Credential({:?})", self.0)'''
+catches = [
+    "drive::serve::tests::a_credential_is_a_user_password_pair_with_no_control_character",
+]
+
+[[fault]]
+id = "drive.serve-auth-is-asked-before-the-host-check"
+failure_class = "drive.serve-auth-is-asked-before-the-host-check"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        if !host_allowed || !origin_allowed {
+            return respond(&mut stream, 403, &empty());
+        }'''
+becomes = '''
+        if let Some(credential) = &self.config.credential
+            && !credential.admits(request.header("authorization"))
+        {
+            return respond_with(&mut stream, 401, CHALLENGE, &empty());
+        }
+        if !host_allowed || !origin_allowed {
+            return respond(&mut stream, 403, &empty());
+        }'''
+catches = [
+    "drive::serve::tests::a_wrong_credential_is_401_on_every_route",
 ]

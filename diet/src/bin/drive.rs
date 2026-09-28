@@ -222,6 +222,9 @@ fn listener(
     port: u16,
     credentialed: bool,
 ) -> Result<std::net::TcpListener, ExitCode> {
+    // `::ffff:0.0.0.0` is the IPv4 wildcard, and `::ffff:127.0.0.1` loopback:
+    // judged as IPv6, the first would pass the wildcard check.
+    let listen = listen.to_canonical();
     if listen.is_unspecified() {
         return Err(fail(
             EXIT_USAGE,

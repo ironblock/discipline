@@ -301,7 +301,7 @@ fn a_drive_server_refuses_a_wildcard_listen_even_with_a_credential() {
     let stub = Stub::serving(Vec::new()).expect("loopback");
     let auth = file_holding("auth", "author:s3cret\n");
     let auth_path = auth.0.to_string_lossy().into_owned();
-    for wildcard in ["0.0.0.0", "::"] {
+    for wildcard in ["0.0.0.0", "::", "::ffff:0.0.0.0"] {
         let (code, said) = run_briefly(
             &stub.url(),
             &["--listen", wildcard, "--auth-file", &auth_path],
