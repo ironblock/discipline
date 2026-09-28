@@ -615,6 +615,24 @@ def _selftest_cases_only():
     return None
 
 
+@fixture("no mechanics assertion lives in a function whose change re-proves everything")
+def _mechanics_outside_machinery():
+    # A mechanics assertion runs on every selftest whatever the scope, so it is
+    # no fault's dependency. Written inside a machinery function, every edit to
+    # one re-proved all 578 faults: #147 added three to `selftest` and scoped
+    # nothing, measured on #112. The `expect_exit` DEFINITION is machinery and
+    # is the one exception.
+    bodies = functions((ROOT / "verify.sh").read_text(encoding="utf-8"))
+    inside = sorted(
+        name for name, body in bodies.items()
+        if name in MACHINERY_FUNCTIONS | {"selftest"} and name != "expect_exit"
+        and re.search(r"(?<![\w-])expect_exit\s", body)
+    )
+    if inside:
+        return f"expect_exit is called inside machinery: {inside}"
+    return None
+
+
 @fixture("the census gives each fault the commit it last ran red at, and what it touched")
 def _census():
     import tempfile

@@ -3387,6 +3387,12 @@ inject_ci() {
   edit_in_place '/^hygiene\t/d' .github/check-owners.tsv
 }
 
+# The trunk's own run cancelled by the next merge (#112): the census a pull
+# request is scoped against goes stale while CI stays green.
+inject_ci_trunk_run_cancelled() {
+  edit_in_place "s/^  cancel-in-progress: .*/  cancel-in-progress: true/" .github/workflows/verify.yml
+}
+
 # A branch filter on the PULL-REQUEST trigger. On `push` the same filter is
 # what stops one sha being gated twice, once per event; here it leaves every
 # pull request against another branch with no run at all and its required
@@ -7040,6 +7046,8 @@ selftest() {
     'has no owner in check-owners\.tsv'
   seeded_case "pull requests filtered by branch"      ci       inject_ci_pr_branch_filter \
     'carries .branches: \[main\]. and is reached'
+  seeded_case "the trunk's run cancelled by a merge"  ci       inject_ci_trunk_run_cancelled \
+    'cancels a push run on the trunk'
   seeded_case "CI narrowing the test check"           ci       inject_ci_scoped_test \
     'passes .--scope. to verify\.sh'
   seeded_case "CI narrowing the history check"        ci       inject_ci_ranged_history \
@@ -7442,6 +7450,164 @@ selftest() {
 
   prove_mechanics
 
+  prove_selftest_mechanics
+
+  prove_patterns "hygiene" scripts/hygiene-patterns.tsv scripts/seed-hygiene-fault.sh \
+    "${REQUIRED_HYGIENE_CLASSES[@]}"
+  prove_patterns "pages" scripts/pages-patterns.tsv scripts/seed-pages-fault.sh \
+    "${REQUIRED_PAGES_CLASSES[@]}"
+
+  # A check with no seeded fault has never been seen red, which is the one
+  # thing this mode exists to rule out.
+  echo
+  echo "--- every check has a seeded fault ---"
+  local check missing=()
+  for check in "${CHECKS[@]}"; do
+    case " ${SEEDED_CHECKS[*]} " in
+      *" ${check} "*) printf 'seeded  %s\n' "$check" ;;
+      *) printf 'UNSEEDED %s  <-- NEVER SEEN RED\n' "$check"; missing+=("$check") ;;
+    esac
+  done
+  [ "${#missing[@]}" -eq 0 ] || SELFTEST_BROKEN+=("checks with no seeded fault: ${missing[*]}")
+
+  # --- the cost harvest's own total ---
+  #
+  # The whole run, so that the packer can subtract the faults from it and be
+  # left with what a shard pays WHATEVER faults it draws: the sandbox target
+  # directory, prove_mechanics -- which runs unsharded, in every shard -- and
+  # the fixture loops that are not faults. That residue is the per-shard
+  # overhead, and it is measured here rather than guessed at, because guessing
+  # it wrong is what decides the shard count wrong.
+  if [ -n "$SELFTEST_COST_INDEX" ]; then
+    now_ms
+    printf 'run\twhole\t%d\tthe unsharded selftest, end to end\n' \
+      "$(( NOW_MS - selftest_started_ms ))" >> "$SELFTEST_COST_INDEX"
+
+    # THE PROVENANCE IS PART OF THE HARVEST, not something asserted about it
+    # afterward: a plan is a claim about the runner's own timing, and the claim
+    # travels with the numbers or not at all. `RUNNER_ENVIRONMENT` is GitHub
+    # Actions' own variable for this and is unset outside Actions, so a local
+    # harvest honestly records `local` rather than guessing at a substrate
+    # nobody declared.
+    printf 'substrate\t%s\t%s\n' "${RUNNER_ENVIRONMENT:-local}" "$(uname -srm 2>/dev/null || echo unknown)" >> "$SELFTEST_COST_INDEX"
+  fi
+
+  # --- the census ---
+  #
+  # What this run RAN, by ordinal, so that N shards can be added up afterwards
+  # and the sum compared against the manifest. A shard that passes having run
+  # a subset of what it was assigned is the one way sharding could quietly
+  # become fault selection, and it is the reason this is emitted as data
+  # rather than asserted here: a shard cannot certify itself.
+  echo
+  printf 'selftest-census: shard %d of %d ran %d of %d fault(s)\n' \
+    "$(( SELFTEST_SHARD == 0 ? 1 : SELFTEST_SHARD ))" \
+    "$SELFTEST_SHARDS" "${#SELFTEST_RAN[@]}" "$SELFTEST_UNITS"
+  if [ "${#SELFTEST_INHERITED[@]}" -gt 0 ]; then
+    printf 'selftest-census: %d fault(s) inherited, not re-proven -- each at the commit it was last seen red:\n' \
+      "${#SELFTEST_INHERITED[@]}"
+    printf '  %s\n' "${SELFTEST_INHERITED[@]}"
+  fi
+  if [ "$SELFTEST_UNPLANNED" -gt 0 ]; then
+    printf 'selftest: %d fault(s) unplanned in %s; balance approximate -- each is assigned a shard by a hash of its id\n' \
+      "$SELFTEST_UNPLANNED" "$SHARD_PLAN"
+  fi
+  if [ -n "$SELFTEST_CENSUS" ]; then
+    {
+      printf 'shard\t%d\n' "$(( SELFTEST_SHARD == 0 ? 1 : SELFTEST_SHARD ))"
+      printf 'shards\t%d\n' "$SELFTEST_SHARDS"
+      printf 'total\t%d\n' "$SELFTEST_UNITS"
+      # MEASURED, so the aggregate can report the slowest shard against the
+      # budget from what the runner took rather than from what a plan
+      # predicted (ruled on #108, 2026-09-24). Reported, never graded: the
+      # budget is a printed number, not a gate (#112).
+      printf 'elapsed\t%d\n' "$SECONDS"
+      # The commit these verdicts are about, so a `main` run's census can say
+      # at which sha each fault was last seen red (#112).
+      printf 'commit\t%s\n' "$(git -C "$ROOT" rev-parse HEAD 2> /dev/null || echo unknown)"
+      # Each fault this shard ran, by ordinal AND id: the id is what a later
+      # scope plan inherits by, and ordinals alone name nothing once the list
+      # moves. Ran means red here -- a shard that let one go green fails.
+      # Guarded, because `printf FORMAT` with no arguments still prints the
+      # format once: an empty list would write a bare `inherited<TAB>` row,
+      # which the census reader refuses -- every shard that inherits nothing
+      # would fail the gate (found by #130's review).
+      [ "${#SELFTEST_RAN_IDS[@]}" -eq 0 ] ||
+        printf 'ordinal\t%s\n' "${SELFTEST_RAN_IDS[@]}"
+      [ "${#SELFTEST_INHERITED[@]}" -eq 0 ] ||
+        printf 'inherited\t%s\n' "${SELFTEST_INHERITED[@]}"
+      [ "${#SELFTEST_TOUCHED[@]}" -eq 0 ] ||
+        printf 'touched\t%s\n' "${SELFTEST_TOUCHED[@]}"
+    } > "$SELFTEST_CENSUS" || {
+      echo "selftest: the census could not be written to ${SELFTEST_CENSUS}" >&2
+      SELFTEST_BROKEN+=("the census could not be written")
+    }
+  fi
+
+  echo
+  if [ "${#SELFTEST_BROKEN[@]}" -gt 0 ]; then
+    printf 'selftest: %d gate(s) failed to fire, or fired for the wrong reason:\n' \
+      "${#SELFTEST_BROKEN[@]}"
+    printf '  - %s\n' "${SELFTEST_BROKEN[@]}"
+    return "$EXIT_FAIL"
+  fi
+  # A CHECK OF NOTHING IS NOT A PASS, and this line is the one place the
+  # selftest says otherwise. `--shard 275/1000` selects no case at all: the
+  # `1 <= K <= N` bound admits it, every loop below runs zero times, nothing
+  # lands in SELFTEST_BROKEN, and the run prints "every gate was seen red on
+  # its own seeded fault" and exits 0. Every word of that sentence is false
+  # about a run that saw no gate.
+  #
+  # Found by a fresh instance, reproduced live. Not reachable through CI --
+  # `grade_shape` refuses an empty shard in the checked-in plan and LPT packing
+  # cannot produce one, so the matrix CI derives never contains a K this empty,
+  # and the census refuses an incomplete union whatever any single shard
+  # claims -- so this is a foot-gun for a person running --shard by hand, and a
+  # comment that overclaimed what the bound guards against. Both are the same
+  # defect: the thing that made it safe was somewhere else, and nothing said
+  # so here.
+  #
+  # unseedable: a re-entrant --selftest call would recurse into the function containing it; proved by hand instead
+  #
+  # This repository's own law is that a gate nothing has seen red is a gate
+  # that does not exist, so the tag above is not decoration: #77's lint
+  # refuses a guard with neither a manifest fault nor this line. Both are run
+  # from inside `selftest`: a seeded case runs one `verify.sh --only <check>`, and
+  # `prove_mechanics` runs unconditionally in every shard. An assertion that
+  # invoked `verify.sh --selftest` to watch this line refuse would re-enter
+  # the function containing it, and the inner run would do the same. Covering
+  # it needs a re-entry flag, which is a change to how the selftest is
+  # invoked and not a fixture.
+  #
+  # It was proved by hand in both directions, and the commit that added it
+  # records the transcript: `--shard 275/1000` exits 2 naming the empty
+  # shard, `--shard 1/8` runs 35 of 274 and still declares the pass. That is
+  # weaker than a fixture and it is what there is.
+  if [ "${#SELFTEST_RAN[@]}" -eq 0 ] && [ "${#SELFTEST_INHERITED[@]}" -eq 0 ]; then
+    echo "selftest: this run selected no seeded case, so it proves nothing" >&2
+    if [ "$SELFTEST_SHARD" -ne 0 ]; then
+      echo "selftest: shard ${SELFTEST_SHARD} of ${SELFTEST_SHARDS} is empty; \
+there are ${SELFTEST_UNITS} case(s) to divide" >&2
+    fi
+    return "$EXIT_MISUSE"
+  fi
+  if [ "${#SELFTEST_INHERITED[@]}" -gt 0 ]; then
+    echo "selftest: every fault this run re-proved was seen red on its own seeded fault; ${#SELFTEST_INHERITED[@]} inherited, declared above."
+  else
+    echo "selftest: every gate was seen red on its own seeded fault."
+  fi
+}
+
+# The mechanics assertions that used to be written inline in `selftest`,
+# moved here unchanged (#112). `selftest` is selftest MACHINERY to
+# scripts/scope-selftest.py -- a change to it re-proves every fault -- and
+# an assertion is no fault's dependency: it runs on every selftest, in every
+# shard, whatever the scope. Inline, each one added re-proved all 578 faults
+# (#147 added three). A new mechanics assertion goes here or in
+# prove_mechanics, never in `selftest`; scope-selftest.py's fixture "no
+# mechanics assertion lives in a function whose change re-proves everything"
+# refuses one that does.
+prove_selftest_mechanics() {
   # --- the linter dispatches; it does not judge the format ---
   #
   # A record diet refuses must surface as diet's verdict and nothing else:
@@ -8054,151 +8220,6 @@ EOF
     bash "${ROOT}/verify.sh" --only injections --scope inject_this_repository_does_not_define
   expect_exit "a shard outside 1..N is a misuse" 2 \
     bash "${ROOT}/verify.sh" --selftest --shard 9/8
-
-  prove_patterns "hygiene" scripts/hygiene-patterns.tsv scripts/seed-hygiene-fault.sh \
-    "${REQUIRED_HYGIENE_CLASSES[@]}"
-  prove_patterns "pages" scripts/pages-patterns.tsv scripts/seed-pages-fault.sh \
-    "${REQUIRED_PAGES_CLASSES[@]}"
-
-  # A check with no seeded fault has never been seen red, which is the one
-  # thing this mode exists to rule out.
-  echo
-  echo "--- every check has a seeded fault ---"
-  local check missing=()
-  for check in "${CHECKS[@]}"; do
-    case " ${SEEDED_CHECKS[*]} " in
-      *" ${check} "*) printf 'seeded  %s\n' "$check" ;;
-      *) printf 'UNSEEDED %s  <-- NEVER SEEN RED\n' "$check"; missing+=("$check") ;;
-    esac
-  done
-  [ "${#missing[@]}" -eq 0 ] || SELFTEST_BROKEN+=("checks with no seeded fault: ${missing[*]}")
-
-  # --- the cost harvest's own total ---
-  #
-  # The whole run, so that the packer can subtract the faults from it and be
-  # left with what a shard pays WHATEVER faults it draws: the sandbox target
-  # directory, prove_mechanics -- which runs unsharded, in every shard -- and
-  # the fixture loops that are not faults. That residue is the per-shard
-  # overhead, and it is measured here rather than guessed at, because guessing
-  # it wrong is what decides the shard count wrong.
-  if [ -n "$SELFTEST_COST_INDEX" ]; then
-    now_ms
-    printf 'run\twhole\t%d\tthe unsharded selftest, end to end\n' \
-      "$(( NOW_MS - selftest_started_ms ))" >> "$SELFTEST_COST_INDEX"
-
-    # THE PROVENANCE IS PART OF THE HARVEST, not something asserted about it
-    # afterward: a plan is a claim about the runner's own timing, and the claim
-    # travels with the numbers or not at all. `RUNNER_ENVIRONMENT` is GitHub
-    # Actions' own variable for this and is unset outside Actions, so a local
-    # harvest honestly records `local` rather than guessing at a substrate
-    # nobody declared.
-    printf 'substrate\t%s\t%s\n' "${RUNNER_ENVIRONMENT:-local}" "$(uname -srm 2>/dev/null || echo unknown)" >> "$SELFTEST_COST_INDEX"
-  fi
-
-  # --- the census ---
-  #
-  # What this run RAN, by ordinal, so that N shards can be added up afterwards
-  # and the sum compared against the manifest. A shard that passes having run
-  # a subset of what it was assigned is the one way sharding could quietly
-  # become fault selection, and it is the reason this is emitted as data
-  # rather than asserted here: a shard cannot certify itself.
-  echo
-  printf 'selftest-census: shard %d of %d ran %d of %d fault(s)\n' \
-    "$(( SELFTEST_SHARD == 0 ? 1 : SELFTEST_SHARD ))" \
-    "$SELFTEST_SHARDS" "${#SELFTEST_RAN[@]}" "$SELFTEST_UNITS"
-  if [ "${#SELFTEST_INHERITED[@]}" -gt 0 ]; then
-    printf 'selftest-census: %d fault(s) inherited, not re-proven -- each at the commit it was last seen red:\n' \
-      "${#SELFTEST_INHERITED[@]}"
-    printf '  %s\n' "${SELFTEST_INHERITED[@]}"
-  fi
-  if [ "$SELFTEST_UNPLANNED" -gt 0 ]; then
-    printf 'selftest: %d fault(s) unplanned in %s; balance approximate -- each is assigned a shard by a hash of its id\n' \
-      "$SELFTEST_UNPLANNED" "$SHARD_PLAN"
-  fi
-  if [ -n "$SELFTEST_CENSUS" ]; then
-    {
-      printf 'shard\t%d\n' "$(( SELFTEST_SHARD == 0 ? 1 : SELFTEST_SHARD ))"
-      printf 'shards\t%d\n' "$SELFTEST_SHARDS"
-      printf 'total\t%d\n' "$SELFTEST_UNITS"
-      # MEASURED, so the aggregate can report the slowest shard against the
-      # budget from what the runner took rather than from what a plan
-      # predicted (ruled on #108, 2026-09-24). Reported, never graded: the
-      # budget is a printed number, not a gate (#112).
-      printf 'elapsed\t%d\n' "$SECONDS"
-      # The commit these verdicts are about, so a `main` run's census can say
-      # at which sha each fault was last seen red (#112).
-      printf 'commit\t%s\n' "$(git -C "$ROOT" rev-parse HEAD 2> /dev/null || echo unknown)"
-      # Each fault this shard ran, by ordinal AND id: the id is what a later
-      # scope plan inherits by, and ordinals alone name nothing once the list
-      # moves. Ran means red here -- a shard that let one go green fails.
-      # Guarded, because `printf FORMAT` with no arguments still prints the
-      # format once: an empty list would write a bare `inherited<TAB>` row,
-      # which the census reader refuses -- every shard that inherits nothing
-      # would fail the gate (found by #130's review).
-      [ "${#SELFTEST_RAN_IDS[@]}" -eq 0 ] ||
-        printf 'ordinal\t%s\n' "${SELFTEST_RAN_IDS[@]}"
-      [ "${#SELFTEST_INHERITED[@]}" -eq 0 ] ||
-        printf 'inherited\t%s\n' "${SELFTEST_INHERITED[@]}"
-      [ "${#SELFTEST_TOUCHED[@]}" -eq 0 ] ||
-        printf 'touched\t%s\n' "${SELFTEST_TOUCHED[@]}"
-    } > "$SELFTEST_CENSUS" || {
-      echo "selftest: the census could not be written to ${SELFTEST_CENSUS}" >&2
-      SELFTEST_BROKEN+=("the census could not be written")
-    }
-  fi
-
-  echo
-  if [ "${#SELFTEST_BROKEN[@]}" -gt 0 ]; then
-    printf 'selftest: %d gate(s) failed to fire, or fired for the wrong reason:\n' \
-      "${#SELFTEST_BROKEN[@]}"
-    printf '  - %s\n' "${SELFTEST_BROKEN[@]}"
-    return "$EXIT_FAIL"
-  fi
-  # A CHECK OF NOTHING IS NOT A PASS, and this line is the one place the
-  # selftest says otherwise. `--shard 275/1000` selects no case at all: the
-  # `1 <= K <= N` bound admits it, every loop below runs zero times, nothing
-  # lands in SELFTEST_BROKEN, and the run prints "every gate was seen red on
-  # its own seeded fault" and exits 0. Every word of that sentence is false
-  # about a run that saw no gate.
-  #
-  # Found by a fresh instance, reproduced live. Not reachable through CI --
-  # `grade_shape` refuses an empty shard in the checked-in plan and LPT packing
-  # cannot produce one, so the matrix CI derives never contains a K this empty,
-  # and the census refuses an incomplete union whatever any single shard
-  # claims -- so this is a foot-gun for a person running --shard by hand, and a
-  # comment that overclaimed what the bound guards against. Both are the same
-  # defect: the thing that made it safe was somewhere else, and nothing said
-  # so here.
-  #
-  # unseedable: a re-entrant --selftest call would recurse into the function containing it; proved by hand instead
-  #
-  # This repository's own law is that a gate nothing has seen red is a gate
-  # that does not exist, so the tag above is not decoration: #77's lint
-  # refuses a guard with neither a manifest fault nor this line. Both are run
-  # from inside `selftest`: a seeded case runs one `verify.sh --only <check>`, and
-  # `prove_mechanics` runs unconditionally in every shard. An assertion that
-  # invoked `verify.sh --selftest` to watch this line refuse would re-enter
-  # the function containing it, and the inner run would do the same. Covering
-  # it needs a re-entry flag, which is a change to how the selftest is
-  # invoked and not a fixture.
-  #
-  # It was proved by hand in both directions, and the commit that added it
-  # records the transcript: `--shard 275/1000` exits 2 naming the empty
-  # shard, `--shard 1/8` runs 35 of 274 and still declares the pass. That is
-  # weaker than a fixture and it is what there is.
-  if [ "${#SELFTEST_RAN[@]}" -eq 0 ] && [ "${#SELFTEST_INHERITED[@]}" -eq 0 ]; then
-    echo "selftest: this run selected no seeded case, so it proves nothing" >&2
-    if [ "$SELFTEST_SHARD" -ne 0 ]; then
-      echo "selftest: shard ${SELFTEST_SHARD} of ${SELFTEST_SHARDS} is empty; \
-there are ${SELFTEST_UNITS} case(s) to divide" >&2
-    fi
-    return "$EXIT_MISUSE"
-  fi
-  if [ "${#SELFTEST_INHERITED[@]}" -gt 0 ]; then
-    echo "selftest: every fault this run re-proved was seen red on its own seeded fault; ${#SELFTEST_INHERITED[@]} inherited, declared above."
-  else
-    echo "selftest: every gate was seen red on its own seeded fault."
-  fi
 }
 
 # --------------------------------------------------------------------------
