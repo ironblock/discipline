@@ -43,7 +43,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use super::session::{CancelError, CommandKind, Logged, Refusal, Session};
+use super::session::{CommandKind, GapEnd, IdleGap, Logged, Refusal, Rejected, Session};
 use crate::client::stream::Streaming;
 use crate::formats::record::json::{self, Value};
 
@@ -414,7 +414,7 @@ impl<S: Streaming + 'static> Serving<S> {
         respond(stream, status, &Value::Object(reply));
     }
 
-    fn run(&self, command: Command) -> (u16, BTreeMap<String, Value>) {
+    fn run(&self, command: Posted) -> (u16, BTreeMap<String, Value>) {
         let refused = |because: Refusal| {
             (
                 409,
@@ -424,8 +424,15 @@ impl<S: Streaming + 'static> Serving<S> {
                 )]),
             )
         };
+        let Posted { command, gap } = command;
+        let rejected = |rejection: Rejected| match rejection {
+            Rejected::Refused(because) => refused(because),
+            // Not a command the session could refuse, or a gap it could not
+            // log: either way nothing was logged, and the request was wrong.
+            Rejected::NoSuchTurn(_) | Rejected::BadGap(_) => (400, BTreeMap::new()),
+        };
         match command {
-            Command::Ask(text) => match self.session.ask(&text) {
+            Command::Ask(text) => match self.session.ask(&text, gap) {
                 Ok(admitted) => (
                     200,
                     BTreeMap::from([
@@ -433,26 +440,31 @@ impl<S: Streaming + 'static> Serving<S> {
                         ("turn".to_owned(), integer(u64::from(admitted.turn))),
                     ]),
                 ),
-                Err(because) => refused(because),
+                Err(rejection) => rejected(rejection),
             },
-            Command::Cancel(turn) => match self.session.cancel(turn) {
+            Command::Cancel(turn) => match self.session.cancel(turn, gap) {
                 Ok(()) => (200, BTreeMap::new()),
-                Err(CancelError::Refused(because)) => refused(because),
-                Err(CancelError::NoSuchTurn(_)) => (400, BTreeMap::new()),
+                Err(rejection) => rejected(rejection),
             },
-            Command::DeclareSeam => match self.session.declare_seam() {
+            Command::DeclareSeam => match self.session.declare_seam(gap) {
                 Ok(()) => (200, BTreeMap::new()),
-                Err(because) => refused(because),
+                Err(rejection) => rejected(rejection),
             },
-            Command::End => match self.session.end() {
+            Command::End => match self.session.end(gap) {
                 Ok(()) => (200, BTreeMap::new()),
-                Err(because) => refused(because),
+                Err(rejection) => rejected(rejection),
             },
         }
     }
 }
 
-/// A command as posted.
+/// A command as posted, and the idle gap it ended, if the surface sent one.
+struct Posted {
+    command: Command,
+    gap: Option<IdleGap>,
+}
+
+/// A command.
 enum Command {
     Ask(String),
     Cancel(u32),
@@ -463,7 +475,7 @@ enum Command {
 impl Command {
     /// A command from its body: `kind` names it, and every other key must be
     /// one that kind takes.
-    fn from_object(object: &BTreeMap<String, Value>) -> Option<Self> {
+    fn from_object(object: &BTreeMap<String, Value>) -> Option<Posted> {
         let Some(Value::String(kind)) = object.get("kind") else {
             return None;
         };
@@ -471,15 +483,20 @@ impl Command {
             .iter()
             .copied()
             .find(|candidate| candidate.tag() == kind)?;
+        // Any command may carry the idle gap it ended (#117, D13 (c)).
         let takes: &[&str] = match kind {
-            CommandKind::Ask => &["kind", "text"],
-            CommandKind::Cancel => &["kind", "turn"],
-            CommandKind::DeclareSeam | CommandKind::End => &["kind"],
+            CommandKind::Ask => &["kind", "text", "idle_gap"],
+            CommandKind::Cancel => &["kind", "turn", "idle_gap"],
+            CommandKind::DeclareSeam | CommandKind::End => &["kind", "idle_gap"],
         };
         if object.keys().any(|key| !takes.contains(&key.as_str())) {
             return None;
         }
-        match kind {
+        let gap = match object.get("idle_gap") {
+            None => None,
+            Some(gap) => Some(idle_gap(gap)?),
+        };
+        let command = match kind {
             CommandKind::Ask => match object.get("text") {
                 Some(Value::String(text)) => Some(Self::Ask(text.clone())),
                 _ => None,
@@ -490,8 +507,47 @@ impl Command {
             },
             CommandKind::DeclareSeam => Some(Self::DeclareSeam),
             CommandKind::End => Some(Self::End),
-        }
+        }?;
+        Some(Posted { command, gap })
     }
+}
+
+/// An `idle_gap` object: exactly the log format's shape for one (v0, Q4),
+/// and nothing else. Durations are non-negative integers; `ended_by` is one
+/// of its words; `opened_by` is a sequence number.
+fn idle_gap(value: &Value) -> Option<IdleGap> {
+    const KEYS: [&str; 7] = [
+        "opened_by",
+        "notice",
+        "read",
+        "compose",
+        "away",
+        "blocked",
+        "ended_by",
+    ];
+    let Value::Object(gap) = value else {
+        return None;
+    };
+    if gap.len() != KEYS.len() || gap.keys().any(|key| !KEYS.contains(&key.as_str())) {
+        return None;
+    }
+    let count = |key: &str| match gap.get(key) {
+        Some(Value::Integer(number)) => u64::try_from(*number).ok(),
+        _ => None,
+    };
+    let ended_by = match gap.get("ended_by") {
+        Some(Value::String(tag)) => GapEnd::ALL.iter().copied().find(|end| end.tag() == tag)?,
+        _ => return None,
+    };
+    Some(IdleGap {
+        opened_by: count("opened_by")?,
+        notice: count("notice")?,
+        read: count("read")?,
+        compose: count("compose")?,
+        away: count("away")?,
+        blocked: count("blocked")?,
+        ended_by,
+    })
 }
 
 fn empty() -> Value {
@@ -793,7 +849,7 @@ mod tests {
     #[test]
     fn a_late_reader_replays_from_zero_then_tails() {
         let (session, server) = serve(Canned::new([deltas(&["one"]), deltas(&["two"])]), quick());
-        session.ask("first").expect("accepted");
+        session.ask("first", None).expect("accepted");
         wait_until(&session, "the first turn to settle", settled);
         let so_far = session.events_from(0).len();
 
@@ -811,7 +867,7 @@ mod tests {
             reader.data()
         );
 
-        session.ask("second").expect("accepted");
+        session.ask("second", None).expect("accepted");
         assert!(
             reader.read_until(Duration::from_secs(10), |read| read
                 .contains("turn: 2, reason")),
@@ -831,7 +887,7 @@ mod tests {
     #[test]
     fn a_reader_resuming_after_an_id_of_this_process_starts_at_the_next() {
         let (session, server) = serve(Canned::new([deltas(&["one"])]), quick());
-        session.ask("first").expect("accepted");
+        session.ask("first", None).expect("accepted");
         wait_until(&session, "the turn to settle", settled);
         let resume = format!("Last-Event-ID: {}-2\r\n", session.opened());
         // The header wins over the query, which is what a browser sends when
@@ -901,7 +957,7 @@ mod tests {
     #[test]
     fn a_request_for_a_rebound_host_name_is_403() {
         let (session, server) = serve(Canned::new([deltas(&["x"])]), quick());
-        session.ask("private").expect("accepted");
+        session.ask("private", None).expect("accepted");
         wait_until(&session, "the turn to settle", settled);
         let rebound = format!(
             "GET /events?from=0 HTTP/1.1\r\nHost: rebound.example:{}\r\n\r\n",
@@ -973,16 +1029,16 @@ mod tests {
         // Every way a turn ends that a canned transport can play (a crash
         // needs a transport that panics; `drive::session` covers it), and
         // every refusal a session in these states gives.
-        session.ask("one").expect("accepted");
+        session.ask("one", None).expect("accepted");
         wait_until(&session, "the first turn to settle", settled);
-        let _ = session.declare_seam();
-        session.ask("two").expect("accepted");
+        let _ = session.declare_seam(None);
+        session.ask("two", None).expect("accepted");
         assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
-        let _ = session.ask("while the second is in flight");
-        assert_eq!(session.cancel(2), Ok(()));
+        let _ = session.ask("while the second is in flight", None);
+        assert_eq!(session.cancel(2, None), Ok(()));
         for turn in 2..=4_usize {
             if turn > 2 {
-                session.ask("again").expect("accepted");
+                session.ask("again", None).expect("accepted");
             }
             wait_until(&session, "the turn to settle", |log| {
                 log.iter()
@@ -992,9 +1048,9 @@ mod tests {
                     && settled(log)
             });
         }
-        let _ = session.cancel(1);
-        assert_eq!(session.end(), Ok(()));
-        let _ = session.ask("after the end");
+        let _ = session.cancel(1, None);
+        assert_eq!(session.end(None), Ok(()));
+        let _ = session.ask("after the end", None);
         let log = session.events_from(0);
 
         let mut reader = Client::send(&server, &events_request(&server, "?from=0", ""));
@@ -1140,7 +1196,7 @@ mod tests {
         // Asks for the stream, then never reads a byte of it.
         let _stalled = Client::send(&server, &events_request(&server, "", ""));
         eventually("the reader to connect", || server.connections() == 1);
-        session.ask("fill the socket").expect("accepted");
+        session.ask("fill the socket", None).expect("accepted");
         wait_until(&session, "the turn to settle", settled);
         eventually(
             "the stream's thread to give up on a reader that stopped",
@@ -1324,6 +1380,53 @@ mod tests {
         eventually("two readers to connect", || server.connections() == 2);
         let third = Client::send(&server, &events_request(&server, "", "")).reply();
         assert_eq!(status(&third), 503, "{third}");
+    }
+
+    #[test]
+    fn a_command_carrying_its_idle_gap_logs_it_and_a_bad_one_is_400() {
+        let (session, server) = serve(Canned::new([deltas(&["one"]), deltas(&["two"])]), quick());
+        assert_eq!(
+            status(&post(&server, r#"{"kind":"ask","text":"a"}"#, "")),
+            200
+        );
+        let log = wait_until(&session, "the turn to settle", settled);
+        let settling = log
+            .iter()
+            .find(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+            .map(|logged| logged.seq)
+            .expect("the turn settled");
+        let before = log.len();
+        let gap = |extra: &str| {
+            format!(
+                r#"{{"kind":"ask","text":"b","idle_gap":{{"opened_by":{settling},"notice":1,"read":2,"compose":3,"away":0,"blocked":0,"ended_by":"ask"{extra}}}}}"#
+            )
+        };
+        // Content in the gap, a duration that is not a count, a word that is
+        // not one of `ended_by`'s, a gap that cites something else: each is
+        // not the v0 shape (or not a gap the session can log), and nothing
+        // is logged for it.
+        for bad in [
+            gap(r#","text":"what I was about to type""#),
+            gap("").replace(r#""read":2"#, r#""read":-2"#),
+            gap("").replace(r#""ended_by":"ask""#, r#""ended_by":"timeout""#),
+            gap("").replace(&format!(r#""opened_by":{settling}"#), r#""opened_by":1"#),
+        ] {
+            let reply = post(&server, &bad, "");
+            assert_eq!(status(&reply), 400, "{bad}: {reply}");
+            assert_eq!(session.events_from(0).len(), before, "{bad} left a line");
+        }
+
+        let reply = post(&server, &gap(""), "");
+        assert_eq!(status(&reply), 200, "{reply}");
+        let log = session.events_from(0);
+        assert!(
+            matches!(log[before].event, Event::IdleGap(IdleGap { opened_by, .. }) if opened_by == settling),
+            "the gap is not the line before the ask: {log:#?}"
+        );
+        assert!(matches!(
+            log[before + 1].event,
+            Event::Asked { turn: 2, .. }
+        ));
     }
 
     #[test]
