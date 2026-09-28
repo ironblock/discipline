@@ -15,7 +15,15 @@ pnpm install
 pnpm dev              # the harness on the canned transport, http://localhost:5173 (?speed=4 to hurry it)
 pnpm storybook        # the surface at every moment of the specimen, http://localhost:6006
 pnpm verify           # typecheck, lint, unit tests, every story as a browser test
+pnpm perf             # a performance trace: frames, long frames, layout, style, script, a profile (--ablate, --css)
 ```
+
+`pnpm perf` (`scripts/perf.mjs`) drives a production build in headless
+Chromium through three sessions -- replay, scroll, pointing -- and says
+where frames go. Headless Chromium rasterises and composites in software:
+its script, style and layout numbers are the app's, its paint and
+compositing numbers are not (glass costs frames there and none on a GPU).
+Compare runs with each other, not with a machine.
 
 CI runs the same thing as the repository's `exercise` check (`./verify.sh --only exercise`, owned in `.github/check-owners.tsv`, run by `pkg-exercise.yml`); its seeded fault is a type error.
 

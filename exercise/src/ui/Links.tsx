@@ -76,13 +76,19 @@ export function Links({
       const routed = new Map<string, { from: Box; wires: Wire[]; to: Net['to'][number][] }>();
       const lit: DrawnNet[] = [];
       let memory: Box | undefined;
+      // Every side call's cell, in one list the browser keeps (a live collection, not a search): this runs each
+      // frame of a scroll, and a search of the page per side call was most of what it cost (scripts/perf.mjs).
+      const cellOf = new Map([...(document.getElementsByClassName('ex-branchcell') as HTMLCollectionOf<HTMLElement>)].map((c) => [c.dataset['branch'] ?? '', c]));
       for (const wire of wires) {
         let from = cells.get(wire.branch);
         if (from === undefined) {
-          const cell = document.querySelector(`.ex-branchcell[data-branch="${CSS.escape(wire.branch)}"]`);
-          const bar = cell?.querySelector('.ex-block, .ex-bar');
-          const r = bar?.getBoundingClientRect();
-          const shown = cell && r && getComputedStyle(cell).visibility !== 'hidden' && r.bottom > 0 && r.top < window.innerHeight;
+          const cell = cellOf.get(wire.branch);
+          // On screen first (its cell holds it), and only then its block, and whether it is placed yet: the
+          // search and the style lookup, per side call off screen, are waste.
+          const around = cell?.getBoundingClientRect();
+          const on = cell && around && around.bottom > 0 && around.top < window.innerHeight;
+          const r = on ? cell.querySelector('.ex-block, .ex-bar')?.getBoundingClientRect() : undefined;
+          const shown = cell && r && r.bottom > 0 && r.top < window.innerHeight && getComputedStyle(cell).visibility !== 'hidden';
           from = shown ? r : null;
           cells.set(wire.branch, from);
         }

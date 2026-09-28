@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PointerEvent, RefObject } from 'react';
 
 import { jump, lens, onMap } from './minimap.ts';
@@ -36,10 +36,18 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
   const [view, setView] = useState({ top: 0, height: 1 });
   const frame = useRef(0);
 
+  // The header and the composer bound what is in view. Found once and kept: this runs every frame of a
+  // scroll, and the composer, last on the page, is a search of all of it (scripts/perf.mjs).
+  const chrome = useRef<{ header?: Element | null | undefined; composer?: Element | null | undefined }>({});
   const band = useCallback(() => {
-    const session = stage.current?.closest('.ex-session');
-    const header = session?.querySelector('.ex-session__header')?.getBoundingClientRect().bottom ?? 0;
-    const composer = session?.querySelector('.ex-session__composer')?.getBoundingClientRect().top ?? window.innerHeight;
+    const kept = chrome.current;
+    if (!kept.header?.isConnected || !kept.composer?.isConnected) {
+      const session = stage.current?.closest('.ex-session');
+      kept.header = session?.querySelector('.ex-session__header');
+      kept.composer = session?.querySelector('.ex-session__composer');
+    }
+    const header = kept.header?.getBoundingClientRect().bottom ?? 0;
+    const composer = kept.composer?.getBoundingClientRect().top ?? window.innerHeight;
     return { top: header, bottom: Math.max(header + 1, Math.min(composer, window.innerHeight)) };
   }, [stage]);
 
@@ -104,23 +112,31 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
         if (e.currentTarget.hasPointerCapture(e.pointerId)) go(e);
       }}
     >
-      {measured.marks.map((mark, i) => {
-        const at = onMap(mark, measured.height);
-        return (
-          <span
-            key={i}
-            className={`ex-mm__${mark.kind}`}
-            data-tone={mark.tone}
-            data-alarm={mark.alarm}
-            data-live={mark.live ? '' : undefined}
-            style={{ ...laneStyle(mark.lane), top: `${at.top * 100}%`, height: `${at.height * 100}%` }}
-          />
-        );
-      })}
+      <Marks measured={measured} />
       <span className="ex-mm__lens" style={{ top: `${view.top * 100}%`, height: `${view.height * 100}%` }} />
     </div>
   );
 }
+
+/**
+ * The marks, apart from the lens: a scroll moves only the lens, and must not
+ * re-render every sliver of a long session with it (scripts/perf.mjs).
+ */
+const Marks = memo(function Marks({ measured }: { readonly measured: Measured }) {
+  return measured.marks.map((mark, i) => {
+    const at = onMap(mark, measured.height);
+    return (
+      <span
+        key={i}
+        className={`ex-mm__${mark.kind}`}
+        data-tone={mark.tone}
+        data-alarm={mark.alarm}
+        data-live={mark.live ? '' : undefined}
+        style={{ ...laneStyle(mark.lane), top: `${at.top * 100}%`, height: `${at.height * 100}%` }}
+      />
+    );
+  });
+});
 
 function measure(stage: HTMLElement): Measured {
   const base = stage.getBoundingClientRect();

@@ -28,10 +28,18 @@ export function tokens(value: number): string {
   return `${Math.round(value / 100) / 10}k`;
 }
 
+/** One formatter, made once: `toLocaleString` builds one per call, and a replay calls it thousands of times (scripts/perf.mjs). */
+const GROUPED = new Intl.NumberFormat('en-US');
+
+/** A count, grouped: `1,860`. */
+export function count(n: number): string {
+  return GROUPED.format(n);
+}
+
 export function rate(n: number, ms: number): string {
   if (ms <= 0 || n <= 0) return '–';
   const perSecond = (n / ms) * 1000;
-  return perSecond >= 100 ? `${Math.round(perSecond).toLocaleString('en-US')}` : perSecond.toFixed(1);
+  return perSecond >= 100 ? count(Math.round(perSecond)) : perSecond.toFixed(1);
 }
 
 export function bytes(text: string): string {

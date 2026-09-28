@@ -16,7 +16,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test"
+    "verify": "pnpm typecheck && pnpm lint && pnpm test",
+    "perf": "node scripts/perf.mjs"
   },
   "dependencies": {
     "marked": "18.0.14",

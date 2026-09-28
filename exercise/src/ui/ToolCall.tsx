@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import type { AssistantNode, Folded, ToolNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
-import { bytes, lines, took } from './format.ts';
+import { bytes, count, lines, took } from './format.ts';
 import { Copy } from './Copy.tsx';
 import { callOf } from './sets.ts';
 import { writingOf, writtenApart } from './flow.ts';
@@ -30,7 +30,10 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
   const call = callOf(node.tool, node.args);
   const script = call.text.split('\n');
   const output = node.output ?? '';
-  const printed = output === '' ? [] : output.split('\n');
+  // What it printed, taken apart once per output, not once per render: every block re-renders on every event
+  // of a session, and splitting and encoding a long output each time was most of a replay's script (scripts/perf.mjs).
+  const printed = useMemo(() => (output === '' ? [] : output.split('\n')), [output]);
+  const said = useMemo(() => (output === '' ? 'no output' : `${count(lines(output))} ${lines(output) === 1 ? 'line' : 'lines'} · ${bytes(output)}`), [output]);
   const hidden = Math.max(0, script.length - PEEK) + Math.max(0, printed.length - PEEK);
   const apart = first && caller ? writtenApart(caller) : undefined;
   const whole = first && caller && !apart ? writingOf(caller, 0) : undefined;
@@ -63,7 +66,7 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
             running · {took(since.ms)}
           </span>
         ) : (
-          `${output === '' ? 'no output' : `${lines(output).toLocaleString('en-US')} ${lines(output) === 1 ? 'line' : 'lines'} · ${bytes(output)}`} in ${took(node.ms ?? 0)}`
+          `${said} in ${took(node.ms ?? 0)}`
         )
       }
       stats={[node.truncated && { value: <span className="ex-truncated">truncated</span>, title: 'the harness cut the output before the model saw it' }, exit]}
@@ -84,7 +87,7 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
       {printed.length > 0 ? <pre className="ex-tool__output">{open ? output : printed.slice(0, PEEK).join('\n')}</pre> : null}
       {hidden > 0 ? (
         <button type="button" className="ex-more" aria-expanded={open} onClick={() => setOpen(!open)}>
-          {open ? 'less' : `${hidden.toLocaleString('en-US')} more ${hidden === 1 ? 'line' : 'lines'}`}
+          {open ? 'less' : `${count(hidden)} more ${hidden === 1 ? 'line' : 'lines'}`}
         </button>
       ) : null}
     </Block>

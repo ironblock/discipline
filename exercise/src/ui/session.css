@@ -10,14 +10,18 @@
  * The live field: light pooled where the work is, brightening with what the
  * session is doing. Colour comes from the palette, amount from the theme
  * (--pool-rest, --pool-live; 0% everywhere but a theme that lights it).
- * The amounts and colours are registered properties so a change of state
- * fades rather than jumps.
+ * The session says where the light should be (--pool-*, set by its state);
+ * only the two layers that paint the field fade toward it (--field-*,
+ * registered, not inherited). A state change restyles the page once; the
+ * fade restyles those two layers alone, not every element under the
+ * session on every frame of it, as an inherited animated property did
+ * (scripts/perf.mjs: most of a replay's style recalculation).
  */
-@property --pool-trunk { syntax: '<percentage>'; inherits: true; initial-value: 0%; }
-@property --pool-lane { syntax: '<percentage>'; inherits: true; initial-value: 0%; }
-@property --pool-memory { syntax: '<percentage>'; inherits: true; initial-value: 0%; }
-@property --pool-trunk-colour { syntax: '<color>'; inherits: true; initial-value: transparent; }
-@property --pool-lane-colour { syntax: '<color>'; inherits: true; initial-value: transparent; }
+@property --field-trunk { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+@property --field-lane { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+@property --field-memory { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+@property --field-trunk-colour { syntax: '<color>'; inherits: false; initial-value: transparent; }
+@property --field-lane-colour { syntax: '<color>'; inherits: false; initial-value: transparent; }
 
 .ex-session {
   /* Room the minimap takes on the left; the row is centred in what is left. */
@@ -45,16 +49,26 @@
   --pool-memory: var(--pool-rest);
   --pool-trunk-colour: var(--ink-user);
   --pool-lane-colour: var(--lane-ink, var(--ink-interview));
+}
+
+/* The two layers that paint the field: behind the page, and again under the composer. */
+.ex-session::before,
+.ex-session__composer::before {
+  --field-trunk: var(--pool-trunk);
+  --field-lane: var(--pool-lane);
+  --field-memory: var(--pool-memory);
+  --field-trunk-colour: var(--pool-trunk-colour);
+  --field-lane-colour: var(--pool-lane-colour);
   --live-field:
-    radial-gradient(34rem 22rem at var(--x-trunk) 100%, color-mix(in oklab, var(--pool-trunk-colour) var(--pool-trunk), transparent), transparent 72%),
-    radial-gradient(18rem 34rem at var(--x-lane, -50%) 45%, color-mix(in oklab, var(--pool-lane-colour) var(--pool-lane), transparent), transparent 72%),
-    radial-gradient(16rem 22rem at var(--x-memory, 150%) 25%, color-mix(in oklab, var(--fresh) var(--pool-memory), transparent), transparent 72%);
+    radial-gradient(34rem 22rem at var(--x-trunk) 100%, color-mix(in oklab, var(--field-trunk-colour) var(--field-trunk), transparent), transparent 72%),
+    radial-gradient(18rem 34rem at var(--x-lane, -50%) 45%, color-mix(in oklab, var(--field-lane-colour) var(--field-lane), transparent), transparent 72%),
+    radial-gradient(16rem 22rem at var(--x-memory, 150%) 25%, color-mix(in oklab, var(--fresh) var(--field-memory), transparent), transparent 72%);
   transition:
-    --pool-trunk 1.2s ease,
-    --pool-lane 1.2s ease,
-    --pool-memory 1.6s ease,
-    --pool-trunk-colour 1.2s ease,
-    --pool-lane-colour 1.2s ease;
+    --field-trunk 1.2s ease,
+    --field-lane 1.2s ease,
+    --field-memory 1.6s ease,
+    --field-trunk-colour 1.2s ease,
+    --field-lane-colour 1.2s ease;
 }
 
 .ex-session--curtain {
