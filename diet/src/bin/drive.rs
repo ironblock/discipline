@@ -37,9 +37,12 @@ use diet::client::Client;
 use diet::client::shape::{
     Concurrency, Dialect, Limits, Message, RequestShape, Role, SamplerCard, Serving,
 };
+use diet::client::stream::HttpStream;
 use diet::client::stub::Stub;
 use diet::client::transport::{Endpoint, Http};
 use diet::drive::regimen::{SUBSTRATE_KEYS, regime_of};
+use diet::drive::serve::{Config, Server};
+use diet::drive::session::Session;
 use diet::drive::{Gym, Halt, canned, run};
 use diet::formats::record::Regime;
 use diet::formats::record::json::{self, Value};
@@ -65,6 +68,132 @@ const EXIT_INPUT: u8 = 1;
 /// one number would be counted together.
 const EXIT_OUTPUT: u8 = 3;
 
+/// The subcommand that serves an interactive session (#117 R2c, I5).
+const SERVE: &str = "serve";
+
+fn serve_usage() -> String {
+    let mut out = String::from(
+        "usage: diet-drive serve --endpoint URL --model NAME --head FILE\n\
+         \x20                       [--port N] [--allow-origin URL]... [--max-output-tokens N]\n\n",
+    );
+    out.push_str("Serves one interactive session over HTTP + SSE on 127.0.0.1 ONLY:\n");
+    out.push_str("GET /events streams the session's log, POST /commands takes its\n");
+    out.push_str("commands. <FILE> is the trunk's system message. The first line on\n");
+    out.push_str("stdout is JSON naming the address it listens on and when it opened.\n");
+    out.push_str("--allow-origin admits a page's origin (a development proxy's).\n");
+    out.push_str("There is no --listen: binding beyond loopback arrives with auth.\n");
+    out
+}
+
+/// `diet-drive serve`: one interactive session, over HTTP + SSE, on loopback.
+///
+/// Loopback ONLY until auth exists (#117 R2c, I7): the plan moved `--listen`
+/// out of this increment so that nothing here can bind a session that runs
+/// the model beyond the machine it is on.
+fn serve(args: &[String]) -> ExitCode {
+    let mut endpoint = None;
+    let mut model = None;
+    let mut head = None;
+    let mut port: u16 = 0;
+    let mut allowed_origins = Vec::new();
+    let mut max_output_tokens: u32 = 512;
+    let mut given = args.iter();
+    while let Some(flag) = given.next() {
+        let Some(value) = given.next() else {
+            eprint!("{}", serve_usage());
+            return ExitCode::from(EXIT_USAGE);
+        };
+        let parsed = if flag == "--endpoint" {
+            endpoint = Some(value.clone());
+            true
+        } else if flag == "--model" {
+            model = Some(value.clone());
+            true
+        } else if flag == "--head" {
+            head = Some(value.clone());
+            true
+        } else if flag == "--allow-origin" {
+            allowed_origins.push(value.clone());
+            true
+        } else if flag == "--port" {
+            value.parse().map(|given| port = given).is_ok()
+        } else if flag == "--max-output-tokens" {
+            value.parse().map(|given| max_output_tokens = given).is_ok()
+        } else {
+            false
+        };
+        if !parsed {
+            eprint!("{}", serve_usage());
+            return ExitCode::from(EXIT_USAGE);
+        }
+    }
+    let (Some(endpoint), Some(model), Some(head)) = (endpoint, model, head) else {
+        eprint!("{}", serve_usage());
+        return ExitCode::from(EXIT_USAGE);
+    };
+    let endpoint = match Endpoint::parse(&endpoint) {
+        Ok(endpoint) => endpoint,
+        Err(why) => return fail(EXIT_INPUT, &format!("{endpoint} is not an endpoint: {why}")),
+    };
+    let system = match std::fs::read_to_string(&head) {
+        Ok(system) => system,
+        Err(why) => return fail(EXIT_INPUT, &format!("{head} cannot be read: {why}")),
+    };
+    let shape = RequestShape {
+        model,
+        messages: vec![Message::new(Role::System, system)],
+        sampler: SamplerCard::empty(),
+        limits: Limits {
+            attempt: std::time::Duration::from_secs(60),
+            call: std::time::Duration::from_secs(180),
+            max_output_tokens,
+            retries: 0,
+        },
+        grammar: None,
+        template_kwargs: BTreeMap::new(),
+        tools: Vec::new(),
+    };
+    let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {
+        Ok(listener) => listener,
+        Err(why) => {
+            return fail(
+                EXIT_HALT,
+                &format!("cannot listen on 127.0.0.1:{port}: {why}"),
+            );
+        }
+    };
+    let session = std::sync::Arc::new(Session::open(HttpStream::new(endpoint), shape));
+    let opened = session.opened();
+    let config = Config {
+        allowed_origins,
+        ..Config::default()
+    };
+    let server = match Server::start(listener, session, config, diet::drive::session::render) {
+        Ok(server) => server,
+        Err(why) => return fail(EXIT_HALT, &format!("the server did not start: {why}")),
+    };
+    let mut out = String::new();
+    json::render(
+        &Value::Object(BTreeMap::from([
+            (
+                "listening".to_owned(),
+                Value::String(server.addr().to_string()),
+            ),
+            (
+                "opened".to_owned(),
+                Value::Integer(i64::try_from(opened).unwrap_or(i64::MAX)),
+            ),
+        ])),
+        &mut out,
+    );
+    println!("{out}");
+    // Serves until the process is stopped. The server's threads do the work;
+    // this one only keeps the process, and the server, alive.
+    loop {
+        std::thread::park();
+    }
+}
+
 fn usage() -> String {
     let mut out =
         String::from("usage: diet-drive <regimen> <worktree> <output.jsonl> [endpoint]\n\n");
@@ -87,6 +216,9 @@ fn usage() -> String {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some(SERVE) {
+        return serve(&args[1..]);
+    }
     let (Some(regimen_path), Some(worktree), Some(out_path)) =
         (args.first(), args.get(1), args.get(2))
     else {

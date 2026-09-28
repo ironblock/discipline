@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 94
+faults = 97
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -1530,4 +1530,45 @@ becomes = '''
 catches = [
     "drive::serve::tests::a_reader_resuming_after_an_id_of_this_process_starts_at_the_next",
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
+]
+
+[[fault]]
+id = "drive.serve-bin-drops-the-head"
+failure_class = "drive.serve-bin-drops-the-head"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+        messages: vec![Message::new(Role::System, system)],'''
+becomes = '''
+        messages: vec![Message::new(Role::System, String::new())],'''
+catches = [
+    "a_served_drive_streams_a_real_servers_answer_over_sse",
+]
+
+[[fault]]
+id = "drive.serve-bin-binds-everywhere"
+failure_class = "drive.serve-bin-binds-everywhere"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {'''
+becomes = '''
+    let listener = match std::net::TcpListener::bind(("0.0.0.0", port)) {'''
+catches = [
+    "a_drive_server_binds_loopback_and_has_no_listen_flag",
+]
+
+[[fault]]
+id = "drive.serve-bin-ignores-allow-origin"
+failure_class = "drive.serve-bin-ignores-allow-origin"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+        allowed_origins,
+        ..Config::default()'''
+becomes = '''
+        allowed_origins: Vec::new(),
+        ..Config::default()'''
+catches = [
+    "a_drive_server_answers_an_allowed_origin_through_its_proxy_host",
 ]
