@@ -755,12 +755,21 @@ vocabulary! {
         /// declares for #94's resolved effort level -- so the record says the
         /// half it measured and does not claim the other.
         ///
-        /// **What this cannot say is that what left was REASONING.** #79's
-        /// class 1 is a harness dropping the model's own thinking between
-        /// tool calls; nothing in a head marks a message as reasoning, so
-        /// this names a message that left and declines to name it thinking. A
+        /// **What this cannot say is that a WHOLE MESSAGE that left was
+        /// reasoning.** #79's class 1 is a harness dropping the model's own
+        /// thinking between tool calls. Thinking carried as a message's
+        /// `reasoning` field is named by [`PrefixReason::Reasoning`] below;
+        /// but nothing in a head marks a whole message as reasoning, so a
+        /// message that left is named as a message and not as thinking. A
         /// rule that guessed would fire on every edited system prompt.
         Injection => "injection",
+        /// A frozen message kept its text and changed its REASONING: the
+        /// thinking an assistant message carries back into the prompt
+        /// (`Message::reasoning`, #117 I5r). #79's live-incident class 1 is a
+        /// harness dropping the model's own thinking between tool calls; with
+        /// reasoning on the message, that is now a change the head can name
+        /// rather than the residual (#92, requested from #136's review).
+        Reasoning => "reasoning",
         /// A line of a frozen message changed, arrived, or left. #79's first
         /// specimen: a system prompt carrying the current date, so crossing
         /// local midnight invalidates every session's prefix.
@@ -810,6 +819,8 @@ vocabulary! {
         LineAdded => "line_added",
         /// One line left a frozen message.
         LineRemoved => "line_removed",
+        /// One frozen message's reasoning changed, arrived, or left.
+        ReasoningChanged => "reasoning_changed",
     }
 }
 
@@ -925,6 +936,23 @@ pub enum PrefixDelta {
         /// What it said.
         was: String,
     },
+    /// One frozen message's reasoning changed: the message kept its role and
+    /// text, and the thinking it carries back did not. Counts rather than the
+    /// text, the way [`PrefixDelta::MessageAdded`] carries one: the reasoning
+    /// itself is already on the request row that sent it. A message with no
+    /// reasoning counts 0, so "dropped" is `now_chars: 0` -- and an absent
+    /// field and an empty one read the same here. EQUAL COUNTS DO NOT MEAN
+    /// NOTHING MOVED: the row exists because the digests differ, and an
+    /// absent field becoming an empty one (a real byte change on the wire)
+    /// or an edit of the same length both read `was_chars == now_chars`.
+    ReasoningChanged {
+        /// Which message.
+        message: u32,
+        /// How many characters of reasoning it carried before.
+        was_chars: Count,
+        /// How many it carries now.
+        now_chars: Count,
+    },
 }
 
 impl PrefixDelta {
@@ -945,6 +973,7 @@ impl PrefixDelta {
             Self::LineChanged { .. } => DeltaKind::LineChanged,
             Self::LineAdded { .. } => DeltaKind::LineAdded,
             Self::LineRemoved { .. } => DeltaKind::LineRemoved,
+            Self::ReasoningChanged { .. } => DeltaKind::ReasoningChanged,
         }
     }
 
@@ -970,6 +999,7 @@ impl PrefixDelta {
             DeltaKind::LineChanged | DeltaKind::LineAdded | DeltaKind::LineRemoved => {
                 PrefixReason::Text
             }
+            DeltaKind::ReasoningChanged => PrefixReason::Reasoning,
         }
     }
 }
@@ -2962,6 +2992,11 @@ fn delta(
             line: take_u32(fields, of, "line")?,
             was: take_payload(fields, of, "was")?,
         },
+        DeltaKind::ReasoningChanged => PrefixDelta::ReasoningChanged {
+            message: take_u32(fields, of, "message")?,
+            was_chars: take_u64(fields, of, "was_chars")?,
+            now_chars: take_u64(fields, of, "now_chars")?,
+        },
     };
     if let Some(field) = fields.keys().next() {
         return Err(SchemaError::UnknownField {
@@ -4123,6 +4158,15 @@ fn delta_value(delta: &PrefixDelta) -> Value {
             put("line", number(*line));
             put("was", text(was));
         }
+        PrefixDelta::ReasoningChanged {
+            message,
+            was_chars,
+            now_chars,
+        } => {
+            put("message", number(*message));
+            put("was_chars", integer(*was_chars));
+            put("now_chars", integer(*now_chars));
+        }
     }
     Value::Object(members)
 }
@@ -4868,6 +4912,7 @@ mod tests {
                 "tools",
                 "effort",
                 "injection",
+                "reasoning",
                 "text",
                 "unattributed"
             ],
@@ -4883,6 +4928,11 @@ mod tests {
                 line: 0,
                 was: "was".to_owned(),
                 now: "now".to_owned(),
+            },
+            PrefixDelta::ReasoningChanged {
+                message: 0,
+                was_chars: Count::new(40).expect("40 is a count"),
+                now_chars: Count::default(),
             },
             PrefixDelta::MessageAdded {
                 at: 1,
@@ -4902,9 +4952,10 @@ mod tests {
             },
         ];
         assert_eq!(reason_of(&one_of_each), PrefixReason::Model);
-        assert_eq!(reason_of(&one_of_each[..4]), PrefixReason::Tools);
-        assert_eq!(reason_of(&one_of_each[..3]), PrefixReason::Effort);
-        assert_eq!(reason_of(&one_of_each[..2]), PrefixReason::Injection);
+        assert_eq!(reason_of(&one_of_each[..5]), PrefixReason::Tools);
+        assert_eq!(reason_of(&one_of_each[..4]), PrefixReason::Effort);
+        assert_eq!(reason_of(&one_of_each[..3]), PrefixReason::Injection);
+        assert_eq!(reason_of(&one_of_each[..2]), PrefixReason::Reasoning);
         assert_eq!(reason_of(&one_of_each[..1]), PrefixReason::Text);
         assert_eq!(
             reason_of(&[]),
@@ -5083,6 +5134,11 @@ mod tests {
                 message: 0,
                 line: 1,
                 was: "was".to_owned(),
+            },
+            PrefixDelta::ReasoningChanged {
+                message: 1,
+                was_chars: Count::new(12).unwrap_or_default(),
+                now_chars: Count::default(),
             },
         ];
         assert_eq!(

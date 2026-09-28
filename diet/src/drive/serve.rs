@@ -627,6 +627,7 @@ mod tests {
 
     use super::*;
     use crate::client::stream::{Canned, Gate, Step};
+    use crate::client::transport::TransportFailure;
     use crate::drive::session::Event;
     use crate::drive::session::tests::{deltas, settled, template, wait_until};
 
@@ -947,6 +948,77 @@ mod tests {
         .reply();
         assert_eq!(status(&proxied), 200, "{proxied}");
         assert_eq!(asked(&session), 1);
+    }
+
+    #[test]
+    fn every_data_line_is_one_log_line_and_its_id_is_opened_and_seq() {
+        let gate = Gate::new();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("loopback");
+        let session = Arc::new(Session::open(
+            Canned::new([
+                deltas(&["Hel", "lo"]),
+                vec![Step::Delta("par".to_owned()), Step::Hold(gate.clone())],
+                vec![Step::Fail(TransportFailure::Connect("refused".to_owned()))],
+                vec![Step::Reject(503, "busy".to_owned())],
+            ]),
+            template(),
+        ));
+        let server = Server::start(
+            listener,
+            Arc::clone(&session),
+            quick(),
+            crate::drive::session::render,
+        )
+        .expect("the server starts");
+        // Every way a turn ends that a canned transport can play (a crash
+        // needs a transport that panics; `drive::session` covers it), and
+        // every refusal a session in these states gives.
+        session.ask("one").expect("accepted");
+        wait_until(&session, "the first turn to settle", settled);
+        let _ = session.declare_seam();
+        session.ask("two").expect("accepted");
+        assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        let _ = session.ask("while the second is in flight");
+        assert_eq!(session.cancel(2), Ok(()));
+        for turn in 2..=4_usize {
+            if turn > 2 {
+                session.ask("again").expect("accepted");
+            }
+            wait_until(&session, "the turn to settle", |log| {
+                log.iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == turn
+                    && settled(log)
+            });
+        }
+        let _ = session.cancel(1);
+        assert_eq!(session.end(), Ok(()));
+        let _ = session.ask("after the end");
+        let log = session.events_from(0);
+
+        let mut reader = Client::send(&server, &events_request(&server, "?from=0", ""));
+        assert!(
+            reader.read_until(Duration::from_secs(5), |read| {
+                read.matches("data: ").count() >= log.len()
+            }),
+            "{:?}",
+            reader.read
+        );
+        let ids: Vec<&str> = reader
+            .read
+            .lines()
+            .filter_map(|line| line.strip_prefix("id: "))
+            .collect();
+        let data = reader.data();
+        assert_eq!(ids.len(), data.len());
+        for (id, line) in ids.iter().zip(&data) {
+            let read = crate::formats::log::line(line)
+                .unwrap_or_else(|why| panic!("{line} is not a log line: {why}"));
+            assert_eq!(*id, format!("{}-{}", session.opened(), read.seq), "{line}");
+        }
+        let document = data.join("\n") + "\n";
+        crate::formats::log::parse(&document).expect("the stream is a v0 log");
     }
 
     #[test]
