@@ -969,6 +969,29 @@ mod tests {
     /// characters -- which is why they are here.
     const CAPTURED_PIECES: [&str; 6] = ["mittel", "су", " polity", " polity", " polity", " polity"];
 
+    #[test]
+    fn a_canned_stream_plays_reasoning_as_reasoning_and_text_as_text() {
+        let canned = Canned::new([vec![
+            Step::Reasoning("thinking\n".to_owned()),
+            Step::Delta("answer".to_owned()),
+        ]]);
+        let mut pieces: Vec<(bool, String)> = Vec::new();
+        let ended = canned.stream(&shape(), deadline(), &Cancel::new(), &mut |piece| {
+            pieces.push(match piece {
+                Piece::Reasoning(reasoning) => (true, reasoning.to_owned()),
+                Piece::Text(text) => (false, text.to_owned()),
+            });
+        });
+        assert!(ended.is_ok(), "{ended:?}");
+        assert_eq!(
+            pieces,
+            [
+                (true, "thinking\n".to_owned()),
+                (false, "answer".to_owned())
+            ]
+        );
+    }
+
     /// A piece's text, where the stream under test carries answer text only.
     fn text(piece: Piece<'_>) -> String {
         match piece {
