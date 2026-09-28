@@ -941,6 +941,68 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_reasoning_change_is_named_whether_added_rewritten_or_beside_a_text_change() {
+        let head = |content: &str, reasoning: Option<&str>| {
+            let mut answer = Message::new(Role::Assistant, content);
+            answer.reasoning = reasoning.map(str::to_owned);
+            Head::of(&shape(vec![
+                Message::new(Role::System, "the regimen"),
+                Message::new(Role::User, "turn one"),
+                answer,
+                Message::new(Role::User, "turn two"),
+            ]))
+        };
+        let chars = |n: u64| Count::new(n).expect("a count");
+        let reasoning_deltas = |from: &Head, to: &Head| -> Vec<PrefixDelta> {
+            to.change_from(from)
+                .expect("the head moved")
+                .diff
+                .into_iter()
+                .filter(|delta| matches!(delta, PrefixDelta::ReasoningChanged { .. }))
+                .collect()
+        };
+        // Added where there was none.
+        assert_eq!(
+            reasoning_deltas(&head("the answer", None), &head("the answer", Some("abc"))),
+            [PrefixDelta::ReasoningChanged {
+                message: 2,
+                was_chars: Count::default(),
+                now_chars: chars(3),
+            }]
+        );
+        // Rewritten to something else of a different length.
+        assert_eq!(
+            reasoning_deltas(
+                &head("the answer", Some("abc")),
+                &head("the answer", Some("abcde"))
+            ),
+            [PrefixDelta::ReasoningChanged {
+                message: 2,
+                was_chars: chars(3),
+                now_chars: chars(5),
+            }]
+        );
+        // Beside a change to the text: both are named, the text by its line.
+        let both = head("another answer", Some("abcde"))
+            .change_from(&head("the answer", Some("abc")))
+            .expect("the head moved");
+        assert!(
+            both.diff
+                .iter()
+                .any(|delta| matches!(delta, PrefixDelta::LineChanged { message: 2, .. })),
+            "{:?}",
+            both.diff
+        );
+        assert!(
+            both.diff
+                .iter()
+                .any(|delta| matches!(delta, PrefixDelta::ReasoningChanged { message: 2, .. })),
+            "{:?}",
+            both.diff
+        );
+    }
+
     /// The residual can fire, and a residual nothing can produce is not a
     /// residual.
     ///
