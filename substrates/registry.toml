@@ -213,8 +213,8 @@ measured class fact, which put the verdict in public without the evidence that \
 actually supports it and beside a number that does not."""
 
 [equipment.rtx6000ada-host]
-display_name = "a shared RTX 6000 Ada workstation"
-display_name_note = "The registry's form is `<github username>'s <name of thing>`; this machine is not the account holder's, so that form would misattribute it. A neutral name is used until the maintainer rules one (asked on #117)."
+display_name = "ironblock's Threadripper workstation"
+display_name_is = "the owner form, the possessive meaning managed and configured by, as for the Linux PC; ruled on #117 (2026-09-28)"
 entry_type = "accelerator-host"
 hardware_fingerprint = "19d9fa21007ab8fef48b62d9d8773ac241fa177b2f8b3de670ddd4128aa10c7b"
 role = "the interactive drive's endpoint for DoD 1 (#117, Q10 as amended 2026-09-27); no banked claim runs here"
