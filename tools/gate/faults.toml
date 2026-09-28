@@ -6239,6 +6239,30 @@ failure_class = "client.canned-plays-reasoning-as-text"
 migrated = false
 
 [[fault]]
+id = "drive.session-a-line-drops-the-partial"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-line-drops-the-partial"
+failure_class = "drive.session-a-line-drops-the-partial"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-timeout-line-says-transport"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-timeout-line-says-transport"
+failure_class = "drive.session-a-timeout-line-says-transport"
+migrated = false
+
+[[fault]]
+id = "drive.serve-the-id-is-not-the-seq"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-the-id-is-not-the-seq"
+failure_class = "drive.serve-the-id-is-not-the-seq"
+migrated = false
+
+[[fault]]
 id = "adapters.compaction-read-as-a-turn"
 kind = "lane-fault"
 check = "lanes"
