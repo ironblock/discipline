@@ -1142,6 +1142,79 @@ mod tests {
     }
 
     #[test]
+    fn a_body_trickled_in_is_held_to_the_same_deadline_as_its_head() {
+        let config = Config {
+            read_timeout: Duration::from_millis(300),
+            ..quick()
+        };
+        let (session, server) = serve(Canned::new([]), config);
+        let mut stream = TcpStream::connect(server.addr()).expect("connects");
+        let head = format!(
+            "POST /commands HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\n\
+             Content-Length: 1000\r\n\r\n",
+            host(&server)
+        );
+        stream
+            .write_all(head.as_bytes())
+            .expect("the head is written");
+        let (gone, let_go) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            // The head arrived whole; the body comes a byte every 50 ms.
+            let give_up = Instant::now() + Duration::from_secs(8);
+            while Instant::now() < give_up {
+                if stream.write_all(b" ").is_err() {
+                    let _ = gone.send(());
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        });
+        assert!(
+            let_go.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "a client trickling a body was never let go"
+        );
+        assert_eq!(asked(&session), 0);
+    }
+
+    #[test]
+    fn a_whole_head_past_its_cap_is_413_even_when_it_arrives_in_one_read() {
+        let config = Config {
+            max_head: 1024,
+            ..quick()
+        };
+        let (_session, server) = serve(Canned::new([]), config);
+        // Terminated, and under one read's size, so the head is found before
+        // the running cap is ever consulted: only the check on the head
+        // itself can refuse it.
+        let head = format!(
+            "GET /events HTTP/1.1\r\nHost: {}\r\nX: {}\r\n\r\n",
+            host(&server),
+            "a".repeat(2048)
+        );
+        let reply = Client::send(&server, &head).reply();
+        assert_eq!(status(&reply), 413, "{reply}");
+    }
+
+    #[test]
+    fn a_server_bound_on_ipv6_loopback_answers_the_host_a_browser_sends_it() {
+        let listener = TcpListener::bind("[::1]:0").expect("IPv6 loopback");
+        let session = Arc::new(Session::open(Canned::new([]), template()));
+        let server = Server::start(listener, Arc::clone(&session), quick(), render)
+            .expect("the server starts");
+        let request = format!(
+            "GET /events HTTP/1.1\r\nHost: [::1]:{}\r\n\r\n",
+            server.addr().port()
+        );
+        let mut reader = Client::send(&server, &request);
+        assert!(
+            reader.read_until(Duration::from_secs(5), |read| read.contains("Started")),
+            "{:?}",
+            reader.read
+        );
+        assert_eq!(status(&reader.read), 200);
+    }
+
+    #[test]
     fn a_request_past_its_cap_is_413_before_it_is_read_whole() {
         let config = Config {
             max_body: 1024,

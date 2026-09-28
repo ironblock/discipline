@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 86
+faults = 89
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -1118,6 +1118,7 @@ becomes = '''
 catches = [
     "drive::serve::tests::a_late_reader_replays_from_zero_then_tails",
     "drive::serve::tests::a_reader_that_leaves_is_let_go",
+    "drive::serve::tests::a_server_bound_on_ipv6_loopback_answers_the_host_a_browser_sends_it",
     "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
 ]
 
@@ -1284,6 +1285,7 @@ anchor = '''
 becomes = '''
         let deadline = Instant::now() + Duration::from_secs(3600);'''
 catches = [
+    "drive::serve::tests::a_body_trickled_in_is_held_to_the_same_deadline_as_its_head",
     "drive::serve::tests::a_client_that_sends_half_a_request_is_let_go_within_the_read_timeout",
     "drive::serve::tests::a_client_that_trickles_a_request_is_let_go_at_one_deadline_for_the_whole_of_it",
 ]
@@ -1343,6 +1345,7 @@ becomes = '''
     let _ = deadline;
     let left = Duration::from_millis(300);'''
 catches = [
+    "drive::serve::tests::a_body_trickled_in_is_held_to_the_same_deadline_as_its_head",
     "drive::serve::tests::a_client_that_trickles_a_request_is_let_go_at_one_deadline_for_the_whole_of_it",
 ]
 
@@ -1398,4 +1401,49 @@ becomes = '''
                 Ok(seq) => match Some(seq.wrapping_add(1)) {'''
 catches = [
     "drive::serve::tests::a_malformed_last_event_id_is_400",
+]
+
+[[fault]]
+id = "drive.serve-a-body-has-no-deadline"
+failure_class = "drive.serve-a-body-has-no-deadline"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        match read_by(stream, &mut chunk[..want], deadline) {'''
+becomes = '''
+        match read_by(stream, &mut chunk[..want], Instant::now() + Duration::from_secs(3600)) {'''
+catches = [
+    "drive::serve::tests::a_body_trickled_in_is_held_to_the_same_deadline_as_its_head",
+]
+
+[[fault]]
+id = "drive.serve-a-whole-head-is-not-capped"
+failure_class = "drive.serve-a-whole-head-is-not-capped"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+    if end > max_head {
+        return Err(Unread::TooLarge);
+    }'''
+becomes = '''
+    if false && end > max_head {
+        return Err(Unread::TooLarge);
+    }'''
+catches = [
+    "drive::serve::tests::a_whole_head_past_its_cap_is_413_even_when_it_arrives_in_one_read",
+]
+
+[[fault]]
+id = "drive.serve-an-ipv6-bind-refuses-its-own-host"
+failure_class = "drive.serve-an-ipv6-bind-refuses-its-own-host"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        addr.to_string(),
+'''
+becomes = '''
+        String::new(),
+'''
+catches = [
+    "drive::serve::tests::a_server_bound_on_ipv6_loopback_answers_the_host_a_browser_sends_it",
 ]
