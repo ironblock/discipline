@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 112
+faults = 120
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -1124,6 +1124,7 @@ catches = [
     "drive::serve::tests::a_foreign_origin_is_403_and_never_reaches_the_log",
     "drive::serve::tests::a_reader_that_reads_nothing_does_not_keep_another_clients_ask_from_being_answered",
     "drive::serve::tests::a_refused_command_is_409_with_its_tag_and_is_in_the_log",
+    "drive::serve::tests::a_wrong_credential_is_401_on_every_route",
     "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
 ]
 
@@ -1142,6 +1143,7 @@ catches = [
     "drive::serve::tests::a_late_reader_replays_from_zero_then_tails",
     "drive::serve::tests::a_reader_that_leaves_is_let_go",
     "drive::serve::tests::a_server_bound_on_ipv6_loopback_answers_the_host_a_browser_sends_it",
+    "drive::serve::tests::a_wrong_credential_is_401_on_every_route",
     "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
 ]
@@ -1558,11 +1560,12 @@ failure_class = "drive.serve-bin-binds-everywhere"
 target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
-    let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {'''
+    std::net::TcpListener::bind((listen, port))'''
 becomes = '''
-    let listener = match std::net::TcpListener::bind(("0.0.0.0", port)) {'''
+    std::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))'''
 catches = [
-    "a_drive_server_binds_loopback_and_has_no_listen_flag",
+    "a_drive_server_binds_loopback_by_default_and_listen_takes_an_ip",
+    "a_drive_server_off_loopback_without_a_credential_refuses_to_start",
 ]
 
 [[fault]]
@@ -1572,10 +1575,10 @@ target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
         allowed_origins,
-        ..Config::default()'''
+        credential,'''
 becomes = '''
         allowed_origins: Vec::new(),
-        ..Config::default()'''
+        credential,'''
 catches = [
     "a_drive_server_answers_an_allowed_origin_through_its_proxy_host",
 ]
@@ -1797,4 +1800,111 @@ becomes = '''
             }'''
 catches = [
     "a_drive_server_sends_the_endpoint_key_from_a_file_never_an_argument",
+]
+
+[[fault]]
+id = "drive.serve-auth-compares-nothing"
+failure_class = "drive.serve-auth-compares-nothing"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+            .fold(0_u8, |differs, (want, got)| differs | (want ^ got));'''
+becomes = '''
+            .fold(0_u8, |differs, _| differs);'''
+catches = [
+    "drive::serve::tests::a_wrong_credential_is_401_on_every_route",
+]
+
+[[fault]]
+id = "drive.serve-a-route-skips-auth"
+failure_class = "drive.serve-a-route-skips-auth"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+            && !credential.admits(request.header("authorization"))'''
+becomes = '''
+            && request.method == "POST"
+            && !credential.admits(request.header("authorization"))'''
+catches = [
+    "drive::serve::tests::a_wrong_credential_is_401_on_every_route",
+]
+
+[[fault]]
+id = "drive.serve-auth-scheme-is-case-sensitive"
+failure_class = "drive.serve-auth-scheme-is-case-sensitive"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        scheme.eq_ignore_ascii_case("basic") && differs == 0'''
+becomes = '''
+        scheme == "Basic" && differs == 0'''
+catches = [
+    "drive::serve::tests::a_wrong_credential_is_401_on_every_route",
+]
+
+[[fault]]
+id = "drive.serve-credential-accepts-a-control-character"
+failure_class = "drive.serve-credential-accepts-a-control-character"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        let usable = user_password.contains(':') && !user_password.chars().any(char::is_control);'''
+becomes = '''
+        let usable = user_password.contains(':');'''
+catches = [
+    "drive::serve::tests::a_credential_is_a_user_password_pair_with_no_control_character",
+]
+
+[[fault]]
+id = "drive.serve-base64-never-pads"
+failure_class = "drive.serve-base64-never-pads"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+            if sextet <= chunk.len() {'''
+becomes = '''
+            if sextet < 4 {'''
+catches = [
+    "drive::serve::tests::base64_matches_rfc4648",
+]
+
+[[fault]]
+id = "drive.serve-bin-listens-openly-without-a-credential"
+failure_class = "drive.serve-bin-listens-openly-without-a-credential"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    if !listen.is_loopback() && !credentialed {'''
+becomes = '''
+    if false && !listen.is_loopback() && !credentialed {'''
+catches = [
+    "a_drive_server_off_loopback_without_a_credential_refuses_to_start",
+]
+
+[[fault]]
+id = "drive.serve-bin-accepts-a-wildcard"
+failure_class = "drive.serve-bin-accepts-a-wildcard"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    if listen.is_unspecified() {'''
+becomes = '''
+    if false && listen.is_unspecified() {'''
+catches = [
+    "a_drive_server_refuses_a_wildcard_listen_even_with_a_credential",
+]
+
+[[fault]]
+id = "drive.serve-bin-ignores-the-auth-file"
+failure_class = "drive.serve-bin-ignores-the-auth-file"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+        credential,
+        ..Config::default()'''
+becomes = '''
+        credential: credential.filter(|_| false),
+        ..Config::default()'''
+catches = [
+    "a_drive_server_with_an_auth_file_asks_every_request_for_it",
 ]

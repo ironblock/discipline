@@ -20,7 +20,10 @@
 //! an `Origin`, when present, must be on the allowed list, and a post must be
 //! `application/json` -- which a page on another site can only send after a
 //! preflight, and the preflight has no route (D17). What this does not stop
-//! is another program on the same machine; that is Basic auth's job (I7).
+//! is another program on the same machine, or another host once the server
+//! listens off loopback; that is Basic auth's job (I7, D10). With a
+//! [`Credential`] set, every request that passes those checks must also
+//! present it, or is `401` -- on every route, and on paths that are none.
 //!
 //! # One thread per connection
 //!
@@ -35,7 +38,7 @@
 //! event's kind.
 
 use std::collections::BTreeMap;
-use std::fmt::Write as _;
+use std::fmt::{self, Write as _};
 use std::io::{self, Read as _, Write as _};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
@@ -45,6 +48,7 @@ use std::time::{Duration, Instant};
 
 use super::session::{CommandKind, GapEnd, IdleGap, Logged, Refusal, Rejected, Session};
 use crate::client::stream::Streaming;
+use crate::digest::sha256;
 use crate::formats::record::json::{self, Value};
 
 /// How one logged event is written as the `data:` of its server-sent event.
@@ -73,6 +77,67 @@ pub struct Config {
     /// (`http://localhost:5173`). Each one's host and port is also accepted
     /// as a `Host`, which is what a development proxy forwards.
     pub allowed_origins: Vec<String>,
+    /// The Basic credential every request must present. `None` asks for
+    /// none, which the binary allows on loopback only.
+    pub credential: Option<Credential>,
+}
+
+/// A Basic credential, `user:password` (D10). Only a digest of what a client
+/// sends for it -- the base64 of `user:password` -- is kept, and it is never
+/// printed.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Credential([u8; 32]);
+
+impl Credential {
+    /// The credential `user:password`, or nothing when there is no `:` or
+    /// the text holds a control character, which no browser prompt produces.
+    #[must_use]
+    pub fn basic(user_password: &str) -> Option<Self> {
+        let usable = user_password.contains(':') && !user_password.chars().any(char::is_control);
+        usable.then(|| Self(sha256(base64(user_password.as_bytes()).as_bytes())))
+    }
+
+    /// Whether an `Authorization` value presents this credential. The
+    /// scheme is compared without case; the token is hashed and all 32 bytes
+    /// compared with no early exit, so how long this takes says nothing about
+    /// how much of a guess was right.
+    fn admits(&self, authorization: Option<&str>) -> bool {
+        let Some((scheme, token)) = authorization.and_then(|value| value.split_once(' ')) else {
+            return false;
+        };
+        let presented = sha256(token.trim_start().as_bytes());
+        let differs = self
+            .0
+            .iter()
+            .zip(presented)
+            .fold(0_u8, |differs, (want, got)| differs | (want ^ got));
+        scheme.eq_ignore_ascii_case("basic") && differs == 0
+    }
+}
+
+impl fmt::Debug for Credential {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Credential(<redacted>)")
+    }
+}
+
+/// Base64, standard alphabet, padded (RFC 4648 section 4): what a browser
+/// sends a Basic credential as.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let byte = |at: usize| usize::from(chunk.get(at).copied().unwrap_or(0));
+        let group = (byte(0) << 16) | (byte(1) << 8) | byte(2);
+        for sextet in 0..4 {
+            if sextet <= chunk.len() {
+                out.push(char::from(ALPHABET[(group >> (18 - 6 * sextet)) & 63]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
 }
 
 impl Default for Config {
@@ -85,6 +150,7 @@ impl Default for Config {
             max_head: 16 * 1024,
             max_body: 1024 * 1024,
             allowed_origins: Vec::new(),
+            credential: None,
         }
     }
 }
@@ -260,6 +326,7 @@ fn routes<S: Streaming + 'static>() -> [(&'static str, &'static str, Handler<S>)
 const REASONS: &[(u16, &str)] = &[
     (200, "OK"),
     (400, "Bad Request"),
+    (401, "Unauthorized"),
     (403, "Forbidden"),
     (404, "Not Found"),
     (409, "Conflict"),
@@ -328,6 +395,11 @@ impl<S: Streaming + 'static> Serving<S> {
         });
         if !host_allowed || !origin_allowed {
             return respond(&mut stream, 403, &empty());
+        }
+        if let Some(credential) = &self.config.credential
+            && !credential.admits(request.header("authorization"))
+        {
+            return respond_with(&mut stream, 401, CHALLENGE, &empty());
         }
         let route = routes::<S>()
             .into_iter()
@@ -659,8 +731,16 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
+/// What a `401` asks for: a browser that sees it prompts for the pair.
+const CHALLENGE: &str = "WWW-Authenticate: Basic realm=\"diet\"\r\n";
+
 /// Answer with `status` and a JSON body, and close.
 fn respond(stream: &mut TcpStream, status: u16, body: &Value) {
+    respond_with(stream, status, "", body);
+}
+
+/// The same, with `headers` -- each line ending in CRLF -- added.
+fn respond_with(stream: &mut TcpStream, status: u16, headers: &str, body: &Value) {
     let reason = REASONS
         .iter()
         .find(|(code, _)| *code == status)
@@ -668,7 +748,7 @@ fn respond(stream: &mut TcpStream, status: u16, body: &Value) {
     let mut text = String::new();
     json::render(body, &mut text);
     let reply = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\n\
+        "HTTP/1.1 {status} {reason}\r\n{headers}Content-Type: application/json\r\n\
          Content-Length: {}\r\nConnection: close\r\n\r\n{text}",
         text.len()
     );
@@ -952,6 +1032,102 @@ mod tests {
         .reply();
         assert_eq!(status(&preflight), 404, "{preflight}");
         assert_eq!(asked(&session), 0, "a cross-site post reached the log");
+    }
+
+    #[test]
+    fn base64_matches_rfc4648() {
+        // RFC 4648 section 10's test vectors.
+        for (plain, encoded) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(base64(plain.as_bytes()), encoded, "{plain:?}");
+        }
+    }
+
+    #[test]
+    fn a_wrong_credential_is_401_on_every_route() {
+        let config = Config {
+            credential: Credential::basic("author:s3cret"),
+            ..quick()
+        };
+        assert!(
+            !format!("{config:?}").contains(&base64(b"author:s3cret")),
+            "the credential was printed"
+        );
+        let (session, server) = serve(Canned::new([deltas(&["ok"])]), config);
+        let ask = r#"{"kind":"ask","text":"hi"}"#;
+        let request = |method: &str, path: &str, authorization: &str| {
+            format!(
+                "{method} {path} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\n\
+                 Content-Length: {}\r\n{authorization}\r\n{ask}",
+                host(&server),
+                ask.len()
+            )
+        };
+        let wrong = [
+            String::new(),
+            format!("Authorization: Basic {}\r\n", base64(b"author:guess")),
+            format!("Authorization: Bearer {}\r\n", base64(b"author:s3cret")),
+            format!("Authorization: Basic{}\r\n", base64(b"author:s3cret")),
+            "Authorization: Basic\r\n".to_owned(),
+        ];
+        let mut paths: Vec<(&str, &str)> = routes::<Canned>()
+            .iter()
+            .map(|(method, path, _)| (*method, *path))
+            .collect();
+        paths.push(("GET", "/nowhere"));
+        for (method, path) in &paths {
+            for authorization in &wrong {
+                let reply = Client::send(&server, &request(method, path, authorization)).reply();
+                assert_eq!(
+                    status(&reply),
+                    401,
+                    "{method} {path} with {authorization:?}: {reply}"
+                );
+                assert!(
+                    reply.contains("\r\nWWW-Authenticate: Basic realm=\"diet\"\r\n"),
+                    "{reply}"
+                );
+            }
+        }
+        assert_eq!(asked(&session), 0, "a refused request reached the session");
+
+        // The right pair, with the scheme in any case, is admitted.
+        let right = format!("Authorization: basic {}\r\n", base64(b"author:s3cret"));
+        let reply = Client::send(&server, &request("POST", "/commands", &right)).reply();
+        assert_eq!(status(&reply), 200, "{reply}");
+        assert_eq!(asked(&session), 1);
+        let mut reader = Client::send(
+            &server,
+            &events_request(&server, "?from=0", &right.replace("basic", "BASIC")),
+        );
+        assert!(
+            reader.read_until(Duration::from_secs(5), |read| read.contains("Asked")),
+            "{}",
+            reader.read
+        );
+        assert_eq!(status(&reader.read), 200, "{}", reader.read);
+    }
+
+    #[test]
+    fn a_credential_is_a_user_password_pair_with_no_control_character() {
+        assert!(Credential::basic("author:s3cret").is_some());
+        assert!(
+            Credential::basic("author:").is_some(),
+            "an empty password is the author's call"
+        );
+        for unusable in ["", "author", "author:s3cret\n", "author:s3\r\ncret"] {
+            assert!(
+                Credential::basic(unusable).is_none(),
+                "{unusable:?} was accepted"
+            );
+        }
     }
 
     #[test]

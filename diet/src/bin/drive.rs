@@ -31,6 +31,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::net::{IpAddr, Ipv4Addr};
 use std::process::ExitCode;
 
 use diet::client::Client;
@@ -41,7 +42,7 @@ use diet::client::stream::{Bearer, HttpStream};
 use diet::client::stub::Stub;
 use diet::client::transport::{Endpoint, Http};
 use diet::drive::regimen::{SUBSTRATE_KEYS, regime_of};
-use diet::drive::serve::{Config, Server};
+use diet::drive::serve::{Config, Credential, Server};
 use diet::drive::session::Session;
 use diet::drive::{Gym, Halt, canned, run};
 use diet::formats::record::Regime;
@@ -74,29 +75,37 @@ const SERVE: &str = "serve";
 fn serve_usage() -> String {
     let mut out = String::from(
         "usage: diet-drive serve --endpoint URL --model NAME --head FILE [--key-file FILE]\n\
-         \x20                       [--port N] [--allow-origin URL]... [--max-output-tokens N]\n\n",
+         \x20                       [--listen IP] [--port N] [--auth-file FILE]\n\
+         \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\n",
     );
-    out.push_str("Serves one interactive session over HTTP + SSE on 127.0.0.1 ONLY:\n");
+    out.push_str("Serves one interactive session over HTTP + SSE on 127.0.0.1, or on\n");
+    out.push_str("--listen's address:\n");
     out.push_str("GET /events streams the session's log, POST /commands takes its\n");
     out.push_str("commands. <FILE> is the trunk's system message. The first line on\n");
     out.push_str("stdout is JSON naming the address it listens on and when it opened.\n");
     out.push_str("--allow-origin admits a page's origin (a development proxy's).\n");
     out.push_str("--key-file names a file holding the endpoint's key, sent as a bearer\n");
     out.push_str("credential; it is never taken as an argument.\n");
-    out.push_str("There is no --listen: binding beyond loopback arrives with auth.\n");
+    out.push_str("--auth-file names a file holding user:password; every request must then\n");
+    out.push_str("present it as Basic auth. --listen off loopback refuses to start without\n");
+    out.push_str("it, and a wildcard (0.0.0.0, ::) is refused: name one interface.\n");
     out
 }
 
-/// `diet-drive serve`: one interactive session, over HTTP + SSE, on loopback.
+/// `diet-drive serve`: one interactive session, over HTTP + SSE, on loopback
+/// unless `--listen` names another address.
 ///
-/// Loopback ONLY until auth exists (#117 R2c, I7): the plan moved `--listen`
-/// out of this increment so that nothing here can bind a session that runs
-/// the model beyond the machine it is on.
+/// Fail-closed (#117 R2c, I7): off loopback it will not start without a
+/// credential, so nothing here binds a session that runs the model beyond the
+/// machine it is on for anyone who can reach it. A wildcard is refused: D17's
+/// `Host` check answers to the bound address, and a wildcard has none.
 fn serve(args: &[String]) -> ExitCode {
     let mut endpoint = None;
     let mut model = None;
     let mut head = None;
     let mut key_file = None;
+    let mut auth_file = None;
+    let mut listen = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let mut port: u16 = 0;
     let mut allowed_origins = Vec::new();
     let mut max_output_tokens: u32 = 512;
@@ -118,6 +127,11 @@ fn serve(args: &[String]) -> ExitCode {
         } else if flag == "--key-file" {
             key_file = Some(value.clone());
             true
+        } else if flag == "--auth-file" {
+            auth_file = Some(value.clone());
+            true
+        } else if flag == "--listen" {
+            value.parse().map(|given| listen = given).is_ok()
         } else if flag == "--allow-origin" {
             let origin = is_an_origin(value);
             if origin {
@@ -148,28 +162,14 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(system) => system,
         Err(why) => return fail(EXIT_INPUT, &format!("{head} cannot be read: {why}")),
     };
-    let shape = RequestShape {
-        model,
-        messages: vec![Message::new(Role::System, system)],
-        sampler: SamplerCard::empty(),
-        limits: Limits {
-            attempt: std::time::Duration::from_secs(60),
-            call: std::time::Duration::from_secs(180),
-            max_output_tokens,
-            retries: 0,
-        },
-        grammar: None,
-        template_kwargs: BTreeMap::new(),
-        tools: Vec::new(),
+    let shape = trunk(model, system, max_output_tokens);
+    let credential = match auth_file.as_deref().map(credential_from).transpose() {
+        Ok(credential) => credential,
+        Err(why) => return fail(EXIT_INPUT, &why),
     };
-    let listener = match std::net::TcpListener::bind(("127.0.0.1", port)) {
+    let listener = match listener(listen, port, credential.is_some()) {
         Ok(listener) => listener,
-        Err(why) => {
-            return fail(
-                EXIT_HALT,
-                &format!("cannot listen on 127.0.0.1:{port}: {why}"),
-            );
-        }
+        Err(refused) => return refused,
     };
     let mut transport = HttpStream::new(endpoint);
     if let Some(key_file) = key_file {
@@ -182,6 +182,7 @@ fn serve(args: &[String]) -> ExitCode {
     let opened = session.opened();
     let config = Config {
         allowed_origins,
+        credential,
         ..Config::default()
     };
     let server = match Server::start(listener, session, config, diet::drive::session::render) {
@@ -194,6 +195,57 @@ fn serve(args: &[String]) -> ExitCode {
     loop {
         std::thread::park();
     }
+}
+
+/// The session's trunk: the system message, and nothing else fixed yet.
+fn trunk(model: String, system: String, max_output_tokens: u32) -> RequestShape {
+    RequestShape {
+        model,
+        messages: vec![Message::new(Role::System, system)],
+        sampler: SamplerCard::empty(),
+        limits: Limits {
+            attempt: std::time::Duration::from_secs(60),
+            call: std::time::Duration::from_secs(180),
+            max_output_tokens,
+            retries: 0,
+        },
+        grammar: None,
+        template_kwargs: BTreeMap::new(),
+        tools: Vec::new(),
+    }
+}
+
+/// The listener `serve` binds: on `listen`, which is refused when it is a
+/// wildcard, or off loopback with no credential (fail-closed, I7).
+fn listener(
+    listen: IpAddr,
+    port: u16,
+    credentialed: bool,
+) -> Result<std::net::TcpListener, ExitCode> {
+    if listen.is_unspecified() {
+        return Err(fail(
+            EXIT_USAGE,
+            &format!(
+                "--listen {listen} is a wildcard, and no Host could be checked against it: \
+                 name one interface's address"
+            ),
+        ));
+    }
+    if !listen.is_loopback() && !credentialed {
+        return Err(fail(
+            EXIT_USAGE,
+            &format!(
+                "--listen {listen} is off loopback and needs --auth-file: without it, \
+                 anyone who can reach {listen} drives the session"
+            ),
+        ));
+    }
+    std::net::TcpListener::bind((listen, port)).map_err(|why| {
+        fail(
+            EXIT_HALT,
+            &format!("cannot listen on {listen}:{port}: {why}"),
+        )
+    })
 }
 
 /// The first line `serve` prints: where it listens and when it opened, as
@@ -226,6 +278,21 @@ fn bearer_from(path: &str) -> Result<Bearer, String> {
         .unwrap_or(&written);
     Bearer::new(key)
         .ok_or_else(|| format!("{path} holds no usable key: empty, or holding a control character"))
+}
+
+/// The drive server's own credential, from a FILE, as `--key-file` reads the
+/// endpoint's: `user:password` on one line, one trailing line break the
+/// file's. A line with no `:`, or with a control character, is refused.
+fn credential_from(path: &str) -> Result<Credential, String> {
+    let written =
+        std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
+    let pair = written
+        .strip_suffix("\r\n")
+        .or_else(|| written.strip_suffix('\n'))
+        .unwrap_or(&written);
+    Credential::basic(pair).ok_or_else(|| {
+        format!("{path} holds no usable credential: user:password, with no control character")
+    })
 }
 
 /// An origin as a browser sends it: a scheme, `://`, a host and port, and
