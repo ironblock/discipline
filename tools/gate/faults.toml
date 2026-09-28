@@ -6057,6 +6057,46 @@ failure_class = "drive.serve-a-malformed-ask-is-an-empty-ask"
 migrated = false
 
 [[fault]]
+id = "drive.serve-read-timeout-per-read"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-read-timeout-per-read"
+failure_class = "drive.serve-read-timeout-per-read"
+migrated = false
+
+[[fault]]
+id = "drive.serve-no-head-cap"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-no-head-cap"
+failure_class = "drive.serve-no-head-cap"
+migrated = false
+
+[[fault]]
+id = "drive.serve-a-request-with-no-host-is-answered"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-a-request-with-no-host-is-answered"
+failure_class = "drive.serve-a-request-with-no-host-is-answered"
+migrated = false
+
+[[fault]]
+id = "drive.serve-a-cancel-for-no-turn-is-200"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-a-cancel-for-no-turn-is-200"
+failure_class = "drive.serve-a-cancel-for-no-turn-is-200"
+migrated = false
+
+[[fault]]
+id = "drive.serve-a-resume-past-the-last-seq-wraps"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-a-resume-past-the-last-seq-wraps"
+failure_class = "drive.serve-a-resume-past-the-last-seq-wraps"
+migrated = false
+
+[[fault]]
 id = "adapters.compaction-read-as-a-turn"
 kind = "lane-fault"
 check = "lanes"
