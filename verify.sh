@@ -7569,13 +7569,21 @@ root = pathlib.Path(sys.argv[1])
 # Fixed stamps rather than offsets from now, so the three cases differ by
 # years and no clock skew can reorder them.
 OLD, BUILT, NEW = 1577836800, 1609459200, 1767225600  # 2020, 2021, 2026
-CASES = ("a-grammar-it-embeds", "nothing-newer", "dep-info-narrows")
+CASES = (
+    "a-grammar-it-embeds",
+    "nothing-newer",
+    "dep-info-narrows",
+    "a-drive-only-edit",
+    "a-diet-source-edit",
+)
 TREE = (
     "Cargo.toml",
     "Cargo.lock",
     "rust-toolchain.toml",
     "diet/Cargo.toml",
     "diet/src/lib.rs",
+    "diet/src/bin/diet.rs",
+    "diet/src/bin/drive.rs",
     "diet/formats/record/grammar.pest",
     "diet/formats/record/fixtures/one.json",
 )
@@ -7616,6 +7624,20 @@ narrows = root / CASES[2]
 )
 stamp(narrows / "diet-bin.d", BUILT)
 stamp(narrows / "diet/formats/record/fixtures/one.json", NEW)
+
+# #138: THE DEP-INFO IS THE SOURCE LIST, for Rust files too. `diet/src` as a
+# whole used to count, so an edit to `bin/drive.rs` -- another binary's
+# source, which `diet` is not built from -- read `diet` as stale, and
+# `cargo build` could not clear it. The `.d` below is what cargo writes for
+# `diet`: its library and its own `bin/diet.rs`, never `bin/drive.rs`.
+for case, edited in (("a-drive-only-edit", "diet/src/bin/drive.rs"),
+                     ("a-diet-source-edit", "diet/src/lib.rs")):
+    here = root / case
+    (here / "diet-bin.d").write_text(
+        f"{here / 'diet-bin'}: diet/src/lib.rs diet/src/bin/diet.rs\n", encoding="utf-8"
+    )
+    stamp(here / "diet-bin.d", BUILT)
+    stamp(here / edited, NEW)
 PYEOF
   expect_exit "a grammar changed under a binary with no dep-info is stale" 2 \
     bash -c "cd '${depless}/a-grammar-it-embeds' \
@@ -7628,6 +7650,14 @@ PYEOF
   expect_exit "a dep-info that does narrow still narrows" 0 \
     bash -c "cd '${depless}/dep-info-narrows' \
       && DIET_BIN='${depless}/dep-info-narrows/diet-bin' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+  expect_exit "an edit to another binary's source leaves diet fresh" 0 \
+    bash -c "cd '${depless}/a-drive-only-edit' \
+      && DIET_BIN='${depless}/a-drive-only-edit/diet-bin' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+  expect_exit "an edit to a source diet is built from is stale" 2 \
+    bash -c "cd '${depless}/a-diet-source-edit' \
+      && DIET_BIN='${depless}/a-diet-source-edit/diet-bin' \
       python3 '${ROOT}/scripts/resolve-diet.py'"
 
   # --- the resolver's own suite cannot report a pass it did not measure ---

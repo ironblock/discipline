@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 122
+mechanics_assertions = 124
 unseedable_guards = 3
 migrated = 0
 
@@ -4163,6 +4163,22 @@ failure_class = "provenance.rule-did-not-apply"
 legacy_signature = ""
 migrated = false
 
+[[fault]]
+id = "mech.an-edit-to-another-binary-s-source-leaves-diet-fresh"
+kind = "mechanics"
+check = "results"
+label = "an edit to another binary's source leaves diet fresh"
+failure_class = "resolver.foreign-source"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.an-edit-to-a-source-diet-is-built-from-is-stale"
+kind = "mechanics"
+check = "results"
+label = "an edit to a source diet is built from is stale"
+failure_class = "resolver.stale-source"
+legacy_signature = ""
+migrated = false
 [[fault]]
 id = "mech.a-dep-info-that-does-narrow-still-narrows"
 kind = "mechanics"

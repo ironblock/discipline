@@ -92,8 +92,16 @@ def candidates() -> tuple[pathlib.Path, ...]:
 # not clear it, because cargo correctly rebuilds nothing when no source
 # changed. The workaround was `touch diet/src/lib.rs && cargo build`, which is
 # a strange thing to have to know and was reported as such (#50).
+#
+# `diet/src` AS A WHOLE IS NOT ONE EITHER (#138), and was until 2026-09-28.
+# It holds other binaries' sources -- `bin/drive.rs` is `diet-drive`'s, not
+# `diet`'s -- so an edit to one read `diet` as stale, and `cargo build`
+# could not clear it, because nothing `diet` is built from had changed: the
+# #50 class again, one directory further in. The Rust files `diet` is built
+# from are cargo's dep-info to say (`embedded()` below), and when there is no
+# dep-info to trust, `embedded()` falls back to the whole of `diet/`, which
+# still contains all of `diet/src`.
 SOURCES = (
-    pathlib.Path("diet/src"),
     pathlib.Path("diet/Cargo.toml"),
     pathlib.Path("Cargo.toml"),
     pathlib.Path("Cargo.lock"),
