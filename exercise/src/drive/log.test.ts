@@ -89,6 +89,23 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(answer?.kind === 'assistant' && answer.reasoning.startsWith(reasoned.join('').slice(0, 1))).toBe(true);
   });
 
+  it("reads a failure by its reason, never its message: two failures differing only in message fold alike (ruled on #140)", () => {
+    const log = logOf('a-turn-whose-connection-failed.jsonl');
+    const withMessage = (message: string) => fold(log.map((l) => (l.kind === 'request.failed' ? { ...l, message } : l)));
+    const [bare, told] = [withMessage(''), withMessage('The server did not answer within 5s. It may be loading a model, out of memory, or gone; the transport gave up waiting and dropped the connection after one attempt.')];
+    // The message is shown, verbatim, and read for nothing: take it out and the two sessions are the same.
+    const unsaid = (session: typeof bare) =>
+      JSON.stringify({
+        state: session.state,
+        receipt: session.receipt,
+        eras: session.eras.map((era) => era.nodes.map((n) => (n.kind === 'assistant' && n.failure ? { ...n, failure: { ...n.failure, message: '' } } : n))),
+      });
+    expect(log.some((l) => l.kind === 'request.failed')).toBe(true);
+    expect(unsaid(told)).toBe(unsaid(bare));
+    const failed = told.eras[0]?.nodes.find((n) => n.kind === 'assistant');
+    expect(failed?.kind === 'assistant' && failed.failure?.reason).toBe('transport');
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });

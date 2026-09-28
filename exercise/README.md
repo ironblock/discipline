@@ -19,18 +19,20 @@ pnpm perf             # a performance trace: frames, long frames, layout, style,
 ```
 
 **Driving `diet`.** `?drive` drives `diet`'s own session, served over HTTP
-(`src/drive/http.ts`, against `serve.rs`'s contract, #128). The page reaches
-it same-origin through the dev server's proxy:
+by `diet-drive serve` (#140; `src/drive/http.ts`). The page reaches it
+same-origin through the dev server's proxy:
 
 ```
-diet-drive serve --allow-origin http://localhost:5173 ...   # #117 I5, not landed yet
-DIET_DRIVE=http://127.0.0.1:<port> pnpm dev                 # then open /?drive
+cargo build --bin diet-drive                                   # from diet/
+target/debug/diet-drive serve --endpoint <llama-server>/v1/chat/completions \
+    --model <name> --head <file> --port 7801 --allow-origin http://localhost:5173
+DIET_DRIVE=http://127.0.0.1:7801 pnpm dev                      # then open /?drive
 ```
 
-Until I5 lands, `node scripts/stand-in.mjs` stands in for it: the same
-routes, statuses and v0 log, a canned answer instead of a model, and
-`SIGUSR2` to restart its session (a 410 for the page to rebuild on).
-Delete it when I5 lands.
+With no model at hand, `node scripts/model-stand-in.mjs` is one: every
+request answered with `diet`'s own captured llama-server reply, byte for
+byte (a random-weight model, so the words are noise), at
+`http://127.0.0.1:7901/v1/chat/completions`.
 
 `pnpm perf` (`scripts/perf.mjs`) drives a production build in headless
 Chromium through three sessions -- replay, scroll, pointing -- and says
