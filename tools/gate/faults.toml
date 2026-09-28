@@ -6263,6 +6263,30 @@ failure_class = "drive.serve-the-id-is-not-the-seq"
 migrated = false
 
 [[fault]]
+id = "drive.serve-bin-drops-the-head"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-drops-the-head"
+failure_class = "drive.serve-bin-drops-the-head"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-binds-everywhere"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-binds-everywhere"
+failure_class = "drive.serve-bin-binds-everywhere"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-ignores-allow-origin"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-ignores-allow-origin"
+failure_class = "drive.serve-bin-ignores-allow-origin"
+migrated = false
+
+[[fault]]
 id = "adapters.compaction-read-as-a-turn"
 kind = "lane-fault"
 check = "lanes"
