@@ -78,6 +78,7 @@ BRANCH_IGNORE = re.compile(r"^ {4,}branches-ignore:")
 INLINE_LIST = re.compile(r"^\[([^\]]*)\]$")
 LIST_ITEM = re.compile(r"^ {6,}-\s*(.+?)\s*$")
 ON_BLOCK = re.compile(r"^on:\s*$", re.MULTILINE)
+CANCEL_IN_PROGRESS = re.compile(r"^\s*cancel-in-progress:\s*(.+?)\s*$", re.MULTILINE)
 EVENT = re.compile(r"^  ([A-Za-z_][A-Za-z0-9_]*):")
 BRANCH_FILTER = re.compile(r"^ {4,}branches(-ignore)?:")
 
@@ -382,6 +383,23 @@ def main() -> int:
             failures.append(f"{wf.name}: is not `on: workflow_call:`, so it cannot be composed")
         if wf.name not in called:
             failures.append(f"{wf.name}: exists but {ROOT_WORKFLOW} never calls it")
+
+    # 8. a run on the trunk is never cancelled by the next push to it
+    #
+    #    The push-to-trunk run is the full selftest whose census every pull
+    #    request's scope plan is read from (#112). `cancel-in-progress: true`
+    #    keyed on the ref cancels it whenever a second merge lands inside its
+    #    nineteen minutes -- 6 of 30 trunk pushes were, measured on #112 --
+    #    and pull requests are then scoped against an older census. A pull
+    #    request superseding its own run is the saving the key exists for, so
+    #    an expression is allowed; the literal `true` is what is refused.
+    cancel = CANCEL_IN_PROGRESS.search(root_text)
+    if cancel and cancel.group(1).strip().strip("\"'") == "true":
+        failures.append(
+            f"{ROOT_WORKFLOW}: `cancel-in-progress: true` cancels a push run on the "
+            f"trunk when the next merge lands, and the next pull request is scoped "
+            f"against the census of an older commit. Cancel pull-request runs only"
+        )
 
     for message in failures:
         print(message, file=sys.stderr)

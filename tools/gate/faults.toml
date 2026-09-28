@@ -3527,6 +3527,14 @@ failure_class = "wiring.pull-request-branch-filtered"
 legacy_signature = "carries .branches: \\[main\\]. and is reached"
 migrated = false
 [[fault]]
+id = "ci.ci_trunk_run_cancelled"
+kind = "seeded-gate"
+check = "ci"
+label = "the trunk's run cancelled by a merge"
+failure_class = "wiring.trunk-run-cancelled"
+legacy_signature = "cancels a push run on the trunk"
+migrated = false
+[[fault]]
 id = "ci.ci_scoped_test"
 kind = "seeded-gate"
 check = "ci"
