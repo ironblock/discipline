@@ -43,7 +43,7 @@ export interface BlockProps {
   readonly alarm?: 'warn' | 'bad' | undefined;
   /** The node's id: its DOM id too, so `#<id>` links to it. */
   readonly id?: string;
-  /** Per-block actions -- copy today; retry, annotate, link later -- shown in the corner on hover or focus. */
+  /** Per-block actions -- copy today; retry, annotate, link later -- at the header's right end, on hover or focus. */
   readonly actions?: ReactNode;
   readonly children?: ReactNode;
 }
@@ -55,7 +55,7 @@ export interface BlockProps {
  * the surface is one of these, refined.
  */
 export function Block({ tone, lane, label, input, output, stats = [], provenance, thin = false, live = false, intake, alarm, id, actions, children }: BlockProps) {
-  const { curtain } = useSurface();
+  const { curtain, gaps } = useSurface();
   const target = useTarget();
   const outputs = stats.filter((s): s is Stat => Boolean(s));
   const chip = <span className="ex-block__label">{label}</span>;
@@ -66,6 +66,20 @@ export function Block({ tone, lane, label, input, output, stats = [], provenance
       </span>
     ) : null;
   const out = output !== undefined ? <span className="ex-block__flow" data-at="foot">{output}</span> : null;
+  // The header's right end: what you can do with the block and where it came from, on hover or focus; and,
+  // with the gaps overlay on, what `diet` cannot emit yet that it was drawn from.
+  const needs = gaps && provenance.needs.length > 0 ? <span className="ex-block__needs">needs {provenance.needs.join(' ')}</span> : null;
+  const corner =
+    actions !== undefined || curtain ? (
+      <span className="ex-block__corner">
+        {actions}
+        {curtain ? (
+          <span className="ex-cite" title="log positions this block was folded from">
+            #{provenance.from.join(' #')}
+          </span>
+        ) : null}
+      </span>
+    ) : null;
   return (
     <div
       className={`ex-block ex-block--${tone}${thin ? ' ex-block--thin' : ''}${live ? ' ex-block--live' : ''}`}
@@ -97,12 +111,15 @@ export function Block({ tone, lane, label, input, output, stats = [], provenance
           {out}
           <span className="ex-block__spacer" />
           {outputs.map(stat)}
+          {needs}
         </footer>
       ) : (
         <>
           <header className="ex-block__head">
             {chip}
             {line}
+            {corner}
+            {needs}
           </header>
           {children !== undefined ? <div className="ex-block__body">{children}</div> : null}
           {out || outputs.length > 0 ? (
@@ -114,16 +131,6 @@ export function Block({ tone, lane, label, input, output, stats = [], provenance
           ) : null}
         </>
       )}
-      {actions !== undefined || curtain ? (
-        <div className="ex-block__corner">
-          {actions}
-          {curtain ? (
-            <span className="ex-cite" title="log positions this block was folded from">
-              #{provenance.from.join(' #')}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }

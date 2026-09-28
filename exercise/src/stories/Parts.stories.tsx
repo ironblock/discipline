@@ -575,7 +575,7 @@ export const ToolWrittenAsOne: Story = {
     const output = () => call?.querySelector('.ex-block__body > .ex-tool__call + .ex-tool__output')?.textContent?.split('\n');
     await expect(output()).toHaveLength(3);
     // What it holds back is said under what it shows, not in the header.
-    await expect(call?.querySelector('.ex-block__head button')).toBeNull();
+    await expect(call?.querySelector('.ex-block__head [aria-expanded]')).toBeNull();
     const more = call?.querySelector('.ex-block__body > .ex-tool__output + .ex-more') as HTMLElement;
     await expect(more.textContent).toBe('1,857 more lines');
     await userEvent.click(more);

@@ -221,6 +221,19 @@ export const Gaps: Story = {
   args: { cursor: MOMENTS.done, gaps: true },
   play: async ({ canvasElement }) => {
     await expect(q(canvasElement, '.ex-gaps')).not.toBeNull();
+    // A block names what it waits on, and keeps its actions and cites, inside its own header: nothing floats
+    // in the gap between blocks, where the one above would be under it.
+    const blocks = [...canvasElement.querySelectorAll('.ex-trunk .ex-block:not(.ex-block--thin)')] as HTMLElement[];
+    const named = blocks.filter((b) => b.dataset['needs']);
+    await expect(named.length).toBeGreaterThan(0);
+    for (const block of named) await expect(block.querySelector(':scope > .ex-block__head > .ex-block__needs')?.textContent).toBe(`needs ${block.dataset['needs']}`);
+    for (const block of blocks) {
+      const box = block.getBoundingClientRect();
+      for (const part of block.querySelectorAll('.ex-block__corner, .ex-block__needs')) {
+        const at = part.getBoundingClientRect();
+        await expect(at.top >= box.top && at.bottom <= box.bottom && at.right <= box.right).toBe(true);
+      }
+    }
   },
 };
 

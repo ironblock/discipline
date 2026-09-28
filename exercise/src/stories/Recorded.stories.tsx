@@ -377,9 +377,9 @@ export const VoxelStress: Story = {
       longest = Math.max(longest, run);
     }
     await expect(longest).toBe(9);
-    // A later call of a step says nothing of what writing it took: its header is its chip alone.
+    // A later call of a step says nothing of what writing it took: its header has no line after its chip.
     const heads = [...canvasElement.querySelectorAll('.ex-block--tool > .ex-block__head')];
-    await expect(heads.filter((h) => h.children.length === 1).length).toBe(105 - shares.length);
+    await expect(heads.filter((h) => h.querySelector('.ex-block__flow') === null).length).toBe(105 - shares.length);
     await expect(canvasElement.textContent).not.toMatch(/\b1 lines\b/);
     await expect(canvasElement.querySelector('.ex-header__unknown')?.getAttribute('title')).toContain('compaction');
   },
