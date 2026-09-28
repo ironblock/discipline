@@ -1642,9 +1642,6 @@ path.write_text(source, encoding="utf-8")
 EOF
 }
 
-# #79: the check that a `prefix.changed` is a change at all. Disabled, a row
-# over two requests that hash the same is accepted -- and a cache census reads
-# a mutation the file itself denies.
 # The session event log's cross-line rules (#117 R2c I1, the courier patch from
 # track three), each disabled in turn: a line the reader must refuse is then
 # read as a log. Measured by track three before the courier; wired here.
@@ -1690,6 +1687,9 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# #79: the check that a `prefix.changed` is a change at all. Disabled, a row
+# over two requests that hash the same is accepted -- and a cache census reads
+# a mutation the file itself denies.
 inject_record_prefix_change_not_a_change() {
   python3 - <<'EOF'
 import pathlib

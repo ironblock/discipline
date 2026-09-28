@@ -435,6 +435,58 @@ fn begins_with_the_session(lines: &[Line]) -> Result<(), LogError> {
     }
 }
 
+/// Q4: an `idle.gap` is emitted once per gap, and references the
+/// `turn.settled` that opened it -- the latest one.
+fn gap_once(
+    opened_by: u64,
+    settlings: &BTreeSet<u64>,
+    latest: Option<u64>,
+    gapped: &mut BTreeSet<u64>,
+) -> Result<(), String> {
+    if !settlings.contains(&opened_by) {
+        return Err(format!("seq {opened_by} is not an earlier `turn.settled`"));
+    }
+    if latest != Some(opened_by) {
+        return Err(format!("seq {opened_by} is not the latest `turn.settled`"));
+    }
+    if !gapped.insert(opened_by) {
+        return Err(format!("a second `idle.gap` opened by seq {opened_by}"));
+    }
+    Ok(())
+}
+
+/// A request ends once: a `response`, a `cancelled` or a `request.failed`
+/// (the module's own rule, "a cancelled call is `cancelled`, never a
+/// `response`"; found by #137's review).
+fn ends_once(event: &Event, request: u64, ended: &mut BTreeSet<u64>) -> Result<(), String> {
+    if ended.insert(request) {
+        return Ok(());
+    }
+    let kind = match event {
+        Event::Response { .. } => Kind::Response,
+        Event::Cancelled { .. } => Kind::Cancelled,
+        _ => Kind::RequestFailed,
+    };
+    Err(format!(
+        "a `{}` for request {request}, which has already ended",
+        kind.tag()
+    ))
+}
+
+/// `seq` counts from 0 without a gap, and `t` never goes back.
+fn in_order(line: &Line, index: usize, last_t: u64) -> Result<(), String> {
+    if line.seq != index as u64 {
+        return Err(format!(
+            "`seq` is {}, where the line's position is {index}",
+            line.seq
+        ));
+    }
+    if line.t < last_t {
+        return Err(format!("`t` went back from {last_t} to {}", line.t));
+    }
+    Ok(())
+}
+
 /// Every rule that no single line can break alone.
 fn check(lines: &[Line]) -> Result<(), LogError> {
     let at = |index: usize, why: String| LogError {
@@ -447,23 +499,12 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
     let mut settled = BTreeSet::new();
     let mut requests = BTreeSet::new();
     let mut settlings = BTreeSet::new();
+    let mut ended = BTreeSet::new();
+    let mut latest_settling = None;
+    let mut gapped = BTreeSet::new();
     let mut last_t = 0_u64;
     for (index, line) in lines.iter().enumerate() {
-        if line.seq != index as u64 {
-            return Err(at(
-                index,
-                format!(
-                    "`seq` is {}, where the line's position is {index}",
-                    line.seq
-                ),
-            ));
-        }
-        if line.t < last_t {
-            return Err(at(
-                index,
-                format!("`t` went back from {last_t} to {}", line.t),
-            ));
-        }
+        in_order(line, index, last_t).map_err(|why| at(index, why))?;
         last_t = line.t;
         match &line.event {
             Event::SessionStart { .. } if index > 0 => {
@@ -508,12 +549,11 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                     return Err(at(index, format!("turn {turn} settled twice")));
                 }
                 settlings.insert(line.seq);
+                latest_settling = Some(line.seq);
             }
-            Event::IdleGap { opened_by, .. } if !settlings.contains(opened_by) => {
-                return Err(at(
-                    index,
-                    format!("seq {opened_by} is not an earlier `turn.settled`"),
-                ));
+            Event::IdleGap { opened_by, .. } => {
+                gap_once(*opened_by, &settlings, latest_settling, &mut gapped)
+                    .map_err(|why| at(index, why))?;
             }
             Event::Delta { request, .. }
             | Event::Response {
@@ -528,6 +568,20 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                     index,
                     format!("seq {request} is not an earlier `request`"),
                 ));
+            }
+            Event::Delta { request, .. } if ended.contains(request) => {
+                return Err(at(
+                    index,
+                    format!("a `delta` for request {request}, which has already ended"),
+                ));
+            }
+            Event::Response {
+                to_request: request,
+                ..
+            }
+            | Event::Cancelled { request, .. }
+            | Event::RequestFailed { request, .. } => {
+                ends_once(&line.event, *request, &mut ended).map_err(|why| at(index, why))?;
             }
             _ => {}
         }
