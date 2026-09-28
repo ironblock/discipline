@@ -57,6 +57,12 @@ class Census:
         self.path = path
         self.scalars: dict[str, int] = {}
         self.ordinals: list[int] = []
+        # #112: faults this shard declared inherited rather than re-proving,
+        # as (ordinal, id, sha); the commit the verdicts are about; and the
+        # files each fault's injection touched. None of them is a pass.
+        self.inherited: list[tuple[int, str, str]] = []
+        self.commit: str | None = None
+        self.touched: list[tuple[str, str]] = []
         self.errors: list[str] = []
         self._parse()
 
@@ -70,10 +76,33 @@ class Census:
             if not line.strip():
                 continue
             parts = line.split("\t")
+            key = parts[0].strip()
+            # The #112 rows carry more than one value, and each is refused by
+            # its own shape rather than let through as a loose line.
+            if key == "commit" and len(parts) == 2:
+                self.commit = parts[1].strip()
+                continue
+            if key == "touched":
+                if len(parts) != 3 or not parts[1] or not parts[2]:
+                    self.errors.append(f"{self.path.name}:{number}: not `touched<TAB>ID<TAB>PATH`")
+                else:
+                    self.touched.append((parts[1], parts[2]))
+                continue
+            if key == "inherited":
+                if len(parts) != 4 or not parts[1].isdigit() or not parts[2] or not parts[3]:
+                    self.errors.append(
+                        f"{self.path.name}:{number}: not `inherited<TAB>ORDINAL<TAB>ID<TAB>SHA`"
+                    )
+                else:
+                    self.inherited.append((int(parts[1]), parts[2], parts[3]))
+                continue
+            # `ordinal<TAB>N<TAB>ID` since #112; `ordinal<TAB>N` before it.
+            if key == "ordinal" and len(parts) == 3:
+                parts = parts[:2]
             if len(parts) != 2:
                 self.errors.append(f"{self.path.name}:{number}: not `key<TAB>value`")
                 continue
-            key, raw = parts[0].strip(), parts[1].strip()
+            raw = parts[1].strip()
             try:
                 value = int(raw)
             except ValueError:
@@ -223,6 +252,15 @@ def main(argv: list[str]) -> int:
     for report in reports:
         for ordinal in report.ordinals:
             ran.setdefault(ordinal, []).append(report.scalars["shard"])
+    # An INHERITED fault is accounted for, exactly once, by the shard that owns
+    # it -- and it is not a pass: it is reported apart from what ran, with the
+    # commit it was last seen red at (#112). One that is both run and
+    # inherited, or inherited twice, is the same double count as running twice.
+    inherited: dict[int, tuple[str, str]] = {}
+    for report in reports:
+        for ordinal, ident, sha in report.inherited:
+            ran.setdefault(ordinal, []).append(report.scalars["shard"])
+            inherited[ordinal] = (ident, sha)
 
     if len(totals) == 1:
         missing = [n for n in range(1, total + 1) if n not in ran]
@@ -250,10 +288,15 @@ def main(argv: list[str]) -> int:
         print(f"check-selftest-census: {len(failures)} failure(s)", file=sys.stderr)
         return 1
 
+    reproven = len(ran) - len(inherited)
     print(
         f"check-selftest-census: {len(reports)} shard(s) ran "
-        f"{len(ran)} of {total} fault(s), each exactly once"
+        f"{reproven} of {total} fault(s) and declared {len(inherited)} inherited, "
+        f"each exactly once"
     )
+    for ordinal in sorted(inherited):
+        ident, sha = inherited[ordinal]
+        print(f"  inherited at {sha}: {ident}")
     return 0
 
 
