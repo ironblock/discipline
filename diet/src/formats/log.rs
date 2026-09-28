@@ -1635,7 +1635,24 @@ mod tests {
             "the fixtures carry a `request.failed`, or this proves nothing"
         );
         assert_eq!(a, b, "the two logs differ in more than a failure's message");
-        assert_ne!(empty, paragraph, "the two fixtures are the same file");
+        // The MESSAGES differ, one of them empty -- not merely the files: two
+        // files differing in whitespace would let a projection that reads the
+        // message pass unseen (#147's review).
+        let messages = |text: &str| -> Vec<String> {
+            parse(text)
+                .expect("a valid fixture")
+                .into_iter()
+                .filter_map(|line| match line.event {
+                    Event::RequestFailed { message, .. } => Some(message),
+                    _ => None,
+                })
+                .collect()
+        };
+        let (quiet, spoken) = (messages(&empty), messages(&paragraph));
+        assert!(
+            quiet.iter().all(String::is_empty) && spoken.iter().all(|m| !m.is_empty()),
+            "one fixture's messages are empty and the other's are prose: {quiet:?} / {spoken:?}"
+        );
 
         let projected_without_message = |text: &str| -> Value {
             let Value::Array(lines) = project(text).expect("a valid fixture projects") else {

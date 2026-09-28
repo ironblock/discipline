@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 124
+mechanics_assertions = 125
 unseedable_guards = 3
 migrated = 0
 
@@ -4163,6 +4163,14 @@ failure_class = "provenance.rule-did-not-apply"
 legacy_signature = ""
 migrated = false
 
+[[fault]]
+id = "mech.a-nested-tree-s-dep-info-does-not-narrow-this-one"
+kind = "mechanics"
+check = "results"
+label = "a nested tree's dep-info does not narrow this one"
+failure_class = "resolver.foreign-dep-info"
+legacy_signature = ""
+migrated = false
 [[fault]]
 id = "mech.an-edit-to-another-binary-s-source-leaves-diet-fresh"
 kind = "mechanics"

@@ -133,6 +133,14 @@ DEP_TARGET = re.compile(r"^(?P<target>(?:[^:\\]|\\.)+):\s*(?P<deps>.*)$")
 # the directory that contains it, whole.
 UNNARROWED = pathlib.Path("diet")
 
+# The binary's own crate root. Dep-info that does not name THIS checkout's copy
+# of it is not dep-info about this checkout's `diet` (#147's review): a build
+# of a worktree nested inside this one -- the desktop app's
+# `.claude/worktrees/<x>` -- writes a `.d` whose every path is inside this
+# tree, and all of them are the nested tree's files. Trusting it would check
+# someone else's sources and none of these.
+CRATE_ROOT = pathlib.Path("diet/src/bin/diet.rs")
+
 
 def embedded(binary: pathlib.Path) -> list[pathlib.Path]:
     """Every file compiled into `binary`, from cargo's dep-info beside it.
@@ -199,7 +207,11 @@ def embedded(binary: pathlib.Path) -> list[pathlib.Path]:
     # for the same reason: a list that cannot be trusted to be complete
     # cannot be trusted to say that nothing changed. An unparseable file
     # lands here too -- no line matches, `found` stays empty.
-    if not found:
+    #
+    # And dep-info that does not name this checkout's own crate root is about
+    # another checkout's `diet` -- a nested worktree's build -- however much of
+    # it happens to resolve inside this tree.
+    if not found or CRATE_ROOT not in found:
         return [UNNARROWED]
     return sorted(found)
 
