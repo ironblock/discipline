@@ -6129,6 +6129,46 @@ failure_class = "drive.serve-an-ipv6-bind-refuses-its-own-host"
 migrated = false
 
 [[fault]]
+id = "drive.session-reasoning-left-off-the-trunk"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-reasoning-left-off-the-trunk"
+failure_class = "drive.session-reasoning-left-off-the-trunk"
+migrated = false
+
+[[fault]]
+id = "drive.session-reasoning-trimmed"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-reasoning-trimmed"
+failure_class = "drive.session-reasoning-trimmed"
+migrated = false
+
+[[fault]]
+id = "client.stream-reads-reasoning-as-text"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-reads-reasoning-as-text"
+failure_class = "client.stream-reads-reasoning-as-text"
+migrated = false
+
+[[fault]]
+id = "client.stream-drops-reasoning"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-drops-reasoning"
+failure_class = "client.stream-drops-reasoning"
+migrated = false
+
+[[fault]]
+id = "client.wire-drops-reasoning"
+kind = "lane-fault"
+check = "lanes"
+label = "client.wire-drops-reasoning"
+failure_class = "client.wire-drops-reasoning"
+migrated = false
+
+[[fault]]
 id = "adapters.compaction-read-as-a-turn"
 kind = "lane-fault"
 check = "lanes"
