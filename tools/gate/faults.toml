@@ -6385,6 +6385,70 @@ failure_class = "drive.serve-bin-accepts-any-allow-origin"
 migrated = false
 
 [[fault]]
+id = "drive.session-a-refused-commands-gap-is-logged"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-refused-commands-gap-is-logged"
+failure_class = "drive.session-a-refused-commands-gap-is-logged"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-gap-is-logged-after-its-commands-outcome"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-gap-is-logged-after-its-commands-outcome"
+failure_class = "drive.session-a-gap-is-logged-after-its-commands-outcome"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-gap-citing-any-settling-is-logged"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-gap-citing-any-settling-is-logged"
+failure_class = "drive.session-a-gap-citing-any-settling-is-logged"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-gap-ended-by-another-command-is-logged"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-gap-ended-by-another-command-is-logged"
+failure_class = "drive.session-a-gap-ended-by-another-command-is-logged"
+migrated = false
+
+[[fault]]
+id = "drive.serve-a-gap-with-more-than-its-shape-is-accepted"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-a-gap-with-more-than-its-shape-is-accepted"
+failure_class = "drive.serve-a-gap-with-more-than-its-shape-is-accepted"
+migrated = false
+
+[[fault]]
+id = "drive.session-an-admitted-command-leaves-the-gap-open"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-an-admitted-command-leaves-the-gap-open"
+failure_class = "drive.session-an-admitted-command-leaves-the-gap-open"
+migrated = false
+
+[[fault]]
+id = "drive.session-an-admitted-end-drops-its-gap"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-an-admitted-end-drops-its-gap"
+failure_class = "drive.session-an-admitted-end-drops-its-gap"
+migrated = false
+
+[[fault]]
+id = "drive.session-an-unwritable-duration-is-capped"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-an-unwritable-duration-is-capped"
+failure_class = "drive.session-an-unwritable-duration-is-capped"
+migrated = false
+
+[[fault]]
 id = "adapters.compaction-read-as-a-turn"
 kind = "lane-fault"
 check = "lanes"
