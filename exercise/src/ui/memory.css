@@ -41,7 +41,7 @@
 
 .ex-memory__empty {
   margin: 0;
-  font: 13px / 1.5 var(--font-system);
+  font: var(--size-aside) / 1.5 var(--font-system);
 }
 
 .ex-memory__category h3 {
@@ -94,7 +94,7 @@
 
 .ex-memory__text {
   color: var(--ink);
-  font: 13px / 1.45 var(--font-memory);
+  font: var(--size-aside) / 1.45 var(--font-memory);
   overflow-wrap: anywhere;
 }
 

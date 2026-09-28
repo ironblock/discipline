@@ -108,6 +108,8 @@
   --size-chrome: 11px;
   --size-stats: 11px;
   --size-tool: 12.5px;
+  /* Text beside the trunk, smaller than its prose: a side call's exchange, working memory. */
+  --size-aside: 13px;
   --leading-prose: 1.6;
 
   /*

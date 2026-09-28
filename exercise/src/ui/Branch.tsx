@@ -3,7 +3,7 @@ import { useState } from 'react';
 import type { BranchNode, Folded, PatchNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { barHeight, rowsOf } from './condensed.ts';
-import { edgeOf, flowText, readingOf, warmOf, writingOf } from './flow.ts';
+import { edgeOf, readingOf, warmOf, writingOf } from './flow.ts';
 import { Flowing } from './Flowing.tsx';
 import { useNow } from './surface.tsx';
 import { tokens } from './format.ts';
@@ -12,9 +12,11 @@ import './branch.css';
 
 /**
  * A side call off the trunk's warm tail, in the slot that served it: a thin
- * bar saying what `diet` noticed and asked, and how many patches of each op
- * it landed -- what they say is in working memory, a line away (Links.tsx);
- * opened, the question, the answer and the patches themselves.
+ * bar saying what it wrote and how many patches of each op it landed --
+ * what they say is in working memory, a line away (Links.tsx) -- and under
+ * it what `diet` noticed. Opened, it is a block as the trunk's are: its
+ * header what it read, its body the question, the answer and the patches,
+ * its footer what it wrote.
  */
 export function Branch({ node, open: initiallyOpen = false }: { readonly node: Folded<BranchNode>; readonly open?: boolean }) {
   const [open, setOpen] = useState(initiallyOpen);
@@ -22,7 +24,7 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
   const live = node.outcome === undefined && !pending;
   const outcome = node.outcome !== undefined ? outcomeOf(node.outcome) : undefined;
   const now = useNow();
-  // What it read: along its bar's top edge, and at the head of the exchange; what it wrote, on its bar.
+  // What it read: along its bar's top edge, and its header opened; what it wrote, on its bar and its footer opened.
   const reading = pending ? undefined : readingOf(node, now);
   const writing = pending ? undefined : writingOf(node, now);
   const warm = warmOf(node);
@@ -32,9 +34,10 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         tone="lane"
         lane={node.lane}
         label={node.lane}
-        thin
+        thin={!open}
         live={live}
         {...(reading ? { intake: { reading: reading.running, edge: edgeOf(node) } } : {})}
+        {...(open && reading ? { input: <Flowing flow={reading} {...(warm !== undefined ? { title: `new tokens read; ${tokens(warm)} more were warm, the trunk's prefix` } : {})} /> } : {})}
         {...(writing ? { output: <Flowing flow={writing} title="tokens written" /> } : {})}
         alarm={outcome ? alarmOf(outcome.level) : undefined}
         stats={[
@@ -59,42 +62,36 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         ]}
         provenance={node}
         id={node.id}
-      />
+      >
+        {open ? (
+          <div className="ex-branch__exchange">
+            <p className="ex-branch__question">{node.question}</p>
+            {node.text !== undefined && node.text !== '' ? <TaggedAnswer text={node.text} /> : null}
+            {node.failure ? (
+              // What failed is the footer's to name; here, what the server said, under what it had written.
+              <p className="ex-failed" role="alert" title={failOf(node.failure.reason).label}>
+                {node.failure.message}
+              </p>
+            ) : null}
+            {(node.text === undefined || node.text === '') && !node.failure && node.outcome === undefined ? (
+              <p className="ex-branch__waiting">{pending ? `waiting for slot ${node.slot}…` : node.progress === 'prefill' ? 'reading…' : 'writing…'}</p>
+            ) : null}
+            {node.patches.length > 0 ? (
+              <ul className="ex-branch__patches">
+                {node.patches.map((p) => (
+                  <PatchLine key={p.id} patch={p} />
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : undefined}
+      </Block>
       <button type="button" className="ex-branch__why" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className="ex-branch__caret" aria-hidden="true">
           {open ? '▾' : '▸'}
         </span>
         {node.why}
       </button>
-      {open ? (
-        <div className="ex-branch__exchange">
-          {reading ? (
-            <p className="ex-branch__intake">
-              {flowText(reading)}
-              {warm !== undefined ? ` over ${tokens(warm)} warm` : ''}
-            </p>
-          ) : null}
-          <p className="ex-branch__question">{node.question}</p>
-          {node.text !== undefined && node.text !== '' ? (
-            <div className="ex-branch__answer">
-              <TaggedAnswer text={node.text} />
-            </div>
-          ) : node.failure ? (
-            <p className="ex-branch__failed">
-              {failOf(node.failure.reason).label}: {node.failure.message}
-            </p>
-          ) : (
-            <p className="ex-branch__waiting">{pending ? `waiting for slot ${node.slot}…` : node.progress === 'prefill' ? 'prefill…' : 'generating…'}</p>
-          )}
-          {node.patches.length > 0 ? (
-            <ul className="ex-branch__patches">
-              {node.patches.map((p) => (
-                <PatchLine key={p.id} patch={p} />
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }

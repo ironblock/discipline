@@ -392,7 +392,11 @@ export const ReadApartFromWritten: Story = {
     }
     // A side call reads its edge too, and says what it read when opened: a warm fork, a few new tokens.
     await expect(at('side').querySelector('.ex-block__edge')).not.toBeNull();
-    await expect(text('side-open', '.ex-branch__intake')).toMatch(/^\+38 tok in .+ pp\) over 17\.8k warm$/);
+    // Opened, it is a block as the trunk's: what it read heads it -- new tokens, the warm part on hover -- and what it wrote closes it.
+    const head = at('side-open').querySelector('.ex-block__head .ex-block__flow') as HTMLElement;
+    await expect(head.textContent).toMatch(/^\+38 tok in .+ pp\)$/);
+    await expect((head.querySelector('[title]') as HTMLElement).title).toMatch(/17\.8k more were warm/);
+    await expect(text('side-open', '.ex-block__foot .ex-block__flow')).toMatch(/^\+71 tok in .+ tg\)$/);
   },
 };
 
@@ -645,6 +649,19 @@ export const BranchLanded: Story = {
 export const BranchOpened: Story = {
   name: 'Branch · interview, question and answer opened',
   render: () => lane(<Branch node={branchAt(MOMENTS.firstSettled, 'i/1')} open />),
+  play: async ({ canvasElement }) => {
+    const block = canvasElement.querySelector('.ex-block--lane') as HTMLElement;
+    await expect(block.classList.contains('ex-block--thin')).toBe(false);
+    // The body is the exchange, in order: the question, the answer, what landed.
+    const body = [...(block.querySelector('.ex-block__body > .ex-branch__exchange')?.children ?? [])].map((c) => c.className);
+    await expect(body).toEqual(['ex-branch__question', 'ex-tagged', 'ex-branch__patches']);
+    // The footer counts what landed, beside what it wrote; the why is under the block, and closes it.
+    await expect(block.querySelector('.ex-block__foot .ex-patchsum')?.textContent).toBe('+3');
+    const why = canvasElement.querySelector('.ex-block--lane + .ex-branch__why') as HTMLElement;
+    await userEvent.click(why);
+    await expect(block.classList.contains('ex-block--thin')).toBe(true);
+    await expect(block.querySelector('.ex-branch__exchange')).toBeNull();
+  },
 };
 
 export const BranchSupersede: Story = {

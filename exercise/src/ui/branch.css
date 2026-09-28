@@ -24,31 +24,20 @@
   color: var(--ink-faint);
 }
 
+/* An opened side call's body: what it was asked, what it answered, what landed. */
 .ex-branch__exchange {
   display: grid;
   gap: 0.5rem;
-  padding: 0.6rem 0.75rem;
-  background: var(--panel);
-  border-radius: var(--radius);
 }
 
-/* What the side call read, above what it was asked. */
-.ex-branch__intake {
+.ex-branch__exchange > .ex-failed {
   margin: 0;
-  font: var(--size-stats) / 1.4 var(--font-stats);
-  color: var(--ink-faint);
-  font-variant-numeric: tabular-nums;
 }
 
 .ex-branch__question {
   margin: 0;
   color: var(--ink-muted);
-  font: 13px / 1.5 var(--font-system);
-}
-
-.ex-branch__answer .ex-prose {
-  font-size: 13px;
-  color: var(--ink-assistant);
+  font: var(--size-aside) / 1.5 var(--font-system);
 }
 
 .ex-branch__waiting {
@@ -56,17 +45,10 @@
   color: var(--ink-faint);
 }
 
-/* How a side call ended, coloured by the registry's level; a name the surface
-   does not know is drawn neutrally, underlined dotted: carried, not understood. */
-.ex-branch__failed {
-  margin: 0;
-  color: var(--bad);
-  overflow-wrap: anywhere;
-}
-
+/* How a side call ended, coloured by the registry's level, lower-case as the trunk's stops are; a name the
+   surface does not know is drawn neutrally, underlined dotted: carried, not understood. */
 .ex-branch__outcome {
   color: var(--ink-muted);
-  text-transform: uppercase;
 }
 
 .ex-branch__outcome[data-level='ok'] { color: var(--ok); }
@@ -110,8 +92,7 @@
 
 .ex-patch__text {
   color: var(--ink);
-  font-family: var(--font-memory);
-  font-size: 12.5px;
+  font: var(--size-aside) / 1.45 var(--font-memory);
   /* The lane says what a patch did; working memory has the whole entry. */
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -135,22 +116,27 @@
 /* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
 .ex-root[data-motion='still'] .ex-patch { animation: none; }
 
+/* An answer's tagged lines: one column for the tags, as wide as the longest, so every line's text starts together. */
 .ex-tagged {
   display: grid;
-  gap: 0.35rem;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.35rem 0.6rem;
 }
 
 .ex-tagged__line {
-  display: grid;
-  grid-template-columns: 4.4rem 1fr;
-  gap: 0.5rem;
-  margin: 0;
-  font: 13px / 1.45 var(--font-answer);
+  display: contents;
+  font: var(--size-aside) / 1.45 var(--font-answer);
   color: var(--ink-assistant);
+}
+
+.ex-tagged__line > * {
+  margin: 0;
 }
 
 .ex-tagged__line--plain {
   display: block;
+  grid-column: 1 / -1;
+  margin: 0;
 }
 
 .ex-tagged__tag {

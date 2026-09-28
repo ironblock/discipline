@@ -184,11 +184,10 @@ function AssistantBody({
         </p>
       ) : null}
       {node.text !== '' ? <Prose text={node.text} kind="answer" caret={streamingInto === 'answer'} /> : null}
-      {node.progress === 'cancelled' ? <p className="ex-cancelled">cancelled</p> : null}
       {node.failure ? (
-        <p className="ex-failed" role="alert">
-          <span className="ex-failed__reason">{failOf(node.failure.reason).label}</span>
-          <span className="ex-failed__message">{node.failure.message}</span>
+        // What failed is the footer's to name; here, what the server said.
+        <p className="ex-failed" role="alert" title={failOf(node.failure.reason).label}>
+          {node.failure.message}
         </p>
       ) : null}
     </>

@@ -269,10 +269,12 @@ function generation(g: GenerationBuilder): Generation {
     ...(g.deltas[0] ? { writingSince: g.deltas[0].t } : {}),
     lastActivityAt: response?.t ?? failed?.t ?? g.deltas.at(-1)?.t ?? request.t,
     ...(response || failed ? { endedAt: (response ?? failed)!.t } : {}),
-    ...(response ? { stop: response.stop, timings: response.timings, wallMs: response.t - request.t } : {}),
+    // A cancelled response's timings are not a measurement (the ask's prefill ignores them too): what the frames said stands.
+    ...(response ? { stop: response.stop, wallMs: response.t - request.t } : {}),
+    ...(response && response.stop !== 'cancelled' ? { timings: response.timings } : {}),
     ...(response?.calls_from ? { callsFrom: response.calls_from } : {}),
     ...(failed && !response ? { failure: { reason: failed.reason, message: failed.message }, wallMs: failed.t - request.t } : {}),
-    ...(!response && !failed && g.frames.length > 0 ? { meter: meterOf(g.frames) } : {}),
+    ...((!response || response.stop === 'cancelled') && !failed && g.frames.length > 0 ? { meter: meterOf(g.frames) } : {}),
   };
 }
 

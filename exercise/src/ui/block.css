@@ -116,15 +116,19 @@
   box-shadow: none;
 }
 
-/* What went in, said: a tool's command, taking the rest of the header's row. */
-.ex-block__lead {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
 /* What went in, or came out, in a line: plain text, not chips -- a sentence about the numbers. */
 .ex-block__flow {
   font-variant-numeric: tabular-nums;
+}
+
+/* The header's takes the rest of the row after its chip, and wraps there when narrow rather than dropping under it. */
+.ex-block__head > .ex-block__flow {
+  flex: 1 1 0;
+  min-width: 8rem;
+}
+
+.ex-block__head {
+  align-items: baseline;
 }
 
 .ex-block--thin .ex-block__foot {
@@ -307,6 +311,18 @@
   }
 }
 
+
+/* What the server said when a generation failed, in its body -- the trunk's or a side call's; the footer names the failure. */
+.ex-failed {
+  margin: 0.75rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 2px solid var(--bad);
+  background: color-mix(in oklab, var(--bad) 8%, transparent);
+  border-radius: 0 calc(var(--radius) / 2) calc(var(--radius) / 2) 0;
+  color: var(--ink);
+  font: var(--size-tool) / 1.5 var(--font-tool);
+  overflow-wrap: anywhere;
+}
 
 /* Something still running says for how long, and colours it once that is worrying. */
 .ex-elapsed[data-level='slow'] { color: var(--warn); }

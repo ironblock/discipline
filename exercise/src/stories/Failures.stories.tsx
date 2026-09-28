@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect } from 'storybook/test';
+import { expect, userEvent } from 'storybook/test';
 
 import { PHASES } from '../App.tsx';
 import type { Link } from '../drive/transport.ts';
@@ -46,8 +46,13 @@ export const Cancelled: Story = {
       ]),
   },
   play: async ({ canvasElement }) => {
-    await expect(canvasElement.querySelector('.ex-cancelled')).not.toBeNull();
     await expect(canvasElement.querySelector('[data-state="awaiting"]')).not.toBeNull();
+    // Named once, in the footer, under where the answer stopped.
+    const cancelled = canvasElement.querySelector('[data-id="q/3"]') as HTMLElement;
+    await expect(cancelled.querySelector('.ex-block__foot .ex-stop')?.textContent).toBe('cancelled');
+    await expect(cancelled.textContent?.split('cancelled')).toHaveLength(2);
+    // A cancelled response's timings are not a measurement: nothing reads as zero tokens in zero time.
+    await expect(cancelled.textContent).not.toMatch(/\+0 tok in 0 ms/);
   },
 };
 
@@ -62,8 +67,11 @@ export const RequestFailed: Story = {
   },
   play: async ({ canvasElement }) => {
     const failed = canvasElement.querySelector('.ex-failed');
-    await expect(failed?.textContent).toContain('the prompt no longer fits');
     await expect(failed?.textContent).toContain('exceeds the available context size');
+    // What failed is named once, in the footer -- what came out; the body keeps what the server said.
+    const block = failed?.closest('.ex-block') as HTMLElement;
+    await expect(block.querySelector('.ex-block__foot')?.textContent).toContain('the prompt no longer fits');
+    await expect(block.textContent?.split('the prompt no longer fits')).toHaveLength(2);
     await expect(canvasElement.querySelector('.ex-turnend[data-level="bad"]')?.textContent).toContain('a request failed');
   },
 };
@@ -114,6 +122,10 @@ export const SideCallTimedOut: Story = {
     const bar = canvasElement.querySelector('[data-branch="i/2"]');
     await expect(bar?.querySelector('.ex-branch__outcome[data-level="bad"]')?.textContent).toBe('timed out');
     await expect(bar?.querySelector('.ex-patch')).toBeNull();
+    // Opened: what it had written, and under it what the server said; the footer names it, once.
+    await userEvent.click(bar?.querySelector('.ex-branch__why') as HTMLElement);
+    await expect(bar?.querySelector('.ex-tagged + .ex-failed')?.textContent).toBe('no response within 120 s');
+    await expect(bar?.querySelector('.ex-block')?.textContent?.split('timed out')).toHaveLength(2);
   },
 };
 
