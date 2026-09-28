@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 81
+faults = 86
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -1127,9 +1127,11 @@ failure_class = "drive.serve-a-resume-repeats-the-last-event"
 target = "diet/src/drive/serve.rs"
 expect_exit = 101
 anchor = '''
-                Ok(seq) => seq + 1,'''
+                Ok(seq) => match seq.checked_add(1) {
+                    Some(first) => first,'''
 becomes = '''
-                Ok(seq) => seq,'''
+                Ok(seq) => match seq.checked_add(1) {
+                    Some(_) => seq,'''
 catches = [
     "drive::serve::tests::a_reader_resuming_after_an_id_of_this_process_starts_at_the_next",
 ]
@@ -1263,9 +1265,11 @@ failure_class = "drive.serve-no-write-timeout"
 target = "diet/src/drive/serve.rs"
 expect_exit = 101
 anchor = '''
-            .and_then(|()| stream.set_write_timeout(Some(self.config.write_timeout)))'''
+            .set_write_timeout(Some(self.config.write_timeout))
+            .is_err()'''
 becomes = '''
-            .and_then(|()| stream.set_write_timeout(None))'''
+            .set_write_timeout(None)
+            .is_err()'''
 catches = [
     "drive::serve::tests::a_reader_that_stops_reading_is_let_go_within_the_write_timeout",
 ]
@@ -1276,11 +1280,12 @@ failure_class = "drive.serve-no-read-timeout"
 target = "diet/src/drive/serve.rs"
 expect_exit = 101
 anchor = '''
-            .set_read_timeout(Some(self.config.read_timeout))'''
+        let deadline = Instant::now() + self.config.read_timeout;'''
 becomes = '''
-            .set_read_timeout(None)'''
+        let deadline = Instant::now() + Duration::from_secs(3600);'''
 catches = [
     "drive::serve::tests::a_client_that_sends_half_a_request_is_let_go_within_the_read_timeout",
+    "drive::serve::tests::a_client_that_trickles_a_request_is_let_go_at_one_deadline_for_the_whole_of_it",
 ]
 
 [[fault]]
@@ -1322,4 +1327,75 @@ becomes = '''
                 _ => Some(Self::Ask(String::new())),'''
 catches = [
     "drive::serve::tests::a_malformed_command_is_400_and_not_logged",
+]
+
+[[fault]]
+id = "drive.serve-read-timeout-per-read"
+failure_class = "drive.serve-read-timeout-per-read"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+    let left = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|left| !left.is_zero())
+        .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;'''
+becomes = '''
+    let _ = deadline;
+    let left = Duration::from_millis(300);'''
+catches = [
+    "drive::serve::tests::a_client_that_trickles_a_request_is_let_go_at_one_deadline_for_the_whole_of_it",
+]
+
+[[fault]]
+id = "drive.serve-no-head-cap"
+failure_class = "drive.serve-no-head-cap"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        if buffer.len() > max_head {
+            return Err(Unread::TooLarge);'''
+becomes = '''
+        if false && buffer.len() > max_head {
+            return Err(Unread::TooLarge);'''
+catches = [
+    "drive::serve::tests::a_head_past_its_cap_is_413",
+]
+
+[[fault]]
+id = "drive.serve-a-request-with-no-host-is-answered"
+failure_class = "drive.serve-a-request-with-no-host-is-answered"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        let host_allowed = request.header("host").is_some_and(|host| {'''
+becomes = '''
+        let host_allowed = request.header("host").is_none_or(|host| {'''
+catches = [
+    "drive::serve::tests::a_request_for_a_rebound_host_name_is_403",
+]
+
+[[fault]]
+id = "drive.serve-a-cancel-for-no-turn-is-200"
+failure_class = "drive.serve-a-cancel-for-no-turn-is-200"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+                Err(CancelError::NoSuchTurn(_)) => (400, BTreeMap::new()),'''
+becomes = '''
+                Err(CancelError::NoSuchTurn(_)) => (200, BTreeMap::new()),'''
+catches = [
+    "drive::serve::tests::a_malformed_command_is_400_and_not_logged",
+]
+
+[[fault]]
+id = "drive.serve-a-resume-past-the-last-seq-wraps"
+failure_class = "drive.serve-a-resume-past-the-last-seq-wraps"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+                Ok(seq) => match seq.checked_add(1) {'''
+becomes = '''
+                Ok(seq) => match Some(seq.wrapping_add(1)) {'''
+catches = [
+    "drive::serve::tests::a_malformed_last_event_id_is_400",
 ]

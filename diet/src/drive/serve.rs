@@ -41,7 +41,7 @@ use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::session::{CancelError, CommandKind, Logged, Refusal, Session};
 use crate::client::stream::Streaming;
@@ -57,7 +57,9 @@ pub struct Config {
     /// How long a stream may be silent before a comment line is sent. The
     /// write is also how a reader that left is noticed.
     pub heartbeat: Duration,
-    /// How long a request may take to arrive.
+    /// How long a request may take to arrive, head and body together: one
+    /// deadline for the whole request, not a bound on each read, so a client
+    /// that sends a byte at a time cannot hold its connection open.
     pub read_timeout: Duration,
     /// How long one write to a client may block.
     pub write_timeout: Duration,
@@ -149,9 +151,13 @@ impl Server {
 impl Drop for Server {
     fn drop(&mut self) {
         self.stopping.store(true, Ordering::SeqCst);
-        // Wake the accept loop so it sees the flag.
-        let _ = TcpStream::connect_timeout(&self.addr, Duration::from_secs(1));
-        if let Some(accept) = self.accept.take() {
+        // Wake the accept loop so it sees the flag. If the wake cannot be
+        // sent, the loop is left to end with the process rather than joined:
+        // a join on a loop nothing will wake is a hang.
+        let woken = TcpStream::connect_timeout(&self.addr, Duration::from_secs(1)).is_ok();
+        if let Some(accept) = self.accept.take()
+            && woken
+        {
             let _ = accept.join();
         }
     }
@@ -161,7 +167,13 @@ impl Drop for Server {
 /// each allowed origin's host and port.
 fn hosts_for(addr: SocketAddr, origins: &[String]) -> Vec<String> {
     let port = addr.port();
-    let mut hosts = vec![format!("127.0.0.1:{port}"), format!("localhost:{port}")];
+    // The bound address as a browser writes it (`[::1]:PORT` for IPv6), and
+    // the loopback names.
+    let mut hosts = vec![
+        addr.to_string(),
+        format!("127.0.0.1:{port}"),
+        format!("localhost:{port}"),
+    ];
     hosts.extend(
         origins
             .iter()
@@ -211,6 +223,8 @@ struct Request {
     query: String,
     headers: Vec<(String, String)>,
     early_body: Vec<u8>,
+    /// When the whole request must have arrived.
+    deadline: Instant,
 }
 
 impl Request {
@@ -261,7 +275,12 @@ impl<S: Streaming + 'static> Serving<S> {
             if self.stopping.load(Ordering::SeqCst) {
                 return;
             }
-            let Ok(mut stream) = incoming else { continue };
+            let Ok(mut stream) = incoming else {
+                // Out of descriptors, most likely: every `accept` fails at
+                // once until some are freed, so wait rather than spin.
+                thread::sleep(Duration::from_millis(10));
+                continue;
+            };
             if self.live.load(Ordering::SeqCst) >= self.config.max_connections {
                 let _ = stream.set_write_timeout(Some(self.config.write_timeout));
                 respond(&mut stream, 503, &Value::Object(BTreeMap::new()));
@@ -284,13 +303,13 @@ impl<S: Streaming + 'static> Serving<S> {
 
     fn connection(&self, mut stream: TcpStream) {
         if stream
-            .set_read_timeout(Some(self.config.read_timeout))
-            .and_then(|()| stream.set_write_timeout(Some(self.config.write_timeout)))
+            .set_write_timeout(Some(self.config.write_timeout))
             .is_err()
         {
             return;
         }
-        let request = match read_request(&mut stream, self.config.max_head) {
+        let deadline = Instant::now() + self.config.read_timeout;
+        let request = match read_request(&mut stream, self.config.max_head, deadline) {
             Ok(request) => request,
             Err(Unread::TooLarge) => return respond(&mut stream, 413, &empty()),
             Err(Unread::Malformed) => return respond(&mut stream, 400, &empty()),
@@ -324,7 +343,10 @@ impl<S: Streaming + 'static> Serving<S> {
     fn events(&self, stream: &mut TcpStream, request: &Request) {
         let first = match request.header("last-event-id") {
             Some(id) => match resume_after(id, self.opened) {
-                Ok(seq) => seq + 1,
+                Ok(seq) => match seq.checked_add(1) {
+                    Some(first) => first,
+                    None => return respond(stream, 400, &empty()),
+                },
                 Err(status) => return respond(stream, status, &empty()),
             },
             None => match from_query(&request.query) {
@@ -345,13 +367,12 @@ impl<S: Streaming + 'static> Serving<S> {
                 out.push_str(":\n\n");
             }
             for logged in &batch {
-                let _ = write!(
-                    out,
-                    "id: {}-{}\ndata: {}\n\n",
-                    self.opened,
-                    logged.seq,
-                    (self.render)(logged)
+                let data = (self.render)(logged);
+                debug_assert!(
+                    !data.contains(['\n', '\r']),
+                    "a renderer broke an event across lines: {data:?}"
                 );
+                let _ = write!(out, "id: {}-{}\ndata: {data}\n\n", self.opened, logged.seq);
                 next = logged.seq + 1;
             }
             if stream.write_all(out.as_bytes()).is_err() || stream.flush().is_err() {
@@ -379,7 +400,7 @@ impl<S: Streaming + 'static> Serving<S> {
         if length > self.config.max_body {
             return respond(stream, 413, &empty());
         }
-        let Some(body) = read_body(stream, &request.early_body, length) else {
+        let Some(body) = read_body(stream, &request.early_body, length, request.deadline) else {
             return;
         };
         let Some(command) = std::str::from_utf8(&body)
@@ -498,8 +519,22 @@ fn from_query(query: &str) -> Option<u64> {
     named.map_or(Some(0), |from| from.parse().ok())
 }
 
-/// Read a request head, up to `max_head` bytes.
-fn read_request(stream: &mut TcpStream, max_head: usize) -> Result<Request, Unread> {
+/// Read into `buffer`, giving up at `deadline` however the bytes trickle in.
+fn read_by(stream: &mut TcpStream, buffer: &mut [u8], deadline: Instant) -> io::Result<usize> {
+    let left = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|left| !left.is_zero())
+        .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;
+    stream.set_read_timeout(Some(left))?;
+    stream.read(buffer)
+}
+
+/// Read a request head, up to `max_head` bytes, by `deadline`.
+fn read_request(
+    stream: &mut TcpStream,
+    max_head: usize,
+    deadline: Instant,
+) -> Result<Request, Unread> {
     let mut buffer = Vec::new();
     let mut chunk = [0_u8; 4096];
     let end = loop {
@@ -509,7 +544,7 @@ fn read_request(stream: &mut TcpStream, max_head: usize) -> Result<Request, Unre
         if buffer.len() > max_head {
             return Err(Unread::TooLarge);
         }
-        match stream.read(&mut chunk) {
+        match read_by(stream, &mut chunk, deadline) {
             Ok(0) | Err(_) => return Err(Unread::Gone),
             Ok(read) => buffer.extend_from_slice(&chunk[..read]),
         }
@@ -538,16 +573,27 @@ fn read_request(stream: &mut TcpStream, max_head: usize) -> Result<Request, Unre
         query: query.to_owned(),
         headers,
         early_body: buffer[end + 4..].to_vec(),
+        deadline,
     })
 }
 
-/// Read the rest of a body of `length` bytes. Nothing when the client went
-/// away or took longer than the read timeout.
-fn read_body(stream: &mut TcpStream, early: &[u8], length: usize) -> Option<Vec<u8>> {
+/// Read the rest of a body of `length` bytes by `deadline`. Nothing when the
+/// client went away or the deadline passed.
+fn read_body(
+    stream: &mut TcpStream,
+    early: &[u8],
+    length: usize,
+    deadline: Instant,
+) -> Option<Vec<u8>> {
     let mut body = early.get(..length.min(early.len()))?.to_vec();
-    let mut rest = vec![0_u8; length - body.len()];
-    stream.read_exact(&mut rest).ok()?;
-    body.extend_from_slice(&rest);
+    let mut chunk = [0_u8; 4096];
+    while body.len() < length {
+        let want = (length - body.len()).min(chunk.len());
+        match read_by(stream, &mut chunk[..want], deadline) {
+            Ok(0) | Err(_) => return None,
+            Ok(read) => body.extend_from_slice(&chunk[..read]),
+        }
+    }
     Some(body)
 }
 
@@ -812,8 +858,11 @@ mod tests {
 
     #[test]
     fn a_malformed_last_event_id_is_400() {
-        let (_session, server) = serve(Canned::new([]), quick());
-        for id in ["20", "abc-2", "1-x"] {
+        let (session, server) = serve(Canned::new([]), quick());
+        // The last of these is well formed and this process's own, but no
+        // event follows the largest sequence number there is.
+        let past_the_end = format!("{}-{}", session.opened(), u64::MAX);
+        for id in ["20", "abc-2", "1-x", past_the_end.as_str()] {
             let header = format!("Last-Event-ID: {id}\r\n");
             let reply = Client::send(&server, &events_request(&server, "", &header)).reply();
             assert_eq!(status(&reply), 400, "{id}: {reply}");
@@ -862,6 +911,14 @@ mod tests {
         assert!(
             !reply.contains("data: "),
             "a rebound host read the log: {reply}"
+        );
+
+        // No Host at all is not a host this server answers to either.
+        let hostless = Client::send(&server, "GET /events?from=0 HTTP/1.1\r\n\r\n").reply();
+        assert_eq!(status(&hostless), 403, "{hostless}");
+        assert!(
+            !hostless.contains("data: "),
+            "a request with no host read the log"
         );
     }
 
@@ -1033,6 +1090,58 @@ mod tests {
     }
 
     #[test]
+    fn a_client_that_trickles_a_request_is_let_go_at_one_deadline_for_the_whole_of_it() {
+        let config = Config {
+            read_timeout: Duration::from_millis(300),
+            ..quick()
+        };
+        let (_session, server) = serve(Canned::new([]), config);
+        let mut stream = TcpStream::connect(server.addr()).expect("connects");
+        let (gone, let_go) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            // A head that never ends, a byte every 50 ms: each read is quick,
+            // and the request as a whole never arrives.
+            let give_up = Instant::now() + Duration::from_secs(8);
+            let mut head = b"GET /events HTTP/1.1\r\nX: "
+                .iter()
+                .chain(std::iter::repeat(&b'a'));
+            while Instant::now() < give_up {
+                let byte = *head.next().expect("endless");
+                if stream.write_all(&[byte]).is_err() {
+                    let _ = gone.send(());
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        });
+        assert!(
+            let_go.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "a client trickling bytes was never let go"
+        );
+    }
+
+    #[test]
+    fn a_head_past_its_cap_is_413() {
+        let config = Config {
+            max_head: 1024,
+            ..quick()
+        };
+        let (_session, server) = serve(Canned::new([]), config);
+        let head = format!(
+            "GET /events HTTP/1.1\r\nHost: {}\r\nX: {}",
+            host(&server),
+            "a".repeat(2048)
+        );
+        let mut client = Client::send(&server, &head);
+        assert!(
+            client.read_until(Duration::from_secs(5), |read| read.contains("\r\n\r\n")),
+            "no answer to a head past the cap: {:?}",
+            client.read
+        );
+        assert_eq!(status(&client.read), 413, "{}", client.read);
+    }
+
+    #[test]
     fn a_request_past_its_cap_is_413_before_it_is_read_whole() {
         let config = Config {
             max_body: 1024,
@@ -1080,6 +1189,9 @@ mod tests {
             r#"{"kind":"ask","text":"x","also":1}"#,
             r#"{"kind":"launch"}"#,
             r#"{"kind":"cancel","turn":"one"}"#,
+            // A turn that was never admitted: not a stop the session can
+            // refuse, so it is not a command.
+            r#"{"kind":"cancel","turn":5}"#,
             "not json",
         ] {
             let reply = post(&server, json, "");
