@@ -763,7 +763,7 @@ vocabulary! {
         /// message that left is named as a message and not as thinking. A
         /// rule that guessed would fire on every edited system prompt.
         Injection => "injection",
-        /// A frozen message kept its text and changed its REASONING: the
+        /// A frozen message changed its REASONING: the
         /// thinking an assistant message carries back into the prompt
         /// (`Message::reasoning`, #117 I5r). #79's live-incident class 1 is a
         /// harness dropping the model's own thinking between tool calls; with
@@ -936,8 +936,10 @@ pub enum PrefixDelta {
         /// What it said.
         was: String,
     },
-    /// One frozen message's reasoning changed: the message kept its role and
-    /// text, and the thinking it carries back did not. Counts rather than the
+    /// One frozen message's reasoning changed. INDEPENDENT of that message's
+    /// text: a message whose text and reasoning both moved carries this delta
+    /// beside its `line_*` deltas, one delta per part that moved (as
+    /// `client::head` emits them, #148; recorded on #92). Counts rather than the
     /// text, the way [`PrefixDelta::MessageAdded`] carries one: the reasoning
     /// itself is already on the request row that sent it. A message with no
     /// reasoning counts 0, so "dropped" is `now_chars: 0` -- and an absent
