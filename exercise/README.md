@@ -32,7 +32,8 @@ DIET_DRIVE=http://127.0.0.1:7801 pnpm dev                      # then open /?dri
 With no model at hand, `node scripts/model-stand-in.mjs` is one: every
 request answered with `diet`'s own captured llama-server reply, byte for
 byte (a random-weight model, so the words are noise), at
-`http://127.0.0.1:7901/v1/chat/completions`.
+`http://127.0.0.1:7901/v1/chat/completions`, with
+`scripts/model-stand-in.head.txt` as the head.
 
 `pnpm perf` (`scripts/perf.mjs`) drives a production build in headless
 Chromium through three sessions -- replay, scroll, pointing -- and says
