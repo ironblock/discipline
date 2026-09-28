@@ -1583,6 +1583,51 @@ EOF
 # #79: the check that a `prefix.changed` is a change at all. Disabled, a row
 # over two requests that hash the same is accepted -- and a cache census reads
 # a mutation the file itself denies.
+# The session event log's cross-line rules (#117 R2c I1, the courier patch from
+# track three), each disabled in turn: a line the reader must refuse is then
+# read as a log. Measured by track three before the courier; wired here.
+inject_log_seq_gap_read_as_a_log() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "if line.seq != index as u64 {"
+new = "if false && line.seq != index as u64 {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_reference_to_anything_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "if !requests.contains(request) =>"
+new = "if false && !requests.contains(request) =>"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_settlement_chain_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "if *from != state {"
+new = "if false && *from != state {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_record_prefix_change_not_a_change() {
   python3 - <<'EOF'
 import pathlib
@@ -6675,6 +6720,12 @@ selftest() {
     'regimen/fixtures/invalid/reasoning-effort-without-budget\.toml' 'test:conformance/formats::regimen'
   seeded_case "two ids over one substrate"            test     inject_record_substrates_indistinguishable \
     'record/fixtures/invalid/substrates-indistinguishable\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a gap in a log's seq read as a log" test inject_log_seq_gap_read_as_a_log \
+    'a_gap_in_seq_is_refused \.\.\. FAILED' 'lib/formats::log::tests'
+  seeded_case "a log reference to anything read as a request" test inject_log_reference_to_anything_read \
+    'a_reference_to_anything_but_an_earlier_request_is_refused \.\.\. FAILED' 'lib/formats::log::tests'
+  seeded_case "a log settlement that leaves a state it is not in" test inject_log_settlement_chain_unchecked \
+    'a_settlement_that_does_not_leave_the_state_it_is_in_is_refused \.\.\. FAILED' 'lib/formats::log::tests'
   seeded_case "a head change that is not a change"    test     inject_record_prefix_change_not_a_change \
     'record/fixtures/invalid/prefix-change-that-is-not-a-change\.jsonl' 'test:conformance/formats::record'
   seeded_case "the miss classes reordered"           test     inject_record_prefix_precedence_reordered \

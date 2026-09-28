@@ -5561,6 +5561,36 @@ legacy_signature = "formats::record::tests::the_precedence_over_prefix_reasons_i
 migrated = false
 
 [[fault]]
+id = "test.log_seq_gap_read_as_a_log"
+kind = "seeded-gate"
+check = "test"
+target = "lib/formats::log::tests"
+label = "a gap in a log's seq read as a log"
+failure_class = "log.seq-gap-read-as-a-log"
+legacy_signature = "a_gap_in_seq_is_refused \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "test.log_reference_to_anything_read"
+kind = "seeded-gate"
+check = "test"
+target = "lib/formats::log::tests"
+label = "a log reference to anything read as a request"
+failure_class = "log.reference-to-anything-read"
+legacy_signature = "a_reference_to_anything_but_an_earlier_request_is_refused \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "test.log_settlement_chain_unchecked"
+kind = "seeded-gate"
+check = "test"
+target = "lib/formats::log::tests"
+label = "a log settlement that leaves a state it is not in"
+failure_class = "log.settlement-chain-unchecked"
+legacy_signature = "a_settlement_that_does_not_leave_the_state_it_is_in_is_refused \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
 id = "test.record_prefix_change_not_a_change"
 kind = "seeded-gate"
 check = "test"
