@@ -46,6 +46,10 @@ const STACK_GAP = 14;
 const STACK_GAP_CONDENSED = 4;
 /** How near the bottom still counts as at it, for following. */
 const LOCK_SLACK = 48;
+/** How long after a wheel, a touch or a key a scroll is still the person's: a trackpad's momentum, a smooth scroll's animation. */
+const HAND_MS = 750;
+/** Keys that scroll the page, when they are not typing. */
+const SCROLL_KEYS: ReadonlySet<string> = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 interface Placement extends Placed {
   /** From the trunk's right edge to the side call's left: what the cable spans. */
   readonly reach: number;
@@ -345,15 +349,36 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
     if (!follow) return;
     const page = document.documentElement;
     const atBottom = () => window.innerHeight + window.scrollY >= page.scrollHeight - LOCK_SLACK;
-    // Only the person moves the lock: scrolling up away from the bottom lets
-    // go, scrolling down onto it takes hold. The page moves the view too --
-    // scroll anchoring as a placement lands above it, clamping as it briefly
-    // shrinks during a layout pass -- and none of that is someone reading.
+    // Only the person lets go: scrolling up away from the bottom, with a hand
+    // on it -- a wheel or a trackpad, a touch, a key that scrolls, the
+    // scrollbar held. The page moves the view too -- scroll anchoring as a
+    // placement lands above it, clamping as it briefly shrinks during a layout
+    // pass -- and none of that is someone reading. Where the view was is not
+    // enough to tell them apart: WebKit reports a clamp's scroll after the
+    // page has grown back, so it looks like a scroll up away from the bottom.
+    // Reaching the bottom, by any means, takes hold again.
     let last = window.scrollY;
+    let touched = Number.NEGATIVE_INFINITY;
+    let holding = false;
+    const hand = () => {
+      touched = performance.now();
+    };
+    const byHand = () => holding || performance.now() - touched < HAND_MS;
+    const onKey = (e: KeyboardEvent) => {
+      const typing = e.target instanceof HTMLElement && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName));
+      if (!typing && SCROLL_KEYS.has(e.key)) hand();
+    };
+    const onDown = () => {
+      holding = true;
+    };
+    const onUp = () => {
+      holding = false;
+      hand();
+    };
     const onScroll = () => {
       const y = window.scrollY;
       if (y > last && atBottom()) locked.current = true;
-      else if (y < last - 1 && !atBottom()) locked.current = false;
+      else if (y < last - 1 && !atBottom() && byHand()) locked.current = false;
       last = y;
     };
     const stick = () => {
@@ -364,11 +389,23 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
       last = window.scrollY;
     };
     window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('wheel', hand, { passive: true });
+    window.addEventListener('touchmove', hand, { passive: true });
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
     const observer = new ResizeObserver(stick);
     if (root.current) observer.observe(root.current);
     stick();
     return () => {
       window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('wheel', hand);
+      window.removeEventListener('touchmove', hand);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
       observer.disconnect();
     };
   }, [follow]);

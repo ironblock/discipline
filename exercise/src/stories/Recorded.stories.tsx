@@ -182,8 +182,9 @@ function Following() {
 
 /**
  * The bottom of the page is now. Following, the view stays locked to it as
- * the page grows -- here with side calls queued past the trunk's end -- and
- * lets go the moment the person scrolls up, staying where they left it.
+ * the page grows -- here with side calls queued past the trunk's end, and
+ * through the page clamping the view as it relays itself out -- and lets go
+ * the moment the person scrolls up, staying where they left it.
  */
 export const FollowsTheBottom: Story = {
   name: '8 · following: locked to the bottom, where now is',
@@ -218,8 +219,19 @@ export const FollowsTheBottom: Story = {
     const laneEnd = Math.max(...[...canvasElement.querySelectorAll('.ex-branchcell')].map((c) => c.getBoundingClientRect().bottom));
     await expect(laneEnd).toBeGreaterThan(trunkEnd);
     await waitFor(async () => expect(atBottom(), where('after the page grew')).toBe(true));
-    // Scrolled away: what the person was reading stays where it was on screen
-    // while the page grows (the browser may move scrollY to keep it there).
+    // The page moves the view too, and that is not the person letting go: a scroll up away from the bottom
+    // with no hand on it -- as WebKit reports a clamp during a layout pass, after the page has grown back --
+    // and then the page grows: the view follows.
+    const session = canvasElement.querySelector('.ex-session') as HTMLElement;
+    window.scrollTo(0, window.scrollY - 300);
+    await new Promise((r) => setTimeout(r, 100));
+    const spacer = session.appendChild(Object.assign(document.createElement('div'), { style: 'height: 400px' }));
+    await waitFor(async () => expect(atBottom(), where('after the page moved the view, and grew')).toBe(true));
+    spacer.remove();
+    await new Promise((r) => setTimeout(r, 200));
+    // Scrolled away by the person -- a wheel, then the scroll it makes: what they were reading stays where
+    // it was on screen while the page grows (the browser may move scrollY to keep it there).
+    window.dispatchEvent(new WheelEvent('wheel', { deltaY: -800 }));
     window.scrollTo(0, window.scrollY - 800);
     await new Promise((r) => setTimeout(r, 100));
     const reading = [...canvasElement.querySelectorAll('.ex-branchcell')].find((c) => {
