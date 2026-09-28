@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 108
+faults = 111
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -876,6 +876,7 @@ catches = [
     "drive::serve::tests::a_cancel_over_http_reaches_a_call_blocked_mid_answer",
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
+    "drive::session::tests::a_gap_closes_at_the_command_that_ends_it_even_when_that_command_carries_none",
     "drive::session::tests::a_real_sessions_whole_log_is_a_v0_log",
     "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
     "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
@@ -914,7 +915,6 @@ catches = [
     "drive::serve::tests::a_refused_command_is_409_with_its_tag_and_is_in_the_log",
     "drive::session::tests::a_cancel_naming_a_turn_that_already_settled_does_not_stop_the_next_one",
     "drive::session::tests::a_command_with_nothing_to_act_on_is_refused_and_logged",
-    "drive::session::tests::a_gap_is_logged_immediately_before_its_commands_outcome_admitted_or_refused",
     "drive::session::tests::an_ask_sent_while_a_turn_is_in_flight_is_refused_by_name",
 ]
 
@@ -947,8 +947,8 @@ catches = [
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_failed_call_is_typed_and_leaves_the_trunk_alone",
-    "drive::session::tests::a_gap_is_logged_immediately_before_its_commands_outcome_admitted_or_refused",
     "drive::session::tests::a_real_sessions_whole_log_is_a_v0_log",
+    "drive::session::tests::a_refused_commands_gap_is_neither_logged_nor_closed_and_the_admitted_one_carries_it",
     "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
     "drive::session::tests::a_turn_the_server_refused_is_logged_as_refused_and_leaves_the_trunk_alone",
@@ -1060,8 +1060,8 @@ becomes = '''
                         text: text.to_owned(),'''
 catches = [
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
-    "drive::session::tests::a_gap_is_logged_immediately_before_its_commands_outcome_admitted_or_refused",
     "drive::session::tests::a_real_sessions_whole_log_is_a_v0_log",
+    "drive::session::tests::a_refused_commands_gap_is_neither_logged_nor_closed_and_the_admitted_one_carries_it",
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
     "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
     "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
@@ -1661,19 +1661,19 @@ catches = [
 ]
 
 [[fault]]
-id = "drive.session-a-refused-commands-gap-is-dropped"
-failure_class = "drive.session-a-refused-commands-gap-is-dropped"
+id = "drive.session-a-refused-commands-gap-is-logged"
+failure_class = "drive.session-a-refused-commands-gap-is-logged"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-        let during = self.settlement;
-        self.push(Event::Refused {'''
+        self.carried = None;
+        let during = self.settlement;'''
 becomes = '''
-        self.pending_gap = None;
-        let during = self.settlement;
-        self.push(Event::Refused {'''
+        self.pending_gap = self.carried.take().map(|(gap, _)| gap);
+        let during = self.settlement;'''
 catches = [
-    "drive::session::tests::a_gap_is_logged_immediately_before_its_commands_outcome_admitted_or_refused",
+    "drive::session::tests::a_gap_closes_at_the_command_that_ends_it_even_when_that_command_carries_none",
+    "drive::session::tests::a_refused_commands_gap_is_neither_logged_nor_closed_and_the_admitted_one_carries_it",
 ]
 
 [[fault]]
@@ -1696,7 +1696,8 @@ becomes = '''
         seq'''
 catches = [
     "drive::serve::tests::a_command_carrying_its_idle_gap_logs_it_and_a_bad_one_is_400",
-    "drive::session::tests::a_gap_is_logged_immediately_before_its_commands_outcome_admitted_or_refused",
+    "drive::session::tests::a_refused_commands_gap_is_neither_logged_nor_closed_and_the_admitted_one_carries_it",
+    "drive::session::tests::an_admitted_end_logs_the_gap_it_carries_before_it_ends",
 ]
 
 [[fault]]
@@ -1710,7 +1711,7 @@ becomes = '''
         if false && self.gap_open != Some(gap.opened_by) {'''
 catches = [
     "drive::serve::tests::a_command_carrying_its_idle_gap_logs_it_and_a_bad_one_is_400",
-    "drive::session::tests::a_gap_is_logged_immediately_before_its_commands_outcome_admitted_or_refused",
+    "drive::session::tests::a_gap_closes_at_the_command_that_ends_it_even_when_that_command_carries_none",
     "drive::session::tests::a_gap_the_session_cannot_log_is_rejected_and_nothing_is_logged",
 ]
 
@@ -1738,4 +1739,47 @@ becomes = '''
     if false && (gap.len() != KEYS.len() || gap.keys().any(|key| !KEYS.contains(&key.as_str()))) {'''
 catches = [
     "drive::serve::tests::a_command_carrying_its_idle_gap_logs_it_and_a_bad_one_is_400",
+]
+
+[[fault]]
+id = "drive.session-an-admitted-command-leaves-the-gap-open"
+failure_class = "drive.session-an-admitted-command-leaves-the-gap-open"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        self.gap_open = None;
+        Ok(())'''
+becomes = '''
+        Ok(())'''
+catches = [
+    "drive::session::tests::a_gap_closes_at_the_command_that_ends_it_even_when_that_command_carries_none",
+]
+
+[[fault]]
+id = "drive.session-an-admitted-end-drops-its-gap"
+failure_class = "drive.session-an-admitted-end-drops-its-gap"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            Settlement::Awaiting => state.admit().map(|()| state.move_to(Settlement::Ended)),'''
+becomes = '''
+            Settlement::Awaiting => state.admit().map(|()| {
+                state.pending_gap = None;
+                state.move_to(Settlement::Ended);
+            }),'''
+catches = [
+    "drive::session::tests::an_admitted_end_logs_the_gap_it_carries_before_it_ends",
+]
+
+[[fault]]
+id = "drive.session-an-unwritable-duration-is-capped"
+failure_class = "drive.session-an-unwritable-duration-is-capped"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            .any(|duration| i64::try_from(*duration).is_err())'''
+becomes = '''
+            .any(|duration| false && i64::try_from(*duration).is_err())'''
+catches = [
+    "drive::session::tests::an_admitted_end_logs_the_gap_it_carries_before_it_ends",
 ]
