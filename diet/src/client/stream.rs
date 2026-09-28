@@ -143,10 +143,22 @@ pub enum Ended {
     },
 }
 
+/// One piece of a streamed answer: answer text, or the reasoning a thinking
+/// model streams before it. Kept apart from the first byte, because the two
+/// go back to the server differently (`reasoning_content` beside `content`,
+/// #117 Q10) and are shown differently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Piece<'a> {
+    /// Answer text: `delta.content`.
+    Text(&'a str),
+    /// Reasoning: `delta.reasoning_content`.
+    Reasoning(&'a str),
+}
+
 /// A transport that delivers an answer as it arrives.
 pub trait Streaming: Send + Sync {
-    /// Send `shape`, calling `on_delta` with each piece of answer text as it
-    /// arrives, until the server finishes, `cancel` is asked, or `deadline`
+    /// Send `shape`, calling `on_delta` with each piece of reasoning or answer
+    /// text as it arrives, until the server finishes, `cancel` is asked, or `deadline`
     /// passes.
     ///
     /// # Errors
@@ -160,7 +172,7 @@ pub trait Streaming: Send + Sync {
         shape: &RequestShape,
         deadline: Instant,
         cancel: &Cancel,
-        on_delta: &mut dyn FnMut(&str),
+        on_delta: &mut dyn FnMut(Piece<'_>),
     ) -> Result<Ended, TransportFailure>;
 
     /// Where this transport sends, for the record.
@@ -226,7 +238,7 @@ impl Streaming for HttpStream {
         shape: &RequestShape,
         deadline: Instant,
         cancel: &Cancel,
-        on_delta: &mut dyn FnMut(&str),
+        on_delta: &mut dyn FnMut(Piece<'_>),
     ) -> Result<Ended, TransportFailure> {
         let started = Instant::now();
         let timeout = || TransportFailure::Timeout {
@@ -414,7 +426,7 @@ impl Reading {
         &mut self,
         bytes: &[u8],
         cap: usize,
-        on_delta: &mut dyn FnMut(&str),
+        on_delta: &mut dyn FnMut(Piece<'_>),
     ) -> Result<Option<Ended>, TransportFailure> {
         self.total += bytes.len();
         if self.total > cap {
@@ -441,7 +453,7 @@ impl Reading {
     fn body(
         &mut self,
         bytes: &[u8],
-        on_delta: &mut dyn FnMut(&str),
+        on_delta: &mut dyn FnMut(Piece<'_>),
     ) -> Result<Option<Ended>, TransportFailure> {
         let Some((status, framing)) = self.head else {
             return Ok(None);
@@ -475,7 +487,7 @@ impl Reading {
 
     /// The body is over, by its framing or by the connection closing: read
     /// whatever event a held line ending was keeping back, then settle.
-    fn closed(&mut self, on_delta: &mut dyn FnMut(&str)) -> Result<Ended, TransportFailure> {
+    fn closed(&mut self, on_delta: &mut dyn FnMut(Piece<'_>)) -> Result<Ended, TransportFailure> {
         if matches!(self.head, Some((200, _))) {
             for data in self.events.finish()? {
                 if let Some(ended) = self.event(&data, on_delta)? {
@@ -497,7 +509,7 @@ impl Reading {
     fn event(
         &mut self,
         data: &str,
-        on_delta: &mut dyn FnMut(&str),
+        on_delta: &mut dyn FnMut(Piece<'_>),
     ) -> Result<Option<Ended>, TransportFailure> {
         if data == "[DONE]" {
             return Ok(Some(Ended::Finished {
@@ -518,10 +530,21 @@ impl Reading {
             .and_then(Value::as_array)
             .and_then(|choices| choices.first())
         {
+            // Measured on e7051ef (#117, Q10): with no `--reasoning-format`,
+            // a thinking model streams `reasoning_content` deltas first and
+            // `content` deltas after, one field per event. Both are read, and
+            // each is delivered as what it is.
+            if let Some(piece) = choice
+                .pointer("/delta/reasoning_content")
+                .and_then(Value::as_str)
+                && !piece.is_empty()
+            {
+                on_delta(Piece::Reasoning(piece));
+            }
             if let Some(piece) = choice.pointer("/delta/content").and_then(Value::as_str)
                 && !piece.is_empty()
             {
-                on_delta(piece);
+                on_delta(Piece::Text(piece));
             }
             if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
                 self.finish_reason = Some(reason.to_owned());
@@ -733,6 +756,8 @@ impl Gate {
 pub enum Step {
     /// A piece of answer text.
     Delta(String),
+    /// A piece of reasoning.
+    Reasoning(String),
     /// Wait here until the gate opens or the call is cancelled.
     Hold(Gate),
     /// Fail as a transport would.
@@ -775,7 +800,7 @@ impl Streaming for Canned {
         shape: &RequestShape,
         _deadline: Instant,
         cancel: &Cancel,
-        on_delta: &mut dyn FnMut(&str),
+        on_delta: &mut dyn FnMut(Piece<'_>),
     ) -> Result<Ended, TransportFailure> {
         self.sent
             .lock()
@@ -798,7 +823,8 @@ impl Streaming for Canned {
                 return Ok(Ended::Cancelled);
             }
             match step {
-                Step::Delta(text) => on_delta(&text),
+                Step::Delta(text) => on_delta(Piece::Text(&text)),
+                Step::Reasoning(text) => on_delta(Piece::Reasoning(&text)),
                 Step::Hold(gate) => {
                     // What a socket read blocked on a silent server looks
                     // like: nothing here polls the flag. Only the stopper
@@ -898,7 +924,7 @@ mod tests {
         std::thread::spawn(move || {
             let mut pieces = String::new();
             let ended = call.stream(&shape(), Instant::now(), &held, &mut |piece| {
-                pieces.push_str(piece);
+                pieces.push_str(&text(piece));
             });
             let _ = sender.send((ended, pieces));
         });
@@ -943,6 +969,94 @@ mod tests {
     /// characters -- which is why they are here.
     const CAPTURED_PIECES: [&str; 6] = ["mittel", "су", " polity", " polity", " polity", " polity"];
 
+    #[test]
+    fn a_canned_stream_plays_reasoning_as_reasoning_and_text_as_text() {
+        let canned = Canned::new([vec![
+            Step::Reasoning("thinking\n".to_owned()),
+            Step::Delta("answer".to_owned()),
+        ]]);
+        let mut pieces: Vec<(bool, String)> = Vec::new();
+        let ended = canned.stream(&shape(), deadline(), &Cancel::new(), &mut |piece| {
+            pieces.push(match piece {
+                Piece::Reasoning(reasoning) => (true, reasoning.to_owned()),
+                Piece::Text(text) => (false, text.to_owned()),
+            });
+        });
+        assert!(ended.is_ok(), "{ended:?}");
+        assert_eq!(
+            pieces,
+            [
+                (true, "thinking\n".to_owned()),
+                (false, "answer".to_owned())
+            ]
+        );
+    }
+
+    /// A piece's text, where the stream under test carries answer text only.
+    fn text(piece: Piece<'_>) -> String {
+        match piece {
+            Piece::Text(text) => text.to_owned(),
+            Piece::Reasoning(reasoning) => {
+                panic!("reasoning where only text was sent: {reasoning:?}")
+            }
+        }
+    }
+
+    /// A thinking model's reply, captured off a raw socket from the drive
+    /// endpoint (llama-server `e7051ef`, 2026-09-28, #117 Q10 by track four):
+    /// 295 `reasoning_content` deltas, then 14 `content` deltas, then usage.
+    const REASONING_CAPTURE: &[u8] =
+        include_bytes!("../../client/fixtures/llama-server-e7051ef-reasoning-stream.http");
+
+    #[test]
+    fn a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer() {
+        // The capture is the one track four measured, not one edited since.
+        assert_eq!(
+            crate::digest::sha256_hex(REASONING_CAPTURE),
+            "b91695d816f39ec5a22fd29d1879ccdcca32fd4b028f14bd4fb854f77a91cd31"
+        );
+        let stub = Stub::serving(vec![Act::Raw(REASONING_CAPTURE.to_vec())]).expect("loopback");
+        let mut pieces: Vec<(bool, String)> = Vec::new();
+        let ended = HttpStream::new(endpoint(&stub)).stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |piece| {
+                pieces.push(match piece {
+                    Piece::Reasoning(reasoning) => (true, reasoning.to_owned()),
+                    Piece::Text(text) => (false, text.to_owned()),
+                });
+            },
+        );
+        assert_eq!(
+            ended,
+            Ok(Ended::Finished {
+                finish_reason: Some("stop".to_owned())
+            })
+        );
+        let reasoning: Vec<&str> = pieces
+            .iter()
+            .filter(|(is_reasoning, _)| *is_reasoning)
+            .map(|(_, piece)| piece.as_str())
+            .collect();
+        let answer: String = pieces
+            .iter()
+            .filter(|(is_reasoning, _)| !*is_reasoning)
+            .map(|(_, piece)| piece.as_str())
+            .collect();
+        assert_eq!(reasoning.len(), 295);
+        assert_eq!(pieces.len(), 295 + 14);
+        assert!(
+            pieces[..295].iter().all(|(is_reasoning, _)| *is_reasoning),
+            "an answer piece arrived before the reasoning was done"
+        );
+        assert_eq!(answer, "225. The journey is 225 minutes long.");
+        assert!(
+            reasoning.concat().ends_with('\n'),
+            "the reasoning's own trailing newline is part of what goes back"
+        );
+    }
+
     fn endpoint(stub: &Stub) -> Endpoint {
         Endpoint::parse(&stub.url()).expect("the stub's URL is an endpoint")
     }
@@ -957,7 +1071,7 @@ mod tests {
         let transport = HttpStream::new(endpoint(&stub));
         let mut pieces = Vec::new();
         let ended = transport.stream(&shape(), deadline(), &Cancel::new(), &mut |piece| {
-            pieces.push(piece.to_owned());
+            pieces.push(text(piece));
         });
         assert_eq!(
             ended,
@@ -985,7 +1099,7 @@ mod tests {
         for byte in CAPTURED {
             if let Some(done) = reading
                 .feed(std::slice::from_ref(byte), usize::MAX, &mut |piece| {
-                    pieces.push(piece.to_owned());
+                    pieces.push(text(piece));
                 })
                 .expect("the captured bytes are a well-formed stream")
             {
@@ -1015,7 +1129,7 @@ mod tests {
         let (result, finished) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let ended = transport.stream(&shape(), deadline(), &cancel, &mut |piece| {
-                let _ = first.send(piece.to_owned());
+                let _ = first.send(text(piece));
             });
             let _ = result.send(ended);
         });
@@ -1106,7 +1220,7 @@ mod tests {
             &shape(),
             deadline(),
             &Cancel::new(),
-            &mut |piece| seen.push(piece.to_owned()),
+            &mut |piece| seen.push(text(piece)),
         );
         assert_eq!(
             ended,
@@ -1235,7 +1349,7 @@ mod tests {
             &shape(),
             deadline(),
             &Cancel::new(),
-            &mut |piece| seen.push(piece.to_owned()),
+            &mut |piece| seen.push(text(piece)),
         );
         assert_eq!(
             ended,
@@ -1262,7 +1376,7 @@ mod tests {
             &shape(),
             deadline(),
             &Cancel::new(),
-            &mut |piece| seen.push(piece.to_owned()),
+            &mut |piece| seen.push(text(piece)),
         );
         assert_eq!(
             ended,

@@ -39,7 +39,7 @@
 [meta]
 source = "verify.sh"
 mechanics_assertions = 120
-unseedable_guards = 2
+unseedable_guards = 3
 migrated = 0
 
 # A guard genuinely too dangerous to seed -- covering it would re-enter
@@ -64,6 +64,14 @@ reason = "a re-entrant --selftest call would recurse into the function containin
 id = "selftest.shard-assignment-refusals"
 file = "verify.sh"
 reason = "the sharded selftest's refusals cannot be seeded without re-entering --selftest; proved by hand instead"
+
+# The server-side half of R2c I5r's prefix identity (#136): the client test
+# pins that reasoning goes back byte-identical; that the bytes re-render to
+# the same tokens needs the served model, and track four measured it.
+[[unseedable]]
+id = "drive.session-server-side-prefix-identity"
+file = "diet/src/drive/session.rs"
+reason = "the server-side 400-token prefix identity needs the model and its tokenizer; track four measured it on capture b91695d8 (#117 comment 5864110723)"
 
 
 [[fault]]
@@ -6126,6 +6134,54 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.serve-an-ipv6-bind-refuses-its-own-host"
 failure_class = "drive.serve-an-ipv6-bind-refuses-its-own-host"
+migrated = false
+
+[[fault]]
+id = "drive.session-reasoning-left-off-the-trunk"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-reasoning-left-off-the-trunk"
+failure_class = "drive.session-reasoning-left-off-the-trunk"
+migrated = false
+
+[[fault]]
+id = "drive.session-reasoning-trimmed"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-reasoning-trimmed"
+failure_class = "drive.session-reasoning-trimmed"
+migrated = false
+
+[[fault]]
+id = "client.stream-reads-reasoning-as-text"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-reads-reasoning-as-text"
+failure_class = "client.stream-reads-reasoning-as-text"
+migrated = false
+
+[[fault]]
+id = "client.stream-drops-reasoning"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-drops-reasoning"
+failure_class = "client.stream-drops-reasoning"
+migrated = false
+
+[[fault]]
+id = "client.wire-drops-reasoning"
+kind = "lane-fault"
+check = "lanes"
+label = "client.wire-drops-reasoning"
+failure_class = "client.wire-drops-reasoning"
+migrated = false
+
+[[fault]]
+id = "client.canned-plays-reasoning-as-text"
+kind = "lane-fault"
+check = "lanes"
+label = "client.canned-plays-reasoning-as-text"
+failure_class = "client.canned-plays-reasoning-as-text"
 migrated = false
 
 [[fault]]
