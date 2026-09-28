@@ -1013,7 +1013,8 @@ pub fn typescript() -> String {
                 let holds = schema(*kind)
                     .iter()
                     .find(|f| f.key == *key)
-                    .map_or(Holds::Text, |f| f.holds);
+                    .map(|f| f.holds)
+                    .expect("`exactly_one` names only keys the schema declares");
                 let _ = write!(out, "{{ {key}: {}", ts_holds(holds));
                 for other in one.iter().filter(|o| *o != key) {
                     let _ = write!(out, "; {other}?: never");
@@ -1406,15 +1407,49 @@ mod tests {
         }
     }
 
-    /// THE SCHEMA IS WHAT THE WRITER WRITES. [`schema`] is read by the
-    /// reader's key check and by the TypeScript bindings; this pins it
-    /// against [`to_value`], line by line and key by key, so a table that
-    /// says `turn` is text while the writer writes a number is red here
-    /// rather than wrong in the SPA's types.
+    /// Every line the schema is pinned against: [`every_event`], and every
+    /// valid fixture -- which is where the optional keys go missing.
+    fn corpus() -> Vec<Line> {
+        let mut lines = every_event();
+        let valid =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("formats/log/fixtures/valid");
+        let mut files: Vec<_> = std::fs::read_dir(&valid)
+            .expect("the valid fixtures")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|e| e == "jsonl"))
+            .collect();
+        files.sort();
+        assert!(
+            !files.is_empty(),
+            "no valid fixture to pin the schema against"
+        );
+        for file in files {
+            let text = std::fs::read_to_string(&file).expect("a fixture reads");
+            lines.extend(parse(&text).unwrap_or_else(|e| panic!("{}: {e}", file.display())));
+        }
+        lines
+    }
+
+    /// THE SCHEMA IS WHAT THE WRITER WRITES, BOTH WAYS. [`schema`] is read by
+    /// the reader's key check and by the TypeScript bindings, so a wrong row is
+    /// a reader that accepts a key nothing writes, or an SPA typed against a
+    /// shape no log has. Pinned against [`to_value`] over [`corpus`]:
+    ///
+    /// * the keys written for a kind are exactly the keys declared for it --
+    ///   a declared key nothing writes is a key the reader would accept;
+    /// * a required key is always written, and an optional one is left out
+    ///   somewhere -- or the bindings mark it optional for nothing;
+    /// * each value is the type declared, and a tag key's vocabulary is the
+    ///   one the READER reads it with: every tag of the declared vocabulary
+    ///   parses in its place, and a tag only another vocabulary has does not
+    ///   (vocabularies share tags, so membership alone cannot tell them apart;
+    ///   found by #144's review).
     #[test]
     fn the_schema_is_what_every_kind_writes() {
-        let mut kinds = BTreeSet::new();
-        for line in every_event() {
+        let mut written: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
+        let mut omitted: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for line in corpus() {
             let Value::Object(object) = to_value(&line) else {
                 panic!("a line is an object");
             };
@@ -1423,7 +1458,6 @@ mod tests {
                 _ => panic!("a line names its kind"),
             })
             .expect("a known kind");
-            kinds.insert(kind.tag());
             let fields = schema(kind);
             for (key, value) in &object {
                 if COMMON.contains(&key.as_str()) {
@@ -1441,21 +1475,125 @@ mod tests {
                     kind.tag(),
                     field.holds
                 );
+                if let Holds::Tag(tags) = field.holds {
+                    the_reader_reads_it_as(&object, key, tags);
+                }
+                written.entry(kind.tag()).or_default().insert(key.clone());
             }
-            for field in fields.iter().filter(|f| f.required) {
+            for field in fields {
+                if !object.contains_key(field.key) {
+                    assert!(
+                        !field.required,
+                        "`{}` declares `{}` required and did not write it",
+                        kind.tag(),
+                        field.key
+                    );
+                    omitted.entry(kind.tag()).or_default().insert(field.key);
+                }
+            }
+        }
+        for kind in Kind::ALL {
+            let declared: BTreeSet<String> =
+                schema(*kind).iter().map(|f| f.key.to_owned()).collect();
+            assert_eq!(
+                written.get(kind.tag()).cloned().unwrap_or_default(),
+                declared,
+                "`{}`: the keys written are not the keys declared",
+                kind.tag()
+            );
+            for field in schema(*kind).iter().filter(|f| !f.required) {
                 assert!(
-                    object.contains_key(field.key),
-                    "`{}` declares `{}` required and did not write it",
+                    omitted
+                        .get(kind.tag())
+                        .is_some_and(|o| o.contains(field.key)),
+                    "`{}` declares `{}` optional and every line writes it",
                     kind.tag(),
                     field.key
                 );
             }
+            for key in exactly_one(*kind) {
+                assert!(
+                    schema(*kind).iter().any(|f| f.key == *key && !f.required),
+                    "`{}`: `exactly_one` names `{key}`, which is not an optional key",
+                    kind.tag()
+                );
+            }
         }
-        assert_eq!(
-            kinds.len(),
-            Kind::ALL.len(),
-            "every kind was checked, or this test covers less than it says"
-        );
+    }
+
+    /// `exactly_one` IS WHAT THE READER ENFORCES: for every line that writes
+    /// one optional text key of its kind, adding another is refused exactly
+    /// when the two are declared exclusive. An exclusivity the bindings drop
+    /// is a union that admits a line the reader refuses.
+    #[test]
+    fn exclusive_keys_are_the_ones_the_reader_refuses_together() {
+        let mut probed = 0;
+        for line in corpus() {
+            let Value::Object(object) = to_value(&line) else {
+                panic!("a line is an object");
+            };
+            let Some(Value::String(tag)) = object.get("kind") else {
+                panic!("a line names its kind");
+            };
+            let kind = Kind::from_tag(tag).expect("a known kind");
+            let optional_text: Vec<&str> = schema(kind)
+                .iter()
+                .filter(|f| !f.required && f.holds == Holds::Text)
+                .map(|f| f.key)
+                .collect();
+            for present in optional_text.iter().filter(|k| object.contains_key(**k)) {
+                for absent in optional_text.iter().filter(|k| !object.contains_key(**k)) {
+                    let mut both = object.clone();
+                    both.insert((*absent).to_owned(), Value::String("x".to_owned()));
+                    let mut rendered = String::new();
+                    json::render(&Value::Object(both), &mut rendered);
+                    let refused = self::line(&rendered).is_err();
+                    let exclusive =
+                        exactly_one(kind).contains(present) && exactly_one(kind).contains(absent);
+                    assert_eq!(
+                        refused,
+                        exclusive,
+                        "`{}` with both `{present}` and `{absent}`: the reader {} it, and \
+                         `exactly_one` says they are{} exclusive",
+                        kind.tag(),
+                        if refused { "refuses" } else { "accepts" },
+                        if exclusive { "" } else { " not" }
+                    );
+                    probed += 1;
+                }
+            }
+        }
+        assert!(probed > 0, "no pair of optional keys was probed");
+    }
+
+    /// `key` in `object` is read with `tags`: each of its tags parses there,
+    /// and a tag only another vocabulary carries does not.
+    fn the_reader_reads_it_as(object: &BTreeMap<String, Value>, key: &str, tags: Tags) {
+        let with = |tag: &str| {
+            let mut changed = object.clone();
+            changed.insert(key.to_owned(), Value::String(tag.to_owned()));
+            let mut rendered = String::new();
+            json::render(&Value::Object(changed), &mut rendered);
+            line(&rendered).is_ok()
+        };
+        let own = tags.tags();
+        for tag in &own {
+            assert!(
+                with(tag),
+                "`{key}` declared {} and `{tag}` is refused there",
+                tags.name()
+            );
+        }
+        for other in Tags::ALL.iter().filter(|t| **t != tags) {
+            for tag in other.tags().into_iter().filter(|t| !own.contains(t)) {
+                assert!(
+                    !with(tag),
+                    "`{key}` declared {} and accepts `{tag}`, which only {} has",
+                    tags.name(),
+                    other.name()
+                );
+            }
+        }
     }
 
     fn bindings_path() -> std::path::PathBuf {
