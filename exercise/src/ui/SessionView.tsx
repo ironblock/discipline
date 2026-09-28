@@ -64,10 +64,13 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
   // Either way a side call that cannot open in its lane opens under the message it came from (`inline`).
   const [room, setRoom] = useState<Room>('whole');
   const [inline, setInline] = useState<ReadonlySet<string>>(new Set());
+  // Where each side call opened under its message is: its cable leaves the trunk there, to its bar.
+  const inlines = useRef(new Map<string, HTMLElement>());
   const slots = laneSlots(session);
   const curtain = surface.curtain && room !== 'none';
   const lanes = curtain ? slots : [];
   const condensed = curtain && (surface.condensed === true || room === 'bars');
+  const opened = useMemo(() => (room === 'bars' ? [...inline] : []), [room, inline]);
   const gap = condensed ? STACK_GAP_CONDENSED : STACK_GAP;
   // A bar pressed while condensed: that side call, opened, once the curtain is.
   const [revealed, setRevealed] = useState<string>();
@@ -145,7 +148,10 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
       pointed.node !== undefined || pointed.branches !== undefined || pointed.entry !== undefined
         ? pointed
         : target === undefined
-          ? {}
+          ? // A side call opened under its message is lit, with its bar and what it wrote, until something else is pointed at.
+            opened.length > 0
+            ? { branches: opened }
+            : {}
           : target.startsWith('memory/')
             ? { entry: target.slice('memory/'.length) }
             : sideOf.has(target)
@@ -154,7 +160,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                 ? { node: target }
                 : {};
     return chain(aimed, wires, (node) => (session.branches.get(node) ?? []).map((b) => b.id), (branch) => sideOf.get(branch)?.at);
-  }, [wires, pointed, target, session]);
+  }, [wires, pointed, target, session, opened]);
   const pointAt = (el: Element | null) => {
     const next = el ? pointedAt(el) : {};
     if (!samePointed(pointed, next)) setPointed(next);
@@ -259,7 +265,10 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
       const cellEl = cells.current.get(side.id);
       const anchorEl = anchors.current.get(side.at);
       if (!spot || !cellEl || !anchorEl) continue;
-      next.set(side.id, { ...spot, reach: cellEl.getBoundingClientRect().left - anchorEl.getBoundingClientRect().right });
+      // Opened under its message, it is where its cable leaves from, level with its header: one line from it to its bar.
+      const opened = inlines.current.get(side.id);
+      const leave = opened ? opened.getBoundingClientRect().top - base + ENTER : spot.leave;
+      next.set(side.id, { ...spot, leave, reach: cellEl.getBoundingClientRect().left - anchorEl.getBoundingClientRect().right });
       const era = eraOf.get(side.at) ?? 0;
       eraBottom.set(era, Math.max(eraBottom.get(era) ?? 0, spot.top + side.height));
       bottom = Math.max(bottom, spot.top + side.height + gap);
@@ -477,7 +486,16 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                             ? branches
                                 .filter((b) => inline.has(b.id))
                                 .map((b) => (
-                                  <div className="ex-inline" key={b.id} style={laneStyle(b.lane)}>
+                                  <div
+                                    className="ex-inline"
+                                    key={b.id}
+                                    style={laneStyle(b.lane)}
+                                    data-branch-inline={b.id}
+                                    ref={(el) => {
+                                      if (el) inlines.current.set(b.id, el);
+                                      else inlines.current.delete(b.id);
+                                    }}
+                                  >
                                     <Branch node={b} open />
                                   </div>
                                 ))

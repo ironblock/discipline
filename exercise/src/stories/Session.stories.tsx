@@ -512,8 +512,20 @@ export const NarrowTablet: Story = {
     await expect(overflow(canvasElement)).toBe(0);
     await expect(q(canvasElement, '.ex-trunk')!.getBoundingClientRect().width).toBeGreaterThanOrEqual(320);
     const bar = q(canvasElement, '.ex-bar') as HTMLElement;
+    const id = bar.closest('.ex-branchcell')?.getAttribute('data-branch') ?? '';
     await userEvent.click(bar);
     await expect(session.classList.contains('ex-session--condensed')).toBe(true);
-    await expect(q(canvasElement, '.ex-trunk .ex-inline .ex-block--lane')).not.toBeNull();
+    const opened = q(canvasElement, `.ex-trunk .ex-inline[data-branch-inline="${id}"]`) as HTMLElement;
+    await expect(opened.querySelector('.ex-block--lane')).not.toBeNull();
+    // Opened, it is tied to its bar: the two are lit as one chain, and the cable leaves the trunk level
+    // with the opened block's header, not the message above it.
+    await expect(bar.closest('.ex-branchcell')?.hasAttribute('data-hot')).toBe(true);
+    const stage = (q(canvasElement, '.ex-stage') as HTMLElement).getBoundingClientRect();
+    const head = (opened.querySelector('.ex-block__head') as HTMLElement).getBoundingClientRect();
+    await waitFor(async () => {
+      const d = q(canvasElement, `.ex-wiring [data-from="${id}"] path`)?.getAttribute('d') ?? '';
+      const y = Number(/^M\s*[\d.]+[ ,]([\d.]+)/.exec(d)?.[1]);
+      await expect(y >= head.top - stage.top && y <= head.bottom - stage.top).toBe(true);
+    });
   },
 };
