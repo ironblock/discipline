@@ -6305,6 +6305,30 @@ failure_class = "client.head-only-a-dropped-reasoning-is-named"
 migrated = false
 
 [[fault]]
+id = "client.stream-sends-no-bearer"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-sends-no-bearer"
+failure_class = "client.stream-sends-no-bearer"
+migrated = false
+
+[[fault]]
+id = "client.bearer-debug-prints-the-key"
+kind = "lane-fault"
+check = "lanes"
+label = "client.bearer-debug-prints-the-key"
+failure_class = "client.bearer-debug-prints-the-key"
+migrated = false
+
+[[fault]]
+id = "client.bearer-accepts-a-line-break"
+kind = "lane-fault"
+check = "lanes"
+label = "client.bearer-accepts-a-line-break"
+failure_class = "client.bearer-accepts-a-line-break"
+migrated = false
+
+[[fault]]
 id = "drive.session-a-line-drops-the-partial"
 kind = "lane-fault"
 check = "lanes"
@@ -6462,6 +6486,14 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.session-an-unwritable-duration-is-capped"
 failure_class = "drive.session-an-unwritable-duration-is-capped"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-ignores-the-key-file"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-ignores-the-key-file"
+failure_class = "drive.serve-bin-ignores-the-key-file"
 migrated = false
 
 [[fault]]

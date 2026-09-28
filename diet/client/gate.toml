@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 55
+faults = 58
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -707,6 +707,7 @@ anchor = '''
 becomes = '''
         if data == "[NEVER]" {'''
 catches = [
+    "client::stream::tests::a_bearer_credential_is_sent_as_an_authorization_header_and_only_then",
     "client::stream::tests::a_chunk_boundary_inside_an_event_is_invisible_to_the_reader",
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
@@ -775,6 +776,7 @@ anchor = '''
 becomes = '''
             let event: Vec<u8> = std::mem::take(&mut self.pending);'''
 catches = [
+    "client::stream::tests::a_bearer_credential_is_sent_as_an_authorization_header_and_only_then",
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
@@ -982,4 +984,43 @@ becomes = '''
             if before.reasoning.is_some() && after.reasoning.is_none() {'''
 catches = [
     "client::head::tests::a_reasoning_change_is_named_whether_added_rewritten_or_beside_a_text_change",
+]
+
+[[fault]]
+id = "client.stream-sends-no-bearer"
+failure_class = "client.stream-sends-no-bearer"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                format!("Authorization: Bearer {key}\r\n")'''
+becomes = '''
+                format!("X-Unused: {}\r\n", key.len())'''
+catches = [
+    "client::stream::tests::a_bearer_credential_is_sent_as_an_authorization_header_and_only_then",
+]
+
+[[fault]]
+id = "client.bearer-debug-prints-the-key"
+failure_class = "client.bearer-debug-prints-the-key"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        f.write_str("Bearer(<redacted>)")'''
+becomes = '''
+        write!(f, "Bearer({})", self.0)'''
+catches = [
+    "client::stream::tests::a_bearer_credential_is_never_printed_and_never_breaks_a_line",
+]
+
+[[fault]]
+id = "client.bearer-accepts-a-line-break"
+failure_class = "client.bearer-accepts-a-line-break"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        let usable = !key.is_empty() && !key.chars().any(char::is_control);'''
+becomes = '''
+        let usable = !key.is_empty();'''
+catches = [
+    "client::stream::tests::a_bearer_credential_is_never_printed_and_never_breaks_a_line",
 ]

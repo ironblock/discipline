@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 111
+faults = 112
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -1782,4 +1782,19 @@ becomes = '''
             .any(|duration| false && i64::try_from(*duration).is_err())'''
 catches = [
     "drive::session::tests::an_admitted_end_logs_the_gap_it_carries_before_it_ends",
+]
+
+[[fault]]
+id = "drive.serve-bin-ignores-the-key-file"
+failure_class = "drive.serve-bin-ignores-the-key-file"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            Ok(bearer) => transport = transport.with_bearer(bearer),'''
+becomes = '''
+            Ok(bearer) => {
+                let _ = bearer;
+            }'''
+catches = [
+    "a_drive_server_sends_the_endpoint_key_from_a_file_never_an_argument",
 ]
