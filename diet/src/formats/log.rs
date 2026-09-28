@@ -700,33 +700,336 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
     })
 }
 
-/// The keys a kind must carry, then the keys it may.
-fn keys(kind: Kind) -> (&'static [&'static str], &'static [&'static str]) {
-    match kind {
-        Kind::SessionStart => (&["version", "opened", "model", "head"], &[]),
-        Kind::Ask => (&["turn", "text"], &[]),
-        Kind::Settlement => (&["from", "to"], &[]),
-        Kind::Request => (&["turn", "lane"], &[]),
-        Kind::Refused => (&["command", "because", "during"], &[]),
-        Kind::Delta => (&["request"], &["text", "reasoning"]),
-        Kind::StopAsked => (&["turn"], &[]),
-        Kind::Response => (&["to_request", "text"], &["finish_reason"]),
-        Kind::Cancelled => (&["request", "partial"], &[]),
-        Kind::RequestFailed => (&["request", "reason", "message"], &["status", "partial"]),
-        Kind::TurnSettled => (&["turn", "reason"], &[]),
-        Kind::IdleGap => (
-            &[
-                "opened_by",
-                "notice",
-                "read",
-                "compose",
-                "away",
-                "blocked",
-                "ended_by",
-            ],
-            &[],
-        ),
+/// The keys a kind must carry, then the keys it may: read off [`schema`],
+/// the one place a kind's keys are declared.
+fn keys(kind: Kind) -> (Vec<&'static str>, Vec<&'static str>) {
+    let fields = schema(kind);
+    (
+        fields
+            .iter()
+            .filter(|f| f.required)
+            .map(|f| f.key)
+            .collect(),
+        fields
+            .iter()
+            .filter(|f| !f.required)
+            .map(|f| f.key)
+            .collect(),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// the schema, as data
+// ---------------------------------------------------------------------------
+
+/// A closed vocabulary a key holds one tag of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tags {
+    /// [`State`].
+    State,
+    /// [`Lane`].
+    Lane,
+    /// [`Command`].
+    Command,
+    /// [`Refusal`].
+    Refusal,
+    /// [`FailReason`].
+    FailReason,
+    /// [`SettleReason`].
+    SettleReason,
+    /// [`GapEnd`].
+    GapEnd,
+    /// [`Role`].
+    Role,
+}
+
+impl Tags {
+    /// Every vocabulary a key can hold.
+    pub const ALL: &'static [Self] = &[
+        Self::State,
+        Self::Lane,
+        Self::Command,
+        Self::Refusal,
+        Self::FailReason,
+        Self::SettleReason,
+        Self::GapEnd,
+        Self::Role,
+    ];
+
+    /// The Rust type's name, which the bindings name the union after.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::State => "State",
+            Self::Lane => "Lane",
+            Self::Command => "Command",
+            Self::Refusal => "Refusal",
+            Self::FailReason => "FailReason",
+            Self::SettleReason => "SettleReason",
+            Self::GapEnd => "GapEnd",
+            Self::Role => "Role",
+        }
     }
+
+    /// Its tags, read off the vocabulary itself.
+    #[must_use]
+    pub fn tags(self) -> Vec<&'static str> {
+        fn of<T: Copy>(all: &[T], tag: fn(T) -> &'static str) -> Vec<&'static str> {
+            all.iter().map(|v| tag(*v)).collect()
+        }
+        match self {
+            Self::State => of(State::ALL, State::tag),
+            Self::Lane => of(Lane::ALL, Lane::tag),
+            Self::Command => of(Command::ALL, Command::tag),
+            Self::Refusal => of(Refusal::ALL, Refusal::tag),
+            Self::FailReason => of(FailReason::ALL, FailReason::tag),
+            Self::SettleReason => of(SettleReason::ALL, SettleReason::tag),
+            Self::GapEnd => of(GapEnd::ALL, GapEnd::tag),
+            Self::Role => of(Role::ALL, Role::tag),
+        }
+    }
+}
+
+/// What a key holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Holds {
+    /// A non-negative integer.
+    Count,
+    /// Text.
+    Text,
+    /// The format's version, which is [`VERSION`].
+    Version,
+    /// The session's head: a list of `{role, content}`.
+    Head,
+    /// One tag of a closed vocabulary.
+    Tag(Tags),
+}
+
+/// One key a kind carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Field {
+    /// The key.
+    pub key: &'static str,
+    /// What it holds.
+    pub holds: Holds,
+    /// Whether every line of the kind carries it.
+    pub required: bool,
+}
+
+const fn must(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+    }
+}
+
+const fn may(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+    }
+}
+
+/// Every key a kind carries beyond `seq`, `t` and `kind`, and what each
+/// holds. THE ONE DECLARATION: the reader's key check ([`keys`]), the
+/// TypeScript bindings ([`typescript`]) and the test that pins this table
+/// against what [`render`] actually writes all read it.
+#[must_use]
+pub fn schema(kind: Kind) -> &'static [Field] {
+    use Holds::{Count, Head, Tag, Text, Version};
+    match kind {
+        Kind::SessionStart => {
+            const F: &[Field] = &[
+                must("version", Version),
+                must("opened", Count),
+                must("model", Text),
+                must("head", Head),
+            ];
+            F
+        }
+        Kind::Ask => {
+            const F: &[Field] = &[must("turn", Count), must("text", Text)];
+            F
+        }
+        Kind::Settlement => {
+            const F: &[Field] = &[must("from", Tag(Tags::State)), must("to", Tag(Tags::State))];
+            F
+        }
+        Kind::Request => {
+            const F: &[Field] = &[must("turn", Count), must("lane", Tag(Tags::Lane))];
+            F
+        }
+        Kind::Refused => {
+            const F: &[Field] = &[
+                must("command", Tag(Tags::Command)),
+                must("because", Tag(Tags::Refusal)),
+                must("during", Tag(Tags::State)),
+            ];
+            F
+        }
+        Kind::Delta => {
+            const F: &[Field] = &[
+                must("request", Count),
+                may("text", Text),
+                may("reasoning", Text),
+            ];
+            F
+        }
+        Kind::StopAsked => {
+            const F: &[Field] = &[must("turn", Count)];
+            F
+        }
+        Kind::Response => {
+            const F: &[Field] = &[
+                must("to_request", Count),
+                must("text", Text),
+                may("finish_reason", Text),
+            ];
+            F
+        }
+        Kind::Cancelled => {
+            const F: &[Field] = &[must("request", Count), must("partial", Text)];
+            F
+        }
+        Kind::RequestFailed => {
+            const F: &[Field] = &[
+                must("request", Count),
+                must("reason", Tag(Tags::FailReason)),
+                must("message", Text),
+                may("status", Count),
+                may("partial", Text),
+            ];
+            F
+        }
+        Kind::TurnSettled => {
+            const F: &[Field] = &[must("turn", Count), must("reason", Tag(Tags::SettleReason))];
+            F
+        }
+        Kind::IdleGap => {
+            const F: &[Field] = &[
+                must("opened_by", Count),
+                must("notice", Count),
+                must("read", Count),
+                must("compose", Count),
+                must("away", Count),
+                must("blocked", Count),
+                must("ended_by", Tag(Tags::GapEnd)),
+            ];
+            F
+        }
+    }
+}
+
+/// Optional keys of which a line of `kind` carries exactly one.
+#[must_use]
+pub fn exactly_one(kind: Kind) -> &'static [&'static str] {
+    match kind {
+        Kind::Delta => &["text", "reasoning"],
+        _ => &[],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TypeScript bindings (#31: the SPA reads a log through types generated from
+// this file, never through a hand-kept mirror of it)
+// ---------------------------------------------------------------------------
+
+/// The checked-in bindings' path, relative to the crate root.
+pub const BINDINGS: &str = "formats/log/log.ts";
+
+fn ts_holds(holds: Holds) -> String {
+    match holds {
+        Holds::Count => "number".to_owned(),
+        Holds::Text => "string".to_owned(),
+        Holds::Version => VERSION.to_string(),
+        Holds::Head => "HeadMessage[]".to_owned(),
+        Holds::Tag(tags) => tags.name().to_owned(),
+    }
+}
+
+fn ts_name(kind: Kind) -> String {
+    kind.tag()
+        .split('.')
+        .map(|part| {
+            let mut chars = part.chars();
+            chars.next().map_or_else(String::new, |first| {
+                first.to_uppercase().chain(chars).collect()
+            })
+        })
+        .chain(std::iter::once("Line".to_owned()))
+        .collect()
+}
+
+/// The TypeScript bindings for this format, generated from [`schema`] and
+/// the vocabularies. Deterministic, and independent of where it is run from:
+/// it reads nothing but this module.
+#[must_use]
+pub fn typescript() -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    out.push_str(
+        "// GENERATED from diet/src/formats/log.rs -- do not edit by hand.\n\
+         // Regenerate: cargo test -p discipline-diet --lib \
+         formats::log::tests::write_the_bindings -- --ignored\n\
+         // A number here is an integer in the log; the reader refuses one past\n\
+         // i64, and a JavaScript number is exact only to 2^53.\n\n",
+    );
+    let _ = write!(out, "export const VERSION = {VERSION};\n\n");
+    out.push_str("export type Kind =\n");
+    for kind in Kind::ALL {
+        let _ = writeln!(out, "  | \"{}\"", kind.tag());
+    }
+    out.push_str(";\n\n");
+    for tags in Tags::ALL {
+        let _ = writeln!(out, "export type {} =", tags.name());
+        for tag in tags.tags() {
+            let _ = writeln!(out, "  | \"{tag}\"");
+        }
+        out.push_str(";\n\n");
+    }
+    out.push_str("export interface HeadMessage {\n  role: Role;\n  content: string;\n}\n\n");
+    for kind in Kind::ALL {
+        let name = ts_name(*kind);
+        let one = exactly_one(*kind);
+        let _ = writeln!(out, "export type {name} = {{");
+        out.push_str("  seq: number;\n  t: number;\n");
+        let _ = writeln!(out, "  kind: \"{}\";", kind.tag());
+        for field in schema(*kind) {
+            if one.contains(&field.key) {
+                continue;
+            }
+            let optional = if field.required { "" } else { "?" };
+            let _ = writeln!(out, "  {}{optional}: {};", field.key, ts_holds(field.holds));
+        }
+        out.push('}');
+        if !one.is_empty() {
+            out.push_str(" & (");
+            for (index, key) in one.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(" | ");
+                }
+                let holds = schema(*kind)
+                    .iter()
+                    .find(|f| f.key == *key)
+                    .map_or(Holds::Text, |f| f.holds);
+                let _ = write!(out, "{{ {key}: {}", ts_holds(holds));
+                for other in one.iter().filter(|o| *o != key) {
+                    let _ = write!(out, "; {other}?: never");
+                }
+                out.push_str(" }");
+            }
+            out.push(')');
+        }
+        out.push_str(";\n\n");
+    }
+    out.push_str("export type LogLine =\n");
+    for kind in Kind::ALL {
+        let _ = writeln!(out, "  | {}", ts_name(*kind));
+    }
+    out.push_str(";\n");
+    out
 }
 
 /// A line as the record's value space holds it.
@@ -1080,6 +1383,106 @@ mod tests {
                 event,
             })
             .collect()
+    }
+
+    /// Whether `value` is what `holds` says a key holds.
+    fn written_as(holds: Holds, value: &Value) -> bool {
+        match (holds, value) {
+            (Holds::Count, Value::Integer(n)) => *n >= 0,
+            (Holds::Version, Value::Integer(n)) => *n == VERSION,
+            (Holds::Text, Value::String(_)) => true,
+            (Holds::Tag(tags), Value::String(tag)) => tags.tags().contains(&tag.as_str()),
+            (Holds::Head, Value::Array(messages)) => messages.iter().all(|m| match m {
+                Value::Object(message) => {
+                    message.len() == 2
+                        && matches!(message.get("content"), Some(Value::String(_)))
+                        && message
+                            .get("role")
+                            .is_some_and(|r| written_as(Holds::Tag(Tags::Role), r))
+                }
+                _ => false,
+            }),
+            _ => false,
+        }
+    }
+
+    /// THE SCHEMA IS WHAT THE WRITER WRITES. [`schema`] is read by the
+    /// reader's key check and by the TypeScript bindings; this pins it
+    /// against [`to_value`], line by line and key by key, so a table that
+    /// says `turn` is text while the writer writes a number is red here
+    /// rather than wrong in the SPA's types.
+    #[test]
+    fn the_schema_is_what_every_kind_writes() {
+        let mut kinds = BTreeSet::new();
+        for line in every_event() {
+            let Value::Object(object) = to_value(&line) else {
+                panic!("a line is an object");
+            };
+            let kind = Kind::from_tag(match object.get("kind") {
+                Some(Value::String(k)) => k,
+                _ => panic!("a line names its kind"),
+            })
+            .expect("a known kind");
+            kinds.insert(kind.tag());
+            let fields = schema(kind);
+            for (key, value) in &object {
+                if COMMON.contains(&key.as_str()) {
+                    continue;
+                }
+                let field = fields.iter().find(|f| f.key == key).unwrap_or_else(|| {
+                    panic!(
+                        "`{}` writes `{key}`, which its schema does not declare",
+                        kind.tag()
+                    )
+                });
+                assert!(
+                    written_as(field.holds, value),
+                    "`{}`'s `{key}` is written as {value:?}, which is not {:?}",
+                    kind.tag(),
+                    field.holds
+                );
+            }
+            for field in fields.iter().filter(|f| f.required) {
+                assert!(
+                    object.contains_key(field.key),
+                    "`{}` declares `{}` required and did not write it",
+                    kind.tag(),
+                    field.key
+                );
+            }
+        }
+        assert_eq!(
+            kinds.len(),
+            Kind::ALL.len(),
+            "every kind was checked, or this test covers less than it says"
+        );
+    }
+
+    fn bindings_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(BINDINGS)
+    }
+
+    /// THE CHECKED-IN BINDINGS ARE WHAT THIS FILE GENERATES. The SPA reads
+    /// `formats/log/log.ts`; a change here that is not regenerated there is a
+    /// SPA reading a format that no longer exists, found only when it misreads
+    /// a live log. Located from `CARGO_MANIFEST_DIR`, not the working
+    /// directory, so the answer does not depend on where cargo was started.
+    #[test]
+    fn the_checked_in_bindings_are_current() {
+        let checked_in = std::fs::read_to_string(bindings_path())
+            .unwrap_or_else(|e| panic!("{BINDINGS} could not be read: {e}"));
+        assert!(
+            checked_in == typescript(),
+            "{BINDINGS} is stale against log.rs; regenerate it: cargo test -p \
+             discipline-diet --lib formats::log::tests::write_the_bindings -- --ignored"
+        );
+    }
+
+    /// Writes the bindings. Ignored: a test run never writes the tree.
+    #[test]
+    #[ignore = "writes formats/log/log.ts; run it to regenerate the bindings"]
+    fn write_the_bindings() {
+        std::fs::write(bindings_path(), typescript()).expect("the bindings are written");
     }
 
     #[test]

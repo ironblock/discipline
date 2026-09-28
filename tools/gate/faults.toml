@@ -5585,6 +5585,16 @@ legacy_signature = "formats::record::tests::the_precedence_over_prefix_reasons_i
 migrated = false
 
 [[fault]]
+id = "test.log_bindings_stale"
+kind = "seeded-gate"
+check = "test"
+target = "lib/formats::log::tests"
+label = "the log's TypeScript bindings stale against log.rs"
+failure_class = "bindings.stale"
+legacy_signature = "the_checked_in_bindings_are_current \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
 id = "test.log_seq_gap_read_as_a_log"
 kind = "seeded-gate"
 check = "test"
