@@ -60,6 +60,7 @@ use crate::client::shape::{Message, RequestShape, Role};
 use crate::client::stream::{Cancel, Ended as StreamEnded, Piece, Streaming};
 use crate::client::transport::TransportFailure;
 use crate::client::vocabulary;
+use crate::formats::log;
 
 vocabulary! {
     /// What the session is doing.
@@ -643,6 +644,176 @@ impl<S: Streaming + 'static> Drop for Session<S> {
 fn from(log: &[Logged], first: u64) -> Vec<Logged> {
     let start = usize::try_from(first).map_or(log.len(), |start| start.min(log.len()));
     log[start..].to_vec()
+}
+
+/// A logged event as a line of the session log format, `diet/formats/log`
+/// v0 (#117, R2c I3). One exhaustive match, so an event with no line fails
+/// to compile, and every word goes through the format's own vocabulary.
+#[must_use]
+pub fn line_of(logged: &Logged) -> log::Line {
+    let event = match &logged.event {
+        Event::Started {
+            opened,
+            model,
+            head,
+        } => log::Event::SessionStart {
+            opened: *opened,
+            model: model.clone(),
+            head: head
+                .iter()
+                .map(|message| log::HeadMessage {
+                    role: role_of(message.role),
+                    content: message.content.clone(),
+                })
+                .collect(),
+        },
+        Event::Asked { turn, text } => log::Event::Ask {
+            turn: *turn,
+            text: text.clone(),
+        },
+        Event::Requested { turn, lane } => log::Event::Request {
+            turn: *turn,
+            lane: match lane {
+                Lane::Trunk => log::Lane::Trunk,
+            },
+        },
+        Event::Settled { from, to } => log::Event::Settlement {
+            from: state_of(*from),
+            to: state_of(*to),
+        },
+        Event::Refused {
+            command,
+            because,
+            during,
+        } => log::Event::Refused {
+            command: command_of(*command),
+            because: refusal_of(*because),
+            during: state_of(*during),
+        },
+        Event::Reasoning { request, text } => log::Event::Delta {
+            request: *request,
+            piece: log::Piece::Reasoning(text.clone()),
+        },
+        Event::Delta { request, text } => log::Event::Delta {
+            request: *request,
+            piece: log::Piece::Text(text.clone()),
+        },
+        Event::StopAsked { turn } => log::Event::StopAsked { turn: *turn },
+        Event::Answered {
+            request,
+            text,
+            finish_reason,
+        } => log::Event::Response {
+            to_request: *request,
+            text: text.clone(),
+            finish_reason: finish_reason.clone(),
+        },
+        Event::Cancelled { request, partial } => log::Event::Cancelled {
+            request: *request,
+            partial: partial.clone(),
+        },
+        Event::Rejected {
+            request,
+            status,
+            body,
+            partial,
+        } => log::Event::RequestFailed {
+            request: *request,
+            reason: log::FailReason::Server,
+            message: body.clone(),
+            status: Some(*status),
+            partial: Some(partial.clone()),
+        },
+        Event::Failed {
+            request,
+            failure,
+            partial,
+        } => failed_line(*request, failure, partial),
+        Event::Crashed { request, why } => log::Event::RequestFailed {
+            request: *request,
+            reason: log::FailReason::Crashed,
+            message: why.clone(),
+            status: None,
+            partial: None,
+        },
+        Event::TurnSettled { turn, reason } => log::Event::TurnSettled {
+            turn: *turn,
+            reason: settle_reason_in_the_log(*reason),
+        },
+    };
+    log::Line {
+        seq: logged.seq,
+        t: logged.t,
+        event,
+    }
+}
+
+/// A logged event, written as one line of the log format: what
+/// `drive::serve` sends as each event's `data:`.
+#[must_use]
+pub fn render(logged: &Logged) -> String {
+    log::render(&line_of(logged))
+}
+
+/// A failed call's line: a timeout is `timeout`, every other transport
+/// failure `transport`, and the failure's own words are the message.
+fn failed_line(request: u64, failure: &TransportFailure, partial: &str) -> log::Event {
+    log::Event::RequestFailed {
+        request,
+        reason: match failure {
+            TransportFailure::Timeout { .. } => log::FailReason::Timeout,
+            _ => log::FailReason::Transport,
+        },
+        message: failure.to_string(),
+        status: None,
+        partial: Some(partial.to_owned()),
+    }
+}
+
+fn role_of(role: Role) -> log::Role {
+    match role {
+        Role::System => log::Role::System,
+        Role::User => log::Role::User,
+        Role::Assistant => log::Role::Assistant,
+    }
+}
+
+fn command_of(command: CommandKind) -> log::Command {
+    match command {
+        CommandKind::Ask => log::Command::Ask,
+        CommandKind::Cancel => log::Command::Cancel,
+        CommandKind::DeclareSeam => log::Command::DeclareSeam,
+        CommandKind::End => log::Command::End,
+    }
+}
+
+fn refusal_of(refusal: Refusal) -> log::Refusal {
+    match refusal {
+        Refusal::InFlight => log::Refusal::InFlight,
+        Refusal::Ended => log::Refusal::Ended,
+        Refusal::NothingInFlight => log::Refusal::NothingInFlight,
+        Refusal::SeamNotBuilt => log::Refusal::SeamNotBuilt,
+        Refusal::Stale => log::Refusal::Stale,
+    }
+}
+
+fn settle_reason_in_the_log(reason: SettleReason) -> log::SettleReason {
+    match reason {
+        SettleReason::Final => log::SettleReason::Final,
+        SettleReason::Cancelled => log::SettleReason::Cancelled,
+        SettleReason::MaxSteps => log::SettleReason::MaxSteps,
+        SettleReason::Timeout => log::SettleReason::Timeout,
+        SettleReason::Failed => log::SettleReason::Failed,
+    }
+}
+
+fn state_of(settlement: Settlement) -> log::State {
+    match settlement {
+        Settlement::Awaiting => log::State::Awaiting,
+        Settlement::Turn => log::State::Turn,
+        Settlement::Capture => log::State::Capture,
+        Settlement::Ended => log::State::Ended,
+    }
 }
 
 /// One turn's call, on its own thread: stream the answer into the log, then
@@ -1602,6 +1773,207 @@ pub(in crate::drive) mod tests {
             "a 60 ms hold shows as {} ms: {log:#?}",
             stamp("b") - stamp("a")
         );
+    }
+
+    /// One of every event, and a match with no wildcard that names each
+    /// variant: an event added to [`Event`] fails to compile here until it
+    /// has a sample, and so a line.
+    fn one_of_every_event() -> Vec<Logged> {
+        let events = vec![
+            Event::Started {
+                opened: 1_790_000_000_000,
+                model: "a-model".to_owned(),
+                head: vec![Message::new(Role::System, HEAD)],
+            },
+            Event::Asked {
+                turn: 1,
+                text: "say \"hi\"\n".to_owned(),
+            },
+            Event::Settled {
+                from: Settlement::Awaiting,
+                to: Settlement::Turn,
+            },
+            Event::Requested {
+                turn: 1,
+                lane: Lane::Trunk,
+            },
+            Event::Refused {
+                command: CommandKind::Cancel,
+                because: Refusal::Stale,
+                during: Settlement::Turn,
+            },
+            Event::Reasoning {
+                request: 3,
+                text: "thinking\n".to_owned(),
+            },
+            Event::Delta {
+                request: 3,
+                text: "Hel".to_owned(),
+            },
+            Event::StopAsked { turn: 1 },
+            Event::Answered {
+                request: 3,
+                text: "Hello".to_owned(),
+                finish_reason: Some("stop".to_owned()),
+            },
+            Event::Cancelled {
+                request: 3,
+                partial: "Hel".to_owned(),
+            },
+            Event::Rejected {
+                request: 3,
+                status: 503,
+                body: "busy".to_owned(),
+                partial: "Hel".to_owned(),
+            },
+            Event::Crashed {
+                request: 3,
+                why: "a panic".to_owned(),
+            },
+            Event::Failed {
+                request: 3,
+                failure: TransportFailure::Timeout {
+                    after: Duration::from_secs(5),
+                },
+                partial: "Hel".to_owned(),
+            },
+            Event::TurnSettled {
+                turn: 1,
+                reason: SettleReason::MaxSteps,
+            },
+        ];
+        let mut kinds = std::collections::BTreeSet::new();
+        for event in &events {
+            kinds.insert(match event {
+                Event::Started { .. } => 0,
+                Event::Asked { .. } => 1,
+                Event::Requested { .. } => 2,
+                Event::Settled { .. } => 3,
+                Event::Refused { .. } => 4,
+                Event::Reasoning { .. } => 5,
+                Event::Delta { .. } => 6,
+                Event::StopAsked { .. } => 7,
+                Event::Answered { .. } => 8,
+                Event::Cancelled { .. } => 9,
+                Event::Rejected { .. } => 10,
+                Event::Crashed { .. } => 11,
+                Event::Failed { .. } => 12,
+                Event::TurnSettled { .. } => 13,
+            });
+        }
+        assert_eq!(kinds.len(), 14, "a variant has no sample");
+        events
+            .into_iter()
+            .enumerate()
+            .map(|(seq, event)| Logged {
+                seq: seq as u64,
+                t: seq as u64 * 7,
+                event,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_event_the_session_logs_is_a_line_the_log_format_reads() {
+        for logged in one_of_every_event() {
+            let rendered = render(&logged);
+            assert!(!rendered.contains('\n'), "a line broke: {rendered}");
+            assert_eq!(
+                log::line(&rendered),
+                Ok(line_of(&logged)),
+                "{rendered} does not read back as the line it was written from"
+            );
+        }
+
+        // A round trip cannot see a conversion that loses something on the
+        // way in, so what each kind of ending SAYS is pinned too.
+        let said = |event: Event| {
+            line_of(&Logged {
+                seq: 9,
+                t: 0,
+                event,
+            })
+            .event
+        };
+        assert_eq!(
+            said(Event::Cancelled {
+                request: 3,
+                partial: "Hel".to_owned()
+            }),
+            log::Event::Cancelled {
+                request: 3,
+                partial: "Hel".to_owned()
+            }
+        );
+        assert_eq!(
+            said(Event::Failed {
+                request: 3,
+                failure: TransportFailure::Timeout {
+                    after: Duration::from_secs(5)
+                },
+                partial: "par".to_owned()
+            }),
+            log::Event::RequestFailed {
+                request: 3,
+                reason: log::FailReason::Timeout,
+                message: TransportFailure::Timeout {
+                    after: Duration::from_secs(5)
+                }
+                .to_string(),
+                status: None,
+                partial: Some("par".to_owned()),
+            }
+        );
+        assert_eq!(
+            said(Event::Rejected {
+                request: 3,
+                status: 503,
+                body: "busy".to_owned(),
+                partial: String::new()
+            }),
+            log::Event::RequestFailed {
+                request: 3,
+                reason: log::FailReason::Server,
+                message: "busy".to_owned(),
+                status: Some(503),
+                partial: Some(String::new()),
+            }
+        );
+
+        // And a real session's whole log, every rule that spans lines
+        // included: an answer, a cancel, a failure, a refusal by the server.
+        let gate = Gate::new();
+        let canned = Canned::new([
+            vec![
+                Step::Reasoning("hmm\n".to_owned()),
+                Step::Delta("one".to_owned()),
+            ],
+            vec![Step::Delta("par".to_owned()), Step::Hold(gate.clone())],
+            vec![Step::Fail(TransportFailure::Connect("refused".to_owned()))],
+            vec![Step::Reject(503, "busy".to_owned())],
+        ]);
+        let session = Session::open(canned, template());
+        for turn in 1..=4_u32 {
+            session.ask("go").expect("accepted");
+            if turn == 2 {
+                assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+                assert_eq!(session.cancel(2), Ok(()));
+            }
+            wait_until(&session, "the turn to settle", |log| {
+                log.iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == turn as usize
+                    && settled(log)
+            });
+        }
+        let document: String = session
+            .events_from(0)
+            .iter()
+            .map(|logged| render(logged) + "\n")
+            .collect();
+        let read = log::parse(&document).expect("the session's log is a v0 log");
+        assert_eq!(read.len(), session.events_from(0).len());
     }
 
     #[test]

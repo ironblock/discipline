@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 91
+faults = 94
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -873,8 +873,10 @@ becomes = '''
                 return Ok(());'''
 catches = [
     "drive::serve::tests::a_cancel_over_http_reaches_a_call_blocked_mid_answer",
+    "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
     "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
 ]
 
@@ -940,6 +942,7 @@ catches = [
     "drive::serve::tests::a_late_reader_replays_from_zero_then_tails",
     "drive::serve::tests::a_reader_resuming_after_an_id_of_this_process_starts_at_the_next",
     "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
+    "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_failed_call_is_typed_and_leaves_the_trunk_alone",
     "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
@@ -947,6 +950,7 @@ catches = [
     "drive::session::tests::a_turn_the_server_refused_is_logged_as_refused_and_leaves_the_trunk_alone",
     "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
     "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
     "drive::session::tests::the_log_is_numbered_by_position_and_a_reader_can_resume_from_any_point",
 ]
 
@@ -1052,9 +1056,11 @@ becomes = '''
                         request: request.saturating_sub(2),
                         text: text.to_owned(),'''
 catches = [
+    "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
     "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
     "drive::session::tests::every_call_is_a_request_and_what_it_produced_names_it",
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
 ]
 
 [[fault]]
@@ -1131,6 +1137,7 @@ catches = [
     "drive::serve::tests::a_reader_that_leaves_is_let_go",
     "drive::serve::tests::a_server_bound_on_ipv6_loopback_answers_the_host_a_browser_sends_it",
     "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
+    "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
 ]
 
 [[fault]]
@@ -1483,4 +1490,44 @@ becomes = '''
             answer.reasoning = (!reasoning.is_empty()).then(|| reasoning.trim_end().to_owned());'''
 catches = [
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
+]
+
+[[fault]]
+id = "drive.session-a-line-drops-the-partial"
+failure_class = "drive.session-a-line-drops-the-partial"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            partial: partial.clone(),'''
+becomes = '''
+            partial: String::new(),'''
+catches = [
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
+]
+
+[[fault]]
+id = "drive.session-a-timeout-line-says-transport"
+failure_class = "drive.session-a-timeout-line-says-transport"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            TransportFailure::Timeout { .. } => log::FailReason::Timeout,'''
+becomes = '''
+            TransportFailure::Timeout { .. } => log::FailReason::Transport,'''
+catches = [
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
+]
+
+[[fault]]
+id = "drive.serve-the-id-is-not-the-seq"
+failure_class = "drive.serve-the-id-is-not-the-seq"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+                let _ = write!(out, "id: {}-{}\ndata: {data}\n\n", self.opened, logged.seq);'''
+becomes = '''
+                let _ = write!(out, "id: {}-{}\ndata: {data}\n\n", self.opened, logged.seq + 1);'''
+catches = [
+    "drive::serve::tests::a_reader_resuming_after_an_id_of_this_process_starts_at_the_next",
+    "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
 ]
