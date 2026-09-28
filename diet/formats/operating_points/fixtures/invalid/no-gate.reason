@@ -1,0 +1,3 @@
+`[alpha]` has a sampler and no gate. Both are required: an entry missing one
+does not say how the model was served, and saying exactly that is the reason
+these are transcribed measurements rather than preferences.

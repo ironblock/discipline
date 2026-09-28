@@ -1,0 +1,2 @@
+LEARNED: the parser reads <stdin> as a file
+PLAN: rename [core] to [engine]

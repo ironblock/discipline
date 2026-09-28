@@ -1,0 +1,9 @@
+A results directory calling itself `reproducible-by-config` whose record is
+adapted from a source that is `pinned_only`. The digest pins WHICH log was
+read; it does not make that log reachable, and an unscrubbed session
+transcript cannot enter this repository. Nothing can re-fire it, so the
+honest kind is `historical-observation`.
+
+Its weights are a digest and not hosted, on purpose: a fixture red for
+another fixture's reason is not a pass, and the hosted refusal already has
+its own case next door.

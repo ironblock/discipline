@@ -1,0 +1,9 @@
+The `main` lane is served by `big` and then by `small`. A lane is a role on a
+substrate, fixed for the run; a lane that changes substrate is two lanes, and
+the record should say so by naming two.
+
+The cost of allowing it lands on `rejected`, which carries a lane and no
+substrate of its own. Its substrate is its lane's, by reference -- one fact,
+written once. A lane with two substrates would give that reference two
+answers, and then the row would need its own copy of a fact the lane already
+holds.

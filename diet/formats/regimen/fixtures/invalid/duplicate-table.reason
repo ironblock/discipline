@@ -1,0 +1,4 @@
+NOT-TOML: The same table opened twice. TOML refuses it and so does this
+grammar's parser: the second header would have to replace the first table
+or merge into it, and a regimen that quietly replaces a binding is not the
+regime that was recorded.

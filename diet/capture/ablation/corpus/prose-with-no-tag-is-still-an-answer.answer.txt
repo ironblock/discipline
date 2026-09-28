@@ -1,0 +1,1 @@
+I read the grammar and the fixtures under /work/diet/formats/shell.

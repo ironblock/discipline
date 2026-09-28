@@ -1,0 +1,381 @@
+#!/usr/bin/env bash
+# Gate 0 for this directory: every number the report states re-derives from the
+# artefacts committed beside it -- and here the product IS a derivation, so it
+# is re-derived whole. `report.json` and `decision-rule.toml` are hashed
+# against the digests the record declares, the rule is applied to the report
+# by the applier below, and the result must be byte-for-byte the committed
+# `verdict.json`. A verdict edited after the fact, a rule edited after the
+# fact, and a report swapped for another run's are each caught.
+#
+# WHAT THIS DOES NOT DO: it does not re-run the bakeoff. The cells in
+# `report.json` are taken at their digest; a metric computed wrongly by the
+# binary that wrote them is caught in that directory's gate 0, not here.
+set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+
+python3 - <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+FENCE = "+++"
+
+
+# 0 CLEAN, 1 FOUND SOMETHING, 2 COULD NOT RUN -- the repository's contract.
+def cannot_run(message):
+    print(f"recompute: {message}", file=sys.stderr)
+    raise SystemExit(2)
+
+
+# A Python without tomllib cannot read the rule, and that is a 2, not a
+# traceback that reads as "the numbers do not re-derive".
+try:
+    import tomllib
+except ImportError:
+    cannot_run(f"this needs Python 3.11 or later for tomllib; this is {sys.version.split()[0]}")
+
+
+def read(path):
+    try:
+        return pathlib.Path(path).read_text(encoding="utf-8")
+    except OSError as err:
+        cannot_run(f"{path} cannot be read: {err.strerror}")
+
+
+def digest(path):
+    try:
+        return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+    except OSError as err:
+        sys.exit(f"{path} is consumed by the record and is not here: {err.strerror}")
+
+
+text = read("README.md")
+if not text.startswith(FENCE + "\n"):
+    cannot_run("README.md does not open with +++ front-matter")
+try:
+    front = tomllib.loads(text.split(FENCE + "\n", 2)[1])
+except (tomllib.TOMLDecodeError, IndexError) as err:
+    cannot_run(f"README.md front-matter is not TOML: {err}")
+
+rows = []
+for number, line in enumerate(read("run.jsonl").splitlines(), start=1):
+    if not line.strip():
+        continue
+    try:
+        rows.append(json.loads(line))
+    except json.JSONDecodeError as err:
+        cannot_run(f"run.jsonl line {number} is not JSON: {err.msg}")
+summary = next((row for row in rows if row.get("record") == "summary"), None)
+if summary is None:
+    cannot_run("run.jsonl has no summary row")
+claims = [row for row in rows if row.get("record") == "claim"]
+if len(claims) != 1:
+    cannot_run(f"run.jsonl carries {len(claims)} claim rows, this directory adjudicates one")
+
+consumed = claims[0].get("consumes", [])
+if not consumed:
+    sys.exit("the claim consumes nothing, so there is nothing here to re-derive from")
+matched = 0
+for artifact in consumed:
+    found = digest(artifact["path"])
+    if found != artifact["sha256"]:
+        sys.exit(f"{artifact['path']} is declared {artifact['sha256']} and hashes to {found}")
+    matched += 1
+for field, counted in (("targets_checked", len(consumed)), ("targets_matched", matched)):
+    if summary[field] != counted:
+        sys.exit(f"the summary says {field} is {summary[field]}, the rows hold {counted}")
+    if front.get(field) not in (None, counted):
+        sys.exit(f"the front-matter says {field} is {front[field]}, the rows hold {counted}")
+
+product = digest("verdict.json")
+for where, stated in (("front-matter", front["product_sha256"]),
+                      ("the summary row", summary["product_sha256"])):
+    if stated != product:
+        sys.exit(f"{where} states product_sha256 {stated}, the product hashes to {product}")
+
+# THE APPLIER, verbatim. --------------------------------------------------
+# THE RULE APPLIER. One function from two committed files to one verdict, so
+# that a reader holding `report.json` and `decision-rule.toml` can re-derive
+# `verdict.json` without this directory's author in the room. Ratified on
+# #24 (5654868940): "for this run the rule is fixed", applied mechanically
+# after the numbers exist, which is not choosing after seeing them because
+# the rule was written before they did.
+#
+# Three readings of the ratified text are taken here and stated, each on the
+# verdict itself under `readings`, because the text does not spell them and a
+# reading made silently is a rule edited after the fact:
+#
+#   1. "the primary register" is the tripped-up register -- the `mistake`
+#      set, named on #24 as "precision at budget on the tripped-up register";
+#      the reversal register is the supersession signal and is scored, not
+#      adjudicated.
+#   2. "the floor's" separation is the floor embedder's d-prime on the SAME
+#      (set, scoring, gate) cell as the cell being compared, so a gate that
+#      collapses spread is charged to both sides alike.
+#   3. A margin that cannot be computed -- d-prime undefined on either side,
+#      or the floor's cell a control failure -- satisfies NEITHER bound. It
+#      cannot lift a cell to `supported` and it cannot sink the best cell to
+#      `refuted`; it is carried as `null` where a number would be.
+#
+#   4. "the best cell" in the refuted clause is the best-SEPARATED contender
+#      cell -- the one with the highest defined d-prime -- because the clause
+#      is about separation. A fresh instance found this reading undisclosed
+#      and found that the verdict turns on it: read as the best cell on the
+#      primary endpoint, two cells tie at precision 1.0 and one of them sits
+#      under the floor, so the alternative is computed and carried under
+#      `alternatives` for the maintainer to rule on, not chosen here.
+#   5. A "cell" is what the pre-registration calls one: a (scoring, gate)
+#      pair, eight per embedder, so a gate arm is its own cell. The ruling's
+#      "(model x scoring) cell" is read as that, since it is the
+#      pre-registration the ruling adjudicates.
+#
+# The pre-gate sub-rule is applied per (embedder, scoring) pair on the same
+# register at the same budget, mirroring the main rule's "for at least one
+# cell": `refuted` when no pair improves by the margin and at least one is
+# lower by it. The "every pair lower" reading is carried under
+# `alternatives` as well. Its `supported` clause needs a paired-bootstrap p between the two
+# gate arms, and `report.json` carries paired bootstraps ACROSS EMBEDDERS
+# only; so if some cell clears the margin, the sub-verdict is `unadjudicated`
+# with that stated, never `supported` on a p nobody computed.
+#
+# The floor is a control, not a contender: it is compared against and never
+# nominated. The directory's `result` is the main rule's verdict; the
+# pre-gate sub-verdict rides beside it in the product, and how the two
+# combine into one word for the two-conjunct hypothesis is not in the
+# ratified text and is disclosed, not decided, here.
+
+PRIMARY_REGISTER = "mistake"
+
+
+def metric_at(cell, name, budget):
+    found = [
+        reading["value"]
+        for reading in cell["metrics"]
+        if reading["metric"] == name and reading["budget"] == budget
+    ]
+    if len(found) > 1:
+        raise ValueError(f"{name} at budget {budget} is read twice on one cell")
+    return found[0] if found else None
+
+
+def scored_cells(report, register):
+    return [
+        cell
+        for cell in report["cells"]
+        if cell["result"] == "scored" and cell["set"] == register
+    ]
+
+
+def margin(cell_d, floor_d):
+    if cell_d is None or floor_d is None:
+        return None
+    return round(cell_d - floor_d, 4)
+
+
+def adjudicate(report, rule):
+    thresholds = rule["rule"]
+    floor = rule["floor"]["embedder"]
+    k = thresholds["budget"]
+    cells = scored_cells(report, PRIMARY_REGISTER)
+    contenders = [c for c in cells if c["embedder"] != floor]
+    floor_d_prime = {
+        (c["scoring"], c["gate"]): metric_at(c, "d_prime", k)
+        for c in cells
+        if c["embedder"] == floor
+    }
+
+    evaluated = []
+    for cell in sorted(contenders, key=lambda c: (c["scoring"], c["gate"], c["embedder"])):
+        precision = metric_at(cell, "precision_at_k", k)
+        over_firing = metric_at(cell, "over_firing", k)
+        d_prime = metric_at(cell, "d_prime", k)
+        floor_d = floor_d_prime.get((cell["scoring"], cell["gate"]))
+        gap = margin(d_prime, floor_d)
+        clears = (
+            precision is not None
+            and over_firing is not None
+            and gap is not None
+            and precision >= thresholds["supported_precision_at_5"]
+            and over_firing <= thresholds["supported_over_firing_at_5"]
+            and gap >= thresholds["supported_d_prime_margin_over_floor"]
+        )
+        evaluated.append(
+            {
+                "embedder": cell["embedder"],
+                "scoring": cell["scoring"],
+                "gate": cell["gate"],
+                "precision_at_k": precision,
+                "over_firing": over_firing,
+                "d_prime": d_prime,
+                "floor_d_prime": floor_d,
+                "d_prime_margin_over_floor": gap,
+                "clears_supported": clears,
+            }
+        )
+
+    supported_by = [
+        f"{e['embedder']}/{e['scoring']}/{e['gate']}" for e in evaluated if e["clears_supported"]
+    ]
+
+    ceiling = thresholds["refuted_precision_ceiling"]
+    reaches_ceiling = [
+        {
+            "cell": f"{c['embedder']}/{c['scoring']}/{c['gate']}",
+            "budget": reading["budget"],
+            "precision_at_k": reading["value"],
+        }
+        for c in contenders
+        for reading in c["metrics"]
+        if reading["metric"] == "precision_at_k" and reading["value"] >= ceiling
+    ]
+    no_cell_reaches_ceiling = not reaches_ceiling
+
+    defined = [e for e in evaluated if e["d_prime"] is not None]
+    best = max(defined, key=lambda e: e["d_prime"]) if defined else None
+    best_margin = best["d_prime_margin_over_floor"] if best else None
+    small = thresholds["refuted_d_prime_margin_over_floor"]
+    best_fails_floor = best_margin is not None and best_margin < small
+
+    if supported_by:
+        verdict = "supported"
+    elif no_cell_reaches_ceiling or best_fails_floor:
+        verdict = "refuted"
+    else:
+        verdict = "inconclusive"
+
+    # THE ALTERNATIVES, computed and carried so that a ruling on any reading
+    # is a measured delta rather than a re-run. None of these is the verdict.
+    def under(best_cells):
+        fails = any(
+            e["d_prime_margin_over_floor"] is not None
+            and e["d_prime_margin_over_floor"] < small
+            for e in best_cells
+        )
+        if supported_by:
+            return "supported"
+        return "refuted" if (no_cell_reaches_ceiling or fails) else "inconclusive"
+
+    with_precision = [e for e in evaluated if e["precision_at_k"] is not None]
+    top = max(e["precision_at_k"] for e in with_precision) if with_precision else None
+    tied = [e for e in with_precision if e["precision_at_k"] == top]
+    tied_defined = [e for e in tied if e["d_prime"] is not None]
+    tie_broken = [max(tied_defined, key=lambda e: e["d_prime"])] if tied_defined else []
+    alternatives = {
+        "best_cell_is_best_precision_and_every_tie_must_clear": {
+            "cells": [f"{e['embedder']}/{e['scoring']}/{e['gate']}" for e in tied],
+            "verdict": under(tied),
+        },
+        "best_cell_is_best_precision_with_ties_broken_by_d_prime": {
+            "cells": [f"{e['embedder']}/{e['scoring']}/{e['gate']}" for e in tie_broken],
+            "verdict": under(tie_broken),
+        },
+    }
+
+    pre_gate = thresholds["pre_gate"]
+    by_arm = {}
+    for cell in contenders:
+        by_arm.setdefault((cell["embedder"], cell["scoring"]), {})[cell["gate"]] = metric_at(
+            cell, "precision_at_k", k
+        )
+    deltas = []
+    for (embedder, scoring), arms in sorted(by_arm.items()):
+        if "with_gate" in arms and "without_gate" in arms:
+            deltas.append(
+                {
+                    "embedder": embedder,
+                    "scoring": scoring,
+                    "with_gate": arms["with_gate"],
+                    "without_gate": arms["without_gate"],
+                    "delta": round(arms["with_gate"] - arms["without_gate"], 4),
+                }
+            )
+    improved = [d for d in deltas if d["delta"] >= pre_gate["margin"]]
+    worsened = [d for d in deltas if d["delta"] <= -pre_gate["margin"]]
+    every_lower = bool(deltas) and len(worsened) == len(deltas)
+    if improved:
+        pre_gate_verdict = "unadjudicated"
+        pre_gate_because = (
+            "a cell clears the margin, and `supported` needs a paired bootstrap p "
+            "between the gate arms that report.json does not carry"
+        )
+    elif worsened:
+        pre_gate_verdict = "refuted"
+        pre_gate_because = "no cell improves by the margin and at least one is lower by it"
+    else:
+        pre_gate_verdict = "inconclusive"
+        pre_gate_because = "every delta is inside the margin"
+
+    return {
+        "rule": {
+            "budget": k,
+            "floor": floor,
+            "primary_register": PRIMARY_REGISTER,
+            "supported": thresholds["supported"],
+            "refuted": thresholds["refuted"],
+            "inconclusive": thresholds["inconclusive"],
+        },
+        "readings": {
+            "primary_register": "the tripped-up register, the `mistake` set",
+            "floor_separation": "the floor's d_prime on the same (set, scoring, gate) cell",
+            "undefined_margin": "satisfies neither bound and is carried as null",
+            "best_cell": "the contender cell with the highest defined d_prime on the primary register",
+            "cell": "a (scoring, gate) pair as the pre-registration lists them, so a gate arm is its own cell",
+            "pre_gate_scope": "per contender (embedder, scoring) pair on the primary register at the budget",
+            "pre_gate_refuted": "no pair improves by the margin and at least one is lower by it",
+        },
+        "alternatives": alternatives,
+        "cells": evaluated,
+        "supported_by": supported_by,
+        "refuted_by": {
+            "no_cell_reaches_precision_ceiling": no_cell_reaches_ceiling,
+            "cells_reaching_ceiling": len(reaches_ceiling),
+            "best_cell": (
+                f"{best['embedder']}/{best['scoring']}/{best['gate']}" if best else None
+            ),
+            "best_cell_d_prime": best["d_prime"] if best else None,
+            "best_cell_margin_over_floor": best_margin,
+            "best_cell_fails_floor_margin": best_fails_floor,
+        },
+        "verdict": verdict,
+        "pre_gate": {
+            "margin": pre_gate["margin"],
+            "deltas": deltas,
+            "improved": len(improved),
+            "worsened": len(worsened),
+            "verdict": pre_gate_verdict,
+            "because": pre_gate_because,
+            "alternative_every_pair_lower": "refuted" if every_lower else "inconclusive",
+        },
+    }
+
+# ------------------------------------------------------------------------
+
+try:
+    report = json.loads(read("report.json"))
+except json.JSONDecodeError as err:
+    cannot_run(f"report.json is not JSON: {err.msg}")
+try:
+    rule = tomllib.loads(read("decision-rule.toml"))
+except tomllib.TOMLDecodeError as err:
+    cannot_run(f"decision-rule.toml is not TOML: {err}")
+
+derived = json.dumps(adjudicate(report, rule), indent=2, sort_keys=True) + "\n"
+committed = read("verdict.json")
+yielded = json.loads(derived)["verdict"]
+if derived != committed:
+    try:
+        stated = json.loads(committed).get("verdict")
+    except json.JSONDecodeError:
+        stated = "unreadable"
+    sys.exit(
+        f"verdict.json does not re-derive: the rule over report.json yields "
+        f"{yielded!r} and the committed file says {stated!r}, or the two differ "
+        f"somewhere below the verdict"
+    )
+for where, stated in (("front-matter", front["result"]), ("the claim row", claims[0]["result"])):
+    if stated != yielded:
+        sys.exit(f"{where} says {stated!r}, the rule yields {yielded!r}")
+
+print(f"{len(consumed)} artefact(s), the product and the verdict re-derive")
+PY

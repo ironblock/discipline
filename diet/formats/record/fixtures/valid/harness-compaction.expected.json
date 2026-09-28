@@ -1,0 +1,24 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532\",\"id\":\"local\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]},\"source\":{\"adapter\":\"claude-code\",\"kind\":\"adapted\",\"source_available\":\"pinned_only\",\"source_digest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}}\n{\"index\":1,\"prefill_tokens\":18400,\"record\":\"turn\"}\n{\"id\":\"u/1\",\"lane\":\"main\",\"record\":\"request\",\"substrate\":\"local\",\"text\":\"keep going\"}\n{\"index\":2,\"prefill_tokens\":1900,\"record\":\"turn\"}\n{\"id\":\"u/2\",\"lane\":\"main\",\"record\":\"request\",\"substrate\":\"local\",\"text\":\"and now the next thing\"}\n{\"at_turn\":2,\"id\":\"compact/2/0\",\"record\":\"compaction\",\"source\":\"harness_compaction\",\"summary_chars\":1840}\n{\"kind\":\"drive\",\"prefill_tokens_total\":20300,\"product_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"record\":\"summary\",\"turns\":2}\n",
+  "kinds": [
+    "start",
+    "turn",
+    "request",
+    "compaction",
+    "summary"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "hosted_substrates": [],
+    "substrates": [
+      "local"
+    ]
+  },
+  "source": {
+    "adapter": "claude-code",
+    "kind": "adapted",
+    "source_available": "pinned_only",
+    "source_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  }
+}

@@ -27,9 +27,12 @@ use std::process::Command;
 const VERBS: &[(&str, &str)] = &[
     ("classify-decline", "decline"),
     ("parse-interview", "interview"),
+    ("check-log", "log"),
+    ("check-operating-points", "operating_points"),
     ("check-record", "record"),
     ("check-regimen", "regimen"),
     ("parse-shell", "shell"),
+    ("parse-verdict", "verdict"),
 ];
 
 /// The binary cargo built for this test run. Not a path this file composes:
@@ -39,6 +42,27 @@ const DIET: &str = env!("CARGO_BIN_EXE_diet");
 fn formats_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("formats")
 }
+
+/// The register the bakeoff fixture is built over.
+const BAKEOFF_REGISTER: &str = include_str!("../capture/sense/register/authored-mistake.jsonl");
+
+/// The `start` row of the bakeoff fixture's run record.
+const BAKEOFF_START: &str = concat!(
+    r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"bakeoff","dogma_version":0,"substrates":[{"id":"#,
+    r#""processor","engine":{"name":"none","version_or_digest":"0"},"weights":{"kind":"#,
+    r#""digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"#,
+    r#""hardware_fingerprint":"152e2fc3bef0c4a186e04612d86d9e90cacf26c5c71da926630cee1f53031f01","sampler_card":{"seed":0},"reasoning":"off"}]}}"#
+);
+
+/// Its `summary` row.
+// Every summary row carries `product_sha256`, a recompute's included: ruled
+// (a) on #68, 2026-09-11, because binary provenance is a fact about the row
+// rather than about the kind.
+const BAKEOFF_SUMMARY: &str = concat!(
+    r#"{"record":"summary","kind":"recompute","targets_checked":1,"targets_matched":1,"#,
+    r#""digests":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],"#,
+    r#""product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}"#
+);
 
 /// Run the binary and report what it did: exit code, stdout, stderr.
 fn run(args: &[&str]) -> (i32, String, String) {
@@ -81,6 +105,35 @@ fn as_text(path: &Path) -> String {
     path.to_str()
         .unwrap_or_else(|| panic!("{} is not UTF-8", path.display()))
         .to_owned()
+}
+
+/// The result reaches stdout at all.
+///
+/// "A run that prints nothing at all" is the third of the three mutations
+/// this file's own doc says it exists to catch, and it was the one with no
+/// test of its own: every other test here parses stdout as JSON on its way to
+/// some different claim, so that mutation broke five of them at once and was
+/// graded by the phrase `stdout is not JSON` lifted out of whichever panicked
+/// first. The CLI is the only way anything outside this crate reads a format,
+/// so "the result reaches stdout" is a rule in its own right, and a rule with
+/// a test of its own is one cargo's `test <name> ... FAILED` line can name.
+#[test]
+fn every_verb_prints_its_result_on_stdout() {
+    for (verb, format) in VERBS {
+        let case = cases(format, "valid")
+            .into_iter()
+            .next()
+            .expect("a valid fixture");
+        let path = as_text(&case);
+        let (code, out, err) = run(&[verb, &path]);
+        assert!(
+            !out.trim().is_empty(),
+            "{verb} {path}: exit {code} and nothing on stdout, so the result \
+             reached nobody; stderr {err:?}"
+        );
+        serde_json::from_str::<serde_json::Value>(&out)
+            .unwrap_or_else(|why| panic!("{verb} {path}: stdout is not JSON ({why}): {out:?}"));
+    }
 }
 
 #[test]
@@ -179,4 +232,314 @@ fn every_format_is_published_under_exactly_one_verb() {
         named, declared,
         "every format is published under a verb, and every verb names a format"
     );
+}
+
+// The router is a lane, not a format, and `route` is the first verb that is
+// not one format's projection. It must still behave like every other verb at
+// the boundary: a structured result on stdout, exit 0 when the drive is a
+// drive, exit 1 when it is not, and nothing a caller would have to parse out
+// of prose.
+#[test]
+fn the_route_verb_answers_with_a_census_and_not_with_prose() {
+    let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("capture/router/corpus");
+    let mut drives: Vec<PathBuf> = std::fs::read_dir(&corpus)
+        .unwrap_or_else(|err| panic!("{}: {err}", corpus.display()))
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+        .collect();
+    drives.sort();
+    assert!(
+        !drives.is_empty(),
+        "{}: no drives, so this test would pass over nothing",
+        corpus.display()
+    );
+    for drive in &drives {
+        let path = drive.to_str().expect("a UTF-8 path");
+        let (code, out, err) = run(&["route", path]);
+        assert_eq!(code, 0, "route {path}: {err}");
+        assert!(err.is_empty(), "route {path} wrote to stderr: {err}");
+        let answer: serde_json::Value = serde_json::from_str(&out)
+            .unwrap_or_else(|err| panic!("route {path}: stdout is not JSON ({err}): {out:?}"));
+        assert_eq!(answer["ok"], serde_json::json!(true), "route {path}");
+        // A lane is not a format, and a census answered under a format's
+        // name would be read as that format's value.
+        assert_eq!(
+            answer["format"],
+            serde_json::json!("route"),
+            "route {path}: answered under another name, `{}`",
+            answer["format"]
+        );
+
+        // The census the drive computes, not merely a census. The counts are
+        // read from the corpus's own expectation file, which is authored by
+        // hand beside the drive, so a binary that answered with an empty
+        // census -- or with any other drive's -- says so here.
+        let census = &answer["value"];
+        let expected: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(drive.with_extension("expected.json"))
+                .unwrap_or_else(|err| panic!("{}: {err}", drive.display())),
+        )
+        .expect("an expectation is JSON");
+        for key in ["forks", "naive_forks", "judgment_asks"] {
+            assert_eq!(
+                census[key], expected[key],
+                "route {path}: the census reports {key} {} where the drive spends {}",
+                census[key], expected[key]
+            );
+        }
+        assert_eq!(
+            census["unclassified"].as_u64(),
+            expected["unclassified"]
+                .as_array()
+                .map(|ids| ids.len() as u64),
+            "route {path}: the census miscounts the calls the table could not place"
+        );
+        // Unwrapped, not compared as options: a missing count reads as
+        // `None`, and `None < Some(_)` would let this pass over a census
+        // that had no forks in it at all.
+        let forks = census["forks"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("route {path}: the census counts no forks: {census}"));
+        let naive = census["naive_forks"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("route {path}: the census counts no naive forks: {census}"));
+        assert!(
+            forks < naive,
+            "route {path}: the router spent no fewer forks than the naive design: {census}"
+        );
+        assert!(
+            census["reduction"].is_number(),
+            "route {path}: the reduction is not a number: {census}"
+        );
+        assert!(
+            census["per_class"]
+                .as_object()
+                .is_some_and(|fired| !fired.is_empty()),
+            "route {path}: a census that names no class that fired: {census}"
+        );
+    }
+
+    // A file that is not a record is the lane's `exit 1`, and it says so in
+    // the same shape as a success rather than on stderr.
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cli.rs");
+    let source = source.to_str().expect("a UTF-8 path");
+    let (code, out, err) = run(&["route", source]);
+    assert_eq!(code, 1, "a source file routed as a drive: {out}{err}");
+    assert!(out.contains("\"ok\":false"), "{out}");
+    assert!(out.contains("\"error\""), "{out}");
+}
+
+/// The bakeoff verb runs the bakeoff, proven by running the program.
+///
+/// `bakeoff` was the one verb with no subprocess test: every other format is
+/// exercised here by data, and the runner's own lane tested `capture::bakeoff`
+/// as a FUNCTION. A review pointed the `bakeoff` row of the command table at
+/// `Operation::Route`, rebuilt, and ran the whole suite: 582 tests, all green,
+/// while `diet bakeoff` answered with the router's refusal. That is exactly the
+/// dispatch defect this file's docstring says data catches and a table-checked-
+/// against-itself does not.
+///
+/// The assertion is not "the output says bakeoff". A mis-wired verb still
+/// labels its answer, and an error path would satisfy that while proving
+/// nothing ran. It is that the PROGRAM's answer equals the LIBRARY function's
+/// answer for the same directory -- so the verb is pinned to the lane behind
+/// it, and the run has to have actually happened to produce anything to
+/// compare.
+#[test]
+fn the_bakeoff_verb_runs_the_bakeoff_and_not_another_lane() {
+    let dir = std::env::temp_dir().join(format!(
+        "diet-bakeoff-cli-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_nanos())
+            .unwrap_or_default()
+    ));
+    let path = write_bakeoff_run(&dir);
+
+    // The library's answer for this directory, and then the program's.
+    let expected = diet::capture::bakeoff::run(&path)
+        .unwrap_or_else(|err| panic!("the library did not report: {err}"));
+    let mut rendered = String::new();
+    diet::formats::record::json::render(&expected, &mut rendered);
+
+    let (code, out, err) = run(&["bakeoff", path.to_str().expect("a UTF-8 path")]);
+    assert_eq!(code, 0, "bakeoff {}: {err}", path.display());
+    assert!(err.is_empty(), "bakeoff wrote to stderr: {err}");
+
+    let answer: serde_json::Value = serde_json::from_str(&out)
+        .unwrap_or_else(|why| panic!("stdout is not JSON ({why}): {out:?}"));
+    assert_eq!(answer["ok"], serde_json::json!(true), "{out}");
+    assert_eq!(answer["format"], serde_json::json!("bakeoff"), "{out}");
+
+    // The whole report, not a field of it. `cells`, `comparisons` and `budget`
+    // are the bakeoff's own shape; no other lane produces them, and a verb
+    // pointed anywhere else cannot match this however it labels itself.
+    let library: serde_json::Value = serde_json::from_str(&rendered)
+        .unwrap_or_else(|why| panic!("the library's report is not JSON ({why})"));
+    assert_eq!(
+        answer["value"], library,
+        "the program's report and the library's differ for the same input"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `--into` is a SECOND ARGUMENT SHAPE through the same dispatch, and a shape
+/// is what a subprocess test catches.
+///
+/// `the_bakeoff_verb_runs_the_bakeoff_and_not_another_lane` pins the verb to
+/// its lane. It does not pin the flag: `capture::bakeoff::assemble` is tested
+/// as a FUNCTION, and the arm that routes `--into` to it lives in `bin/diet.rs`
+/// where no test reached. A `--into` misspelled in that match, or `path` and
+/// `into` transposed, falls through to the usage error with every unit test
+/// still green -- which is the defect the sibling test's docstring was written
+/// about, one argument along.
+///
+/// So both directions: the flag spelled right assembles, and a flag spelled
+/// wrong is a usage error that writes NOTHING. Without the second, an arm that
+/// accepted any fourth argument would satisfy the first.
+#[test]
+fn the_into_flag_assembles_a_directory_and_a_misspelling_writes_nothing() {
+    let dir = std::env::temp_dir().join(format!(
+        "diet-bakeoff-into-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_nanos())
+            .unwrap_or_default()
+    ));
+    let path = write_bakeoff_run(&dir);
+    let run_path = path.to_str().expect("a UTF-8 path").to_owned();
+
+    // A flag this program does not define is a usage error, and it must not
+    // have written the directory on its way to saying so.
+    let wrong = dir.join("never-written");
+    let (code, out, _) = run(&[
+        "bakeoff",
+        &run_path,
+        "--intoo",
+        wrong.to_str().expect("a UTF-8 path"),
+    ]);
+    assert_eq!(code, 2, "a flag the program does not define was accepted");
+    assert!(out.is_empty(), "a usage error printed a result: {out}");
+    assert!(
+        !wrong.exists(),
+        "a refused assembly wrote its directory anyway"
+    );
+
+    let into = dir.join("2026-01-01-a-sense-bakeoff");
+    let (code, out, err) = run(&[
+        "bakeoff",
+        &run_path,
+        "--into",
+        into.to_str().expect("a UTF-8 path"),
+    ]);
+    assert_eq!(code, 0, "bakeoff --into: {err}");
+    assert!(err.is_empty(), "bakeoff --into wrote to stderr: {err}");
+
+    let answer: serde_json::Value = serde_json::from_str(&out)
+        .unwrap_or_else(|why| panic!("stdout is not JSON ({why}): {out:?}"));
+    assert_eq!(answer["ok"], serde_json::json!(true), "{out}");
+    assert_eq!(
+        answer["value"]["directory"],
+        serde_json::json!(into.to_str().expect("a UTF-8 path")),
+        "the answer names a directory other than the one it was given"
+    );
+
+    // Every file the ruling named, and the caches the record consumed.
+    for name in [
+        "README.md",
+        "run.jsonl",
+        "regimen.toml",
+        "report.json",
+        "recompute.sh",
+    ] {
+        assert!(into.join(name).is_file(), "{name} was not written");
+    }
+
+    // The digest the answer states is the product's, so a caller has something
+    // to check without opening the directory.
+    let product = std::fs::read(into.join("report.json")).expect("the product");
+    assert_eq!(
+        answer["value"]["product_sha256"],
+        serde_json::json!(diet::digest::sha256_hex(&product)),
+        "the answer's digest is not the product's"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A bakeoff run directory: the shipped register, two caches, and a record
+/// that consumes all three by digest.
+///
+/// Built through the crate's PUBLIC api -- `sense::Fixture` is the embedder
+/// the instrument's own tests use -- so there is no second embedding here to
+/// drift from the first. It is assembled rather than committed because the
+/// vectors are derived: a committed cache would freeze an answer this crate
+/// computes, and the first change to `Fixture::embed` would make it a fixture
+/// that tests a number nobody can re-derive.
+fn write_bakeoff_run(dir: &Path) -> PathBuf {
+    use diet::capture::sense::{self, Embedder, Fixture};
+    use std::fmt::Write as _;
+
+    std::fs::create_dir_all(dir).expect("a directory");
+    let senses = sense::shipped_senses().expect("the shipped senses");
+    let rows = sense::register(BAKEOFF_REGISTER).expect("the shipped register");
+    let register_texts: Vec<String> = rows.iter().map(|row| row.text.clone()).collect();
+    let mut texts = register_texts.clone();
+    texts.extend(senses.iter().map(|sense| sense.text.clone()));
+    for scoring in sense::Scoring::ALL {
+        let (top, bottom) = scoring.extremes();
+        for set in sense::SenseSet::ALL {
+            let embedded =
+                sense::EmbeddedSet::embed(&senses, *set, &Fixture).expect("an embeddable set");
+            texts.push(top.row(&embedded).text);
+            texts.push(bottom.row(&embedded).text);
+        }
+    }
+    texts.sort();
+    texts.dedup();
+
+    let cache = |lean: bool| {
+        let mut out = String::new();
+        for text in &texts {
+            let mut vector = Fixture.embed(text);
+            if lean && register_texts.contains(text) {
+                vector[Fixture::DIMENSIONS - 1] += 0.5;
+            }
+            let spelled: Vec<String> = vector.iter().map(|value| format!("{value:.8}")).collect();
+            let quoted = serde_json::to_string(text).expect("a JSON string");
+            let _ = writeln!(
+                out,
+                "{{\"text\":{quoted},\"vector\":[{}]}}",
+                spelled.join(",")
+            );
+        }
+        out
+    };
+
+    let files = [
+        ("authored-mistake.jsonl", BAKEOFF_REGISTER.to_owned()),
+        ("even.vectors.jsonl", cache(false)),
+        ("lean.vectors.jsonl", cache(true)),
+    ];
+    let mut consumes = Vec::new();
+    for (name, body) in &files {
+        std::fs::write(dir.join(name), body).expect("a written input");
+        consumes.push(format!(
+            "{{\"path\":\"{name}\",\"sha256\":\"{}\"}}",
+            diet::digest::sha256_hex(body.as_bytes())
+        ));
+    }
+
+    let record = format!(
+        "{BAKEOFF_START}\n{{\"record\":\"claim\",\"id\":\"c1\",\"hypothesis\":\"the cells are \
+         comparable\",\"result\":\"supported\",\"consumes\":[{}]}}\n{BAKEOFF_SUMMARY}\n",
+        consumes.join(",")
+    );
+    let path = dir.join("run.jsonl");
+    std::fs::write(&path, record).expect("a written record");
+    path
 }

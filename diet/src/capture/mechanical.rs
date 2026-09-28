@@ -831,7 +831,14 @@ impl Lane {
             | Event::Seam { .. }
             | Event::Rejected { .. }
             | Event::Claim { .. }
-            | Event::Summary { .. } => {}
+            | Event::Summary { .. }
+            // A prefix that moved and a history a harness discarded carry no
+            // tool call either, so they move nothing here.
+            | Event::PrefixChanged { .. }
+            | Event::Compaction { .. }
+            // A row no adapter could map carries no tool call, so it moves
+            // nothing here. Listed rather than wildcarded, like the rest.
+            | Event::Unknown { .. } => {}
         }
     }
 
@@ -922,6 +929,12 @@ impl Lane {
                     turn,
                     lane: LANE.to_owned(),
                     fork: None,
+                    // Trunk, always. This lane derives its facts from the
+                    // record row, which the trunk goes on writing while a
+                    // tangent runs, and `tangent::Tangent::provenance` is the
+                    // only thing that writes a scope in. Stamping one here by
+                    // hand would put a scope in the record nothing checked.
+                    tangent: None,
                     index,
                 },
             });
@@ -1593,7 +1606,11 @@ fn target_of(argument: Option<&Word>, state: &State) -> Cwd {
 const TILDE: &str = "~";
 
 /// The last element of a path-like word: `./target/debug/diet` is `diet`.
-fn basename(word: &str) -> Option<&str> {
+///
+/// The router reads a command word by this function rather than by one of
+/// its own. Two spellings of one rule disagree eventually, and this one had
+/// already disagreed with a second copy on `..` and on a trailing slash.
+pub(crate) fn basename(word: &str) -> Option<&str> {
     Path::new(word).file_name().and_then(|name| name.to_str())
 }
 
@@ -1788,7 +1805,7 @@ mod tests {
     use crate::formats::record::{self, Event, Regime};
     use crate::object::{EntryId, Patch, WorkingObject};
 
-    const START: &str = r#"{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrate":{"name":"local","model":"m","quantization":"q","sampler":{"seed":0},"reasoning":"on","hardware":"h"}}}"#;
+    const START: &str = r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
 
     fn regime() -> Regime {
         record::parse(START).expect("a record").regime().clone()
@@ -2280,7 +2297,9 @@ mod tests {
             .iter()
             .map(|patch| match patch {
                 Patch::Add { id, .. } | Patch::Supersede { id, .. } => id.to_string(),
-                Patch::Resolve { target, .. } | Patch::Retire { target, .. } => target.to_string(),
+                Patch::Resolve { target, .. }
+                | Patch::Retire { target, .. }
+                | Patch::Park { target, .. } => target.to_string(),
             })
             .collect();
         assert_eq!(ids, vec!["t1/ran"], "an unknown tool derived something");

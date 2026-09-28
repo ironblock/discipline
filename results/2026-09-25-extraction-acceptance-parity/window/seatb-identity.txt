@@ -1,0 +1,5 @@
+exe_sha256 980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4
+cmdline ./llama-server -m ~/Models/Qwen3-1.7B-Q4_K_M.gguf --port 8185 --host <box> -c 8192 --parallel 1 --threads 8 
+env_cuda CUDA_VISIBLE_DEVICES=
+weights_sha256 b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897
+102890, 23214 MiB

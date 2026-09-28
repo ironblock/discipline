@@ -21,9 +21,12 @@
 
 pub mod decline;
 pub mod interview;
+pub mod log;
+pub mod operating_points;
 pub mod record;
 pub mod regimen;
 pub mod shell;
+pub mod verdict;
 
 /// A format with a grammar and a conformance-fixture directory.
 #[derive(Debug, Clone, Copy)]
@@ -64,6 +67,16 @@ pub const FORMATS: &[Format] = &[
         project: interview::project,
     },
     Format {
+        name: "log",
+        case_extension: "jsonl",
+        project: log::project,
+    },
+    Format {
+        name: "operating_points",
+        case_extension: "toml",
+        project: operating_points::project,
+    },
+    Format {
         name: "record",
         case_extension: "jsonl",
         project: record::project,
@@ -77,6 +90,11 @@ pub const FORMATS: &[Format] = &[
         name: "shell",
         case_extension: "sh",
         project: shell::project,
+    },
+    Format {
+        name: "verdict",
+        case_extension: "txt",
+        project: verdict::project,
     },
 ];
 

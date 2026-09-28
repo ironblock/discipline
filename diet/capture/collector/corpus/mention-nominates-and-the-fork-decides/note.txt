@@ -1,0 +1,7 @@
+A mention nominates at this tier: the anchor recurred, and only a fork can say
+whether the prose reverses the entry. Precision at tier 0 is about anchors,
+not about meaning; the verdict is what tells a mention from a reversal, and
+the case that says so is `reconcile`'s -- a fork answering NOT_THIS applies
+nothing. The case is named for what it records, because a corpus case whose
+name is the opposite of its expectation is read by whoever skims the
+directory listing and by nobody else.

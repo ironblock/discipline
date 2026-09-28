@@ -1,0 +1,15 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "the goal still quotes the opening message rather than the current mission"
+      },
+      "raw": "the goal still quotes the opening message rather than the current mission",
+      "tag": {
+        "as_written": "NOTE:",
+        "kind": "note"
+      }
+    }
+  ]
+}

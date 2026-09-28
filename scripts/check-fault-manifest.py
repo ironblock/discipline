@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import pathlib
 import re
+
+import gatelib
 import subprocess
 import sys
 import tomllib
@@ -37,6 +39,7 @@ VERIFY = ROOT / "verify.sh"
 MANIFEST = ROOT / "tools" / "gate" / "faults.toml"
 FIXTURES = ROOT / "tests" / "fixtures" / "results-bad"
 REGIMEN_INVALID = ROOT / "diet" / "formats" / "regimen" / "fixtures" / "invalid"
+APPLY_LANE_FAULTS = ROOT / "scripts" / "apply-lane-faults.py"
 
 # A fixture whose .reason opens with this pins the TOML-subset agreement: both
 # readers must reject it. Those are the entries that relocate when the second
@@ -44,8 +47,63 @@ REGIMEN_INVALID = ROOT / "diet" / "formats" / "regimen" / "fixtures" / "invalid"
 NOT_TOML = "NOT-TOML:"
 RELOCATING = {"subset-fixture"}
 
-CASE = re.compile(r'seeded_case\s+"([^"]+)"\s+(\w+)\s+(\w+)\s*\\\s*\n\s*\'([^\']*)\'')
+# The kinds `verify.sh --selftest` proves red itself, and so the kinds a shard
+# can be assigned. Named once: the census script and the report at the bottom
+# both derive from this, and they used to be two lists that agreed by hand.
+# "lane-fault" joins this tuple, not "seeded-gate": a lane fault does not
+# come through `gatelib.seeded_cases()` at all -- see the note in
+# `observed()` -- so folding it into the kind that reader owns would credit
+# gatelib with cases it has never seen. It still runs inside `--selftest`,
+# through the same `seeded_case`/`in_shard` machinery every other kind uses,
+# which is what earns it a place in this tuple.
+SELFTEST_KINDS = ("seeded-gate", "results-fixture", "pattern-class", "lane-fault")
+
+# A line git writes into a file it could not merge. `=======` alone is not
+# one: it is a plausible separator in ordinary prose, and a checker that
+# refused it would refuse files nobody is merging. The two arrow markers are
+# not plausible as anything else.
+CONFLICTED = re.compile(r"^(<{7} |>{7} )", re.M)
+
+
+def refuse_conflicted(path: pathlib.Path, text: str) -> None:
+    """Exit 2 if a file still carries conflict markers.
+
+    Both of this gate's two inputs go through here, for one reason: what a
+    checker reads out of a half-merged file is the union of both sides, or
+    neither side, depending on where the markers fell, and either way it
+    looks like an answer.
+
+    THE COUNT IS DERIVED FROM verify.sh. So a `--count-red` taken while
+    verify.sh is still half-merged hands back a number about a file nobody
+    wrote. The tool that asked is mid-merge and about to write that number
+    into the manifest, which is the one moment nothing is watching.
+
+    AND THE MANIFEST IS THE FILE BEING MERGED. `faults.toml` conflicts on
+    essentially every merge in a stack -- `merge-gate.py --union` exists for
+    exactly that -- so a half-merged manifest is the ordinary state of this
+    file during ordinary work, not a corruption. It reached `tomllib` and
+    came back "not TOML", exit 1, which reads as a finding about the
+    manifest when the truth is that the caller is mid-merge.
+
+    Exit 2 rather than 1: this is "I was asked something I cannot answer",
+    the code every other refusal in this gate uses for that.
+    """
+    if CONFLICTED.search(text):
+        found = CONFLICTED.findall(text)
+        print(
+            f"{path}: still carries {len(found)} conflict marker(s). Nothing is "
+            f"read from a half-merged file -- what is in one is the union of both "
+            f"sides, or neither side. Resolve it, then ask again.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+
 MECH = re.compile(r'expect_exit\s+"([^"]+)"\s+(\d+)')
+# The line check_test prints before it runs anything, taken from verify.sh so
+# that this file holds no second copy of it. Captured with its `%s` and `%d`
+# still in place; the guard below substitutes the scope and every count.
+ANNOUNCE = re.compile(r"printf '(test scope: %s \(%d test\(s\) selected\))")
 REQ = re.compile(r"REQUIRED_(HYGIENE|PAGES)_CLASSES=\(([^)]*)\)", re.DOTALL)
 
 
@@ -59,19 +117,52 @@ DETAILS: dict[str, dict[str, str]] = {}
 def observed() -> dict[str, set[str]]:
     """What verify.sh proves, read out of verify.sh rather than assumed."""
     s = VERIFY.read_text(encoding="utf-8")
+    refuse_conflicted(VERIFY, s)
     seen: dict[str, set[str]] = {k: set() for k in
                                  ("seeded-gate", "mechanics", "results-fixture",
-                                  "pattern-class", "subset-fixture")}
-    for label, check, inject, sig in CASE.findall(s):
+                                  "pattern-class", "subset-fixture", "lane-fault")}
+    for label, check, inject, sig, scope in gatelib.seeded_cases(s):
         ident = f"{check}.{inject.removeprefix('inject_')}"
         seen["seeded-gate"].add(ident)
         DETAILS[ident] = {"label": label, "legacy_signature": sig}
+        # Only the `test` check's scope is a cargo target, so only its cases carry a
+        # target here. Recording an empty one for the rest would make three
+        # hundred manifest entries restate that a Python check has no cargo
+        # test target.
+        if check == "test":
+            DETAILS[ident]["target"] = scope
     for label, _want in MECH.findall(s):
         seen["mechanics"].add("mech." + re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-"))
     for kind, body in REQ.findall(s):
         prefix = kind.lower()
         for cls in body.split():
             seen["pattern-class"].add(f"{prefix}.{cls}")
+    # LANE FAULTS DO NOT COME THROUGH gatelib AT ALL. Every other kind above
+    # is read as a LITERAL out of verify.sh's own source text -- a
+    # `seeded_case "label" check inject 'sig'` call gatelib can point at.
+    # 123 lane faults are declared through ONE loop that generates that call
+    # at runtime, from `apply-lane-faults.py --list`, and a static reader of
+    # verify.sh's text sees that loop as a single block, not 123 cases.
+    #
+    # So this is the one kind whose declaration source is a PROGRAM'S OUTPUT
+    # rather than a grep. `apply-lane-faults.py` is the one reader of the
+    # lane manifests and the root registry; running it is what "what
+    # verify.sh proves" means for this kind, the same way running `diet
+    # check-record` is what a format check means elsewhere in this gate.
+    lane_faults = subprocess.run(
+        [sys.executable, str(APPLY_LANE_FAULTS), "--list"],
+        capture_output=True, text=True, cwd=ROOT,
+    )
+    if lane_faults.returncode not in (0, 1):
+        print(
+            f"{APPLY_LANE_FAULTS.name}: could not list lane faults (exit "
+            f"{lane_faults.returncode}): {lane_faults.stderr.strip()}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    for line in lane_faults.stdout.splitlines():
+        _lane, fault_id, _signature, _cls = line.split("	")
+        seen["lane-fault"].add(fault_id)
     if FIXTURES.is_dir():
         for d in FIXTURES.iterdir():
             if d.is_dir():
@@ -84,14 +175,112 @@ def observed() -> dict[str, set[str]]:
 
 
 def main() -> int:
+    # `--count-red` prints the number of faults proven red and nothing
+    # else, so a tool that has just assembled the fault list can ask THIS
+    # reader for the count rather than reimplementing the arithmetic or
+    # scraping it out of a failure message. One reader, structured answer.
+    counting = "--count-red" in sys.argv
+    counting_mechanics = "--count-mechanics" in sys.argv
+    listing_fixtures = "--fixture-classes" in sys.argv
+    # The same question narrowed to the faults `--selftest` itself proves --
+    # the subset fixtures go red on every run through check_regimen and are
+    # never in a shard. check-selftest-census.py asks for this rather than
+    # subtracting one number from another, because a subtraction is a second
+    # opinion about which kinds the selftest runs.
+    counting_selftest = "--count-selftest-red" in sys.argv
+    # The same question again, answered with the NAMES rather than the number.
+    # `derive-shards.py` has to say which faults an assignment is missing and
+    # which it names that no longer exist, and neither is answerable from a
+    # count. Emitted from here for the reason `--fixture-classes` is: the set
+    # of faults `--selftest` runs has one reader, and a second one free to
+    # disagree with it is how a fault ends up in nobody's shard.
+    listing_selftest = "--list-selftest-red" in sys.argv
+
+    # Asked for the count, answer the count -- before the manifest is read at
+    # all. The count derives from `verify.sh` and the fixture directories and
+    # never from the manifest, and the caller is a tool that has just
+    # assembled a fault list and is holding a manifest that does not yet
+    # agree with it. Refusing to answer because the file it is about to
+    # rewrite is missing, empty or not yet valid TOML is refusing exactly
+    # when asked. `observed()` also fills DETAILS, which the loop below reads.
+    seen = observed()
+    if counting:
+        print(sum(len(seen[k]) for k in seen if k != "mechanics"))
+        return 0
+    # The same question for the other total the manifest carries. A branch
+    # that adds a mechanics assertion changes this line, and a resolver that
+    # cannot recount it refuses a merge over a number it could have derived.
+    if counting_mechanics:
+        print(len(seen["mechanics"]))
+        return 0
+    if counting_selftest:
+        print(sum(len(seen[k]) for k in SELFTEST_KINDS))
+        return 0
+    if listing_selftest:
+        # `id<TAB>kind`, in the order the kinds are declared and sorted within
+        # each. Not declaration order -- this reader does not have one, since
+        # three of the four kinds come from directory listings and a program's
+        # output rather than from verify.sh's text -- and nothing downstream
+        # needs one: the assignment is keyed by id precisely so that where a
+        # fault sits in the list stops mattering.
+        for kind in SELFTEST_KINDS:
+            for ident in sorted(seen[kind]):
+                print(f"{ident}\t{kind}")
+        return 0
+    # The selftest greps each results fixture's output for the class declared
+    # here. It is emitted from THIS script because the manifest has one reader
+    # and a second one in the shell would be free to disagree with it.
+    if listing_fixtures:
+        try:
+            text = MANIFEST.read_text(encoding="utf-8")
+        except OSError as err:
+            print(f"cannot read the manifest: {err}", file=sys.stderr)
+            return 1
+        refuse_conflicted(MANIFEST, text)
+        try:
+            entries = tomllib.loads(text)["fault"]
+        except (ValueError, KeyError) as err:
+            print(f"cannot read the manifest: {err}", file=sys.stderr)
+            return 1
+        for entry in entries:
+            if entry.get("kind") == "results-fixture":
+                print(f"{entry.get('label')}\t{entry.get('failure_class')}")
+        return 0
+
     failures: list[str] = []
 
     if not MANIFEST.is_file():
         print(f"{MANIFEST}: missing", file=sys.stderr)
         return 1
+    # THE MANIFEST IS REFUSED MID-MERGE, and not merely reported as bad TOML.
+    # `faults.toml` conflicts on essentially every merge in a stack -- it is
+    # what `merge-gate.py --union` exists for -- so a half-merged one is the
+    # ordinary state of this file during the ordinary operation, not a
+    # corruption. `tomllib` fails on the markers and the old message said
+    # "not TOML", exit 1: a finding about the manifest, when the truth was
+    # that the caller is mid-merge and this gate could not answer. The
+    # reasoning `refuse_conflicted` already carries for `verify.sh` is the
+    # same reasoning here, so it is the same call.
+    #
+    # A TOML error that is NOT a conflict marker stays 1. The manifest is a
+    # checked artefact of this repository and a malformed one is a finding
+    # about it; only the mid-merge case is "I was asked something I cannot
+    # answer". The two are told apart by the markers and by nothing else.
+    #
+    # And this is HERE, not up with the counting modes, on purpose. The
+    # counting modes answer before the manifest is read at all, precisely so
+    # that `merge-gate.py` can ask for a count while holding a conflicted
+    # manifest it is about to rewrite. Refusing up there would break the one
+    # caller this refusal is about.
     try:
-        doc = tomllib.loads(MANIFEST.read_bytes().decode("utf-8"))
-    except (ValueError, UnicodeDecodeError) as err:
+        text = MANIFEST.read_bytes().decode("utf-8")
+    except UnicodeDecodeError as err:
+        print(f"{MANIFEST}: not TOML: {err}", file=sys.stderr)
+        return 1
+    refuse_conflicted(MANIFEST, text)
+    try:
+        doc = tomllib.loads(text)
+    except ValueError as err:
         print(f"{MANIFEST}: not TOML: {err}", file=sys.stderr)
         return 1
 
@@ -99,9 +288,6 @@ def main() -> int:
     if not entries:
         print(f"{MANIFEST}: declares no faults, so it defines no parity", file=sys.stderr)
         return 1
-
-    # Before the loop: `observed()` is what fills DETAILS, which the loop reads.
-    seen = observed()
 
     declared: dict[str, set[str]] = {}
     for index, entry in enumerate(entries):
@@ -125,6 +311,17 @@ def main() -> int:
                         f"{where}: {field} is {stated!r}, but verify.sh's "
                         f"case says {actual!r}"
                     )
+        # A `test` fault with no target runs the whole workspace: every test
+        # binary linked and every test run, to ask whether one gate fired.
+        # That was the selftest's bill. Refused rather than defaulted, because
+        # a default here is a cost nobody sees and nobody files.
+        if kind == "seeded-gate" and entry.get("check") == "test":
+            target = entry.get("target")
+            if not isinstance(target, str) or not target.strip():
+                failures.append(
+                    f"{where}: a `test` fault must name the target its scope runs -- "
+                    f"`lib`, `bins`, `all` or `test:NAME`, each optionally /FILTER"
+                )
         if entry.get("migrated") is True and "failure_class" not in entry:
             failures.append(f"{where}: marked migrated with no failure_class")
         # An entry whose assertion moves must name where it lands, or the
@@ -139,15 +336,128 @@ def main() -> int:
         for ident in sorted(have - want):
             failures.append(f"the manifest claims `{ident}` ({kind}), which verify.sh does not prove")
 
+    # A scope must not be able to satisfy the signature that grades it.
+    #
+    # verify.sh prints one line naming the scope before it runs the tests, and
+    # the selftest greps the whole log for the case's signature. A signature
+    # the scope line itself matches cannot tell "red for its own fault" from
+    # "red for something else" -- the evidence would be in the log whatever
+    # happened. It cannot manufacture a false RED, because the exit code is
+    # still the verdict; it can hide a WRONG, which is the verdict this gate
+    # was given a signature to be able to reach.
+    #
+    # THE FIRST VERSION OF THIS GUARD COULD NOT FIRE, and it is worth saying
+    # exactly how, because the mistake is the one this repository names most
+    # often. It reconstructed the line by hand as `... (1 test(s) selected)`.
+    # No scope in the tree selects exactly one test -- the counts run 0, 2, 4,
+    # 5, 9, 12 ... 235, 420 -- so for all 181 scoped faults it compared the
+    # signature against a string that appears in no log the selftest has ever
+    # produced. It passed for every input, which reads exactly like a guard
+    # with nothing to complain about.
+    #
+    # Two things follow, and both are here. The template is READ OUT OF
+    # verify.sh rather than copied, so there is one text; and the count is
+    # tried across every value a run could print, because the count is the
+    # part that varies and the part the hand-written copy froze.
+    announce = ANNOUNCE.search(VERIFY.read_text(encoding="utf-8"))
+    if not announce:
+        failures.append(
+            f"{VERIFY.name}: no `test scope:` line to grade signatures against. "
+            f"Either check_test stopped announcing its scope -- in which case "
+            f"this guard has nothing to do and should go -- or the wording moved "
+            f"and this reader is now guarding a line nobody prints"
+        )
+    for ident, detail in sorted(DETAILS.items()):
+        signature, scope = detail.get("legacy_signature"), detail.get("target")
+        if not signature or not scope or not announce:
+            continue
+        try:
+            pattern = re.compile(signature)
+        except re.error as err:
+            failures.append(f"`{ident}`: its signature is not a regex: {err}")
+            continue
+        # Every count a scope could announce. The largest in the tree today is
+        # 420 -- the whole library -- so this range covers it with room, and a
+        # signature that matches at ANY count is one the scope line can satisfy.
+        hit = next(
+            (n for n in range(0, 1000)
+             if pattern.search(announce.group(1).replace("%s", scope).replace("%d", str(n)))),
+            None,
+        )
+        if hit is not None:
+            failures.append(
+                f"`{ident}`: its signature /{signature}/ matches the line naming "
+                f"its own scope when {hit} test(s) are selected, so the log carries "
+                f"the signature whether or not the gate fired"
+            )
+
+    # UNSEEDABLE GUARDS (#77 item 3). A fault that genuinely cannot be seeded
+    # -- a mechanics assertion over `--selftest` re-entering itself -- is not
+    # exempt from this repository's law that a gate nothing has seen red does
+    # not exist; it is declared instead, with the hand transcript that stands
+    # in for a fixture. This does not go looking for an undeclared guard
+    # anywhere in `verify.sh` -- there is no syntactic marker for "a guard"
+    # short of the tag itself, and a scan that guessed would either miss real
+    # ones or flag ordinary `if`/`return` code that guards nothing. What it
+    # proves is narrower and still real: every guard THIS manifest says is
+    # unseedable still carries the tag its declaration promises, so a tag
+    # quietly dropped from the code -- the guard's own reasoning still
+    # sitting above it, now unbound -- goes red exactly like a `claim:` whose
+    # test disappeared.
+    unseedable = doc.get("unseedable") or []
+    declared_unseedable: set[str] = set()
+    for index, entry in enumerate(unseedable):
+        where = f"{MANIFEST.name}[unseedable][{index}]"
+        for field in ("id", "file", "reason"):
+            if not isinstance(entry.get(field), str) or not entry[field].strip():
+                failures.append(f"{where}: `{field}` is missing or empty")
+        ident = entry.get("id")
+        if isinstance(ident, str):
+            if ident in declared_unseedable:
+                failures.append(f"{where}: duplicate id `{ident}`")
+            declared_unseedable.add(ident)
+        name, reason = entry.get("file"), entry.get("reason")
+        if not isinstance(name, str) or not isinstance(reason, str):
+            continue
+        target = ROOT / name
+        if not target.is_file():
+            failures.append(f"{where}: `{name}` does not exist")
+            continue
+        tag = re.compile(
+            r"^[ \t]*(?:#|//)\s*unseedable:\s*" + re.escape(reason) + r"\s*$",
+            re.M,
+        )
+        if not tag.search(target.read_text(encoding="utf-8")):
+            failures.append(
+                f"{where}: no `unseedable: {reason}` comment in {name} -- the "
+                f"guard this declares is untagged, undeclared, or the two "
+                f"have drifted apart"
+            )
+
+    # No `red_faults` comparison: the red count is DERIVED, from the entries
+    # this has just read, and never hand-kept in `[meta]` (ruled on #108,
+    # 2026-09-24). It is printed below and answered by `--count-red`; a copy
+    # typed into the manifest was only ever a second place for it to be wrong,
+    # and a conflict between every two PRs that added a fault.
     meta = doc.get("meta") or {}
-    red = sum(len(seen[k]) for k in seen if k != "mechanics")
-    if meta.get("red_faults") != red:
-        failures.append(f"[meta] red_faults is {meta.get('red_faults')}, observed {red}")
     if meta.get("mechanics_assertions") != len(seen["mechanics"]):
         failures.append(
             f"[meta] mechanics_assertions is {meta.get('mechanics_assertions')}, "
             f"observed {len(seen['mechanics'])}"
         )
+    if meta.get("unseedable_guards") != len(unseedable):
+        failures.append(
+            f"[meta] unseedable_guards is {meta.get('unseedable_guards')}, "
+            f"observed {len(unseedable)}"
+        )
+
+    # Asked for the count, answer the count. Deliberately before the failure
+    # report: the caller is a tool that has just assembled the fault list and
+    # is asking what the red count is, so the one failure it is about to
+    # fix must not silence the answer.
+    if counting:
+        print(sum(len(seen[k]) for k in seen if k != "mechanics"))
+        return 0
 
     for message in failures:
         print(message, file=sys.stderr)
@@ -159,7 +469,7 @@ def main() -> int:
     # explains itself. `--selftest` reports 67; the manifest says 75 red; the
     # difference is the 8 subset fixtures, which go red on every run through
     # check_regimen rather than in the selftest.
-    by_selftest = sum(len(seen[k]) for k in ("seeded-gate", "results-fixture", "pattern-class"))
+    by_selftest = sum(len(seen[k]) for k in SELFTEST_KINDS)
     by_per_run = len(seen["subset-fixture"])
     migrated = sum(1 for e in entries if e.get("migrated") is True)
     print(

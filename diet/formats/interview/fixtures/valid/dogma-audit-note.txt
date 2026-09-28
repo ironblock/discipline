@@ -1,0 +1,1 @@
+NOTE: the goal still quotes the opening message rather than the current mission

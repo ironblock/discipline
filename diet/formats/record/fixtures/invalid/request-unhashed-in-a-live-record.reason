@@ -1,0 +1,9 @@
+A `live` record whose `request` row carries no `head_sha256`. Absence is an
+ADAPTED record's state: a foreign harness's log records what was said, not the
+bytes that were sent, so an adapter has no head to hash. A session this library
+drove rendered the head itself.
+
+The same rule `undeclared-reasoning-in-a-live-record.jsonl` and
+`unknown-row-in-a-live-record.jsonl` pin one field over, and it was missing
+here for a while -- the field's own doc claimed the rule and nothing enforced
+it, so a live record could silently lose the measurement #79 exists to take.

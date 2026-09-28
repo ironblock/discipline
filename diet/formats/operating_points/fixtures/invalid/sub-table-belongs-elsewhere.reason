@@ -1,0 +1,5 @@
+`[beta.sampler]` sits inside `[alpha]`. A sub-table belongs to the entry above
+it; one that names another entry is a sampler filed under a model that never
+had it, and nothing downstream would say so. A PEG will not carry a name
+across a header to check it against a later one, so this is a structure check
+with a name, the way the record format checks that `summary` is the last row.

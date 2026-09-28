@@ -48,7 +48,49 @@ because that happened -- a whole module, 500 lines and eleven tests, sat on
 disk uncompiled while the gate stayed green, and the only symptom was a test
 filter quietly selecting nothing.
 
-Stdlib only. Exit 0 if both rules hold, 1 otherwise.
+RULE THREE: no claim bound to a test that is not there.
+
+A comment stating a fact about the tree -- a count, a name, a "no path does
+X", a "removing Y trips Z" -- is true when written and silently rots: nothing
+compares it to the tree again. Six specimens shipped this way in one week
+(#77): a claim that an injection trips a refusal it does not trip, a
+``.reason`` teaching a vocabulary a commit had already grown, a "no path
+raises" beside a bare traceback. The fix is not "write better comments" --
+every one of the six was true when written -- it is binding the ones that are
+checkable to the thing that checks them, so a later change that falsifies the
+comment also breaks the build.
+
+A comment of the form ``// claim: <fact> :: <ref>`` states `<fact>` and names
+what proves it. When `<ref>` is a bare identifier or a `::`-qualified path --
+no space, no `/`, no `.` -- it is a test name, and this rule fails if no
+`#[test]` function by that name exists anywhere this crate compiles (rule
+two's own reachable set, so a claim bound to a test in an orphaned file also
+fails). Anything else -- a shell command, a path, a sentence -- is a
+`<ref>` this script cannot run, and is accepted unchecked: an unbindable
+claim is still better disclosed than untagged, but nothing here can verify a
+command's output. A bare single word meant as a no-argument command reads
+identically to a test name and is checked as one; disclosed rather than
+guessed around, since a command with any argument, flag or path already
+falls outside the pattern. Untagged comments are opinions and stay
+unchecked; the discipline is that a *fact* gets a tag or gets rewritten as
+one.
+
+Read off real comments, not raw text, so a claim-shaped line quoted inside a
+string literal -- a fixture, a generated script -- is string content, never
+mistaken for a comment no rustc would ever see. A fact too long for one line
+continues on the next comment line, joined bounded to four physical lines
+total: enough for a claim that wraps once, not so much that an unrelated
+`//!` doc block below an untagged "claim:" mention gets searched end to end
+for a stray `::` that would bind the wrong reference to it entirely.
+
+Deliberately narrow. This governs `diet/src/` alone, because that is where
+`#[test]` functions live and where this script can name a false claim by
+running nothing but `rustc`'s own module graph. A claim about a script in
+`scripts/` or a fixture's `.reason` file is real and just as capable of
+rotting, but this rule cannot bind it to a test it cannot see; extending
+coverage there is a different script's job, not a wider regex here.
+
+Stdlib only. Exit 0 if all three rules hold, 1 otherwise.
 """
 
 from __future__ import annotations
@@ -71,17 +113,104 @@ PATH_MOD = re.compile(
 
 CHAR = re.compile(r"'(?:\\.[^']*|[^'\\])'")
 
+# A `//` line comment's own text, prefix stripped -- applied to one
+# `mask()`-reported comment span at a time, never to raw text, so a
+# claim-shaped line inside a string literal (`r#"// claim: ... :: ..."#`) is
+# string content, never mistaken for a comment no rustc would ever see.
+COMMENT_PREFIX = re.compile(r"^[ \t]*//[!/]?\s*")
+CLAIM_START = re.compile(r"^claim:\s*(?P<body>.*?)\s*$")
 
-def mask(text: str) -> tuple[str, set[int]]:
+# A `<ref>` this script can resolve to a real function: no space, `/` or `.`,
+# because those are exactly the characters a shell command or a path has and
+# a bare identifier or `mod::path::name` does not. A single bare word meant
+# as a no-argument command (`:: cargo`) reads the same as a test name and is
+# checked as one -- a real ambiguity, disclosed rather than guessed around;
+# a command reference with any argument, flag or path already falls outside
+# this pattern and is left unverified as intended.
+TEST_REF = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*$")
+
+TEST_ATTR = re.compile(r"#\[\s*test\s*\]")
+ATTR = re.compile(r"#\[[^\]]*\]")
+FN_NAME = re.compile(r"\bfn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+
+
+def claims_in(text: str, comment_spans: list[tuple[int, int]]) -> list[tuple[str, int]]:
+    """Every `claim: <fact> :: <ref>` found across real `//` comments.
+
+    A fact that does not fit on one line continues on the next comment
+    line -- joined here, bounded to four physical lines total, so a `//!`
+    doc block that runs on for many lines with nothing to do with any tag
+    is never searched end to end for a stray `::` that would bind the wrong
+    reference to it entirely. Two comment lines join only when nothing but
+    whitespace and a single newline sits between them: a blank line or a
+    line of code breaks the chain, the same way a paragraph break would.
+    """
+    claims: list[tuple[str, int]] = []
+    total = len(comment_spans)
+    i = 0
+    while i < total:
+        start, end = comment_spans[i]
+        stripped = COMMENT_PREFIX.sub("", text[start:end], count=1)
+        first = CLAIM_START.match(stripped)
+        if first is None:
+            i += 1
+            continue
+        body = first.group("body")
+        j = i
+        while " :: " not in body and j + 1 < total and j - i < 3:
+            gap = text[comment_spans[j][1] : comment_spans[j + 1][0]]
+            if gap.count("\n") != 1 or gap.strip():
+                break
+            j += 1
+            cont = COMMENT_PREFIX.sub("", text[comment_spans[j][0] : comment_spans[j][1]], count=1)
+            body = f"{body} {cont.strip()}"
+        # No ` :: ` anywhere in what joined is ordinary prose that happens to
+        # use the word -- "they are one claim: the record says what
+        # happened" is a sentence, not a tag, and flagging it would be the
+        # same over-eager-regex mistake rule one's own docstring narrates.
+        if " :: " in body:
+            claims.append((body, start))
+        i += 1
+    return claims
+
+
+def test_fn_names(masked: str) -> set[str]:
+    """Every `#[test] fn NAME` in `masked`, skipping attributes in between.
+
+    Reads the masked text, same as the other two rules, so a `#[test]`
+    written out in a comment or a string does not mint a name nothing runs.
+    """
+    names: set[str] = set()
+    for found in TEST_ATTR.finditer(masked):
+        index = found.end()
+        while True:
+            gap = re.match(r"\s*", masked[index:])
+            index += gap.end()
+            attr = ATTR.match(masked, index)
+            if attr is None:
+                break
+            index = attr.end()
+        fn = FN_NAME.match(masked, index)
+        if fn:
+            names.add(fn.group(1))
+    return names
+
+
+def mask(text: str) -> tuple[str, set[int], list[tuple[int, int]]]:
     """Blank out comments and literal interiors; report where literals start.
 
     Returns the masked text -- same length, so every index still lines up with
-    the original -- and the set of indices at which a string literal begins.
-    Structure is read off the masked text so that a `=>` or a brace inside a
-    string or a comment cannot be mistaken for the real thing.
+    the original -- the set of indices at which a string literal begins, and
+    the span of every `//` line comment. Structure is read off the masked
+    text so that a `=>` or a brace inside a string or a comment cannot be
+    mistaken for the real thing; the comment spans exist for the opposite
+    reason -- rule three reads comments themselves, and a line inside a raw
+    string that merely looks like one (`r#"// claim: ... :: ..."#`) is string
+    content, not a comment no rustc would ever see as one.
     """
     out = list(text)
     starts: set[int] = set()
+    line_comments: list[tuple[int, int]] = []
     i, n = 0, len(text)
 
     def blank(lo: int, hi: int) -> None:
@@ -94,6 +223,7 @@ def mask(text: str) -> tuple[str, set[int]]:
         if rest.startswith("//"):
             end = text.find("\n", i)
             end = n if end == -1 else end
+            line_comments.append((i, end))
             blank(i, end)
             i = end
             continue
@@ -146,7 +276,7 @@ def mask(text: str) -> tuple[str, set[int]]:
                 i = found.end()
                 continue
         i += 1
-    return "".join(out), starts
+    return "".join(out), starts, line_comments
 
 
 def _guard_start(masked: str, start: int, end: int) -> int:
@@ -260,7 +390,7 @@ def declared_modules(source: pathlib.Path) -> tuple[list[str], list[str]]:
         text = source.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return [], []
-    masked, _ = mask(text)
+    masked, _, _ = mask(text)
     # `#[path = "..."]` keeps its literal, which masking blanked; take those
     # from the original text and trust the masked text for the rest.
     paths = [
@@ -328,6 +458,8 @@ def main() -> int:
             )
 
     lines_scanned = 0
+    all_test_names: set[str] = set()
+    claims: list[tuple[pathlib.Path, str, str, int]] = []
     for source in sources:
         try:
             text = source.read_text(encoding="utf-8")
@@ -335,7 +467,7 @@ def main() -> int:
             failures.append(f"{source}: cannot read: {err}")
             continue
         lines_scanned += len(text.splitlines())
-        masked, literals = mask(text)
+        masked, literals, comment_spans = mask(text)
         for start, end in arm_patterns(masked) + matches_patterns(masked):
             caught = sorted(index for index in literals if start <= index < end)
             if not caught:
@@ -344,6 +476,24 @@ def main() -> int:
             failures.append(
                 f"{source}:{line_of(text, caught[0])}: a match arm on a string "
                 f"literal: {pattern[:90]}"
+            )
+        # A file rustc never reaches never runs the test a claim there names,
+        # so an orphaned file's tests do not enter the name set either --
+        # rule two's own finding, reused rather than re-decided here.
+        if source.resolve() in compiled:
+            all_test_names |= test_fn_names(masked)
+        for body, index in claims_in(text, comment_spans):
+            _fact, ref = body.rsplit(" :: ", 1)
+            claims.append((source, text, ref, index))
+
+    for source, text, ref, index in claims:
+        if not TEST_REF.match(ref):
+            continue  # a command or a path: not this script's to run
+        name = ref.rsplit("::", 1)[-1]
+        if name not in all_test_names:
+            failures.append(
+                f"{source}:{line_of(text, index)}: claim names a test that "
+                f"does not exist: `{ref}`"
             )
 
     if not lines_scanned:
@@ -360,7 +510,7 @@ def main() -> int:
         return 1
     print(
         f"check-library: {len(sources)} source file(s), {lines_scanned} line(s); "
-        f"all compiled, no match arm on a string literal"
+        f"all compiled, no match arm on a string literal, no dangling claim"
     )
     return 0
 

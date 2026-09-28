@@ -1,0 +1,6 @@
+Earlier in this work, this was recorded:
+RECORDED: {old_entry}
+In the step you just completed you said:
+LATEST: "{new_quote}"
+Does the latest information replace, resolve, or contradict the earlier record? Answer with exactly one line:
+VERDICT: REPLACES | RESOLVES | CONTRADICTS | UNRELATED — followed, if not UNRELATED, by CORRECTED: <the one-line entry that should stand>.

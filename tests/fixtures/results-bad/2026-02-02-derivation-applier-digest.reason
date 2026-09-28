@@ -1,0 +1,20 @@
+`recompute.sh` is here and hashes to something other than the
+`derivation.applier_sha256` the front-matter declares.
+
+Ruled 2026-09-19 on #84's second ruling: a derived directory's front-matter
+carries a typed `[derivation]` block rather than README prose about which
+interpreter and which machine applied the rule -- "the Python and machine
+are stated in the README" is the prose-claims class (#77), true when
+written and checked by nothing.
+
+`applier_sha256` is a FILE digest, the same shape as `pre_registration_sha256`
+and for the same reason: "the applier is the Python inside `recompute.sh`;
+there is no other copy," so the applier that ran is whatever bytes are
+committed there, and a digest that names something else names an applier
+nobody can point at. A derivation whose applier moved after the digest was
+pinned is a rule that could have been edited after the fact -- the failure
+mode a pinned applier exists to catch.
+
+`derivation.derived_from` is left correct in this fixture (it matches the
+claim row's own `consumes` digest) so this fixture red for exactly one
+reason: the applier digest, not the citation.

@@ -1,0 +1,50 @@
+{
+ "version": "v2",
+ "beside": "2026-09-20-false-nomination-framing",
+ "authorized": "decision 1 on PR #101: a re-drawn second run including the two admitted forks with a mined positive",
+ "arms": [
+  "control",
+  "imperative",
+  "advisory",
+  "sham"
+ ],
+ "rungs": [
+  1.0,
+  0.8,
+  0.6,
+  0.4,
+  0.6222,
+  0.0556
+ ],
+ "forks_per_rung": 100,
+ "draws_per_arm": 1,
+ "seed": 393,
+ "hypothesis": "When the collector's nominator fires falsely, the consumer's turn changes less, and its reasoning acknowledges the nomination without acting on it more often, under advisory framing than imperative; and the difference falls as the nominator's precision rises.",
+ "fork": "a main-lane turn.request of an archived capture drive at a register turn, re-fired verbatim with its recorded sampler parameters; the nomination appended to the last user message",
+ "headroom": "the (b) headroom pilot's admitted set (headroom.json of the (b) record, consumed by digest) if the box is still instance 2026-09-20 at the window's start (fingerprint check and canary); otherwise the pilot is re-run on the new instance under the same rule (two no-nomination draws agree on (tool, target) and emit a command) and the new instance registered before any fork fires",
+ "sample": "the two admitted forks carrying a mined positive (drive-08#t9s24, drive-09#t2s8) are in the sample by construction; 98 more are drawn once by seed 393 from the other admitted forks; the same 100 forks at every rung",
+ "true_nominations": "mined positives only, as in (b): one per mined-positive fork; at rung p each of the two draws a true nomination with probability p, so the realisable true share is at most 0.02 on any rung; the true-nomination control fork is drive-08#t9s24 with its mined positive, fired before the run as the refusal gate and again in the run as an ordinary sample fork",
+ "ladder_reading": "nominal: no rung claim is adjudicable from this register, stated before the run; the six rungs are six seeded assignments of a false nomination per fork over the same 100 forks and the rule's 'every rung' reads over them as replicate stability; the per-session cost = false-nomination change rate x (1 - p) is reported as the precision arm; the realised true share per rung is reported beside the nominal rung",
+ "nomination_lines": "byte-identical to (b): imperative and advisory as posted on #89 2026-09-20 (5747608246); the same entry under all three framings of a fork within a rung",
+ "sham": "a passage of exactly the advisory line's character length from the prose of a register turn of a different drive; source row recorded",
+ "turn_change": "tool = first word of the extracted command after comment stripping (exercise extract-command, the drive loop's extractor; a leading '#' comment is not a tool); target = first path-like argument else the second word; a response with no command against one with a command is changed; OR the reply's prose before the command states a correction to, supersession of, replacement of or removal of the entry the nomination named (the edit field of the blind judge); the raw-extractor (tool, target) grade and the comment-stripped (tool, target) grade alone are reported beside, never adjudicating",
+ "record_edit": "the ratified endpoint's third arm, unmeasured in (b) (decision 6): a two-way field 'edit' in {yes, no} by the blind judge over the reply's prose before the command, not the reasoning; yes iff the prose states the named entry is superseded, no longer holds, is wrong, should be updated or removed, or supplies replacement text for it; merely mentioning, questioning, checking, or affirming the entry is no",
+ "acknowledgement": "names: any anchor of the nominated entry (the gym's literal::anchors) or the phrase 'working record' in the reasoning (thinking-on forks) or the prose before the command; if named, a three-way grade accepts / questions / declines by the blind judge's verdict field, over reasoning and prose; reported beside the verdict, never folded in",
+ "judge": "one fresh Claude Code subagent per batch on Sonnet (model: sonnet at launch), the model read off each subagent's transcript and declared per batch in judge/judge.json; reads only judge/prompt.md (version 2, digest posted before the first fork) and its batch file; every non-control arm row is judged (imperative, advisory, sham; 1,800 rows in 50 batches of 36 plus 4 keyed controls each); items carry an opaque id, the register's entry text, the reasoning (thinking-on forks) and the prose before the command, and NOT the appended line, so the judge is blind to the arm as well as to the key; the key is withheld; each batch scored by judge-score: exit 0 keyed, 1 any control miss on either field (batch void), 2 malformed",
+ "void_protocol": "a void batch (judge-score exit 1: a control miss on either field) is re-judged by a fresh instance under the same prompt, batch file and key; a malformed output (exit 2: ids missing, extra or out of order, or a field outside its vocabulary) is not a verdict and is likewise re-judged by a fresh instance, kept under judge/malformed-NN[b].json; up to three instances per batch, void and malformed outputs both counting; the void verdicts are kept under judge/void-NN[b].json, read by nothing; a batch unjudged after three instances has its rows carry edit = null and verdict = null, and a fork-rung with a null edit on either framing is excluded from that rung's changed rate pairwise, the count reported",
+ "judge_controls": "keyed controls authored before the first batch, drawn from the (b) record's committed replies and keyed by hand for both fields, at least twelve, with at least four keyed edit = yes; judge/controls.json digest posted on #89 before the first fork",
+ "grading_orders": "every deterministic grade (extract, tool_target, changed, names) is taken over the raw rows and over the committed rows after the home-prefix collapse; the committed grades are over the committed rows; the two gradings are diffed row by row and any difference declares grading order a regime factor in regimen.toml with the rows listed (decision 7)",
+ "primary": "the rate of changed turns (turn_change above) on false nominations, advisory against imperative, at each rung, paired by fork",
+ "secondary": "the acknowledgement grade and the (tool, target)-only change rates, reported beside the verdict",
+ "controls": [
+  "the true-nomination control fork: a mined positive whose turn is the voiding step must read changed under both framings, or the run refuses",
+  "shuffled-framing null, pre-registered: arm labels permuted within fork, 9,999 permutations seeded, on every computable rung the null's mean advisory-minus-imperative difference within 0.02 of zero, or the result is inconclusive whatever the rule says (decision 5)",
+  "the sham arm as the perturbation floor",
+  "every grader's demonstrated failure in the instrument's selftest, the judge scorer's control-miss and malformed refusals included",
+  "grading-order diff over every row (decision 7)"
+ ],
+ "substrate": "the box instance at the window's start, expected 2026-09-20 (registered), pinned engine, production model and flags, each fork's own sampler parameters; verify-box before and after; production config untouched",
+ "box_time": "2,400 rows at the (b) mean of 5.6 s a row is about 3.7 h plus the control fork; about 4 h in the announced window, 5.2 h if the headroom pilot must be re-run on a new instance",
+ "readings_posted": "every reading under decision-rule.toml [readings] is posted on #89 before the first fork; a reading not posted there is not applied",
+ "pilot": "before ratification the judge prompt and controls were piloted on one batch of the (b) record's rows on Sonnet: the first pilot voided on an ambiguous control (replaced, the edit definition tightened), the second returned 38 objects for 40 items (malformed; the prompt now asks for the count and malformed outputs are covered above); pilot verdicts are read by nothing and no pilot touched the box"
+}

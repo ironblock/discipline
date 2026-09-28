@@ -1,0 +1,2 @@
+Not UTF-8. A format returns a verdict on arbitrary bytes rather than
+crashing on them, and the verdict here is refusal.

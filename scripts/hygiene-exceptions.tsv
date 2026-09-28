@@ -1,0 +1,35 @@
+# Declared exceptions to the shaped patterns in hygiene-patterns.tsv.
+#
+# Format: label<TAB>extended-regex, in the SAME dialect the pattern it
+# exempts is written in -- POSIX ERE, because `hygiene.sh` applies this
+# through `sed -E`, the one tool that shares grep -E's regex flavour, so a
+# maintainer reading a pattern and its exception beside it reads one syntax
+# rather than two.
+#
+# WHAT THIS DOES, AND WHAT IT DOES NOT. An exception does not loosen or
+# rewrite the pattern it names: `hygiene.sh` still runs the pattern's own
+# regex, unedited, against the full line. Every occurrence of the exception
+# regex is then removed from that line, and the pattern is asked again
+# whether anything is LEFT. If nothing is, every hit on the line was
+# accounted for by a declared-safe form and the line is clean; if something
+# still matches, it is reported exactly as before -- so a line carrying both
+# a forge remote AND a private one still fires.
+#
+# This is a data-driven carve-out, not a weaker pattern: the shape the
+# pattern names is unchanged, and a form not listed here still fires -- a
+# login at a DOTTED private host, colon-terminated, is the whole reason
+# `ssh-user-at-host` keeps matching after this file exists. (Not a bare,
+# dotless hostname: a fresh-instance review of #83 found an earlier example
+# here used one and never fired, since the pattern requires a dot --
+# pre-existing and unrelated to this file, corrected rather than repeated.
+# Not written as a literal instance again, for the same reason this row's
+# own regex is not written as the string it exempts.)
+#
+# Ruled 2026-09-12 on #72. `ssh-user-at-host` exists to catch a PRIVATE
+# remote a captured log carries by accident -- a build box, a personal
+# machine -- and a public forge's own SSH remote form is not that: it is the
+# same string in every clone of every public repository on that host,
+# published by the forge itself. Four forges named here; the shape is one
+# alternation, so a fifth is one more name in it, not a new row.
+
+ssh-user-at-host	(git|hg)@(github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|sr\.ht):

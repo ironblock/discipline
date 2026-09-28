@@ -29,3 +29,5 @@
 - A test that cannot fail is not a test: Write RED tests, then make them pass.
 - If you're asserting that a system works a certain way, write a test that fails if it doesn't.
 - A verdict through `grep` is not a gate. `cargo test | tee` returns tee's status, not cargo's; a `&&` following a `grep` passed on nothing.
+- An injection's verdict reads the tree delta AND the exit status. A mutation that exits 1 after changing the tree is BROKEN, not a green accusation against a working check. *Specimen: an injection that edited a record and then died reported `GREEN <-- THE GATE DID NOT FIRE` against `check-results.py`, which was working; both readers of "did the injection take" had discarded `$?`.*
+- Any fixture text that exists twice has one source. Two copies of the same four lines is one fix and one survivor, and the survivor is found by a seventeen-minute selftest rather than by review.

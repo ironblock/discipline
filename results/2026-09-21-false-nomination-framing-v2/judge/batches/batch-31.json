@@ -1,0 +1,245 @@
+{
+"batch": 31,
+"items": [
+{
+"entry": "The `sse_ping_interval` timeout mechanism at the bottom — sends `:\\n\\n` keep-alive pings to prevent client-side timeouts (`server-context.cpp` ~line 3995)",
+"id": "707eedfb09f7",
+"prose": "The note about `sse_ping_interval` (line ~3995) is still accurate — I confirmed it at line ~3998 in my earlier reads. Let me continue tracing the stop conditions and the final response path.\n\n",
+"reasoning": ""
+},
+{
+"entry": "Function calling / tool use support with `--jinja` flag (README.md, Anthropic API section)",
+"id": "c028a014c068",
+"prose": "Correction: The entry about `--jinja` flag for function calling/tool use in the Anthropic API section was based on a misreading — the `--jinja` flag is actually for template rendering control in general, not specifically for function calling. Function calling support is a separate feature implemented through the request body's `tools` parameter, not a CLI flag. I'll update this in the working record.\n\nNow let me explore the source files available:",
+"reasoning": ""
+},
+{
+"entry": "Member `int32_t dry_allowed_length = 2;` — tokens extending repetitions beyond this receive penalty (`common/common.h:241`).",
+"id": "38d984385724",
+"prose": "The `dry_allowed_length` note from the working record is about sampling params in `common/common.h:241`, which is unrelated to the caching/checkpointing code I'm examining in `server-context.cpp`. It should still hold.\n\nLet me check how `n_before_user` is computed and set:",
+"reasoning": ""
+},
+{
+"entry": "`params.parallel_tool_calls` is passed through to the template context — relevant for understanding how the template decides whether to render multiple tool calls in a single assistant message (`chat.cpp`, ~line 2495)",
+"id": "b61a611db998",
+"prose": "The working record note about `params.parallel_tool_calls` being passed through to the template context is confirmed accurate — it's set at line ~2495 in `common_chat_templates_apply_jinja`. Let me now look at how specialized templates (like LFM2) render tool definitions into the prompt:\n\n",
+"reasoning": ""
+},
+{
+"entry": "Check if there are server-specific defaults that override the struct defaults in `common.h`.",
+"id": "c993a891d2d9",
+"prose": "Reasoning: I will start by listing the contents of the `tools/server` directory in the beellama.cpp repository to see what files are present.\n\n",
+"reasoning": ""
+},
+{
+"entry": "How does `server_response_reader::next()` block/wait for results — need to see the synchronization primitive",
+"id": "355bf5830358",
+"prose": "Let me read the other stop conditions at lines 3800-3950:\n\n",
+"reasoning": "The user's note about `server_response_reader::next()` is still relevant - I should look at that. But first, let me continue tracing the stop conditions around lines 3813 and 3935."
+},
+{
+"entry": "Slot save/restore (`/slots/{id}?action=save/restore`) and the internal prompt cache (`server_prompt_cache`) are TWO completely independent systems — slot save/restore writes full KV state to disk via `llama_state_seq_get_data_ext`/`llama_state_seq_set_data_ext`, while the prompt cache is an in-memory cross-slot LRU cache that uses `get_common_prefix` matching — IMPLICATION: Auditing \"cache\" behavior requires reasoning about two separate mechanisms with different APIs, lifecycle rules, and eviction strategies; they are not interchangeable.",
+"id": "a6ec5865ebd1",
+"prose": "**Correction:** The previous entry incorrectly described the prompt cache as \"LRU.\" It is actually **FIFO** (first-in-first-out) — `update()` evicts via `states.pop_front()` which removes the oldest entry. The *selection* strategy is best-match (dual `f_keep`/`sim` criteria), but *eviction* is strictly FIFO, not LRU. Slot save/restore is disk-based via `llama_state_seq_save_file()`, while the prompt cache is in-memory via `llama_state_seq_get_data_ext`/`llama_state_seq_set_data_ext`. They are two independent systems.\n\n",
+"reasoning": "The user wants me to update the working record entry about slot save/restore and the prompt cache. Let me re-examine the code to make sure I have the correct understanding, then update the entry.\n\nFrom what I've seen:\n\n1. **Slot save/restore** (`/slots/{id}?action=save/restore`):\n   - Uses `llama_state_seq_save_file()` for saving (line 2371)\n   - Uses `llama_state_seq_get_data_ext()` / `llama_state_seq_set_data_ext()` for the internal prompt cache\n   - Writes to disk via `params.slot_save_path + filename`\n   - Task types: `SERVER_TASK_TYPE_SLOT_SAVE`, `SERVER_TASK_TYPE_SLOT_RESTORE`, `SERVER_TASK_TYPE_SLOT_ERASE`\n\n2. **Internal prompt cache** (`server_prompt_cache`):\n   - In-memory, cross-slot cache\n   - Uses `get_common_prefix()` for matching\n   - Has eviction via `update()` when size limit is exceeded\n   - Uses `llama_state_seq_get_data_ext()` / `llama_state_seq_set_data_ext()` for KV state serialization\n   - NOT LRU - it's a best-match search based on `f_keep` and `sim` dual criteria\n\nWait, let me re-check. The prompt cache is not LRU in the traditional sense. The `update()` function does `states.pop_front()` which removes the oldest entry, but the selection in `load()` is based on best match, not LRU. \n\nSo it's a FIFO eviction policy with best-match selection. The slot save/restore is disk-based and uses `llama_state_seq_save_file()` directly, while the prompt cache is in-memory and uses the ext functions. They are indeed two separate systems. I need to correct the record entry—the prompt cache uses FIFO eviction, not LRU."
+},
+{
+"entry": "The working record references specific files like `server.cpp`, `server-common.h`, `server-context.cpp`, `server-task.cpp`, `server-schema.cpp`, `server-http.cpp`, `server-queue.h`, `arg.cpp`, and `common/chat.cpp` — none of these have been found yet.",
+"id": "eb10855a6d13",
+"prose": "Correction: The working record entry #140 was incorrect — the beellama fork's source files ARE present at `~/git/reference/beellama.cpp/tools/server/`. The earlier note about files not being found referred to the Homebrew install path (`/usr/local/Cellar/llama.cpp/9700/`), which only contains binaries. The actual source tree is in the beellama fork repo.\n\nNow let me continue examining the unique files:\n\n",
+"reasoning": ""
+},
+{
+"entry": "Upstream's `struct server_prompt` had a `data` field of type `server_prompt_data` holding the main KV state, but beellama's version has no such field — IMPLICATION: the checkpoint data lifecycle is managed externally via function callbacks (`can_restore`, `restore`, `clear`) rather than being embedded in the prompt object itself",
+"id": "5b71f98eefa1",
+"prose": "That entry still holds. The upstream `server_prompt` struct had an embedded `server_prompt_data data` field holding raw KV bytes, but in beellama that field is gone — replaced by the callback-based `server_prompt_cache_state_io` interface. Let me verify this by examining the checkpoint call site at line 3912 and the surrounding context.\n\n",
+"reasoning": ""
+},
+{
+"entry": "How does the engine.ts implementation differ from standard Babylon.js (WebGPU-specific details)?",
+"id": "72819ef56d38",
+"prose": "",
+"reasoning": "I see the engine directory has WebGPU-specific files like `gpu-task-timer.ts`, `gpu-task-timing.ts`, `gpu-timer.ts`, and `surface.ts`. Let me look at the main `engine.ts` file to see how it's structured and how it differs from standard Babylon.js. I'll also check the `frame-graph` directory since that's a key part of modern rendering engines."
+},
+{
+"entry": "Were `server-schema.cpp/h` and `server-stream.cpp/h` functionality moved inline into other files in beellama, or were they dropped entirely?",
+"id": "8bf250536630",
+"prose": "",
+"reasoning": "Now let me also look at the size differences for other key files to get a complete picture."
+},
+{
+"entry": "The `tool_choice` parameter (\"auto\", \"none\", \"required\") is NOT passed into the Jinja template context — only `messages`, `tools`, `bos_token`, `eos_token`, `enable_thinking`, and `add_generation_prompt` are. The `tool_choice` is used solely for grammar generation (controlling min/max tool call counts), not for template rendering — IMPLICATION: Jinja templates cannot conditionally render based on tool_choice; they always render tool definitions the same way regardless of whether tool use is required/auto/none.",
+"id": "7689cb0589a9",
+"prose": "",
+"reasoning": "Let me look at `process_token` which is where the actual token generation and streaming decision happens."
+},
+{
+"entry": "Compare beellama's server.cpp against upstream to identify what was refactored out into the new files",
+"id": "5124ac38cee7",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "`pre_decode()` and `batch.render()` are called to prepare the llama batch before decoding — these bridge slot state to the actual llama.cpp inference engine (`server-context.cpp`, line ~2802)",
+"id": "499826150ee2",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "NONE — The shell environment is simply empty. There's no Babylon Lite codebase checked out here, so I can't search for or examine the Minecraft clone scene.",
+"id": "287c06412859",
+"prose": "The shell environment is empty — no Babylon Lite codebase is checked out here. Let me verify what's actually available.\n\n",
+"reasoning": ""
+},
+{
+"entry": "The working record references specific files like `server.cpp`, `server-common.h`, `server-context.cpp`, `server-task.cpp`, `server-schema.cpp`, `server-http.cpp`, `server-queue.h`, `arg.cpp`, and `common/chat.cpp` — none of these have been found yet.",
+"id": "966c451e697b",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "`top_n_sigma` — sigma-based token selection parameter (common.h, line ~245)",
+"id": "48217245c3c4",
+"prose": "...e Anthropic tool_choice handling was removed or just relocated:\n\n",
+"reasoning": ""
+},
+{
+"entry": "Examine `server-task.cpp` / `server-task.h` to understand the `server_task` struct and `SERVER_TASK_TYPE_COMPLETION`",
+"id": "ae9d36f721e7",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "Read `get_common_prefix()` in server-common.cpp",
+"id": "3c1c7981033f",
+"prose": "",
+"reasoning": "The working record note about `get_common_prefix()` was from an old investigation. Since I'm now investigating checkpointing and KV cache save/restore, this note is no longer relevant to the current task. Let me look at the LoRA cache clearing logic."
+},
+{
+"entry": "Read the `on_new_task` callback handler in server-context.cpp (around line 1458) to trace slot selection and task assignment",
+"id": "e681ca35879b",
+"prose": "",
+"reasoning": "Let me look at the key locations:\n1. Line 1708 - where partial responses are sent during token generation\n2. Lines 3044-3047 - progress and begin events during prompt processing\n3. Lines 2791, 3494, 3616 - where final responses are sent (stop conditions)"
+},
+{
+"entry": "Where in `server-context.cpp` or `server-schema.cpp` are tool definitions from the JSON request body converted into the format expected by the chat template engine?",
+"id": "5850612578f6",
+"prose": "**Correction to working record:** The entry \"Where in `server-context.cpp` or `server-schema.cpp` are tool definitions from the JSON request body converted into the format expected by the chat template engine?\" is superseded. The conversion doesn't happen in `server-context.cpp` or `server-schema.cpp` — tool definitions flow through `common/chat.cpp` where they are parsed and rendered. Specifically, the chat template engine in `common/chat.cpp` handles tool definition rendering internally via the `template_tool_use` variant and the `common_chat_templates_apply()` function, which calls `llama_chat_apply_template()`. The server-side code (`server-context.cpp`) only passes the raw tool definitions as part of the `server_task_completion_params` struct, and the actual rendering into template-compatible format happens deep in the common library's chat template subsystem.\n\nLet me continue tracing the full flow:\n\n",
+"reasoning": ""
+},
+{
+"entry": "`prompt_clear` uses `common_context_seq_rm(ctx_tgt, id, -1, -1)` to wipe the KV cache for a slot — this is how slots get recycled (server-context.cpp, line ~165)",
+"id": "c66821580825",
+"prose": "The working record entry at #62 (and the follow-up note about `prompt_clear`) stated that `common_context_seq_rm(ctx_tgt, id, -1, -1)` wipes the KV cache for a slot to recycle it. That's only partially correct — `prompt_clear` is indeed called during `slot.reset()`, but the KV cache isn't simply \"wiped\" in the general case. The server has a **three-tier** cache management strategy:\n\n1. **In-memory prompt cache** (`server_prompt_cache`) — before a slot is recycled, `prompt_save()` is called to serialize the KV cache state into an in-memory LRU cache (gated by `--cache-prompt-size` and `--cache-prompt-limit-tokens`). This cached state can later be restored via `prompt_load()` when a new request shares a prefix with the saved prompt.\n\n2. **Disk-backed slot save/restore** — `SERVER_TASK_TYPE_SLOT_SAVE` writes the full KV cache state (target + draft contexts) to a file under `--slot-save-path`, and `SERVER_TASK_TYPE_SLOT_RESTORE` reads it back. This is the explicit checkpoint mechanism exposed via `/slots/:id_slot?action=save` and `?action=restore`.\n\n3. **Context checkpoints within a slot** — the `slot.prompt.checkpoints` list stores KV cache snapshots for speculative decoding rollback, managed by `n_ctx_checkpoints`. These are internal checkpoints, not user-facing.\n\nSo `prompt_clear` is only the *fallback* path when no cache save is needed. The primary recycling path goes through `prompt_save` → `prompt_load` (in-memory) or disk save/restore. The correction: `common_context_seq_rm` clears the KV cache *after* it has been optionally saved to the prompt cache, and `prompt_clear` is called in `reset()` which is invoked when a slot transitions to `SLOT_STATE_IDLE`, but the cache state may have been preserved in-memory or on disk before clearing.\n\n",
+"reasoning": ""
+},
+{
+"entry": "Beellama adds a `server_state` enum (DOWNLOADING, LOADING, READY, SLEEPING) and `server_state_callback_t` replacing upstream's simpler `on_sleeping_changed(bool)` callback — this is a more granular state machine. — IMPLICATION: State reporting and lifecycle management are more sophisticated in beellama, which matters for router health checks and child process management.",
+"id": "0db046ef2ad9",
+"prose": "Correction: The `server_state` enum and `server_state_callback_t` in beellama's `server-context.h` replace upstream's `on_sleeping_changed(bool)` callback with a more granular 4-state lifecycle (DOWNLOADING, LOADING, READY, SLEEPING) and a typed callback `std::function<void(server_state, json /* payload */)>`. This is not just a \"more granular state machine\" — it fundamentally changes how child processes report lifecycle events to the router, enabling the router to distinguish between models actively downloading vs. loading vs. ready, which feeds into the `conv_model_tracker` and resumable streaming routing logic. The old upstream callback was a simple boolean toggle for sleeping state only.\n\nNow continuing with the comparison:",
+"reasoning": ""
+},
+{
+"entry": "Compare the beellama.cpp tools/server file list against upstream llama.cpp to identify differing files",
+"id": "8cd77328d7c5",
+"prose": "Here's a comprehensive summary of the **three distinct chat template rendering paths** in llama.cpp, based on the source code analysis:\n\n---\n\n## Three Chat Template Rendering Paths in llama.cpp\n\n### 1. **Generation-Time Rendering** — `common_chat_templates_apply()` during inference\n\n**Entry Point:** `server-context.cpp:4107` (inside `process_single_task`)\n\n**Flow:**\n",
+"reasoning": ""
+},
+{
+"entry": "`get_common_prefix()` handles multimodal tokens specially — when both tokens are `LLAMA_TOKEN_NULL`, it compares media chunk IDs and token counts rather than raw token values — IMPLICATION: Prompt caching for multimodal inputs requires matching media chunk identity, not just token sequence equality",
+"id": "47f63387c0b2",
+"prose": "",
+"reasoning": "The user wants me to update my working record entry about `get_common_prefix()` handling multimodal tokens. Let me look at the code more carefully.\n\nLooking at the `get_common_prefix` function in server-common.cpp (lines 471-518), I can see:\n\n1. When `has_mtmd` is false, it does a simple token-by-token comparison\n2. When `has_mtmd` is true, it handles `LLAMA_TOKEN_NULL` specially - these represent multimodal chunks, and it compares the chunk IDs and token counts\n\nThe existing record says: \"`get_common_prefix()` handles multimodal tokens specially — when both tokens are `LLAMA_TOKEN_NULL`, it compares media chunk IDs and token counts rather than raw token values — IMPLICATION: Prompt caching for multimodal inputs requires matching media chunk identity, not just token sequence equality\"\n\nThis seems accurate based on the code. But let me look at it more carefully:\n\n```cpp\nif (ai == LLAMA_TOKEN_NULL && bi == LLAMA_TOKEN_NULL) {\n    const auto & a_chunk =   find_chunk(i);\n    const auto & b_chunk = b.find_chunk(i);\n\n    GGML_ASSERT(a_chunk && b_chunk);\n\n    const std::string id_ai = mtmd_input_chunk_get_id(a_chunk.get());\n    const std::string id_bi = mtmd_input_chunk_get_id(b_chunk.get());\n\n    const size_t n_tok_a = mtmd_input_chunk_get_n_tokens(a_chunk.get());\n    const size_t n_tok_b = mtmd_input_chunk_get_n_tokens(b_chunk.get());\n\n    if (id_ai == id_bi && n_tok_a == n_tok_b) {\n        GGML_ASSERT(n_tok_a > 0 && \"Invalid media chunk\");\n        i += n_tok_a - 1; // will be +1 by the for loop\n        continue;\n    }\n\n    return i;\n}\n```\n\nSo when both tokens are NULL, it retrieves the corresponding chunks and validates them by checking if their IDs and token counts match. If they're identical, it advances the index past the chunk and continues; otherwise it returns the current position as the divergence point. There's also a guard that ensures multimodal chunks have at least one token.\n\nFor regular token pairs, it just compares them directly and returns early on any mismatch. The function ultimately returns the index where the sequences first differ, or the full length if they're identical. The record entry seems accurate, though I should verify whether there are additional nuances I'm missing.\n\nLooking at the cache loading logic, `f_keep` represents the fraction of the cached prompt that remains usable, while `sim` measures how much of the new prompt overlaps with what's cached. The selection criteria requires both metrics to improve simultaneously—`f_keep_cur < 0.25f` acts as a floor to avoid discarding too much of a large cached prompt, and `f_keep_best < f_keep_cur && sim_best < sim_cur` ensures we're genuinely finding a better match. The current record appears correct, so I should proceed with the summary."
+},
+{
+"entry": "The `start_loop` method on `server_queue` is the main event loop that processes queued tasks and manages sleeping — it's where tasks get dispatched to slots (`server-context.cpp` / `server.cpp`)",
+"id": "9236385d8c5f",
+"prose": "Good — that entry still holds. The `start_loop` method is indeed the main event loop for task dispatch. Let me continue investigating the slot save/restore HTTP endpoints and the disk-backed persistence.\n\n",
+"reasoning": ""
+},
+{
+"entry": "`is_router_server` branch — the server can run in \"router\" mode with different handler wiring vs. standalone mode (lines 260+)",
+"id": "e0dfaf4f6810",
+"prose": "Now let me read the actual handler in server-context.cpp:\n\n",
+"reasoning": "Now I found it. The actual handler is in `server-context.cpp` at line 4716. Let me read that function to understand the flow."
+},
+{
+"entry": "The prompt cache `load()` function uses a **dual improvement criteria** — a cached prompt is only selected if BOTH `f_keep` (fraction of cached context preserved) AND `sim` (common prefix / new prompt length) are strictly better than the slot's current prompt — IMPLICATION: A cached prompt with high similarity but low `f_keep` won't be used, and vice versa; this prevents loading a tiny cache entry that barely overlaps with the new prompt even if it matches perfectly.",
+"id": "7b2d1019f6c9",
+"prose": "",
+"reasoning": "Let me look at the `handle_slots_save` and `handle_slots_restore` functions to understand the endpoint-level save/restore."
+},
+{
+"entry": "The `alloc()` method's LCP-based deduplication — it removes obsolete cached prompts fully contained in the new prompt and skips saving if the prompt already exists. This matters for understanding cache bloat and eviction behavior. (server-task.cpp, lines 1620+)",
+"id": "fe61c63bfee1",
+"prose": "Now let me check the upstream llama.cpp tools/server directory for comparison. Let me also check the CMakeLists.txt and tests:\n\n",
+"reasoning": ""
+},
+{
+"entry": "The `alloc()` method's LCP-based deduplication — it removes obsolete cached prompts fully contained in the new prompt and skips saving if the prompt already exists. This matters for understanding cache bloat and eviction behavior. (server-task.cpp, lines 1620+)",
+"id": "4b7cf7de808e",
+"prose": "Now let me check the upstream llama.cpp tools/server directory for comparison to identify which files are truly unique to beellama:\n\n",
+"reasoning": ""
+},
+{
+"entry": "Where in `server-context.cpp` or `server-schema.cpp` are tool definitions from the JSON request body converted into the format expected by the chat template engine?",
+"id": "0d08634fdbeb",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "NONE — The core question (where common-prefix matching happens for prompt cache/slot reuse) has been fully answered with quoted code from all four key locations: `get_common_prefix()` in server-common.cpp, `get_available_slot()` in server-context.cpp, `server_prompt_cache::load()` in server-task.cpp, and the slot-level `prompt_save`/`prompt_load` in server-context.cpp.",
+"id": "792270d9fd09",
+"prose": "Reasoning: Note: The \"NONE\" entry about prompt cache/slot reuse common-prefix matching remains valid — it was fully answered. This is a new, separate investigation into chat templates and tool/function rendering. Let me search in the `tools/` directory where the server code likely lives.\n\n",
+"reasoning": "The user is asking me to update a working record entry that says \"NONE\" (meaning the core question was fully answered). But the new question is about chat templates and tool/function definition rendering, which is a different topic. The \"NONE\" entry was about prompt cache/slot reuse common-prefix matching, which was indeed fully answered.\n\nI should note that this new investigation is a separate question, not a correction to the previous one. Let me proceed with finding chat template application and tool/function definition rendering in the server code.\n\nLet me search in the `tools/` directory since that's likely where the server code lives."
+},
+{
+"entry": "The `finish_reason` string mapping from `stop_type` enum (`STOP_TYPE_EOS`/`STOP_TYPE_WORD`/`STOP_TYPE_LIMIT`) to OpenAI-compatible strings (`\"stop\"`/`\"length\"`) is not in `send_final_response` but in `server_task_result_cmpl_final::to_json()` — IMPLICATION: need to read the `to_json()` method to see the exact `finish_reason` mapping",
+"id": "0cd763403eee",
+"prose": "Let me read the finish_reason mapping in detail:",
+"reasoning": "The working record entry is superseded because I've now read the actual code. Let me look at the key sections of the `to_json()` methods for the final response to understand the finish_reason mapping."
+},
+{
+"entry": "Slot save/restore operates on a specific slot ID and requires the slot to be in an idle/released state — IMPLICATION: you cannot checkpoint a slot mid-generation; the slot must be available, which means save/restore is a cold-standby pattern, not a hot-snapshot mechanism",
+"id": "e2cf0e77e336",
+"prose": "Now let me look at the task processing for SLOT_SAVE and SLOT_RESTORE:\n\n",
+"reasoning": "The user wants me to investigate slot checkpointing and KV cache save/restore. Let me continue reading the task processing code for SLOT_SAVE and SLOT_RESTORE."
+},
+{
+"entry": "Whether upstream llama.cpp has any of these new files (server-adaptive-dm.h, server-loop-guard.cpp/h, server-mcp.cpp/h, server-models.cpp/h, server-stream.cpp/h, server-tools.cpp/h) — I haven't checked an upstream clone for comparison",
+"id": "eb44dde847e4",
+"prose": "**Correction to the working record:**\n\nThe earlier hypothesis that `server-mcp.cpp/h`, `server-models.cpp/h`, `server-stream.cpp/h`, and `server-tools.cpp/h` might be beellama-specific additions is **incorrect**. I verified by comparing beellama's HEAD file list against upstream commit `6ba5ef247` (the latest merged upstream as of `Merge upstream llama.cpp through 6ba5ef247`), and all four pairs are present in upstream. The **only** files that are genuinely beellama-specific are:\n\n| File | Purpose |\n|---|---|\n| `server-adaptive-dm.h` (1,596 lines) | Adaptive draft-model speculative decoding helpers — EWMA profit tracking, probe fraction tuning, continuation-preservation heuristics |\n| `server-loop-guard.cpp` (253 lines) + `.h` (47 lines) | Reasoning loop guard — detects infinite reasoning loops via periodic tail, n-gram dominance, and low-entropy checks on reasoning vs visible token streams |\n\nEverything else in `tools/server/` (including `server-mcp.*`, `server-models.*`, `server-stream.*`, `server-tools.*`) is upstream llama.cpp. The only beellama modifications to shared files are:\n- `CMakeLists.txt` — added `server-loop-guard.cpp` and `server-loop-guard.h` to the build\n- `README.md`, `README-dev.md` — fork-specific docs\n- Various test file changes\n- Minor parameter/field additions to `server-task.h` (e.g., `loop_guard_triggered`, `loop_guard_action`, `loop_guard_reason`, `reasoning_loop_guard`)",
+"reasoning": ""
+},
+{
+"entry": "MAD (Multiply-Add) counting as a shader complexity metric — used in parity tests to ensure Lite shaders are not more expensive than BJS (GUIDANCE.md, section 4)",
+"id": "d05158b02c5d",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "The `alloc()` method's LCP-based deduplication — it removes obsolete cached prompts fully contained in the new prompt and skips saving if the prompt already exists. This matters for understanding cache bloat and eviction behavior. (server-task.cpp, lines 1620+)",
+"id": "19f7516da5fb",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "The `tool_choice` parameter (\"auto\", \"none\", \"required\") is NOT passed into the Jinja template context — only `messages`, `tools`, `bos_token`, `eos_token`, `enable_thinking`, and `add_generation_prompt` are. The `tool_choice` is used solely for grammar generation (controlling min/max tool call counts), not for template rendering — IMPLICATION: Jinja templates cannot conditionally render based on tool_choice; they always render tool definitions the same way regardless of whether tool use is required/auto/none.",
+"id": "ac99118cfe0e",
+"prose": "Reasoning: Now I have a good picture. Let me check one more thing - how `tool_choice` is actually passed to the Jinja context, since I noticed it's not directly in the `inp` JSON at line 839-852. Let me also look at the `jinja::global_from_json` function to understand how the context is set up.\n\n",
+"reasoning": "Now I have a comprehensive picture. Let me now look at how `tool_choice` gets passed into the Jinja template context. I need to check if `tool_choice` is added to the `inp` JSON object in `common_chat_template_direct_apply_impl`. Looking back at lines 837-869, I saw that `tool_choice` is NOT directly added to the `inp` JSON. Let me check if it's handled differently.\n\nActually, looking at the code more carefully, I see that `tool_choice` is used for grammar generation but may not be passed directly to the Jinja template as a variable. The Jinja template typically receives `tools` as a JSON array. Let me verify this.\n\nLet me also check how the Jinja template actually renders the tools - what Jinja expression is typically used in templates to render tools."
+},
+{
+"entry": "`tokenize_input_prompts` converts raw prompt strings to token sequences — relevant for prompt processing bugs",
+"id": "a46683cb61b4",
+"prose": "",
+"reasoning": "Let me get the full function that computes n_before_user."
+},
+{
+"entry": "Compare the beellama.cpp tools/server file list against upstream llama.cpp to identify differing files",
+"id": "9dc7fb9d987f",
+"prose": "",
+"reasoning": ""
+}
+]
+}

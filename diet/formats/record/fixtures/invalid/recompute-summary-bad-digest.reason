@@ -1,0 +1,20 @@
+A recompute summary carrying a `product_sha256` that is not a digest. Every
+field its kind declares is present and well-formed; only the digest's CONTENT
+is wrong, so the row survives the required-field parse and reaches
+`admit_summary`, which is where the check lives.
+
+THIS FIXTURE EXISTS BECAUSE THE CHECK HAD NEVER BEEN RED FOR THIS KIND. The
+2026-09-11 ruling moved `product_sha256` onto `Event::Summary` and the check
+with it, out of the drive arm and in front of the kinds. Nothing proved the
+second half. The only recompute fixture touching the digest is
+`recompute-summary-without-its-product-digest.jsonl`, and it has the field
+MISSING -- caught by `take_string` before `admit_summary` runs at all, so it
+cannot tell "the digest's content is checked for every kind" from "the digest
+is checked for drives only". A fresh instance narrowed the check back to the
+drive arm and watched 597 tests pass over a record whose digest reads
+`not-a-valid-digest`.
+
+The seeded fault that was supposed to cover this, `inject_record_recompute_
+digest_optional`, changes TWO things at once -- the field becomes optional and
+the check narrows to Drive -- and grades on the missing-field fixture, so the
+narrowing half rode along untested. Two defects need two fixtures.

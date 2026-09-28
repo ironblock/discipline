@@ -1,0 +1,5 @@
+# The regimen this run applied.
+arm = "false-nomination-framing-v2-four-arms-six-rungs"
+substrates = ["accel24-beellama-qwen27b-q4kxl"]
+dogma_version = 0
+grading_order_is_regime_factor = true

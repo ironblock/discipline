@@ -1,0 +1,2 @@
+DECISION — keep the guard — EVIDENCE: the selftest went red
+PLAN: land it

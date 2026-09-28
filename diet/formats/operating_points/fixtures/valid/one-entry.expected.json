@@ -1,0 +1,21 @@
+[
+  {
+    "gate": {
+      "temperature": {
+        "float": 0.0
+      },
+      "votes": {
+        "integer": 1
+      }
+    },
+    "key": "local",
+    "match": "local",
+    "nothink_ops": [],
+    "sampler": {
+      "temperature": {
+        "float": 0.0
+      }
+    },
+    "thinking_kwarg": false
+  }
+]

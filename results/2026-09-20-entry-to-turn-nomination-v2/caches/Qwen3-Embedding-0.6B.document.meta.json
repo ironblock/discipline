@@ -1,0 +1,48 @@
+{
+ "cache": "Qwen3-Embedding-0.6B.document.vectors.jsonl",
+ "cache_sha256": "a3bc884ea6c459432c96bcf515eb6500812956017606cfcec4ef715749e2e10f",
+ "id": "Qwen3-Embedding-0.6B",
+ "role": "document",
+ "model": "onnx-community/Qwen3-Embedding-0.6B-ONNX",
+ "revision": "c25a394dd583836952667c12f008335071b3f43d",
+ "onnx": [
+  {
+   "file": "onnx/model_int8.onnx",
+   "sha256": "6d0ea863f78b4a84afa3c7fcba1ec341572b5e28121aef77b7092b1dfdf679c7"
+  }
+ ],
+ "tokenizer": {
+  "file": "tokenizer.json",
+  "sha256": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"
+ },
+ "dimension": 1024,
+ "normalized": true,
+ "pooling": "last token of `last_hidden_state` (the <|endoftext|> the shipped tokenizer.json post-processor appends, which the session verifies at load), the causal graph fed position_ids 0..T-1 and empty past_key_values",
+ "prefix_queries": null,
+ "prefix_documents": "",
+ "prefix_note": "entries and their intents under this task's instruction (declared on #17, reading 8); senses under the sense bakeoff's; documents as the sense bakeoff's rows",
+ "texts": 674,
+ "max_tokens": null,
+ "truncated": [],
+ "texts_source": {
+  "gym_commit": "a7d2148",
+  "register": {
+   "pairs-intent.jsonl": "8a626b8b29c7c82075e439d944b61a054c5e30f7c61ef96ee7c7c2e75e5b3c83",
+   "pairs-intent.provenance.jsonl": "fef05dbcb2b6b237004afd4a42cfb2f8622284d033de59d456f82ed93f589f40",
+   "turns-sense.jsonl": "5a21649312d97d97a3777bf741eeedf4fbf7df194938638822a10d077fae9d21"
+  },
+  "senses": "diet/capture/sense/sets.jsonl"
+ },
+ "decimals": 8,
+ "batch_size": 1,
+ "intra_op_num_threads": 4,
+ "execution_provider": "CPUExecutionProvider",
+ "python": "3.12.13",
+ "onnxruntime": "1.23.2",
+ "tokenizers": "0.23.2",
+ "numpy": "2.5.2",
+ "huggingface_hub": "1.30.0",
+ "HF_HUB_OFFLINE": "1",
+ "environment": "requirements-ort-frozen.txt (throwaway uv venv; onnxruntime, tokenizers, numpy, huggingface_hub; no torch)",
+ "script": "entry-to-turn/embed_pairs.py ort"
+}

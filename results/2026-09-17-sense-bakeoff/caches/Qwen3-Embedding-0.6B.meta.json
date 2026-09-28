@@ -1,0 +1,54 @@
+{
+ "cache": "Qwen3-Embedding-0.6B.vectors.jsonl",
+ "cache_sha256": "bce8b47a394717f276e7f8e1b33c3af399178145b5c976f3f3f1ce5b56f48509",
+ "id": "Qwen3-Embedding-0.6B",
+ "model": "onnx-community/Qwen3-Embedding-0.6B-ONNX",
+ "revision": "c25a394dd583836952667c12f008335071b3f43d",
+ "onnx": [
+  {
+   "file": "onnx/model_int8.onnx",
+   "sha256": "6d0ea863f78b4a84afa3c7fcba1ec341572b5e28121aef77b7092b1dfdf679c7"
+  }
+ ],
+ "tokenizer": {
+  "file": "tokenizer.json",
+  "sha256": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a"
+ },
+ "graph": {
+  "kind": "decoder",
+  "output": "last_hidden_state",
+  "inputs": 59,
+  "outputs": 57,
+  "kv_inputs": 56
+ },
+ "dimension": 1024,
+ "normalized": true,
+ "pooling": "last token of `last_hidden_state` (the <|endoftext|> the shipped tokenizer.json post-processor appends, which the session verifies at load), the causal graph fed position_ids 0..T-1 and empty past_key_values",
+ "framing": {
+  "bos": null,
+  "eos": "<|endoftext|>"
+ },
+ "prefix_rows": "",
+ "prefix_senses": "Instruct: Given a description of a kind of statement made in a coding session, retrieve statements of that kind\nQuery: ",
+ "prefix_note": "the declared regime of the 2026-09-04 ruling: `Instruct: {task}\\nQuery: {text}` WITH a space after `Query:`. Qwen3-Embedding's model card (get_detailed_instruct, checked 2026-09-04) emits `Instruct: {task}\\nQuery:{query}` with NO space, and no instruction on documents; the space is the ruling's byte form, recorded here, not the card's",
+ "regime": "register rows are the documents, senses are the queries; the prefix is applied to the model input only and the cache text is bare",
+ "texts": 323,
+ "rows": 305,
+ "senses": 18,
+ "texts_source": {
+  "gym_commit": "c20e32b",
+  "register": "diet/capture/sense/register/*.jsonl minus *.provenance.jsonl",
+  "senses": "diet/capture/sense/sets.jsonl"
+ },
+ "decimals": 8,
+ "threads": 4,
+ "batch_size": 1,
+ "execution_provider": "CPUExecutionProvider",
+ "python": "3.12.13",
+ "onnxruntime": "1.23.2",
+ "tokenizers": "0.23.2",
+ "numpy": "2.5.2",
+ "huggingface_hub": "1.30.0",
+ "HF_HUB_OFFLINE": "1",
+ "environment": "requirements-ort-frozen.txt (throwaway uv venv; onnxruntime, tokenizers, numpy, huggingface_hub; no torch)"
+}

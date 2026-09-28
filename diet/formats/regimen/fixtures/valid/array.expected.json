@@ -1,0 +1,12 @@
+{
+  "controls": {
+    "array": [
+      {
+        "string": "a"
+      },
+      {
+        "string": "b"
+      }
+    ]
+  }
+}

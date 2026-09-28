@@ -1,0 +1,3 @@
+An array spanning lines. This format is line-oriented -- a statement ends at
+its newline -- and a value that continues past one is the multi-line string's
+problem restated. TOML accepts it; this subset does not.

@@ -1,0 +1,4 @@
+The reverse of the acceptance row, and it must fail for the same reason. A
+kind decides which fields exist in BOTH directions; a rule that only refused
+recompute fields on a drive would be a rule about one kind rather than about
+kinds.

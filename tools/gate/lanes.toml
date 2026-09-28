@@ -1,0 +1,37 @@
+# The root registry for lane-declared seeded faults.
+#
+# tools/gate/README.md's own law: "the registry is the pin." A gate
+# discovered by globbing a directory can silently find nothing if the
+# directory moves or the file is deleted; a lane named HERE and missing its
+# manifest is a finding (`scripts/apply-lane-faults.py --verify`), never a
+# silence.
+#
+# Format: name = "path/to/gate.toml", relative to the repository root.
+#
+# WHY THIS EXISTS. Every lane below writes its own seeded faults beside the
+# code that emits them -- ruling 1 on #59 -- and until now nothing applied
+# them: 123 faults declared, proven once by hand by whoever wrote them, and
+# run by nothing CI runs. `scripts/apply-lane-faults.py` is what applies them
+# for real, continuously, through `verify.sh`'s `lanes` check and the
+# `--selftest` cases this registry's `--list` output generates.
+#
+# RULED on #76, 2026-09-14: "client, drive, isolation, digest, and this
+# lane's [adapters]." All five are registered below. `adapters`'s own
+# manifest (`diet/adapters/gate.toml`) did not exist on `main` when this
+# comment was first written, so the entry was left commented out to avoid
+# firing "a registry entry with no manifest" against a file that had no PR
+# bringing it yet. That PR (#76) is now merging: uncommented here, in the
+# one-line fix its own thread posted (comment 5739679341), ruled to land
+# ahead of the manifest itself (comment 5739752816) so #76 goes green on a
+# rebase with no other change, rather than the two landing in the order
+# that would have kept both checks honest continuously. `seam` was the
+# opposite case at the time and is unaffected by this change: its manifest
+# already existed and was already unregistered drift.
+
+[lanes]
+client = "diet/client/gate.toml"
+drive = "diet/drive/gate.toml"
+isolation = "diet/isolation/gate.toml"
+digest = "diet/digest/gate.toml"
+seam = "diet/seam/gate.toml"
+adapters = "diet/adapters/gate.toml"

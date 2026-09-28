@@ -1,0 +1,245 @@
+{
+"batch": 49,
+"items": [
+{
+"entry": "`pre_decode()` and `batch.render()` are called to prepare the llama batch before decoding — these bridge slot state to the actual llama.cpp inference engine (`server-context.cpp`, line ~2802)",
+"id": "61ea46219f1d",
+"prose": "Now let me also see the task result flow — how results get sent back through the queue:\n\n",
+"reasoning": ""
+},
+{
+"entry": "Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)",
+"id": "cdc674c4eb4e",
+"prose": "Correction: The entry \"Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)\" should be updated to reflect that `/metrics` is indeed registered in `server.cpp` at line 207 as `ctx_http.get(\"/metrics\", ex_wrapper(routes.get_metrics))`, and it's a GET endpoint for Prometheus-style monitoring. The original entry was accurate, but I'll refine it for clarity:\n\n**Updated entry:** Metrics endpoint (`GET /metrics`) for Prometheus-style monitoring, registered in `server.cpp` line 207 via `routes.get_metrics`.\n\nNow continuing with the investigation:",
+"reasoning": ""
+},
+{
+"entry": "Diff key shared files (e.g., server-context.cpp, server-common.cpp) against upstream to identify modifications",
+"id": "08f0caf338d8",
+"prose": "**CORRECTION**: The working record entry \"Diff key shared files (e.g., server-context.cpp, server-common.cpp) against upstream to identify modifications\" is **superseded** by this step — we've already identified beellama's unique files and their purposes via directory listing and targeted inspection. No further diffing is needed to understand the fork's additions.\n\nNow searching for `n_before_user` and checkpoint behavior:",
+"reasoning": "The user wants me to:\n1. Update the working record to note that the \"Diff key shared files\" entry is superseded\n2. Search for `n_before_user` and checkpoint-related code in the beellama fork\n3. Explain what it does with quoted code\n\nLet me start by searching for `n_before_user` in the beellama fork."
+},
+{
+"entry": "Cache reuse (`n_cache_reuse`) also requires `llama_memory_can_shift()` to return true — not all memory backends support KV cache shifting",
+"id": "8ad3c4833f6a",
+"prose": "**CORRECTION:** The working record entry about `n_cache_reuse` requirements is incomplete. Cache reuse requires **both** conditions to be true simultaneously:\n\n1. `llama_memory_can_shift()` must return true (backend support)\n2. **No multimodal data present** (`!has_mtmd`)\n\nFrom `server-context.cpp:2849`:\n",
+"reasoning": "The user is asking me to update a working record entry that says \"Cache reuse (`n_cache_reuse`) also requires `llama_memory_can_shift()` to return true — not all memory backends support KV cache shifting\". They say this is superseded by the current investigation step.\n\nLooking at my investigation, I found that `n_cache_reuse` has TWO requirements:\n1. `llama_memory_can_shift()` must return true\n2. Multimodal data must NOT be present (`!has_mtmd`)\n\nThe original entry only mentioned the memory backend requirement. Let me update it to include the multimodal limitation as well.\n\nLet me check the exact code to confirm:\n- Line 2849: `const bool can_cache_reuse = llama_memory_can_shift(llama_get_memory(ctx_tgt)) && !has_mtmd;`\n\nSo the correction is that cache reuse requires BOTH `llama_memory_can_shift()` returning true AND no multimodal data."
+},
+{
+"entry": "`ctx_server.process_chat_completion(req, true)` is the key entry point — the second `true` arg likely means \"streaming.\" This function lives in `server-context.cpp` and is where the real flow begins. (`server.cpp`, route registration block)",
+"id": "4838a1626267",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "The beellama fork completely removed `server-schema.cpp` and `server-schema.h` (upstream's JSON param validation layer with `field_num`/`field_bool`/`set_limits`/`add_alias`) — the code is not just relocated, it's entirely absent, meaning parameter parsing works differently than upstream — IMPLICATION: When comparing parameter handling or tracing schema validation, the beellama fork likely uses a simpler/different approach that needs separate investigation",
+"id": "a71ec1e89007",
+"prose": "",
+"reasoning": "Let me look at how beellama handles parameter parsing differently from upstream."
+},
+{
+"entry": "Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)",
+"id": "66d69f453195",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "`dry_base` has a custom handler that clamps values `< 1.0` back to `params_base.sampling.dry_base` — a special validation rule at line ~139 (server-schema.cpp)",
+"id": "0781950a0838",
+"prose": "Good, this is the full source repo. Let me search for chat template and tool rendering code:\n\n",
+"reasoning": ""
+},
+{
+"entry": "The `llama_params[\"parse_tool_calls\"] = true` flag set when tools are present — this tells the server to post-process tool calls from the output (server-common.cpp, ~line 1070)",
+"id": "13697497d196",
+"prose": "The note was written successfully. Here's what it covers:\n\n1. **Cache entries are consumed, not referenced** — `states.erase(it_best)` removes the winning cache entry after a slot picks it, making cache single-use rather than shared.\n\n2. **Tool definitions are purely text-transform via Jinja** — no model-level tool registration; tools are parsed, re-serialized into a Jinja context, rendered into the prompt as text, and response tool-calls are parsed by an auto-generated PEG grammar.\n\n3. **Deferred tasks and async scheduling** — tasks are queued when no slot is available, creating potential starvation/deadlock risks between `wait_for_all()` polling and deferred scheduling, with cache timing and LoRA invalidation adding complexity.",
+"reasoning": ""
+},
+{
+"entry": "`logit_bias` — per-token logit biasing (common.h, within the struct, ~line 258)",
+"id": "60e85f284a73",
+"prose": "Now let me compare this with the upstream llama.cpp tools/server directory to identify which files are unique to beellama or have different purposes.\n\n",
+"reasoning": ""
+},
+{
+"entry": "The `load` method's dual-scoring heuristic using `f_keep` (preservation of cached prompt) and `sim` (similarity to new prompt) with a 0.25 threshold — this is the eviction/selection policy for picking the best cached KV state (`server-task.cpp`, lines ~1676–1700)",
+"id": "f2e2cd4de0b2",
+"prose": "Let me verify the exact dual-scoring heuristic and threshold in the `load` method to correct the record.",
+"reasoning": ""
+},
+{
+"entry": "The `llama_params[\"parse_tool_calls\"] = true` flag set when tools are present — this tells the server to post-process tool calls from the output (server-common.cpp, ~line 1070)",
+"id": "58daa9b92ce2",
+"prose": "The working record entry about `llama_params[\"parse_tool_calls\"] = true` was imprecise. Here's the correction:\n\n**Correction:** The flag `llama_params[\"parse_tool_calls\"] = true` is set at `tools/server/server-common.cpp:1070` only when **both** conditions hold: (1) tools are present (`!inputs.tools.empty()`), and (2) `tool_choice` is not `COMMON_CHAT_TOOL_CHOICE_NONE`. It does **not** merely signal that \"tools are present.\" When set, it tells the server's output parsing layer to invoke the PEG grammar-based tool-call parser (derived from the auto-generated `common_chat_params.parser`) on the model's response, rather than relying on simple delimiter-based splitting. The parser is generated by the auto-parser subsystem from the chat template's structure (see `common/chat.cpp:2629-2750`), not from any explicit tool registration.\n\n",
+"reasoning": ""
+},
+{
+"entry": "Compare the beellama.cpp tools/server file list against upstream llama.cpp to identify differing files",
+"id": "d38d8d0834c1",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "The `sse_ping_interval` timeout mechanism at the bottom — sends `:\\n\\n` keep-alive pings to prevent client-side timeouts (`server-context.cpp` ~line 3995)",
+"id": "f35dfa35c517",
+"prose": "The working record entry about `sse_ping_interval` at \"~line 3995\" is imprecise — the actual ping logic is at lines ~3990-4000 within the `res->next` lambda callback, where it checks `params.sse_ping_interval > 0` and sends `:\\n\\n` as a keep-alive. The line numbers are close but the key detail is that the ping is sent from *within* the `next()` callback during the polling loop, not as a separate timer-driven mechanism.\n\nLet me continue tracing the stop conditions and final response:\n\n",
+"reasoning": ""
+},
+{
+"entry": "Read the `on_new_task` callback handler in server-context.cpp (around line 1458) to trace slot selection and task assignment",
+"id": "bc878a637a69",
+"prose": "",
+"reasoning": "Let me look at the main token generation loop where partial responses are sent (around line 1708) and the final response sending locations."
+},
+{
+"entry": "The prompt cache (`server_prompt_cache`) stores KV state in RAM with configurable size/token limits via `--cache-backend-size` and `--cache-backend-tokens`; when limits are exceeded, oldest entries are evicted (FIFO)",
+"id": "c8371ba3a980",
+"prose": "**Correction:** The prompt cache (`server_prompt_cache`) does **not** use FIFO eviction. It uses **LRU (Least Recently Used) eviction** based on byte size (`limit_size`) and token count (`limit_tokens`), as implemented in `server_prompt_cache::update()`. The `alloc()` method also uses LCP (Longest Common Prefix) matching to detect duplicates before inserting, and entries are evicted by age/access order, not strictly first-in-first-out.\n\n---\n\nNow, back to the original task — here's the full analysis of `n_before_user` and checkpoint behavior in beellama vs upstream:\n\n## `n_before_user` — Removed in beellama\n\n**In upstream** (`llama.cpp`), `n_before_user` is a field in `task_params` (in `server-task.h`, line 66):\n\n",
+"reasoning": ""
+},
+{
+"entry": "The prompt cache `load()` function uses a **dual improvement criteria** — a cached prompt is only selected if BOTH `f_keep` (fraction of cached context preserved) AND `sim` (common prefix / new prompt length) are strictly better than the slot's current prompt — IMPLICATION: A cached prompt with high similarity but low `f_keep` won't be used, and vice versa; this prevents loading a tiny cache entry that barely overlaps with the new prompt even if it matches perfectly.",
+"id": "7850ae58d182",
+"prose": "Let me verify the dual improvement criteria in `server_prompt_cache::load()`.",
+"reasoning": "The user wants me to check if the working record entry about the dual improvement criteria for prompt cache `load()` is still accurate. Let me look at the actual code in `server_prompt_cache::load()` to verify."
+},
+{
+"entry": "`server_prompt_cache::load` enforces a `f_keep_cur < 0.25f` minimum threshold — it will refuse to load a cached prompt that would discard more than 75% of the cached context — IMPLICATION: For very divergent new prompts, even if a cached entry exists, it may be rejected as too wasteful, falling back to the slot's own (possibly shorter) cached context or starting fresh.",
+"id": "bd09d83cf317",
+"prose": "",
+"reasoning": "The user wants me to update my working record with a correction about `server_prompt_cache::load`. Let me look at the actual code to verify the correction. The user is saying that `server_prompt_cache::load` has an `f_keep_cur < 0.25f` threshold that I need to verify.\n\nLet me look at the `server_prompt_cache::load` function."
+},
+{
+"entry": "The main loop processes ALL queued tasks first, THEN calls `update_slots()` for inference — tasks are not processed one-at-a-time with interleaved inference. — IMPLICATION: The server batches task assignments before running inference, enabling continuous batching across multiple concurrent requests.",
+"id": "8152f4a4d39f",
+"prose": "Correction noted: The main loop processes ALL queued tasks first via `callback_new_task`, THEN calls `callback_update_slots()` once for inference — not interleaved per-task. This enables continuous batching across concurrent requests.\n\nHere's the complete flow for a `/v1/chat/completions` request:\n\n---\n\n## Request Flow: `/v1/chat/completions` → Slot System\n\n### 1. HTTP Handler Registration (`server.cpp:216`)\n",
+"reasoning": "The user is asking me to correct my working record. The correction is about the main loop behavior - it processes ALL queued tasks first, THEN calls `update_slots()` for inference, rather than processing tasks one-at-a-time with interleaved inference. This enables continuous batching.\n\nLet me update my understanding and provide a clear summary of the request flow."
+},
+{
+"entry": "The beellama fork completely removed `server-schema.cpp` and `server-schema.h` (upstream's JSON param validation layer with `field_num`/`field_bool`/`set_limits`/`add_alias`) — the code is not just relocated, it's entirely absent, meaning parameter parsing works differently than upstream — IMPLICATION: When comparing parameter handling or tracing schema validation, the beellama fork likely uses a simpler/different approach that needs separate investigation",
+"id": "56cded8144ec",
+"prose": "",
+"reasoning": "The working record note is still accurate - the schema code is entirely absent. Let me check how beellama handles parameter parsing differently."
+},
+{
+"entry": "Cache reuse (`n_cache_reuse`) also requires `llama_memory_can_shift()` to return true — not all memory backends support KV cache shifting",
+"id": "cf7b3d3936bf",
+"prose": "",
+"reasoning": "The user wants me to update a working record entry about `n_cache_reuse` requiring `llama_memory_can_shift()`. Let me check the actual code to see what the current state is.\n\nLooking at my earlier findings, I saw that `can_cache_reuse` requires both `llama_memory_can_shift()` and `!has_mtmd`. Let me verify this more precisely and update the working record."
+},
+{
+"entry": "`params.parallel_tool_calls` is passed through to the template context — relevant for understanding how the template decides whether to render multiple tool calls in a single assistant message (`chat.cpp`, ~line 2495)",
+"id": "e72fb0b6b562",
+"prose": "The note about `params.parallel_tool_calls` being passed through to the template context at ~line 2495 is still valid — I can see it's set at line ~2492 (`params.parallel_tool_calls = inputs.parallel_tool_calls;`) in the Jinja path. Let me verify that specific line:\n\n",
+"reasoning": ""
+},
+{
+"entry": "`oaicompat_chat_params_parse` parses the OpenAI-compatible JSON body — this is where request validation and parameter extraction happens. (server-context.cpp, within `post_chat_completions` lambda)",
+"id": "32804ea76312",
+"prose": "I need to correct that record entry before continuing. Let me first verify the actual location of `oaicompat_chat_params_parse`.\n\n",
+"reasoning": ""
+},
+{
+"entry": "The parity testing infrastructure (pixel-diff golden references, `tests/lite/parity/`) is a key part of their quality assurance strategy — ensures Lite produces pixel-identical output to Babylon.js (in `tests/lite/parity/`)",
+"id": "da2f04530f76",
+"prose": "",
+"reasoning": "Let me look at the compat package's index.ts and also check the GUIDANCE.md to understand the full picture of what Babylon Lite is trying to achieve."
+},
+{
+"entry": "`common_prompt_checkpoint` struct in `server-context.cpp:177` — defines the checkpoint data structure used for speculative decoding rollback; may reveal checkpoint granularity and what state is captured",
+"id": "4a9cee79a564",
+"prose": "Let me check the upstream `common_prompt_checkpoint` definition for comparison.\n\n",
+"reasoning": "The user is asking me to update the compacted working record entry about `common_prompt_checkpoint`. Let me look at what I found:\n\nIn the diff, I can see that beellama has a `server_prompt_checkpoint` struct (not `common_prompt_checkpoint`) defined in `server-task.h` that includes:\n- `pos_min`, `pos_max` - position bounds\n- `n_tokens` - token count\n- `data` - main KV cache state\n- `ring_data` - DFlash ring buffer state (NEW in beellama, not in upstream)\n- `size()` method\n- `empty()` method\n\nThe upstream `common_prompt_checkpoint` was referenced in `server-context.cpp:177`. Let me check what the upstream version looks like."
+},
+{
+"entry": "Function calling / tool use support with `--jinja` flag (README.md, Anthropic API section)",
+"id": "19974c535499",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "NONE — The shell environment is simply empty. There's no Babylon Lite codebase checked out here, so I can't search for or examine the Minecraft clone scene.",
+"id": "ec1e66b49a39",
+"prose": "The working record noted the shell was empty. Let me check what's actually available.\n\n",
+"reasoning": ""
+},
+{
+"entry": "`packages/babylon-lite/` — the actual engine library source, need to examine for structural differences vs full Babylon.js",
+"id": "9b21001462a2",
+"prose": "",
+"reasoning": "Let me look at the Babylon.js packages directory to compare the module structure."
+},
+{
+"entry": "The `llama_params[\"parse_tool_calls\"] = true` flag set when tools are present — this tells the server to post-process tool calls from the output (server-common.cpp, ~line 1070)",
+"id": "8a071d99bf66",
+"prose": "The note still holds. I confirmed it at `server-common.cpp:1070` where `llama_params[\"parse_tool_calls\"] = true` is set when `!inputs.tools.empty() && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE`. This flag signals the downstream response-processing path to parse tool calls from the generated output.\n\n",
+"reasoning": ""
+},
+{
+"entry": "`workaround::system_message_not_supported(params.messages)` — handles templates that don't support system role (chat.cpp, line ~2674)",
+"id": "768b371f4668",
+"prose": "",
+"reasoning": "The user wants me to explore the beellama.cpp fork at `~/git/reference/beellama.cpp` and compare its `tools/server` directory with the upstream llama.cpp server. Let me start by listing the directory structure."
+},
+{
+"entry": "The parity testing infrastructure (pixel-diff golden references, `tests/lite/parity/`) is a key part of their quality assurance strategy — ensures Lite produces pixel-identical output to Babylon.js (in `tests/lite/parity/`)",
+"id": "3886ace3862c",
+"prose": "",
+"reasoning": "Let me look at the @babylonjs packages to see the full scope of Babylon.js."
+},
+{
+"entry": "Whether upstream llama.cpp has any of these new files (server-adaptive-dm.h, server-loop-guard.cpp/h, server-mcp.cpp/h, server-models.cpp/h, server-stream.cpp/h, server-tools.cpp/h) — I haven't checked an upstream clone for comparison",
+"id": "71ad41050be8",
+"prose": "**Correction to working record:** The upstream commit `6ba5ef247` (merged into beellama at `9d6c32851`) already contains `server-mcp.cpp/h`, `server-models.cpp/h`, `server-stream.cpp/h`, and `server-tools.cpp/h`. The **only** files unique to the beellama fork are:\n\n- `server-adaptive-dm.h` — adaptive draft-model speculative decoding helpers\n- `server-loop-guard.cpp` / `server-loop-guard.h` — reasoning loop guard (detects infinite loops in reasoning models)\n\nEverything else in `tools/server/` is present in upstream.",
+"reasoning": ""
+},
+{
+"entry": "`pre_decode()` and `batch.render()` are called to prepare the llama batch before decoding — these bridge slot state to the actual llama.cpp inference engine (`server-context.cpp`, line ~2802)",
+"id": "ef3ef42e750c",
+"prose": "Correction: The `pre_decode()` and `batch.render()` functions are NOT called to \"prepare the llama batch before decoding\" as a single step. Looking at the actual code flow in `server-context.cpp` around the `update_slots` / `slot_process_prompt` / `slot_generate` functions, `batch.render()` is a method on the `llama_batch` object that finalizes/renders the batch data structure for submission to the llama backend, while `pre_decode()` is a separate slot-level method that handles pre-decoding state updates (like updating KV cache positions). They serve distinct purposes and are called in different contexts — `pre_decode()` is called on the slot to prepare internal state, and `batch.render()` is called on the batch object right before passing it to `llama_decode()`.\n\nNow let me continue the SSE streaming trace:\n\n",
+"reasoning": ""
+},
+{
+"entry": "Slot save/restore (`/slots/{id}?action=save/restore`) and the internal prompt cache (`server_prompt_cache`) are TWO completely independent systems — slot save/restore writes full KV state to disk via `llama_state_seq_get_data_ext`/`llama_state_seq_set_data_ext`, while the prompt cache is an in-memory cross-slot LRU cache that uses `get_common_prefix` matching — IMPLICATION: Auditing \"cache\" behavior requires reasoning about two separate mechanisms with different APIs, lifecycle rules, and eviction strategies; they are not interchangeable.",
+"id": "fb207fc33baa",
+"prose": "",
+"reasoning": "The entry still holds. Let me continue investigating. I need to look at:\n\n1. The `prompt_save` and `prompt_load` methods on `server_slot`\n2. The `--cache-backend` and `--cache-size` CLI options\n3. Any limits on what can be saved/restored\n4. The slot-level KV cache vs the external prompt cache\n\nLet me look at the prompt_save/prompt_load on server_slot and how they interact with the cache."
+},
+{
+"entry": "Were `server-schema.cpp/h` and `server-stream.cpp/h` functionality moved inline into other files in beellama, or were they dropped entirely?",
+"id": "56b145446d7e",
+"prose": "Correction: `server-schema.cpp/h` and `server-stream.cpp/h` were **dropped entirely** from beellama, not inlined. `grep` for `server_schema::`, `eval_llama_cmpl_schema`, and `stream_session` returned zero hits across the entire beellama server directory. The functionality was removed, not moved.\n\nNow let me investigate what accounts for the massive 175KB growth in beellama's `server-context.cpp` (218KB → 394KB):\n\n",
+"reasoning": "The user is telling me to update the working record. The question was whether `server-schema.cpp/h` and `server-stream.cpp/h` functionality was moved inline or dropped. Let me check if the functionality from those files was inlined into beellama's other files.\n\nFrom my investigation:\n- `server-schema.cpp/h` — contains `eval_llama_cmpl_schema`, `server_schema::` — NOT found in beellama (grep returned nothing)\n- `server-stream.cpp/h` — contains `stream_session` — NOT found in beellama (grep returned nothing)\n- beellama's `server-context.cpp` is 394KB vs upstream's 218KB — a 175KB increase\n\nSo the schema and streaming files were REMOVED, not inlined. But the context file got much bigger, so something else was added. Let me check what was added to context."
+},
+{
+"entry": "NONE — the previous search was just too broad and timed out. I need to narrow down where llama.cpp files actually live on this system.",
+"id": "a168047cb36d",
+"prose": "You're right — that entry (#81) is superseded. The correction:\n\n**#81 CORRECTED:** The source repo is confirmed at `~/git/llama.cpp/` — I have the full codebase to work with. (The earlier \"NONE\" timeout was resolved; the repo location is known and all subsequent steps have been operating from this path.)\n\nNow continuing with the investigation — let me look at `common_prompt_checkpoint`:\n\n",
+"reasoning": ""
+},
+{
+"entry": "The main loop processes ALL queued tasks first, THEN calls `update_slots()` for inference — tasks are not processed one-at-a-time with interleaved inference. — IMPLICATION: The server batches task assignments before running inference, enabling continuous batching across multiple concurrent requests.",
+"id": "97b5dcd7bd4a",
+"prose": "The user is correct. Looking at `start_loop()` in `server-queue.cpp` (lines 125-165), the inner `while` loop drains ALL tasks from `queue_tasks` before `callback_update_slots()` is called:\n\n",
+"reasoning": "The user is asking me to correct my working record. Let me re-examine the code to understand the actual flow.\n\nLooking at the `start_loop` function in server-queue.cpp (lines 125-180ish):\n\n```cpp\nvoid server_queue::start_loop(int64_t idle_sleep_ms) {\n    ...\n    while (true) {\n        QUE_DBG(\"%s\", \"processing new tasks\\n\");\n\n        while (true) {\n            std::unique_lock<std::mutex> lock(mutex_tasks);\n            if (!running) {\n                QUE_DBG(\"%s\", \"terminate\\n\");\n                return;\n            }\n            if (queue_tasks.empty()) {\n                lock.unlock();\n                break;\n            }\n            server_task task = std::move(queue_tasks.front());\n            queue_tasks.pop_front();\n            lock.unlock();\n\n            QUE_DBG(\"processing task, id = %d\\n\", task.id);\n            callback_new_task(std::move(task));\n        }\n        // all tasks in the current loop is processed, slots data is now ready\n        QUE_DBG(\"%s\", \"update slots\\n\");\n\n        // this will run the main inference process for all slots\n        callback_update_slots();\n        ...\n```\n\nSo the inner while loop processes ALL tasks from `queue_tasks` until it's empty, calling `callback_new_task` (which is `process_single_task`) for each. THEN after all tasks are dequeued and processed, `callback_update_slots()` is called once.\n\nSo the user's assertion is actually CORRECT based on the code. The working record entry I have says the opposite - that tasks are processed one-at-a-time with interleaved inference. But looking at the code:\n\n\nThe inner loop drains the queue completely before moving to the update phase, and the debug message confirms \"all tasks in the current loop is processed, slots data is now ready\" before calling `callback_update_slots()`. This means my working record entry is wrong and needs to be corrected to reflect that tasks are batched together before inference runs."
+},
+{
+"entry": "How does `server_response_reader::next()` block/wait for results — need to see the synchronization primitive",
+"id": "391e2646430c",
+"prose": "Let me try reading that section again:\n\n",
+"reasoning": "The output got mixed up with something about Minecraft. Let me try again to read the stop conditions more carefully."
+},
+{
+"entry": "The `alloc()` method's LCP-based deduplication — it removes obsolete cached prompts fully contained in the new prompt and skips saving if the prompt already exists. This matters for understanding cache bloat and eviction behavior. (server-task.cpp, lines 1620+)",
+"id": "756c6b59bac0",
+"prose": "Let me verify the `alloc()` method's LCP-based deduplication claim in `server-task.cpp`:\n\n",
+"reasoning": ""
+},
+{
+"entry": "`backend_sampling` boolean — gates whether token selection happens on the backend (e.g., GPU) vs. CPU-side llama.cpp sampling; matters for understanding where sampling physically occurs (`server-schema.cpp:170`)",
+"id": "9967af2a45ba",
+"prose": "Here's the complete summary:\n\n## beellama.cpp `tools/server/` — Divergence from Upstream\n\n### Files **only in beellama** (not in upstream llama.cpp):\n\n| File | Size | Purpose |\n|------|------|---------|\n| **`server-adaptive-dm.h`** | 65 KB | **Adaptive draft-model speculative decoding controller.** Implements EWMA-based profit/fringe controllers (`COMMON_SPECULATIVE_DM_CONTROLLER_PROFIT`, `COMMON_SPECULATIVE_DM_CONTROLLER_FRINGE`) that dynamically tune `n_max` draft token counts based on observed acceptance rates. Contains `server_adaptive_dm_state` which is inherited by `server_slot`. |\n| **`server-loop-guard.h`** + **`server-loop-guard.cpp`** | 9.5 KB | **Reasoning loop detector.** Monitors reasoning (thinking) token tails for periodic repetition, n-gram dominance, and low entropy — triggers early termination when the model is stuck in a reasoning loop. Exposed via `common_reasoning_loop_guard_params`. |\n\n### Files **only in upstream** (removed from beellama):\n\n| File | Size | Purpose (upstream) | beellama replacement |\n|------|------|--------------------|---------------------|\n| **`server-schema.h`** + **`server-schema.cpp`** | 35 KB | JSON Schema → GBNF grammar validation for request params (`eval_llama_cmpl_schema`), including aliases, conditional grammar triggers, and per-field type coercion | Replaced by `server_task::params_from_json_cmpl()` — a direct JSON-to-params parser with no schema validation layer |\n| **`server-stream.h`** + **`server-stream.cpp`** | 30 KB | Persistent streaming session buffers (`stream_session`) keyed by `conversation_id`, supporting ring-buffer replay, offset-based resumption, and producer stop hooks (`stream_session_attach_pipe`) | **Removed entirely.** `stream_session_attach_pipe()` call is gone; no persistent stream session replay mechanism |\n\n### Files **significantly modified** in beellama:\n\n| File | Upstream | beellama | Δ | Key changes |\n|------|----------|----------|---|-------------|\n| **`server-context.cpp`** | 219 KB | 394 KB | **+175 KB** | Massive speculative decoding integration (`dflash_*` functions, `server_adaptive_dm_state` inheritance, `server_loop_guard` wiring, reasoning budget tracking). `eval_llama_cmpl_schema` → `params_from_json_cmpl`. `stream_session_attach_pipe` removed. New `n_before_user` checkpoint boundary logic. |\n| **`server-task.cpp`** | 63 KB | 104 KB | **+41 KB** | New `params_from_json_cmpl()` method replacing schema-based validation. Extended speculative decoding params handling. |\n| **`server.cpp`** | 21 KB | 15 KB | **-6 KB** | Simplified; schema/stream imports removed. |\n\n### Key Architectural Differences:\n\n1. **Speculative decoding** — beellama has full DFlash draft-model speculative decoding with adaptive controllers (profit/fringe), while upstream has it `#if 0` disabled in the server schema.\n\n2. **Reasoning loop guard** — beellama detects and terminates reasoning loops via `server_loop_guard`; upstream has no equivalent.\n\n3. **Schema validation** — upstream validates ",
+"reasoning": "The user's message got cut off. Let me provide the final summary without a bash block."
+}
+]
+}

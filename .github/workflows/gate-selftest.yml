@@ -2,22 +2,189 @@ name: gate-selftest
 
 # The gate's own test, composed by verify.yml. Every line of its output must
 # read RED: a gate that has never been seen red is not a gate.
+#
+# Sharded, because the fault list is long -- `check-fault-manifest.py
+# --count-selftest-red` says how long, and is the one reader that knows -- and
+# most of it rebuilds the crate in a sandbox. This line used to carry the
+# number itself and was two short from the commit that wrote it.
+#
+# Sharding is a division of labour and NOT a selection of
+# faults: `--shard K/N` decides which job runs a fault, never whether it runs.
+# The two are told apart after the fact -- each shard writes down the ordinals
+# it ran, and verify.yml's gate job adds them up and refuses unless they are
+# exactly the manifest's list, each fault once. A shard that quietly ran
+# nothing exits 0 and reports `success` like any other; the census is the only
+# thing that can tell you it did.
+#
+# HOW MANY SHARDS IS NOT WRITTEN HERE. It was -- a literal `[1 .. 8]` -- and
+# eight was right when it was measured and wrong two hundred faults later,
+# which is what #87 was filed about. It is now an output of the harvest that
+# balances them: tools/gate/shards.tsv derives the smallest count whose
+# slowest shard fits .github/gate-budget.tsv's five minutes, and the `plan`
+# job below reads that count out of the same file `verify.sh --shard` reads
+# its assignment from. Neither is free to disagree with the other -- verify.sh
+# refuses an N that is not the one the file was packed for.
+#
+# N is still `strategy.job-total`, which is the size of the matrix the plan
+# produced, so the flag follows the file with nothing restating it.
 
 on:
   workflow_call:
 
 permissions:
   contents: read
+  # To read the latest `main` run's census artifacts, which a pull request's
+  # scope plan is derived from (#112).
+  actions: read
 
 jobs:
-  selftest:
-    name: selftest
+  # One short job, so that the matrix below can be a number this repository
+  # derived rather than a number somebody typed. `fromJson` needs a JSON array
+  # and a matrix needs it before any shard starts, which is what makes this a
+  # job of its own rather than a step.
+  plan:
+    name: plan
     runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.count.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # The JSON is built by the script that owns the file, not by a `seq` or
+      # a `jq` here: a second thing that knows how to turn an assignment into
+      # a matrix is a second thing that can get it wrong, and this one refuses
+      # an unreadable or empty assignment rather than printing `[]` -- which
+      # would make a matrix of nothing, a workflow of no jobs, and a census
+      # that never filed.
+      #
+      # The substitution is BOUND TO A VARIABLE FIRST, not written straight
+      # into the `echo`. `echo "shards=$(...)" >> $GITHUB_OUTPUT` is echo's
+      # exit status, which is 0 whatever the script did -- so a refusal would
+      # set an empty output, and the failure would arrive later as an
+      # unreadable matrix expression rather than here as the script's own
+      # message. An assignment carries the substitution's status, and the
+      # default shell is `bash -e`.
+      - name: How many shards the assignment derives
+        id: count
+        run: |
+          shards="$(python3 scripts/derive-shards.py --matrix)"
+          echo "shards=${shards}" >> "$GITHUB_OUTPUT"
+          echo "the assignment derives ${shards}"
+
+      # A PULL REQUEST RE-PROVES ONLY WHAT ITS DIFF CAN REACH (#112). The
+      # latest successful `main` run's censuses say which faults ran red there,
+      # at which commit, and which files each fault's injection touched;
+      # scripts/scope-selftest.py turns that and this diff into a plan of
+      # faults to INHERIT, each declared in this run's census at the commit it
+      # was last seen red -- never counted as passed. No `main` census, or
+      # none this branch can reach, is a plan that inherits nothing, and every
+      # fault runs. A push to `main` is never scoped: it is the full run the
+      # next pull request's plan is read from.
+      - name: Fetch the history the scope is measured against
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --quiet origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" --unshallow || git fetch --no-tags --quiet origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+      - name: Read the latest main run's censuses
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "${{ runner.temp }}/main-census"
+          run_id="$(gh run list --repo "${{ github.repository }}" --workflow verify.yml \
+            --branch "${{ github.base_ref }}" --event push --status success --limit 1 \
+            --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -n "$run_id" ]; then
+            gh run download "$run_id" --repo "${{ github.repository }}" \
+              --pattern 'selftest-census-*' --dir "${{ runner.temp }}/main-census" \
+              || echo "::warning::main run ${run_id} has no census to read; every fault runs"
+          else
+            echo "::warning::no successful main run to read; every fault runs"
+          fi
+      - name: Derive this pull request's scope plan
+        if: github.event_name == 'pull_request'
+        run: >-
+          python3 scripts/scope-selftest.py
+          --base "origin/${{ github.base_ref }}"
+          --census "${{ runner.temp }}/main-census"
+          --out "${{ runner.temp }}/scope-plan.tsv"
+      - name: Keep the scope plan
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-scope-plan
+          path: ${{ runner.temp }}/scope-plan.tsv
+          if-no-files-found: error
+          retention-days: 7
+
+  selftest:
+    name: selftest ${{ matrix.shard }}
+    needs: [plan]
+    runs-on: ubuntu-latest
+    strategy:
+      # Every shard runs. `fail-fast` would cancel the others on the first
+      # red, and a cancelled shard files no census -- so a real failure would
+      # arrive alongside a census failure blaming the shards it cancelled.
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.plan.outputs.shards) }}
     steps:
       - uses: actions/checkout@v5
 
       - name: Resolve the pinned toolchain
         run: cargo --version
 
-      - name: ./verify.sh --selftest
-        run: ./verify.sh --selftest
+      # The isolation lane's seeded faults need a sandbox to execute
+      # against, same as `pkg-diet.yml`'s own copy of these three steps --
+      # without `bwrap` the lane asserts a correct REFUSAL and passes, which
+      # is exactly what let `lane: isolation.isolation.the-escape-census-
+      # under-reports` fire GREEN here rather than RED (#83): #76's applier
+      # is what wires lane faults into `--selftest` at all, so this gap was
+      # unreachable before it and is this PR's to close. Every shard gets
+      # it, not just whichever one draws an isolation fault -- sharding is a
+      # division of labour, never a selection, per this file's own header,
+      # so which shard that lands on is not something to predict.
+      - name: Install the sandbox the isolation lane confines with
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
+      # THE ONE RELAXED CONTROL, NAMED, per `pkg-diet.yml` and its ruling on
+      # #74: Ubuntu 24.04 refuses unprivileged user namespaces, which is
+      # what `bwrap` builds every sandbox out of, so without this no
+      # composition starts and the isolation lane's seeded escapes cannot
+      # execute here either. Tolerant rather than fatal: if the sysctl
+      # cannot be set, the honest signal is the isolation tests failing
+      # with their own message about the mechanism, not this step erroring
+      # first and hiding it.
+      - name: Permit the user namespaces the sandbox is built from
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 \
+            || echo "::warning::the userns restriction could not be relaxed; the isolation tests will say so"
+
+      # And say so, which is what makes the refusal branch a failure HERE
+      # and nowhere a contributor's own machine lacks `bwrap`.
+      - name: Declare this a host where the sandbox is required
+        run: echo "DIET_REQUIRE_SANDBOX=1" >> "$GITHUB_ENV"
+
+      - name: The scope plan this pull request's plan job derived
+        if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@v4
+        with:
+          name: selftest-scope-plan
+          path: ${{ runner.temp }}
+
+      - name: ./verify.sh --selftest --shard ${{ matrix.shard }}
+        run: >-
+          ./verify.sh --selftest
+          --shard ${{ matrix.shard }}/${{ strategy.job-total }}
+          --census "${{ runner.temp }}/census.tsv"
+          ${{ github.event_name == 'pull_request' && format('--scope-plan {0}/scope-plan.tsv', runner.temp) || '' }}
+
+      # Uploaded only on success, deliberately. A shard that failed has
+      # already failed the build; its census would say nothing the failure
+      # does not, and the aggregate reporting "shard 5 filed no census" is a
+      # true statement about a shard that did not finish.
+      - name: Keep this shard's census
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-census-${{ matrix.shard }}
+          path: ${{ runner.temp }}/census.tsv
+          if-no-files-found: error
+          retention-days: 7

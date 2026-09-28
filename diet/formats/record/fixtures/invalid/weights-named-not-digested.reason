@@ -1,0 +1,10 @@
+`qwen3-30b-a3b-q4` is a name, and identity by name is the thing the digest
+replaced: two runs can spell the same weights differently and a third can
+spell different weights the same, and then a regime comparison compares
+strings.
+
+A run served by weights nobody can digest has a shape of its own now --
+`{"kind":"hosted",...}`, ruled 2026-09-08 and pinned by `weights-hosted` --
+so this is not the case of a substrate that cannot be spelled. It is the case
+of a substrate spelled as `digest` and then handed a name, which is the one
+thing the digest variant exists to refuse.

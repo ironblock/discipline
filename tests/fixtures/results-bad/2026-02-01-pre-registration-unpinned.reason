@@ -1,0 +1,13 @@
+`pre-registration.json` is here and the front-matter declares no
+`pre_registration_sha256`.
+
+The other half of the biconditional `2026-01-31-pre-registration-digest` tests.
+A digest that only has to be right WHEN IT IS PRESENT is a pin anybody can
+escape by deleting a line: the endpoints stay in the directory, nothing holds
+them, and they can be edited after the numbers exactly as if the rule did not
+exist.
+
+Whether a results directory must HAVE a pre-registration is a separate question
+and is not what either fixture is about. A recompute-confirmed row that never
+pre-registered anything is a real shape and stays legal. These two hold that the
+two halves, when one of them exists, agree.

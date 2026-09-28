@@ -31,10 +31,17 @@
 //!   of `R` resamples cannot produce a p below `1/(R+1)`. [`PValue`] carries
 //!   that floor and prints it, so a small register cannot report a
 //!   significance it could not have reached.
-//! * **The controls are rows.** The sense text verbatim must rank first; a
-//!   row of unrelated words -- or the negative sense verbatim, under a scoring
-//!   that subtracts it -- must rank last; and a shuffled-label null must sit
-//!   at chance. A run whose controls are not at their extremes is not a run.
+//! * **The controls are rows.** The sense text verbatim must rank first; no
+//!   POSITIVE row may rank below a row of unrelated words -- or below the
+//!   negative sense verbatim, under a scoring that subtracts it -- while a
+//!   negative that sinks under either is a negative doing its job, measured
+//!   where negatives are measured; and a shuffled-label null must sit at
+//!   chance. A cell whose controls are not at their extremes is not a cell:
+//!   it is reported as the control failure it is, with no metric over it.
+//!   Ruled on #24 (2026-09-15), after the first invocation on real embedders
+//!   found the bound as coded assumed "unrelated" was the minimum of the
+//!   space -- under raw cosine it sits near the origin, and a real negative
+//!   can be anti-correlated with a sense.
 //!
 //! Negation is why there is a `reversal` set at all. Embedding models read
 //! "X" and "not X" as neighbours, so supersession is nominated by an authored,
@@ -539,7 +546,11 @@ impl Error for DataError {}
 type DataLine = (usize, BTreeMap<String, Value>);
 
 /// Every non-blank line of a data file, decoded through the one reader.
-fn rows(source: &str) -> Result<Vec<DataLine>, DataError> {
+///
+/// `pub(crate)` because the collector's nomination policy is read by these
+/// same five helpers. Two readers of one row shape is the drift this
+/// repository spends a gate on.
+pub(crate) fn rows(source: &str) -> Result<Vec<DataLine>, DataError> {
     let mut decoded = Vec::new();
     for (index, text) in source.lines().enumerate() {
         if text.trim().is_empty() {
@@ -556,7 +567,7 @@ fn rows(source: &str) -> Result<Vec<DataLine>, DataError> {
 }
 
 /// A required, non-empty string member, removed from the row.
-fn take_text(
+pub(crate) fn take_text(
     members: &mut BTreeMap<String, Value>,
     line: usize,
     key: &'static str,
@@ -590,7 +601,7 @@ fn take_version(
 }
 
 /// A required member of a closed vocabulary, removed from the row.
-fn take_tag<T>(
+pub(crate) fn take_tag<T>(
     members: &mut BTreeMap<String, Value>,
     line: usize,
     key: &'static str,
@@ -601,7 +612,7 @@ fn take_tag<T>(
 }
 
 /// Nothing left in the row: the schema is closed.
-fn closed(members: &BTreeMap<String, Value>, line: usize) -> Result<(), DataError> {
+pub(crate) fn closed(members: &BTreeMap<String, Value>, line: usize) -> Result<(), DataError> {
     match members.keys().next() {
         Some(key) => Err(DataError::UnknownKey {
             line,
@@ -1435,8 +1446,10 @@ pub enum Control {
     /// The negative literal, verbatim. Must rank last under a scoring that
     /// subtracts it.
     VerbatimNegative,
-    /// Words that share nothing with any sense. Must rank last under a scoring
-    /// that measures closeness to the positive side only.
+    /// Words that share nothing with any sense. No positive row may rank below
+    /// it under a scoring that measures closeness to the positive side only;
+    /// a negative may, because under raw cosine these words sit near the
+    /// origin and a negative can be anti-correlated with the sense.
     UnrelatedWords,
 }
 
@@ -1519,7 +1532,12 @@ pub enum ControlFailure {
         /// What that row scored.
         other: f64,
     },
-    /// A register row went under the bottom control.
+    /// A positive register row went under the bottom control.
+    ///
+    /// Positives only, ruled on #24 (2026-09-15): the control's meaning is
+    /// that the embedder can place a positive above noise. A negative below
+    /// the bottom control is measured by precision, the false-positive rate
+    /// and d', not refused here.
     NotAtBottom {
         /// The control.
         control: Control,
@@ -1566,7 +1584,7 @@ impl fmt::Display for ControlFailure {
                 other,
             } => write!(
                 f,
-                "{} scored {score} and {row} went under it at {other}",
+                "{} scored {score} and the positive {row} went under it at {other}",
                 control.tag()
             ),
             Self::Inverted { top, bottom } => write!(
@@ -1587,8 +1605,12 @@ impl Error for ControlFailure {}
 /// The controls are scored ungated, because they test the scoring and the gate
 /// is a separate factor. The top control must **strictly** outscore every
 /// register row -- an embedder that cannot tell the sense from the register
-/// ties them, and a tie is that failure -- and no register row may go under
-/// the bottom control.
+/// ties them, and a tie is that failure -- and no POSITIVE register row may go
+/// under the bottom control. Negatives are unconstrained by the bottom: under
+/// raw cosine the unrelated-words row sits near the origin, and an authored
+/// hard negative anti-correlated with the sense is doing its job, not failing
+/// the instrument. Ruled on #24 (2026-09-15); as first coded the bound took
+/// every row, and on three of four real embedders a negative sat under it.
 ///
 /// # Errors
 ///
@@ -1635,7 +1657,7 @@ pub fn controls(
                 other: row.score,
             });
         }
-        if row.score < bottom_score {
+        if row.label.is_positive() && row.score < bottom_score {
             return Err(ControlFailure::NotAtBottom {
                 control: bottom,
                 score: bottom_score,
@@ -1784,14 +1806,33 @@ fn moments(values: &[f64]) -> Option<Moments> {
 /// separation over a zero spread is not infinite, it is undefined.
 #[must_use]
 pub fn d_prime(rows: &[Scored]) -> Option<f64> {
+    d_prime_or_why(rows).ok()
+}
+
+/// [`d_prime`], saying why when it has no value.
+///
+/// Two conditions make it undefined and they are different facts about the
+/// rows: a class with fewer than two members has no spread to standardise
+/// by, and two classes with no spread between them have nothing to divide.
+/// A seat reading the refusal from outside could not tell which had fired,
+/// so each is named. Ruled on #24 (2026-09-15).
+///
+/// # Errors
+///
+/// [`UndefinedCause::TooFewRows`] naming the class and its count, or
+/// [`UndefinedCause::ZeroSpread`].
+pub fn d_prime_or_why(rows: &[Scored]) -> Result<f64, UndefinedCause> {
     let (positive, negative) = split(rows);
-    let positive = moments(&positive)?;
-    let negative = moments(&negative)?;
-    let pooled = f64::midpoint(positive.variance, negative.variance).sqrt();
+    let too_few = |class: Label, n: usize| UndefinedCause::TooFewRows { class, n };
+    let positive_moments =
+        moments(&positive).ok_or_else(|| too_few(Label::Positive, positive.len()))?;
+    let negative_moments =
+        moments(&negative).ok_or_else(|| too_few(Label::Negative, negative.len()))?;
+    let pooled = f64::midpoint(positive_moments.variance, negative_moments.variance).sqrt();
     if pooled <= 0.0 {
-        return None;
+        return Err(UndefinedCause::ZeroSpread);
     }
-    Some((positive.mean - negative.mean) / pooled)
+    Ok((positive_moments.mean - negative_moments.mean) / pooled)
 }
 
 /// A seeded pseudo-random generator: xorshift with a multiplicative output.
@@ -2114,6 +2155,50 @@ pub enum Metric {
 /// One row of a failure fixture: an id, what it is, and the score it is given.
 type FixtureRow = (&'static str, Label, f64);
 
+/// The nomination budgets the bakeoff reports at, pre-registered.
+///
+/// THE BUDGET IS A DESIGN PARAMETER OF THE COLLECTOR, NOT A PROPERTY OF A
+/// FIXTURE. It used to be a `const` in the runner set to eight, and eight was
+/// not chosen: it was the largest budget the precision failure fixture
+/// happened to demonstrate, because that fixture held eight non-positives
+/// above its positives. A fixture that stops at eight pins what its author was
+/// thinking about, and the instrument's parameter space is not a fixture's to
+/// cap. Ruled 2026-09-10 on #69.
+///
+/// So the ladder is declared here, before there is data -- the same argument
+/// [`PRE_REGISTRATION`] makes about every other endpoint -- and the two
+/// budgeted fixtures are BUILT FROM IT rather than compared against it. One
+/// nomination, through the range a rolling summary would actually surface, to
+/// fifty over a register of a few hundred rows.
+///
+/// THE RUNGS ARE WHERE THE CURVE IS, not where a round number is. The
+/// budgets are nomination counts per session at deployment, and a confirm slot
+/// costs the operator's attention -- so production sits between one and five
+/// nominations, which is where the precision-at-budget curve's knee most
+/// likely is. Three is the rung that resolves that knee; twenty-five and fifty
+/// characterise the tail. Ruled 2026-09-10, amended 2026-09-11 on #69.
+///
+/// Changing it changes both fixtures, and
+/// `every_pre_registered_budget_is_one_its_fixture_demonstrates` is what says
+/// so rather than leaving it to be discovered at the first refusal.
+pub const BUDGETS: &[usize] = &[1, 3, 5, 10, 25, 50];
+
+/// The widest pre-registered budget: how far down the precision fixture must
+/// keep the positives.
+#[must_use]
+pub fn widest_budget() -> usize {
+    BUDGETS.iter().copied().max().unwrap_or(1)
+}
+
+/// The narrowest pre-registered budget: how many hard negatives the
+/// over-firing fixture may put on top and still read as total over-firing at
+/// every budget, since `over_firing` is 1.0 only when the budget reaches every
+/// hard negative there is.
+#[must_use]
+pub fn narrowest_budget() -> usize {
+    BUDGETS.iter().copied().min().unwrap_or(1)
+}
+
 /// For each metric, rows on which it must report the worst it can say.
 ///
 /// The fixtures are rankings built against the metric: three of them put the
@@ -2121,37 +2206,16 @@ type FixtureRow = (&'static str, Label, f64);
 /// on top. A metric that reads its own fixture as anything but failure is not
 /// measuring what its name says.
 ///
-/// Both budgeted fixtures are budget-sensitive by construction. The precision
-/// fixture holds eight non-positives above its positives, so it fails at any
-/// budget up to eight; the over-firing fixture holds two hard negatives at the
-/// top, so it fails at any budget of two or more. A budget outside those is
-/// not a budget these fixtures demonstrate, and [`Reported::take`] refuses
-/// rather than reports.
+/// THE TWO BUDGETED FIXTURES ARE NOT IN THIS TABLE. Their content is a RULE
+/// rather than a ranking somebody picked -- "every non-positive above every
+/// positive, as many as the widest budget reaches", and "every hard negative
+/// on top, as few as the narrowest budget reaches" -- and a rule written out
+/// fifty times is a rule somebody has to remember to extend. They are built
+/// from [`BUDGETS`] in [`budgeted_fixture`] instead, which is what stops a
+/// fixture's shape from capping the instrument's parameter space. The other
+/// two have no budget and are ranked by hand, because there is nothing to
+/// derive them from.
 const FAILURE_FIXTURES: &[(Metric, &[FixtureRow])] = &[
-    (
-        Metric::PrecisionAtK,
-        &[
-            ("failing/negative/0.9", Label::Negative, 0.9),
-            ("failing/hard_negative/0.8", Label::HardNegative, 0.8),
-            ("failing/negative/0.7", Label::Negative, 0.7),
-            ("failing/hard_negative/0.6", Label::HardNegative, 0.6),
-            ("failing/negative/0.5", Label::Negative, 0.5),
-            ("failing/negative/0.4", Label::Negative, 0.4),
-            ("failing/negative/0.3", Label::Negative, 0.3),
-            ("failing/negative/0.2", Label::Negative, 0.2),
-            ("failing/positive/0.1", Label::Positive, 0.1),
-            ("failing/positive/0.0", Label::Positive, 0.0),
-        ],
-    ),
-    (
-        Metric::OverFiring,
-        &[
-            ("failing/hard_negative/0.9", Label::HardNegative, 0.9),
-            ("failing/hard_negative/0.8", Label::HardNegative, 0.8),
-            ("failing/positive/0.2", Label::Positive, 0.2),
-            ("failing/negative/0.1", Label::Negative, 0.1),
-        ],
-    ),
     (
         Metric::Auc,
         &[
@@ -2171,6 +2235,59 @@ const FAILURE_FIXTURES: &[(Metric, &[FixtureRow])] = &[
         ],
     ),
 ];
+
+/// The failure fixture for a metric that takes a budget, built from
+/// [`BUDGETS`] rather than written out.
+///
+/// PRECISION: every non-positive first, `widest_budget()` of them, then the
+/// positives. `precision_at_k` over the top `k` finds no positive for any `k`
+/// the ladder names, so it reads 0 -- the worst it can say -- at every one.
+///
+/// OVER-FIRING: every hard negative first, `narrowest_budget()` of them, then
+/// a positive and a negative. `over_firing` is the share of ALL hard-negative
+/// rows inside the top `k`, so it reads 1.0 only once `k` reaches every hard
+/// negative there is -- which is why the count is the NARROWEST budget and not
+/// the widest. Put more hard negatives in and the narrowest budget stops
+/// demonstrating total over-firing, which is the trap the hand-written version
+/// was already in at a budget of one.
+///
+/// Scores descend from 1.0 in equal steps so that `ranked` gets a strict order
+/// with no ties: two rows on the same score make the top-k a matter of which
+/// sort the implementation happens to use, and a fixture whose answer depends
+/// on that is a fixture that will move under a refactor.
+fn budgeted_fixture(metric: Metric) -> Vec<Scored> {
+    let (above, above_label, below) = match metric {
+        Metric::PrecisionAtK => (widest_budget(), Label::Negative, vec![Label::Positive; 2]),
+        Metric::OverFiring => (
+            narrowest_budget(),
+            Label::HardNegative,
+            vec![Label::Positive, Label::Negative],
+        ),
+        Metric::Auc | Metric::DPrime => return Vec::new(),
+    };
+    let labels: Vec<Label> = std::iter::repeat_n(above_label, above)
+        .chain(below)
+        .collect();
+    // The rank arithmetic in f64 rather than in usize, and the conversion is
+    // exact: a fixture is tens of rows, not petabytes of them, and a budget
+    // ladder that reached 2^53 would have run out of register long before it
+    // ran out of mantissa.
+    let rows = u32::try_from(labels.len()).unwrap_or(u32::MAX);
+    let step = 1.0 / (f64::from(rows) + 1.0);
+    labels
+        .into_iter()
+        .enumerate()
+        .map(|(rank, label)| {
+            let place = f64::from(u32::try_from(rank).unwrap_or(u32::MAX));
+            Scored {
+                id: format!("failing/{}/{rank}", label.tag()),
+                label,
+                score: 1.0 - step * (place + 1.0),
+                admitted: true,
+            }
+        })
+        .collect()
+}
 
 impl Metric {
     /// Every metric, so a report cannot leave one unfixtured.
@@ -2224,19 +2341,34 @@ impl Metric {
     }
 
     /// The metric over `rows`, at budget `k` where a budget applies.
-    #[must_use]
-    pub fn compute(self, k: usize, rows: &[Scored]) -> Option<f64> {
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`UndefinedCause`] when the rows do not meet the metric's
+    /// precondition -- typed, so a refusal downstream can say which.
+    pub fn compute(self, k: usize, rows: &[Scored]) -> Result<f64, UndefinedCause> {
         match self {
-            Self::PrecisionAtK => precision_at_k(rows, k).as_f64(),
-            Self::OverFiring => over_firing(rows, k).as_f64(),
-            Self::Auc => auc(rows),
-            Self::DPrime => d_prime(rows),
+            Self::PrecisionAtK => precision_at_k(rows, k)
+                .as_f64()
+                .ok_or(UndefinedCause::NoValue),
+            Self::OverFiring => over_firing(rows, k).as_f64().ok_or(UndefinedCause::NoValue),
+            Self::Auc => auc(rows).ok_or(UndefinedCause::NoValue),
+            Self::DPrime => d_prime_or_why(rows),
         }
     }
 
     /// The rows this metric must fail on.
+    ///
+    /// Built from [`BUDGETS`] for the two metrics that take one, and read from
+    /// [`FAILURE_FIXTURES`] for the two that do not. One door either way, so a
+    /// caller cannot tell which kind it asked for -- and so a metric that grew
+    /// a budget later cannot keep a hand-written fixture by accident.
     #[must_use]
     pub fn failure_fixture(self) -> Vec<Scored> {
+        let budgeted = budgeted_fixture(self);
+        if !budgeted.is_empty() {
+            return budgeted;
+        }
         FAILURE_FIXTURES
             .iter()
             .find(|(metric, _)| *metric == self)
@@ -2277,6 +2409,8 @@ pub enum MetricError {
     InstrumentNeverFailed {
         /// The metric.
         metric: Metric,
+        /// The budget it was asked for.
+        budget: usize,
         /// What the failing rows actually scored.
         value: f64,
         /// The reading that would have counted as failure.
@@ -2287,8 +2421,70 @@ pub enum MetricError {
         /// The metric.
         metric: Metric,
         /// Which rows.
-        on: &'static str,
+        on: MetricSubject,
+        /// Why: which of the metric's preconditions the rows did not meet.
+        ///
+        /// Typed, ruled on #24 (2026-09-15): `d_prime is undefined on the
+        /// subject` told a seat outside the instrument neither which cell nor
+        /// which of two conditions fired, and it could not diagnose from the
+        /// message. Now it can.
+        cause: UndefinedCause,
     },
+}
+
+/// Which rows a metric was taken over.
+///
+/// Typed rather than a string so that a reader deciding what an undefined
+/// metric means -- the instrument's own fixture, or the subject it was asked
+/// about -- matches on a variant, not on prose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetricSubject {
+    /// The metric's own failure fixture, which must fail.
+    FailureFixture,
+    /// The rows the metric was asked about.
+    Subject,
+}
+
+impl fmt::Display for MetricSubject {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::FailureFixture => "its failure fixture",
+            Self::Subject => "the subject",
+        })
+    }
+}
+
+/// Why a metric has no value on a set of rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UndefinedCause {
+    /// Fewer than two rows of one class, so that class has no spread.
+    TooFewRows {
+        /// Which class.
+        class: Label,
+        /// How many rows it had.
+        n: usize,
+    },
+    /// Both classes present and no spread between them at all.
+    ZeroSpread,
+    /// The metric had nothing to rank or count over.
+    NoValue,
+    /// The metric computed, and to a value that is not a number.
+    NotFinite,
+}
+
+impl fmt::Display for UndefinedCause {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TooFewRows { class, n } => write!(
+                f,
+                "fewer than two {} rows ({n}), so that class has no spread",
+                class.tag()
+            ),
+            Self::ZeroSpread => write!(f, "no spread at all across the two classes"),
+            Self::NoValue => write!(f, "nothing to rank or count over"),
+            Self::NotFinite => write!(f, "the value is not a finite number"),
+        }
+    }
 }
 
 impl fmt::Display for MetricError {
@@ -2297,15 +2493,19 @@ impl fmt::Display for MetricError {
             Self::InstrumentNeverFailed {
                 metric,
                 value,
+                budget,
                 reading,
             } => write!(
                 f,
-                "{} scored {value} on rows built to fail, where {reading} is failure, and did \
-                 not fail: an instrument that has never been seen fail cannot certify anything",
+                "{} at a budget of {budget} scored {value} on rows built to fail, where \
+                 {reading} is failure, and did not fail: an instrument that has never been seen \
+                 fail cannot certify anything. The pre-registered budgets are {BUDGETS:?}, and \
+                 the fixtures are built to demonstrate failure at every one of them -- so a \
+                 budget outside that ladder is refused here rather than reported quietly",
                 metric.tag()
             ),
-            Self::Undefined { metric, on } => {
-                write!(f, "{} is undefined on {on}", metric.tag())
+            Self::Undefined { metric, on, cause } => {
+                write!(f, "{} is undefined on {on}: {cause}", metric.tag())
             }
         }
     }
@@ -2332,25 +2532,34 @@ impl Reported {
     /// has no value on the fixture or on the subject.
     pub fn take(metric: Metric, k: usize, subject: &[Scored]) -> Result<Self, MetricError> {
         let failing = metric.failure_fixture();
-        let on_failure_fixture = metric.compute(k, &failing).ok_or(MetricError::Undefined {
-            metric,
-            on: "its failure fixture",
-        })?;
+        let on_failure_fixture =
+            metric
+                .compute(k, &failing)
+                .map_err(|cause| MetricError::Undefined {
+                    metric,
+                    on: MetricSubject::FailureFixture,
+                    cause,
+                })?;
         if !metric.failed(on_failure_fixture) {
             return Err(MetricError::InstrumentNeverFailed {
                 metric,
+                budget: k,
                 value: on_failure_fixture,
                 reading: metric.failure_reading(),
             });
         }
-        let value = metric.compute(k, subject).ok_or(MetricError::Undefined {
-            metric,
-            on: "the subject",
-        })?;
+        let value = metric
+            .compute(k, subject)
+            .map_err(|cause| MetricError::Undefined {
+                metric,
+                on: MetricSubject::Subject,
+                cause,
+            })?;
         if !value.is_finite() {
             return Err(MetricError::Undefined {
                 metric,
-                on: "the subject",
+                on: MetricSubject::Subject,
+                cause: UndefinedCause::NotFinite,
             });
         }
         Ok(Self {
@@ -2491,6 +2700,13 @@ pub struct PreRegistration {
     pub comparator: &'static str,
     /// How significance is tested and corrected.
     pub correction: &'static str,
+    /// The nomination budgets the primary endpoint is reported at.
+    ///
+    /// Pre-registered like every other endpoint here, and for the same reason:
+    /// a budget chosen after the numbers are in is a budget the numbers chose.
+    /// Before 2026-09-11 it was a `const` in the runner whose value was
+    /// whatever a fixture allowed.
+    pub budgets: &'static [usize],
     /// Bootstrap resamples per comparison.
     pub resamples: u32,
     /// Label shuffles per null.
@@ -2512,6 +2728,7 @@ pub const PRE_REGISTRATION: PreRegistration = PreRegistration {
               scoring and gate",
     separation: "the area under the curve and the standardised separation, per cell",
     over_firing: "the share of hard-negative rows nominated within the budget",
+    budgets: BUDGETS,
     comparator: "an entailment cross-encoder as the accuracy ceiling, so the gap between it \
                  and an embedder is priced rather than assumed",
     correction: "paired bootstrap across embedders, Holm-corrected across cells, the \
@@ -2543,6 +2760,15 @@ impl PreRegistration {
             ("over_firing".to_owned(), text(self.over_firing)),
             ("comparator".to_owned(), text(self.comparator)),
             ("correction".to_owned(), text(self.correction)),
+            (
+                "budgets".to_owned(),
+                Value::Array(
+                    self.budgets
+                        .iter()
+                        .map(|k| Value::Integer(i64::try_from(*k).unwrap_or(i64::MAX)))
+                        .collect(),
+                ),
+            ),
             (
                 "resamples".to_owned(),
                 Value::Integer(i64::from(self.resamples)),
@@ -2636,7 +2862,12 @@ impl PreRegistration {
 /// The one place a number a program computed becomes a number a record holds.
 /// A value with no spelling -- not finite -- comes back as the string
 /// `undefined` rather than as a number that is not one.
-fn decimal(value: f64, digits: usize) -> Value {
+/// A float as an exact decimal of `digits` places.
+///
+/// Crate-visible because the bakeoff runner spells numbers too, and a
+/// second copy of this would be a second place that has to remember
+/// `-0.0000` is a second spelling of zero.
+pub(crate) fn decimal(value: f64, digits: usize) -> Value {
     let spelled = format!("{value:.digits$}");
     // `-0.0000` is a second spelling of zero, which the record refuses; the
     // sign carries no information once every digit is a zero.
@@ -2655,13 +2886,14 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        Blocker, BootstrapError, Cached, Cell, Control, ControlFailure, DataError, Embedded,
-        EmbeddedSet, Embedder, Fixture, Fraction, Gate, JoinError, Label, Metric, MetricError,
-        NULL_AUC_BAND, NULL_D_PRIME_BAND, NULL_SHUFFLES, PRE_REGISTRATION, Polarity,
-        REGISTER_SIDECARS, RegisterName, Reported, Row, ScoreError, Scored, Scoring, SenseSet,
-        SetError, Source, Xorshift, attainable_p_floor, auc, controls, cosine, d_prime, holm,
-        joined, over_firing, paired_bootstrap, precision_at_k, provenance, register, score_rows,
-        seeds, senses, shipped_senses, shuffled_null,
+        BUDGETS, Blocker, BootstrapError, Cached, Cell, Control, ControlFailure, DataError,
+        Embedded, EmbeddedSet, Embedder, Fixture, Fraction, Gate, JoinError, Label, Metric,
+        MetricError, MetricSubject, NULL_AUC_BAND, NULL_D_PRIME_BAND, NULL_SHUFFLES,
+        PRE_REGISTRATION, Polarity, REGISTER_SIDECARS, RegisterName, Reported, Row, ScoreError,
+        Scored, Scoring, SenseSet, SetError, Source, UndefinedCause, Xorshift, attainable_p_floor,
+        auc, controls, cosine, d_prime, d_prime_or_why, holm, joined, narrowest_budget,
+        over_firing, paired_bootstrap, precision_at_k, provenance, register, score_rows, seeds,
+        senses, shipped_senses, shuffled_null, widest_budget,
     };
     use crate::formats::record::json::{self, Decimal, Value};
 
@@ -2685,6 +2917,18 @@ mod tests {
             .join("capture")
             .join("sense")
             .join("register")
+    }
+
+    /// A register file's path relative to the crate root -- what a failure
+    /// message names it by, for the reason `diet/tests/conformance.rs::rel`
+    /// gives: this directory is walked by one test, so the seeded faults that
+    /// plant different files in it all break that one test, and the file is
+    /// the only thing that tells them apart. A relative path is a stable
+    /// identifier a seeded fault can bind to and is the same string on every
+    /// machine; an absolute one baked from `CARGO_MANIFEST_DIR` never was.
+    fn rel(path: &Path) -> &Path {
+        path.strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")))
+            .unwrap_or(path)
     }
 
     fn register_rows() -> Vec<Row> {
@@ -2970,15 +3214,21 @@ mod tests {
                         .any(|suffix| name.ends_with(suffix)),
                     "{}: not `<source>-<set>.jsonl` and not a declared sidecar, so \
                      nothing here knows what it is",
-                    path.display()
+                    rel(path).display()
                 );
                 continue;
             };
             registers += 1;
             let text = std::fs::read_to_string(path)
-                .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-            let rows = register(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-            assert!(rows.len() >= 10, "{}: {} rows", path.display(), rows.len());
+                .unwrap_or_else(|err| panic!("{}: {err}", rel(path).display()));
+            let rows =
+                register(&text).unwrap_or_else(|err| panic!("{}: {err}", rel(path).display()));
+            assert!(
+                rows.len() >= 10,
+                "{}: {} rows",
+                rel(path).display(),
+                rows.len()
+            );
             // A mined row is evidence, and evidence with no provenance is an
             // assertion. The sidecar is named for the source, so the mined
             // registers in this directory share one.
@@ -2987,7 +3237,7 @@ mod tests {
                 let text = std::fs::read_to_string(&sidecar).unwrap_or_else(|err| {
                     panic!(
                         "{}: a mined register and no {}: {err}",
-                        path.display(),
+                        rel(path).display(),
                         sidecar.display()
                     )
                 });
@@ -2997,7 +3247,7 @@ mod tests {
                     assert!(
                         traced.iter().any(|entry| entry.id == row.id),
                         "{}: {}",
-                        path.display(),
+                        rel(path).display(),
                         JoinError::Untraced(row.id.clone())
                     );
                 }
@@ -3007,14 +3257,14 @@ mod tests {
             assert!(
                 rows.iter().all(|row| row.source == declared.source),
                 "{}: the name says {} and a row says otherwise",
-                path.display(),
+                rel(path).display(),
                 declared.source.tag()
             );
             for label in Label::ALL {
                 assert!(
                     rows.iter().any(|row| row.label == *label),
                     "{}: no {} row",
-                    path.display(),
+                    rel(path).display(),
                     label.tag()
                 );
             }
@@ -3525,12 +3775,12 @@ mod tests {
             ControlFailure::NotAtBottom {
                 control: Control::UnrelatedWords,
                 score: 0.0,
-                row: "authored/hard_negative/mistakes-of-this-kind".to_owned(),
+                row: "authored/positive/actually-the-flag".to_owned(),
                 other: -1.0,
             }
             .to_string(),
-            "unrelated_words scored 0 and authored/hard_negative/mistakes-of-this-kind went \
-             under it at -1"
+            "unrelated_words scored 0 and the positive authored/positive/actually-the-flag \
+             went under it at -1"
         );
         assert_eq!(
             ControlFailure::Unscorable(ScoreError::Unembeddable {
@@ -3580,13 +3830,13 @@ mod tests {
                 scoring.tag()
             );
         }
-        // And a register row *under* the bottom control. The fixture
+        // And a POSITIVE register row *under* the bottom control. The fixture
         // embedder's components are token counts, so nothing it places can go
         // there; a signed space is where a real embedder puts things.
         let under = rows
             .iter()
-            .find(|row| row.id == "authored/hard_negative/mistakes-of-this-kind")
-            .expect("a hard negative")
+            .find(|row| row.label.is_positive() && row.id != displaced.id)
+            .expect("a second positive")
             .clone();
         let positive = literal(SenseSet::Mistake, Polarity::Positive);
         let placed = Placed::at(&[
@@ -3598,7 +3848,7 @@ mod tests {
         let signed = EmbeddedSet::embed(&shipped(), SenseSet::Mistake, &placed)
             .expect("the shipped set embeds");
         let err = controls(&rows, &signed, &placed, Scoring::RawCosine)
-            .expect_err("a register row went under the bottom control and the controls passed");
+            .expect_err("a positive went under the bottom control and the controls passed");
         let ControlFailure::NotAtBottom { control, row, .. } = &err else {
             panic!("{err:?}")
         };
@@ -3607,6 +3857,25 @@ mod tests {
             (Control::UnrelatedWords, under.id.as_str()),
             "the wrong control or the wrong row was named"
         );
+        // A NEGATIVE under the bottom control is not a failure: it is the
+        // direction a negative is supposed to go, and it is measured by the
+        // metrics rather than refused by the controls. As first coded this
+        // was refused, and three of four real embedders failed on an authored
+        // hard negative at a cosine below random words. Ruled on #24.
+        let negative = rows
+            .iter()
+            .find(|row| row.id == "authored/hard_negative/mistakes-of-this-kind")
+            .expect("a hard negative")
+            .clone();
+        let sunk = Placed::at(&[
+            (positive.as_str(), [1.0, 0.0]),
+            (super::UNRELATED, [0.0, 1.0]),
+            (negative.text.as_str(), [-1.0, 0.0]),
+        ]);
+        let signed = EmbeddedSet::embed(&shipped(), SenseSet::Mistake, &sunk)
+            .expect("the shipped set embeds");
+        controls(&rows, &signed, &sunk, Scoring::RawCosine)
+            .unwrap_or_else(|err| panic!("a negative under the bottom control was refused: {err}"));
     }
 
     #[test]
@@ -3995,6 +4264,15 @@ mod tests {
             row("n2", Label::Negative, 0.2),
         ];
         assert!(d_prime(&too_few).is_none(), "one positive has no spread");
+        // And WHY, typed: a seat reading the refusal from outside the
+        // instrument could not tell one positive from a flat register.
+        assert_eq!(
+            d_prime_or_why(&too_few),
+            Err(UndefinedCause::TooFewRows {
+                class: Label::Positive,
+                n: 1
+            })
+        );
         let flat = [
             row("p1", Label::Positive, 0.5),
             row("p2", Label::Positive, 0.5),
@@ -4004,6 +4282,20 @@ mod tests {
         assert!(
             d_prime(&flat).is_none(),
             "no spread, no standardised separation"
+        );
+        assert_eq!(d_prime_or_why(&flat), Err(UndefinedCause::ZeroSpread));
+        assert_eq!(
+            MetricError::Undefined {
+                metric: Metric::DPrime,
+                on: MetricSubject::Subject,
+                cause: UndefinedCause::TooFewRows {
+                    class: Label::Negative,
+                    n: 0
+                },
+            }
+            .to_string(),
+            "d_prime is undefined on the subject: fewer than two negative rows (0), so \
+             that class has no spread"
         );
     }
 
@@ -4288,6 +4580,14 @@ mod tests {
         assert!(holm(&[]).is_empty());
     }
 
+    /// SPLIT FROM `the_record_of_a_metric_carries_the_numbers_it_produced`
+    /// BELOW, AND THAT IS THE POINT. This loop and that record check were one
+    /// test, so `inject_sense_metric_fixture_removed` and
+    /// `inject_sense_reported_value_constant` broke the same test and could
+    /// be told apart only by which assertion message came back. That is prose
+    /// lifted out of a panic, which is the staleness #46 exists to end.
+    /// Split, each fault breaks a test of its own and cargo's own
+    /// `test <path> ... FAILED` line is the class.
     #[test]
     fn every_metric_is_reported_only_after_failing_its_own_fixture() {
         let subject = ungated();
@@ -4328,11 +4628,15 @@ mod tests {
                 Some(&Value::String(metric.tag().to_owned()))
             );
         }
-        // And the record carries the numbers, not merely their kind. This is
-        // precision at a budget of two over rows ranked exactly right, which
-        // is one; against a fixture holding eight non-positives above its
-        // positives, which is nothing; and the reading that counted as the
-        // failure travels with both.
+    }
+
+    /// And the record carries the numbers, not merely their kind. This is
+    /// precision at a budget of two over rows ranked exactly right, which is
+    /// one; against a fixture holding eight non-positives above its
+    /// positives, which is nothing; and the reading that counted as the
+    /// failure travels with both.
+    #[test]
+    fn the_record_of_a_metric_carries_the_numbers_it_produced() {
         let exact = [
             row("s/p1", Label::Positive, 0.9),
             row("s/p2", Label::Positive, 0.8),
@@ -4393,14 +4697,91 @@ mod tests {
         assert!(Metric::OverFiring.failed(1.0) && !Metric::OverFiring.failed(0.99));
     }
 
+    // THE COVERAGE THE RULING ASKED FOR. A budget the bakeoff pre-registers
+    // and a fixture does not demonstrate is a budget nothing can be reported
+    // at -- so the endpoint exists on paper and produces no number, which is
+    // the shape "decouple the budget from the fixture" was ruled against.
+    //
+    // Every pre-registered budget, every metric, through the one door that
+    // takes them: `Reported::take` computes the fixture at the budget it was
+    // asked for and refuses unless that reading is failure. Passing here is
+    // exactly "the instrument has been seen fail at this budget".
+    #[test]
+    fn every_pre_registered_budget_is_one_its_fixture_demonstrates() {
+        assert!(
+            !BUDGETS.is_empty(),
+            "a ladder of no budgets reports nothing"
+        );
+        let subject = ungated();
+        for &budget in BUDGETS {
+            for metric in Metric::ALL {
+                let taken = Reported::take(*metric, budget, &subject).unwrap_or_else(|err| {
+                    panic!(
+                        "{} is pre-registered at a budget of {budget} and its fixture does not \
+                         demonstrate failure there: {err}",
+                        metric.tag()
+                    )
+                });
+                assert_eq!(taken.budget(), budget);
+                assert!(
+                    metric.failed(taken.demonstrated_failure()),
+                    "{} reported at {budget} without a demonstrated failure",
+                    metric.tag()
+                );
+            }
+        }
+        // And the fixtures are the ladder's, not a remembered shape. Both
+        // counts follow from BUDGETS, so widening the ladder widens them --
+        // which is the whole content of the change. Asserted rather than
+        // trusted, because a builder that ignored its argument would satisfy
+        // every assertion above: all four metrics would still fail at every
+        // budget, on fixtures that happened to be big enough.
+        let precision = Metric::PrecisionAtK.failure_fixture();
+        assert_eq!(
+            precision
+                .iter()
+                .filter(|row| !row.label.is_positive())
+                .count(),
+            widest_budget(),
+            "the precision fixture does not hold the widest budget above its positives"
+        );
+        let over_firing = Metric::OverFiring.failure_fixture();
+        assert_eq!(
+            over_firing
+                .iter()
+                .filter(|row| row.label.is_hard_negative())
+                .count(),
+            narrowest_budget(),
+            "the over-firing fixture holds more hard negatives than the narrowest budget reaches"
+        );
+        // No ties, or the top-k is whichever order the sort happened to give.
+        for fixture in [&precision, &over_firing] {
+            let mut scores: Vec<f64> = fixture.iter().map(|row| row.score).collect();
+            scores.sort_by(|a, b| a.partial_cmp(b).expect("a finite score"));
+            let before = scores.len();
+            scores.dedup_by(|a, b| near(*a, *b));
+            assert_eq!(before, scores.len(), "a budgeted fixture has tied scores");
+        }
+    }
+
     #[test]
     fn a_metric_that_has_not_been_seen_fail_is_not_reported() {
         let subject = ungated();
-        // Both budgeted fixtures are budget-sensitive by construction. Outside
-        // the budget they demonstrate, they report success -- and a metric
-        // whose instrument has not been seen fail at the budget it is being
-        // reported at says nothing about the subject.
-        for (metric, budget) in [(Metric::PrecisionAtK, 9), (Metric::OverFiring, 1)] {
+        // Both budgeted fixtures are budget-sensitive by construction, and the
+        // budgets they cover are the pre-registered ones. OUTSIDE that ladder
+        // they report success -- and a metric whose instrument has not been
+        // seen fail at the budget it is being reported at says nothing about
+        // the subject.
+        //
+        // The two budgets below are DERIVED from the ladder rather than
+        // written. Written, they would have gone stale the moment the ladder
+        // moved, and gone stale in the direction that hides the defect: a
+        // hard-coded 9 stops being outside the ladder as soon as the ladder
+        // reaches 9, and the test then asserts a refusal that never comes.
+        for (metric, budget) in [
+            (Metric::PrecisionAtK, widest_budget() + 1),
+            (Metric::OverFiring, narrowest_budget() - 1),
+        ] {
             let err = Reported::take(metric, budget, &subject)
                 .err()
                 .unwrap_or_else(|| {
@@ -4409,12 +4790,32 @@ mod tests {
                         metric.tag()
                     )
                 });
-            let MetricError::InstrumentNeverFailed { value, reading, .. } = &err else {
+            let MetricError::InstrumentNeverFailed {
+                value,
+                reading,
+                budget: refused,
+                ..
+            } = &err
+            else {
                 panic!("{}: {err:?}", metric.tag())
             };
             assert!(!metric.failed(*value), "{}: {err:?}", metric.tag());
             assert!(near(*reading, metric.failure_reading()));
+            assert_eq!(*refused, budget, "{}: {err:?}", metric.tag());
             assert!(err.to_string().contains("never been seen fail"), "{err}");
+            // DECLARED RATHER THAN SILENT, which is the half of the ruling a
+            // refusal alone does not satisfy: the reader is told which budget
+            // was asked for and which ladder the fixtures cover, so the answer
+            // to "then what may I ask for" is in the refusal.
+            let said = err.to_string();
+            assert!(
+                said.contains(&format!("budget of {budget}")),
+                "the refusal does not name the budget it refused: {said}"
+            );
+            assert!(
+                said.contains(&format!("{BUDGETS:?}")),
+                "the refusal does not name the ladder the fixtures cover: {said}"
+            );
         }
         assert!(matches!(
             Reported::take(Metric::Auc, 3, &[]),
@@ -4423,10 +4824,11 @@ mod tests {
         assert_eq!(
             MetricError::Undefined {
                 metric: Metric::DPrime,
-                on: "the subject",
+                on: MetricSubject::Subject,
+                cause: UndefinedCause::ZeroSpread,
             }
             .to_string(),
-            "d_prime is undefined on the subject"
+            "d_prime is undefined on the subject: no spread at all across the two classes"
         );
     }
 
@@ -4444,6 +4846,7 @@ mod tests {
             [
                 "attainable_p_floor",
                 "blocked_on",
+                "budgets",
                 "cells",
                 "comparator",
                 "controls",

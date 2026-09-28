@@ -1,0 +1,74 @@
+// The `verdict` format, v0. This file is NORMATIVE: the Rust parser in
+// diet/src/formats/verdict.rs implements it and is not itself the definition.
+//
+// A verdict is the whole answer of a constrained fork asked whether a
+// nominated pair is a supersession: the collector found an entry recorded
+// at turn 5 and prose at turn 18 that names its anchors, and one fork is
+// spent asking what the prose does to the entry. The model judges; this
+// grammar formats; the reconciler applies. What it applies is a link, never
+// an overwrite -- but only if the answer is one of four words, because the
+// reconciler branches on the word and a fifth outcome would be a branch
+// nobody wrote.
+//
+// So the answer is one of DONE, PARTIAL, NOT_THIS, SUPERSEDED -- whole,
+// first, and alone. The rules, each of which closes a hole a tolerant reader
+// would have opened:
+//
+//   1. THE VERDICT COMES FIRST. `I think it is DONE` is prose containing a
+//      verdict, and a reader that searched for the word would find one in
+//      `not DONE yet` too, with the opposite meaning.
+//   2. THE VERDICT IS A WHOLE WORD. `DONEISH` and `PARTIALLY` are not
+//      verdicts. What refuses them is the anchored document: after the
+//      verdict comes a reason or nothing, and `ISH` is neither. A boundary
+//      check on the verdict token itself would say the same thing a second
+//      time and could not be made to fail on its own, so the rule lives in
+//      one place and the anchor is what a seeded fault removes. The
+//      boundary check that does carry its own weight is in `upper_verdict`
+//      below, where a reason may name `DONE_MARKER` without that naming
+//      being a second answer.
+//   3. THERE IS ONE VERDICT. A reason may follow, set off by a colon, a
+//      dash or parentheses, and the reason may not contain a second verdict
+//      written as one -- upper case, a whole token: `DONE - or PARTIAL` is
+//      two answers, and the reconciler cannot apply two. A lower-case
+//      `done` inside a reason is English.
+//   4. ONE LINE. A second line is a second answer, or a discussion; the
+//      fork was not asked for either.
+//
+// Case is not significant, and `NOT THIS` with a space is `NOT_THIS`: a
+// register difference is not a different judgment. A bare reason with no
+// verdict is not a verdict. An empty answer is not a verdict either; the
+// caller records a silence, which is a typed outcome of its own.
+
+sp = _{ " " | "\t" }
+ws = _{ " " | "\t" | "\r" | "\n" }
+nl = _{ "\r\n" | "\n" }
+
+// Anchored at both ends: a verdict is a property of the whole answer.
+document = { SOI ~ ws* ~ verdict ~ reason? ~ ws* ~ EOI }
+
+// No spelling here is a prefix of another, and the document's end anchor is
+// what keeps a longer word that merely begins with one from being a verdict
+// (rule 2).
+verdict = @{ ^"SUPERSEDED" | ^"NOT_THIS" | ^"NOT THIS" | ^"PARTIAL" | ^"DONE" }
+word_char = _{ ASCII_ALPHANUMERIC | "_" }
+
+// A reason: set off by a colon that may hug the verdict, by a dash with
+// whitespace on both sides, or bracketed. One line, and no second verdict
+// in it (rule 3). A verdict inside a reason is one written in the answer's
+// register -- upper case, a whole token -- and `it is done; nothing more`
+// is English, not a second answer. Preserved verbatim by the parser, typed
+// as a reason.
+reason = { paren_reason | setoff_reason }
+paren_reason = { sp* ~ "(" ~ sp* ~ paren_text ~ ")" }
+paren_text = @{ paren_token ~ (sp+ ~ paren_token)* }
+paren_token = _{ !upper_verdict ~ (!sp ~ !nl ~ !")" ~ ANY)+ }
+setoff_reason = { (colon_setoff | dash_setoff) ~ reason_text }
+colon_setoff = _{ sp* ~ ":" ~ sp* }
+dash_setoff = _{ sp+ ~ ("—" | "–" | "--" | "-") ~ sp+ }
+reason_text = @{ reason_token ~ (sp+ ~ reason_token)* }
+reason_token = _{ !upper_verdict ~ (!sp ~ !nl ~ ANY)+ }
+
+// A verdict written as an answer would write it: upper case, and whole --
+// `DONE_MARKER` in a reason is an identifier the reason names, not a second
+// answer, and the boundary check is what tells them apart.
+upper_verdict = _{ ("SUPERSEDED" | "NOT_THIS" | "NOT THIS" | "PARTIAL" | "DONE") ~ !word_char }

@@ -112,19 +112,54 @@ impl FieldKind {
     /// What this field can be grounded against.
     ///
     /// The scoping was ruled after the third incident, and it is narrow on
-    /// purpose: four of the six kinds are judgment, and the gate does not
-    /// touch them.
+    /// purpose: fourteen of the twenty-one kinds are judgment, and the gate
+    /// does not touch them. Growing the vocabulary to the dogma's tags did
+    /// not widen the gate -- every new kind that has no source to be present
+    /// in went to judgment, because the failure this scoping exists to
+    /// prevent is a gate rejecting legitimate content, and a kind wrongly
+    /// gated does exactly that on every turn.
     #[must_use]
     pub fn class(self) -> FieldClass {
         match self {
-            // Names the turn touched: a restructuring of the answer, and the
-            // field the 454-entry fabrication landed in.
-            Self::ApiSurface => FieldClass::Structuring,
-            // Excerpts from tool output, which either appear in it or do not.
-            Self::Evidence => FieldClass::Verbatim,
-            // What the turn decided, learned, intends, or could not get past.
-            // None of these has a source to be present in.
-            Self::Decision | Self::Learned | Self::Plan | Self::Stuck => FieldClass::Judgment,
+            // Quoted, or supplied as a quote, and so either present in the
+            // source or not. `LATEST` and `RECORDED` are the two halves of a
+            // supersede question and the harness puts them in the prompt
+            // verbatim; an answer that changes them has changed the question.
+            Self::Evidence | Self::Latest | Self::Recorded => FieldClass::Verbatim,
+            // A restructuring of something with a source: the names the turn
+            // touched (the field the 454-entry fabrication landed in), a fact
+            // extracted from material, a pointer naming where something is,
+            // and a citation of an earlier record. A fabricated one of any of
+            // these is the same failure in a different dress.
+            Self::ApiSurface | Self::Fact | Self::Pointer | Self::Supersede => {
+                FieldClass::Structuring
+            }
+            // No source to be present in. `RATIONALE` is the clearest case and
+            // the reason the list is this long: its template asks for the why
+            // a future session could NOT reconstruct from the artifacts, so
+            // grounding it against the artifacts would reject exactly the
+            // content it exists to collect.
+            //
+            // `CONSTRAINT` is the one judgment call in here. DOCTRINE asks for
+            // it as a verbatim quote and CONSTRAINTS asks for a commitment the
+            // turn is making, and a class is attached to the kind rather than
+            // to the lane -- so one of the two registers has to lose. Judgment
+            // loses less: a wrongly gated constraint is rejected on every turn
+            // that states one, where an ungated quote is merely unchecked.
+            Self::Constraint
+            | Self::Dark
+            | Self::Decision
+            | Self::Followup
+            | Self::Gotcha
+            | Self::Learned
+            | Self::Map
+            | Self::Note
+            | Self::Open
+            | Self::Plan
+            | Self::PlanImpact
+            | Self::Rationale
+            | Self::Stuck
+            | Self::Verdict => FieldClass::Judgment,
         }
     }
 }
@@ -821,16 +856,40 @@ mod tests {
         );
     }
 
+    // The gated set is pinned as a LIST, not as a count: growing the
+    // vocabulary to the dogma's tags must not quietly widen what the gate
+    // touches, and a count would let one kind swap for another and still
+    // read as two. Adding a kind to this list is a decision about whether it
+    // has a source to be checked against; making that decision here, in a
+    // diff somebody reads, is the point.
     #[test]
-    fn every_field_kind_has_a_class_and_only_two_are_gated() {
+    fn every_field_kind_has_a_class_and_the_gated_set_is_pinned() {
         let gated: Vec<_> = FieldKind::ALL
             .iter()
             .filter(|kind| kind.class().is_gated())
             .map(|kind| kind.canonical_tag())
             .collect();
-        assert_eq!(gated, vec!["api_surface", "evidence"]);
+        assert_eq!(
+            gated,
+            vec![
+                "api_surface",
+                "evidence",
+                "fact",
+                "latest",
+                "pointer",
+                "recorded",
+                "supersede",
+            ]
+        );
         assert_eq!(FieldKind::Plan.class(), FieldClass::Judgment);
         assert_eq!(FieldKind::Evidence.class(), FieldClass::Verbatim);
+        assert_eq!(
+            FieldKind::Rationale.class(),
+            FieldClass::Judgment,
+            "a rationale is asked for BECAUSE it cannot be reconstructed from \
+             the artifacts, so grounding it against them would reject exactly \
+             the content it collects"
+        );
     }
 
     // A threshold that cannot say where its value came from is a number

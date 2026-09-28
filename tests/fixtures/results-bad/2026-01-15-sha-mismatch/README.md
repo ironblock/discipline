@@ -1,6 +1,7 @@
 +++
 hypothesis = "State the claim being tested, in one sentence, so that it could be wrong."
 result = "supported"
+kind = "reproducible-by-config"
 product_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 controls_run = ["null-regimen"]
 known_defects = []
@@ -9,7 +10,7 @@ prefill_tokens_total = 2048
 
 [regime]
 arm = "baseline"
-substrate = "local"
+substrates = ["local"]
 dogma_version = 0
 +++
 

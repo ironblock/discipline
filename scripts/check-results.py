@@ -31,6 +31,13 @@ What stays here is what is not a format question. Three cross-checks:
      be bound by ``regimen.toml`` and must equal it; and the required three
      must equal what the record's ``start`` row carries.
   3. ``product_sha256`` must equal the summary row's ``product_sha256``.
+  4. Every ``consumes`` entry on every claim row must name a file in the
+     directory whose SHA-256 is the digest recorded beside it. The record
+     carried those digests and nothing compared them to the bytes, so a claim
+     could cite evidence it had never read -- provenance for the wrong
+     artefact, which reads exactly like provenance for the right one.
+     ``diet check-record`` stays shape-only: a format check is pure, and this
+     linter is the reader that has the filesystem.
 
 Stdlib only, by design: this runs in ``verify.sh`` and must not need an
 install step to tell the truth. It needs a built ``diet``, and refuses --
@@ -47,8 +54,11 @@ directories is an error, not a pass.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import argparse
 import datetime
+import hashlib
 import json
 import pathlib
 import re
@@ -61,6 +71,11 @@ FENCE = "+++"
 REQUIRED_KEYS: dict[str, type | tuple[type, ...]] = {
     "hypothesis": str,
     "result": str,
+    # Which of the two gate-0 kinds this directory is. Required here rather
+    # than only in check-recompute.py so that a directory cannot be added
+    # without declaring it: an undeclared directory is neither recomputed nor
+    # knowingly skipped, which is how a gate comes to run over nothing.
+    "kind": str,
     "regime": dict,
     "product_sha256": str,
     "controls_run": list,
@@ -69,11 +84,29 @@ REQUIRED_KEYS: dict[str, type | tuple[type, ...]] = {
 
 REQUIRED_REGIME_KEYS: dict[str, type | tuple[type, ...]] = {
     "arm": str,
-    "substrate": str,
+    "substrates": list,
     "dogma_version": int,
 }
 
+# `[derivation]`'s four keys, ruled 2026-09-19 on #84's second ruling: the
+# arithmetic's environment is a typed block, not README prose. Optional at
+# the top level (most directories derive from nothing); required whole once
+# declared, the way `[regime]` is.
+REQUIRED_DERIVATION_KEYS: dict[str, type | tuple[type, ...]] = {
+    "applier_sha256": str,
+    "runtime": str,
+    "substrate_id": str,
+    "derived_from": str,
+}
+
 SECTIONS = ["Observation", "Hypothesis", "Test", "Results", "Conclusion"]
+
+# The two kinds a directory may declare. Spelled here as well as in
+# check-recompute.py because this linter refuses a third spelling and that one
+# decides what to run; a directory whose kind neither reader knows would
+# otherwise be caught by neither.
+KINDS = ("reproducible-by-config", "historical-observation")
+REPRODUCIBLE = KINDS[0]
 
 REQUIRED_FILES = ["run.jsonl", "regimen.toml", "README.md"]
 
@@ -258,18 +291,23 @@ def resolve(value: object, path: tuple[object, ...]) -> tuple[bool, object]:
     return True, current
 
 
-def split_front_matter(text: str) -> tuple[str | None, str, str | None]:
-    """Split a report into (front-matter source, body, error).
+def split_front_matter(text: str) -> tuple[str | None, str, str | None, str | None]:
+    """Split a report into (front-matter source, body, error, failure class).
 
-    Exactly one of the front-matter source or the error is not ``None``.
+    Exactly one of the front-matter source or the error is not ``None``. The
+    two ways the fence can be wrong are different failures and are declared
+    separately in the manifest, so the split says which one it met rather than
+    leaving the caller to re-derive it from the message text.
     """
     lines = text.split("\n")
     if not lines or lines[0].strip() != FENCE:
-        return None, "", f"does not open with a {FENCE!r} front-matter fence"
+        return None, "", f"does not open with a {FENCE!r} front-matter fence", \
+            "results.front-matter-absent"
     for index in range(1, len(lines)):
         if lines[index].strip() == FENCE:
-            return "\n".join(lines[1:index]), "\n".join(lines[index + 1 :]), None
-    return None, "", f"front-matter fence {FENCE!r} is never closed"
+            return "\n".join(lines[1:index]), "\n".join(lines[index + 1 :]), None, None
+    return None, "", f"front-matter fence {FENCE!r} is never closed", \
+        "results.front-matter-unterminated"
 
 
 def body_sections(body: str) -> list[str]:
@@ -300,23 +338,29 @@ def check_run(directory: pathlib.Path) -> list[str]:
     """Lint one run directory. Returns a list of failure messages."""
     failures: list[str] = []
 
-    def fail(message: str) -> None:
-        failures.append(f"{directory}: {message}")
+    def fail(failure_class: str, message: str) -> None:
+        # The class is EMITTED, not merely declared. The manifest names a
+        # `failure_class` for every one of these fixtures, and for as long as
+        # nothing printed it the selftest could only grade on "exited 1" --
+        # so a fixture going red for a reason nobody checked graded the same
+        # as one going red for its own. Red for the wrong reason is the WRONG
+        # verdict wearing the right exit code.
+        failures.append(f"{directory}: {message}  [{failure_class}]")
 
     name = directory.name
     if name != TEMPLATE_DIR:
         match = DIR_NAME.fullmatch(name)
         if not match:
-            fail("name is not `YYYY-MM-DD-<slug>` with a lowercase hyphenated slug")
+            fail("results.name-malformed", "name is not `YYYY-MM-DD-<slug>` with a lowercase hyphenated slug")
         else:
             try:
                 datetime.date.fromisoformat(match.group(1))
             except ValueError:
-                fail(f"name carries an impossible date `{match.group(1)}`")
+                fail("results.name-malformed", f"name carries an impossible date `{match.group(1)}`")
 
     missing = [f for f in REQUIRED_FILES if not (directory / f).is_file()]
     for f in missing:
-        fail(f"missing required file `{f}`")
+        fail("results.required-file-missing", f"missing required file `{f}`")
     if missing:
         return failures
 
@@ -324,8 +368,13 @@ def check_run(directory: pathlib.Path) -> list[str]:
     verdict = record_verdict(directory / "run.jsonl")
     summary: dict | None = None
     recorded_regime: dict | None = None
+    claims: list[dict] = []
+    recorded_source: dict | None = None
     if not verdict.ok:
-        fail(f"run.jsonl is not a session record, says diet check-record: {verdict.error}")
+        fail(
+            "results.record-refused",
+            f"run.jsonl is not a session record, says diet check-record: {verdict.error}",
+        )
         # Nothing below reads the record. The number and digest checks need a
         # summary row, and a summary row is only known to exist once diet has
         # said the file is a record; reaching for one here would be this
@@ -335,10 +384,13 @@ def check_run(directory: pathlib.Path) -> list[str]:
         rows = [json.loads(line) for line in value.get("canonical", "").splitlines() if line.strip()]
         summaries = [r for r in rows if r.get("record") == "summary"]
         if len(summaries) != 1:
-            fail(f"run.jsonl holds {len(summaries)} summary rows, expected exactly 1")
+            fail("results.summary-record-count", f"run.jsonl holds {len(summaries)} summary rows, expected exactly 1")
         else:
             summary = summaries[0]
         recorded_regime = value.get("regime")
+        claims = [r for r in rows if r.get("record") == "claim"]
+        recorded_source = value.get("source")
+        check_consumed(directory, rows, fail)
 
     # --- regimen.toml ----------------------------------------------------
     regimen: dict | None = None
@@ -351,29 +403,30 @@ def check_run(directory: pathlib.Path) -> list[str]:
     # tomllib raises bare ValueError for an integer too large to convert, and
     # TOMLDecodeError is itself a ValueError, so one clause covers both.
     except (ValueError, UnicodeDecodeError, OSError) as err:
-        fail(f"regimen.toml is not TOML: {err}")
+        fail("results.regimen-not-toml", f"regimen.toml is not TOML: {err}")
 
     # --- README.md front-matter -----------------------------------------
     try:
         text = read_text(directory / "README.md")
     except Unreadable as err:
-        fail(str(err))
+        fail("results.unreadable-encoding", str(err))
         return failures
-    source, body, err = split_front_matter(text)
+    source, body, err, err_class = split_front_matter(text)
     if err is not None or source is None:
-        fail(f"README.md {err}")
+        fail(err_class or "results.front-matter-absent", f"README.md {err}")
         return failures
     try:
         front = tomllib.loads(source)
     except ValueError as exc:
-        fail(f"README.md front-matter is not TOML: {exc}")
+        fail("results.front-matter-not-toml", f"README.md front-matter is not TOML: {exc}")
         return failures
 
     for key, expected in REQUIRED_KEYS.items():
         if key not in front:
-            fail(f"front-matter is missing required key `{key}`")
+            fail("results.required-key-missing", f"front-matter is missing required key `{key}`")
         elif not has_type(front[key], expected):
             fail(
+                "results.key-mistyped",
                 f"front-matter key `{key}` is {type(front[key]).__name__}, "
                 f"expected {type_name(expected)}"
             )
@@ -381,15 +434,16 @@ def check_run(directory: pathlib.Path) -> list[str]:
     for key in ("controls_run", "known_defects"):
         value = front.get(key)
         if isinstance(value, list) and not all(isinstance(item, str) for item in value):
-            fail(f"front-matter key `{key}` must be a list of strings")
+            fail("results.key-mistyped", f"front-matter key `{key}` must be a list of strings")
 
     regime = front.get("regime")
     if isinstance(regime, dict):
         for key, expected in REQUIRED_REGIME_KEYS.items():
             if key not in regime:
-                fail(f"front-matter is missing required key `regime.{key}`")
+                fail("results.required-key-missing", f"front-matter is missing required key `regime.{key}`")
             elif not has_type(regime[key], expected):
                 fail(
+                    "results.key-mistyped",
                     f"front-matter key `regime.{key}` is {type(regime[key]).__name__}, "
                     f"expected {type_name(expected)}"
                 )
@@ -401,6 +455,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
                     recorded_regime[key], regime[key]
                 ):
                     fail(
+                        "results.regime-disagrees-with-regimen",
                         f"front-matter `regime.{key}` is {regime[key]!r} but the "
                         f"record's start row carries {recorded_regime[key]!r}"
                     )
@@ -410,23 +465,237 @@ def check_run(directory: pathlib.Path) -> list[str]:
             # nothing backs.
             for key in regime:
                 if key not in regimen:
-                    fail(f"regimen.toml does not bind `{key}`, so `regime.{key}` is unbacked")
+                    fail("results.regime-unbacked", f"regimen.toml does not bind `{key}`, so `regime.{key}` is unbacked")
                 elif not same_value(regimen[key], regime[key]):
                     fail(
+                        "results.regime-disagrees-with-regimen",
                         f"front-matter `regime.{key}` is {regime[key]!r} but "
                         f"regimen.toml binds {regimen[key]!r}"
                     )
 
+    kind = front.get("kind")
+    if isinstance(kind, str) and kind not in KINDS:
+        fail("results.kind-undeclared", f"front-matter `kind` is {kind!r}, which is neither {' nor '.join(KINDS)}")
+
+    # A hosted substrate is one whose weights can change under you: the
+    # provider re-points a tag and the same config serves different weights.
+    # Gate 0 does not care -- re-deriving numbers from committed artefacts is
+    # indifferent to what produced them -- but a directory declaring
+    # `reproducible-by-config` is promising a RE-FIRING, and that is the
+    # promise nobody can keep here. Such a run is a real result and its kind is
+    # `historical-observation`. Ruled 2026-09-08.
+    #
+    # The list comes from diet, which is the only reader of the record; this
+    # script asking `canonical` which weights each substrate carries would be
+    # a second opinion about the format.
+    if kind == REPRODUCIBLE and recorded_regime is not None:
+        hosted = recorded_regime.get("hosted_substrates") or []
+        if hosted:
+            fail(
+                "results.hosted-cannot-be-reproducible",
+                f"front-matter `kind` is {REPRODUCIBLE!r} but the record is "
+                f"served by hosted weights ({', '.join(sorted(hosted))}), which "
+                f"can change under a re-firing; this is {KINDS[1]!r}",
+            )
+
+    # THE FRONT-MATTER'S VERDICT AND THE RECORD'S ARE ONE STATEMENT WRITTEN
+    # TWICE. Ruled 2026-09-14, after `diet bakeoff` wrote `unadjudicated` in
+    # the README and `inconclusive` on the claim row of the same directory
+    # for a day, with nothing in this script comparing them: `result` is a
+    # free string in the front-matter schema and `Verdict` is a closed
+    # vocabulary in the record, so neither reader could see the other's copy.
+    #
+    # They are not two measurements taken differently. `inconclusive` is a
+    # verdict -- the evidence was held against a rule and did not decide --
+    # and `unadjudicated` is the absence of one. A directory that says both
+    # is a directory whose reader has to guess which half to believe.
+    #
+    # A directory with no claim row is not this check's business: the record
+    # format decides whether one is required, and a results directory with no
+    # claim is already refused upstream by the rule that a claim must name the
+    # artefacts it consumed. More than one claim row and every one must agree
+    # with the front-matter, because the front-matter has one `result` field
+    # and cannot mean different things to different rows.
+    stated = front.get("result")
+    if isinstance(stated, str):
+        for claim in claims:
+            recorded = claim.get("result")
+            if recorded is not None and recorded != stated:
+                fail(
+                    "results.verdict-disagrees-with-record",
+                    f"front-matter `result` is {stated!r} but claim "
+                    f"{claim.get('id')!r} carries {recorded!r}; the report and the "
+                    f"record are one statement written twice and must agree"
+                )
+
+    # THE PRE-REGISTRATION IS PINNED BY THE DIGEST OF A FILE, not by a hash of
+    # a block inside `report.json`. Ruled 2026-09-14.
+    #
+    # The block version would have made this script a SECOND canonicaliser of
+    # record data: to hash a sub-object it would have to serialise it, and
+    # serialising means deciding key order, separators and -- since the
+    # pre-registration carries the attainable p floor and the budget ladder --
+    # decimal formatting. A second canonicaliser that disagrees with `diet` by
+    # one digit reports a mismatch that looks exactly like tampering. This
+    # script hashes whole files and delegates every structural question, and
+    # that is the property being kept.
+    #
+    # BICONDITIONAL, so neither half can be dropped to escape it: a directory
+    # with the file must declare the digest, and a directory declaring the
+    # digest must have the file. An optional pin is a pin nobody has to carry.
+    #
+    # Whether a results directory must HAVE a pre-registration is a different
+    # question and is not decided here -- a recompute-confirmed row that never
+    # pre-registered anything is a real shape, and this check is about the two
+    # halves agreeing, not about requiring one.
+    declared_pre = front.get("pre_registration_sha256")
+    pre_file = directory / "pre-registration.json"
+    if declared_pre is not None and not isinstance(declared_pre, str):
+        fail("results.key-mistyped", "front-matter `pre_registration_sha256` is not a string")
+    elif isinstance(declared_pre, str) and not SHA256.fullmatch(declared_pre):
+        fail(
+            "results.sha-malformed",
+            "front-matter `pre_registration_sha256` is not 64 lowercase hex characters",
+        )
+    elif isinstance(declared_pre, str) and not pre_file.is_file():
+        fail(
+            "results.pre-registration-absent",
+            "front-matter declares `pre_registration_sha256` and there is no "
+            "`pre-registration.json` here; a digest of a file that is not in the "
+            "directory pins nothing",
+        )
+    elif isinstance(declared_pre, str):
+        found_pre = digest_of(pre_file)
+        if found_pre != declared_pre:
+            fail(
+                "results.pre-registration-digest",
+                f"`pre-registration.json` hashes to {found_pre} and the front-matter "
+                f"declares {declared_pre}; the endpoints a run was scored against are "
+                f"not the endpoints committed beside it",
+            )
+    elif pre_file.is_file():
+        fail(
+            "results.pre-registration-unpinned",
+            "`pre-registration.json` is here and the front-matter declares no "
+            "`pre_registration_sha256`; endpoints nothing pins can be edited after "
+            "the numbers, which is what pre-registering them is against",
+        )
+
+    # A record ADAPTED from a log nobody else can read cannot promise a
+    # re-firing either, and for a nearer reason than hosted weights: the input
+    # itself is gone. `pinned_only` says the digest names a file that is not in
+    # this repository and cannot be -- an operator's own session transcript,
+    # unscrubbed. Pinning WHICH file was read is not the same as making it
+    # readable, and `reproducible-by-config` promises the second. `committed`
+    # is fine: the source is right there beside the record.
+    #
+    # Read from diet's projection rather than from `canonical`, for the reason
+    # the hosted check above gives: this script must not become a second
+    # opinion about the record format.
+    if (
+        kind == REPRODUCIBLE
+        and recorded_source is not None
+        and recorded_source.get("source_available") == "pinned_only"
+    ):
+        fail(
+            "results.pinned-only-cannot-be-reproducible",
+            f"front-matter `kind` is {REPRODUCIBLE!r} but the record is adapted "
+            f"from a source pinned by digest and not reachable "
+            f"({recorded_source.get('adapter')!r}), so nothing can re-fire it; "
+            f"this is {KINDS[1]!r}",
+        )
+
+    # THE ARITHMETIC'S ENVIRONMENT IS A TYPED BLOCK, NOT README PROSE. Ruled
+    # 2026-09-19 on #84's second ruling, after a derived directory's README
+    # stated "the arithmetic ran under Python 3.14.6 ... the registry's
+    # mac-pro-2019 instance" in prose that nothing here checked -- the
+    # prose-claims class #77 names: true when written, checked by nothing.
+    #
+    # OPTIONAL, the way `pre_registration_sha256` is: most directories derive
+    # from nothing, and this check is about a declared derivation being real,
+    # not about requiring every directory to be one. Required whole once
+    # declared, the way `[regime]` is required whole.
+    #
+    # Two of its four keys are digests and are verified as such, the same way
+    # `pre_registration_sha256` is: `applier_sha256` against `recompute.sh`
+    # itself -- "the applier is the Python inside recompute.sh; there is no
+    # other copy" -- and `derived_from` against the claim row's own
+    # `consumes`, so citing an original by digest is a checked fact and not
+    # an assertion nobody reads back. `runtime` and `substrate_id` are typed
+    # and required but not independently verifiable from this directory
+    # alone -- there is no second reading of which interpreter or which
+    # machine ran, only the one this directory declares.
+    derivation = front.get("derivation")
+    if derivation is not None and not isinstance(derivation, dict):
+        fail("results.key-mistyped", "front-matter `derivation` is not a table")
+    elif isinstance(derivation, dict):
+        for key, expected in REQUIRED_DERIVATION_KEYS.items():
+            if key not in derivation:
+                fail(
+                    "results.required-key-missing",
+                    f"front-matter `derivation` is missing required key `{key}`",
+                )
+            elif not has_type(derivation[key], expected):
+                fail(
+                    "results.key-mistyped",
+                    f"front-matter `derivation.{key}` is {type(derivation[key]).__name__}, "
+                    f"expected {type_name(expected)}",
+                )
+
+        applier_sha256 = derivation.get("applier_sha256")
+        applier_file = directory / "recompute.sh"
+        if isinstance(applier_sha256, str):
+            if not SHA256.fullmatch(applier_sha256):
+                fail(
+                    "results.sha-malformed",
+                    "front-matter `derivation.applier_sha256` is not 64 lowercase hex characters",
+                )
+            elif not applier_file.is_file():
+                fail(
+                    "results.derivation-applier-absent",
+                    "front-matter declares `derivation.applier_sha256` and there is no "
+                    "`recompute.sh` here to be the applier",
+                )
+            else:
+                found_applier = digest_of(applier_file)
+                if found_applier != applier_sha256:
+                    fail(
+                        "results.derivation-applier-digest",
+                        f"`recompute.sh` hashes to {found_applier} and the front-matter "
+                        f"declares {applier_sha256}; the applier that ran is not the one "
+                        f"committed beside it",
+                    )
+
+        derived_from = derivation.get("derived_from")
+        if isinstance(derived_from, str):
+            if not SHA256.fullmatch(derived_from):
+                fail(
+                    "results.sha-malformed",
+                    "front-matter `derivation.derived_from` is not 64 lowercase hex characters",
+                )
+            elif not any(
+                isinstance(artifact, dict) and artifact.get("sha256") == derived_from
+                for claim in claims
+                for artifact in claim.get("consumes", [])
+            ):
+                fail(
+                    "results.derivation-unconsumed",
+                    f"front-matter `derivation.derived_from` is {derived_from!r}, which no "
+                    f"claim row's `consumes` names; citing an original by digest means "
+                    f"consuming it",
+                )
+
     sha = front.get("product_sha256")
     if isinstance(sha, str):
         if not SHA256.fullmatch(sha):
-            fail("front-matter `product_sha256` is not 64 lowercase hex characters")
+            fail("results.sha-malformed", "front-matter `product_sha256` is not 64 lowercase hex characters")
         elif summary is not None:
             recorded = summary.get("product_sha256")
             if recorded is None:
-                fail("the record's summary row does not carry `product_sha256`")
+                fail("results.sha-disagrees-with-summary", "the record's summary row does not carry `product_sha256`")
             elif recorded != sha:
                 fail(
+                    "results.sha-disagrees-with-summary",
                     f"front-matter `product_sha256` is {sha} but the summary "
                     f"record carries {recorded!r}"
                 )
@@ -440,11 +709,13 @@ def check_run(directory: pathlib.Path) -> list[str]:
             found, at_path = resolve(summary, path)
             if not found:
                 fail(
+                    "results.number-unbound-in-summary",
                     f"front-matter `{shown}` states {value!r}, but the summary "
                     f"record binds no `{shown}`"
                 )
             elif not (is_number(at_path) and same_value(at_path, value)):
                 fail(
+                    "results.number-contradicts-summary",
                     f"front-matter `{shown}` states {value!r} but the summary "
                     f"record binds `{shown}` to {at_path!r}"
                 )
@@ -453,10 +724,106 @@ def check_run(directory: pathlib.Path) -> list[str]:
     headings = body_sections(body)
     if headings != SECTIONS:
         fail(
+            "results.sections-wrong",
             f"README.md sections are {headings!r}, expected exactly {SECTIONS!r} in order"
         )
 
     return failures
+
+
+def digest_of(path: pathlib.Path) -> str:
+    """The SHA-256 of a file, read in chunks so a large artefact is not held."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def check_consumed(
+    directory: pathlib.Path, rows: list[dict], fail: Callable[[str, str], None]
+) -> None:
+    """Every claim's consumed evidence, hashed against the committed file.
+
+    The record states which artefacts a claim was derived from and the digest
+    each one had. Until this existed, both halves were shape-checked and
+    neither was compared to anything: a claim could name a file that had since
+    changed, or a file that was never there, and the whole gate stayed green.
+    A digest that is never checked is a decoration on a claim.
+    """
+    for row in rows:
+        if row.get("record") != "claim":
+            continue
+        claim = row.get("id", "<unnamed>")
+        entries = row.get("consumes")
+        if not isinstance(entries, list):
+            continue  # shape is diet's question, and it has already answered
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            stated, recorded = entry.get("path"), entry.get("sha256")
+            if not isinstance(stated, str) or not isinstance(recorded, str):
+                continue
+            # A results directory is self-contained: its evidence is committed
+            # beside it. A path that leaves the directory names something this
+            # repository does not carry, and a digest of it would be a digest
+            # of whatever happened to be on the machine that ran the linter.
+            parts = pathlib.PurePosixPath(stated).parts
+            if stated.startswith("/") or ".." in parts:
+                fail(
+                    "results.provenance-unchecked",
+                    f"claim `{claim}` consumes `{stated}`, which is outside the "
+                    f"run directory; evidence is committed beside the claim"
+                )
+                continue
+            if stated == "run.jsonl":
+                fail(
+                    "results.provenance-unchecked",
+                    f"claim `{claim}` consumes `run.jsonl`, whose digest it is "
+                    f"itself part of; a record cannot state its own hash"
+                )
+                continue
+            artefact = directory / stated
+            # `..` and a leading `/` are refused above, but a SYMLINK carries
+            # neither and `is_file()` follows it: a committed link can name a
+            # path outside the directory, outside the repository, and the
+            # digest recorded would be a digest of whatever happened to sit
+            # there on the machine that ran the linter -- the machine-local
+            # bytes this check exists to rule out. A directory symlink does it
+            # with no `..` in the path at all. So containment is checked on
+            # the RESOLVED path, which is the only form that can answer it.
+            try:
+                resolved = artefact.resolve(strict=True)
+            except (OSError, RuntimeError):
+                # Same sentence as the not-a-file branch below, deliberately:
+                # "there is no such file" and "there is something there that
+                # is not a file" are one fault to the person reading it, and
+                # one guard with two spellings is one the seeded case can only
+                # half cover.
+                fail(
+                    "results.provenance-unchecked",
+                    f"claim `{claim}` consumes `{stated}`, which is not a file here",
+                )
+                continue
+            here = directory.resolve()
+            if not resolved.is_relative_to(here):
+                fail(
+                    "results.provenance-escapes-the-directory",
+                    f"claim `{claim}` consumes `{stated}`, which resolves to "
+                    f"`{resolved}`, outside the run directory; evidence is "
+                    f"committed beside the claim, and a link is not evidence",
+                )
+                continue
+            if not resolved.is_file():
+                fail("results.provenance-unchecked", f"claim `{claim}` consumes `{stated}`, which is not a file here")
+                continue
+            found = digest_of(artefact)
+            if found != recorded:
+                fail(
+                    "results.provenance-unchecked",
+                    f"claim `{claim}` consumes `{stated}` at sha256 {recorded}, "
+                    f"but the committed file hashes to {found}"
+                )
 
 
 def run_directories(root: pathlib.Path) -> list[pathlib.Path]:
@@ -466,6 +833,26 @@ def run_directories(root: pathlib.Path) -> list[pathlib.Path]:
     reject sit unlinted while other tooling still walks it.
     """
     return sorted(p for p in root.iterdir() if p.is_dir())
+
+
+def nested_run_directories(root: pathlib.Path) -> list[pathlib.Path]:
+    """Run directories sitting INSIDE a run directory.
+
+    Every walker here is one level deep, which is not a bug in the walkers --
+    a results directory is a flat, dated, registered thing. What it means is
+    that anything a level down is walked by nobody, and two such directories
+    were committed with claim records and product digests in them, unlinted
+    and unregistered. Skipping them quietly is how they got there. An
+    unregistered artefact accumulates authority by sitting still, so this
+    refuses rather than ignores: a claim record nothing grades is worse than
+    no claim record, because it reads like one that passed.
+    """
+    nested = []
+    for directory in run_directories(root):
+        for inner in run_directories(directory):
+            if any((inner / f).is_file() for f in REQUIRED_FILES):
+                nested.append(inner)
+    return sorted(nested)
 
 
 def main(argv: list[str]) -> int:
@@ -515,6 +902,13 @@ def main(argv: list[str]) -> int:
         found = run_directories(root)
         if not found:
             failures.append(f"{root}: root holds no run directories")
+        for inner in nested_run_directories(root):
+            failures.append(
+                f"{inner}: a run directory inside a run directory. Every walker "
+                f"here is one level deep, so this one is linted by nothing and "
+                f"registered nowhere while carrying the files of a real result  "
+                f"[results.nested-run-directory]"
+            )
         targets += found
 
     for directory in args.directories:

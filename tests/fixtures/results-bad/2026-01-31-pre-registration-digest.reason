@@ -1,0 +1,19 @@
+`pre-registration.json` is here and hashes to something other than the
+`pre_registration_sha256` the front-matter declares.
+
+The endpoints a run was scored against are not the endpoints committed beside
+it, which is the whole of what pre-registering them is for: a pre-registration
+that can be edited after the numbers is a set of endpoints chosen to fit them.
+
+Ruled 2026-09-14, and it is a FILE digest on purpose. Hashing the
+pre-registration as a block inside `report.json` would have made
+`check-results.py` serialise a sub-object to check it -- deciding key order,
+separators and, because the block carries the attainable p floor and the budget
+ladder, decimal formatting. That is a second canonicaliser of record data, and
+one that disagrees with `diet` by a digit reports a mismatch indistinguishable
+from tampering. A file has bytes, and `digest_of` already hashes bytes for every
+other artefact in the directory.
+
+The check is BICONDITIONAL: `2026-02-01-pre-registration-unpinned` is the other
+half, a directory carrying the file and declaring no digest at all. Either half
+alone would be a pin that can be escaped by dropping the other.

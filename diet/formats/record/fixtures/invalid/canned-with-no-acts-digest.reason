@@ -1,0 +1,7 @@
+A canned substrate that names no acts digest.
+
+"No weights" is not "nothing identifiable". The acts decided every reply, they
+are an artifact a later reader can hold and hash, and their digest is this
+substrate's whole identity. A `canned` kind with nothing under it is a
+substrate asserting it cannot be identified while being declared as one --
+the null the typed identity was adopted to remove, wearing the new kind's name.

@@ -1,0 +1,11 @@
+{
+  "arm": { "string": "thinking-uncapped" },
+  "dogma_version": { "integer": 0 },
+  "reasoning": {
+    "table": {
+      "budget_tokens": { "string": "none" },
+      "effort": { "string": "medium" }
+    }
+  },
+  "substrate": { "string": "local" }
+}

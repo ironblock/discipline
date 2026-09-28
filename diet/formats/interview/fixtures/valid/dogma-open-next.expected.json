@@ -1,0 +1,25 @@
+{
+  "completion": "complete",
+  "fields": [
+    {
+      "outcome": {
+        "value": "whether the union should consult the merge base for a shared block"
+      },
+      "raw": "whether the union should consult the merge base for a shared block",
+      "tag": {
+        "as_written": "OPEN:",
+        "kind": "open"
+      }
+    },
+    {
+      "outcome": {
+        "value": "read the base and compare the three texts"
+      },
+      "raw": "read the base and compare the three texts",
+      "tag": {
+        "as_written": "NEXT:",
+        "kind": "plan"
+      }
+    }
+  ]
+}

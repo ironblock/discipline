@@ -1,0 +1,1 @@
+The CLI is missing a verb for records; I'll add one before the linter grows a second reader.

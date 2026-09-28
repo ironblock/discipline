@@ -1,0 +1,3 @@
+NOT-TOML: A two-segment header whose parent is bound to a value. One of the
+two bindings would have to disappear, and a regimen that quietly replaces a
+binding is not the regime that was recorded.

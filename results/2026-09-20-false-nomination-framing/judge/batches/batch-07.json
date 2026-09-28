@@ -1,0 +1,245 @@
+{
+"batch": 7,
+"items": [
+{
+"id": "0.6|drive-10#t8s10|imperative",
+"note": "Working record: the entry \"The cross-slot prompt cache (`server_prompt_cache`) is purely in-memory with LRU eviction — there is NO persistent disk-based prompt cache that survives server restarts — IMPLICATION: Prompt cache is lost on every server restart; the only persistent option is the slot file save/restore which doesn't work with multimodal\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "Let me verify the prompt cache persistence situation before updating the record.\n\n",
+"reasoning": "The user wants me to update my working record. Let me first check if there's a persistent disk-based prompt cache or if the prompt cache is purely in-memory. Let me also check the `--cache-type` and related options."
+},
+{
+"id": "0.6222|drive-08#t8s17|imperative",
+"note": "Working record: the entry \"The full source tree is at `~/git/reference/llama.cpp/tools/server/` — this is where I need to search for prompt cache and common-prefix matching logic\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "The working record entry `#54` states the source tree is at `~/git/reference/llama.cpp/tools/server/` — this is correct (resolves to `~/git/reference/llama.cpp/tools/server/`) and all subsequent steps have used the expanded absolute path consistently. The entry is not superseded; it remains accurate. I'll continue with the investigation.\n\n",
+"reasoning": "The user is asking me to update the working record. The entry says \"The full source tree is at `~/git/reference/llama.cpp/tools/server/`\" but I've been using `~/git/reference/llama.cpp/tools/server/` throughout. The `~` expansion is equivalent to `~/` on this system, so the paths are actually the same. However, the working record entry was originally a \"need to find\" item - and I've now thoroughly explored the source tree. Let me update the record to reflect that the source location is confirmed and the relevant files have been identified.\n\nLet me also note that this is a correction/update request before continuing with the investigation. Let me provide the correction and then continue with reading `launch_slot_with_task`."
+},
+{
+"id": "ack11-b7",
+"note": "Working record note: the entry \"`audio.ts` is a stub\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "The note about `audio.ts` may be out of date, but the file listing doesn't settle it; I'll open the file and check whether the bodies are still empty.",
+"reasoning": ""
+},
+{
+"id": "0.0556|drive-02#t8s5|imperative",
+"note": "Working record: the entry \"`--slot-save-path` CLI flag referenced at server-context.cpp:4237 — gates whether save/restore is enabled at all\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "The working record entry stating \"`--slot-save-path` CLI flag referenced at server-context.cpp:4237 — gates whether save/restore is enabled at all\" is **correct as stated**, but I want to verify the exact flag name and its registration to make sure there are no nuances.\n\n",
+"reasoning": ""
+},
+{
+"id": "0.6222|drive-08#t9s14|imperative",
+"note": "Working record: the entry \"What functional changes exist in the shared files with significant size deltas — particularly `server-context.cpp` (+175KB in beellama), `server-task.cpp` (+41KB), `server-common.h` (larger), and `server-models.cpp` (-27KB)?\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "Correction: The upstream `server-context.cpp` is 218,791 bytes and beellama's is 394,212 bytes — a **+175,421 byte** delta (80% larger). This is the single largest divergence. I'll now investigate what was added to beellama's `server-context.cpp`.\n\n",
+"reasoning": "The user wants me to update the working record. The entry that needs updating is about the size deltas between the two forks. Let me provide the correction."
+},
+{
+"id": "0.4|drive-10#t10s7|imperative",
+"note": "Working record: the entry \"How speculative decoding checkpoints (`common_prompt_checkpoint`) interact with the in-memory `server_prompt_cache` — do checkpoints get saved/restored as part of prompt cache entries, or are they strictly per-slot ephemeral?\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "",
+"reasoning": "The user wants me to update the working record based on what I've found. The question was about how speculative decoding checkpoints interact with the in-memory prompt cache. From the code I've seen, speculative decoding checkpoints (`slot.prompt.checkpoints`) are per-slot ephemeral and are NOT saved/restored as part of the prompt cache entries. The prompt cache (`server_prompt_cache`) saves KV state via `llama_state_seq_get_data_ext`, while speculative checkpoints are a separate `common_prompt_checkpoint` structure stored in `slot.prompt.checkpoints` vector.\n\nLet me also check if checkpoints are included in prompt cache save/load to confirm."
+},
+{
+"id": "0.6|drive-05#t11s26|imperative",
+"note": "Working record: the entry \"Member `int32_t dry_allowed_length = 2;` — tokens extending repetitions beyond this receive penalty (`common/common.h:241`).\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "Correction: The working record entry `#158` stating \"`int32_t dry_allowed_length = 2;` — tokens extending repetitions beyond this receive penalty (`common/common.h:241`)\" is superseded. The actual field `dry_allowed_length` is defined in the fork's `common/common.h` as part of `common_params_sampling`, but the default value and line number may differ from what was recorded. More importantly, this field is irrelevant to the caching/checkpointing analysis I'm now working on. I'll update the record when I append to it after completing the file edit.\n\nLet me now get the exact upstream line numbers for the key checkpoint differences:\n\n",
+"reasoning": ""
+},
+{
+"id": "ack08-b7",
+"note": "Working record note: the entry \"the parity tests are pixel-exact\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "The parity tests are still pixel-exact; that entry holds as written. Adding the new scene next.",
+"reasoning": "The test output shows 1/1 frames identical, so pixel-exact still holds."
+},
+{
+"id": "1.0|drive-09#t8s28|advisory",
+"note": "Working record note: the entry \"Read `get_common_prefix()` in server-common.cpp\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "",
+"reasoning": "The entry about `get_common_prefix()` was about understanding LCP (Longest Common Prefix) matching for slot selection. I've now seen how it's used in the prompt cache system (`get_common_prefix` for finding the best matching cached prompt). Let me look at the `lora_should_clear_cache` function to complete the picture."
+},
+{
+"id": "ack06-b7",
+"note": "Working record: the entry \"the README is about 97 KB and truncates when read whole\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "Reading the API section of the README.",
+"reasoning": ""
+},
+{
+"id": "0.4|drive-02#t9s16|advisory",
+"note": "Working record note: the entry \"The `alloc()` method's LCP-based deduplication — it removes obsolete cached prompts fully contained in the new prompt and skips saving if the prompt already exists. This matters for understanding cache bloat and eviction behavior. (server-task.cpp, lines 1620+)\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "Let me check the current state of `alloc()` in `server-task.cpp` to see if the LCP-based deduplication is still present.\n\n",
+"reasoning": ""
+},
+{
+"id": "0.0556|drive-13#t4s0|imperative",
+"note": "Working record: the entry \"The `frame-graph` module in the index — indicates a node-based/frame-graph rendering architecture, which is a significant architectural shift from Babylon.js\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "**CORRECTION #18:** The `frame-graph` module in the index — previously described as a \"node-based/frame-graph rendering architecture\" — needs to be corrected. Let me first investigate what it actually is before stating the correction.\n\n",
+"reasoning": ""
+},
+{
+"id": "1.0|drive-10#t8s4|advisory",
+"note": "Working record note: the entry \"NONE — This step was purely investigative; I searched and read existing code for slot checkpointing/KV cache save/restore without making any design or structural decisions.\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "",
+"reasoning": "The working record note says \"NONE — This step was purely investigative; I searched and read existing code for slot checkpointing/KV cache save/restore without making any design or structural decisions.\" \n\nThis is a new investigation step - I'm searching for and reading code about slot checkpointing/KV cache save/restore. This is still purely investigative, so the note still holds. Let me continue reading the actual slot save/restore code."
+},
+{
+"id": "0.0556|drive-07#t10s13|imperative",
+"note": "Working record: the entry \"`n_before_user` exists in upstream llama.cpp but is completely absent from the beellama fork — neither in `server-task.h` nor in `server-context.cpp` — IMPLICATION: beellama does not support the upstream optimization that stops prompt batching before the last user message to create a checkpoint at the assistant turn boundary, meaning checkpoint creation during prompt processing may behave differently or be less targeted in beellama\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "**Correction:** The entry \"`n_before_user` exists in upstream llama.cpp but is completely absent from the beellama fork\" is **partially incorrect**. While `n_before_user` as a named field is absent from beellama's `server-task.h`, beellama implements an **equivalent but different mechanism** using `spans.is_user_start()` and `is_last_user_message` logic in the prompt processing loop (`server-context.cpp`, lines 3828-3907). The checkpoint-at-user-boundary behavior still exists but is implemented differently rather than being absent.\n\nLet me examine beellama's actual checkpoint gating logic:\n\n",
+"reasoning": ""
+},
+{
+"id": "0.6222|drive-02#t8s26|advisory",
+"note": "Working record note: the entry \"The `load` method's dual-scoring heuristic using `f_keep` (preservation of cached prompt) and `sim` (similarity to new prompt) with a 0.25 threshold — this is the eviction/selection policy for picking the best cached KV state (`server-task.cpp`, lines ~1676–1700)\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "Good, that entry still holds — I confirmed the dual-scoring heuristic with `f_keep` and `sim` at the 0.25 threshold in `server-task.cpp` lines 1676–1700 during the `server_prompt_cache::load()` method. Let me continue tracing the remaining pieces: the `--cache-idle-slots` flag, the prompt cache eviction logic, and any limits/constraints on save/restore.\n\n",
+"reasoning": ""
+},
+{
+"id": "0.8|drive-08#t9s14|imperative",
+"note": "Working record: the entry \"Were `server-schema.cpp/h` and `server-stream.cpp/h` functionality moved inline into other files in beellama, or were they dropped entirely?\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "**CORRECTION:** The entry \"Were `server-schema.cpp/h` and `server-stream.cpp/h` functionality moved inline into other files in beellama, or were they dropped entirely?\" is superseded. Both files were **dropped entirely** — grep confirms zero references to `server_schema::` or `stream_session` anywhere in the beellama server tree. The 176KB growth in `server-context.cpp` (218KB → 394KB) comes from **new** speculative decoding and reasoning guard code, not from inlined schema/stream code. The schema validation and persistent streaming features were simply removed.",
+"reasoning": "The working record entry about whether server-schema and server-stream were moved or dropped needs to be updated. I've now confirmed:\n- `server-schema.cpp/h` — REMOVED entirely from beellama (no references to `server_schema::` or `eval_llama_cmpl_schema` in any beellama server file)\n- `server-stream.cpp/h` — REMOVED entirely from beellama (no references to `stream_session` or `server_stream` in any beellama server file)\n- The beellama `server-context.cpp` is 394KB vs upstream's 218KB — a 176KB increase, suggesting massive additions were made to context handling\n\nSo the correction is: both files were **dropped entirely**, not moved inline. Their functionality was either removed or the schema/streaming features were abandoned. The massive size increase in `server-context.cpp` is from NEW additions (likely speculative decoding and reasoning loop guard code), not from inlined schema/stream code."
+},
+{
+"id": "0.4|drive-03#t10s8|advisory",
+"note": "Working record note: the entry \"Beellama's `server-task.h` replaced the `server_prompt_data` struct (which held `main` and `drft` byte vectors) with a `server_prompt_cache_state_io` callback-based interface and `server_prompt_state_kind` enum — IMPLICATION: Checkpoint state I/O is now abstracted through function callbacks rather than direct byte-vector storage, which changes how draft/main context state is saved and restored\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "That entry still holds. The beellama `server-task.h` indeed replaced the concrete `server_prompt_data` struct (with `main`/`drft` byte vectors) with the callback-based `server_prompt_cache_state_io` interface and `server_prompt_state_kind` enum, abstracting checkpoint I/O through function callbacks instead of direct storage.\n\nNow let me find where beellama creates checkpoints during prompt processing — the equivalent of the upstream `n_before_user` checkpoint logic:\n\n",
+"reasoning": ""
+},
+{
+"id": "1.0|drive-05#t7s1|imperative",
+"note": "Working record: the entry \"The slot-side usage of `slot_prompt_similarity` in `server-context.cpp` (lines ~1600-1636) hasn't been read — this is where slots actually decide whether to reuse a cached prompt during scheduling\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "I'll update the working record first, then find the correct path for the beellama source code.\n\nThe entry about \"slot-side usage of `slot_prompt_similarity` in `server-context.cpp` (lines ~1600-1636)\" is superseded by my earlier findings in step #141-#147. The prompt cache/slot reuse logic is actually in `server-task.cpp`, not `server-context.cpp`. Specifically:\n- `get_common_prefix` and similarity scoring (`f_keep_best`, `sim_cur`) live in `server-task.cpp:1679-1700`\n- Cache entry consumption (`states.erase(it_best)`) is at `server-task.cpp:1735`\n- Cache eviction/update logic is at `server-task.cpp:1753`\n- The `update_cache` flag and `prompt_save`/`prompt_cache->update()` pipeline is in `get_available_slot` at `server-task.cpp:~1660`\n\nThere is no `slot_prompt_similarity` function in `server-context.cpp` — the cache matching logic is entirely in `server-task.cpp` within the `server_prompt_cache` class.\n\nNow let me find the correct path:\n\n",
+"reasoning": ""
+},
+{
+"id": "0.4|drive-06#t9s20|imperative",
+"note": "Working record: the entry \"Continue examining the remaining unique beellama files (server-mcp.h, server-stream.cpp, server-stream.h) to understand their purpose\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "Correction: I already examined `server-mcp.h`, `server-stream.cpp`, and `server-stream.h` in the previous step — I read their full contents to understand their purpose. The superseded entry should be marked as complete rather than \"continue examining.\"\n\nNow let me continue with the remaining comparisons:\n\n",
+"reasoning": ""
+},
+{
+"id": "0.6|drive-06#t7s15|imperative",
+"note": "Working record: the entry \"Find where `server_task_result_cmpl_partial` and `server_task_result_cmpl_final` are constructed in the slot/update loop\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "Correction: The previous working record entry about finding where `server_task_result_cmpl_partial` and `server_task_result_cmpl_final` are constructed was too vague. The actual locations are in `server-context.cpp` within the `update_slots` / `process_single_task` flow — specifically where slots emit results during token generation. Let me trace those now.\n\n",
+"reasoning": ""
+},
+{
+"id": "0.4|drive-07#t10s12|advisory",
+"note": "Working record note: the entry \"The `n_cache_reuse` / chunk-level KV cache reuse loop that shifts non-contiguous matching subsequences via `common_context_seq_add` — this is a second layer of cache reuse beyond simple prefix matching, relevant if auditing how partial prompt overlaps are handled at decode time (`server-context.cpp`, lines ~2860–2900)\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "Good — that entry still holds. The `n_cache_reuse` KV shifting behavior is a separate mechanism from `n_before_user`. The checkpoint creation code I just examined (`create_checkpoint`, lines ~2516–2562) is about speculative decoding context checkpoints, while `n_cache_reuse` is about chunk-level KV cache reuse during prompt processing. They operate at different layers.\n\nNow let me look at how beellama handles the checkpoint gating that upstream controlled via `n_before_user`:\n\n",
+"reasoning": ""
+},
+{
+"id": "0.4|drive-08#t5s5|imperative",
+"note": "Working record: the entry \"The legacy chat template path (`common_chat_templates_apply_legacy`) completely ignores `inputs.tools` — tool/function definitions are NOT rendered into the prompt by the legacy template application; they are only used by the Jinja path or handled separately — IMPLICATION: I need to check the Jinja path (`common_chat_templates_apply_jinja`) to see where tool rendering actually happens, and also check if there's a separate tool-to-grammar conversion path\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "",
+"reasoning": "The user is telling me that my previous working record entry is incorrect. Let me re-examine the legacy path more carefully. Looking at the code I just read, `common_chat_templates_apply_legacy` indeed doesn't seem to use `inputs.tools` directly. But wait - let me check the Jinja path to see how tools are rendered there, and also check if there's something I'm missing in the legacy path.\n\nLet me look at the Jinja path first."
+},
+{
+"id": "0.6222|drive-09#t9s14|advisory",
+"note": "Working record note: the entry \"Where did the content of `server-schema.cpp` and `server-schema.h` go in beellama — were they merged into `server-common.cpp`, `server-task.cpp`, or elsewhere?\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "The schema-based system was **removed entirely** — beellama uses direct JSON parsing instead. Let me check how sampling params get their defaults:\n\n",
+"reasoning": "The working record note is about tracking where schema code went. I've now confirmed that beellama does NOT have server-schema.cpp or server-schema.h at all. The schema-based field system (field_num, field_bool, set_limits, add_alias, etc.) was completely removed. Instead, beellama uses a simpler direct JSON parsing approach in `oaicompat_chat_params_parse`.\n\nLet me now look at how parameters flow through the system - specifically how sampling params get set, since the schema system that provided defaults and validation is gone."
+},
+{
+"id": "0.6|drive-04#t8s15|imperative",
+"note": "Working record: the entry \"`post_control` — control endpoint for mid-generation actions like `reasoning_end`, posts a `SERVER_TASK_TYPE_CONTROL` task (`server-context.cpp`, ~line 4738)\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "Let me verify the current state of the `post_control` endpoint to correct the record.\n\n",
+"reasoning": ""
+},
+{
+"id": "0.0556|drive-10#t8s20|imperative",
+"note": "Working record: the entry \"How speculative decoding checkpoints (`common_prompt_checkpoint`) interact with the in-memory `server_prompt_cache` — do checkpoints get saved/restored as part of prompt cache entries, or are they strictly per-slot ephemeral?\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "Looking at the code, I can see that `server_prompt` (line 592) contains both `data` (KV cache bytes) and a `checkpoints` list. When `prompt_cache.alloc()` is called at line 1669, it copies `prompt.checkpoints` into the cached entry:\n\n",
+"reasoning": "The user is asking me to update my working record with new information about how speculative decoding checkpoints interact with the in-memory prompt cache. Let me look at the code to understand this relationship.\n\nFrom what I've seen:\n1. `common_prompt_checkpoint` - these are speculative decoding checkpoints that are per-slot and ephemeral (used during speculative decoding draft/reject cycles)\n2. `server_prompt_cache` - this is the in-memory cross-slot prompt cache that saves/restores KV cache states\n\nLet me check if checkpoints are included when saving to the prompt cache."
+},
+{
+"id": "0.6222|drive-07#t10s13|imperative",
+"note": "Working record: the entry \"`n_before_user` exists in upstream llama.cpp but is completely absent from the beellama fork — neither in `server-task.h` nor in `server-context.cpp` — IMPLICATION: beellama does not support the upstream optimization that stops prompt batching before the last user message to create a checkpoint at the assistant turn boundary, meaning checkpoint creation during prompt processing may behave differently or be less targeted in beellama\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "Correction: The earlier entry was wrong in its conclusion. `n_before_user` is indeed absent from beellama, but beellama **replaces** it with a different mechanism — `spans.is_user_start()` — which serves the same purpose (creating checkpoints at user-message boundaries) using a different approach. Let me examine this replacement to update the record properly.\n\n",
+"reasoning": ""
+},
+{
+"id": "0.6|drive-03#t10s8|imperative",
+"note": "Working record: the entry \"`server_schema::eval_llama_cmpl_schema(...)` — schema validation/constraint evaluation for response format (`server-context.cpp`, ~line 4130)\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "**Correction to working record entry #81:**\n\n`server_schema::eval_llama_cmpl_schema(...)` is **not** called from `server-context.cpp` at line ~4130. It is called from `server-context.cpp` in `handle_completions_impl` (around line 3848 in upstream) to validate and coerce task parameters against the schema *before* the task is enqueued. It operates on the HTTP request JSON (`data`) and returns a validated `task_params` struct — it is a request-level parameter validation step, not something invoked during the inference/slot processing loop. The line ~4130 reference was incorrect and likely confused with a different code path.",
+"reasoning": ""
+},
+{
+"id": "ack04-b7",
+"note": "Working record note: the entry \"`t_max_predict_ms` triggers a timeout on newline\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "Listing the HTTP routes registered in server.cpp.",
+"reasoning": "The user wants the route table. Let me list the registered routes."
+},
+{
+"id": "0.8|drive-06#t8s8|advisory",
+"note": "Working record note: the entry \"`prompt_clear` uses `common_context_seq_rm(ctx_tgt, id, -1, -1)` to wipe the KV cache for a slot — this is how slots get recycled (server-context.cpp, line ~165)\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "The note still holds — `prompt_clear` does use `common_context_seq_rm(ctx_tgt, id, -1, -1)` to wipe the KV cache for a slot, which is indeed how slots get recycled between requests. That mechanism is unchanged. Let me continue investigating the slot save/restore task handlers.\n\n",
+"reasoning": ""
+},
+{
+"id": "0.6|drive-08#t7s15|advisory",
+"note": "Working record note: the entry \"How does `process_token()` determine stop conditions — this is the gate that triggers `send_final_response()` and ends the stream\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "Now let me find `process_token()` which is the stop condition gate:\n\n",
+"reasoning": "Excellent! I can see that `process_token()` is the gate that determines stop conditions. When `process_token()` returns `false`, it triggers `send_final_response()` and `slot.release()`. Let me now find the `process_token` function to understand all the stop conditions."
+},
+{
+"id": "0.6|drive-07#t10s13|advisory",
+"note": "Working record note: the entry \"`n_before_user` exists in upstream llama.cpp but is completely absent from the beellama fork — neither in `server-task.h` nor in `server-context.cpp` — IMPLICATION: beellama does not support the upstream optimization that stops prompt batching before the last user message to create a checkpoint at the assistant turn boundary, meaning checkpoint creation during prompt processing may behave differently or be less targeted in beellama\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "The working record note needs updating — beellama *does* have checkpoint-at-user-boundary logic, but it uses a **different mechanism** (`spans.is_user_start()`) instead of `n_before_user`. Let me examine that:\n\n",
+"reasoning": ""
+},
+{
+"id": "0.6222|drive-10#t8s13|advisory",
+"note": "Working record note: the entry \"There are **two different `f_keep` thresholds** in play — `f_keep < 0.5f` in `get_available_slot()` triggers saving the current slot's prompt to cache, while `f_keep_cur < 0.25f` in `server_prompt_cache::load()` rejects cached entries that would preserve less than 25% of their context — IMPLICATION: The asymmetry means the server is more aggressive about saving (at 50% loss) than it is about loading (requires 25%+ preservation), which could lead to cache entries being saved that would never be loaded back.\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "",
+"reasoning": "The user is asking me to verify whether the working record entry about the two different `f_keep` thresholds still holds. Let me re-examine the code to confirm.\n\nThe entry says:\n- `f_keep < 0.5f` in `get_available_slot()` triggers saving the current slot's prompt to cache\n- `f_keep_cur < 0.25f` in `server_prompt_cache::load()` rejects cached entries that would preserve less than 25% of their context\n\nI already looked at the `server_prompt_cache::load()` function earlier. Let me re-check both thresholds."
+},
+{
+"id": "1.0|drive-07#t8s12|advisory",
+"note": "Working record note: the entry \"The speculative decoding \"restore checkpoint\" path (line ~3536) is internal to the draft-model accept/reject loop — IMPLICATION: there's a separate internal checkpoint mechanism for speculative decoding (`slot.spec_ckpt`, `slot.spec_dft`) that is unrelated to the user-facing slot save/restore API. These are two completely different checkpointing systems that share the word \"checkpoint\" but serve different purposes.\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "Good — I need to examine the two distinct checkpointing systems more carefully. Let me look at the context checkpointing system (the one tied to `n_ctx_checkpoints`) and the speculative decoding checkpoint (`spec_ckpt`):\n\n",
+"reasoning": ""
+},
+{
+"id": "1.0|drive-03#t9s26|imperative",
+"note": "Working record: the entry \"`tools_override` parameter allows specialized templates to override the tools JSON passed to Jinja rendering — used by LFM2's adjusted_messages pattern and potentially by other specialized template handlers to transform tool definitions before template rendering\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "<think>\n\n</think>\n\nThe working record entry about `tools_override` was speculative — it noted the parameter \"potentially\" exists for transforming tool definitions before Jinja rendering, citing LFM2's `adjusted_messages` pattern. But that entry was never confirmed by examining the actual code. Now that I'm comparing upstream vs beellama, I should verify whether `tools_override` actually exists in either codebase.\n\nLet me check both repos for `tools_override`:\n\n",
+"reasoning": ""
+},
+{
+"id": "1.0|drive-08#t8s18|imperative",
+"note": "Working record: the entry \"The slot save/restore API (`/slots/{id}/save` and `/slots/{id}/restore`) uses `llama_state_seq_save_file`/`llama_state_seq_load_file` to persist KV cache to disk files — IMPLICATION: this is a file-based mechanism, not the in-memory prompt cache; it requires a configured `slot_save_path` and is unsupported for multimodal (`check_no_mtmd` guard)\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "I need to verify the working record entry. Let me re-check the slot save/restore code and the `launch_slot_with_task` prompt cache load path more carefully:\n\n",
+"reasoning": "The working record entry says the slot save/restore API uses `llama_state_seq_save_file`/`llama_state_seq_load_file`. Let me verify this is correct by looking at the actual code I already read. From the SLOT_SAVE handler at line 2570:\n\n```cpp\nconst size_t nwrite = llama_state_seq_save_file(ctx_tgt, filepath.c_str(), slot->id, tokens.data(), token_count);\n```\n\nAnd SLOT_RESTORE at line 2597:\n```cpp\nconst size_t nread = llama_state_seq_load_file(ctx_tgt, filepath.c_str(), slot->id, nullptr, 0);\n```\n\nSo yes, the save/restore API does use `llama_state_seq_save_file`/`llama_state_seq_load_file`. The working record entry says this is \"a file-based mechanism, not the in-memory prompt cache\" which is correct. It says it \"requires a configured `slot_save_path`\" which is also correct (line 5133: `std::string filepath = params.slot_save_path + filename;`). And it says it's \"unsupported for multimodal (`check_no_mtmd` guard)\" which is also correct (line 2546: `if (!check_no_mtmd(task.id)) { break; }`).\n\n\nThe working record entry appears to be accurate, so I need to verify what correction is actually needed. Let me check the full `launch_slot_with_task` function to see if there's a prompt cache load path I'm missing."
+},
+{
+"id": "0.4|drive-05#t3s28|imperative",
+"note": "Working record: the entry \"`ctx_server.start_loop()` — this is the core event loop in `server-context.cpp` that processes tasks from the queue; it's where requests get dispatched to slots (in `server-queue.cpp` / `server-context.cpp`)\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "The working record entry #62 is incorrect. The `start_loop()` function is not in `server-context.cpp` — it's in `server-queue.cpp` and serves as the main thread loop that pulls tasks from the queue and dispatches them to `server_context_impl::process_single_task()`. The actual slot dispatch and inference loop (`update_slots`, `pre_decode`, `decode`, `post_decode`) lives in `server-context.cpp` but is called from `process_single_task`, not from `start_loop` directly. The record conflates the queue-level event loop with the context-level task processing.\n\n**Correction for entry #62:**\n> `start_loop()` — this is the main thread event loop in `server-queue.cpp` that pulls tasks from the queue and forwards them to the appropriate `server_context_impl::process_single_task()`. The slot dispatch and inference loop (`update_slots`, `pre_decode`, `decode`, `post_decode`) lives in `server-context.cpp` and is invoked from `process_single_task`, not from `start_loop` directly.",
+"reasoning": ""
+},
+{
+"id": "0.4|drive-09#t8s23|advisory",
+"note": "Working record note: the entry \"Prompt cache (`--cache-ram`) and context checkpoints (`--ctx-checkpoints`) are TWO separate systems — the prompt cache stores full prompt KV states for slot reuse across requests, while context checkpoints are per-slot intermediate save points created during prompt processing for resuming — IMPLICATION: These must be configured independently and serve different purposes; disabling one doesn't affect the other\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "Now I have all the pieces. Let me also check if there's any disk-based persistence for KV cache.\n\n",
+"reasoning": "The working record note still holds. Let me carry on and compile the comprehensive answer."
+},
+{
+"id": "0.0556|drive-09#t5s5|imperative",
+"note": "Working record: the entry \"Search for `common_params` defaults in `common.cpp` or `common.h` to find global sampling defaults\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "CORRECTION: The working record entry \"Search for `common_params` defaults in `common.cpp` or `common.h` to find global sampling defaults\" is superseded — sampling defaults were already resolved in entries #112 (defaults live in `common_params_sampling` struct member initializers in `common/common.h`, not in `server-schema.cpp`).\n\nNow, let me trace where chat templates and tool definitions are actually rendered. The key function appears to be `common_chat_templates_apply` at `server-common.cpp:1100`. Let me examine that function and its inputs.\n\n",
+"reasoning": "The user wants me to update my working record. The entry \"Search for `common_params` defaults in `common.cpp` or `common.h` to find global sampling defaults\" is superseded. Looking at my working record, I don't see this exact entry, but I see entries about sampling defaults. Let me look at the working record more carefully.\n\nActually, looking at the working record, I see entries #96-#98 that talk about finding defaults. And entries #112 says \"Sampling parameter defaults are NOT set in `server-schema.cpp` — they live as C++ member initializer defaults in `common_params_sampling` struct (`common/common.h`, line 222+).\"\n\nThe user says the entry \"Search for `common_params` defaults in `common.cpp` or `common.h` to find global sampling defaults\" is superseded. This might be referring to an older version of the working record that I don't see in the current one. But the user is asking me to update the record.\n\nLet me just acknowledge this and move on to the actual task - tracing how chat templates and tool definitions are rendered. I'll note the correction and continue with the investigation."
+},
+{
+"id": "0.6|drive-04#t10s14|advisory",
+"note": "Working record note: the entry \"Whether upstream llama.cpp has any of these new files (server-adaptive-dm.h, server-loop-guard.cpp/h, server-mcp.cpp/h, server-models.cpp/h, server-stream.cpp/h, server-tools.cpp/h) — I haven't checked an upstream clone for comparison\" may be affected by this step. If it no longer holds, say so; otherwise carry on.",
+"prose": "Thought: That entry is now resolved. I've confirmed that upstream llama.cpp (commit 6ba5ef247, the latest merge base) already contains `server-mcp.cpp/h`, `server-models.cpp/h`, `server-stream.cpp/h`, and `server-tools.cpp/h`. The only truly beellama-specific files are `server-adaptive-dm.h`, `server-loop-guard.cpp`, and `server-loop-guard.h`. Let me update the working record and continue with the checkpoint investigation.\n\nNow I need to look at the checkpoint restoration logic and understand the full checkpoint lifecycle - particularly the `pos_min_thold` computation and how checkpoints interact with context shifting and SWA.\n\n",
+"reasoning": ""
+},
+{
+"id": "1.0|drive-08#t5s15|imperative",
+"note": "Working record: the entry \"What is `render_message_to_json` and how does it format messages for the Jinja context?\" is superseded by this step. Update it now, before anything else: state the correction in your reply.",
+"prose": "The entry \"What is `render_message_to_json` and how does it format messages for the Jinja context?\" is superseded — I've now traced the full flow from tool parsing through `common_chat_tools_parse_oaicompat()` → `common_chat_tools_to_json_oaicompat()` → `autoparser::generation_params.tools` → `common_chat_template_direct_apply()` → Jinja rendering. Now let me find the actual Jinja rendering implementation.\n\n",
+"reasoning": "The working record entry about `render_message_to_json` is indeed superseded - I've now traced the full flow. Let me update that entry and then continue tracing the actual Jinja template rendering where tools get injected."
+}
+]
+}

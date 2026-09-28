@@ -1,0 +1,2 @@
+FACT: red_faults = 203 in tools/gate/faults.toml
+FACT: the manifest defines parity as red in --selftest plus red per run plus mechanics assertions

@@ -1,0 +1,4 @@
+nothink_ops = ["extraction", "judgment", "audit"]
+empty = []
+trailing = ["x", ]
+mixed = ["a", 1, 0.5, true]

@@ -1,0 +1,36 @@
+// The `log` format, v0. This file is NORMATIVE: the Rust reader in
+// diet/src/formats/log.rs implements it and is not itself the definition.
+//
+// A session's event log (#117, ruled 2026-09-26): what a drive did, in the
+// order it did it, one event per line. Two things read it -- the record
+// projection and the surface, `exercise` -- and that is what makes it a format
+// rather than a drive-internal detail. The record stays the durable artifact
+// derived from it.
+//
+// THE VALUE TERMINALS ARE THE RECORD'S. `object`, `string`, `decimal`,
+// `integer`, `boolean` come from `record/grammar.pest` (and `number.pest`),
+// which the reader concatenates ahead of this file, and every value is read
+// by the record's one value reader (`record::json::line`). So there is no
+// `null` and no binary float here either, for the record's reasons: absence
+// is an omitted key, and a number reads back as the digits written.
+//
+// What this file adds is the document:
+//
+//   * ONE EVENT PER LINE, AND NOTHING BETWEEN THEM. No blank line, no
+//     indentation, `\n` only. The sequence number is the primary key and it
+//     is gapless; a blank line would be a line with no key.
+//
+//   * A LAST LINE MAY END THE TEXT WITHOUT A NEWLINE, because a log being
+//     written is read while it is open.
+//
+// Not said here, and checked in Rust under a name, as the record does with
+// its own cross-row rules: what each `kind` carries, and the rules that span
+// rows -- the first line is `session.start` and carries the version; `seq`
+// counts from 0 without a gap; `t` never decreases; a `settlement` leaves
+// the state the previous one entered; turns count from 1 by one; a reference
+// names an earlier `request` by its `seq`. A back-reference across lines is
+// not what a PEG is for.
+
+log_document = { SOI ~ log_line+ ~ EOI }
+
+log_line = { object ~ ("\n" | &EOI) }

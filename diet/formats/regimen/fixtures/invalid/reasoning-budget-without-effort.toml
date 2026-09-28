@@ -1,0 +1,6 @@
+arm = "thinking-capped"
+dogma_version = 0
+substrate = "local"
+
+[reasoning]
+budget_tokens = 4096

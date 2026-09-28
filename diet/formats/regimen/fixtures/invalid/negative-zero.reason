@@ -1,0 +1,7 @@
+Negative zero as an integer. `-0` is legal TOML, and this grammar refuses it
+anyway -- a subset may refuse more. It is a second spelling of zero: `-0` and
+`0` both project to {"integer": 0}, so two documents differing only in those
+bytes would name one regime and compare unequal. The float rule already
+refuses `-0.0` on the same ground, inherited from the record's decimal
+constructor; integers never reach that constructor, so the rule is stated in
+the grammar instead.

@@ -1,0 +1,7 @@
+A hardware fingerprint is the registry's digest over an equipment entry's
+declared hardware fields. A name in that field is prose where an identity
+belongs: two runs can spell the same machine differently and a third can spell
+different machines the same, and a sentinel can sit there unrefused -- which
+one did. Every fixture in this corpus carried `one-gpu` here until the field
+was tightened; the digests they carry now are the sha256 of each former label,
+so they are digest-shaped without pretending to name a registry entry.

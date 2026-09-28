@@ -1,0 +1,14 @@
+Two ids over one substrate. Every declared field but `id` is identical, so
+nothing in this record says what makes them two -- and a result attributed to
+`stock` compared against a result attributed to `patched` is a substrate
+compared with itself under another name.
+
+Not `SubstrateDeclaredTwice`, which is the opposite shape: one id twice, where
+every reference is ambiguous. Here the references are unambiguous and the
+distinction is the thing that is missing.
+
+Two files of one model with different chat templates ARE two substrates -- the
+template renders the effort level, so the same request reaches the model as
+different text -- and `chat_template_sha256` is where the record says so. The
+valid fixture `one-weights-two-chat-templates.jsonl` is this document with the
+disclosure. #94 design point 2, acceptance row 2.

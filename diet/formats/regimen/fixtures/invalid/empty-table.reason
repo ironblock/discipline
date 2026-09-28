@@ -1,0 +1,5 @@
+A table header with no binding under it -- `[serving]` followed straight by
+`[serving.flags]`, or a header at the end of the document -- is a placeholder
+or a mistake, and both should be loud. A nested header opens its parent on its
+own, so the bare header says nothing the document does not already say.
+Ruled on #51 (2026-09-15).

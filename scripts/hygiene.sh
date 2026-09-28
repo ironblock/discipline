@@ -11,6 +11,23 @@
 #                                (cached + untracked, minus .gitignore)
 #   hygiene.sh --tree DIR        scan every file under DIR instead
 #   hygiene.sh --patterns FILE   use a different pattern table
+#   hygiene.sh --hashes FILE     use a different digest table
+#
+# A pattern table FOO-patterns.tsv may carry a sibling FOO-exceptions.tsv --
+# see that file's own header. Optional: a table with no sibling has none, and
+# behaves exactly as it did before this existed.
+#
+# CONTENT IS SCANNED AS A READER WOULD SEE IT, not only as it is stored. The
+# artefacts this gate exists for arrive JSON-escaped, where a newline is the
+# two characters `\` and `n` -- so a token right after one has a literal `n`
+# welded to its left and walks past a pattern anchored on a word boundary. So
+# every file that carries encoded strings is mirrored, decoded, under a
+# temporary directory, and the same table runs over the mirror. A hit there is
+# reported as `(decoded)` against the file it came from.
+#
+# The literals that have no shape are checked here too, by salted digest:
+# `scripts/check-hashes.py` runs over the same file list. One gate, so
+# `--only hygiene` and `check-history.py` both get both halves.
 #
 # Exits 0 if nothing matched, 1 if anything did, 2 if the scan itself failed.
 # A scan that finds no files to read is an error, not a pass.
@@ -29,9 +46,11 @@ readonly MAX_REPORT=200
 
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly DEFAULT_PATTERNS="${here}/hygiene-patterns.tsv"
+readonly DEFAULT_HASHES="${here}/hygiene-hashes.txt"
 
 tree=""
 patterns_file="$DEFAULT_PATTERNS"
+hashes_file="$DEFAULT_HASHES"
 # `# scan: all` in a table means every file must be scannable text and every
 # pattern runs over every file. Splitting text from binary is right for the
 # genesis table, whose loose environment heuristics match inside ordinary
@@ -45,6 +64,11 @@ while [ "$#" -gt 0 ]; do
     --patterns)
       [ "$#" -ge 2 ] || { echo "hygiene: --patterns needs a file" >&2; exit "$EXIT_BROKEN"; }
       patterns_file="$2"
+      shift 2
+      ;;
+    --hashes)
+      [ "$#" -ge 2 ] || { echo "hygiene: --hashes needs a file" >&2; exit "$EXIT_BROKEN"; }
+      hashes_file="$2"
       shift 2
       ;;
     --tree)
@@ -62,6 +86,30 @@ done
 [ -f "$patterns_file" ] || {
   echo "hygiene: no pattern file at $patterns_file" >&2
   exit "$EXIT_BROKEN"
+}
+
+# The sibling exceptions file, by name, and only for a table spelled the
+# expected way -- a caller naming some other file gets no exceptions rather
+# than one derived from a guess at what it meant.
+exceptions_file=""
+case "$patterns_file" in
+  *-patterns.tsv) exceptions_file="${patterns_file%-patterns.tsv}-exceptions.tsv" ;;
+esac
+
+# The declared exception regex for pattern LABEL, or nothing if it has none.
+# Read fresh per call rather than cached in an associative array: this script
+# targets plain POSIX-ish bash rather than bash 4's associative arrays, and
+# the file is small and read once per PATTERN, not once per hit.
+exception_for() {
+  local want="$1" ex_label ex_regex
+  [ -n "$exceptions_file" ] && [ -f "$exceptions_file" ] || return 0
+  while IFS=$'\t' read -r ex_label ex_regex || [ -n "${ex_label:-}" ]; do
+    case "$ex_label" in ''|\#*) continue ;; esac
+    if [ "$ex_label" = "$want" ] && [ -n "${ex_regex:-}" ]; then
+      printf '%s' "$ex_regex"
+      return 0
+    fi
+  done < "$exceptions_file"
 }
 
 if grep -qE '^#[[:space:]]*scan:[[:space:]]*all[[:space:]]*$' -- "$patterns_file"; then
@@ -99,6 +147,25 @@ if [ "${#scanned[@]}" -eq 0 ]; then
   exit "$EXIT_BROKEN"
 fi
 
+# --- the decoded view ---------------------------------------------------------
+# Written beside the tree, never instead of it: the bytes on disk are still
+# scanned, and this is a second view of the same files. A file carrying no
+# encoded strings has no view and no mirror file, so the mirror is small.
+mirror="$(mktemp -d)" || { echo "hygiene: mktemp -d failed" >&2; exit "$EXIT_BROKEN"; }
+trap 'rm -rf -- "$mirror"' EXIT
+
+decoded_count=0
+if ! decoded_count="$(printf '%s\0' "${scanned[@]}" \
+      | python3 "${here}/hygiene-decode.py" --into "$mirror")"; then
+  echo "hygiene: the decoded view could not be built; a scan that skips it is" \
+       "a scan of the escaping, not of the content" >&2
+  exit "$EXIT_BROKEN"
+fi
+
+decoded_files=()
+while IFS= read -r -d '' path; do decoded_files+=("$path"); done \
+  < <(find "$mirror" ! -type d -print0)
+
 # Check readability once, up front. Otherwise the first pattern's grep fails,
 # its stderr is discarded, and the scan dies with a status and no filename.
 for path in "${scanned[@]}"; do
@@ -116,6 +183,9 @@ done
 # credential-scanned, which is all it could ever carry.
 text_files=()
 binary_files=()
+for path in ${decoded_files+"${decoded_files[@]}"}; do
+  text_files+=("$path")
+done
 for path in "${scanned[@]}"; do
   if grep -Iq . -- "$path" 2>/dev/null || [ ! -s "$path" ]; then
     text_files+=("$path")
@@ -161,6 +231,13 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
   opts=(-n -a -H -E)
   case "${flags:-}" in *i*) opts+=(-i) ;; esac
 
+  # Read once per PATTERN, not once per hit. A declared exception does not
+  # touch $regex itself -- it is a subtraction applied to a matched LINE,
+  # below, so the pattern keeps the exact shape it was written with.
+  exception="$(exception_for "$label")"
+  sed_flags="g"
+  case "${flags:-}" in *i*) sed_flags="gI" ;; esac
+
   targets=("${text_files[@]}")
   case "${flags:-}" in
     *b*) targets+=(${binary_files+"${binary_files[@]}"}) ;;
@@ -177,6 +254,37 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
       0)
         while IFS= read -r line; do
           [ -n "$line" ] || continue
+          if [ -n "$exception" ]; then
+            # Remove every occurrence of the declared-safe form from the
+            # line, then ask the UNCHANGED pattern whether anything is left.
+            # If nothing is, every hit on this line was a forge's own remote
+            # form (or whatever else was declared) and the line is clean; a
+            # line carrying a private form beside a public one still has
+            # something left over and still fires below.
+            #
+            # THE EXIT STATUS IS CHECKED, not just the output. An exception
+            # regex containing an unescaped `/` breaks `sed -E "s/${exception}
+            # //${sed_flags}"`'s own delimiter -- a fresh-instance review of
+            # #83 reproduced it -- and unchecked, that failure did two wrong
+            # things at once under `set -e`: it killed the whole scan with
+            # EXIT_DIRTY (1, "found something") rather than EXIT_BROKEN (2,
+            # "could not run"), and it did so before the line that tripped it
+            # was ever reported, so the exit code that told an operator to go
+            # rewrite commits was raised by a malformed exception table, not
+            # by anything committed. Refused here, by name, instead.
+            if ! stripped="$(printf '%s' "$line" | sed -E "s/${exception}//${sed_flags}")"; then
+              echo "hygiene: the exception for '${label}' could not be applied" \
+                "to a matched line -- check it is a valid, slash-free POSIX ERE" >&2
+              exit "$EXIT_BROKEN"
+            fi
+            printf '%s' "$stripped" | grep -qE "$regex" || continue
+          fi
+          # A hit in the mirror is a hit in the file it was decoded from, and
+          # says so. Reporting the temporary path would name a file that is
+          # gone by the time anyone reads the message.
+          case "$line" in
+            "$mirror"/*) line="(decoded) ${line#"$mirror"/}" ;;
+          esac
           echo "hygiene: ${label}: ${line:0:MAX_REPORT}" >&2
           hits=$((hits + 1))
         done < <(tr -d '\0' < "$matchfile")
@@ -201,11 +309,29 @@ if [ "$hits" -gt 0 ]; then
   exit "$EXIT_DIRTY"
 fi
 
+# --- the literals that have no shape ------------------------------------------
+# Run over the same list, and over each file's decoded view, which the scanner
+# derives itself. A pattern can be given a looser boundary to reach through an
+# escape; a digest cannot, so this half needs the decoding more than the other.
+digests=0
+printf '%s\0' "${scanned[@]}" \
+  | python3 "${here}/check-hashes.py" --table "$hashes_file" || digests=$?
+case "$digests" in
+  0) : ;;
+  1) exit "$EXIT_DIRTY" ;;
+  *)
+    echo "hygiene: check-hashes.py exited ${digests}; a literal scan that did" \
+         "not run is not a literal scan that passed" >&2
+    exit "$EXIT_BROKEN"
+    ;;
+esac
+
 if [ "$scan_all" = true ]; then
   echo "hygiene: ${#scanned[@]} file(s) clean against ${patterns} pattern(s)" \
        "(every pattern over every file; this table sets 'scan: all')"
 else
   echo "hygiene: ${#scanned[@]} file(s) clean against ${patterns} pattern(s)" \
-       "(${#text_files[@]} text, ${#binary_files[@]} binary, the latter searched" \
-       "only for credential shapes)"
+       "($((${#text_files[@]} - decoded_count)) text, ${#binary_files[@]} binary," \
+       "the latter searched only for credential shapes;" \
+       "${decoded_count} decoded view(s) scanned beside them)"
 fi

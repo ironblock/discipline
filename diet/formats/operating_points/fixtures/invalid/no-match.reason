@@ -1,0 +1,3 @@
+`[alpha]` carries no `match`. An entry that does not say which served ids it
+is about is an operating point that can never be selected, and a file of them
+would report as read while deciding nothing.

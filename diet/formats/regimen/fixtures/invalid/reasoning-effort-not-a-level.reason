@@ -1,0 +1,6 @@
+An effort level is a string the chat template renders as a sentence, not a
+number the template happens to accept. `effort` bound to anything but
+non-empty text is a different finding from the key being absent -- that case
+is `ReasoningPairIncomplete` -- and gets its own refusal so a reader is told
+which of the two documents it is reading: one where the level was never
+written, and one where something else was written in its place.

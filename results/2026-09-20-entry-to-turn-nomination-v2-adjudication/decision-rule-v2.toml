@@ -1,0 +1,49 @@
+# RULE V2 for the entry-to-turn nomination run. The `[claim]`, `[floor]`,
+# `[rule]` and `[rule.pre_gate]` tables below are the ratified rule v1, byte for
+# byte as the run consumed it before any score existed. The `[rule.v2]` table at
+# the end is the maintainer's wording on #17 (5747481065, 2026-09-20T03:56Z),
+# written AFTER the v1 verdict's numbers were on PR #96 -- a reading of the
+# ratified text (the bars scale with the rung's attainable ceiling) chosen by
+# the maintainer, not by the applier, and applied here as a second
+# adjudication beside v1 with both verdicts in the ledger. The separation
+# clause that decides both verdicts is untouched by the wording.
+#
+[claim]
+hypothesis = "An entry recorded in the working object at turn N can be matched against the prose of a later turn sharply enough to nominate supersession at a fixed per-session budget without over-firing on mentions that do not supersede -- in each of the two registers #17 names, intent-to-intent and authored-sense -- and the literal tier's anchors, applied as a pre-gate, do not lower precision at that budget."
+primary_register = "intent"
+budgets = [1, 3, 5, 10, 25, 50]
+pooling = "nominations ranked within each drive, the top k per drive taken, precision computed over the pooled top-k across drives"
+sources = "register rows carry source planted | mined; the report breaks precision out by source beside the pooled figure; the pooled verdict stands"
+
+[floor]
+embedder = "all-MiniLM-L6-v2"
+role = "a control rather than a contender, for #24's reason"
+prediction = "directional: it separates entry-to-turn pairs worse than the instruction-tuned cells; if it matches them the effect is not about instruction tuning"
+
+[rule]
+budget = 5
+supported = "for at least one contender cell at k = 5 on the primary register: precision >= 0.80, hard-negative false-positive rate <= 0.10, and the cell's d' exceeds the floor's d' on the same (register, scoring, gate) cell by >= 0.5 -- all three at once"
+supported_precision_at_5 = 0.80
+supported_over_firing_at_5 = 0.10
+supported_d_prime_margin_over_floor = 0.5
+refuted = "no contender cell at any pre-registered budget reaches precision >= 0.60 on the primary register, or the maximum separation over all scored contender cells does not exceed the matched floor cell's by >= 0.2 -- either alone"
+refuted_precision_ceiling = 0.60
+refuted_d_prime_margin_over_floor = 0.2
+inconclusive = "otherwise"
+undefined_margin = "a margin that cannot be computed (d' undefined on either side, or the floor's cell a control failure) satisfies neither bound"
+
+[rule.pre_gate]
+supported = "on at least one contender (embedder, scoring) pair, the anchored arm's precision at k = 5 exceeds the unanchored arm's by >= 0.05 with paired-bootstrap p between the arms below the attainable floor; the verb must emit that paired bootstrap, or the sub-verdict is unadjudicated"
+refuted = "no pair is higher by the margin and at least one is lower by it"
+margin = 0.05
+inconclusive = "between"
+combination = "the directory's result is the main rule's verdict; the sub-verdict rides beside it on the verdict, never folded in"
+
+[rule.v2]
+ruled = "#17, 5747481065 (2026-09-20): the third reading the ratified text already contains -- the precision bars scale with the rung's attainable ceiling"
+supported_precision_at_5 = "0.80 x the ceiling at k = 5, the ceiling being sum over drives of min(k, positives) over sum of min(k, rows) from the report's by_drive counts"
+refuted_precision_ceiling = "0.60 x each rung's ceiling likewise"
+d_prime_margins = "as ratified: 0.5 over the matched floor cell for supported, 0.2 for refuted"
+pre_gate_p = "the drive-resampled paired bootstrap of pooled precision at k between the gate arms (the verb emits it since #99), its own p uncorrected at the attainable floor"
+admitted_only = "the precision over admitted nominations the verb now emits is reported beside every cell and adjudicates nothing"
+sits_beside = "the v1 adjudication of the same run under the fixed bars; both rules and both verdicts are in the ledger"

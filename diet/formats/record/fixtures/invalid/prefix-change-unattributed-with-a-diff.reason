@@ -1,0 +1,8 @@
+A `prefix.changed` naming `unattributed` while carrying a diff that names the
+line that changed. The residual is the class for bytes that moved with no part
+of the head naming what moved; a residual carrying evidence has thrown away
+what it was holding.
+
+The other direction is refused by `prefix-reason-disagrees-with-its-diff`: the
+pair is the rule in both directions, and `unattributed` is the one class whose
+diff is empty.

@@ -1,0 +1,9 @@
+# The regimen this run applied, written by `diet bakeoff --into`.
+#
+# It is the regimen of the run being RECOMPUTED: these numbers are
+# about that run's substrates, and a recompute that declared its own
+# would be describing the machine that did the arithmetic rather than
+# the machine the result is about.
+arm = "entry-to-turn-nomination-four-embedders"
+substrates = ["all-MiniLM-L6-v2", "bge-small-en-v1.5", "embeddinggemma-300m", "Qwen3-Embedding-0.6B"]
+dogma_version = 0

@@ -1,0 +1,2 @@
+OPEN: whether the union should consult the merge base for a shared block
+NEXT: read the base and compare the three texts

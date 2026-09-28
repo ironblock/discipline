@@ -1,0 +1,54 @@
+# Human-driven session arm — the T0/ecological instrument of the idle-gap
+# distribution and UX study of a diet-driven session; corrected 2026-08-09.
+# Every binding the arm declares is expressible in regimen v1; nothing is omitted.
+#
+# Corrected 2026-08-09 from the arm as it actually ran in attempt 1, which was
+# missing [triggers] and therefore drove the BARE control while intending diet.
+# Attempt 1's own post-mortem records the full account.
+
+name = "human-driven"
+
+# Ruling on task provenance: the assigned task is the ARM's to declare
+# (provenance `arm`, never audited). Attempt 2 predates the ruling and had its
+# goal hand-seeded from a warm-up question — the incident that produced the
+# ruling. For the next attempt, DECLARE the task here before driving, e.g.:
+#   goal = "Build a small Babylon.js demo scene"
+# Leaving it undeclared is also valid and means the run carries NO goal slot.
+
+[triggers]
+# THE diet/bare distinction. Defaults to FALSE — the attempt-1 arm omitted this
+# table entirely, so it fired the control. Nothing warned; there is no
+# deny_unknown_fields and every field is #[serde(default)].
+enabled = true
+
+[sampler]
+# NOTE: the models registry records Qwen3.6's MEASURED operating point as
+# temperature 0.3 / top_k 20 / top_p 1.0. This arm ran 0.9 in attempt 1.
+# Kept at 0.9 for continuity with that attempt — this experiment measures
+# idle-gap distribution and UX, not output quality, so the deviation is
+# tolerable here. It would NOT be tolerable in a scored arm.
+temperature = 0.9
+top_k = 20
+top_p = 1.0
+max_tokens = 65000          # >= Pi's observed max gen (2494 tok); default is 2500
+preserve_thinking = true    # server-matched (production carries it)
+enable_thinking = true
+interview_thinking = true
+
+# [limits] omitted deliberately — the defaults ARE what attempt 1 spelled out:
+#   turn_timeout_s 2400 · max_steps 30 · tool_timeout_s 120 · max_tool_output 4000
+# (the arm loader's compiled-in defaults). Writing them changes nothing;
+# leaving them out means one less thing to keep in sync.
+
+# [serving] was declared in attempt 1 as --cache-ram 8192. REMOVED, because it
+# was doubly inert and therefore misleading:
+#   1. [serving] is not in the Arm struct at all — the Rust loader silently
+#      discards it. Only the level2 parity preamble reads it, and
+#      `serve --drive` never runs that.
+#   2. Production is currently running with --cache-ram ABSENT (verified via
+#      the substrate fingerprint instrument, digest 6b752810f3208083), so the
+#      declared condition was not met either.
+# A prior experiment measured the flag behaviourally inert across
+# 0/8192/16384 MiB anyway. If a future drive of this experiment needs a
+# specific substrate, it has to be fired through the level2 orchestration,
+# not asserted in an arm serve --drive ignores.

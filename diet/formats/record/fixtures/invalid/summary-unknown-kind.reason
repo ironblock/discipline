@@ -1,0 +1,5 @@
+`replay` is named by #47 and is deliberately absent from `SummaryKind`: the
+issue says its fields are "to be stated", and a variant with no stated fields
+is either a guess about what a replay measures or a variant nothing can
+construct. Until the word means something it is refused, and this fixture is
+what proves the refusal rather than the omission.

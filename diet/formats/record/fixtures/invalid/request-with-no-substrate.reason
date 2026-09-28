@@ -1,0 +1,6 @@
+One substrate declared, and the request still has to name it.
+
+The omission is refused rather than resolved to "the only one". A row that may
+omit the field when there is exactly one is a row whose meaning depends on a
+count elsewhere in the file: the same three lines mean something different in
+a two-substrate run, and nothing in the row says so. Ruled 2026-09-08.

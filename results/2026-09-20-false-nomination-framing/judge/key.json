@@ -1,0 +1,152 @@
+{
+ "1": {
+  "ack12-b1": "declines",
+  "ack02-b1": "questions",
+  "ack03-b1": "declines",
+  "ack10-b1": "ignores"
+ },
+ "2": {
+  "ack04-b2": "ignores",
+  "ack10-b2": "ignores",
+  "ack09-b2": "accepts",
+  "ack08-b2": "declines"
+ },
+ "3": {
+  "ack06-b3": "ignores",
+  "ack07-b3": "questions",
+  "ack02-b3": "questions",
+  "ack12-b3": "declines"
+ },
+ "4": {
+  "ack12-b4": "declines",
+  "ack02-b4": "questions",
+  "ack01-b4": "accepts",
+  "ack03-b4": "declines"
+ },
+ "5": {
+  "ack01-b5": "accepts",
+  "ack04-b5": "ignores",
+  "ack12-b5": "declines",
+  "ack10-b5": "ignores"
+ },
+ "6": {
+  "ack10-b6": "ignores",
+  "ack09-b6": "accepts",
+  "ack07-b6": "questions",
+  "ack03-b6": "declines"
+ },
+ "7": {
+  "ack11-b7": "questions",
+  "ack06-b7": "ignores",
+  "ack04-b7": "ignores",
+  "ack08-b7": "declines"
+ },
+ "8": {
+  "ack11-b8": "questions",
+  "ack12-b8": "declines",
+  "ack10-b8": "ignores",
+  "ack09-b8": "accepts"
+ },
+ "9": {
+  "ack05-b9": "accepts",
+  "ack09-b9": "accepts",
+  "ack08-b9": "declines",
+  "ack01-b9": "accepts"
+ },
+ "10": {
+  "ack07-b10": "questions",
+  "ack03-b10": "declines",
+  "ack10-b10": "ignores",
+  "ack04-b10": "ignores"
+ },
+ "11": {
+  "ack08-b11": "declines",
+  "ack05-b11": "accepts",
+  "ack03-b11": "declines",
+  "ack07-b11": "questions"
+ },
+ "12": {
+  "ack11-b12": "questions",
+  "ack03-b12": "declines",
+  "ack02-b12": "questions",
+  "ack07-b12": "questions"
+ },
+ "13": {
+  "ack06-b13": "ignores",
+  "ack08-b13": "declines",
+  "ack07-b13": "questions",
+  "ack11-b13": "questions"
+ },
+ "14": {
+  "ack09-b14": "accepts",
+  "ack01-b14": "accepts",
+  "ack04-b14": "ignores",
+  "ack11-b14": "questions"
+ },
+ "15": {
+  "ack08-b15": "declines",
+  "ack06-b15": "ignores",
+  "ack02-b15": "questions",
+  "ack05-b15": "accepts"
+ },
+ "16": {
+  "ack02-b16": "questions",
+  "ack04-b16": "ignores",
+  "ack05-b16": "accepts",
+  "ack09-b16": "accepts"
+ },
+ "17": {
+  "ack10-b17": "ignores",
+  "ack11-b17": "questions",
+  "ack12-b17": "declines",
+  "ack04-b17": "ignores"
+ },
+ "18": {
+  "ack01-b18": "accepts",
+  "ack10-b18": "ignores",
+  "ack03-b18": "declines",
+  "ack04-b18": "ignores"
+ },
+ "19": {
+  "ack03-b19": "declines",
+  "ack05-b19": "accepts",
+  "ack06-b19": "ignores",
+  "ack09-b19": "accepts"
+ },
+ "20": {
+  "ack06-b20": "ignores",
+  "ack02-b20": "questions",
+  "ack07-b20": "questions",
+  "ack03-b20": "declines"
+ },
+ "21": {
+  "ack05-b21": "accepts",
+  "ack11-b21": "questions",
+  "ack06-b21": "ignores",
+  "ack07-b21": "questions"
+ },
+ "22": {
+  "ack12-b22": "declines",
+  "ack08-b22": "declines",
+  "ack10-b22": "ignores",
+  "ack02-b22": "questions"
+ },
+ "23": {
+  "ack06-b23": "ignores",
+  "ack08-b23": "declines",
+  "ack10-b23": "ignores",
+  "ack07-b23": "questions"
+ },
+ "24": {
+  "ack04-b24": "ignores",
+  "ack10-b24": "ignores",
+  "ack11-b24": "questions",
+  "ack07-b24": "questions"
+ },
+ "25": {
+  "ack09-b25": "accepts",
+  "ack05-b25": "accepts",
+  "ack12-b25": "declines",
+  "ack02-b25": "questions"
+ }
+}

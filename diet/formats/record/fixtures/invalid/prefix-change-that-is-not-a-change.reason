@@ -1,0 +1,8 @@
+A `prefix.changed` over two requests that hash to the same head. Nothing moved,
+so nothing that compared two digests could have written this row -- and a
+cache-miss census reading it would count a mutation the file itself denies.
+
+The row carries no digest of its own on purpose: both are on the `request`
+rows, where they cannot contradict each other. This document is what that
+arrangement is for -- the contradiction is visible from the two rows above,
+rather than hidden inside a third copy.

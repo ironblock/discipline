@@ -1,0 +1,8 @@
+A `compaction` whose `source` is prose. The vocabulary has one word,
+`harness_compaction`, and it is a vocabulary rather than a boolean because the
+next source -- an operator's own `/clear`, a server-side eviction a provider
+reports -- is a different fact about who threw the cache away.
+
+A free string here would let each adapter spell the same event its own way, and
+a replay viewer would be comparing prose. Adding a source means adding a
+variant, which is a change somebody makes on purpose.

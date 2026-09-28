@@ -1,0 +1,68 @@
+{
+ "cache": "embeddinggemma-300m.document.vectors.jsonl",
+ "cache_sha256": "3bfcde3e045a2a1f16a5e9884493f34decd785890e8ebc27a39ad5943bae7498",
+ "id": "embeddinggemma-300m",
+ "role": "document",
+ "model": "onnx-community/embeddinggemma-300m-ONNX",
+ "revision": "5090578d9565bb06545b4552f76e6bc2c93e4a66",
+ "onnx": [
+  {
+   "file": "onnx/model_quantized.onnx",
+   "sha256": "172efde319fe1542dc41f31be6154910b05b78f7a861c265c4600eec906bd6d8"
+  },
+  {
+   "file": "onnx/model_quantized.onnx_data",
+   "sha256": "705626e28e4c23c82ade34566b4197d97f534c12275fa406dfb71e9937d388c0"
+  }
+ ],
+ "tokenizer": {
+  "file": "tokenizer.json",
+  "sha256": "4dda02faaf32bc91031dc8c88457ac272b00c1016cc679757d1c441b248b9c47"
+ },
+ "dimension": 768,
+ "normalized": true,
+ "pooling": "the graph's own `sentence_embedding` output, taken as-is: the exporter's pooling head over `last_hidden_state`, which the session verifies at load is unit-norm as emitted and is not the masked mean of `last_hidden_state`; the input framed as the shipped tokenizer.json post-processor frames it, <bos> text <eos>",
+ "prefix_queries": null,
+ "prefix_documents": "title: none | text: ",
+ "prefix_note": "EmbeddingGemma's documented document prompt (title: none | text: ) and retrieval-query prompt (task: search result | query: ), byte for byte",
+ "texts": 674,
+ "max_tokens": 2048,
+ "truncated": [
+  {
+   "tokens": 2386,
+   "kept": 2048,
+   "text_sha256": "a4a43c1ab296a1b47cf25b10ec15436b554dad14718950ee0d11c576d50f2b3c"
+  },
+  {
+   "tokens": 2080,
+   "kept": 2048,
+   "text_sha256": "57e588e4053f308c46c12d741caf5583367b8ebeb5222cc38ac16ca79755930a"
+  },
+  {
+   "tokens": 2082,
+   "kept": 2048,
+   "text_sha256": "fb7e9eae27f798029a7490156c9494d642540ad654ddba1c367568f63719e2f8"
+  }
+ ],
+ "texts_source": {
+  "gym_commit": "a7d2148",
+  "register": {
+   "pairs-intent.jsonl": "8a626b8b29c7c82075e439d944b61a054c5e30f7c61ef96ee7c7c2e75e5b3c83",
+   "pairs-intent.provenance.jsonl": "fef05dbcb2b6b237004afd4a42cfb2f8622284d033de59d456f82ed93f589f40",
+   "turns-sense.jsonl": "5a21649312d97d97a3777bf741eeedf4fbf7df194938638822a10d077fae9d21"
+  },
+  "senses": "diet/capture/sense/sets.jsonl"
+ },
+ "decimals": 8,
+ "batch_size": 1,
+ "intra_op_num_threads": 4,
+ "execution_provider": "CPUExecutionProvider",
+ "python": "3.12.13",
+ "onnxruntime": "1.23.2",
+ "tokenizers": "0.23.2",
+ "numpy": "2.5.2",
+ "huggingface_hub": "1.30.0",
+ "HF_HUB_OFFLINE": "1",
+ "environment": "requirements-ort-frozen.txt (throwaway uv venv; onnxruntime, tokenizers, numpy, huggingface_hub; no torch)",
+ "script": "entry-to-turn/embed_pairs.py ort"
+}

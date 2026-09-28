@@ -1,0 +1,8 @@
+A `head_sha256` holding prose instead of a digest. It is an identity claim
+about the bytes a request sent, and a string that is not 64 lowercase hex
+characters cannot make one -- the same rule `weights.sha256`, `acts_sha256`,
+`hardware_fingerprint` and `chat_template_sha256` are each held to.
+
+A fingerprint nothing can compare is worse than none: `prefix.changed` is
+decided by comparing two of these, and a description sitting where a digest
+belongs would make every comparison against it read as a change.

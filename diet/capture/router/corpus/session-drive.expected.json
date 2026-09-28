@@ -1,0 +1,168 @@
+{
+  "calls": {
+    "t1": {
+      "class": "version-control",
+      "routing": "silent"
+    },
+    "t2": {
+      "class": "version-control",
+      "routing": "silent"
+    },
+    "t3": {
+      "class": "unknown",
+      "routing": "fork:generic"
+    },
+    "t4": {
+      "class": "directory-listing",
+      "routing": "silent"
+    },
+    "t5": {
+      "class": "source-read",
+      "routing": "fork:api_surface"
+    },
+    "t6": {
+      "class": "source-read",
+      "routing": "fork:api_surface"
+    },
+    "t7": {
+      "class": "source-read",
+      "routing": "fork:api_surface"
+    },
+    "t8": {
+      "class": "search",
+      "routing": "silent"
+    },
+    "t9": {
+      "class": "test-run",
+      "routing": "fork:outcome"
+    },
+    "t10": {
+      "class": "edit",
+      "routing": "fork:change"
+    },
+    "t11": {
+      "class": "edit",
+      "routing": "fork:change"
+    },
+    "t12": {
+      "class": "build",
+      "routing": "silent"
+    },
+    "t13": {
+      "class": "unknown",
+      "routing": "fork:generic"
+    },
+    "t14": {
+      "class": "side-effect",
+      "routing": "defer"
+    },
+    "t15": {
+      "class": "web-read",
+      "routing": "fork:finding"
+    },
+    "t16": {
+      "class": "build",
+      "routing": "silent"
+    },
+    "t17": {
+      "class": "build",
+      "routing": "silent"
+    },
+    "t18": {
+      "class": "unknown",
+      "routing": "fork:generic"
+    },
+    "t19": {
+      "class": "inert",
+      "routing": "silent"
+    },
+    "t20": {
+      "class": "side-effect",
+      "routing": "defer"
+    },
+    "t21": {
+      "class": "version-control",
+      "routing": "silent"
+    },
+    "t22": {
+      "class": "test-run",
+      "routing": "fork:outcome"
+    }
+  },
+  "unclassified": [
+    "t3",
+    "t13",
+    "t18"
+  ],
+  "judgment_asks": 5,
+  "forks": 16,
+  "naive_forks": 27,
+  "per_class": {
+    "build": {
+      "seen": 3,
+      "forked": 0,
+      "deferred": 0,
+      "silent": 3
+    },
+    "directory-listing": {
+      "seen": 1,
+      "forked": 0,
+      "deferred": 0,
+      "silent": 1
+    },
+    "edit": {
+      "seen": 2,
+      "forked": 2,
+      "deferred": 0,
+      "silent": 0
+    },
+    "inert": {
+      "seen": 1,
+      "forked": 0,
+      "deferred": 0,
+      "silent": 1
+    },
+    "search": {
+      "seen": 1,
+      "forked": 0,
+      "deferred": 0,
+      "silent": 1
+    },
+    "side-effect": {
+      "seen": 2,
+      "forked": 0,
+      "deferred": 2,
+      "silent": 0
+    },
+    "source-read": {
+      "seen": 3,
+      "forked": 3,
+      "deferred": 0,
+      "silent": 0
+    },
+    "test-run": {
+      "seen": 2,
+      "forked": 2,
+      "deferred": 0,
+      "silent": 0
+    },
+    "unknown": {
+      "seen": 3,
+      "forked": 3,
+      "deferred": 0,
+      "silent": 0
+    },
+    "version-control": {
+      "seen": 3,
+      "forked": 0,
+      "deferred": 0,
+      "silent": 3
+    },
+    "web-read": {
+      "seen": 1,
+      "forked": 1,
+      "deferred": 0,
+      "silent": 0
+    }
+  }
+}

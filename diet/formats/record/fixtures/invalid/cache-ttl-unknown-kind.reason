@@ -1,0 +1,9 @@
+A `cache_ttl` tagged `minutes`. The vocabulary is `seconds` and `none`, and a
+kind outside it is refused rather than guessed at: a lifetime read in the wrong
+unit is off by sixty, which is the difference between a miss that was expected
+and one that was not.
+
+Kind first, then only that kind's fields -- the shape `weights`,
+`budget_tokens` and `summary` all use -- so `{"kind":"none","seconds":1800}` is
+an unknown key rather than a lifetime recorded under a declaration of no
+caching.

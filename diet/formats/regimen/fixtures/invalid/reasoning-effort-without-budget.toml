@@ -1,0 +1,6 @@
+arm = "thinking-high"
+dogma_version = 0
+substrate = "local"
+
+[reasoning]
+effort = "high"

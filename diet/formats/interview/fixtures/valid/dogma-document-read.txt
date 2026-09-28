@@ -1,0 +1,3 @@
+EXCERPT: `--union` is the one to reach for. It ignores the conflict hunks entirely.
+POINTER: the epitaph for the deleted third mode (top of scripts/merge-gate.py)
+PLAN_IMPACT: the hand resolution is per branch, so it is a cost and not a defect

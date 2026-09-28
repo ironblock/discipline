@@ -1,0 +1,3 @@
+{"version":1,"clause":"scope","text":"Answer from this turn."}
+{"version":1,"clause":"exclusion","text":"Do not answer from earlier turns."}
+{"version":1,"clause":"brevity","text":"A sentence is enough."}

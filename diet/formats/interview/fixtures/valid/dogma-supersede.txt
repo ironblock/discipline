@@ -1,0 +1,3 @@
+RECORDED: red_faults is the merge base plus each side's delta
+LATEST: "red_faults is COUNTED from the assembled list"
+VERDICT: REPLACES — CORRECTED: red_faults is counted from the assembled list, never computed

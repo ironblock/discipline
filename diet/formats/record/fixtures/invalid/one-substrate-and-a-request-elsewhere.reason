@@ -1,0 +1,12 @@
+The run declares exactly ONE substrate, `local`, and the request is served by
+`remote`.
+
+This is the case the field's own doc comment exists for: the reference is
+required even when a run declares one substrate, precisely so that it can
+never be inferred from a count. With one declared it is tempting to read an
+unresolvable reference as a typo for the only candidate, or to skip the check
+because there is nothing to choose between -- and a record that resolves a
+reference by counting is a record whose rows are not self-describing.
+
+Its absence was found by a fresh-instance review, which relaxed the check to
+fire only above one substrate and watched all 617 tests stay green.

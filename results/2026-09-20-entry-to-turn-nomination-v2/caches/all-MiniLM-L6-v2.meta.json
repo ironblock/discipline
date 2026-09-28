@@ -1,0 +1,282 @@
+{
+ "cache": "all-MiniLM-L6-v2.vectors.jsonl",
+ "cache_sha256": "200e55d7eec0e35d9d6585b97f45989b375095c4d0064b2a886a3a60744628b2",
+ "id": "all-MiniLM-L6-v2",
+ "model": "sentence-transformers/all-MiniLM-L6-v2",
+ "revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+ "files": [
+  {
+   "file": "model.safetensors",
+   "sha256": "53aa51172d142c89d9012cce15ae4d6cc0ca6895895114379cacb4fab128d9db"
+  },
+  {
+   "file": "tokenizer.json",
+   "sha256": "be50c3628f2bf5bb5e3a7f17b1f74611b2561a3a27eeab05e5aa30f411572037"
+  },
+  {
+   "file": "config.json",
+   "sha256": "953f9c0d463486b10a6871cc2fd59f223b2c70184f49815e7efbcab5d8908b41"
+  },
+  {
+   "file": "modules.json",
+   "sha256": "84e40c8e006c9b1d6c122e02cba9b02458120b5fb0c87b746c41e0207cf642cf"
+  },
+  {
+   "file": "1_Pooling/config.json",
+   "sha256": "4be450dde3b0273bb9787637cfbd28fe04a7ba6ab9d36ac48e92b11e350ffc23"
+  }
+ ],
+ "dimension": 384,
+ "normalized": true,
+ "pooling": "sentence-transformers' shipped modules for the model, Transformer -> Pooling -> Normalize: Pooling mode 'mean', then Normalize; encode(normalize_embeddings=True)",
+ "roles": "one cache for both roles: no instruction prefix on either side",
+ "prefix_queries": "",
+ "prefix_documents": "",
+ "texts": 1566,
+ "queries": 983,
+ "documents": 674,
+ "max_seq_length": 256,
+ "truncated": [
+  {
+   "tokens": 367,
+   "kept": 256,
+   "text_sha256": "6352c16f6f636b98e2f0f0c685903403fac85abc34f05d4990c6ed68cf5ec02c"
+  },
+  {
+   "tokens": 288,
+   "kept": 256,
+   "text_sha256": "8014c4e09d27218719b9fd500bf7fc0e472006feb797b204f14d5316780da82c"
+  },
+  {
+   "tokens": 931,
+   "kept": 256,
+   "text_sha256": "46a6ab90abab11c1bc3011eafb8b2aaf5dab296a9b8a7c4089e2155f13ba4e31"
+  },
+  {
+   "tokens": 707,
+   "kept": 256,
+   "text_sha256": "f928075d99c6ba3c84e424434b08d25db6f9fa73430bae19c8e42419de81b28e"
+  },
+  {
+   "tokens": 338,
+   "kept": 256,
+   "text_sha256": "76f7cc97401f818f16eda41a8807d69d7adb07c84bc728038a3be306744c21df"
+  },
+  {
+   "tokens": 437,
+   "kept": 256,
+   "text_sha256": "cb1d1bf8f853a14aa885e2dce3298aa3deabc455d6a201eab79395c6ed7cc0ae"
+  },
+  {
+   "tokens": 416,
+   "kept": 256,
+   "text_sha256": "45555369a0936bafe52e1463032f36ef9483e8f64cc8ca930be770e47a611c3a"
+  },
+  {
+   "tokens": 520,
+   "kept": 256,
+   "text_sha256": "b06c126697f81c740cf9c13bb8719b2dcf031931407c1629a27e1b6453814126"
+  },
+  {
+   "tokens": 467,
+   "kept": 256,
+   "text_sha256": "f7fe6c3bf32c23afca1bc3240bf09ed7f8af5dd0932c912960a8892aacbdea45"
+  },
+  {
+   "tokens": 595,
+   "kept": 256,
+   "text_sha256": "44856987cdef7d529c92ac8a7d99c0fe7f73bab464043698ffe3a0982dd02aef"
+  },
+  {
+   "tokens": 425,
+   "kept": 256,
+   "text_sha256": "99f3bfd4d68e43bf82ffb76f0ec86922e58b63bba394e29d166c3c02a27ae607"
+  },
+  {
+   "tokens": 355,
+   "kept": 256,
+   "text_sha256": "1b8d04501dc5c8f184856d8b7a55d3331e2eadda59ed0ccfcffe3bdd0b4915b0"
+  },
+  {
+   "tokens": 393,
+   "kept": 256,
+   "text_sha256": "6fd0fdcb87e77c843a5b22d11ece23c3089512faa44e6d3f9478a9168fd001b4"
+  },
+  {
+   "tokens": 299,
+   "kept": 256,
+   "text_sha256": "b758064f9896240f28cc58a1ce3ae75573bcc76e93709ddb6064644e99b06cf9"
+  },
+  {
+   "tokens": 1114,
+   "kept": 256,
+   "text_sha256": "4a851c51b093e984f3b73501e6c76a129dfb9b3813b9ad224261838df671d672"
+  },
+  {
+   "tokens": 834,
+   "kept": 256,
+   "text_sha256": "a4158e2d15166d39541b44d1dc59d91b4532301b98b11cf5840ef79e66285515"
+  },
+  {
+   "tokens": 1100,
+   "kept": 256,
+   "text_sha256": "cadd24f908c51064f807da362c3c7d9e85b615724ecb77e3d0610a04ee52aab5"
+  },
+  {
+   "tokens": 1535,
+   "kept": 256,
+   "text_sha256": "0b5a639f5c8664cafdcc3894d2d3108ac2c00a15243762d18c15768494a42431"
+  },
+  {
+   "tokens": 866,
+   "kept": 256,
+   "text_sha256": "31df433f988a6f4d22caf642ad76af655e502528a4aaef0d5d1150008bd7a565"
+  },
+  {
+   "tokens": 1269,
+   "kept": 256,
+   "text_sha256": "aecd06f25358acb73b5924d2972eadb630108a0baffb892623dfebffd08ee675"
+  },
+  {
+   "tokens": 1727,
+   "kept": 256,
+   "text_sha256": "4c5249435e13c5dec0a8356a8b379c4c54f9b6c2aa40d18538167aa5a72be857"
+  },
+  {
+   "tokens": 1286,
+   "kept": 256,
+   "text_sha256": "9fca98f8f592f905d449b8de3f090643aa3965c1d23b41464dc0ca8eee18bda3"
+  },
+  {
+   "tokens": 1112,
+   "kept": 256,
+   "text_sha256": "d9b3123191e2c521526d94e92dd4ed04f5fd419583d05235258beea09d2d7e48"
+  },
+  {
+   "tokens": 1959,
+   "kept": 256,
+   "text_sha256": "d1cd903573899cedce4b615bdca2d6491598210da4b904795e33291c01feb47e"
+  },
+  {
+   "tokens": 461,
+   "kept": 256,
+   "text_sha256": "fd54bcaffd938c965588ebb2b83bd174f945f0a7bf8b6333c41e1c7c60770682"
+  },
+  {
+   "tokens": 2178,
+   "kept": 256,
+   "text_sha256": "1caa3723c18e31e3fb95440c1a3df2d750d447bb0d21753e1f77b4ad2199ccc0"
+  },
+  {
+   "tokens": 1208,
+   "kept": 256,
+   "text_sha256": "7ec63678d9941a7042fa3ba163253d4f8d2128b73ab38d6d62c797315ad31d0b"
+  },
+  {
+   "tokens": 422,
+   "kept": 256,
+   "text_sha256": "f6daa8d04ddc4c3ed2e64ef2132716db5a36ef80cb5c743c0a2a70cba36b338b"
+  },
+  {
+   "tokens": 2191,
+   "kept": 256,
+   "text_sha256": "46e845465300ff6b9fdd5b4aa2f06ea065f83f52dc4767e1a3be7909f996b733"
+  },
+  {
+   "tokens": 1714,
+   "kept": 256,
+   "text_sha256": "57ac6ff36603b49d425bc4bc7e53ba2b1b07da3ec2442889197c6576f222b3f9"
+  },
+  {
+   "tokens": 892,
+   "kept": 256,
+   "text_sha256": "984e1061c0d9806a7c52a79a221a17fd847e0b9ecfb5304e9cc4f3b5bc716845"
+  },
+  {
+   "tokens": 2328,
+   "kept": 256,
+   "text_sha256": "9d5b84dd87338a8064dec9f71cbf5905c51cb023f5472d1e9ecc2611968ccfdf"
+  },
+  {
+   "tokens": 886,
+   "kept": 256,
+   "text_sha256": "035d25a25b61c5ec1876f538978c5cad7c200a095a8b0214a848a0fe997f6f2b"
+  },
+  {
+   "tokens": 1406,
+   "kept": 256,
+   "text_sha256": "c685c7dab1ce8f7f632367f023272505ad171d3e1819b81684fa940d591b138b"
+  },
+  {
+   "tokens": 360,
+   "kept": 256,
+   "text_sha256": "e778ac70247ae9daee84c20391ecedfd2a92a42a6c794b879aeac68634cb7dc1"
+  },
+  {
+   "tokens": 386,
+   "kept": 256,
+   "text_sha256": "ee66329f9646109d7e3210c306b471e406b925afce1a6d2cfb7baa3851869ea2"
+  },
+  {
+   "tokens": 291,
+   "kept": 256,
+   "text_sha256": "d05b997ae331a26984c97284259ea5da40b199c01a8733651335411f0328f930"
+  },
+  {
+   "tokens": 558,
+   "kept": 256,
+   "text_sha256": "ce1558d98bf4dc2ae1c0593bad306c0cfffee04f24b6d91825bea283161b8f6c"
+  },
+  {
+   "tokens": 352,
+   "kept": 256,
+   "text_sha256": "69bbdf2f529d942ff37f191d70a312887993aca845226911699c5c29c8fc3735"
+  },
+  {
+   "tokens": 331,
+   "kept": 256,
+   "text_sha256": "5a525c2162f173808c91796bad2acf17174813a8384b045a4516c0f20e6c3ed4"
+  },
+  {
+   "tokens": 410,
+   "kept": 256,
+   "text_sha256": "a2b94ec80a5747fbfc81a569f092a4d218767523d7caaa9d6e438b9d8b4c19cb"
+  },
+  {
+   "tokens": 310,
+   "kept": 256,
+   "text_sha256": "610d3274a0b61ef5e81de8fc66f38bd11b208d66db83936bc9b587415eb57df2"
+  },
+  {
+   "tokens": 967,
+   "kept": 256,
+   "text_sha256": "309c50d5a9e946deeead7c41b7a6c744bd0e55172a3ead8412632bed7effe816"
+  },
+  {
+   "tokens": 1330,
+   "kept": 256,
+   "text_sha256": "9d66ff1384d9bbcd0f4a2f1cb18efa561d0314c937e0b7b4a0fcf299df65cb4a"
+  }
+ ],
+ "texts_source": {
+  "gym_commit": "a7d2148",
+  "register": {
+   "pairs-intent.jsonl": "8a626b8b29c7c82075e439d944b61a054c5e30f7c61ef96ee7c7c2e75e5b3c83",
+   "pairs-intent.provenance.jsonl": "fef05dbcb2b6b237004afd4a42cfb2f8622284d033de59d456f82ed93f589f40",
+   "turns-sense.jsonl": "5a21649312d97d97a3777bf741eeedf4fbf7df194938638822a10d077fae9d21"
+  },
+  "senses": "diet/capture/sense/sets.jsonl"
+ },
+ "decimals": 8,
+ "batch_size": 32,
+ "device": "cpu",
+ "python": "3.12.13",
+ "sentence_transformers": "3.0.1",
+ "transformers": "4.44.2",
+ "torch": "2.2.2",
+ "tokenizers": "0.19.1",
+ "HF_HUB_OFFLINE": "1",
+ "TRANSFORMERS_OFFLINE": "1",
+ "environment": "encoder-suite/.venv (the research program's pinned environment)",
+ "script": "entry-to-turn/embed_pairs.py st"
+}

@@ -1,0 +1,245 @@
+{
+"batch": 28,
+"items": [
+{
+"entry": "MAD (Multiply-Add) counting as a shader complexity metric — used in parity tests to ensure Lite shaders are not more expensive than BJS (GUIDANCE.md, section 4)",
+"id": "b0d38282c4c3",
+"prose": "Understood. I'll correct that entry now:\n\n> **CORRECTION:** MAD counting is not a shader complexity metric used in parity tests. The parity tests use pixel-diff comparison against golden references and bundle size ceilings, but there's no MAD counting system in the codebase. The previous entry was incorrect.\n\nNow let me search for the Minecraft/voxel clone:\n\n",
+"reasoning": ""
+},
+{
+"entry": "Tool use parsing (`tools`, `tool_choice`) with jinja flag requirement — relevant for function calling flow (server-common.cpp:911-925)",
+"id": "dd24bc7701d5",
+"prose": "Now let me look at the prompt cache (a separate caching mechanism) and the `copy_state_to` function:\n\n",
+"reasoning": ""
+},
+{
+"entry": "`pre_decode()` and `batch.render()` are called to prepare the llama batch before decoding — these bridge slot state to the actual llama.cpp inference engine (`server-context.cpp`, line ~2802)",
+"id": "c1ef60b5b261",
+"prose": "That note about `pre_decode()` and `batch.render()` is about the inference/sampling loop inside slots — completely separate from the HTTP response streaming mechanism I'm tracing now. The note still holds as-is. Let me continue tracing the SSE flow.\n\n",
+"reasoning": ""
+},
+{
+"entry": "How does the KV cache reuse actually work in `server-context.cpp` around line 2839 — need to see the full chunk-based cache reuse mechanism",
+"id": "df6f416b0b87",
+"prose": "Now let me search more specifically for `n_before_user`:",
+"reasoning": ""
+},
+{
+"entry": "`workaround::system_message_not_supported(params.messages)` — handles templates that don't support system role (chat.cpp, line ~2674)",
+"id": "679fc1c525bb",
+"prose": "",
+"reasoning": "The user wants me to compare the llama.cpp server directory with the beellama.cpp fork. Let me first list the tools/server directory in both repositories to identify differences."
+},
+{
+"entry": "Trace how tool/function definitions are rendered into the chat template — look for `tools`, `tool_call`, `function_call` handling in template application code",
+"id": "5809c6b2babb",
+"prose": "You're right - the tool/function template tracing question has been fully answered by entries #176-201 which cover the complete pipeline: `common_chat_tools_parse_oaicompat()` → `common_chat_tool` struct → `common_chat_tools_to_json_oaicompat()` → Jinja template context → rendering. I'll mark those remaining open questions as resolved.\n\n",
+"reasoning": "The user wants me to update the working record because the entry about tracing tool/function definitions in chat templates is now superseded. Looking at my working record, I see entries #153, #202-205, #208-210 which are about tool/function definitions in chat templates. Based on my previous analysis (entries #176-201), I've already thoroughly audited how tools are parsed, transformed, and rendered through the Jinja template system.\n\nLet me update the superseded entries and then continue tracing the SSE streaming pipeline.\n\nNow I need to look at where partial and final results are created in the slot update loop. Let me look at the key areas where results are sent."
+},
+{
+"entry": "How do individual model Jinja templates (e.g., Llama 3.1, Mistral, Phi) actually iterate over the `tools` variable — we know the variable is injected but haven't inspected real template source to confirm rendering patterns",
+"id": "2451ed88ed0d",
+"prose": "",
+"reasoning": "The user is asking about slot checkpointing and KV cache save/restore support. Let me search for more information about the limits and constraints of these features."
+},
+{
+"entry": "The `n_cache_reuse` / chunk-level KV cache reuse loop that shifts non-contiguous matching subsequences via `common_context_seq_add` — this is a second layer of cache reuse beyond simple prefix matching, relevant if auditing how partial prompt overlaps are handled at decode time (`server-context.cpp`, lines ~2860–2900)",
+"id": "bb84bc206907",
+"prose": "Let me look at where checkpoints are actually *called* in beellama's decode loop:\n\n",
+"reasoning": ""
+},
+{
+"entry": "Cache reuse (`n_cache_reuse`) is disabled for multimodal AND also disabled when the memory backend doesn't support `llama_memory_can_shift()` — IMPLICATION: Chunk-level KV cache relocation only works with text-only models on backends that support memory shifting (not all do)",
+"id": "f9f46991ffb2",
+"prose": "",
+"reasoning": "Now let me look at the prompt cache size limits."
+},
+{
+"entry": "`pre_decode()` and `batch.render()` are called to prepare the llama batch before decoding — these bridge slot state to the actual llama.cpp inference engine (`server-context.cpp`, line ~2802)",
+"id": "940e8ceec964",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "The `n_cache_reuse` / chunk-level KV cache reuse loop that shifts non-contiguous matching subsequences via `common_context_seq_add` — this is a second layer of cache reuse beyond simple prefix matching, relevant if auditing how partial prompt overlaps are handled at decode time (`server-context.cpp`, lines ~2860–2900)",
+"id": "7ada19c024c3",
+"prose": "Good — the working record note about `n_cache_reuse` / chunk-level KV cache reuse via `common_context_seq_add` still holds. That mechanism is separate from `n_before_user` and checkpoint creation. Let me now verify the checkpoint creation call site in beellama to confirm the `n_before_user` gating is indeed absent:\n\n",
+"reasoning": ""
+},
+{
+"entry": "How speculative decoding checkpoints (`common_prompt_checkpoint`) interact with the in-memory `server_prompt_cache` — do checkpoints get saved/restored as part of prompt cache entries, or are they strictly per-slot ephemeral?",
+"id": "86bb25c51b07",
+"prose": "The working record entry about speculative decoding checkpoints and prompt cache interaction is incorrect. Here's the correction:\n\n**Correction:** Speculative decoding checkpoints (`common_prompt_checkpoint`) are stored within `server_prompt.checkpoints` and **are cloned** when a prompt is saved to the `server_prompt_cache` (see `server-task.cpp:1669` — `/*.checkpoints =*/ prompt.checkpoints`). However, they are **NOT restored** when loading from the prompt cache. In `server_prompt_cache::load()` (`server-task.cpp:1675+`), only the main KV state (`data.main`) and draft KV state (`data.drft`) are restored via `llama_state_seq_set_data_ext()`. The checkpoints list is never transferred back. This means checkpoints are effectively **saved-but-not-restored** — they occupy cache memory but serve no functional purpose after a cache load. They remain strictly per-slot ephemeral structures used only during speculative decoding within a single generation session (for draft rejection recovery).",
+"reasoning": "The user is asking me to update the working record with a correction about speculative decoding checkpoints and their relationship to the prompt cache. Let me analyze what I've found:\n\n1. `common_prompt_checkpoint` is a struct that stores KV cache snapshots for speculative decoding (target + draft context states)\n2. `server_prompt` contains a `std::list<common_prompt_checkpoint> checkpoints` field\n3. When `server_prompt_cache::alloc()` is called, it clones the prompt including `prompt.checkpoints` (line 1669)\n4. However, in `server_prompt_cache::load()`, only the main KV state data is restored via `llama_state_seq_set_data_ext()` - the checkpoints are NOT restored\n5. The checkpoints in `server_prompt` are per-slot and used during speculative decoding to restore context when draft tokens are rejected\n\nSo the correction is: Checkpoints ARE saved as part of prompt cache entries (they're cloned into the cached `server_prompt`), but they are NOT restored when loading from the prompt cache - they are strictly per-slot ephemeral structures used only during speculative decoding within a single generation session.\n\nLet me formulate this correction."
+},
+{
+"entry": "Read `get_common_prefix()` in server-common.cpp",
+"id": "7b9728ec7229",
+"prose": "The entry \"Read `get_common_prefix()` in server-common.cpp\" is superseded — I've now traced the complete cache/checkpoint system including how `get_common_prefix()` is used in `server_prompt_cache::load()` for similarity-based cache matching. Updating the record.\n\n",
+"reasoning": "The working record entry about reading `get_common_prefix()` in server-common.cpp is indeed superseded - I've now traced the complete cache/checkpoint system including how prompt similarity matching works (using `get_common_prefix()` in the cache load path). Let me update the working record and then provide the comprehensive answer."
+},
+{
+"entry": "The `load` method's dual-scoring heuristic using `f_keep` (preservation of cached prompt) and `sim` (similarity to new prompt) with a 0.25 threshold — this is the eviction/selection policy for picking the best cached KV state (`server-task.cpp`, lines ~1676–1700)",
+"id": "588f5acaf0a2",
+"prose": "Let me re-examine the `server_prompt_cache::load` method carefully to verify the actual scoring heuristic and threshold values.\n\n",
+"reasoning": ""
+},
+{
+"entry": "NONE — the source repo is confirmed at `~/git/llama.cpp/` and I have the full codebase to work with.",
+"id": "f7a4d67520b5",
+"prose": "I'll trace how the server handles SSE streaming, starting with the HTTP handler for streaming responses and following the flow through to chunk emission and stop conditions.\n\n",
+"reasoning": ""
+},
+{
+"entry": "How speculative decoding checkpoints (`common_prompt_checkpoint`) interact with the in-memory `server_prompt_cache` — do checkpoints get saved/restored as part of prompt cache entries, or are they strictly per-slot ephemeral?",
+"id": "8180d004162a",
+"prose": "",
+"reasoning": "Now let me look at the struct definition for message_spans in the chat params."
+},
+{
+"entry": "Prompt cache (`--cache-ram`) and context checkpoints (`--ctx-checkpoints`) are TWO separate systems — the prompt cache stores full prompt KV states for slot reuse across requests, while context checkpoints are per-slot intermediate save points created during prompt processing for resuming — IMPLICATION: These must be configured independently and serve different purposes; disabling one doesn't affect the other",
+"id": "dc62b41ebd99",
+"prose": "The working record note still holds — prompt cache and context checkpoints are indeed two separate systems. Let me check for any limitations or special conditions around checkpointing, particularly around SWA models and multimodal content.\n\n",
+"reasoning": "The working record note is still accurate. The prompt cache and context checkpoints are indeed two separate systems:\n\n1. **Prompt cache** (`--cache-ram`): Stores full prompt KV states for slot reuse across requests. Uses LRU eviction. Enabled by default with 8192 MiB limit.\n\n2. **Context checkpoints** (`--ctx-checkpoints`): Per-slot intermediate save points created during prompt processing for resuming. Max 32 per slot, min spacing 8192 tokens.\n\nLet me continue investigating any remaining gaps. Let me check if there are any limitations or special conditions around checkpointing."
+},
+{
+"entry": "The `server_res_generator::next` callback uses a `should_stop()` lambda that checks both `req.should_stop()` (client disconnect) AND a timeout based on `params.sse_ping_interval` — the timeout doesn't actually stop the stream, it just sends a ping comment (`:\\n\\n`) to keep the connection alive — IMPLICATION: The ping mechanism is a keep-alive strategy for HTTP clients that drop idle connections (like undici), not a true stop condition; actual stream termination only happens on client disconnect, error, or final result",
+"id": "2e65e953922c",
+"prose": "Let me look at the partial result emission at line 1887 and the final result at line 1930:\n\n",
+"reasoning": ""
+},
+{
+"entry": "Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)",
+"id": "09820d9e44ab",
+"prose": "Correction: The `/metrics` endpoint is not specifically Prometheus-style — it's a general monitoring/metrics endpoint. The README just mentions \"Monitoring endpoints\" generically. I'll update that.\n\nLet me continue tracing the request flow:\n\n",
+"reasoning": ""
+},
+{
+"entry": "Function calling / tool use support with `--jinja` flag (README.md, Anthropic API section)",
+"id": "4e903d39d231",
+"prose": "Correction: Entry #18 (\"Function calling / tool use support with `--jinja` flag (README.md, Anthropic API section)\") is superseded. The `--jinja` flag is about chat template rendering, not function calling. Function calling and tool use are separate features that work independently of the `--jinja` flag. The `--jinja` flag specifically enables/disables Jinja-based chat template application for formatting conversations, while function calling relies on schema constraints and tool definitions passed in the request body.",
+"reasoning": ""
+},
+{
+"entry": "Slot save/restore (`/slots/{id}?action=save/restore`) and the internal prompt cache (`server_prompt_cache`) are TWO completely independent systems — slot save/restore writes full KV state to disk via `llama_state_seq_get_data_ext`/`llama_state_seq_set_data_ext`, while the prompt cache is an in-memory cross-slot LRU cache that uses `get_common_prefix` matching — IMPLICATION: Auditing \"cache\" behavior requires reasoning about two separate mechanisms with different APIs, lifecycle rules, and eviction strategies; they are not interchangeable.",
+"id": "0489c8790ca1",
+"prose": "Correction: The working record entry is **largely accurate** but needs a refinement. Both systems ultimately operate on the same underlying KV cache state, but through **different llama.cpp APIs**:\n- **Slot save/restore endpoints** (`/slots/{id}?action=save/restore`) use `llama_state_seq_save_file()` / `llama_state_seq_load_file()` — file I/O, disk persistence\n- **Internal prompt cache** (`server_prompt_cache`) uses `llama_state_seq_get_data_ext()` / `llama_state_seq_set_data_ext()` — in-memory buffers, cross-slot LRU matching\n\nThey are NOT interchangeable (different APIs, different lifecycle), but they serialize the same type of data (KV cache state for a slot). Let me now continue the investigation to produce a full picture.\n\n",
+"reasoning": "The user is asking me to update my working record. The entry they're referring to says that slot save/restore and the internal prompt cache are TWO completely independent systems. But based on my investigation, they're actually using the same underlying llama.cpp API (`llama_state_seq_get_data_ext`/`llama_state_seq_set_data_ext`). Let me verify this.\n\nLooking at the code:\n- `prompt_save()` at line 128 uses `llama_state_seq_get_data_ext()` to get slot KV state\n- `prompt_load()` at line 156 calls `prompt_cache.load()` which uses `llama_state_seq_set_data_ext()` to restore\n- Slot save (`SERVER_TASK_TYPE_SLOT_SAVE`) at line 2344 uses `llama_state_seq_save_file()` \n- Slot restore (`SERVER_TASK_TYPE_SLOT_RESTORE`) uses `llama_state_seq_load_file()`\n\nSo actually:\n- The internal prompt cache (`server_prompt_cache`) uses `llama_state_seq_get_data_ext`/`llama_state_seq_set_data_ext` for in-memory operations\n- The slot save/restore endpoints use `llama_state_seq_save_file`/`llama_state_seq_load_file` for disk persistence\n\nThey ARE different APIs but they both operate on the same underlying KV cache state. The prompt cache is in-memory and cross-slot, while slot save/restore is disk-based and per-slot.\n\nWait, let me re-read the user's message more carefully. They say the entry is \"superseded by this step\" and ask me to \"state the correction.\" But they didn't actually provide the correction - they're asking ME to investigate and then correct the record based on what I find.\n\n\nThe prompt cache and slot persistence are fundamentally different mechanisms. The prompt cache operates in-memory across slots using `get_common_prefix` matching for LRU-style eviction, while slot save/restore writes to disk using file-based APIs. They share the same underlying KV cache state but serve entirely different purposes—one optimizes inference speed through in-memory reuse, the other provides manual checkpointing for disk persistence. The distinction between them is real and important."
+},
+{
+"entry": "NONE — I have a thorough understanding of the streaming architecture from the code examined so far.",
+"id": "46a049b5113d",
+"prose": "The working record entry \"NONE — I have a thorough understanding of the streaming architecture from the code examined so far.\" is incorrect — I haven't actually examined the emission points yet. I need to trace where `server_task_result_cmpl_partial` and `server_task_result_cmpl_final` are created and posted to the response queue. Let me continue.\n\n",
+"reasoning": ""
+},
+{
+"entry": "`cache_idle_slots` logic and `kv_unified` interaction — affects how slots are cleared/cached when idle, relevant for understanding slot lifecycle and memory behavior (lines 1472–1485)",
+"id": "2f9452357a25",
+"prose": "## Correction to Working Record\n\n**Superseded entry:** `#77` — \"`cache_idle_slots` logic and `kv_unified` interaction — affects how slots are cleared/cached when idle, relevant for understanding slot lifecycle and memory behavior (lines 1472–1485)\"\n\n**Correction:** The `cache_idle_slots` logic and its interaction with `kv_unified` was discussed at lines ~1472–1485 in an earlier pass, but the current codebase has shifted. The actual cache idle slot behavior is now at lines ~1294–1298 and ~1477–1485 in `server-context.cpp`, where `cache_idle_slots` controls whether idle slots are saved and cleared versus just saved. The `kv_unified` interaction specifically is not directly referenced in the cache idle logic — instead, cache management uses `slot.prompt_save()` and `slot.prompt_load()` to persist to `server_prompt_cache`. The `n_cache_reuse` chunk-level KV cache reuse loop (lines ~2860–2900) is the more relevant mechanism for understanding how non-contiguous matching subsequences are handled via `common_context_seq_add`.\n\nNow let me look at where partial and final results are actually emitted during the decode loop:\n\n",
+"reasoning": ""
+},
+{
+"entry": "There are TWO distinct caching layers with different LCP thresholds — (1) slot-level KV cache reuse uses `f_keep < 0.5f` in `get_available_slot()` to trigger cache save, while (2) the external `server_prompt_cache::load()` uses `f_keep < 0.25f` as a guard against trashing large cached prompts — IMPLICATION: The two layers interact but have independent eviction criteria, so a prompt might be evicted from slot cache but still found in the external cache (or vice versa)",
+"id": "2da186d212c7",
+"prose": "I've traced the full prompt cache / slot reuse mechanism. Here's how it works, with the key code quoted:\n\n---\n\n## Two-Layer Caching Architecture\n\nThe server uses **two distinct caching layers** that interact:\n\n1. **Slot-level KV cache** — the in-model KV cache tied to each slot (GPU memory)\n2. **External prompt cache** (`server_prompt_cache`) — a CPU-side LRU cache of serialized KV states\n\n---\n\n## Layer 1: Slot Selection (`get_available_slot`)\n\nWhen a new task arrives, `get_available_slot()` (server-context.cpp:1530) picks a slot using **three strategies in order**:\n\n### Strategy A: Explicit slot ID\n",
+"reasoning": "The working record note is still accurate. The two caching layers do have different LCP thresholds:\n1. Slot-level KV cache reuse uses `f_keep < 0.5f` in `get_available_slot()` to trigger cache save\n2. The external `server_prompt_cache::load()` uses `f_keep < 0.25f` as a guard against trashing large cached prompts\n\nLet me now provide a comprehensive summary of how the prompt cache / slot reuse works."
+},
+{
+"entry": "`get_common_prefix()` handles multimodal tokens specially — when both tokens are `LLAMA_TOKEN_NULL`, it compares media chunk IDs and token counts rather than raw token values — IMPLICATION: Prompt caching for multimodal inputs requires matching media chunk identity, not just token sequence equality",
+"id": "2175fad35324",
+"prose": "Here is how the prompt cache / slot reuse system works, with the key code quoted:\n\n---\n\n## 1. Longest Common Prefix (LCP) Computation\n\nThe core matching algorithm is `server_tokens::get_common_prefix()` in `server-common.cpp`:\n\n",
+"reasoning": "Now I have enough information to provide a comprehensive answer about how the prompt cache / slot reuse works. Let me summarize the key findings:\n\n1. **`server_tokens::get_common_prefix()`** - The core LCP computation function in `server-common.cpp:471`\n2. **`get_available_slot()`** - Slot selection with 3 strategies in `server-context.cpp:1530`\n3. **`server_prompt_cache::load()`** - Cache lookup in `server-task.cpp:1737`\n4. **KV cache reuse during inference** - `n_past = slot.prompt.tokens.get_common_prefix(input_tokens)` in `server-context.cpp:3154`\n\nLet me provide a comprehensive summary."
+},
+{
+"entry": "How does the `gridworks` synthetic substrate function in `phase3/`?",
+"id": "c2ceec1aa8f4",
+"prose": "Let me explore the project to find the relevant files mentioned.\n\n",
+"reasoning": "The user wants me to pick one of the files mentioned in the compacted working record and show its first 40 lines. Let me look at what files/directories are referenced:\n\n1. `docs/compaction-model.md`\n2. `gates/` directory\n3. `phase3/` directory (gridworks)\n4. `phase4/` directory\n\nLet me start by exploring the filesystem to find these files."
+},
+{
+"entry": "The Jinja path selects between `template_default` and `template_tool_use` based on whether `params.tools.is_array()` — two separate chat templates can exist per model, with the tool-aware template activated only when tools are present — IMPLICATION: models need a `template_tool_use` variant in their tokenizer metadata for tool rendering to work correctly",
+"id": "09246ebfe6fd",
+"prose": "",
+"reasoning": "The user wants me to update my working record. Let me first look at the actual template application to understand the correction needed, then update the record.\n\nLet me look at how the template is actually applied with tools in the Jinja path."
+},
+{
+"entry": "Slot save/restore operates on a specific slot ID and requires the slot to be in an idle/released state — IMPLICATION: you cannot checkpoint a slot mid-generation; the slot must be available, which means save/restore is a cold-standby pattern, not a hot-snapshot mechanism",
+"id": "296fa10e2c59",
+"prose": "",
+"reasoning": "Now let me look at the actual slot save/restore task processing code."
+},
+{
+"entry": "Cache reuse (`n_cache_reuse`) is disabled for multimodal AND also disabled when the memory backend doesn't support `llama_memory_can_shift()` — IMPLICATION: Chunk-level KV cache relocation only works with text-only models on backends that support memory shifting (not all do)",
+"id": "550f1fcd05fc",
+"prose": "Let me check the exact condition at line 1113-1115 to see what \"this context\" means.\n\n",
+"reasoning": "The user is asking me to update the working record. Let me look at what the current entry says and what correction needs to be made. The user is saying that the entry about `n_cache_reuse` being disabled for multimodal AND when the memory backend doesn't support `llama_memory_can_shift()` is superseded by my findings.\n\nLooking at my findings from the code:\n- Line 1101-1103: cache_reuse is disabled for multimodal\n- Line 1113-1115: cache_reuse is disabled \"by this context\" (which I need to check what that means)\n- Line 2849-2853: `can_cache_reuse` requires `llama_memory_can_shift()` AND `!has_mtmd`\n\nLet me check what \"this context\" refers to at line 1113-1115."
+},
+{
+"entry": "How does `server_response_reader::next()` block/wait for results — need to see the synchronization primitive",
+"id": "fd99472ed167",
+"prose": "Now let me look at the other stop conditions around lines 3800-3940:\n\n",
+"reasoning": "The working record note about `server_response_reader::next()` is still relevant - I haven't seen that yet. Let me continue reading the stop conditions and then look at the response reader."
+},
+{
+"entry": "Cache reuse (`n_cache_reuse`) also requires `llama_memory_can_shift()` to return true — not all memory backends support KV cache shifting",
+"id": "55295da3edc8",
+"prose": "Based on my investigation of the llama.cpp server codebase, here's a comprehensive breakdown of slot checkpointing and KV cache save/restore support:\n\n---\n\n## Two Independent Cache Systems\n\nThe server has **two distinct** caching mechanisms that serve different purposes:\n\n### 1. In-Memory Prompt Cache (`server_prompt_cache`)\n- **Purpose**: Cross-slot KV cache reuse for prompt similarity matching\n- **Location**: `tools/server/server-task.h:624`, `tools/server/server-task.cpp:1598+`\n- **Enabled via**: `--cache-ram <MiB>` (default: 8192 MiB)\n- **How it works**:\n  - Stores serialized KV states (`server_prompt`) keyed by token sequences\n  - On new task, searches all cached states for best LCP (longest common prefix) match\n  - Uses dual improvement criteria: both `f_keep` (fraction preserved) AND `sim` (similarity) must strictly beat the current slot's state\n  - Evicts oldest entries when size limit exceeded (`update()`)\n\n### 2. File-Based Slot Save/Restore (`/slots/{id}?action=save|restore`)\n- **Purpose**: Manual persistence of a specific slot's KV cache to disk\n- **Location**: `tools/server/server-context.cpp:4841-4910`\n- **Enabled via**: `--slot-save-path <directory>`\n- **How it works**:\n  - `POST /slots/{id}?action=save` → saves KV state to file via `llama_state_seq_save_file()`\n  - `POST /slots/{id}?action=restore` → restores KV state from file via `llama_state_seq_set_data_ext()`\n  - `POST /slots/{id}?action=erase` → clears the slot's KV cache\n- **Limitations**: Only works when slot is idle (not processing); deferred if busy\n\n---\n\n## Speculative Decoding Checkpoints (`common_prompt_checkpoint`)\n\n- **Purpose**: KV cache snapshots for speculative draft rollback\n- **Location**: `common/common.h:1056`, `tools/server/server-context.cpp:87`\n- **Per-slot**: Each slot has a `spec_ckpt` member\n- **Triggered**: During prompt processing when `checkpoint_min_step` tokens have been processed since last checkpoint\n- **Stores**: Both target (`data_tgt`) and draft (`data_dft`) context states\n- **Used for**: Rolling back draft tokens when speculation fails\n\n---\n\n## Key Limits & Constraints\n\n| Feature | Limitation | Source |\n|---|---|---|\n| **Multimodal (mtmd)** | Slot save/restore **not supported** | `server-context.cpp:1878-1881` |\n| **Multimodal (mtmd)** | `n_cache_reuse` **disabled** | `server-context.cpp:1101-1103` |\n| **Multimodal (mtmd)** | Context shifting **not supported** | `server-context.cpp:1098-1100` |\n| **Multimodal (mtmd)** | Checkpointing blocked after mtmd chunks | `server-context.cpp:3252-3253` |\n| **`n_cache_reuse`** | Requires `llama_memory_can_shift()` | `server-context.cpp:2850` |\n| **`n_cache_reuse`** | Incompatible with multimodal | `server-context.cpp:2851` |\n| **aLoRA** | `n_past` capped at `alora_invocation_start - 1` | `server-context.cpp:2841-2844` |\n| **Prompt cache** | `f_keep_cur < 0.25f` → rejected | `server-task.cpp:1755` |\n| **Prompt cache** | `f_keep < 0.5f` → triggers save before reuse | `server-context.cpp:1584` |\n| **LRU fal",
+"reasoning": "Now I have enough information to provide a comprehensive answer about slot checkpointing and KV cache save/restore support. Let me summarize what I've found."
+},
+{
+"entry": "The `finish_reason` string mapping from `stop_type` enum (`STOP_TYPE_EOS`/`STOP_TYPE_WORD`/`STOP_TYPE_LIMIT`) to OpenAI-compatible strings (`\"stop\"`/`\"length\"`) is not in `send_final_response` but in `server_task_result_cmpl_final::to_json()` — IMPLICATION: need to read the `to_json()` method to see the exact `finish_reason` mapping",
+"id": "c0c6e164c90d",
+"prose": "Let me read the finish_reason mapping in detail:",
+"reasoning": "The working record entry is superseded because I've now read the actual code. Let me look at the key sections of the `to_json()` methods for the final response to understand the finish_reason mapping."
+},
+{
+"entry": "Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)",
+"id": "b61a35a720a8",
+"prose": "Correction: The entry \"Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)\" should be updated to reflect that `/metrics` is indeed registered in `server.cpp` at line 207 as `ctx_http.get(\"/metrics\", ex_wrapper(routes.get_metrics))`, and it's a GET endpoint for Prometheus-style monitoring. The original entry was accurate, but I'll refine it for clarity:\n\n**Updated entry:** Metrics endpoint (`GET /metrics`) for Prometheus-style monitoring, registered in `server.cpp` line 207 via `routes.get_metrics`.\n\nNow continuing with the investigation:",
+"reasoning": ""
+},
+{
+"entry": "Member `int32_t dry_allowed_length = 2;` — tokens extending repetitions beyond this receive penalty (`common/common.h:241`).",
+"id": "a6d3547e50be",
+"prose": "The `dry_allowed_length` note from the working record is about sampling params in `common/common.h:241`, which is unrelated to the caching/checkpointing code I'm examining in `server-context.cpp`. It should still hold.\n\nLet me check how `n_before_user` is computed and set:",
+"reasoning": ""
+},
+{
+"entry": "`backend_sampling` boolean — gates whether token selection happens on the backend (e.g., GPU) vs. CPU-side llama.cpp sampling; matters for understanding where sampling physically occurs (`server-schema.cpp:170`)",
+"id": "58d11a204a80",
+"prose": "",
+"reasoning": "Let me check what files exist in the current working directory."
+},
+{
+"entry": "Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)",
+"id": "bdb5c747f6be",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "`server_schema::eval_llama_cmpl_schema(...)` — schema validation/constraint evaluation for response format (`server-context.cpp`, ~line 4130)",
+"id": "5ce86a4eb9af",
+"prose": "",
+"reasoning": ""
+},
+{
+"entry": "The `tool_choice` parameter (\"auto\", \"none\", \"required\") is NOT passed into the Jinja template context — only `messages`, `tools`, `bos_token`, `eos_token`, `enable_thinking`, and `add_generation_prompt` are. The `tool_choice` is used solely for grammar generation (controlling min/max tool call counts), not for template rendering — IMPLICATION: Jinja templates cannot conditionally render based on tool_choice; they always render tool definitions the same way regardless of whether tool use is required/auto/none.",
+"id": "15a9ee7cb375",
+"prose": "",
+"reasoning": "The working record entry about `tool_choice` not being passed to the Jinja template context is actually correct based on what I found earlier in the code. Let me continue tracing the streaming pipeline. I need to look at where `process_token` is called and how it leads to sending partial responses, and also look at the SSE format functions."
+},
+{
+"entry": "Parity testing infrastructure (`tests/lite/parity/`) — pixel-diff validation against Babylon.js golden references",
+"id": "e0b3c5584cd0",
+"prose": "",
+"reasoning": "The mesh directory shows factory functions for creating meshes (`create-box.ts`, `create-sphere.ts`, etc.) and thin instance support. Let me check the main `mesh.ts` to see the mesh interface."
+},
+{
+"entry": "Were `server-schema.cpp/h` and `server-stream.cpp/h` functionality moved inline into other files in beellama, or were they dropped entirely?",
+"id": "d413dd8c6256",
+"prose": "",
+"reasoning": "The working record note asks whether the schema/stream files were moved inline or dropped. The beellama server-context.cpp is 394KB vs upstream 218KB — a 176KB increase. The upstream schema and stream files total about 31KB (server-schema.cpp 31KB + server-schema.h 3KB + server-stream.cpp 20KB + server-stream.h 8KB = ~62KB). So the 176KB increase is much larger than just those two files being inlined.\n\nLet me search for the key types/functions that were in those files to confirm they were inlined or dropped."
+}
+]
+}

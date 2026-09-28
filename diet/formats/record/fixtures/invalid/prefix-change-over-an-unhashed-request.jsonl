@@ -1,0 +1,5 @@
+{"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on"}]},"source":{"kind":"adapted","adapter":"claude-code","source_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","source_available":"pinned_only"}}
+{"record":"turn","index":1,"prefill_tokens":10}
+{"record":"request","id":"u/1","lane":"main","substrate":"local","head_sha256":"1f2e3d4c5b6a79880f1e2d3c4b5a69780e1d2c3b4a5968770d1c2b3a49586776"}
+{"record":"request","id":"u/2","lane":"main","substrate":"local"}
+{"record":"prefix.changed","id":"x/1","at_request":"u/2","reason":"unattributed","diff":[]}

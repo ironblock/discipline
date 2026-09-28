@@ -1,0 +1,22 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"cache_ttl\":{\"kind\":\"seconds\",\"seconds\":1800},\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532\",\"id\":\"first-party\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}},{\"cache_ttl\":{\"kind\":\"seconds\",\"seconds\":300},\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532\",\"id\":\"through-a-gateway\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}},{\"cache_ttl\":{\"kind\":\"none\"},\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532\",\"id\":\"no-cache-at-all\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]},\"source\":{\"kind\":\"live\"}}\n{\"index\":1,\"prefill_tokens\":1200,\"record\":\"turn\"}\n{\"head_sha256\":\"1f2e3d4c5b6a79880f1e2d3c4b5a69780e1d2c3b4a5968770d1c2b3a49586776\",\"id\":\"q/1\",\"lane\":\"main\",\"record\":\"request\",\"substrate\":\"first-party\"}\n{\"head_sha256\":\"1f2e3d4c5b6a79880f1e2d3c4b5a69780e1d2c3b4a5968770d1c2b3a49586776\",\"id\":\"g/1\",\"lane\":\"gateway\",\"record\":\"request\",\"substrate\":\"through-a-gateway\"}\n{\"head_sha256\":\"1f2e3d4c5b6a79880f1e2d3c4b5a69780e1d2c3b4a5968770d1c2b3a49586776\",\"id\":\"n/1\",\"lane\":\"uncached\",\"record\":\"request\",\"substrate\":\"no-cache-at-all\"}\n{\"kind\":\"drive\",\"prefill_tokens_total\":1200,\"product_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"record\":\"summary\",\"turns\":1}\n",
+  "kinds": [
+    "start",
+    "turn",
+    "request",
+    "summary"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "hosted_substrates": [],
+    "substrates": [
+      "first-party",
+      "through-a-gateway",
+      "no-cache-at-all"
+    ]
+  },
+  "source": {
+    "kind": "live"
+  }
+}
