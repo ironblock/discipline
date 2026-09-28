@@ -5804,6 +5804,7 @@ prove_patterns() {
     if [ ! -d "$dir" ]; then
       printf 'UNSEEDED %s pattern %s  <-- NO CLASS TO PROVE IT AGAINST\n' "$kind" "$label"
       SELFTEST_BROKEN+=("${kind} pattern ${label} has no seeded class")
+      not_red "${kind}.${label}" "$kind" "no seeded class to prove it against"
       shard_cost "${kind}.${label}" "$started_ms" "${kind} pattern ${label}"
       continue
     fi
@@ -5839,6 +5840,7 @@ prove_patterns() {
         printf 'UNSEEDED %s pattern %s  <-- NO %s TO PROVE IT AGAINST\n' \
           "$kind" "$label" "$(printf '%s' "$missing" | tr '[:lower:]' '[:upper:]')"
         SELFTEST_BROKEN+=("${kind} pattern ${label} has no ${missing}")
+        not_red "${kind}.${label}" "$kind" "no ${missing} to prove it against"
         shard_cost "${kind}.${label}" "$started_ms" "${kind} pattern ${label}"
         continue
       fi

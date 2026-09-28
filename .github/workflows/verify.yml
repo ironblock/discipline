@@ -113,7 +113,10 @@ jobs:
       # The comparison lives in a script rather than inline here, so that it
       # can be run and proven against every result state instead of being
       # trusted because it looks right in YAML.
+      # `always()`: the opener above only fails when a shard already has, and
+      # its failure must not hide this step's message about which job it was.
       - name: Every job must have succeeded
+        if: always()
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: python3 scripts/check-job-results.py

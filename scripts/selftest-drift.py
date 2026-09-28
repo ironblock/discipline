@@ -4,8 +4,8 @@ pull request touching that check is refused until it is closed (#112).
 
     selftest-drift.py open DIR     on `main` and the nightly: every census under
                                    DIR is read for `not_red` rows, and each
-                                   fault gets one open issue, titled by its id
-                                   and labelled `check:<CHECK>`
+                                   check with one gets ONE open issue, labelled
+                                   `check:<CHECK>`, listing its faults
     selftest-drift.py block FILE   on a pull request: FILE lists the checks
                                    whose faults the PR re-proves, one per line
                                    (scope-selftest.py --checks-out); an open
@@ -14,8 +14,15 @@ pull request touching that check is refused until it is closed (#112).
     selftest-drift.py --selftest   the fixtures, against a stand-in for `gh`
 
 The label is the mechanism and the issue is the record (ruled on #112,
-2026-09-27). A fault already open is not opened again, so the nightly does
-not file the same fault every night.
+2026-09-27). One issue per CHECK, not per fault: the block is per check, and a
+runner regression that greens a whole lane would otherwise file a hundred
+issues and hit GitHub's rate limit half way. A check already open gets one
+comment naming only the faults its issue does not mention yet, so the nightly
+does not repeat itself.
+
+A pull request that FIXES the drift re-proves the check and is refused like any
+other. The procedure is the refusal's: close the issue, re-run the pull
+request, and let the next `main` run reopen it if the fix did not hold.
 
 Why the block exists when a re-proven fault would fail anyway: the fault a PR
 touches may be inherited from a `main` run older than the drift, and the issue
@@ -57,8 +64,11 @@ class Gh:
 
     def open_issues(self, label: str) -> list[dict]:
         out = self.run("issue", "list", "--state", "open", "--label", label,
-                       "--limit", "100", "--json", "number,title,url")
+                       "--limit", "100", "--json", "number,title,url,body")
         return json.loads(out or "[]")
+
+    def comment(self, number: int, body: str) -> None:
+        self.run("issue", "comment", str(number), "--body", body)
 
     def ensure_label(self, label: str) -> None:
         self.run("label", "create", label, "--force", "--color", LABEL_COLOR,
@@ -68,8 +78,19 @@ class Gh:
         return self.run("issue", "create", "--title", title, "--label", label, "--body", body).strip()
 
 
-def title(ident: str) -> str:
-    return f"selftest: {ident} is not red on main"
+def title(check: str) -> str:
+    return f"selftest: the {check} check has faults not red on main"
+
+
+LISTED = 50
+
+
+def listing(faults: list[tuple[str, str]]) -> str:
+    """The faults as Markdown lines, at most LISTED of them and a count."""
+    lines = [f"- `{ident}`: {why}" for ident, why in faults[:LISTED]]
+    if len(faults) > LISTED:
+        lines.append(f"- and {len(faults) - LISTED} more; the run's census names every one")
+    return "\n".join(lines) + "\n"
 
 
 def read_not_red(directory: pathlib.Path) -> tuple[list[tuple[str, str, str]], str | None]:
@@ -89,23 +110,34 @@ def read_not_red(directory: pathlib.Path) -> tuple[list[tuple[str, str, str]], s
 
 
 def open_issues_for(rows, commit, gh: Gh, run_url: str) -> list[str]:
-    """Open one issue per fault not already open; say what was done."""
-    said = []
+    """One open issue per check with a fault not red; say what was done."""
+    by_check: dict[str, list[tuple[str, str]]] = {}
     for ident, check, why in sorted(set(rows)):
+        by_check.setdefault(check, []).append((ident, why))
+    said = []
+    where = f" at {commit}" if commit else ""
+    for check, faults in sorted(by_check.items()):
         label = f"check:{check}"
         gh.ensure_label(label)
-        existing = [i for i in gh.open_issues(label) if i.get("title") == title(ident)]
+        existing = gh.open_issues(label)
         if existing:
-            said.append(f"{ident}: already open as #{existing[0]['number']}")
+            issue = existing[0]
+            new = [(i, w) for i, w in faults if f"`{i}`" not in (issue.get("body") or "")]
+            if new:
+                gh.comment(issue["number"], f"Also not red on `main`{where}:\n\n{listing(new)}\nRun: {run_url or 'unknown'}\n")
+                said.append(f"{check}: #{issue['number']} already open; {len(new)} more fault(s) added")
+            else:
+                said.append(f"{check}: #{issue['number']} already open and names every fault")
             continue
         body = (
-            f"The seeded fault `{ident}` was not seen red by the full selftest on `main`"
-            f"{f' at {commit}' if commit else ''}: {why}.\n\n"
-            f"Its check is `{check}`. Until this issue is closed, a pull request whose "
-            f"selftest re-proves any `{check}` fault is refused (#112).\n\n"
+            f"The full selftest on `main`{where} did not see these `{check}` faults red:\n\n"
+            f"{listing(faults)}\n"
+            f"Until this issue is closed, a pull request whose selftest re-proves any `{check}` "
+            f"fault is refused (#112). A pull request that fixes this is refused too: close the "
+            f"issue, re-run it, and the next `main` run reopens it if the fix did not hold.\n\n"
             f"Run: {run_url or 'unknown'}\n"
         )
-        said.append(f"{ident}: opened {gh.create_issue(title(ident), label, body)}")
+        said.append(f"{check}: opened {gh.create_issue(title(check), label, body)} for {len(faults)} fault(s)")
     return said
 
 
@@ -132,18 +164,22 @@ class FakeGh(Gh):
         super().__init__(None)
         self.issues = issues or {}          # label -> [issue]
         self.created: list[tuple[str, str]] = []
-        self.labels: set[str] = set()
+        self.comments: list[tuple[int, str]] = []
+        self.labels: list[str] = []
 
     def open_issues(self, label):
         return list(self.issues.get(label, []))
 
     def ensure_label(self, label):
-        self.labels.add(label)
+        self.labels.append(label)
+
+    def comment(self, number, body):
+        self.comments.append((number, body))
 
     def create_issue(self, title, label, body):
         number = 900 + len(self.created)
         self.created.append((title, label))
-        self.issues.setdefault(label, []).append({"number": number, "title": title, "url": f"u/{number}"})
+        self.issues.setdefault(label, []).append({"number": number, "title": title, "url": f"u/{number}", "body": body})
         return f"u/{number}"
 
 
@@ -164,33 +200,52 @@ def _census(box: pathlib.Path, text: str) -> pathlib.Path:
     return box
 
 
-@fixture("a fault not red on main opens one issue labelled with its check")
+@fixture("faults not red on main open one issue per check, labelled with it")
 def _opens():
     import tempfile
     with tempfile.TemporaryDirectory() as box:
-        rows, commit = read_not_red(_census(pathlib.Path(box), "shard\t3\ncommit\tabc1234\nordinal\t4\tci.x\nnot_red\tci.x\tci\tthe gate did not fire\n"))
+        rows, commit = read_not_red(_census(pathlib.Path(box),
+            "shard\t3\ncommit\tabc1234\nordinal\t4\tci.x\n"
+            "not_red\tci.x\tci\tthe gate did not fire\nnot_red\tci.y\tci\tred for the wrong reason\n"
+            "not_red\tresults.z\tresults\tthe fixture did not fail\n"))
     gh = FakeGh()
     open_issues_for(rows, commit, gh, "run")
-    if gh.created != [(title("ci.x"), "check:ci")]:
+    if gh.created != [(title("ci"), "check:ci"), (title("results"), "check:results")]:
         return f"created {gh.created}"
+    body = gh.issues["check:ci"][0]["body"]
+    if "`ci.x`" not in body or "`ci.y`" not in body or "abc1234" not in body:
+        return f"the ci issue does not name both faults and the commit: {body!r}"
+    if gh.labels != ["check:ci", "check:results"]:
+        return f"labels made {gh.labels}, not once per check"
     return None
 
 
-@fixture("a fault already open is not opened again")
+@fixture("a runner regression greening a whole lane files one issue, not one per fault")
+def _flood():
+    rows = [(f"isolation.f{n}", "lanes", "the gate did not fire") for n in range(123)]
+    gh = FakeGh()
+    open_issues_for(rows, "abc", gh, "run")
+    if len(gh.created) != 1 or len(gh.labels) != 1:
+        return f"{len(gh.created)} issue(s), {len(gh.labels)} label call(s) for one check"
+    body = gh.issues["check:lanes"][0]["body"]
+    listed = sum(1 for line in body.splitlines() if line.startswith("- `"))
+    if listed != LISTED or "and 73 more" not in body:
+        return f"listed {listed} fault(s), not {LISTED} and a count of the rest"
+    return None
+
+
+@fixture("a check already open is not opened again, and says only what is new")
 def _dedup():
-    gh = FakeGh({"check:ci": [{"number": 7, "title": title("ci.x")}]})
+    gh = FakeGh({"check:ci": [{"number": 7, "title": title("ci"), "body": "- `ci.x`: why\n"}]})
     said = open_issues_for([("ci.x", "ci", "why")], "abc", gh, "run")
-    if gh.created or "#7" not in said[0]:
-        return f"opened a second issue: {gh.created}; said {said}"
-    return None
-
-
-@fixture("an open issue for another fault of the same check does not stand in for this one")
-def _other_fault():
-    gh = FakeGh({"check:ci": [{"number": 7, "title": title("ci.other")}]})
-    open_issues_for([("ci.x", "ci", "why")], "abc", gh, "run")
-    if gh.created != [(title("ci.x"), "check:ci")]:
-        return f"ci.x was not opened while ci.other was open: {gh.created}"
+    if gh.created or gh.comments or "#7" not in said[0]:
+        return f"repeated a fault already named: created {gh.created}, commented {gh.comments}"
+    open_issues_for([("ci.x", "ci", "why"), ("ci.y", "ci", "why")], "abc", gh, "run")
+    if gh.created or len(gh.comments) != 1:
+        return f"a new fault of an open check: created {gh.created}, commented {len(gh.comments)} time(s)"
+    number, body = gh.comments[0]
+    if number != 7 or "`ci.y`" not in body or "`ci.x`" in body:
+        return f"the comment on #{number} was {body!r}"
     return None
 
 
@@ -217,7 +272,7 @@ def _malformed():
 
 @fixture("an open issue for a check the PR re-proves refuses it, by name")
 def _blocks():
-    gh = FakeGh({"check:ci": [{"number": 7, "title": title("ci.x"), "url": "u/7"}]})
+    gh = FakeGh({"check:ci": [{"number": 7, "title": title("ci"), "url": "u/7"}]})
     found = blocking(["test", "ci"], gh)
     if len(found) != 1 or "#7" not in found[0]:
         return f"found {found}"
@@ -226,7 +281,7 @@ def _blocks():
 
 @fixture("an open issue for a check the PR does not touch does not refuse it")
 def _unrelated():
-    gh = FakeGh({"check:ci": [{"number": 7, "title": title("ci.x")}]})
+    gh = FakeGh({"check:ci": [{"number": 7, "title": title("ci")}]})
     found = blocking(["test", "lanes"], gh)
     return f"refused on {found}" if found else None
 
@@ -276,12 +331,13 @@ def main(argv: list[str]) -> int:
             return 0
         checks = [c.strip() for c in target.read_text(encoding="utf-8").splitlines() if c.strip()]
         found = blocking(checks, gh)
-    except (Broken, OSError, json.JSONDecodeError) as err:
+    except (Broken, OSError, ValueError) as err:
         print(f"selftest-drift: {err}", file=sys.stderr)
         return EXIT_BROKEN
     if found:
-        print("selftest-drift: this pull request re-proves a check with an open drift issue on main; "
-              "close it (fix the fault on main) before this merges:", file=sys.stderr)
+        print("selftest-drift: this pull request re-proves a check with an open drift issue on main. "
+              "If this pull request is the fix, close the issue and re-run it; the next main run "
+              "reopens it if the fix did not hold. Open:", file=sys.stderr)
         for line in found:
             print(f"  {line}", file=sys.stderr)
         return EXIT_REFUSED
