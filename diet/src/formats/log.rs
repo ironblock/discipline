@@ -965,6 +965,11 @@ fn ts_name(kind: Kind) -> String {
 /// The TypeScript bindings for this format, generated from [`schema`] and
 /// the vocabularies. Deterministic, and independent of where it is run from:
 /// it reads nothing but this module.
+///
+/// # Panics
+///
+/// If [`exactly_one`] names a key [`schema`] does not declare for the same
+/// kind -- a table defect, and one the schema's own test refuses first.
 #[must_use]
 pub fn typescript() -> String {
     use std::fmt::Write as _;
