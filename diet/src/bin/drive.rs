@@ -215,8 +215,8 @@ fn announcement(listening: &str, opened: u64) -> String {
 
 /// The endpoint's key, from a FILE: an argument is readable by anyone who
 /// can list the machine's processes. One trailing line break is the file's,
-/// not the key's; an empty key, or one with a line break inside it, is
-/// refused rather than sent.
+/// not the key's; an empty key, or one holding a control character (a line
+/// break among them), is refused rather than sent.
 fn bearer_from(path: &str) -> Result<Bearer, String> {
     let written =
         std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
@@ -225,7 +225,7 @@ fn bearer_from(path: &str) -> Result<Bearer, String> {
         .or_else(|| written.strip_suffix('\n'))
         .unwrap_or(&written);
     Bearer::new(key)
-        .ok_or_else(|| format!("{path} holds no usable key: empty, or a line break inside it"))
+        .ok_or_else(|| format!("{path} holds no usable key: empty, or holding a control character"))
 }
 
 /// An origin as a browser sends it: a scheme, `://`, a host and port, and
