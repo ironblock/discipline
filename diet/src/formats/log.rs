@@ -1601,6 +1601,85 @@ mod tests {
         }
     }
 
+    /// `request.failed.message` IS PROSE (ruled on #140): the typed `reason`
+    /// is the vocabulary, the message is diagnostic text, and nothing here
+    /// reads it as anything else. Two fixtures identical but for the message
+    /// -- empty, and a paragraph -- parse to the same lines and project to the
+    /// same value, `message` aside.
+    #[test]
+    fn a_failures_message_is_read_as_nothing_but_prose() {
+        let valid =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("formats/log/fixtures/valid");
+        let read = |name: &str| {
+            std::fs::read_to_string(valid.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
+        };
+        let empty = read("a-failure-whose-message-is-empty.jsonl");
+        let paragraph = read("a-failure-whose-message-is-a-paragraph.jsonl");
+
+        let without_message = |text: &str| -> Vec<Line> {
+            parse(text)
+                .expect("a valid fixture")
+                .into_iter()
+                .map(|mut line| {
+                    if let Event::RequestFailed { message, .. } = &mut line.event {
+                        message.clear();
+                    }
+                    line
+                })
+                .collect()
+        };
+        let (a, b) = (without_message(&empty), without_message(&paragraph));
+        assert!(
+            a.iter()
+                .any(|l| matches!(l.event, Event::RequestFailed { .. })),
+            "the fixtures carry a `request.failed`, or this proves nothing"
+        );
+        assert_eq!(a, b, "the two logs differ in more than a failure's message");
+        // The MESSAGES differ, one of them empty -- not merely the files: two
+        // files differing in whitespace would let a projection that reads the
+        // message pass unseen (#147's review).
+        let messages = |text: &str| -> Vec<String> {
+            parse(text)
+                .expect("a valid fixture")
+                .into_iter()
+                .filter_map(|line| match line.event {
+                    Event::RequestFailed { message, .. } => Some(message),
+                    _ => None,
+                })
+                .collect()
+        };
+        let (quiet, spoken) = (messages(&empty), messages(&paragraph));
+        assert!(
+            quiet.iter().all(String::is_empty) && spoken.iter().all(|m| !m.is_empty()),
+            "one fixture's messages are empty and the other's are prose: {quiet:?} / {spoken:?}"
+        );
+
+        let projected_without_message = |text: &str| -> Value {
+            let Value::Array(lines) = project(text).expect("a valid fixture projects") else {
+                panic!("a log projects to an array");
+            };
+            Value::Array(
+                lines
+                    .into_iter()
+                    .map(|line| match line {
+                        Value::Object(mut object) => {
+                            if matches!(object.get("kind"), Some(Value::String(k)) if k == "request.failed") {
+                                object.remove("message");
+                            }
+                            Value::Object(object)
+                        }
+                        other => other,
+                    })
+                    .collect(),
+            )
+        };
+        assert_eq!(
+            projected_without_message(&empty),
+            projected_without_message(&paragraph),
+            "the projection reads a failure's message as more than prose"
+        );
+    }
+
     fn bindings_path() -> std::path::PathBuf {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(BINDINGS)
     }
