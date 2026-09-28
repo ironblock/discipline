@@ -85,7 +85,7 @@ CI runs the same thing as the repository's `exercise` check (`./verify.sh --only
 
 | path | what it is |
 | --- | --- |
-| `src/drive/log.ts` | The session's log as the surface reads it: `diet/formats/log` v0 (#137), **mirrored by hand** until track one's generated bindings replace it, and held to `diet`'s own valid fixtures by `log.test.ts`. Beside v0, what the surface draws that the log does not say yet is marked AHEAD, each tagged with the step of #117 that will add it. A node's id is the `seq` of the line it began at. |
+| `src/drive/log.ts` | The session's log as the surface reads it: `diet/formats/log` v0, its types **generated** from the format (`diet/formats/log/log.ts`, #144) and imported. On top of them, what the surface draws that the log does not say yet is marked AHEAD, each tagged with the step of #117 that will add it. `log.test.ts` folds every one of `diet`'s valid logs. A node's id is the `seq` of the line it began at. |
 | `src/drive/script.ts`, `place.ts` | The authored shape the specimen, the kitchen sink and the recorded sessions are written in -- labels (`q/2`, `i/1`) where the log has `seq` references -- and the step that places a script in the log. Only the log is folded; stories find nodes by label through `idOf`. |
 | `src/drive/transport.ts` | The drive interface: subscribe to the session's log; send an ask, cancel, declare a seam. |
 | `src/drive/http.ts` | The transport against `diet`'s served session: `/events` as server-sent events, `/commands` as JSON. A closed stream asks, once, what it was answered with (finding 17, #117): 410 rebuilds from a new session's first line, anything else is shown to the author with its reason. |

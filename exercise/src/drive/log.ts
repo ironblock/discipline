@@ -1,22 +1,18 @@
 /**
- * The session's log, as the surface reads it: `diet/formats/log` v0 (#137,
- * `diet/src/formats/log.rs`), mirrored by hand -- and, beside it, what the
- * surface draws that v0 does not say yet, each tagged with the step of #117
- * that will make `diet` say it.
- *
- * HAND-MIRRORED, NOT GENERATED. #31 asks for bindings generated from the
- * format and checked in CI; the generator is track one's, queued after I1
- * (ruled on #117, 2026-09-28). Until it lands, `log.test.ts` folds every
- * valid fixture in `diet/formats/log/fixtures/valid/` and fails on anything
- * this file cannot read -- `diet`'s fixtures stay the one source. The PR that
- * adopts the generated types deletes this mirror.
+ * The session's log, as the surface reads it: `diet/formats/log` v0, whose
+ * types are GENERATED from `diet/src/formats/log.rs` (#144) and imported
+ * here -- and, on top of them, what the surface draws that v0 does not say
+ * yet, each marked AHEAD and tagged with the step of #117 that will make
+ * `diet` say it. The hand mirror this file was is gone (ruled on #117,
+ * 2026-09-28): a v0 line's shape is `diet`'s, checked in its CI.
  *
  * References are the `seq` of the line they name, as v0 has them: an
- * identifier the log issues, never one anybody invents. What v0 does not
- * have yet is marked AHEAD (a kind, or an optional field on a v0 kind); a v0
- * reader would refuse it, and a session run against `diet` today carries
- * none of it -- the surface draws what it can without it.
+ * identifier the log issues, never one anybody invents. A session run
+ * against `diet` today carries nothing AHEAD -- the surface draws what it can
+ * without it.
  */
+
+import type * as V0 from '../../../diet/formats/log/log.ts';
 
 /** A step of #117, and what it makes the drive able to say. One source. */
 export const NEEDS = {
@@ -39,31 +35,24 @@ export type Need = keyof typeof NEEDS;
  */
 export type Open<Known extends string> = Known | (string & {});
 
-// ------------------------------------------------------------------ v0's sets
+// ------------------------------------------------------------------ v0's sets, from `diet`
 
-/** What the session is doing (v0 `State`). */
-export type State = 'awaiting' | 'turn' | 'capture' | 'ended';
-/** A command a person sent (v0 `Command`). */
-export type CommandKind = 'ask' | 'cancel' | 'declare-seam' | 'end';
-/** Why a command was refused (v0 `Refusal`). */
-export type RefusalReason = Open<'in-flight' | 'ended' | 'nothing-in-flight' | 'seam-not-built' | 'stale'>;
-/** Who a head message is from (v0 `Role`). */
-export type Role = 'system' | 'user' | 'assistant';
-/** How a turn ended (v0 `SettleReason`). */
-export type SettleReason = Open<'final' | 'cancelled' | 'max_steps' | 'timeout' | 'failed'>;
-/** What ended an idle gap (v0 `GapEnd`). */
-export type GapEnd = 'ask' | 'seam' | 'cancel' | 'end';
+export type { GapEnd, HeadMessage, Role, State } from '../../../diet/formats/log/log.ts';
+export type CommandKind = V0.Command;
+export type RefusalReason = V0.Refusal;
+/** How a turn ended: v0's, open to a newer drive's for the registries that draw them. */
+export type SettleReason = Open<V0.SettleReason>;
 /**
- * Why a call ended without an answer (v0 `FailReason`: server, timeout,
- * transport, crashed). AHEAD: `context_overflow`, the predecessor's commonest
- * hard failure, which v0 folds into `server`.
+ * Why a call ended without an answer: v0's (server, timeout, transport,
+ * crashed). AHEAD: `context_overflow`, the predecessor's commonest hard
+ * failure, which v0 folds into `server`.
  */
-export type FailReason = Open<'server' | 'timeout' | 'transport' | 'crashed' | 'context_overflow'>;
+export type FailReason = Open<V0.FailReason | 'context_overflow'>;
 
 /** The side lanes a fork runs in (AHEAD, R4). `extraction` is the predecessor's mechanical read of the trunk. */
 export type ForkLane = Open<'interview' | 'ratify' | 'extraction'>;
 /** Which lane a request was made on: v0 has only `trunk`; the rest are AHEAD (R4). */
-export type Lane = 'trunk' | ForkLane;
+export type Lane = V0.Lane | ForkLane;
 
 /** llama.cpp's per-request `timings`, the fields the surface reads (AHEAD, R3). */
 export interface Timings {
@@ -91,7 +80,7 @@ export type Authority = Open<'stated' | 'extracted' | 'observed' | 'arm'>;
 
 export type SeamReason = Open<'operator' | 'phase' | 'cadence' | 'budget'>;
 
-// ------------------------------------------------------------------ lines
+// ------------------------------------------------------------------ v0's lines, with what is AHEAD on them
 
 interface At {
   /** Its position in the log: gapless, from 0. The primary key, and what references name. */
@@ -100,21 +89,8 @@ interface At {
   readonly t: number;
 }
 
-export interface HeadMessage {
-  readonly role: Role;
-  readonly content: string;
-}
-
 /** The session opened. The first line, and only the first. */
-export interface SessionStart extends At {
-  readonly kind: 'session.start';
-  readonly version: number;
-  /** When, in milliseconds since the Unix epoch: the stream's identity (Q11). */
-  readonly opened: number;
-  /** The model name requests are sent with -- a name, not an identity. */
-  readonly model: string;
-  /** The messages the trunk starts from; the system prompt is its `system` message. */
-  readonly head: readonly HeadMessage[];
+export type SessionStart = V0.SessionStartLine & {
   /** AHEAD (R2's record fields): the arm this session runs. */
   readonly arm?: string;
   /** AHEAD (R4): the server's `-np`, how many requests it serves at once. */
@@ -125,126 +101,48 @@ export interface SessionStart extends At {
   readonly phase?: string;
   /** AHEAD (R3): the system prompt's size in tokens. */
   readonly system_tokens?: number;
-}
+};
 
-/** An ask was admitted, and a turn begins on it. */
-export interface Ask extends At {
-  readonly kind: 'ask';
-  /** The turn it begins, from 1. */
-  readonly turn: number;
-  readonly text: string;
-}
-
-/** The session's state moved. */
-export interface Settlement extends At {
-  readonly kind: 'settlement';
-  readonly from: State;
-  readonly to: State;
-}
+export type Ask = V0.AskLine;
+export type Settlement = V0.SettlementLine;
 
 /** A call was made to the model. Its `seq` is its identity: what its deltas, answer or failure name. */
-export interface Request extends At {
-  readonly kind: 'request';
-  readonly turn: number;
+export type Request = Omit<V0.RequestLine, 'lane'> & {
+  /** v0's `trunk`, or AHEAD (R4) a side lane. */
   readonly lane: Lane;
   /** AHEAD (R4): the server slot it went to. */
   readonly slot?: number;
   /** AHEAD (R4): the `seq` of the `fork` this call serves, for a side lane. */
   readonly fork?: number;
-}
+};
 
-/** A command was refused. */
-export interface Refused extends At {
-  readonly kind: 'refused';
-  readonly command: CommandKind;
-  readonly because: RefusalReason;
-  readonly during: State;
-}
-
+export type Refused = V0.RefusedLine;
 /** A piece of a call's answer: exactly one of `text` and `reasoning`. */
-export interface Delta extends At {
-  readonly kind: 'delta';
-  /** The `seq` of the `request` it answers. */
-  readonly request: number;
-  readonly text?: string;
-  readonly reasoning?: string;
-}
-
-/** A stop was asked for a turn's call. */
-export interface StopAsked extends At {
-  readonly kind: 'stop.asked';
-  readonly turn: number;
-}
+export type Delta = V0.DeltaLine;
+export type StopAsked = V0.StopAskedLine;
 
 /** A call answered. */
-export interface Response extends At {
-  readonly kind: 'response';
-  /** The `seq` of the `request` it answers. */
-  readonly to_request: number;
-  /** The whole answer. */
-  readonly text: string;
-  /** Why the server stopped, as it spelled it, if it said: llama.cpp's `stop`, `length`, `tool_calls`. */
-  readonly finish_reason?: string;
+export type Response = V0.ResponseLine & {
   /** AHEAD (R3): llama.cpp's timings for the call. */
   readonly timings?: Timings;
   /**
    * AHEAD (R3, the surface's ask, ruled into R3's scope on #117): where its
    * tool calls began in what it wrote -- tokens and ms generated before the
-   * first tool-call chunk. The rest of `timings`' generation is the calls'.
-   * `predicted_n` alone absent when only the time was kept (a harness's
-   * transcript that recorded when a call part began, not what came before).
+   * first tool-call chunk. `predicted_n` alone absent when only the time was
+   * kept (a harness's transcript that recorded when a call part began).
    */
   readonly calls_from?: { readonly predicted_n?: number; readonly predicted_ms: number };
   /** AHEAD (R2/I5r): the whole reasoning, as the deltas streamed it. */
   readonly reasoning?: string;
-}
+};
 
-/** A call was stopped. What arrived before is never an answer. */
-export interface Cancelled extends At {
-  readonly kind: 'cancelled';
-  /** The `seq` of the `request` stopped. */
-  readonly request: number;
-  readonly partial: string;
-}
-
-/** A call ended without an answer: refused by the server, failed, or its thread crashed. */
-export interface RequestFailed extends At {
-  readonly kind: 'request.failed';
-  /** The `seq` of the `request`. */
-  readonly request: number;
-  readonly reason: FailReason;
-  /** What the server, the transport or the panic said. */
-  readonly message: string;
-  /** The HTTP status, when the server refused it. */
-  readonly status?: number;
-  /** What arrived before it ended, when anything did. */
-  readonly partial?: string;
-}
-
+export type Cancelled = V0.CancelledLine;
+/** A call ended without an answer; its reason v0's, or AHEAD `context_overflow`. */
+export type RequestFailed = Omit<V0.RequestFailedLine, 'reason'> & { readonly reason: FailReason };
 /** A turn is over. */
-export interface TurnSettled extends At {
-  readonly kind: 'turn.settled';
-  readonly turn: number;
-  readonly reason: SettleReason;
-}
-
-/**
- * A person's idle gap after a settled turn, as the surface measured it (Q4,
- * ruled on #117): integer ms on the surface's monotonic clock, durations
- * only. The five sum to the gap's wall clock -- from the settling to the
- * accepted command -- within the residual the fold reports.
- */
-export interface IdleGap extends At {
-  readonly kind: 'idle.gap';
-  /** The `seq` of the `turn.settled` that opened the gap. */
-  readonly opened_by: number;
-  readonly notice: number;
-  readonly read: number;
-  readonly compose: number;
-  readonly away: number;
-  readonly blocked: number;
-  readonly ended_by: GapEnd;
-}
+export type TurnSettled = Omit<V0.TurnSettledLine, 'reason'> & { readonly reason: SettleReason };
+/** A person's idle gap after a settled turn, as the surface measured it (Q4). */
+export type IdleGap = V0.IdleGapLine;
 
 // ------------------------------------------------------------------ AHEAD kinds
 
@@ -392,39 +290,3 @@ export const NEEDS_OF: { readonly [K in Kind]: readonly Need[] } = {
   patch: ['R5'],
   seam: ['R6'],
 };
-
-/**
- * v0's keys per kind, required and optional, as `keys()` in `log.rs` has them
- * (every line also carries `seq`, `t` and `kind`): the mirror's one runtime
- * statement of v0, which `log.test.ts` holds `diet`'s fixtures to. A key or
- * a kind v0 gains fails that test until this file says it too.
- */
-export const V0_KEYS: { readonly [K in string]: readonly [readonly string[], readonly string[]] } = {
-  'session.start': [['version', 'opened', 'model', 'head'], []],
-  ask: [['turn', 'text'], []],
-  settlement: [['from', 'to'], []],
-  request: [['turn', 'lane'], []],
-  refused: [['command', 'because', 'during'], []],
-  delta: [['request'], ['text', 'reasoning']],
-  'stop.asked': [['turn'], []],
-  response: [['to_request', 'text'], ['finish_reason']],
-  cancelled: [['request', 'partial'], []],
-  'request.failed': [['request', 'reason', 'message'], ['status', 'partial']],
-  'turn.settled': [['turn', 'reason'], []],
-  'idle.gap': [['opened_by', 'notice', 'read', 'compose', 'away', 'blocked', 'ended_by'], []],
-};
-
-/** v0's closed sets, as the mirror knows them: each fixture's values must be among them. */
-export const V0_SETS = {
-  state: ['awaiting', 'turn', 'capture', 'ended'],
-  command: ['ask', 'cancel', 'declare-seam', 'end'],
-  refusal: ['in-flight', 'ended', 'nothing-in-flight', 'seam-not-built', 'stale'],
-  lane: ['trunk'],
-  role: ['system', 'user', 'assistant'],
-  fail: ['server', 'timeout', 'transport', 'crashed'],
-  settle: ['final', 'cancelled', 'max_steps', 'timeout', 'failed'],
-  gapEnd: ['ask', 'seam', 'cancel', 'end'],
-} as const satisfies Record<string, readonly string[]>;
-
-/** v0's kinds: the rest are AHEAD. */
-export const V0_KINDS: ReadonlySet<string> = new Set(Object.keys(V0_KEYS));

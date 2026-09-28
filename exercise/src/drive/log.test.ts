@@ -6,15 +6,13 @@ import { describe, expect, it } from 'vitest';
 
 import { fold } from '../session/fold.ts';
 import type { LogLine } from './log.ts';
-import { V0_KEYS, V0_KINDS, V0_SETS } from './log.ts';
 
 /**
- * The hand-mirrored v0 (`log.ts`) held to `diet`'s own fixtures, until the
- * generated bindings replace it (#117, 2026-09-28): every valid log in
- * `diet/formats/log/fixtures/valid/` is read line by line against the
- * mirror's keys and sets, and folded. Anything the surface cannot read --
- * a kind, a key, a member it does not know, a line the fold counts as
- * unknown -- fails here, where it is found, not in a session.
+ * `diet`'s own valid logs (`diet/formats/log/fixtures/valid/`), folded. A
+ * line's shape is `diet`'s -- its types generated from the format (#144) and
+ * checked in its CI -- so what is left to hold here is the surface's half:
+ * every fixture folds, into a session, with no line the fold counts as
+ * unknown. A kind `diet` gains fails here before it fails in a session.
  */
 const valid = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../diet/formats/log/fixtures/valid');
 const fixtures = readdirSync(valid).filter((f) => f.endsWith('.jsonl')).sort();
@@ -25,19 +23,6 @@ const logOf = (file: string): LogLine[] =>
     .filter((line) => line !== '')
     .map((line) => JSON.parse(line) as LogLine);
 
-/** Which v0 set each key's values belong to. */
-const SET_OF: Readonly<Record<string, readonly string[]>> = {
-  'settlement.from': V0_SETS.state,
-  'settlement.to': V0_SETS.state,
-  'refused.command': V0_SETS.command,
-  'refused.because': V0_SETS.refusal,
-  'refused.during': V0_SETS.state,
-  'request.lane': V0_SETS.lane,
-  'request.failed.reason': V0_SETS.fail,
-  'turn.settled.reason': V0_SETS.settle,
-  'idle.gap.ended_by': V0_SETS.gapEnd,
-};
-
 describe("diet's valid v0 logs, as the surface reads them", () => {
   it('finds the fixtures', () => {
     expect(fixtures.length).toBeGreaterThan(0);
@@ -45,21 +30,7 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
 
   for (const file of fixtures) {
     it(file, () => {
-      const log = logOf(file);
-      for (const line of log) {
-        const where = `${file} seq ${line.seq}`;
-        expect(V0_KINDS.has(line.kind), `${where}: kind ${line.kind}`).toBe(true);
-        const [required, optional] = V0_KEYS[line.kind]!;
-        const keys = Object.keys(line).filter((k) => k !== 'seq' && k !== 't' && k !== 'kind');
-        for (const key of required) expect(keys, `${where}: ${line.kind} lacks ${key}`).toContain(key);
-        for (const key of keys) expect([...required, ...optional], `${where}: ${line.kind} has ${key}, which the mirror does not`).toContain(key);
-        for (const [key, value] of Object.entries(line)) {
-          const set = SET_OF[`${line.kind}.${key}`];
-          if (set) expect(set, `${where}: ${line.kind}.${key} = ${String(value)}`).toContain(value);
-        }
-        if (line.kind === 'session.start') for (const m of line.head) expect(V0_SETS.role, `${where}: role ${m.role}`).toContain(m.role);
-      }
-      const session = fold(log);
+      const session = fold(logOf(file));
       expect([...session.unknown.keys()], `${file}: kinds the fold does not know`).toEqual([]);
       expect(session.state).not.toBe('connecting');
     });
