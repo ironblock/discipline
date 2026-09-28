@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 53
+faults = 55
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -576,8 +576,10 @@ anchor = '''
 becomes = '''
         let _ = (&previous.tools, &previous.template_kwargs, &previous.frozen);'''
 catches = [
+    "client::head::tests::a_change_to_reasoning_alone_is_reasoning_not_the_residual",
     "client::head::tests::a_date_that_moved_is_a_text_change_naming_the_line",
     "client::head::tests::a_head_that_moved_in_two_places_names_the_stronger_class",
+    "client::head::tests::a_reasoning_change_is_named_whether_added_rewritten_or_beside_a_text_change",
     "client::head::tests::a_template_argument_that_moved_is_named_by_its_key",
     "client::head::tests::a_trailing_newline_or_a_crlf_ending_is_an_ordinary_line_delta",
     "client::head::tests::a_watch_reports_a_change_per_lane_and_never_on_the_first_head",
@@ -604,6 +606,7 @@ becomes = '''
         for (index, message) in self.frozen.iter().enumerate() {'''
 catches = [
     "client::head::tests::a_dated_model_identifier_is_a_name_and_not_a_timestamp",
+    "client::head::tests::a_dated_template_argument_is_a_timestamp_too",
 ]
 
 [[fault]]
@@ -952,4 +955,31 @@ becomes = '''
                 Step::Reasoning(text) => on_delta(Piece::Text(&text)),'''
 catches = [
     "client::stream::tests::a_canned_stream_plays_reasoning_as_reasoning_and_text_as_text",
+]
+
+[[fault]]
+id = "client.head-a-reasoning-change-is-unattributed"
+failure_class = "client.head-a-reasoning-change-is-unattributed"
+target = "diet/src/client/head.rs"
+expect_exit = 101
+anchor = '''
+            if before.reasoning != after.reasoning {'''
+becomes = '''
+            if false && before.reasoning != after.reasoning {'''
+catches = [
+    "client::head::tests::a_change_to_reasoning_alone_is_reasoning_not_the_residual",
+    "client::head::tests::a_reasoning_change_is_named_whether_added_rewritten_or_beside_a_text_change",
+]
+
+[[fault]]
+id = "client.head-only-a-dropped-reasoning-is-named"
+failure_class = "client.head-only-a-dropped-reasoning-is-named"
+target = "diet/src/client/head.rs"
+expect_exit = 101
+anchor = '''
+            if before.reasoning != after.reasoning {'''
+becomes = '''
+            if before.reasoning.is_some() && after.reasoning.is_none() {'''
+catches = [
+    "client::head::tests::a_reasoning_change_is_named_whether_added_rewritten_or_beside_a_text_change",
 ]
