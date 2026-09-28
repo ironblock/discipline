@@ -6335,11 +6335,11 @@ failure_class = "drive.serve-bin-accepts-any-allow-origin"
 migrated = false
 
 [[fault]]
-id = "drive.session-a-refused-commands-gap-is-dropped"
+id = "drive.session-a-refused-commands-gap-is-logged"
 kind = "lane-fault"
 check = "lanes"
-label = "drive.session-a-refused-commands-gap-is-dropped"
-failure_class = "drive.session-a-refused-commands-gap-is-dropped"
+label = "drive.session-a-refused-commands-gap-is-logged"
+failure_class = "drive.session-a-refused-commands-gap-is-logged"
 migrated = false
 
 [[fault]]
@@ -6372,6 +6372,30 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.serve-a-gap-with-more-than-its-shape-is-accepted"
 failure_class = "drive.serve-a-gap-with-more-than-its-shape-is-accepted"
+migrated = false
+
+[[fault]]
+id = "drive.session-an-admitted-command-leaves-the-gap-open"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-an-admitted-command-leaves-the-gap-open"
+failure_class = "drive.session-an-admitted-command-leaves-the-gap-open"
+migrated = false
+
+[[fault]]
+id = "drive.session-an-admitted-end-drops-its-gap"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-an-admitted-end-drops-its-gap"
+failure_class = "drive.session-an-admitted-end-drops-its-gap"
+migrated = false
+
+[[fault]]
+id = "drive.session-an-unwritable-duration-is-capped"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-an-unwritable-duration-is-capped"
+failure_class = "drive.session-an-unwritable-duration-is-capped"
 migrated = false
 
 [[fault]]
