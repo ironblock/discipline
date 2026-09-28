@@ -6249,6 +6249,14 @@ failure_class = "client.canned-plays-reasoning-as-text"
 migrated = false
 
 [[fault]]
+id = "client.head-a-reasoning-change-is-unattributed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.head-a-reasoning-change-is-unattributed"
+failure_class = "client.head-a-reasoning-change-is-unattributed"
+migrated = false
+
+[[fault]]
 id = "drive.session-a-line-drops-the-partial"
 kind = "lane-fault"
 check = "lanes"
