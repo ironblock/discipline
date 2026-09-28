@@ -1,0 +1,10 @@
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"seq":0,"t":0,"version":0}
+  {"kind":"ask","seq":1,"t":5,"text":"say hello","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"kind":"delta","request":3,"seq":4,"t":20,"text":"Hel"}
+{"kind":"delta","request":3,"seq":5,"t":25,"text":"lo"}
+{"finish_reason":"stop","kind":"response","seq":6,"t":30,"text":"Hello","to_request":3}
+{"kind":"turn.settled","reason":"final","seq":7,"t":35,"turn":1}
+{"from":"turn","kind":"settlement","seq":8,"t":40,"to":"capture"}
+{"from":"capture","kind":"settlement","seq":9,"t":45,"to":"awaiting"}
