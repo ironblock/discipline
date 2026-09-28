@@ -281,7 +281,7 @@ export const AssistantPrefill: Story = {
   render: () => {
     // No progress frame yet: the first arrives a quarter-second in.
     const unread = variantAt({ beat: 2, t: 5_000 }, (e) => (e['kind'] === 'progress' ? [] : e));
-    const node = unread.eras.flatMap((era) => era.nodes).find((n) => n.id === 'q/3' && n.kind === 'assistant');
+    const node = unread.eras.flatMap((era) => era.nodes).find((n) => n.id === unread.idOf('q/3') && n.kind === 'assistant');
     if (node?.kind !== 'assistant') throw new Error('no assistant q/3 in prefill');
     return <AssistantMessage node={node} />;
   },
@@ -630,8 +630,8 @@ export const ToolScriptNoOutput: Story = {
 function Pair({ at, message, tool, callsFrom }: { readonly at: Cursor; readonly message: string; readonly tool: string; readonly callsFrom?: { readonly predicted_n: number; readonly predicted_ms: number } }) {
   const session = callsFrom ? variantAt(at, (e) => (e['kind'] === 'response' && e['to_request'] === message ? { ...e, calls_from: callsFrom } : e)) : sessionAt(at);
   const nodes = session.eras.flatMap((era) => era.nodes);
-  const caller = nodes.find((n) => n.id === message);
-  const call = nodes.find((n) => n.id === tool);
+  const caller = nodes.find((n) => n.id === session.idOf(message));
+  const call = nodes.find((n) => n.id === session.idOf(tool));
   if (caller?.kind !== 'assistant' || call?.kind !== 'tool') throw new Error(`no ${message} and ${tool}`);
   return (
     <div style={{ display: 'grid', gap: '0.5rem' }}>
@@ -721,7 +721,7 @@ const unknownBranch = () => {
     if (e['kind'] === 'patch' && e['from'] === 'i/1') return { ...e, op: 'amend', authority: 'observed-momentum' };
     return e;
   });
-  const branch = [...session.branches.values()].flat().find((b) => b.id === 'i/1');
+  const branch = [...session.branches.values()].flat().find((b) => b.id === session.idOf('i/1'));
   if (!branch) throw new Error('no branch i/1');
   return branch;
 };
@@ -751,7 +751,7 @@ export const UnknownTool: Story = {
     const session = variantAt(MOMENTS.firstSettled, (e) =>
       e['kind'] === 'tool.begin' && e['id'] === 't/1' ? { ...e, tool: 'read', args: { path: 'src/report.rs', lines: [40, 88] } } : e,
     );
-    const node = session.eras[0]?.nodes.find((n) => n.id === 't/1');
+    const node = session.eras[0]?.nodes.find((n) => n.id === session.idOf('t/1'));
     if (node?.kind !== 'tool') throw new Error('no tool t/1');
     return <ToolBlock node={node} first />;
   },

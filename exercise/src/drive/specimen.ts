@@ -2,7 +2,7 @@
  * THE SPECIMEN: one authored session, walking #31's definition of done.
  *
  * This is not a record and nothing validated it. It is hand-written, in the
- * provisional vocabulary of `events.ts`, to show what the surface needs the
+ * script language of `script.ts`, to show what the surface needs the
  * drive to say -- the forcing function, in data. Its numbers are plausible
  * for one local model on llama.cpp with `-np 2`, and are not measurements.
  * When #117's loop runs, a recorded session replaces it and this file is
@@ -16,7 +16,7 @@
  * transcript, and reads only the forty-nine lines it needs.
  */
 
-import type { Timings, Unplaced } from './events.ts';
+import type { Timings, Unplaced } from './script.ts';
 
 /** What starts a beat: the session opening, a person's ask, a declared seam. */
 export type Trigger = 'open' | 'send' | 'seam';

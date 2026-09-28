@@ -4,14 +4,16 @@
  * This is the only place a drive event becomes something a component can
  * render, and the type says so: every node is `Folded`, a brand declared
  * here and never exported, so a component cannot be handed a node that did
- * not come from the log -- a story included. Each node also carries `from`,
+ * not come from the log -- a story included. The log is `diet`'s (`log.ts`):
+ * a node's `id` is the `seq` of the line it began at, the identifier the log
+ * issues, and every reference between nodes is one. Each node also carries `from`,
  * the log positions it was folded from, which is what the inspector shows
  * when you ask where a number came from, and `needs`, the steps of #117 the
  * node waits on, which is what the gaps overlay outlines.
  */
 
-import type { Authority, DriveEvent, EventOf, FailReason, ForkLane, ForkOutcome, Lane, Need, PatchOp, SeamReason, SettleReason, Stop, Timings, Tool } from '../drive/events.ts';
-import { NEEDS_OF } from '../drive/events.ts';
+import type { Authority, FailReason, ForkLane, ForkOutcome, Lane, LineOf, LogLine, Need, Open, PatchOp, SeamReason, SettleReason, Timings, Tool } from '../drive/log.ts';
+import { NEEDS_OF } from '../drive/log.ts';
 import { receiptOf } from './receipt.ts';
 import type { Receipt } from './receipt.ts';
 
@@ -48,6 +50,9 @@ export interface UserNode extends Provenance {
 }
 
 export type Progress = 'prefill' | 'streaming' | 'done' | 'cancelled' | 'failed';
+
+/** Why a generation stopped: the response's `finish_reason` as llama.cpp spells it, or `cancelled` for a stopped call. */
+export type Stop = Open<'stop' | 'tool_calls' | 'length' | 'cancelled'>;
 
 export interface Generation {
   readonly progress: Progress;
@@ -91,7 +96,7 @@ export interface Meter {
 
 export interface AssistantNode extends Provenance, Generation {
   readonly kind: 'assistant';
-  /** The trunk request's id; `fork.at` may name its response instead. */
+  /** Its request's `seq`: what its answer, its tool calls and its side calls name. */
   readonly id: string;
   readonly turn: number;
 }
@@ -102,7 +107,7 @@ export interface ToolNode extends Provenance {
   readonly turn: number;
   readonly tool: Tool;
   readonly args: Readonly<Record<string, unknown>>;
-  /** The assistant node that made the call (its request's id): the model wrote it, as the end of that generation. */
+  /** The assistant node that made the call (its request's `seq`): the model wrote it, as the end of that generation. */
   readonly after: string;
   /** Session time the call began. */
   readonly startedAt: number;
@@ -142,7 +147,7 @@ export interface BranchNode extends Provenance, Partial<Generation> {
   readonly id: string;
   readonly lane: ForkLane;
   readonly slot: number;
-  /** The trunk node it branched from. */
+  /** The trunk node it branched from: an assistant node, or a tool call. */
   readonly at: string;
   readonly why: string;
   readonly question: string;
@@ -202,6 +207,8 @@ export interface Holder {
 
 export interface Session {
   readonly state: SessionState;
+  /** When the session opened, ms since the Unix epoch: the stream's identity (Q11). 0 before it has. */
+  readonly opened: number;
   readonly arm: string;
   readonly model: string;
   readonly slots: number;
@@ -226,59 +233,55 @@ function brand<T>(value: T): Folded<T> {
   return value as Folded<T>;
 }
 
-function needsOf(events: readonly DriveEvent[]): Need[] {
+function needsOf(events: readonly LogLine[]): Need[] {
   const out = new Set<Need>();
   for (const e of events) for (const n of NEEDS_OF[e.kind]) out.add(n);
   return [...out].sort();
 }
 
-function provenance(...events: readonly (DriveEvent | undefined)[]): Provenance {
-  const present = events.filter((e): e is DriveEvent => e !== undefined);
+function provenance(...events: readonly (LogLine | undefined)[]): Provenance {
+  const present = events.filter((e): e is LogLine => e !== undefined);
   return { from: present.map((e) => e.seq), needs: needsOf(present) };
 }
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 interface GenerationBuilder {
-  request: EventOf<'request'>;
-  deltas: EventOf<'delta'>[];
-  frames: EventOf<'progress'>[];
-  response?: EventOf<'response'>;
-  failed?: EventOf<'request.failed'>;
+  request: LineOf<'request'>;
+  deltas: LineOf<'delta'>[];
+  frames: LineOf<'progress'>[];
+  response?: LineOf<'response'>;
+  cancelled?: LineOf<'cancelled'>;
+  failed?: LineOf<'request.failed'>;
 }
 
-function generation(g: GenerationBuilder): Generation {
-  const { request, response, failed } = g;
-  const reasoning = response ? (response.reasoning ?? '') : g.deltas.map((d) => d.reasoning ?? '').join('');
-  const text = response ? response.text : g.deltas.map((d) => d.text ?? '').join('');
-  const progress: Progress = response
-    ? response.stop === 'cancelled'
-      ? 'cancelled'
-      : 'done'
-    : failed
-      ? 'failed'
-      : g.deltas.length > 0
-        ? 'streaming'
-        : 'prefill';
+function generation(g: GenerationBuilder, trunkSlot: number): Generation {
+  const { request, response, cancelled, failed } = g;
+  const streamed = (piece: 'text' | 'reasoning') => g.deltas.map((d) => d[piece] ?? '').join('');
+  const reasoning = response?.reasoning ?? streamed('reasoning');
+  const text = response ? response.text : cancelled ? cancelled.partial : streamed('text');
+  const ended = response ?? cancelled ?? failed;
+  const progress: Progress = response ? 'done' : cancelled ? 'cancelled' : failed ? 'failed' : g.deltas.length > 0 ? 'streaming' : 'prefill';
   return {
     progress,
     reasoning,
     text,
-    slot: request.slot,
+    // v0 names no slot: a request on the trunk is on the trunk's.
+    slot: request.slot ?? trunkSlot,
     startedAt: request.t,
     ...(g.deltas[0] ? { writingSince: g.deltas[0].t } : {}),
-    lastActivityAt: response?.t ?? failed?.t ?? g.deltas.at(-1)?.t ?? request.t,
-    ...(response || failed ? { endedAt: (response ?? failed)!.t } : {}),
-    // A cancelled response's timings are not a measurement (the ask's prefill ignores them too): what the frames said stands.
-    ...(response ? { stop: response.stop, wallMs: response.t - request.t } : {}),
-    ...(response && response.stop !== 'cancelled' ? { timings: response.timings } : {}),
+    lastActivityAt: ended?.t ?? g.deltas.at(-1)?.t ?? request.t,
+    ...(ended ? { endedAt: ended.t, wallMs: ended.t - request.t } : {}),
+    ...(response?.finish_reason !== undefined ? { stop: response.finish_reason } : cancelled ? { stop: 'cancelled' } : {}),
+    // A stopped call's timings are not a measurement, and v0 gives it none: what the frames said stands.
+    ...(response?.timings ? { timings: response.timings } : {}),
     ...(response?.calls_from ? { callsFrom: response.calls_from } : {}),
-    ...(failed && !response ? { failure: { reason: failed.reason, message: failed.message }, wallMs: failed.t - request.t } : {}),
-    ...((!response || response.stop === 'cancelled') && !failed && g.frames.length > 0 ? { meter: meterOf(g.frames) } : {}),
+    ...(failed && !response ? { failure: { reason: failed.reason, message: failed.message } } : {}),
+    ...(!response && !failed && g.frames.length > 0 ? { meter: meterOf(g.frames) } : {}),
   };
 }
 
-function meterOf(frames: readonly EventOf<'progress'>[]): Meter {
+function meterOf(frames: readonly LineOf<'progress'>[]): Meter {
   const last = frames.at(-1)!;
   const top = frames.reduce((best, f) => (f.prompt.processed > best.prompt.processed ? f : best), frames[0]!);
   const first = frames[0]!;
@@ -306,11 +309,12 @@ function unended(g: Generation): Omit<Generation, 'endedAt'> {
 }
 
 /** Fold a session's log. Pure; the same log always folds the same. */
-export function fold(events: readonly DriveEvent[]): Session {
-  const start = events.find((e): e is EventOf<'session.start'> => e.kind === 'session.start');
+export function fold(lines: readonly LogLine[]): Session {
+  const start = lines.find((e): e is LineOf<'session.start'> => e.kind === 'session.start');
   if (!start) {
     return {
       state: 'connecting',
+      opened: 0,
       arm: '',
       model: '',
       slots: 0,
@@ -321,33 +325,36 @@ export function fold(events: readonly DriveEvent[]): Session {
       memory: [],
       occupancy: [],
       now: 0,
-      events: events.length,
+      events: lines.length,
       unknown: new Map(),
-      receipt: { ...receiptOf(events), liveEntries: 0 },
+      receipt: { ...receiptOf(lines), liveEntries: 0 },
     };
   }
+  const trunkSlot = start.trunk_slot ?? 0;
+  const id = (seq: number) => String(seq);
 
-  // Builders, keyed by the ids later events name.
-  const generations = new Map<string, GenerationBuilder>();
-  const responseToRequest = new Map<string, string>();
-  const asks = new Map<number, EventOf<'ask'>>();
-  const firstRequestOfTurn = new Map<number, string>();
-  const tools = new Map<string, { begin: EventOf<'tool.begin'>; end?: EventOf<'tool.end'> }>();
-  const forks = new Map<string, { fork: EventOf<'fork'>; request?: string; settled?: EventOf<'fork.settled'>; patches: EventOf<'patch'>[] }>();
+  // Builders, keyed by the `seq` later lines name.
+  const generations = new Map<number, GenerationBuilder>();
+  const asks = new Map<number, LineOf<'ask'>>();
+  const firstRequestOfTurn = new Map<number, number>();
+  const tools = new Map<number, { begin: LineOf<'tool.begin'>; end?: LineOf<'tool.end'> }>();
+  const forks = new Map<number, { fork: LineOf<'fork'>; request?: number; settled?: LineOf<'fork.settled'>; patches: LineOf<'patch'>[] }>();
   const entries = new Map<string, Mutable<Omit<MemoryEntry, 'fresh' | 'landedAt'>> & { seq: number }>();
 
   type Slot =
     | { kind: 'user'; turn: number }
-    | { kind: 'assistant'; request: string }
-    | { kind: 'tool'; id: string }
-    | { kind: 'settled'; event: EventOf<'turn.settled'> };
-  const eras: { seam?: EventOf<'seam'>; system: SystemNode; slots: Slot[] }[] = [
+    | { kind: 'assistant'; request: number }
+    | { kind: 'tool'; begin: number }
+    | { kind: 'settled'; line: LineOf<'turn.settled'> };
+  const system = start.head.find((m) => m.role === 'system');
+  const eras: { seam?: LineOf<'seam'>; system: SystemNode; slots: Slot[] }[] = [
     {
       system: {
         kind: 'system',
-        id: 'system/0',
-        text: start.system.text,
-        ...(start.system.tokens !== undefined ? { tokens: start.system.tokens } : {}),
+        // Part of a line, not the whole of one: the line's own id is its session start, or its seam.
+        id: `system/${start.seq}`,
+        text: system?.content ?? '',
+        ...(start.system_tokens !== undefined ? { tokens: start.system_tokens } : {}),
         ...provenance(start),
       },
       slots: [],
@@ -356,14 +363,21 @@ export function fold(events: readonly DriveEvent[]): Session {
   const era = () => eras[eras.length - 1]!;
 
   const unknown = new Map<string, number>();
-  let phase = start.phase;
+  let phase = start.phase ?? '';
   let openTurn: number | undefined;
   let lastAskSeq = -1;
-  let ended = false;
+  // The state as the log says it, when it says it (`diet` logs every move; a script logs only the end).
+  let settledTo: LineOf<'settlement'>['to'] | undefined;
 
-  for (const e of events) {
+  for (const e of lines) {
     switch (e.kind) {
       case 'session.start':
+      case 'refused':
+      case 'stop.asked':
+      case 'idle.gap':
+        break;
+      case 'settlement':
+        settledTo = e.to;
         break;
       case 'ask':
         asks.set(e.turn, e);
@@ -372,13 +386,13 @@ export function fold(events: readonly DriveEvent[]): Session {
         era().slots.push({ kind: 'user', turn: e.turn });
         break;
       case 'request':
-        generations.set(e.id, { request: e, deltas: [], frames: [] });
+        generations.set(e.seq, { request: e, deltas: [], frames: [] });
         if (e.lane === 'trunk') {
-          if (!firstRequestOfTurn.has(e.turn)) firstRequestOfTurn.set(e.turn, e.id);
-          era().slots.push({ kind: 'assistant', request: e.id });
-        } else if (e.fork) {
+          if (!firstRequestOfTurn.has(e.turn)) firstRequestOfTurn.set(e.turn, e.seq);
+          era().slots.push({ kind: 'assistant', request: e.seq });
+        } else if (e.fork !== undefined) {
           const f = forks.get(e.fork);
-          if (f) f.request = e.id;
+          if (f) f.request = e.seq;
         }
         break;
       case 'delta':
@@ -390,54 +404,58 @@ export function fold(events: readonly DriveEvent[]): Session {
       case 'response': {
         const g = generations.get(e.to_request);
         if (g) g.response = e;
-        responseToRequest.set(e.id, e.to_request);
+        break;
+      }
+      case 'cancelled': {
+        const g = generations.get(e.request);
+        if (g) g.cancelled = e;
+        break;
+      }
+      case 'request.failed': {
+        const g = generations.get(e.request);
+        if (g) g.failed = e;
         break;
       }
       case 'tool.begin':
-        tools.set(e.id, { begin: e });
-        era().slots.push({ kind: 'tool', id: e.id });
+        tools.set(e.seq, { begin: e });
+        era().slots.push({ kind: 'tool', begin: e.seq });
         break;
       case 'tool.end': {
-        const t = tools.get(e.id);
+        const t = tools.get(e.begin);
         if (t) t.end = e;
         break;
       }
       case 'turn.settled':
         if (openTurn === e.turn) openTurn = undefined;
         // A turn that ended on its own, or was cancelled (the message says so), needs no mark.
-        if (e.reason !== 'final' && e.reason !== 'cancelled') era().slots.push({ kind: 'settled', event: e });
+        if (e.reason !== 'final' && e.reason !== 'cancelled') era().slots.push({ kind: 'settled', line: e });
         break;
-      case 'request.failed': {
-        const g = generations.get(e.request);
-        if (g) g.failed = e;
-        break;
-      }
       case 'fork':
-        forks.set(e.id, { fork: e, patches: [] });
+        forks.set(e.seq, { fork: e, patches: [] });
         break;
       case 'fork.settled': {
-        const f = forks.get(e.id);
+        const f = forks.get(e.fork);
         if (f) f.settled = e;
         break;
       }
       case 'patch': {
-        forks.get(e.from)?.patches.push(e);
+        forks.get(e.fork)?.patches.push(e);
         const old = entries.get(e.entry.id);
         const base = {
           ...(e.entry.category !== undefined ? { category: e.entry.category } : {}),
           ...(e.authority !== undefined ? { authority: e.authority } : {}),
           text: e.entry.text,
-          by: e.id,
+          by: id(e.seq),
           seq: e.seq,
           ...provenance(e),
         };
         if (e.op === 'retire') {
-          if (old) entries.set(e.entry.id, { ...old, state: 'retired', by: e.id, seq: e.seq, from: [...old.from, e.seq] });
+          if (old) entries.set(e.entry.id, { ...old, state: 'retired', by: id(e.seq), seq: e.seq, from: [...old.from, e.seq] });
           break;
         }
         if (e.op === 'supersede' && e.supersedes) {
           const replaced = entries.get(e.supersedes);
-          if (replaced) entries.set(e.supersedes, { ...replaced, state: 'superseded', by: e.id, seq: e.seq, from: [...replaced.from, e.seq] });
+          if (replaced) entries.set(e.supersedes, { ...replaced, state: 'superseded', by: id(e.seq), seq: e.seq, from: [...replaced.from, e.seq] });
         }
         if (e.op === 'add' || e.op === 'supersede' || !old) {
           entries.set(e.entry.id, { id: e.entry.id, state: 'live', ...base, ...(e.op !== 'add' && e.op !== 'supersede' ? { op: e.op } : {}) });
@@ -449,22 +467,19 @@ export function fold(events: readonly DriveEvent[]): Session {
       }
       case 'seam': {
         if (e.phase) phase = e.phase.to;
-        const system: SystemNode = {
+        const rendered: SystemNode = {
           kind: 'system',
-          id: `system/${e.id}`,
+          id: `system/${e.seq}`,
           text: e.render.text,
           ...(e.render.tokens !== undefined ? { tokens: e.render.tokens } : {}),
           render: e.render.version,
           ...provenance(e),
         };
-        eras.push({ seam: e, system, slots: [] });
+        eras.push({ seam: e, system: rendered, slots: [] });
         break;
       }
-      case 'session.end':
-        ended = true;
-        break;
       default: {
-        // Every kind the vocabulary names is handled above -- `never` keeps the
+        // Every kind the log names is handled above -- `never` keeps the
         // compiler checking that. What reaches here at run time is a kind from a
         // newer drive: the log carries it before the surface draws it.
         const newer: never = e;
@@ -475,24 +490,23 @@ export function fold(events: readonly DriveEvent[]): Session {
   }
 
   // Trunk nodes, era by era.
-  const trunkPrefixAt = (timings: Timings | undefined) =>
-    timings ? timings.prompt_n + timings.cache_n + timings.predicted_n : undefined;
+  const trunkPrefixAt = (timings: Timings | undefined) => (timings ? timings.prompt_n + timings.cache_n + timings.predicted_n : undefined);
   let previousEraEnd: Timings | undefined;
   const builtEras: Era[] = eras.map((raw, index) => {
     const nodes: TrunkNode[] = raw.slots.map((slot): TrunkNode => {
       switch (slot.kind) {
         case 'user': {
           const ask = asks.get(slot.turn)!;
-          const firstId = firstRequestOfTurn.get(slot.turn);
-          const first = firstId ? generations.get(firstId) : undefined;
+          const firstSeq = firstRequestOfTurn.get(slot.turn);
+          const first = firstSeq !== undefined ? generations.get(firstSeq) : undefined;
           const timings = first?.response?.timings;
           return brand<UserNode>({
             kind: 'user',
-            id: `ask/${slot.turn}`,
+            id: id(ask.seq),
             turn: slot.turn,
             text: ask.text,
             endedAt: ask.t,
-            ...(timings && first?.response?.stop !== 'cancelled' ? { prefill: { fresh: timings.prompt_n, cached: timings.cache_n } } : {}),
+            ...(timings ? { prefill: { fresh: timings.prompt_n, cached: timings.cache_n } } : {}),
             ...provenance(ask, first?.response),
           });
         }
@@ -500,22 +514,22 @@ export function fold(events: readonly DriveEvent[]): Session {
           const g = generations.get(slot.request)!;
           const node: AssistantNode = {
             kind: 'assistant',
-            id: g.request.id,
+            id: id(g.request.seq),
             turn: g.request.turn,
-            ...generation(g),
-            ...provenance(g.request, ...g.deltas.slice(0, 1), g.response, g.failed),
+            ...generation(g, trunkSlot),
+            ...provenance(g.request, ...g.deltas.slice(0, 1), g.response, g.cancelled, g.failed),
           };
           return brand(node);
         }
         case 'tool': {
-          const { begin, end } = tools.get(slot.id)!;
+          const { begin, end } = tools.get(slot.begin)!;
           return brand<ToolNode>({
             kind: 'tool',
-            id: begin.id,
+            id: id(begin.seq),
             turn: begin.turn,
             tool: begin.tool,
             args: begin.args,
-            after: responseToRequest.get(begin.after) ?? begin.after,
+            after: id(begin.request),
             startedAt: begin.t,
             running: end === undefined,
             ...(end ? { exit: end.exit, output: end.output, ms: end.t - begin.t, endedAt: end.t, ...(end.truncated ? { truncated: true } : {}) } : {}),
@@ -525,28 +539,28 @@ export function fold(events: readonly DriveEvent[]): Session {
         case 'settled':
           return brand<SettledNode>({
             kind: 'settled',
-            id: `settled/${slot.event.turn}`,
-            turn: slot.event.turn,
-            reason: slot.event.reason,
-            endedAt: slot.event.t,
-            ...provenance(slot.event),
+            id: id(slot.line.seq),
+            turn: slot.line.turn,
+            reason: slot.line.reason,
+            endedAt: slot.line.t,
+            ...provenance(slot.line),
           });
       }
     });
-    const seamEvent = raw.seam;
-    const seam = seamEvent
+    const seamLine = raw.seam;
+    const seam = seamLine
       ? brand<SeamNode>({
           kind: 'seam',
-          id: seamEvent.id,
-          atTurn: seamEvent.at_turn,
-          reason: seamEvent.reason,
-          ...(seamEvent.phase ? { phase: seamEvent.phase } : {}),
-          hashBefore: seamEvent.prefix_hash_before,
-          hashAfter: seamEvent.prefix_hash_after,
+          id: id(seamLine.seq),
+          atTurn: seamLine.at_turn,
+          reason: seamLine.reason,
+          ...(seamLine.phase ? { phase: seamLine.phase } : {}),
+          hashBefore: seamLine.prefix_hash_before,
+          hashAfter: seamLine.prefix_hash_after,
           ...(previousEraEnd ? { prefixBefore: trunkPrefixAt(previousEraEnd)! } : {}),
-          ...(seamEvent.render.tokens !== undefined ? { prefixAfter: seamEvent.render.tokens } : {}),
-          ...(seamEvent.warm ? { warm: seamEvent.warm } : {}),
-          ...provenance(seamEvent),
+          ...(seamLine.render.tokens !== undefined ? { prefixAfter: seamLine.render.tokens } : {}),
+          ...(seamLine.warm ? { warm: seamLine.warm } : {}),
+          ...provenance(seamLine),
         })
       : undefined;
     // The last trunk timings in this era, for the next seam's "before".
@@ -561,14 +575,14 @@ export function fold(events: readonly DriveEvent[]): Session {
 
   // Branches, keyed by the trunk node they came from.
   const branches = new Map<string, Folded<BranchNode>[]>();
-  const openForks: EventOf<'fork'>[] = [];
+  const openForks: LineOf<'fork'>[] = [];
   for (const { fork, request, settled, patches } of forks.values()) {
-    const g = request ? generations.get(request) : undefined;
-    const at = responseToRequest.get(fork.at) ?? fork.at;
+    const g = request !== undefined ? generations.get(request) : undefined;
+    const at = id(fork.at);
     if (!settled) openForks.push(fork);
     const node = brand<BranchNode>({
       kind: 'branch',
-      id: fork.id,
+      id: id(fork.seq),
       lane: fork.lane,
       slot: fork.slot,
       at,
@@ -576,11 +590,11 @@ export function fold(events: readonly DriveEvent[]): Session {
       question: fork.question,
       prefixTokens: fork.prefix_tokens,
       // A side call has finished when it settles, after its patches -- not at its response.
-      ...(g ? unended(generation(g)) : {}),
+      ...(g ? unended(generation(g, trunkSlot)) : {}),
       ...(settled ? { outcome: settled.outcome, endedAt: settled.t } : {}),
       patches: patches.map((p) =>
         brand<PatchNode>({
-          id: p.id,
+          id: id(p.seq),
           op: p.op,
           entryId: p.entry.id,
           ...(p.entry.category !== undefined ? { category: p.entry.category } : {}),
@@ -597,38 +611,45 @@ export function fold(events: readonly DriveEvent[]): Session {
     branches.set(at, list);
   }
 
-  // Slot occupancy: whatever request is generating, per slot.
-  const occupancy: (Holder | undefined)[] = Array.from({ length: start.slots }, () => undefined);
+  // Slot occupancy: whatever request is generating, per slot. v0 declares no slots: the trunk's alone.
+  const occupancy: (Holder | undefined)[] = Array.from({ length: start.slots ?? 1 }, () => undefined);
   for (const g of generations.values()) {
-    if (!g.response && !g.failed) occupancy[g.request.slot] = { id: g.request.fork ?? g.request.id, lane: g.request.lane };
+    if (!g.response && !g.cancelled && !g.failed) occupancy[g.request.slot ?? trunkSlot] = { id: id(g.request.fork ?? g.request.seq), lane: g.request.lane };
   }
 
-  const state: SessionState = ended
-    ? 'ended'
-    : openTurn !== undefined
-      ? 'turn'
-      : openForks.some((f) => f.lane === 'ratify')
-        ? 'ratify'
-        : openForks.length > 0
-          ? 'capture'
-          : 'awaiting';
+  const ratifying = openForks.some((f) => f.lane === 'ratify');
+  const state: SessionState =
+    settledTo === 'ended'
+      ? 'ended'
+      : settledTo !== undefined
+        ? settledTo === 'capture' && ratifying
+          ? 'ratify'
+          : settledTo
+        : openTurn !== undefined
+          ? 'turn'
+          : ratifying
+            ? 'ratify'
+            : openForks.length > 0
+              ? 'capture'
+              : 'awaiting';
 
   const memory = [...entries.values()].map(({ seq, ...entry }) => brand<MemoryEntry>({ ...entry, landedAt: seq, fresh: seq > lastAskSeq }));
 
   return {
     state,
-    arm: start.arm,
+    opened: start.opened,
+    arm: start.arm ?? '',
     model: start.model,
-    slots: start.slots,
-    trunkSlot: start.trunk_slot,
+    slots: start.slots ?? 1,
+    trunkSlot,
     phase,
     eras: builtEras,
     branches,
     memory,
     occupancy,
-    now: events.at(-1)?.t ?? 0,
-    events: events.length,
+    now: lines.at(-1)?.t ?? 0,
+    events: lines.length,
     unknown,
-    receipt: { ...receiptOf(events), liveEntries: memory.filter((m) => m.state === 'live').length },
+    receipt: { ...receiptOf(lines), liveEntries: memory.filter((m) => m.state === 'live').length },
   };
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 One-time migration: a session the predecessor recorded, into the surface's
-provisional event vocabulary (src/drive/events.ts), as a fixture.
+provisional event vocabulary (src/drive/script.ts; placed in the log by src/drive/place.ts), as a fixture.
 
     python3 scripts/migrate-recorded.py <events.jsonl> <out.json> --scrub <name> [--scrub <name> ...]
 

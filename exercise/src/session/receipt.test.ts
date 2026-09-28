@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import type { DriveEvent } from '../drive/events.ts';
+import type { LogLine } from '../drive/log.ts';
+import { place } from '../drive/place.ts';
+import type { Unplaced } from '../drive/script.ts';
 import { RECORDINGS, recordedAt } from '../drive/recorded.ts';
 import { fold } from './fold.ts';
 import { receiptOf } from './receipt.ts';
 
-/** A log from loose rows, numbered in order. */
-const log = (rows: readonly Record<string, unknown>[]): DriveEvent[] => rows.map((r, seq) => ({ ...r, seq }) as unknown as DriveEvent);
+/** A log from loose scripted rows, placed in order. */
+const log = (rows: readonly Record<string, unknown>[]): readonly LogLine[] => place(rows as unknown as Unplaced[]).log;
 
 describe('the receipt: six numbers a session is measured on (#31)', () => {
   it('counts side calls, patches and mimicry per ask', () => {

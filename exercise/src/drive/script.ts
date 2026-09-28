@@ -1,57 +1,21 @@
 /**
- * What the surface needs the drive to say, as events -- PROVISIONAL, and the
- * surface's half of #117.
+ * The authored shape of a session: what the specimen, the kitchen sink, the
+ * recorded sessions and the canned transport are written in -- the surface's
+ * provisional vocabulary from before `diet`'s log existed, kept as a script
+ * language because it names things. Labels (`q/2`, `t/1`, `i/1`) stand where
+ * the log has references by `seq`; `place.ts` turns a script into the log
+ * (`log.ts`), and only the log is folded.
  *
- * `diet` has no interactive loop yet, so nothing emits these. This file is the
- * request: every kind below is tagged with the step of #117 that would make
- * `diet` emit it (`NEEDS`), and the surface draws nothing it cannot fold from
- * these. The log is a format, `diet/formats/log` (ruled on #117, 2026-09-26):
- * when it lands, its generated types replace this file and every difference
- * is a compile error in `src/session/fold.ts`.
- *
- * Names follow the record where the record has the concept (`request`,
- * `response`, `fork`, `seam`, `to_request`, `of_turn`, `at_turn`) and the
- * rulings on #31 where it does not: the canonical session is the `trunk`,
- * a `slot` is a server slot and nothing else, the seam-time audit is `ratify`.
+ * Nothing reads a script but `place.ts`. A session run against `diet` never
+ * passes through here.
  */
 
-/** A step of #117, and what it makes the drive able to say. One source. */
-export const NEEDS = {
-  R2: 'the interactive drive: an ask from a person, the trunk appended until a seam, settlement, cancel',
-  R3: 'per-request timings and cache telemetry; streaming',
-  R4: 'warm-tail interview forks in the idle gap, on declared slots',
-  R5: 'patches and working memory, visible',
-  R6: 'the human-declared seam: ratify, render, refill, pre-warm',
-} as const;
+import type { Authority, FailReason, ForkLane, ForkOutcome, Lane, PatchOp, SeamReason, SettleReason, Timings, Tool } from './log.ts';
 
-export type Need = keyof typeof NEEDS;
-
-/**
- * An OPEN set: its members come from `diet`, the regimen or the person and
- * grow without a surface release. The known members are named (for the
- * registries in `src/ui/sets.ts`, and for autocomplete); any other string is
- * carried through the fold and drawn neutrally under its own name. A CLOSED
- * set -- the surface's own, like a node's kind -- stays a plain union, so
- * adding a member breaks the build everywhere that must handle it.
- */
-export type Open<Known extends string> = Known | (string & {});
-
-/** The side lanes a fork runs in. `extraction` is the predecessor's mechanical read of the trunk. */
-export type ForkLane = Open<'interview' | 'ratify' | 'extraction'>;
-
-export type Lane = 'trunk' | ForkLane;
-
-/** llama.cpp's own per-request `timings`, the fields the surface reads. */
-export interface Timings {
-  /** Prompt tokens evaluated for this request: the new part of the prefix. */
-  readonly prompt_n: number;
-  /** Prompt tokens reused from the slot's cache. */
-  readonly cache_n: number;
-  readonly prompt_ms: number;
-  /** Tokens generated, reasoning included. */
-  readonly predicted_n: number;
-  readonly predicted_ms: number;
-}
+export type { Authority, FailReason, ForkLane, ForkOutcome, Lane, PatchOp, SeamReason, SettleReason, Timings, Tool } from './log.ts';
+export { NEEDS, NEEDS_OF } from './log.ts';
+export type { Need, Open } from './log.ts';
+import type { Open } from './log.ts';
 
 interface At {
   /** Position in the session's log, from 0. Assigned by the transport. */
@@ -136,15 +100,6 @@ export interface Response extends At {
   readonly calls_from?: { readonly predicted_n?: number; readonly predicted_ms: number };
 }
 
-/** The tools a model may call. Only `bash` exists today; every other tool is drawn as `name(args)`. */
-export type Tool = Open<'bash'>;
-
-/**
- * Why a request produced no response: the server refused or failed it, the
- * prompt no longer fit, the drive gave up waiting. Open.
- */
-export type FailReason = Open<'server' | 'context_overflow' | 'timeout' | 'disconnected'>;
-
 /** A request that will never have a response. Its slot is free again. */
 export interface RequestFailed extends At {
   readonly kind: 'request.failed';
@@ -174,8 +129,6 @@ export interface ToolEnd extends At {
   readonly truncated?: boolean;
 }
 
-export type SettleReason = Open<'final' | 'cancelled' | 'max_steps' | 'timeout' | 'failed'>;
-
 export interface TurnSettled extends At {
   readonly kind: 'turn.settled';
   readonly turn: number;
@@ -198,23 +151,6 @@ export interface Fork extends At {
   readonly prefix_tokens: number;
 }
 
-/**
- * How a fork ended: the one enum, ruled on #117 (2026-09-26, naming 6), which
- * lives on the fork event in `formats/record`. `value` is an answer the
- * capture could use; the drive's own outcomes fold into these.
- */
-export type ForkOutcome = Open<
-  | 'value'
-  | 'decline'
-  | 'mimicry'
-  | 'unparseable'
-  | 'thinking_exhausted'
-  | 'rejected'
-  | 'timeout'
-  | 'truncated'
-  | 'output_too_large'
->;
-
 export interface ForkSettled extends At {
   readonly kind: 'fork.settled';
   readonly id: string;
@@ -228,21 +164,6 @@ export interface Entry {
   readonly text: string;
 }
 
-/**
- * A change to working memory: `diet`'s ops, ruled on #117 (naming 4). `add`,
- * `supersede` and `retire` change an entry's state; `resolve` and `park`
- * rewrite it and are shown by name. `edit` is reserved for a person editing
- * working memory, with authority `stated`. `void` is a state, never an op.
- */
-export type PatchOp = Open<'add' | 'supersede' | 'resolve' | 'retire' | 'park' | 'edit'>;
-
-/**
- * How an entry was known -- `authority`, ruled on #117 (naming 5), where
- * `provenance` is its position (turn, lane, fork). Authority follows it: an
- * entry the arm declared is never rewritten.
- */
-export type Authority = Open<'stated' | 'extracted' | 'observed' | 'arm'>;
-
 /** A change to working memory, from the fork that produced it. */
 export interface Patch extends At {
   readonly kind: 'patch';
@@ -255,8 +176,6 @@ export interface Patch extends At {
   /** How the entry was known. */
   readonly authority?: Authority;
 }
-
-export type SeamReason = Open<'operator' | 'phase' | 'cadence' | 'budget'>;
 
 /** The one deliberate prefill event: the trunk rebuilt from working memory. */
 export interface Seam extends At {
@@ -302,22 +221,3 @@ export type EventOf<K extends Kind> = Extract<DriveEvent, { readonly kind: K }>;
 
 /** An event before the transport has placed it in the log. */
 export type Unplaced<E extends DriveEvent = DriveEvent> = E extends DriveEvent ? Omit<E, 'seq'> : never;
-
-/** Which step of #117 each kind waits on. Nothing in `diet` emits any of them yet. */
-export const NEEDS_OF: { readonly [K in Kind]: readonly Need[] } = {
-  'session.start': ['R2', 'R4'],
-  ask: ['R2'],
-  request: ['R2', 'R4'],
-  delta: ['R3'],
-  progress: ['R3'],
-  response: ['R2', 'R3'],
-  'request.failed': ['R2'],
-  'tool.begin': ['R2'],
-  'tool.end': ['R2'],
-  'turn.settled': ['R2'],
-  fork: ['R4'],
-  'fork.settled': ['R4'],
-  patch: ['R5'],
-  seam: ['R6'],
-  'session.end': ['R2'],
-};

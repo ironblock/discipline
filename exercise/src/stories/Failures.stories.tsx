@@ -5,7 +5,7 @@ import { PHASES } from '../App.tsx';
 import type { Link } from '../drive/transport.ts';
 import type { Session } from '../session/fold.ts';
 import { SessionView } from '../ui/SessionView.tsx';
-import { MOMENTS, sessionAt, variantAt } from './moments.ts';
+import { idAt, MOMENTS, sessionAt, variantAt } from './moments.ts';
 
 interface FailureArgs {
   readonly session: () => Session;
@@ -48,7 +48,7 @@ export const Cancelled: Story = {
   play: async ({ canvasElement }) => {
     await expect(canvasElement.querySelector('[data-state="awaiting"]')).not.toBeNull();
     // Named once, in the footer, under where the answer stopped.
-    const cancelled = canvasElement.querySelector('[data-id="q/3"]') as HTMLElement;
+    const cancelled = canvasElement.querySelector(`[data-id="${idAt(MOMENTS.streaming, 'q/3')}"]`) as HTMLElement;
     await expect(cancelled.querySelector('.ex-block__foot .ex-stop')?.textContent).toBe('cancelled');
     await expect(cancelled.textContent?.split('cancelled')).toHaveLength(2);
     // A cancelled response's timings are not a measurement: nothing reads as zero tokens in zero time.
@@ -103,7 +103,7 @@ export const ToolFailed: Story = {
       ),
   },
   play: async ({ canvasElement }) => {
-    await expect(canvasElement.querySelector('[data-id="t/5"] .ex-exit--bad')?.textContent).toBe('exit 101');
+    await expect(canvasElement.querySelector(`[data-id="${idAt(MOMENTS.done, 't/5')}"] .ex-exit--bad`)?.textContent).toBe('exit 101');
   },
 };
 
@@ -119,7 +119,7 @@ export const SideCallTimedOut: Story = {
       }),
   },
   play: async ({ canvasElement }) => {
-    const bar = canvasElement.querySelector('[data-branch="i/2"]');
+    const bar = canvasElement.querySelector(`[data-branch="${idAt(MOMENTS.firstSettled, 'i/2')}"]`);
     await expect(bar?.querySelector('.ex-branch__outcome[data-level="bad"]')?.textContent).toBe('timed out');
     await expect(bar?.querySelector('.ex-patch')).toBeNull();
     // Opened: what it had written, and under it what the server said; the footer names it, once.

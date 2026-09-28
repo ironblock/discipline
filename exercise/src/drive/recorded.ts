@@ -14,7 +14,9 @@
 
 import { deltas } from './canned.ts';
 import { frames } from './progress.ts';
-import type { DriveEvent, EventOf, Unplaced } from './events.ts';
+import type { LogLine } from './log.ts';
+import { place } from './place.ts';
+import type { EventOf, Unplaced } from './script.ts';
 import type { Ack, DriveTransport } from './transport.ts';
 import firstDrive from './recorded/first-drive.json?raw';
 import cancelledCapture from './recorded/cancelled-capture.json?raw';
@@ -52,7 +54,16 @@ export const RECORDINGS = {
 export type RecordingName = keyof typeof RECORDINGS;
 
 /** The whole log, with synthesized deltas, placed in order. */
-export function placed(recording: Recording): readonly DriveEvent[] {
+export function placed(recording: Recording): readonly LogLine[] {
+  return placing(recording).log;
+}
+
+/** Where each of the recording's labels landed in its placed log: the node id a story looks for. */
+export function labelsOf(recording: Recording): ReadonlyMap<string, number> {
+  return placing(recording).labels;
+}
+
+function placing(recording: Recording) {
   const requestAt = new Map<string, number>();
   const out: Unplaced[] = [];
   for (const event of recording.events) {
@@ -65,14 +76,15 @@ export function placed(recording: Recording): readonly DriveEvent[] {
     }
     out.push(event);
   }
-  return out
+  const ordered = out
     .map((e, i) => [e, i] as const)
     .sort(([a, i], [b, j]) => a.t - b.t || i - j)
-    .map(([e], seq) => ({ ...e, seq }) as DriveEvent);
+    .map(([e]) => e);
+  return place(ordered);
 }
 
 /** The log up to session time `t`: the recording stopped at a moment. */
-export function recordedAt(recording: Recording, t: number): readonly DriveEvent[] {
+export function recordedAt(recording: Recording, t: number): readonly LogLine[] {
   const log = placed(recording);
   const upto = log.findIndex((e) => e.t > t);
   return upto === -1 ? log : log.slice(0, upto);
@@ -85,10 +97,10 @@ export function recordedAt(recording: Recording, t: number): readonly DriveEvent
  * so a mount, unmount and remount (React's StrictMode) loses nothing.
  */
 export class ReplayTransport implements DriveTransport {
-  readonly #log: readonly DriveEvent[];
+  readonly #log: readonly LogLine[];
   readonly #speed: number;
-  readonly #emitted: DriveEvent[] = [];
-  readonly #listeners = new Set<(event: DriveEvent) => void>();
+  readonly #emitted: LogLine[] = [];
+  readonly #listeners = new Set<(line: LogLine) => void>();
   readonly #timers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(recording: Recording, { speed = 1 }: { readonly speed?: number } = {}) {
@@ -96,7 +108,7 @@ export class ReplayTransport implements DriveTransport {
     this.#speed = speed;
   }
 
-  subscribe(listener: (event: DriveEvent) => void): () => void {
+  subscribe(listener: (line: LogLine) => void): () => void {
     for (const event of this.#emitted) listener(event);
     this.#listeners.add(listener);
     if (this.#timers.size === 0) this.#play();

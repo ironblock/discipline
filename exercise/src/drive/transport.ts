@@ -8,7 +8,7 @@
  * tail), and each command is one POST -- and nothing above this file changes.
  */
 
-import type { DriveEvent, Open } from './events.ts';
+import type { LogLine, Open } from './log.ts';
 
 /**
  * What a person can ask of the drive. Closed: the surface owns what it
@@ -51,7 +51,7 @@ export type Link = 'live' | 'reconnecting' | 'lost';
 
 export interface DriveTransport {
   /** Every event so far, in order, then each new one. Returns an unsubscribe. */
-  subscribe(listener: (event: DriveEvent) => void): () => void;
+  subscribe(listener: (line: LogLine) => void): () => void;
   dispatch(command: Command): Promise<Ack>;
   /** The connection's state now, then each change. Absent: always `live`. */
   watchLink?(listener: (link: Link) => void): () => void;

@@ -1,4 +1,4 @@
-import type { DriveEvent, EventOf } from '../drive/events.ts';
+import type { LineOf, LogLine } from '../drive/log.ts';
 
 /**
  * A session's receipt: the six numbers #31 measures a driven session on,
@@ -32,15 +32,15 @@ export interface Receipt {
 type Span = readonly [number, number];
 
 /** Everything but live entries, which come from the fold's working memory. */
-export function receiptOf(events: readonly DriveEvent[]): Omit<Receipt, 'liveEntries'> {
-  const of = <K extends DriveEvent['kind']>(kind: K) => events.filter((e): e is EventOf<K> => e.kind === kind);
-  const now = events.at(-1)?.t ?? 0;
+export function receiptOf(lines: readonly LogLine[]): Omit<Receipt, 'liveEntries'> {
+  const of = <K extends LogLine['kind']>(kind: K) => lines.filter((e): e is LineOf<K> => e.kind === kind);
+  const now = lines.at(-1)?.t ?? 0;
   const asks = of('ask');
   const forks = of('fork');
-  const settled = new Map(of('fork.settled').map((e) => [e.id, e] as const));
+  const settled = new Map(of('fork.settled').map((e) => [e.fork, e] as const));
 
   // What the trunk did, and when it finished doing it.
-  const trunkRequests = new Set(of('request').filter((e) => e.lane === 'trunk').map((e) => e.id));
+  const trunkRequests = new Set(of('request').filter((e) => e.lane === 'trunk').map((e) => e.seq));
   const trunkDone = [
     ...asks.map((e) => e.t),
     ...of('response').filter((e) => trunkRequests.has(e.to_request)).map((e) => e.t),
@@ -54,8 +54,8 @@ export function receiptOf(events: readonly DriveEvent[]): Omit<Receipt, 'liveEnt
   // Each side call from its request to its settling (or now, still running).
   const started = new Map(of('request').flatMap((e) => (e.fork !== undefined ? [[e.fork, e.t] as const] : [])));
   const sideCalls: Span[] = forks.flatMap((f) => {
-    const from = started.get(f.id);
-    return from === undefined ? [] : [[from, settled.get(f.id)?.t ?? now] as const];
+    const from = started.get(f.seq);
+    return from === undefined ? [] : [[from, settled.get(f.seq)?.t ?? now] as const];
   });
 
   // Each person's gap: the turn handed back, to their next ask or refill.

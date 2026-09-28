@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 
-import type { ForkLane } from '../drive/events.ts';
+import type { ForkLane } from '../drive/log.ts';
 import { laneStyle } from './sets.ts';
 import { useSurface, useTarget } from './surface.tsx';
 import './block.css';

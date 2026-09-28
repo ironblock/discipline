@@ -1,4 +1,4 @@
-import type { Authority, ForkLane, PatchOp, Timings, Unplaced } from './events.ts';
+import type { Authority, ForkLane, PatchOp, Timings, Unplaced } from './script.ts';
 
 /**
  * A session composed from a script, rather than recorded or written event by

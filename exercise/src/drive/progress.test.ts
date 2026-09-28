@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { DriveEvent } from './events.ts';
+import { place } from './place.ts';
+import type { Unplaced } from './script.ts';
 import { FRAME_MS, frames } from './progress.ts';
 import { fold } from '../session/fold.ts';
 
@@ -33,7 +34,7 @@ describe('progress frames, synthesized from a response’s timings', () => {
 });
 
 describe('the meter a running request carries', () => {
-  const log = (rows: readonly Record<string, unknown>[]): DriveEvent[] => rows.map((r, seq) => ({ ...r, seq }) as unknown as DriveEvent);
+  const log = (rows: readonly Record<string, unknown>[]) => place(rows as unknown as Unplaced[]).log;
   const base = [
     { kind: 'session.start', t: 0, arm: 'a', model: 'm', slots: 2, trunk_slot: 0, phase: 'p', system: { text: '' } },
     { kind: 'ask', t: 0, turn: 1, text: 'hi' },

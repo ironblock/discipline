@@ -5,7 +5,7 @@ import { expect, userEvent, waitFor } from 'storybook/test';
 import { PHASES } from '../App.tsx';
 import { cableOf } from './cables.ts';
 import { colourContrast, contrast, fillContrast } from './contrast.ts';
-import { RECORDINGS, recordedAt } from '../drive/recorded.ts';
+import { labelsOf, RECORDINGS, recordedAt } from '../drive/recorded.ts';
 import type { RecordingName } from '../drive/recorded.ts';
 import { fold } from '../session/fold.ts';
 import { SessionView } from '../ui/SessionView.tsx';
@@ -59,14 +59,16 @@ export const Ratifying: Story = {
   play: async ({ canvasElement }) => {
     await expect(canvasElement.querySelector('[data-state="ratify"]')).not.toBeNull();
     await expect(canvasElement.querySelector('.ex-lanehead[data-lane="ratify"]')).not.toBeNull();
-    // A busy slot says which lane holds it; the side call's own id is on hover.
+    // A busy slot says which lane holds it; the side call's own id -- its line's seq -- is on hover.
+    const running = [...canvasElement.querySelectorAll<HTMLElement>('.ex-branchcell')].find((c) => c.querySelector('[data-lane="ratify"][data-outcome="running"]'))?.dataset['branch'] ?? '';
+    await expect(running).toMatch(/^\d+$/);
     const head = canvasElement.querySelector('.ex-lanehead[data-lane="ratify"]');
     await expect(head?.textContent).toContain('ratify');
-    await expect(head?.textContent).not.toMatch(/e\d{4}/);
-    await expect(head?.getAttribute('title')).toMatch(/e\d{4}/);
+    await expect(head?.textContent).not.toContain(running);
+    await expect(head?.getAttribute('title')).toContain(running);
     const led = canvasElement.querySelector('.ex-header__slot[data-lane="ratify"]');
     await expect(led?.textContent).toContain('ratify');
-    await expect(led?.textContent).not.toMatch(/e\d{4}/);
+    await expect(led?.textContent).not.toContain(running);
   },
 };
 
@@ -142,8 +144,10 @@ export const StartsWhereItRan: Story = {
       (e) => Number(e['t']) <= start && ((e['kind'] === 'response' && trunkRequests.has(e['to_request'])) || e['kind'] === 'tool.end'),
     );
     const last = finished.at(-1);
-    const id = String(last?.['kind'] === 'response' ? last['to_request'] : last?.['id']);
-    const cell = canvasElement.querySelector('[data-branch="e0100"]');
+    // Labels in the recording; node ids are where they landed in its log.
+    const labels = labelsOf(recording);
+    const id = String(labels.get(String(last?.['kind'] === 'response' ? last['to_request'] : last?.['id'])));
+    const cell = canvasElement.querySelector(`[data-branch="${labels.get('e0100')}"]`);
     const node = canvasElement.querySelector(`.ex-trunk [data-id="${id}"]`);
     await expect(node).not.toBeNull();
     await waitFor(async () => expect(cell?.getBoundingClientRect().top).toBeGreaterThanOrEqual(node?.getBoundingClientRect().bottom ?? Number.POSITIVE_INFINITY));

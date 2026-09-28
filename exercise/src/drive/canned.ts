@@ -10,7 +10,9 @@
  */
 
 import { frames } from './progress.ts';
-import type { DriveEvent, Response, Unplaced } from './events.ts';
+import type { LogLine } from './log.ts';
+import { place as placeAll, Placer } from './place.ts';
+import type { Response, Unplaced } from './script.ts';
 import type { Beat, Trigger } from './specimen.ts';
 import type { Ack, Command, DriveTransport } from './transport.ts';
 
@@ -65,12 +67,8 @@ function chunks(s: string): string[] {
   return out;
 }
 
-function place(events: readonly Unplaced[]): DriveEvent[] {
-  return events.map((e, seq) => ({ ...e, seq }) as DriveEvent);
-}
-
-/** The session at a cursor, with no clock: beats start `READING_GAP_MS` after the last one ended. */
-export function snapshot(beats: readonly Beat[], cursor: Cursor): readonly DriveEvent[] {
+/** The session at a cursor, with no clock -- beats start `READING_GAP_MS` after the last one ended -- as the script it plays. */
+export function scriptAt(beats: readonly Beat[], cursor: Cursor): readonly Unplaced[] {
   const events: Unplaced[] = [];
   let start = 0;
   const upto = Math.min(cursor.beat, beats.length);
@@ -83,7 +81,12 @@ export function snapshot(beats: readonly Beat[], cursor: Cursor): readonly Drive
     const end = expanded.at(-1)?.t ?? start;
     start = end + (beats[b + 1]?.trigger === 'send' ? READING_GAP_MS : 1500);
   }
-  return place(events);
+  return events;
+}
+
+/** The session at a cursor, placed in the log. */
+export function snapshot(beats: readonly Beat[], cursor: Cursor): readonly LogLine[] {
+  return placeAll(scriptAt(beats, cursor)).log;
 }
 
 /** Each beat's length, so a story can ask for "the middle of the tool call". */
@@ -99,8 +102,11 @@ export interface CannedOptions {
 export class CannedTransport implements DriveTransport {
   readonly #beats: readonly Beat[];
   readonly #speed: number;
-  readonly #log: DriveEvent[] = [];
-  readonly #listeners = new Set<(event: DriveEvent) => void>();
+  /** What the script has played, labels and all: what `cancel` reads to find what is still open. */
+  readonly #played: Unplaced[] = [];
+  readonly #placer = new Placer();
+  readonly #log: LogLine[] = [];
+  readonly #listeners = new Set<(line: LogLine) => void>();
   readonly #timers = new Set<ReturnType<typeof setTimeout>>();
   readonly #opened = performance.now();
   #next = 0;
@@ -120,7 +126,7 @@ export class CannedTransport implements DriveTransport {
     return this.#timers.size > 0;
   }
 
-  subscribe(listener: (event: DriveEvent) => void): () => void {
+  subscribe(listener: (line: LogLine) => void): () => void {
     for (const event of this.#log) listener(event);
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
@@ -149,9 +155,9 @@ export class CannedTransport implements DriveTransport {
     for (const timer of this.#timers) clearTimeout(timer);
     this.#timers.clear();
     const now = this.#now();
-    const open = openWork(this.#log);
+    const open = openWork(this.#played);
     for (const request of open.requests) {
-      const streamed = this.#log.filter((e): e is Extract<DriveEvent, { kind: 'delta' }> => e.kind === 'delta' && e.request === request);
+      const streamed = this.#played.filter((e): e is Extract<Unplaced, { kind: 'delta' }> => e.kind === 'delta' && e.request === request);
       this.#emit({
         kind: 'response',
         t: now,
@@ -201,14 +207,16 @@ export class CannedTransport implements DriveTransport {
   }
 
   #emit(event: Unplaced): void {
-    const placed = { ...event, seq: this.#log.length } as DriveEvent;
-    this.#log.push(placed);
-    for (const listener of this.#listeners) listener(placed);
+    this.#played.push(event);
+    for (const line of this.#placer.place(event)) {
+      this.#log.push(line);
+      for (const listener of this.#listeners) listener(line);
+    }
   }
 }
 
 /** Requests with no response, forks not settled, and a turn not settled. */
-function openWork(log: readonly DriveEvent[]) {
+function openWork(log: readonly Unplaced[]) {
   const requests = new Set<string>();
   const forks = new Set<string>();
   let turn: number | undefined;

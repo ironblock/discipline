@@ -1,6 +1,6 @@
 /**
  * The registries for the surface's open sets (see `Open` in
- * `src/drive/events.ts`): each known member and how it is drawn, and the
+ * `src/drive/log.ts`): each known member and how it is drawn, and the
  * one rule for everything else -- an unknown member is drawn neutrally,
  * labelled with its own name, never as a crash or a blank.
  *
@@ -10,7 +10,8 @@
 
 import type { CSSProperties } from 'react';
 
-import type { FailReason, ForkLane, ForkOutcome, PatchOp, SeamReason, SettleReason, Stop, Tool } from '../drive/events.ts';
+import type { FailReason, ForkLane, ForkOutcome, PatchOp, SeamReason, SettleReason, Tool } from '../drive/log.ts';
+import type { Stop } from '../session/fold.ts';
 import type { Refusal } from '../drive/transport.ts';
 
 /** How a member reads at a glance. `quiet` is the neutral every unknown member gets. */
@@ -123,7 +124,7 @@ export const seamReasonOf = registry<SeamReason>({
 /** Why a generation stopped. The expected ones draw nothing; the rest say so. */
 export const stopOf = registry<Stop>({
   stop: { label: 'stop', level: 'ok' },
-  tool: { label: 'tool call', level: 'ok' },
+  tool_calls: { label: 'tool call', level: 'ok' },
   length: { label: 'hit max tokens', level: 'warn' },
   cancelled: { label: 'cancelled', level: 'quiet' },
 });
@@ -141,7 +142,8 @@ export const failOf = registry<FailReason>({
   server: { label: 'the server failed it', level: 'bad' },
   context_overflow: { label: 'the prompt no longer fits', level: 'bad' },
   timeout: { label: 'timed out', level: 'bad' },
-  disconnected: { label: 'the connection dropped', level: 'bad' },
+  transport: { label: 'the connection dropped', level: 'bad' },
+  crashed: { label: 'the call\'s thread crashed', level: 'bad' },
 });
 
 // ------------------------------------------------------------------ refusals

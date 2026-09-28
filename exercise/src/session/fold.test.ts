@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
-import { beatLength, snapshot } from '../drive/canned.ts';
+import { beatLength, scriptAt, snapshot } from '../drive/canned.ts';
+import type { LogLine } from '../drive/log.ts';
+import { place } from '../drive/place.ts';
+import type { Unplaced } from '../drive/script.ts';
 import { SPECIMEN } from '../drive/specimen.ts';
-import type { DriveEvent } from '../drive/events.ts';
 import { fold } from './fold.ts';
 
-const at = (beat: number, t?: number) => fold(snapshot(SPECIMEN, t === undefined ? { beat } : { beat, t }));
+/** A script placed and folded, and the node id each of its labels names: its line's `seq`. */
+const folded = (script: readonly Unplaced[]) => {
+  const { log, labels } = place(script);
+  const id = (label: string) => String(labels.get(label) ?? log.find((l) => l.kind === 'ask' && `ask/${l.turn}` === label)?.seq);
+  return Object.assign(fold(log), { id });
+};
+const scriptOf = (beat: number, t?: number) => scriptAt(SPECIMEN, t === undefined ? { beat } : { beat, t });
+const at = (beat: number, t?: number) => folded(scriptOf(beat, t));
 const beat = (n: number) => SPECIMEN[n]!;
 
 describe('fold over the specimen', () => {
@@ -23,7 +32,7 @@ describe('fold over the specimen', () => {
     const last = s.eras[0]?.nodes.at(-1);
     expect(last?.kind).toBe('assistant');
     expect(last?.kind === 'assistant' && last.progress).toBe('streaming');
-    expect(s.occupancy[0]).toEqual({ id: 'q/3', lane: 'trunk' });
+    expect(s.occupancy[0]).toEqual({ id: s.id('q/3'), lane: 'trunk' });
     expect(s.occupancy[1]).toBeUndefined();
   });
 
@@ -40,15 +49,15 @@ describe('fold over the specimen', () => {
   it('is in capture after settlement, with the interview in slot 1 hung off the tool call it was about', () => {
     const s = at(2, 28_000);
     expect(s.state).toBe('capture');
-    expect(s.occupancy[1]).toEqual({ id: 'i/1', lane: 'interview' });
-    const branch = s.branches.get('t/2')?.[0];
+    expect(s.occupancy[1]).toEqual({ id: s.id('i/1'), lane: 'interview' });
+    const branch = s.branches.get(s.id('t/2'))?.[0];
     expect(branch?.lane).toBe('interview');
     expect(branch?.slot).toBe(1);
   });
 
-  it('anchors a branch named by a response id to its trunk request', () => {
+  it('anchors a branch named by a response to its trunk request', () => {
     const s = at(2);
-    expect(s.branches.get('q/3')?.[0]?.id).toBe('i/2');
+    expect(s.branches.get(s.id('q/3'))?.[0]?.id).toBe(s.id('i/2'));
   });
 
   it('lands patches in working memory, fresh until the next ask', () => {
@@ -71,7 +80,7 @@ describe('fold over the specimen', () => {
   it('is ratifying while the seam-time fork runs', () => {
     const s = at(4, 1000);
     expect(s.state).toBe('ratify');
-    expect(s.occupancy[1]).toEqual({ id: 'r/1', lane: 'ratify' });
+    expect(s.occupancy[1]).toEqual({ id: s.id('r/1'), lane: 'ratify' });
   });
 
   it('opens a second era at the seam, whose system prompt is the render', () => {
@@ -93,9 +102,9 @@ describe('fold over the specimen', () => {
   it('runs an interview in the idle gap of a running tool call', () => {
     const s = at(5, 12_000);
     expect(s.state).toBe('turn');
-    const tool = s.eras[1]?.nodes.find((n) => n.kind === 'tool' && n.id === 't/5');
+    const tool = s.eras[1]?.nodes.find((n) => n.kind === 'tool' && n.id === s.id('t/5'));
     expect(tool?.kind === 'tool' && tool.running).toBe(true);
-    expect(s.occupancy[1]).toEqual({ id: 'i/4', lane: 'interview' });
+    expect(s.occupancy[1]).toEqual({ id: s.id('i/4'), lane: 'interview' });
   });
 
   it('ends the specimen settled, every node carrying where it came from and what it needs', () => {
@@ -112,23 +121,27 @@ describe('fold over the specimen', () => {
 });
 
 describe('fold over what it does not know', () => {
-  const withEvent = (extra: Record<string, unknown>) => {
+  /** Beat 2, and one more line: a kind the log has not got, written straight into it. */
+  const withLine = (extra: Record<string, unknown>) => {
     const log = [...snapshot(SPECIMEN, { beat: 2 })];
-    const placed = { t: log.at(-1)!.t, seq: log.length, ...extra } as unknown as DriveEvent;
-    return fold([...log, placed]);
+    return fold([...log, { t: log.at(-1)!.t, seq: log.length, ...extra } as unknown as LogLine]);
+  };
+  /** Beat 2, and one more scripted event after it. */
+  const withEvent = (extra: Record<string, unknown>) => {
+    const script = scriptOf(2);
+    return folded([...script, { t: script.at(-1)!.t, ...extra } as unknown as Unplaced]);
   };
 
   it('keeps and counts an event kind it does not know, and folds the rest as before', () => {
     const plain = fold(snapshot(SPECIMEN, { beat: 2 }));
-    const s = withEvent({ kind: 'gate.verdict', verdict: 'pass' });
+    const s = withLine({ kind: 'gate.verdict', verdict: 'pass' });
     expect(s.unknown.get('gate.verdict')).toBe(1);
     expect(s.eras[0]?.nodes.map((n) => n.id)).toEqual(plain.eras[0]?.nodes.map((n) => n.id));
     expect(plain.unknown.size).toBe(0);
   });
 
   it('carries a patch op it does not know onto the entry, by name, without changing its state', () => {
-    const log = [...snapshot(SPECIMEN, { beat: 2 })];
-    const add = log.find((e) => e.kind === 'patch');
+    const add = scriptOf(2).find((e) => e.kind === 'patch');
     expect(add?.kind).toBe('patch');
     if (add?.kind !== 'patch') return;
     const s = withEvent({ kind: 'patch', id: 'p/park', from: add.from, op: 'park', entry: { ...add.entry, text: 'parked for later' } });
@@ -141,19 +154,16 @@ describe('fold over what it does not know', () => {
 
 describe('fold over what went wrong', () => {
   /** The specimen at a cursor, edited: the same helper stories use, without a DOM. */
-  const variant = (beatNo: number, t: number | undefined, edit: (e: DriveEvent) => DriveEvent | readonly DriveEvent[]) => {
-    const log = snapshot(SPECIMEN, t === undefined ? { beat: beatNo } : { beat: beatNo, t }).flatMap((e) => edit(e));
-    return fold(log.map((e, seq) => ({ ...e, seq }) as DriveEvent));
-  };
+  const variant = (beatNo: number, t: number | undefined, edit: (e: Unplaced) => Unplaced | readonly Unplaced[]) => folded(scriptOf(beatNo, t).flatMap((e) => edit(e)));
 
   it('fails a request the server gave up on: the answer so far stays, the reason and message are carried, the slot is free', () => {
     const s = variant(2, 22_000, (e) => e);
     const streaming = s.eras[0]?.nodes.at(-1);
     expect(streaming?.kind).toBe('assistant');
     if (streaming?.kind !== 'assistant') return;
-    const log = [...snapshot(SPECIMEN, { beat: 2, t: 22_000 })];
-    const failed = { kind: 'request.failed', t: 22_100, seq: log.length, request: streaming.id, reason: 'context_overflow', message: 'the prompt no longer fits in the context' } as DriveEvent;
-    const f = fold([...log, failed]);
+    const failed: Unplaced = { kind: 'request.failed', t: 22_100, request: 'q/3', reason: 'context_overflow', message: 'the prompt no longer fits in the context' };
+    const f = folded([...scriptOf(2, 22_000), failed]);
+    expect(f.id('q/3')).toBe(streaming.id);
     const node = f.eras[0]?.nodes.find((n) => n.id === streaming.id);
     expect(node?.kind === 'assistant' && node.progress).toBe('failed');
     expect(node?.kind === 'assistant' && node.failure).toEqual({ reason: 'context_overflow', message: 'the prompt no longer fits in the context' });
@@ -173,12 +183,12 @@ describe('fold over what went wrong', () => {
     const s = at(2);
     const ended = Object.fromEntries((s.eras[0]?.nodes ?? []).map((n) => [n.id, n.endedAt]));
     const ask = snapshot(SPECIMEN, { beat: 2 }).find((e) => e.kind === 'ask');
-    expect(ended['ask/1']).toBe(ask?.t);
-    expect(ended['t/2']).toBeGreaterThan(0);
+    expect(ended[s.id('ask/1')]).toBe(ask?.t);
+    expect(ended[s.id('t/2')]).toBeGreaterThan(0);
     // The specimen's times are from the start of the beat, which begins at the ask.
     const beatStart = ask?.t ?? 0;
-    expect(ended['q/3']).toBe(beatStart + 27_600);
-    expect(s.branches.get('t/2')?.[0]?.endedAt).toBeGreaterThan(beatStart + 27_710);
+    expect(ended[s.id('q/3')]).toBe(beatStart + 27_600);
+    expect(s.branches.get(s.id('t/2'))?.[0]?.endedAt).toBeGreaterThan(beatStart + 27_710);
     // Still running: no end.
     const running = at(2, 22_000).eras[0]?.nodes.at(-1);
     expect(running?.endedAt).toBeUndefined();
@@ -186,8 +196,8 @@ describe('fold over what went wrong', () => {
 
   it('keeps a fork waiting for its slot as pending: declared, not started', () => {
     const s = variant(2, 28_000, (e) => (e.kind === 'request' && e.fork === 'i/1' ? [] : e));
-    const branch = s.branches.get('t/2')?.[0];
-    expect(branch?.id).toBe('i/1');
+    const branch = s.branches.get(s.id('t/2'))?.[0];
+    expect(branch?.id).toBe(s.id('i/1'));
     expect(branch?.startedAt).toBeUndefined();
     expect(branch?.progress).toBeUndefined();
     expect(s.occupancy[1]).toBeUndefined();

@@ -1,4 +1,4 @@
-import type { ProgressFrame, Response } from './events.ts';
+import type { ProgressFrame, Response } from './script.ts';
 
 type Unplaced = Omit<ProgressFrame, 'seq'>;
 

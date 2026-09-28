@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { SessionView } from '../ui/SessionView.tsx';
 import type { Surface } from '../ui/surface.tsx';
 import { cableOf } from './cables.ts';
-import { MOMENTS, sessionAt, variantAt } from './moments.ts';
+import { idAt, MOMENTS, sessionAt, variantAt } from './moments.ts';
 
 interface MomentArgs {
   readonly cursor: Cursor;
@@ -66,9 +66,10 @@ export const BigRead: Story = {
   name: '3 · a tool call returned 1,860 lines',
   args: { cursor: MOMENTS.bigRead },
   play: async ({ canvasElement }) => {
+    const id = (label: string) => idAt(MOMENTS.bigRead, label);
     // The call is one block after the message that wrote it: the command, then its first lines, not all 1,860.
-    await expect(q(canvasElement, '[data-id="t/2"] .ex-tool__call')?.textContent).toBe('$ cat src/report.rs');
-    await expect(q(canvasElement, '[data-id="t/2"] .ex-tool__output')?.textContent?.split('\n')).toHaveLength(3);
+    await expect(q(canvasElement, `[data-id="${id('t/2')}"] .ex-tool__call`)?.textContent).toBe('$ cat src/report.rs');
+    await expect(q(canvasElement, `[data-id="${id('t/2')}"] .ex-tool__output`)?.textContent?.split('\n')).toHaveLength(3);
   },
 };
 
@@ -77,10 +78,11 @@ export const IdleGapInterview: Story = {
   name: '4 · an interview in the idle gap',
   args: { cursor: MOMENTS.idleGapInterview },
   play: async ({ canvasElement }) => {
+    const id = (label: string) => idAt(MOMENTS.idleGapInterview, label);
     await expect(q(canvasElement, '[data-state="capture"]')).not.toBeNull();
-    await expect(q(canvasElement, '[data-branch="i/1"] [data-outcome="running"]')).not.toBeNull();
+    await expect(q(canvasElement, `[data-branch="${id('i/1')}"] [data-outcome="running"]`)).not.toBeNull();
     // It started when the answer settled: it is drawn below the answer, in the idle gap it ran in.
-    await waitFor(async () => expect(top(canvasElement, '[data-branch="i/1"]')).toBeGreaterThanOrEqual(bottom(canvasElement, '[data-id="q/3"]')));
+    await waitFor(async () => expect(top(canvasElement, `[data-branch="${id('i/1')}"]`)).toBeGreaterThanOrEqual(bottom(canvasElement, `[data-id="${id('q/3')}"]`)));
   },
 };
 
@@ -99,12 +101,13 @@ export const InterviewQueued: Story = {
     />
   ),
   play: async ({ canvasElement }) => {
-    const cell = '[data-branch="i/1"]';
+    const id = (label: string) => idAt(MOMENTS.idleGapInterview, label);
+    const cell = `[data-branch="${id('i/1')}"]`;
     await waitFor(async () => expect(q(canvasElement, `${cell}[data-pending]`)).not.toBeNull());
     await expect(q(canvasElement, `${cell} [data-outcome="pending"]`)?.textContent).toContain('queued');
     // Its cable is laid, dashed, and carries no light yet.
-    await waitFor(async () => expect(cableOf(canvasElement, 'i/1')).toEqual({ pending: true, live: false }));
-    await expect(top(canvasElement, cell)).toBeGreaterThanOrEqual(bottom(canvasElement, '[data-id="q/3"]'));
+    await waitFor(async () => expect(cableOf(canvasElement, id('i/1'))).toEqual({ pending: true, live: false }));
+    await expect(top(canvasElement, cell)).toBeGreaterThanOrEqual(bottom(canvasElement, `[data-id="${id('q/3')}"]`));
   },
 };
 
@@ -155,8 +158,9 @@ export const TestsRunning: Story = {
   name: '10 · an interview while cargo test runs',
   args: { cursor: MOMENTS.testsRunning },
   play: async ({ canvasElement }) => {
-    await expect(q(canvasElement, '[data-id="t/5"].ex-block--live')).not.toBeNull();
-    await expect(q(canvasElement, '[data-branch="i/4"]')).not.toBeNull();
+    const id = (label: string) => idAt(MOMENTS.testsRunning, label);
+    await expect(q(canvasElement, `[data-id="${id('t/5')}"].ex-block--live`)).not.toBeNull();
+    await expect(q(canvasElement, `[data-branch="${id('i/4')}"]`)).not.toBeNull();
   },
 };
 
@@ -242,13 +246,14 @@ export const Condensed: Story = {
   name: 'condensed · an interview in the idle gap',
   args: { cursor: MOMENTS.idleGapInterview, condensed: true },
   play: async ({ canvasElement }) => {
+    const id = (label: string) => idAt(MOMENTS.idleGapInterview, label);
     await expect(q(canvasElement, '.ex-session--condensed')).not.toBeNull();
     await expect(q(canvasElement, '.ex-lane')?.getBoundingClientRect().width).toBeLessThan(24);
     await expect(q(canvasElement, '.ex-branch')).toBeNull();
     const bars = canvasElement.querySelectorAll('.ex-bar');
     await expect(bars.length).toBeGreaterThan(0);
     await expect(bars.length).toBe(canvasElement.querySelectorAll('.ex-branchcell').length);
-    await expect(q(canvasElement, '[data-branch="i/1"] .ex-bar[data-live]')).not.toBeNull();
+    await expect(q(canvasElement, `[data-branch="${id('i/1')}"] .ex-bar[data-live]`)).not.toBeNull();
     // Every bar keeps its cable.
     const ids = [...canvasElement.querySelectorAll('.ex-branchcell')].map((c) => c.getAttribute('data-branch') ?? '');
     await waitFor(async () => expect(ids.filter((id) => cableOf(canvasElement, id) === undefined)).toEqual([]));
@@ -260,11 +265,12 @@ export const CondensedOpens: Story = {
   name: 'condensed · pressing a bar opens it',
   args: { cursor: MOMENTS.done, condensed: true },
   play: async ({ canvasElement }) => {
-    const bar = q(canvasElement, '[data-branch="i/1"] .ex-bar') as HTMLElement;
-    await expect(bar.getAttribute('aria-label')).toContain('i/1');
+    const id = (label: string) => idAt(MOMENTS.done, label);
+    const bar = q(canvasElement, `[data-branch="${id('i/1')}"] .ex-bar`) as HTMLElement;
+    await expect(bar.getAttribute('aria-label')).toContain(id('i/1'));
     await userEvent.click(bar);
     await expect(q(canvasElement, '.ex-session--condensed')).toBeNull();
-    await expect(q(canvasElement, '[data-branch="i/1"] .ex-branch')).not.toBeNull();
+    await expect(q(canvasElement, `[data-branch="${id('i/1')}"] .ex-branch`)).not.toBeNull();
   },
 };
 
@@ -292,11 +298,13 @@ export const DeepLink: Story = {
   render: ({ cursor }) => <OpenedByLink cursor={cursor} />,
   play: async ({ canvasElement }) => {
     window.scrollTo(0, 0);
-    window.location.hash = '#i/1';
+    // A side call's address is its line's `seq`, as every node's is.
+    const target = idAt(MOMENTS.done, 'i/1');
+    window.location.hash = `#${target}`;
     (canvasElement.querySelector('[data-open]') as HTMLElement).click();
-    await waitFor(async () => expect(canvasElement.querySelector('[id="i/1"]')?.hasAttribute('data-target')).toBe(true));
+    await waitFor(async () => expect(canvasElement.querySelector(`[id="${target}"]`)?.hasAttribute('data-target')).toBe(true));
     await waitFor(async () => {
-      const box = canvasElement.querySelector('[id="i/1"]')?.getBoundingClientRect();
+      const box = canvasElement.querySelector(`[id="${target}"]`)?.getBoundingClientRect();
       await expect((box?.top ?? -1) >= 0 && (box?.bottom ?? Infinity) <= window.innerHeight).toBe(true);
     });
     const ids = [...canvasElement.querySelectorAll('[data-id]')].map((el) => [el.id, el.getAttribute('data-id')]);
@@ -317,8 +325,9 @@ export const LinesKeepUp: Story = {
   name: 'memory · lines keep up with a scroll',
   args: { cursor: MOMENTS.done },
   play: async ({ canvasElement }) => {
-    const line = () => document.querySelector('.ex-links .ex-link[data-from="i/1"]')?.getAttribute('d') ?? '';
-    const cell = q(canvasElement, '[data-branch="i/1"]') as HTMLElement;
+    const id = (label: string) => idAt(MOMENTS.done, label);
+    const line = () => document.querySelector(`.ex-links .ex-link[data-from="${id('i/1')}"]`)?.getAttribute('d') ?? '';
+    const cell = q(canvasElement, `[data-branch="${id('i/1')}"]`) as HTMLElement;
     await waitFor(async () => expect(cell.style.visibility).not.toBe('hidden'));
     cell.scrollIntoView({ block: 'center' });
     await waitFor(async () => expect(line()).not.toBe(''));
@@ -345,15 +354,16 @@ export const LinesIntoMemory: Story = {
   name: 'memory · lines from side calls to what they wrote',
   args: { cursor: MOMENTS.done },
   play: async ({ canvasElement }) => {
-    const cell = q(canvasElement, '[data-branch="i/1"]') as HTMLElement;
+    const id = (label: string) => idAt(MOMENTS.done, label);
+    const cell = q(canvasElement, `[data-branch="${id('i/1')}"]`) as HTMLElement;
     await expect(cell.querySelector('.ex-branch__patches')).toBeNull();
     await expect(cell.querySelector('.ex-patchsum')?.textContent).toMatch(/\+\s*\d/);
     // Lines are drawn for the side calls on screen.
     await waitFor(async () => expect(cell.style.visibility).not.toBe('hidden'));
     cell.scrollIntoView({ block: 'center' });
-    const lines = () => [...document.querySelectorAll('.ex-links path.ex-link[data-from="i/1"]')];
+    const lines = () => [...document.querySelectorAll(`.ex-links path.ex-link[data-from="${id('i/1')}"]`)];
     await waitFor(async () => expect(lines().length).toBeGreaterThan(0));
-    const entries = [...new Set([...document.querySelectorAll('.ex-links path.ex-link[data-from="i/1"]')].map((l) => l.getAttribute('data-entry')))];
+    const entries = [...new Set([...document.querySelectorAll(`.ex-links path.ex-link[data-from="${id('i/1')}"]`)].map((l) => l.getAttribute('data-entry')))];
     await waitFor(async () => expect(lines().length).toBeGreaterThan(0));
     for (const entry of entries) await expect(canvasElement.querySelector(`[id="memory/${entry}"]`)).not.toBeNull();
     await expect(lines().some((l) => l.hasAttribute('data-hot'))).toBe(false);
@@ -408,9 +418,10 @@ export const ChainFromALine: Story = {
   args: { cursor: MOMENTS.done },
   globals: { connectors: 'sweep' },
   play: async ({ canvasElement }) => {
-    const cell = q(canvasElement, '.ex-branchcell[data-branch="i/1"]') as HTMLElement;
+    const id = (label: string) => idAt(MOMENTS.done, label);
+    const cell = q(canvasElement, `.ex-branchcell[data-branch="${id('i/1')}"]`) as HTMLElement;
     cell.scrollIntoView({ block: 'center' });
-    const hits = () => [...document.querySelectorAll('.ex-links [data-point][data-branches="i/1"][data-entry]')];
+    const hits = () => [...document.querySelectorAll(`.ex-links [data-point][data-branches="${id('i/1')}"][data-entry]`)];
     await waitFor(async () => expect(hits().length).toBeGreaterThan(1));
     const hit = hits()[0] as Element;
     const entry = hit.getAttribute('data-entry') ?? '';
@@ -430,7 +441,8 @@ export const ChainByFocus: Story = {
   name: 'chain · focus lights it too',
   args: { cursor: MOMENTS.done },
   play: async ({ canvasElement }) => {
-    const cell = q(canvasElement, '.ex-branchcell[data-branch="i/1"]') as HTMLElement;
+    const id = (label: string) => idAt(MOMENTS.done, label);
+    const cell = q(canvasElement, `.ex-branchcell[data-branch="${id('i/1')}"]`) as HTMLElement;
     (cell.querySelector('button, summary, [tabindex]') as HTMLElement).focus();
     await waitFor(async () => expect(cell.hasAttribute('data-hot')).toBe(true));
     await expect(q(canvasElement, '.ex-trunk__node[data-hot]')).not.toBeNull();
@@ -445,9 +457,10 @@ export const LinesDrawerShut: Story = {
   args: { cursor: MOMENTS.done },
   render: (args) => <div style={{ width: 900 }}>{meta.render(args)}</div>,
   play: async ({ canvasElement }) => {
+    const id = (label: string) => idAt(MOMENTS.done, label);
     await waitFor(async () => expect(q(canvasElement, '.ex-session[data-drawer]')).not.toBeNull());
     // A side call with patches on screen: the only thing a line could come from.
-    const cell = q(canvasElement, '[data-branch="i/1"]') as HTMLElement;
+    const cell = q(canvasElement, `[data-branch="${id('i/1')}"]`) as HTMLElement;
     await waitFor(async () => expect(cell.style.visibility).not.toBe('hidden'));
     cell.scrollIntoView({ block: 'center' });
     await new Promise((r) => setTimeout(r, 300));

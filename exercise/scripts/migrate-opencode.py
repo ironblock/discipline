@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 One-time migration: a session OpenCode recorded (its sqlite store), into the
-surface's provisional event vocabulary (src/drive/events.ts), as a fixture.
+surface's provisional event vocabulary (src/drive/script.ts; placed in the log by src/drive/place.ts), as a fixture.
 
     python3 scripts/migrate-opencode.py <opencode.db> <session title> <out.json> --scrub <name> --title <title>
 
