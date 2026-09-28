@@ -34,6 +34,8 @@ export interface SessionViewProps {
   readonly session: Session;
   /** The connection to the drive. Absent: live. */
   readonly link?: Link;
+  /** Why the link is not live, when the transport says (finding 17: a status the author must see). */
+  readonly linkWhy?: string;
   readonly surface: Surface;
   readonly onSurface?: (next: Surface) => void;
   readonly composer: Omit<ComposerProps, 'state' | 'phase'>;
@@ -62,7 +64,7 @@ interface Placement extends Placed {
  * an earlier branch in the same slot is still in the way it stacks below
  * and its cable bends to reach it. The trunk never moves for a branch.
  */
-export function SessionView({ session, link = 'live', surface, onSurface, composer, follow = false }: SessionViewProps) {
+export function SessionView({ session, link = 'live', linkWhy, surface, onSurface, composer, follow = false }: SessionViewProps) {
   // What the row has room for beside the trunk (measured below): whole side calls, bars, or neither. With
   // less room than the curtain asks for, side calls condense to bars; with none, the curtain draws closed.
   // Either way a side call that cannot open in its lane opens under the message it came from (`inline`).
@@ -453,7 +455,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
         <div className="ex-session__need" data-for="bars" ref={needBars} aria-hidden="true" />
         {minimap ? <Minimap stage={stage} revision={[session, placed, seamPad, curtain]} curtain={curtain} /> : null}
         <div className="ex-session__header">
-          <SessionHeader session={session} link={link} surface={surface} room={room} {...(onSurface ? { onSurface } : {})} />
+          <SessionHeader session={session} link={link} {...(linkWhy !== undefined ? { linkWhy } : {})} surface={surface} room={room} {...(onSurface ? { onSurface } : {})} />
         </div>
         <div className="ex-session__main">
           <div className="ex-session__columns">

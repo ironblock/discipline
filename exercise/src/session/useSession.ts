@@ -11,8 +11,10 @@ export function useSession(transport: DriveTransport): Session {
   useEffect(() => {
     const seen: LogLine[] = [];
     setEvents([]);
-    return transport.subscribe((event) => {
-      seen.push(event);
+    return transport.subscribe((line) => {
+      // A session's first line after another's: the drive restarted, and this is a new session.
+      if (line.seq === 0) seen.length = 0;
+      seen.push(line);
       setEvents([...seen]);
     });
   }, [transport]);

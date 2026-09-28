@@ -18,6 +18,20 @@ pnpm verify           # typecheck, lint, unit tests, every story as a browser te
 pnpm perf             # a performance trace: frames, long frames, layout, style, script, a profile (--ablate, --css)
 ```
 
+**Driving `diet`.** `?drive` drives `diet`'s own session, served over HTTP
+(`src/drive/http.ts`, against `serve.rs`'s contract, #128). The page reaches
+it same-origin through the dev server's proxy:
+
+```
+diet-drive serve --allow-origin http://localhost:5173 ...   # #117 I5, not landed yet
+DIET_DRIVE=http://127.0.0.1:<port> pnpm dev                 # then open /?drive
+```
+
+Until I5 lands, `node scripts/stand-in.mjs` stands in for it: the same
+routes, statuses and v0 log, a canned answer instead of a model, and
+`SIGUSR2` to restart its session (a 410 for the page to rebuild on).
+Delete it when I5 lands.
+
 `pnpm perf` (`scripts/perf.mjs`) drives a production build in headless
 Chromium through three sessions -- replay, scroll, pointing -- and says
 where frames go. Headless Chromium rasterises and composites in software:
@@ -70,7 +84,8 @@ CI runs the same thing as the repository's `exercise` check (`./verify.sh --only
 | --- | --- |
 | `src/drive/log.ts` | The session's log as the surface reads it: `diet/formats/log` v0 (#137), **mirrored by hand** until track one's generated bindings replace it, and held to `diet`'s own valid fixtures by `log.test.ts`. Beside v0, what the surface draws that the log does not say yet is marked AHEAD, each tagged with the step of #117 that will add it. A node's id is the `seq` of the line it began at. |
 | `src/drive/script.ts`, `place.ts` | The authored shape the specimen, the kitchen sink and the recorded sessions are written in -- labels (`q/2`, `i/1`) where the log has `seq` references -- and the step that places a script in the log. Only the log is folded; stories find nodes by label through `idOf`. |
-| `src/drive/transport.ts` | The drive interface: subscribe to the session's log; send an ask, cancel, declare a seam. An HTTP + SSE transport implements it against #117's loop. |
+| `src/drive/transport.ts` | The drive interface: subscribe to the session's log; send an ask, cancel, declare a seam. |
+| `src/drive/http.ts` | The transport against `diet`'s served session: `/events` as server-sent events, `/commands` as JSON. A closed stream asks, once, what it was answered with (finding 17, #117): 410 rebuilds from a new session's first line, anything else is shown to the author with its reason. |
 | `src/drive/specimen.ts` | **Authored, not recorded.** One session walking the definition of done, as a script. Deleted when a recorded session replaces it. |
 | `src/drive/canned.ts` | A transport that plays the specimen with real timing, and `snapshot()`, the same session stopped at any moment. |
 | `src/drive/recorded/` | **Recorded, not authored.** Sessions the predecessor recorded against a real model, migrated once by `scripts/migrate-recorded.py` (each file's `migration` header says what the migration decided) and scrubbed of names and paths. `?session=first-drive` replays one (also `cancelled-capture`, `step-limit`); `Session/Recorded` stops each where it went wrong. `voxel-stress` is an OpenCode session (`scripts/migrate-opencode.py`): native tool calls, several a step, six tools -- its side calls did not run, and are stitched on by `scripts/stitch-sides.py`, their answers written by a model from the trunk's own text; a stand-in until a drive's recording replaces it. A kind the vocabulary lacks is carried under its own name, never dropped. Deltas and progress frames are synthesized from each response's timings, since neither was recorded. |

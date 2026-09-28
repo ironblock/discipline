@@ -156,4 +156,10 @@ export const refusalOf = registry<Refusal>({
   'nothing-to-cancel': { label: 'nothing is running', level: 'quiet' },
   'off-script': { label: 'the canned script expects something else next', level: 'quiet' },
   recording: { label: 'a recording: it plays, and takes no commands', level: 'quiet' },
+  // diet's own (log v0's Refusal), and the transport's.
+  'in-flight': { label: 'not taken: something is still running', level: 'warn' },
+  'nothing-in-flight': { label: 'nothing is running', level: 'quiet' },
+  'seam-not-built': { label: 'not taken: the drive cannot refill yet', level: 'quiet' },
+  stale: { label: 'not taken: that turn is over', level: 'quiet' },
+  unreachable: { label: 'not taken: the drive cannot be reached', level: 'bad' },
 });

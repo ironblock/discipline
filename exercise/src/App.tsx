@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { CannedTransport } from './drive/canned.ts';
+import { HttpTransport } from './drive/http.ts';
 import { ReplayTransport } from './drive/recorded.ts';
 import { SESSIONS } from './drive/sessions.ts';
 import type { SessionName } from './drive/sessions.ts';
@@ -22,31 +23,35 @@ const EXPECTS: Readonly<Record<string, string>> = {
 };
 
 /**
- * The harness, on the canned transport until #117's loop serves a real one --
- * or replaying a recorded session, which plays and takes no commands.
+ * The harness: driving `diet`'s session over HTTP (`drive`, #117 I5), or on
+ * the canned transport, or replaying a recorded session, which plays and
+ * takes no commands.
  */
-export function App({ speed = 1, recording }: { readonly speed?: number; readonly recording?: SessionName }) {
+export function App({ speed = 1, recording, drive = false }: { readonly speed?: number; readonly recording?: SessionName; readonly drive?: boolean }) {
   const transport = useMemo(
-    () => (recording ? new ReplayTransport(SESSIONS[recording], { speed }) : new CannedTransport(SPECIMEN, { speed })),
-    [speed, recording],
+    () => (drive ? new HttpTransport() : recording ? new ReplayTransport(SESSIONS[recording], { speed }) : new CannedTransport(SPECIMEN, { speed })),
+    [speed, recording, drive],
   );
   useEffect(() => () => transport.close(), [transport]);
   const session = useSession(transport);
-  const [link, setLink] = useState<Link>('live');
-  useEffect(() => (transport as DriveTransport).watchLink?.(setLink), [transport]);
+  const [link, setLink] = useState<{ readonly link: Link; readonly why?: string }>({ link: 'live' });
+  useEffect(() => (transport as DriveTransport).watchLink?.((next, why) => setLink(why === undefined ? { link: next } : { link: next, why })), [transport]);
   const [surface, setSurface] = useState<Surface>({ curtain: true, gaps: false });
   const expects = transport instanceof CannedTransport ? transport.expects : undefined;
   return (
     <SessionView
       session={session}
-      link={link}
+      link={link.link}
+      {...(link.why !== undefined ? { linkWhy: link.why } : {})}
       surface={surface}
       onSurface={setSurface}
       follow
       composer={{
         phases: PHASES,
         dispatch: (command) => transport.dispatch(command),
-        hint: recording
+        hint: drive
+          ? `driving: diet's session, over HTTP`
+          : recording
           ? `replaying: ${SESSIONS[recording].title}`
           : session.state === 'awaiting'
             ? expects

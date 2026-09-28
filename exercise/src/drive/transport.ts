@@ -38,6 +38,13 @@ export type Refusal = Open<
   | 'off-script'
   /** A recording plays; it takes no commands. */
   | 'recording'
+  /** `diet`'s own (log v0 `Refusal`): a turn or a capture is in flight; the turn named has nothing in flight; seams are not built yet; a stop named an older turn. */
+  | 'in-flight'
+  | 'nothing-in-flight'
+  | 'seam-not-built'
+  | 'stale'
+  /** The HTTP transport's: the drive did not answer. */
+  | 'unreachable'
 >;
 
 export type Ack = { readonly ok: true } | { readonly ok: false; readonly refused: Refusal };
@@ -53,6 +60,6 @@ export interface DriveTransport {
   /** Every event so far, in order, then each new one. Returns an unsubscribe. */
   subscribe(listener: (line: LogLine) => void): () => void;
   dispatch(command: Command): Promise<Ack>;
-  /** The connection's state now, then each change. Absent: always `live`. */
-  watchLink?(listener: (link: Link) => void): () => void;
+  /** The connection's state now, then each change, and why when it is not live. Absent: always `live`. */
+  watchLink?(listener: (link: Link, why?: string) => void): () => void;
 }

@@ -9,6 +9,8 @@ import './header.css';
 export interface SessionHeaderProps {
   readonly session: Session;
   readonly link?: Link;
+  /** Why the link is not live, when the transport says. */
+  readonly linkWhy?: string;
   readonly surface: Surface;
   /** What the row has room for beside the trunk (SessionView): the curtain can draw no more than that. */
   readonly room?: Room;
@@ -19,18 +21,23 @@ export interface SessionHeaderProps {
 const CURTAIN = ['closed', 'condensed', 'open'] as const;
 
 /** One quiet line: what is running this session, where it is, and the switches for seeing more. */
-export function SessionHeader({ session, link = 'live', surface, room = 'whole', onSurface }: SessionHeaderProps) {
+export function SessionHeader({ session, link = 'live', linkWhy, surface, room = 'whole', onSurface }: SessionHeaderProps) {
   const unavailable = CURTAIN.filter((c) => (room === 'bars' && c === 'open') || (room === 'none' && c !== 'closed'));
   const drawn = !surface.curtain || room === 'none' ? 'closed' : surface.condensed === true || room === 'bars' ? 'condensed' : 'open';
   return (
     <header className="ex-header">
-      <span className="ex-header__item">
-        <span className="ex-header__k">arm</span> {session.arm}
-      </span>
+      {/* What the log has not said is left out: `diet`'s v0 names no arm and no phase. */}
+      {session.arm ? (
+        <span className="ex-header__item">
+          <span className="ex-header__k">arm</span> {session.arm}
+        </span>
+      ) : null}
       <span className="ex-header__item ex-header__model">{session.model}</span>
-      <span className="ex-header__item">
-        <span className="ex-header__k">phase</span> {session.phase}
-      </span>
+      {session.phase ? (
+        <span className="ex-header__item">
+          <span className="ex-header__k">phase</span> {session.phase}
+        </span>
+      ) : null}
       <span className="ex-header__slots" title="the server's slots, and what each is serving now">
         {session.occupancy.map((holder, slot) => (
           <span
@@ -58,8 +65,9 @@ export function SessionHeader({ session, link = 'live', surface, room = 'whole',
         </span>
       ) : null}
       {link !== 'live' ? (
-        <span className="ex-header__link" data-link={link} role="status">
+        <span className="ex-header__link" data-link={link} role="status" title={linkWhy}>
           {link === 'reconnecting' ? 'reconnecting…' : 'connection lost'}
+          {link === 'lost' && linkWhy ? `: ${linkWhy}` : ''}
         </span>
       ) : null}
       <span className="ex-header__state" data-state={session.state}>

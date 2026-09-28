@@ -83,7 +83,7 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
         </span>
         <span className="ex-composer__spacer" />
         <span className="ex-composer__phase">
-          <span className="ex-composer__label">phase</span> {phase}
+          <span className="ex-composer__label">phase</span> {phase || 'not said'}
         </span>
         <label className="ex-composer__seam">
           <span className="ex-composer__label">move to</span>
