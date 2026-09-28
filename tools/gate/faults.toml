@@ -6561,6 +6561,38 @@ failure_class = "drive.serve-bin-ignores-the-auth-file"
 migrated = false
 
 [[fault]]
+id = "drive.serve-bin-accepts-a-mapped-wildcard"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-accepts-a-mapped-wildcard"
+failure_class = "drive.serve-bin-accepts-a-mapped-wildcard"
+migrated = false
+
+[[fault]]
+id = "drive.serve-credential-accepts-an-empty-user"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-credential-accepts-an-empty-user"
+failure_class = "drive.serve-credential-accepts-an-empty-user"
+migrated = false
+
+[[fault]]
+id = "drive.serve-credential-debug-prints-its-digest"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-credential-debug-prints-its-digest"
+failure_class = "drive.serve-credential-debug-prints-its-digest"
+migrated = false
+
+[[fault]]
+id = "drive.serve-auth-is-asked-before-the-host-check"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-auth-is-asked-before-the-host-check"
+failure_class = "drive.serve-auth-is-asked-before-the-host-check"
+migrated = false
+
+[[fault]]
 id = "adapters.compaction-read-as-a-turn"
 kind = "lane-fault"
 check = "lanes"
