@@ -57,7 +57,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::client::shape::{Message, RequestShape, Role};
-use crate::client::stream::{Cancel, Ended as StreamEnded, Streaming};
+use crate::client::stream::{Cancel, Ended as StreamEnded, Piece, Streaming};
 use crate::client::transport::TransportFailure;
 use crate::client::vocabulary;
 
@@ -177,6 +177,15 @@ pub enum Event {
         because: Refusal,
         /// What the session was doing when it refused.
         during: Settlement,
+    },
+    /// A piece of the trunk's reasoning arrived: what a thinking model
+    /// streams before its answer. It joins the trunk with the answer (#117,
+    /// Q10).
+    Reasoning {
+        /// The sequence number of the [`Event::Requested`] it belongs to.
+        request: u64,
+        /// The piece, as the server sent it.
+        text: String,
     },
     /// A piece of the trunk's answer arrived.
     Delta {
@@ -648,14 +657,27 @@ fn call<S: Streaming>(
 ) {
     let deadline = Instant::now() + shared.template.limits.call;
     let mut partial = String::new();
+    let mut reasoning = String::new();
     let result = shared
         .transport
-        .stream(shape, deadline, cancel, &mut |piece: &str| {
-            partial.push_str(piece);
-            shared.lock().push(Event::Delta {
-                request,
-                text: piece.to_owned(),
-            });
+        .stream(shape, deadline, cancel, &mut |piece: Piece<'_>| {
+            let event = match piece {
+                Piece::Text(text) => {
+                    partial.push_str(text);
+                    Event::Delta {
+                        request,
+                        text: text.to_owned(),
+                    }
+                }
+                Piece::Reasoning(text) => {
+                    reasoning.push_str(text);
+                    Event::Reasoning {
+                        request,
+                        text: text.to_owned(),
+                    }
+                }
+            };
+            shared.lock().push(event);
             shared.changed.notify_all();
         });
 
@@ -664,9 +686,13 @@ fn call<S: Streaming>(
     match result {
         Ok(StreamEnded::Finished { finish_reason }) => {
             state.trunk.push(Message::new(Role::User, ask));
-            state
-                .trunk
-                .push(Message::new(Role::Assistant, partial.clone()));
+            // The reasoning goes back with the answer, byte for byte and
+            // untrimmed: measured on e7051ef (#117, Q10), dropping it
+            // diverges the next prompt at this turn, and a stray newline
+            // diverges it inside this turn.
+            let mut answer = Message::new(Role::Assistant, partial.clone());
+            answer.reasoning = (!reasoning.is_empty()).then_some(reasoning);
+            state.trunk.push(answer);
             state.push(Event::Answered {
                 request,
                 text: partial,
@@ -1098,9 +1124,9 @@ pub(in crate::drive) mod tests {
             _shape: &RequestShape,
             _deadline: Instant,
             _cancel: &Cancel,
-            on_delta: &mut dyn FnMut(&str),
+            on_delta: &mut dyn FnMut(Piece<'_>),
         ) -> Result<StreamEnded, TransportFailure> {
-            on_delta("half");
+            on_delta(Piece::Text("half"));
             panic!("a transport that panics mid-answer (seeded by this test)");
         }
 
@@ -1189,6 +1215,72 @@ pub(in crate::drive) mod tests {
             matches!(held, Held::HungUp(after) if after < Duration::from_secs(5)),
             "{held:?}"
         );
+    }
+
+    #[test]
+    fn a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical() {
+        use crate::client::stream::HttpStream;
+        use crate::client::stub::{Act, Stub};
+        use crate::client::transport::Endpoint;
+
+        // The drive endpoint's own reply to a thinking turn (#117 Q10,
+        // measured by track four): re-sent, its reasoning kept 400 of 420
+        // prompt tokens warm; dropped, the prompt diverged at this turn.
+        let capture =
+            include_bytes!("../../client/fixtures/llama-server-e7051ef-reasoning-stream.http");
+        let stub = Stub::serving(vec![Act::Raw(capture.to_vec()), Act::Raw(capture.to_vec())])
+            .expect("loopback");
+        let transport =
+            HttpStream::new(Endpoint::parse(&stub.url()).expect("the stub's URL is an endpoint"));
+        let session = Session::open(transport, template());
+        for (turn, ask) in [(1_usize, "how long?"), (2, "and back?")] {
+            session.ask(ask).expect("accepted");
+            wait_until(&session, "the turn to settle", |log| {
+                log.iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == turn
+                    && settled(log)
+            });
+        }
+        let log = session.events_from(0);
+        let first_request = 3;
+        let streamed = |reasoning: bool| -> String {
+            log.iter()
+                .filter_map(|logged| match &logged.event {
+                    Event::Reasoning { request, text }
+                        if reasoning && *request == first_request =>
+                    {
+                        Some(text.as_str())
+                    }
+                    Event::Delta { request, text } if !reasoning && *request == first_request => {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        drop(session);
+
+        let bodies: Vec<serde_json::Value> = stub
+            .received()
+            .iter()
+            .map(|body| serde_json::from_str(body).expect("a request body is JSON"))
+            .collect();
+        assert_eq!(bodies.len(), 2);
+        let first = bodies[0]["messages"].as_array().expect("messages");
+        let second = bodies[1]["messages"].as_array().expect("messages");
+        // Appended, never rebuilt: the second request begins with the first.
+        assert_eq!(second[..first.len()], first[..]);
+        let answered = &second[first.len()];
+        assert_eq!(answered["role"], serde_json::json!("assistant"));
+        assert_eq!(
+            answered["reasoning_content"],
+            serde_json::json!(streamed(true)),
+            "the reasoning went back changed, or not at all"
+        );
+        assert_eq!(answered["content"], serde_json::json!(streamed(false)));
+        assert!(streamed(true).ends_with('\n') && !streamed(false).is_empty());
     }
 
     #[test]

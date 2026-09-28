@@ -560,6 +560,7 @@ impl<T: Transport> Ratifier for Interviewer<'_, T> {
         shape.messages = vec![Message {
             role: Role::User,
             content: ask.text.clone(),
+            reasoning: None,
         }];
         // Immediately before the call, like `Heads::about_to_call`: what a
         // cache lifetime is compared against is the gap between two
@@ -850,6 +851,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         asking.messages = vec![Message {
             role: Role::User,
             content: KWARG_CONTROL_ASK.to_owned(),
+            reasoning: None,
         }];
         asking
             .template_kwargs
@@ -916,10 +918,12 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             Message {
                 role: Role::System,
                 content: controller.prefix().to_owned(),
+                reasoning: None,
             },
             Message {
                 role: Role::User,
                 content: turn.ask.clone(),
+                reasoning: None,
             },
         ];
         // THE LINT, before the call. The main lane is the one whose head
@@ -989,6 +993,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             asking.messages = vec![Message {
                 role: Role::User,
                 content: question.clone(),
+                reasoning: None,
             }];
             linted_head(&asking, index, INTERVIEW)?;
             heads.about_to_call(INTERVIEW);

@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 89
+faults = 91
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -840,6 +840,7 @@ anchor = '''
 becomes = '''
         shape.messages.clone_from(&self.shared.template.messages);'''
 catches = [
+    "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
     "drive::session::tests::the_trunk_is_appended_never_rebuilt",
 ]
 
@@ -855,6 +856,7 @@ becomes = '''
             Settlement::Awaiting | Settlement::Turn => {}
             Settlement::Capture => {'''
 catches = [
+    "drive::serve::tests::a_refused_command_is_409_with_its_tag_and_is_in_the_log",
     "drive::session::tests::an_ask_sent_while_a_turn_is_in_flight_is_refused_by_name",
 ]
 
@@ -870,6 +872,7 @@ becomes = '''
                 let _ = &cancel;
                 return Ok(());'''
 catches = [
+    "drive::serve::tests::a_cancel_over_http_reaches_a_call_blocked_mid_answer",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
     "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
@@ -905,6 +908,7 @@ anchor = '''
 becomes = '''
         let _ = (command, during);'''
 catches = [
+    "drive::serve::tests::a_refused_command_is_409_with_its_tag_and_is_in_the_log",
     "drive::session::tests::a_cancel_naming_a_turn_that_already_settled_does_not_stop_the_next_one",
     "drive::session::tests::a_command_with_nothing_to_act_on_is_refused_and_logged",
     "drive::session::tests::an_ask_sent_while_a_turn_is_in_flight_is_refused_by_name",
@@ -933,9 +937,13 @@ anchor = '''
 becomes = '''
         let seq = u64::try_from(self.log.len() / 2)'''
 catches = [
+    "drive::serve::tests::a_late_reader_replays_from_zero_then_tails",
+    "drive::serve::tests::a_reader_resuming_after_an_id_of_this_process_starts_at_the_next",
+    "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_failed_call_is_typed_and_leaves_the_trunk_alone",
     "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
+    "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
     "drive::session::tests::a_turn_the_server_refused_is_logged_as_refused_and_leaves_the_trunk_alone",
     "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
     "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
@@ -1036,12 +1044,15 @@ failure_class = "drive.session-a-delta-names-the-ask"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-            shared.lock().push(Event::Delta {
-                request,'''
+                    Event::Delta {
+                        request,
+                        text: text.to_owned(),'''
 becomes = '''
-            shared.lock().push(Event::Delta {
-                request: request.saturating_sub(2),'''
+                    Event::Delta {
+                        request: request.saturating_sub(2),
+                        text: text.to_owned(),'''
 catches = [
+    "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
     "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
     "drive::session::tests::every_call_is_a_request_and_what_it_produced_names_it",
 ]
@@ -1446,4 +1457,30 @@ becomes = '''
 '''
 catches = [
     "drive::serve::tests::a_server_bound_on_ipv6_loopback_answers_the_host_a_browser_sends_it",
+]
+
+[[fault]]
+id = "drive.session-reasoning-left-off-the-trunk"
+failure_class = "drive.session-reasoning-left-off-the-trunk"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            answer.reasoning = (!reasoning.is_empty()).then_some(reasoning);'''
+becomes = '''
+            let _ = reasoning;'''
+catches = [
+    "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
+]
+
+[[fault]]
+id = "drive.session-reasoning-trimmed"
+failure_class = "drive.session-reasoning-trimmed"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            answer.reasoning = (!reasoning.is_empty()).then_some(reasoning);'''
+becomes = '''
+            answer.reasoning = (!reasoning.is_empty()).then(|| reasoning.trim_end().to_owned());'''
+catches = [
+    "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
 ]
