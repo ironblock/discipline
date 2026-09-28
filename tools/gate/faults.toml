@@ -6097,6 +6097,30 @@ failure_class = "drive.serve-a-resume-past-the-last-seq-wraps"
 migrated = false
 
 [[fault]]
+id = "drive.serve-a-body-has-no-deadline"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-a-body-has-no-deadline"
+failure_class = "drive.serve-a-body-has-no-deadline"
+migrated = false
+
+[[fault]]
+id = "drive.serve-a-whole-head-is-not-capped"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-a-whole-head-is-not-capped"
+failure_class = "drive.serve-a-whole-head-is-not-capped"
+migrated = false
+
+[[fault]]
+id = "drive.serve-an-ipv6-bind-refuses-its-own-host"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-an-ipv6-bind-refuses-its-own-host"
+failure_class = "drive.serve-an-ipv6-bind-refuses-its-own-host"
+migrated = false
+
+[[fault]]
 id = "adapters.compaction-read-as-a-turn"
 kind = "lane-fault"
 check = "lanes"
