@@ -1,0 +1,245 @@
+{
+"batch": 48,
+"items": [
+{
+"id": "7daa7b859595",
+"entry": "What functional changes exist in the shared files with significant size deltas — particularly `server-context.cpp` (+175KB in beellama), `server-task.cpp` (+41KB), `server-common.h` (larger), and `server-models.cpp` (-27KB)?",
+"reasoning": "The note about file size deltas is still valid and actually confirmed by this step. Let me now check the server-task.cpp sizes and server-common.h sizes.",
+"prose": ""
+},
+{
+"id": "0071d4eb9356",
+"entry": "Upstream's `server-models.h` uses a static `setup_child_server()` and `notify_router_sleeping_state()` pattern, while beellama's uses instance methods (`setup()`, `notify_to_router()`) with a more sophisticated `conv_model_tracker` for conversation-to-model routing — the beellama fork has evolved the router model management with resumable streaming awareness. — IMPLICATION: When comparing routing behavior, the key divergence is in how conversation IDs are tracked across child instances and how stream sessions are resolved.",
+"reasoning": "",
+"prose": "I see the working record entry you're referring to, but I notice you said it's \"superseded by this step\" and should be updated. However, looking at my current working record (entries #2 through #296), I don't actually see that specific entry about `server-models.h` and `conv_model_tracker`. It appears this might be a new finding from this investigation.\n\nLet me provide the summary of what I've found:\n\n## Comparison Summary: beellama.cpp vs upstream llama.cpp server\n\n### Files UNIQUE to beellama (not in upstream):\n\n| File | Purpose |\n|------|---------|\n| **`server-adaptive-dm.h`** | Adaptive draft model controller for speculative decoding — implements profit-based EWMA (exponential weighted moving average) controllers for tuning speculative draft parameters dynamically. Upstream has speculative decoding but not this adaptive profit-based controller layer. |\n| **`server-loop-guard.cpp`/`.h`** | Reasoning loop detection/guard — monitors token generation for reasoning models to detect looping behavior (periodic tails, n-gram dominance, low entropy) in both reasoning and visible output regions. Prevents reasoning models from getting stuck in repetitive loops. |\n| **`server-mcp.cpp`/`.h`** | **Model Context Protocol (MCP)** support — full MCP client implementation with stdio transport, NDJSON parsing, JSON-RPC session management, subprocess spawning, and tool listing/calling. This is a major new capability not present in upstream at all. |\n| **`server-stream.cpp`/`.h`** | **Resumable streaming sessions** — ring-buffer-based stream sessions keyed by `conversation_id`, with `stream_session_manager` for session lifecycle (create/replace/evict/GC), tee-style pipes for stream replay, and `/v1/stream/*` HTTP routes. Allows clients to reconnect and resume a stream from any offset. |\n\n### Shared files with SIGNIFICANT divergence:\n\n| File | Upstream | Beellama | Δ | Key Divergence |\n|------|----------|----------|---|----------------|\n| **`server-tools.cpp`/`.h`** | 29.9K/623B | 51.6K/1.1K | +72%/+78% | Massive expansion — beellama has a full built-in tool system with git operations, file I/O, exec results, and tool permissions |\n| **`server-models.h`** | 10.8K | 15.0K | +38% | `conv_model_tracker` for conversation-to-model routing, `server_child_mode` enum, resumable stream awareness in router |\n| **`server.cpp`** | 16.9K | 22.1K | +30% | MCP integration, stream session routes, loop guard wiring, adaptive DM params |\n| **`server-context.h`** | 5.6K | 6.5K | +16% | `server_state` enum (downloading/loading/ready/sleeping), state callbacks, `model_ftype` field |\n| **`server-context.cpp`** | 209K | 241K | +15% | MCP tool calling, loop guard integration, stream session management, adaptive DM |\n| **`server-models.cpp`** | 75K | 86.6K | +15% | Download mode, progress tracking, conv model tracker, stream route proxying |\n| **`server-common.h`** | 13.8K | 16.3K | +18% | `server_pipe<T>` template, `has_media()`, `find_message_spans()` |\n| **`server-cors-proxy.h`** | 2.1"
+},
+{
+"id": "32907057e5de",
+"entry": "SSE ping mechanism (`params.sse_ping_interval`) keeps connections alive when clients timeout — matters for long-running streams",
+"reasoning": "Now let me check the README-dev.md to understand the overall purpose of this fork, and also look at the CMakeLists.txt to see how these new files are integrated.",
+"prose": ""
+},
+{
+"id": "d52cc95fe8f4",
+"entry": "Compare Babylon-Lite's package structure and API surface against the original Babylon.js repo",
+"reasoning": "",
+"prose": "It looks like `babylon-lite-gl` is just a placeholder directory (empty with only `.gitkeep`). Let me now compare the two repos side by side:\n\n"
+},
+{
+"id": "6107932e5098",
+"entry": "What is `render_message_to_json` and how does it format messages for the Jinja context?",
+"reasoning": "The working record note says I should update an entry about `render_message_to_json`. But I'm not maintaining a working record in this conversation - that was from the previous compacted record. Let me just continue with the investigation and look at `common_chat_template_direct_apply_impl` to see how Jinja rendering actually happens with tools.",
+"prose": ""
+},
+{
+"id": "7caceda758fc",
+"entry": "Look at `server_response_reader::next()` in server-queue.h to understand result pulling",
+"reasoning": "",
+"prose": "Good point — I need to update the working record. The entry about looking at `server_response_reader::next()` in server-queue.h was a deferred investigation step, but I've now traced the full streaming pipeline from HTTP handler → chunked content provider → `res->next` callback → result queue → partial/final result types. Let me update that entry.\n\n"
+},
+{
+"id": "df14b4f85c79",
+"entry": "The mismatch diagnostic code that prints tokens around the cache miss point (`ss0`/`ss1` strings) — useful for debugging cache hit/miss behavior (`server-context.cpp`, lines ~2931+)",
+"reasoning": "",
+"prose": "Now let me check the upstream llama.cpp tools/server directory for comparison:\n\n"
+},
+{
+"id": "d6659baee1b8",
+"entry": "The full source tree is at `~/git/reference/llama.cpp/tools/server/` — this is where I need to search for prompt cache and common-prefix matching logic",
+"reasoning": "The user is noting that the working record entry about the source tree location is still valid - the source is at `~/git/reference/llama.cpp/tools/server/`. Let me continue reading the `launch_slot_with_task` function to see the prompt cache load path.",
+"prose": ""
+},
+{
+"id": "5fa127a06215",
+"entry": "How the autoparser-generated grammar for tool calls interacts with the Jinja-rendered prompt — we saw grammar triggers and lazy evaluation but haven't traced a full tool-calling request end-to-end",
+"reasoning": "The user is noting that a working record entry may be affected. Let me look at the handle_slots_save and handle_slots_restore functions to understand the slot checkpointing/KV cache save/restore support.",
+"prose": ""
+},
+{
+"id": "6cfe3eab97c8",
+"entry": "Examine `server-task.cpp` / `server-task.h` to understand the `server_task` struct and `SERVER_TASK_TYPE_COMPLETION`",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "90eec589a4a4",
+"entry": "Look at `llama_state_seq_get_data_ext` and related llama.cpp C API functions to understand what KV cache data is actually serialized",
+"reasoning": "",
+"prose": "The entry still holds — I've now seen how `llama_state_seq_get_data_ext` and `llama_state_seq_set_data_ext` are called in `prompt_save`/`prompt_load` and in checkpoint creation/restoration, but I haven't yet examined the underlying llama.cpp C API to understand what KV cache data is actually serialized. Let me continue tracing the checkpoint restoration path and the slot cache save/restore endpoints.\n\n"
+},
+{
+"id": "76c118154d27",
+"entry": "NONE — The core question (where common-prefix matching happens for prompt cache/slot reuse) has been fully answered with quoted code from all four key locations: `get_common_prefix()` in server-common.cpp, `get_available_slot()` in server-context.cpp, `server_prompt_cache::load()` in server-task.cpp, and the slot-level `prompt_save`/`prompt_load` in server-context.cpp.",
+"reasoning": "The server code is in `tools/` directory based on the structure. Let me check there.",
+"prose": "Reasoning: The server code appears to be in the `tools/` directory. Let me check that.\n\n"
+},
+{
+"id": "1d2a2db2a9a8",
+"entry": "Cannot use custom grammar constraints with tools (throws invalid_argument)",
+"reasoning": "The user is noting that the entry \"Cannot use custom grammar constraints with tools (throws invalid_argument)\" may be affected. Let me check this in the codebase to see if it's still true or if there have been changes.",
+"prose": ""
+},
+{
+"id": "135e2346c81f",
+"entry": "The `grammar_lazy` flag logic — when `tool_choice == AUTO`, grammar constraints are deferred until a tool call prefix is detected. This matters for understanding when constrained decoding actually activates during tool-calling conversations. (`common/chat.cpp:1030`, `common/chat.cpp:1191`, `common/chat.cpp:1322`)",
+"reasoning": "",
+"prose": "Correction: The working record entry #161 regarding `grammar_lazy` flag logic is superseded. The `grammar_lazy` flag is not a beellama-specific feature — it exists in upstream llama.cpp as part of the standard tool-calling grammar deferral mechanism. It is not a differentiating factor between upstream and the fork.\n\nNow let me investigate caching/checkpointing differences between upstream and beellama.\n\n"
+},
+{
+"id": "a62409609a97",
+"entry": "Read `get_common_prefix()` in server-common.cpp",
+"reasoning": "The working record note about `get_common_prefix()` in server-common.cpp is not affected by this step - I'm looking at LoRA cache clearing logic, which is a different concern. Let me look at the LoRA cache clearing logic briefly, then compile the final answer.",
+"prose": "Let me check the LoRA cache clearing logic.\n\n"
+},
+{
+"id": "8bd065b7f777",
+"entry": "The Jinja path selects between `template_default` and `template_tool_use` based on whether `params.tools.is_array()` — two separate chat templates can exist per model, with the tool-aware template activated only when tools are present — IMPLICATION: models need a `template_tool_use` variant in their tokenizer metadata for tool rendering to work correctly",
+"reasoning": "Let me look at the `apply_template` function and how it handles tools in the Jinja rendering.",
+"prose": ""
+},
+{
+"id": "65c52cffde46",
+"entry": "`workaround::map_developer_role_to_system(params.messages)` — role mapping workaround for templates that don't support \"developer\" role (chat.cpp, line ~2671)",
+"reasoning": "The user is asking me to update a working record entry about the developer role mapping workaround. Let me check what the current understanding is and correct it based on what I found.\n\nLooking back at my earlier findings, at `common/chat.cpp:2671` area, I saw:\n\n```cpp\nif (src.find(\"<|channel|>\") == std::string::npos) {\n    // map developer to system for all models except for GPT-OSS\n    workaround::map_developer_role_to_system(params.messages);\n}\n```\n\nSo the correction is: this workaround specifically maps \"developer\" role to \"system\" for all models EXCEPT GPT-OSS (which uses `<|channel|>` tokens). The original entry didn't mention the GPT-OSS exception.\n\nLet me state this correction clearly.",
+"prose": "Correction: The `workaround::map_developer_role_to_system(params.messages)` call at `common/chat.cpp:2671` is **conditional** — it only maps \"developer\" → \"system\" for templates that do **not** contain the `<|channel|>` token. GPT-OSS templates (which use `<|channel|>`) are explicitly excluded and keep the \"developer\" role intact. The original entry omitted this GPT-OSS exception."
+},
+{
+"id": "aa07247b9fec",
+"entry": "The `start_loop` method on `server_queue` is the main event loop that processes queued tasks and manages sleeping — it's where tasks get dispatched to slots (`server-context.cpp` / `server.cpp`)",
+"reasoning": "",
+"prose": "Now let me look at the `server_prompt` struct definition:\n\n"
+},
+{
+"id": "24e5076db41e",
+"entry": "The prompt cache `load()` function uses a **dual improvement criteria** — a cached prompt is only selected if BOTH `f_keep` (fraction of cached context preserved) AND `sim` (common prefix / new prompt length) are strictly better than the slot's current prompt — IMPLICATION: A cached prompt with high similarity but low `f_keep` won't be used, and vice versa; this prevents loading a tiny cache entry that barely overlaps with the new prompt even if it matches perfectly.",
+"reasoning": "The user wants me to check if the working record entry about the dual improvement criteria for prompt cache `load()` is still accurate. Let me look at the actual code in `server_prompt_cache::load()` to verify.",
+"prose": "Let me verify the dual improvement criteria in `server_prompt_cache::load()`."
+},
+{
+"id": "91ce2f6ec4d9",
+"entry": "`ctx_server.start_loop()` — this is the core event loop in `server-context.cpp` that processes tasks from the queue; it's where requests get dispatched to slots (in `server-queue.cpp` / `server-context.cpp`)",
+"reasoning": "",
+"prose": "Now I have all the pieces. Let me provide a comprehensive answer.\n\n---\n\n## How the Server's Prompt Cache / Slot Reuse Works\n\nThe prompt cache and slot reuse system has **two layers**: (1) **slot-level LCP similarity matching** for selecting which slot to assign a new request to, and (2) a **persistent prompt cache** (`server_prompt_cache`) that stores serialized KV state from evicted slots so it can be restored later.\n\n### Layer 1: Slot Selection via Common-Prefix Matching (`get_available_slot`)\n\nWhen a new completion task arrives, `get_available_slot()` (`server-context.cpp:1586`) tries to find the best slot. If `slot_prompt_similarity` threshold is configured (non-zero), it scores each idle slot by how much of the new prompt overlaps with what's already cached in that slot's KV cache:\n\n"
+},
+{
+"id": "7d32aa54fefc",
+"entry": "`pre_decode()` and `batch.render()` are called to prepare the llama batch before decoding — these bridge slot state to the actual llama.cpp inference engine (`server-context.cpp`, line ~2802)",
+"reasoning": "",
+"prose": "The working record entry about `pre_decode()` and `batch.render()` being at line ~2802 is superseded by the actual code investigation. Let me correct that now and continue the trace.\n\n**Correction:** The actual streaming/SSE flow is not in the decode loop at all — it's in the HTTP response layer. The key mechanism is:\n\n1. `server_res_generator` (server-context.cpp:3717) extends `server_http_res` and holds a `server_response_reader rd` that bridges the task/result queues\n2. When streaming is enabled, `handle_completions_impl` sets `res->content_type = \"text/event-stream\"` and defines `res->next` as a lambda callback (server-context.cpp:3951+)\n3. The HTTP layer (`server-http.cpp:504`) repeatedly calls `response->next(chunk)` in a `chunked_content_provider` loop, writing each chunk to the `httplib::DataSink`\n\nLet me continue tracing the details of where chunks originate and what stops the stream.\n\n"
+},
+{
+"id": "921327be2c89",
+"entry": "BOTH file-based slot save/restore and the in-memory prompt cache are gated by `check_no_mtmd()` — multimodal models get \"This feature is not supported by multimodal\" — IMPLICATION: Any cache-related feature audit must explicitly exclude multimodal paths; the server hard-fails rather than degrading gracefully",
+"reasoning": "The user is asking about the structure of the \"working-object\" described in `docs/compaction-model.md`. Let me read that file to find the exact structure.",
+"prose": ""
+},
+{
+"id": "8fbf4a154087",
+"entry": "`dry_base` has a custom handler that clamps values `< 1.0` back to `params_base.sampling.dry_base` — a special validation rule at line ~139 (server-schema.cpp)",
+"reasoning": "",
+"prose": "Good catch. The `dry_base` custom handler clamping behavior at line ~139 in `server-schema.cpp` is superseded. Let me verify what's actually there now:\n\n"
+},
+{
+"id": "06157e5958bf",
+"entry": "Look at `llama_state_seq_get_data_ext` and related llama.cpp C API functions to understand what KV cache data is actually serialized",
+"reasoning": "",
+"prose": "The entry still holds — `llama_state_seq_get_data_ext` and related functions are the low-level C API calls that serialize/deserialize KV cache sequences. We've already seen them in action in `prompt_save` (line 147) and in `common_prompt_checkpoint::update_tgt`/`update_dft`. These are the actual data movement primitives. The higher-level abstractions (`create_checkpoint`, `prompt_save`, `prompt_load`) all delegate to these. No new investigation needed on that specific point.\n\n"
+},
+{
+"id": "b2c4fff3db35",
+"entry": "NONE — the source repo is confirmed at `~/git/llama.cpp/` and I have the full codebase to work with.",
+"reasoning": "",
+"prose": "I'll trace the SSE streaming flow through the llama.cpp server code, focusing on where chunks are emitted and what stop conditions end a stream.\n\n"
+},
+{
+"id": "02bc92dbfb8b",
+"entry": "Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "c60b9ee09096",
+"entry": "`backend_sampling` boolean — gates whether token selection happens on the backend (e.g., GPU) vs. CPU-side llama.cpp sampling; matters for understanding where sampling physically occurs (`server-schema.cpp:170`)",
+"reasoning": "The working record note about `backend_sampling` is about the struct field in `common_params_sampling`, not about `n_before_user`. The note still holds — `backend_sampling` is a field in the sampling params struct that gates where sampling happens. My current work on `n_before_user` is a separate, unrelated investigation. I should carry on.\n\nLet me now also check where `n_before_user` is populated from the JSON request to understand the full flow.",
+"prose": ""
+},
+{
+"id": "09d75b055592",
+"entry": "Beellama adds a `server_state` enum (DOWNLOADING, LOADING, READY, SLEEPING) and `server_state_callback_t` replacing upstream's simpler `on_sleeping_changed(bool)` callback — this is a more granular state machine. — IMPLICATION: State reporting and lifecycle management are more sophisticated in beellama, which matters for router health checks and child process management.",
+"reasoning": "",
+"prose": "Correction: The `server_state` enum and `server_state_callback_t` in beellama's `server-context.h` replace upstream's `on_sleeping_changed(bool)` callback with a more granular 4-state lifecycle (DOWNLOADING, LOADING, READY, SLEEPING) and a typed callback `std::function<void(server_state, json /* payload */)>`. This is not just a \"more granular state machine\" — it fundamentally changes how child processes report lifecycle events to the router, enabling the router to distinguish between models actively downloading vs. loading vs. ready, which feeds into the `conv_model_tracker` and resumable streaming routing logic. The old upstream callback was a simple boolean toggle for sleeping state only.\n\nNow continuing with the comparison:"
+},
+{
+"id": "ae9af7d29a38",
+"entry": "Find where `server_task_result_cmpl_partial` and `server_task_result_cmpl_final` are constructed in the slot/update loop",
+"reasoning": "",
+"prose": "Correction: I'll supersede the previous working record entry about finding where `server_task_result_cmpl_partial` and `server_task_result_cmpl_final` are constructed — I'm actively tracing that now. Let me continue the investigation.\n\n"
+},
+{
+"id": "eb95adfdce4d",
+"entry": "Look at `llama_state_seq_get_data_ext` and related llama.cpp C API functions to understand what KV cache data is actually serialized",
+"reasoning": "",
+"prose": "Now let me look at the checkpoint restoration path during context shifts:\n\n"
+},
+{
+"id": "092651e82992",
+"entry": "How does the engine.ts implementation differ from standard Babylon.js (WebGPU-specific details)?",
+"reasoning": "The user seems to have interrupted or there was an issue with the output. Let me check the engine.ts file to see how the WebGPU engine is implemented in Babylon Lite. I'll also look at the main index.ts to see what's exported and how it differs from standard Babylon.js.",
+"prose": ""
+},
+{
+"id": "4ddae0b70997",
+"entry": "The `find_stopping_strings` call (at line ~2036-2041) is where stop word detection happens — it's called twice, once with `true` (to erase) and once with `false` (to check), and the distinction matters for understanding when text gets sent vs suppressed before a stop word.",
+"reasoning": "",
+"prose": "The working record entry about `find_stopping_strings` at lines ~2036-2041 is superseded. Let me find the actual location and behavior in the current codebase.\n\n"
+},
+{
+"id": "b76f33f4183e",
+"entry": "Slot management endpoints (`/slots`) for monitoring active inference slots (`server.cpp`)",
+"reasoning": "",
+"prose": "Now let me look at `common_chat_tool` struct definition:"
+},
+{
+"id": "6cdbec426ce4",
+"entry": "Look at `llama_state_seq_get_data_ext` and related llama.cpp C API functions to understand what KV cache data is actually serialized",
+"reasoning": "",
+"prose": "The `llama_state_seq_get_data_ext` investigation was noted earlier but never actually executed — the working record captured references to it in `prompt_save()` (line 128) but the underlying C API serialization semantics were never examined. I need to look at what exactly gets serialized.\n\n"
+},
+{
+"id": "5e7f9029fde5",
+"entry": "Continue examining each potentially new/different file in beellama's tools/server directory to identify their purposes",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "6f44e48be87d",
+"entry": "`launch_slot_with_task` and `launch_slots_with_parent_task` are the functions that actually bind a task to a slot — they set up the slot's state, tokens, and sampler (seen at the tail of the excerpt, e.g., `launch_slot_with_task(*slot, std::move(task))`)",
+"reasoning": "",
+"prose": "I see the streaming `next` lambda at line 3950. Let me read more of it to understand the full flow, including the stop conditions.\n\n"
+},
+{
+"id": "2e164e12e020",
+"entry": "How does the KV cache reuse actually work in `server-context.cpp` around line 2839 — need to see the full chunk-based cache reuse mechanism",
+"reasoning": "",
+"prose": "The output got garbled. Let me re-read the checkpoint creation section more carefully:\n\n"
+},
+{
+"id": "d9a5a4cbdc3d",
+"entry": "`params.parallel_tool_calls` is passed through to the template context — relevant for understanding how the template decides whether to render multiple tool calls in a single assistant message (`chat.cpp`, ~line 2495)",
+"reasoning": "",
+"prose": "Correction: `params.parallel_tool_calls` is passed through to the template context (set at `chat.cpp` ~line 2495 in `common_chat_templates_apply_jinja`), but it's not a template rendering decision — it's a boolean that flows from the HTTP request (`parallel_tool_calls` field) through `common_chat_templates_inputs` and into `autoparser::generation_params`. The Jinja template itself may reference this value (e.g., `{% if parallel_tool_calls %}`) to control how tool calls are structured in the rendered output. The actual multi-tool-call rendering behavior is determined by the template's Jinja logic, not by server-side branching on this flag.\n\n"
+},
+{
+"id": "0251f4296b7b",
+"entry": "Where in `server-context.cpp` or `server-schema.cpp` are tool definitions from the JSON request body converted into the format expected by the chat template engine?",
+"reasoning": "",
+"prose": "Let me trace the key area where tool definitions are handled in the chat template engine.\n\n"
+},
+{
+"id": "bb3983d00175",
+"entry": "`backend_sampling` boolean — gates whether token selection happens on the backend (e.g., GPU) vs. CPU-side llama.cpp sampling; matters for understanding where sampling physically occurs (`server-schema.cpp:170`)",
+"reasoning": "The user wants me to update the working record entry about `backend_sampling`. The entry references `server-schema.cpp:170`, but in beellama, `server-schema.cpp` doesn't exist at all. The `backend_sampling` field is now parsed directly in `server-task.cpp` via `params_from_json_cmpl`. Let me check where it's handled in beellama.",
+"prose": ""
+}
+]
+}

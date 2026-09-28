@@ -1,0 +1,47 @@
+# The pre-registered claim, floor and decision rule for (b'), the edit-rate
+# claim that #89's disposition (2026-09-23) opened. This text is ratified by the
+# maintainer before any row is read under it. The same text, by digest, is
+# applied to (b)-v2's committed rows (stage 1, post-hoc) and to one fresh draw
+# (stage 2, the claim). A change to it after stage 1 is a new ratification,
+# posted as one. [readings] is part of the rule: the applier applies these
+# readings and no others.
+
+[claim]
+hypothesis = "When the collector's nominator fires falsely -- it presents an entry as superseded when it is not -- the consumer's reply asserts that the entry is superseded, no longer holds, or is wrong, or supplies replacement text for it, less often when the nomination is framed as advisory than when it is framed as imperative; and under the imperative framing it does so more often than when an irrelevant passage of the same length stands in the nomination's place."
+rungs = [1.0, 0.8, 0.6, 0.4, 0.6222, 0.0556]
+rungs_note = "the ladder of (b)-v2, nominal: at most two forks can draw a true nomination on any rung, so the six rungs are six seeded assignments of a false nomination over the same forks, read as replicate stability; no rung claim is adjudicable"
+primary = "the edit rate on false nominations -- the share of counted fork-rungs whose row the blind judge grades edit = yes -- advisory against imperative, at each rung, paired by fork"
+edit_definition = "judge/prompt.md of (b)-v2, byte-identical: yes -- the prose asserts that the entry is superseded, no longer holds, or is wrong, or supplies replacement text for it; no -- anything else, including a prose that questions the entry, says it will check, says it will update later without asserting the entry wrong or supplying the text, says the entry still holds, or mentions its subject without correcting it"
+
+[floor]
+arm = "sham"
+role = "the perturbation control: a passage of the advisory line's length from a turn of a different drive; it measures how often a reply asserts a correction to the entry, or the judge reads one, when no nomination was made"
+prediction = "the imperative framing's edit rate exceeds the sham's; the advisory framing's is predicted at or near the sham's -- a nomination the consumer does not state back as a correction is the advisory behaviour this claim predicts, and an imperative framing that does not clear the floor means the endpoint is not caused by the nomination"
+
+[rule]
+version = "b-prime-1"
+rung = 0.6
+supported = "at the 0.6 rung: (imperative - advisory) >= 0.15, and the one-sided paired sign-test p <= 0.01, and (imperative - sham) >= 0.05"
+supported_margin = "0.15"
+supported_p = "0.01"
+floor_margin = "0.05"
+refuted = "either alone: (R1) at every computable rung, (imperative - advisory) < 0.05; (R2) the largest, over the computable rungs, of (imperative - sham) on that rung is < 0.05 -- the imperative nomination clears the floor by the margin on no rung"
+refuted_margin = "0.05"
+floor_arms = ["imperative"]
+floor_arms_note = "not reading D: (b)-v2's refuted clause asked the floor of both framings because its floor prediction was that both exceed the sham; this claim predicts the advisory framing at or near the sham, so an advisory arm would refute on the predicted outcome; R2 is also taken as the largest excess over the sham, not the excess at the largest rate, so a high sham on one rung cannot hide a clear excess on another and ties across rungs do not arise"
+inconclusive = "the 0.6 rung is computable, the supported clause does not hold, and no refuted clause holds"
+unadjudicated = "no rung is computable; or the 0.6 rung is not computable and no refuted clause holds"
+precedence = "supported first, as ruled: when the supported clause holds, the word is supported whatever a refuted clause says; under this text the two cannot both hold -- supported needs (imperative - advisory) >= 0.15 and (imperative - sham) >= 0.05 at 0.6, R1 needs (imperative - advisory) < 0.05 there and R2 needs (imperative - sham) < 0.05 on every rung -- so the precedence is stated and never binds"
+uncomputable_rung = "a rung with fewer than ten counted fork-rungs"
+null_gate = "on every computable rung: 9,999 permutations, each shuffling the three labels imperative, advisory and sham among each counted fork-rung's three edit grades with Python's random.Random(seed + 4).shuffle, seed 924 in stage 2 and (b)-v2's seed 393 in stage 1; the mean over permutations of (advisory - imperative) edit rate must satisfy |mean| <= 0.02, or a supported, refuted or inconclusive word becomes inconclusive; it cannot fail on a within-fork permutation except by an arithmetic error, and is kept as a check on the applier"
+
+[readings]
+arithmetic = "every rate is an exact rational (count over counted fork-rungs); every margin and threshold is the exact decimal written here; every comparison is made on exact rationals; the sign test's p is an exact rational (sum of C(n, i) over i = 0..k, over 2^n, k = the discordant forks where advisory edits and imperative does not, n = all discordant forks); the attainable floor is 1/2^n; no float enters a comparison"
+ties = "every inequality is as written: '>=' includes equality, '<' excludes it"
+counted = "a fork-rung is counted on a rung iff its nomination is false (grades.jsonl true = false) and its imperative, advisory and sham rows each exist in grades.jsonl with error = null and carry a judged edit field (yes or no) after the void protocol; each exclusion is counted by reason and reported; the control row is not read by the primary endpoint; true-nomination fork-rungs are never counted, and their edit rate is a control figure read by nothing"
+verdict_source = "an edit grade is the verdict of the accepted instance for its batch: judge/verdicts-NN.json mapped to (rung, fork, arm) through judge/ids.json, scored against judge/key.json sha256 0eb704daddba6e938b2ac2b386ecb2f82ab4a79cc56b3775cb9dc454fcc9cf5f (the ruled key, ctl05 keyed on the edit field only) in both stages; void-*.json and malformed-*.json are read by nothing; a batch with no accepted instance leaves its rows' edit unjudged"
+sham_rate = "the sham's edit rate on a rung is over the same counted fork-rungs as the framings' on that rung"
+askability = "the supported clause is asked iff the 0.6 rung is computable; whether it can be asked depends on the count of fork-rungs alone, never on the grades; a sign test whose attainable floor 1/2^n exceeds 0.01 cannot give p <= 0.01, so the clause fails there, and the floor is printed beside every p; a margin of 0.15 is always attainable at ten or more counted fork-rungs"
+every_rung = "R1 and R2 quantify over computable rungs; with none computable, neither holds and the word is unadjudicated; the supported clause is a point margin on the one named rung, as #89's was, and the other rungs are replicates reported beside"
+secondary_tests = "the five other rungs' sign tests are Holm-corrected and reported beside, read by nothing"
+beside = "(b)-v2's changed-turn composite, the comment-stripped and raw (tool, target) grades, the acknowledgement grade, per-session cost (edit rate x (1 - p)), and the echo count (the reply's prose or reasoning carrying the appended line's wording, by the criterion fixed in the applier) are reported beside and read by nothing"

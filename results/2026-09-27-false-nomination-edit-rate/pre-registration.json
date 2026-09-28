@@ -1,0 +1,28 @@
+{
+ "claim": "gym #114: the pre-registration in the issue body; ratified by the maintainer 2026-09-25 (comment 5826194082); the key-file reading ruled 2026-09-27 (5852326658); the sample amended and ratified before any fork fired (5860699265); the post-fire canary and the rebuilt grader ruled 2026-09-28 (5863430704)",
+ "written": "as a file after the fire, summarising the ratified text rather than quoting it; the operative rule is decision-rule.toml and the operative applier apply_bprime.py, whose digests were posted on #114 before the applier read any row",
+ "hypothesis": "When the collector's nominator fires falsely -- it presents an entry as superseded when it is not -- the consumer's reply asserts that the entry is superseded, no longer holds, or is wrong, or supplies replacement text for it, less often when the nomination is framed as advisory than when it is framed as imperative; and under the imperative framing it does so more often than when an irrelevant passage of the same length stands in the nomination's place.",
+ "rule": {
+  "decision_rule_sha256": "cee9e51342592d9ec4eca966706e2a6207294e211d67fbf08ffcf0e9bc1658d2",
+  "applier_sha256": "7a819a891237ad689515e684b8a4f51ac9f7ef243961a4a853fd1b96b1e4c32b"
+ },
+ "stages": {
+  "stage_1": "post-hoc, exploratory, never cited as confirmation: the same applier and rule over (b)-v2's committed rows (stage1.json)",
+  "stage_2": "the claim: one fresh draw (stage2.json, the product)"
+ },
+ "sample": "38 forced (36 admitted forks (b)-v2 did not sample whose drive logs survive, plus the two mined-positive forks drive-08#t9s24 and drive-09#t2s8) and 62 drawn by seed 924 from the 96 remaining admitted forks; the four admitted forks whose drive logs were lost (drive-01#t3s22, drive-11#t3s0, drive-11#t3s1, drive-12#t6s1) removed from headroom.json's admitted set, as ratified",
+ "seed": 924,
+ "judge": {
+  "prompt_sha256": "359f830eac12293324967f63ad10cdf9a9d2d0f3b58cf92e4e48fa8f747f028a",
+  "controls_sha256": "306cf676ec3c676c90e0ac042a5567bd1b1f97f5ee7142d4e0ff2093ae0594f3",
+  "launch_prompt_sha256": "bdbbb3855e9c4ff5e73832303c052d0622b4a7ee9cf47e0626400c7f736d05c4",
+  "model": "claude-sonnet-5",
+  "key": "the ruled answers per control (ctl05 on edit only), scored by control name; a key answering any control otherwise is refused"
+ },
+ "instrument": {
+  "file": "the research program's instruments/nomination_framing.py at commit 406f835",
+  "sha256": "4e6ce98f581e64777ba026f3b32dfd5be1bb11ffc334e58c08217b5176686c22"
+ },
+ "inputs": "the seat's durable run directory bprime-114/work, named here; the pool (forks.json 9ee23f9c...) rebuilt from the committed register and the surviving drive logs, pinned-only",
+ "substrate": "accel24-beellama-qwen27b-q4kxl, instance 2026-09-20, production serving line untouched"
+}
