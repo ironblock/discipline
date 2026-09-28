@@ -1,0 +1,70 @@
+{
+ "subset": "the 36 never-sampled forks",
+ "verdict": {
+  "word_before_null_gate": "supported",
+  "verdict": "supported",
+  "supported": true,
+  "R1": false,
+  "R2": false,
+  "null_gate_ok": true,
+  "computable_rungs": [
+   "0.0556",
+   "0.4",
+   "0.6",
+   "0.6222",
+   "0.8",
+   "1.0"
+  ],
+  "rung_asked": "0.6"
+ },
+ "rungs": {
+  "1.0": {
+   "counted": 36,
+   "rate": {
+    "imperative": "19/36",
+    "advisory": "1/36",
+    "sham": "0/1"
+   }
+  },
+  "0.8": {
+   "counted": 36,
+   "rate": {
+    "imperative": "1/2",
+    "advisory": "1/36",
+    "sham": "0/1"
+   }
+  },
+  "0.6": {
+   "counted": 36,
+   "rate": {
+    "imperative": "5/9",
+    "advisory": "1/36",
+    "sham": "0/1"
+   }
+  },
+  "0.4": {
+   "counted": 36,
+   "rate": {
+    "imperative": "2/3",
+    "advisory": "1/36",
+    "sham": "0/1"
+   }
+  },
+  "0.6222": {
+   "counted": 36,
+   "rate": {
+    "imperative": "5/12",
+    "advisory": "1/18",
+    "sham": "0/1"
+   }
+  },
+  "0.0556": {
+   "counted": 36,
+   "rate": {
+    "imperative": "4/9",
+    "advisory": "1/18",
+    "sham": "0/1"
+   }
+  }
+ }
+}

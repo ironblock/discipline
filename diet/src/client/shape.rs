@@ -45,15 +45,22 @@ pub struct Message {
     pub role: Role,
     /// What it says.
     pub content: String,
+    /// What the model reasoned before `content`, when it streamed any: an
+    /// assistant message only. Re-sent BYTE-IDENTICAL, because the server's
+    /// template renders it back into the prompt -- measured on e7051ef
+    /// (#117, Q10): re-sent, 400 of 420 prompt tokens stayed warm; dropped,
+    /// the prompt diverged at the previous assistant turn.
+    pub reasoning: Option<String>,
 }
 
 impl Message {
-    /// A message from `role` saying `content`.
+    /// A message from `role` saying `content`, with no reasoning.
     #[must_use]
     pub fn new(role: Role, content: impl Into<String>) -> Self {
         Self {
             role,
             content: content.into(),
+            reasoning: None,
         }
     }
 }

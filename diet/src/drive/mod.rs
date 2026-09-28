@@ -96,6 +96,8 @@
 pub mod canned;
 pub mod regimen;
 pub mod script;
+pub mod serve;
+pub mod session;
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -558,6 +560,7 @@ impl<T: Transport> Ratifier for Interviewer<'_, T> {
         shape.messages = vec![Message {
             role: Role::User,
             content: ask.text.clone(),
+            reasoning: None,
         }];
         // Immediately before the call, like `Heads::about_to_call`: what a
         // cache lifetime is compared against is the gap between two
@@ -848,6 +851,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         asking.messages = vec![Message {
             role: Role::User,
             content: KWARG_CONTROL_ASK.to_owned(),
+            reasoning: None,
         }];
         asking
             .template_kwargs
@@ -914,10 +918,12 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             Message {
                 role: Role::System,
                 content: controller.prefix().to_owned(),
+                reasoning: None,
             },
             Message {
                 role: Role::User,
                 content: turn.ask.clone(),
+                reasoning: None,
             },
         ];
         // THE LINT, before the call. The main lane is the one whose head
@@ -987,6 +993,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             asking.messages = vec![Message {
                 role: Role::User,
                 content: question.clone(),
+                reasoning: None,
             }];
             linted_head(&asking, index, INTERVIEW)?;
             heads.about_to_call(INTERVIEW);
@@ -2874,6 +2881,9 @@ mod tests {
                 // manifest; a catcher living beside it has to be findable
                 // here too.
                 include_str!("regimen.rs"),
+                // The interactive session and its HTTP surface (#117 R2).
+                include_str!("serve.rs"),
+                include_str!("session.rs"),
                 // The binary's own tests, which live outside `src/` and are the
                 // only thing that runs the program. A `catches` naming one of
                 // them has to be checkable here too, or the half of this lane

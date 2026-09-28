@@ -1,0 +1,20 @@
+[
+ {
+  "with_reasoning": true,
+  "prompt_n": 20,
+  "cache_n": 400,
+  "prompt_tokens": 420
+ },
+ {
+  "with_reasoning": false,
+  "prompt_n": 40,
+  "cache_n": 85,
+  "prompt_tokens": 125
+ },
+ {
+  "with_reasoning": true,
+  "prompt_n": 335,
+  "cache_n": 85,
+  "prompt_tokens": 420
+ }
+]

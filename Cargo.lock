@@ -59,6 +59,14 @@ dependencies = [
  "pest_derive",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "discipline-diet-wasm"
+version = "0.0.0"
+dependencies = [
+ "discipline-diet",
+ "serde_json",
  "wasm-bindgen",
 ]
 

@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 48
+faults = 91
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -828,4 +828,659 @@ becomes = '''
         heads.observations.push(crate::client::cache::Observation {'''
 catches = [
     "drive::tests::the_cache_census_counts_every_call_and_names_the_undeclared_lifetime",
+]
+
+[[fault]]
+id = "drive.session-rebuilds-the-trunk"
+failure_class = "drive.session-rebuilds-the-trunk"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        shape.messages.clone_from(&state.trunk);'''
+becomes = '''
+        shape.messages.clone_from(&self.shared.template.messages);'''
+catches = [
+    "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
+    "drive::session::tests::the_trunk_is_appended_never_rebuilt",
+]
+
+[[fault]]
+id = "drive.session-accepts-an-ask-mid-turn"
+failure_class = "drive.session-accepts-an-ask-mid-turn"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            Settlement::Awaiting => {}
+            Settlement::Turn | Settlement::Capture => {'''
+becomes = '''
+            Settlement::Awaiting | Settlement::Turn => {}
+            Settlement::Capture => {'''
+catches = [
+    "drive::serve::tests::a_refused_command_is_409_with_its_tag_and_is_in_the_log",
+    "drive::session::tests::an_ask_sent_while_a_turn_is_in_flight_is_refused_by_name",
+]
+
+[[fault]]
+id = "drive.session-cancel-reaches-nothing"
+failure_class = "drive.session-cancel-reaches-nothing"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+                cancel.ask();
+                return Ok(());'''
+becomes = '''
+                let _ = &cancel;
+                return Ok(());'''
+catches = [
+    "drive::serve::tests::a_cancel_over_http_reaches_a_call_blocked_mid_answer",
+    "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
+    "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
+    "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
+]
+
+[[fault]]
+id = "drive.session-a-cancelled-ask-joins-the-trunk"
+failure_class = "drive.session-a-cancelled-ask-joins-the-trunk"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        Ok(StreamEnded::Cancelled) => {
+            state.push(Event::Cancelled { request, partial });'''
+becomes = '''
+        Ok(StreamEnded::Cancelled) => {
+            state.trunk.push(Message::new(Role::User, ask));
+            state.push(Event::Cancelled { request, partial });'''
+catches = [
+    "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
+]
+
+[[fault]]
+id = "drive.session-a-refusal-goes-unlogged"
+failure_class = "drive.session-a-refusal-goes-unlogged"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        self.push(Event::Refused {
+            command,
+            because,
+            during,
+        });'''
+becomes = '''
+        let _ = (command, during);'''
+catches = [
+    "drive::serve::tests::a_refused_command_is_409_with_its_tag_and_is_in_the_log",
+    "drive::session::tests::a_cancel_naming_a_turn_that_already_settled_does_not_stop_the_next_one",
+    "drive::session::tests::a_command_with_nothing_to_act_on_is_refused_and_logged",
+    "drive::session::tests::an_ask_sent_while_a_turn_is_in_flight_is_refused_by_name",
+]
+
+[[fault]]
+id = "drive.session-skips-the-capture-state"
+failure_class = "drive.session-skips-the-capture-state"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            state.move_to(Settlement::Capture);'''
+becomes = '''
+            let _ = Settlement::Capture;'''
+catches = [
+    "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
+]
+
+[[fault]]
+id = "drive.session-numbers-the-log-by-something-else"
+failure_class = "drive.session-numbers-the-log-by-something-else"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        let seq = u64::try_from(self.log.len())'''
+becomes = '''
+        let seq = u64::try_from(self.log.len() / 2)'''
+catches = [
+    "drive::serve::tests::a_late_reader_replays_from_zero_then_tails",
+    "drive::serve::tests::a_reader_resuming_after_an_id_of_this_process_starts_at_the_next",
+    "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
+    "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
+    "drive::session::tests::a_failed_call_is_typed_and_leaves_the_trunk_alone",
+    "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
+    "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
+    "drive::session::tests::a_turn_the_server_refused_is_logged_as_refused_and_leaves_the_trunk_alone",
+    "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
+    "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
+    "drive::session::tests::the_log_is_numbered_by_position_and_a_reader_can_resume_from_any_point",
+]
+
+[[fault]]
+id = "drive.session-a-rejected-ask-joins-the-trunk"
+failure_class = "drive.session-a-rejected-ask-joins-the-trunk"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        Ok(StreamEnded::Rejected { status, body }) => {
+            state.push(Event::Rejected {'''
+becomes = '''
+        Ok(StreamEnded::Rejected { status, body }) => {
+            state.trunk.push(Message::new(Role::User, ask));
+            state.push(Event::Rejected {'''
+catches = [
+    "drive::session::tests::a_turn_the_server_refused_is_logged_as_refused_and_leaves_the_trunk_alone",
+]
+
+[[fault]]
+id = "drive.session-a-crashed-turn-never-settles"
+failure_class = "drive.session-a-crashed-turn-never-settles"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+    if state.settlement == Settlement::Turn {
+        if let Some(flight) = state.flight.take() {'''
+becomes = '''
+    if false {
+        if let Some(flight) = state.flight.take() {'''
+catches = [
+    "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
+    "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
+]
+
+[[fault]]
+id = "drive.session-a-crash-says-nothing"
+failure_class = "drive.session-a-crash-says-nothing"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+                    crashed(&shared, panic_message(payload.as_ref()));'''
+becomes = '''
+                    crashed(&shared, String::new());'''
+catches = [
+    "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
+]
+
+[[fault]]
+id = "drive.session-a-stale-cancel-stops-the-next-turn"
+failure_class = "drive.session-a-stale-cancel-stops-the-next-turn"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            _ if turn < latest => Refusal::Stale,'''
+becomes = '''
+            _ if false => Refusal::Stale,'''
+catches = [
+    "drive::session::tests::a_cancel_naming_a_turn_that_already_settled_does_not_stop_the_next_one",
+]
+
+[[fault]]
+id = "drive.session-a-timeout-settles-as-failed"
+failure_class = "drive.session-a-timeout-settles-as-failed"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        TransportFailure::Timeout { .. } => SettleReason::Timeout,'''
+becomes = '''
+        TransportFailure::Timeout { .. } => SettleReason::Failed,'''
+catches = [
+    "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
+]
+
+[[fault]]
+id = "drive.session-a-crash-settles-no-turn"
+failure_class = "drive.session-a-crash-settles-no-turn"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            state.push(Event::TurnSettled {
+                turn: flight.turn,
+                reason: SettleReason::Failed,
+            });'''
+becomes = '''
+            let _ = flight.turn;'''
+catches = [
+    "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
+    "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
+]
+
+[[fault]]
+id = "drive.session-a-delta-names-the-ask"
+failure_class = "drive.session-a-delta-names-the-ask"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+                    Event::Delta {
+                        request,
+                        text: text.to_owned(),'''
+becomes = '''
+                    Event::Delta {
+                        request: request.saturating_sub(2),
+                        text: text.to_owned(),'''
+catches = [
+    "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
+    "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
+    "drive::session::tests::every_call_is_a_request_and_what_it_produced_names_it",
+]
+
+[[fault]]
+id = "drive.session-the-start-omits-the-head"
+failure_class = "drive.session-the-start-omits-the-head"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            head: template.messages.clone(),'''
+becomes = '''
+            head: Vec::new(),'''
+catches = [
+    "drive::session::tests::the_log_begins_with_the_session_it_describes",
+]
+
+[[fault]]
+id = "drive.session-opened-is-a-constant"
+failure_class = "drive.session-opened-is-a-constant"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        state.push(Event::Started {
+            opened,'''
+becomes = '''
+        state.push(Event::Started {
+            opened: 0,'''
+catches = [
+    "drive::session::tests::the_log_begins_with_the_session_it_describes",
+]
+
+[[fault]]
+id = "drive.session-the-clock-stands-still"
+failure_class = "drive.session-the-clock-stands-still"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        let t = u64::try_from(self.opened_at.elapsed().as_millis()).unwrap_or(u64::MAX);'''
+becomes = '''
+        let t = 0;'''
+catches = [
+    "drive::session::tests::each_event_is_stamped_when_it_was_logged",
+]
+
+[[fault]]
+id = "drive.serve-an-ask-never-reaches-the-session"
+failure_class = "drive.serve-an-ask-never-reaches-the-session"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+                Some(Value::String(text)) => Some(Self::Ask(text.clone())),'''
+becomes = '''
+                Some(Value::String(_)) => None,'''
+catches = [
+    "drive::serve::tests::a_cancel_over_http_reaches_a_call_blocked_mid_answer",
+    "drive::serve::tests::a_foreign_origin_is_403_and_never_reaches_the_log",
+    "drive::serve::tests::a_reader_that_reads_nothing_does_not_keep_another_clients_ask_from_being_answered",
+    "drive::serve::tests::a_refused_command_is_409_with_its_tag_and_is_in_the_log",
+    "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
+]
+
+[[fault]]
+id = "drive.serve-from-is-ignored"
+failure_class = "drive.serve-from-is-ignored"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+            None => match from_query(&request.query) {
+                Some(first) => first,'''
+becomes = '''
+            None => match from_query(&request.query) {
+                Some(_) => self.session.events_from(0).len() as u64,'''
+catches = [
+    "drive::serve::tests::a_late_reader_replays_from_zero_then_tails",
+    "drive::serve::tests::a_reader_that_leaves_is_let_go",
+    "drive::serve::tests::a_server_bound_on_ipv6_loopback_answers_the_host_a_browser_sends_it",
+    "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
+]
+
+[[fault]]
+id = "drive.serve-a-resume-repeats-the-last-event"
+failure_class = "drive.serve-a-resume-repeats-the-last-event"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+                Ok(seq) => match seq.checked_add(1) {
+                    Some(first) => first,'''
+becomes = '''
+                Ok(seq) => match seq.checked_add(1) {
+                    Some(_) => seq,'''
+catches = [
+    "drive::serve::tests::a_reader_resuming_after_an_id_of_this_process_starts_at_the_next",
+]
+
+[[fault]]
+id = "drive.serve-resumes-another-processs-log"
+failure_class = "drive.serve-resumes-another-processs-log"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+    if process == opened { Ok(seq) } else { Err(410) }'''
+becomes = '''
+    let _ = (process, opened);
+    Ok(seq)'''
+catches = [
+    "drive::serve::tests::a_resume_from_another_processs_log_is_410",
+]
+
+[[fault]]
+id = "drive.serve-accepts-a-simple-post"
+failure_class = "drive.serve-accepts-a-simple-post"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        if !json_body {'''
+becomes = '''
+        if false && !json_body {'''
+catches = [
+    "drive::serve::tests::a_cross_site_simple_post_is_415_and_never_reaches_the_log",
+]
+
+[[fault]]
+id = "drive.serve-answers-any-host"
+failure_class = "drive.serve-answers-any-host"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        if !host_allowed || !origin_allowed {'''
+becomes = '''
+        if !origin_allowed {
+            let _ = host_allowed;'''
+catches = [
+    "drive::serve::tests::a_request_for_a_rebound_host_name_is_403",
+]
+
+[[fault]]
+id = "drive.serve-answers-any-origin"
+failure_class = "drive.serve-answers-any-origin"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        if !host_allowed || !origin_allowed {'''
+becomes = '''
+        if !host_allowed {
+            let _ = origin_allowed;'''
+catches = [
+    "drive::serve::tests::a_foreign_origin_is_403_and_never_reaches_the_log",
+]
+
+[[fault]]
+id = "drive.serve-a-refusal-is-200"
+failure_class = "drive.serve-a-refusal-is-200"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        let refused = |because: Refusal| {
+            (
+                409,'''
+becomes = '''
+        let refused = |because: Refusal| {
+            (
+                200,'''
+catches = [
+    "drive::serve::tests::a_refused_command_is_409_with_its_tag_and_is_in_the_log",
+]
+
+[[fault]]
+id = "drive.serve-cancel-reaches-nothing"
+failure_class = "drive.serve-cancel-reaches-nothing"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+                Some(Value::Integer(turn)) => u32::try_from(*turn).ok().map(Self::Cancel),'''
+becomes = '''
+                Some(Value::Integer(turn)) => u32::try_from(*turn).ok().map(|_| Self::Cancel(0)),'''
+catches = [
+    "drive::serve::tests::a_cancel_over_http_reaches_a_call_blocked_mid_answer",
+]
+
+[[fault]]
+id = "drive.serve-no-heartbeat"
+failure_class = "drive.serve-no-heartbeat"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+                out.push_str(":\n\n");'''
+becomes = '''
+                continue;'''
+catches = [
+    "drive::serve::tests::a_reader_that_leaves_is_let_go",
+]
+
+[[fault]]
+id = "drive.serve-one-connection-at-a-time"
+failure_class = "drive.serve-one-connection-at-a-time"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+            let spawned = thread::Builder::new()
+                .name("diet-serve-conn".to_owned())
+                .spawn(move || {
+                    let _live = live;
+                    serving.connection(stream);
+                });'''
+becomes = '''
+            let spawned: io::Result<()> = {
+                let _live = live;
+                serving.connection(stream);
+                Ok(())
+            };'''
+catches = [
+    "drive::serve::tests::a_connection_past_the_cap_is_503",
+    "drive::serve::tests::a_late_reader_replays_from_zero_then_tails",
+    "drive::serve::tests::a_reader_that_reads_nothing_does_not_keep_another_clients_ask_from_being_answered",
+    "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
+]
+
+[[fault]]
+id = "drive.serve-no-write-timeout"
+failure_class = "drive.serve-no-write-timeout"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+            .set_write_timeout(Some(self.config.write_timeout))
+            .is_err()'''
+becomes = '''
+            .set_write_timeout(None)
+            .is_err()'''
+catches = [
+    "drive::serve::tests::a_reader_that_stops_reading_is_let_go_within_the_write_timeout",
+]
+
+[[fault]]
+id = "drive.serve-no-read-timeout"
+failure_class = "drive.serve-no-read-timeout"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        let deadline = Instant::now() + self.config.read_timeout;'''
+becomes = '''
+        let deadline = Instant::now() + Duration::from_secs(3600);'''
+catches = [
+    "drive::serve::tests::a_body_trickled_in_is_held_to_the_same_deadline_as_its_head",
+    "drive::serve::tests::a_client_that_sends_half_a_request_is_let_go_within_the_read_timeout",
+    "drive::serve::tests::a_client_that_trickles_a_request_is_let_go_at_one_deadline_for_the_whole_of_it",
+]
+
+[[fault]]
+id = "drive.serve-no-body-cap"
+failure_class = "drive.serve-no-body-cap"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        if length > self.config.max_body {'''
+becomes = '''
+        if false && length > self.config.max_body {'''
+catches = [
+    "drive::serve::tests::a_request_past_its_cap_is_413_before_it_is_read_whole",
+]
+
+[[fault]]
+id = "drive.serve-no-connection-cap"
+failure_class = "drive.serve-no-connection-cap"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+            if self.live.load(Ordering::SeqCst) >= self.config.max_connections {'''
+becomes = '''
+            if false && self.live.load(Ordering::SeqCst) >= self.config.max_connections {'''
+catches = [
+    "drive::serve::tests::a_connection_past_the_cap_is_503",
+]
+
+[[fault]]
+id = "drive.serve-a-malformed-ask-is-an-empty-ask"
+failure_class = "drive.serve-a-malformed-ask-is-an-empty-ask"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+                Some(Value::String(text)) => Some(Self::Ask(text.clone())),
+                _ => None,'''
+becomes = '''
+                Some(Value::String(text)) => Some(Self::Ask(text.clone())),
+                _ => Some(Self::Ask(String::new())),'''
+catches = [
+    "drive::serve::tests::a_malformed_command_is_400_and_not_logged",
+]
+
+[[fault]]
+id = "drive.serve-read-timeout-per-read"
+failure_class = "drive.serve-read-timeout-per-read"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+    let left = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|left| !left.is_zero())
+        .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;'''
+becomes = '''
+    let _ = deadline;
+    let left = Duration::from_millis(300);'''
+catches = [
+    "drive::serve::tests::a_body_trickled_in_is_held_to_the_same_deadline_as_its_head",
+    "drive::serve::tests::a_client_that_trickles_a_request_is_let_go_at_one_deadline_for_the_whole_of_it",
+]
+
+[[fault]]
+id = "drive.serve-no-head-cap"
+failure_class = "drive.serve-no-head-cap"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        if buffer.len() > max_head {
+            return Err(Unread::TooLarge);'''
+becomes = '''
+        if false && buffer.len() > max_head {
+            return Err(Unread::TooLarge);'''
+catches = [
+    "drive::serve::tests::a_head_past_its_cap_is_413",
+]
+
+[[fault]]
+id = "drive.serve-a-request-with-no-host-is-answered"
+failure_class = "drive.serve-a-request-with-no-host-is-answered"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        let host_allowed = request.header("host").is_some_and(|host| {'''
+becomes = '''
+        let host_allowed = request.header("host").is_none_or(|host| {'''
+catches = [
+    "drive::serve::tests::a_request_for_a_rebound_host_name_is_403",
+]
+
+[[fault]]
+id = "drive.serve-a-cancel-for-no-turn-is-200"
+failure_class = "drive.serve-a-cancel-for-no-turn-is-200"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+                Err(CancelError::NoSuchTurn(_)) => (400, BTreeMap::new()),'''
+becomes = '''
+                Err(CancelError::NoSuchTurn(_)) => (200, BTreeMap::new()),'''
+catches = [
+    "drive::serve::tests::a_malformed_command_is_400_and_not_logged",
+]
+
+[[fault]]
+id = "drive.serve-a-resume-past-the-last-seq-wraps"
+failure_class = "drive.serve-a-resume-past-the-last-seq-wraps"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+                Ok(seq) => match seq.checked_add(1) {'''
+becomes = '''
+                Ok(seq) => match Some(seq.wrapping_add(1)) {'''
+catches = [
+    "drive::serve::tests::a_malformed_last_event_id_is_400",
+]
+
+[[fault]]
+id = "drive.serve-a-body-has-no-deadline"
+failure_class = "drive.serve-a-body-has-no-deadline"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        match read_by(stream, &mut chunk[..want], deadline) {'''
+becomes = '''
+        match read_by(stream, &mut chunk[..want], Instant::now() + Duration::from_secs(3600)) {'''
+catches = [
+    "drive::serve::tests::a_body_trickled_in_is_held_to_the_same_deadline_as_its_head",
+]
+
+[[fault]]
+id = "drive.serve-a-whole-head-is-not-capped"
+failure_class = "drive.serve-a-whole-head-is-not-capped"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+    if end > max_head {
+        return Err(Unread::TooLarge);
+    }'''
+becomes = '''
+    if false && end > max_head {
+        return Err(Unread::TooLarge);
+    }'''
+catches = [
+    "drive::serve::tests::a_whole_head_past_its_cap_is_413_even_when_it_arrives_in_one_read",
+]
+
+[[fault]]
+id = "drive.serve-an-ipv6-bind-refuses-its-own-host"
+failure_class = "drive.serve-an-ipv6-bind-refuses-its-own-host"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        addr.to_string(),
+'''
+becomes = '''
+        String::new(),
+'''
+catches = [
+    "drive::serve::tests::a_server_bound_on_ipv6_loopback_answers_the_host_a_browser_sends_it",
+]
+
+[[fault]]
+id = "drive.session-reasoning-left-off-the-trunk"
+failure_class = "drive.session-reasoning-left-off-the-trunk"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            answer.reasoning = (!reasoning.is_empty()).then_some(reasoning);'''
+becomes = '''
+            let _ = reasoning;'''
+catches = [
+    "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
+]
+
+[[fault]]
+id = "drive.session-reasoning-trimmed"
+failure_class = "drive.session-reasoning-trimmed"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            answer.reasoning = (!reasoning.is_empty()).then_some(reasoning);'''
+becomes = '''
+            answer.reasoning = (!reasoning.is_empty()).then(|| reasoning.trim_end().to_owned());'''
+catches = [
+    "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
 ]

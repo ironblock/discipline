@@ -1,0 +1,81 @@
+{
+ "generation_prompt_opens_think": true,
+ "turn2_tokens": 420,
+ "closing '\\n</think>\\n\\n'": {
+  "stream_tokens": 400,
+  "first_differing_token": 383,
+  "stream_is_prefix_of_rerendered": false,
+  "stream_at_diff": [
+   {
+    "id": 271,
+    "piece": "\n\n"
+   },
+   {
+    "id": 248069,
+    "piece": "</think>"
+   },
+   {
+    "id": 271,
+    "piece": "\n\n"
+   },
+   {
+    "id": 17,
+    "piece": "2"
+   },
+   {
+    "id": 17,
+    "piece": "2"
+   }
+  ],
+  "rerendered_at_diff": [
+   {
+    "id": 198,
+    "piece": "\n"
+   },
+   {
+    "id": 248069,
+    "piece": "</think>"
+   },
+   {
+    "id": 271,
+    "piece": "\n\n"
+   },
+   {
+    "id": 17,
+    "piece": "2"
+   },
+   {
+    "id": 17,
+    "piece": "2"
+   }
+  ]
+ },
+ "closing '</think>\\n\\n'": {
+  "stream_tokens": 400,
+  "first_differing_token": 400,
+  "stream_is_prefix_of_rerendered": true,
+  "stream_at_diff": [],
+  "rerendered_at_diff": [
+   {
+    "id": 248046,
+    "piece": "<|im_end|>"
+   },
+   {
+    "id": 198,
+    "piece": "\n"
+   },
+   {
+    "id": 248045,
+    "piece": "<|im_start|>"
+   },
+   {
+    "id": 846,
+    "piece": "user"
+   },
+   {
+    "id": 198,
+    "piece": "\n"
+   }
+  ]
+ }
+}

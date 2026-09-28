@@ -60,8 +60,13 @@ WORKFLOW_CALL = re.compile(r"^\s*workflow_call:\s*$", re.MULTILINE)
 # that gates may spell none of them. One table so that a flag added to the
 # script is refused here by a row, not by whoever remembers this rule exists.
 NARROWING_FLAGS = (
-    ("--scope", re.compile(r"--scope\b"),
-     "narrows the test check to part of the suite; the selftest scopes its own "
+    # `(?![-\w])`, so `--scope-plan` is not read as `--scope`. It is not a row
+    # of its own: it is the selftest's ruled PR scoping (#112), and every
+    # fault it does not re-prove is DECLARED in the census at the commit it
+    # was last seen red, which is the thing a narrowing flag here hides.
+    ("--scope", re.compile(r"--scope(?![-\w])"),
+     "narrows the test check to part of the suite, or the injections check to "
+     "one injection; the selftest scopes its own "
      "sandboxes and CI must not"),
     ("--range", re.compile(r"--range\b"),
      "narrows the history check to a slice somebody chose; the range CI must "

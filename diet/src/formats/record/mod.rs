@@ -81,6 +81,10 @@ macro_rules! vocabulary {
     };
 }
 
+// The session log (`formats::log`) declares its closed vocabularies the same
+// way, so the rule above holds for it too rather than being restated there.
+pub(crate) use vocabulary;
+
 // ---------------------------------------------------------------------------
 // the regime
 // ---------------------------------------------------------------------------

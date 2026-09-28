@@ -1,0 +1,7 @@
+# The regimen this run applied: (b')'s fresh draw, the false-nomination
+# instrument's four arms at six rungs over 100 forks, the edit rate as the
+# primary endpoint, re-fired on the accelerator substrate's production line.
+arm = "false-nomination-edit-rate-four-arms-six-rungs"
+substrates = ["accel24-beellama-qwen27b-q4kxl"]
+dogma_version = 0
+grading_order_is_regime_factor = true

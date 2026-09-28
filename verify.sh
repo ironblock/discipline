@@ -6,10 +6,12 @@
 #   verify.sh                 run every check
 #   verify.sh --only CHECK    run one check (repeatable)
 #   verify.sh --only test --scope SPEC   narrow the test check (selftest only)
+#   verify.sh --only injections --scope inject_NAME   apply one injection (selftest only)
 #   verify.sh --only history --range A..B   scan an explicit range, to repro
 #   verify.sh --list          name the checks, in order
 #   verify.sh --selftest      prove the gate goes red on seeded faults (bash 4+)
 #   verify.sh --selftest --shard K/N    run this job's share of the faults
+#   verify.sh --selftest --scope-plan F re-prove only what plan F does not inherit (#112)
 #   verify.sh --selftest --census PATH  write what this run ran, for the sum
 #   verify.sh --selftest --derive-scopes DIR   re-harvest the test cases' scopes
 #   verify.sh --selftest --derive-shards DIR   re-harvest each fault's cost
@@ -131,6 +133,8 @@ check_clippy() { cargo clippy --workspace --all-targets -- -D warnings; }
 # and scripts/check-ci-coverage.py refuses the spelling in any workflow the
 # gate depends on.
 VERIFY_TEST_SCOPE=""
+VERIFY_SCOPE=""
+VERIFY_SCOPE_GIVEN=""
 
 # SPEC is TARGET or TARGET/FILTER.
 #   lib            the library's own tests
@@ -418,7 +422,15 @@ check_history() {
 # something before the RED it produces counts as anything. This runs on every
 # invocation and not only in --selftest: an inert injection is introduced by
 # an edit, and the edit is what should fail.
-check_injections() { python3 scripts/check-injections.py; }
+# `--scope NAME` narrows the check to applying ONE injection (#112): the static
+# questions still read the whole file, since they cost seconds. It exists for
+# the seeded case that plants an inert injection -- the smallest input that
+# shows the applier fires is the one injection it planted, not all of them,
+# and applying all of them made that one case 225 s on the runner.
+VERIFY_INJECTION_SCOPE=""
+check_injections() {
+  python3 scripts/check-injections.py . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"}
+}
 
 # The merge resolver, exercised on fixtures before it is trusted to resolve a
 # merge. `merge-gate.py` rebuilds the gate files from both sides by name, and
@@ -445,7 +457,8 @@ check_resolver() { python3 scripts/check-merge-gate.py; }
 # if the first is sound.
 check_derive() {
   python3 scripts/derive-scopes.py --selftest &&
-    python3 scripts/derive-shards.py --selftest
+    python3 scripts/derive-shards.py --selftest &&
+    python3 scripts/scope-selftest.py --selftest
 }
 
 # The fault-migration manifest defines what parity means for the replacement
@@ -584,6 +597,16 @@ SELFTEST_SHARDS=1
 SELFTEST_UNITS=0
 SELFTEST_RAN=()
 SELFTEST_UNPLANNED=0
+# #112: which faults this run re-proves and which it INHERITS. A plan is read
+# by --scope-plan (scripts/scope-selftest.py writes it); a fault it does not
+# name runs, so no plan -- and any plan that forgets a fault -- means the old
+# behaviour, every fault re-proven. An inherited fault is never counted as
+# passed: the census declares it, with the `main` commit it was last seen red
+# at, and nothing here runs it.
+SELFTEST_SCOPE_PLAN=""
+SELFTEST_RAN_IDS=()
+SELFTEST_INHERITED=()
+SELFTEST_TOUCHED=()
 SELFTEST_CENSUS=""
 
 # The checked-in assignment, relative to ROOT. Named once; derive-shards.py
@@ -706,8 +729,8 @@ nothing can say which shard runs it" >&2
     exit "$EXIT_MISUSE"
   fi
   if [ "$SELFTEST_SHARD" -eq 0 ]; then
-    SELFTEST_RAN+=("$SELFTEST_UNITS")
-    return 0
+    claim_fault "$ident"
+    return
   fi
   local assigned="${SHARD_OF[$ident]-}"
   if [ -z "$assigned" ]; then
@@ -732,10 +755,51 @@ treated as belonging to no shard rather than refused" >&2
     ;;
   esac
   if [ "$assigned" -eq "$SELFTEST_SHARD" ]; then
-    SELFTEST_RAN+=("$SELFTEST_UNITS")
-    return 0
+    claim_fault "$ident"
+    return
   fi
   return 1
+}
+
+# This shard owns the fault: run it, or -- when the scope plan inherits it --
+# declare it and do not. Declared by the shard that owns it and no other, so
+# the census adds inherited faults up exactly once, the same way it adds up
+# the ones that ran.
+claim_fault() {
+  local ident="$1" sha="${SCOPE_INHERIT[$1]-}"
+  if [ -n "$sha" ]; then
+    SELFTEST_INHERITED+=("${SELFTEST_UNITS}"$'\t'"${ident}"$'\t'"${sha}")
+    return 1
+  fi
+  SELFTEST_RAN+=("$SELFTEST_UNITS")
+  SELFTEST_RAN_IDS+=("${SELFTEST_UNITS}"$'\t'"${ident}")
+  return 0
+}
+
+# Read `--scope-plan` into SCOPE_INHERIT, `selftest`'s local like SHARD_OF.
+# `inherit<TAB>ID<TAB>SHA` rows; `#` lines are comments; anything else is a
+# plan written by something that is not scope-selftest.py, and is refused
+# rather than half-read. An empty sha would read as "not inherited" in
+# claim_fault, so it is refused too.
+load_scope_plan() {
+  local path="$SELFTEST_SCOPE_PLAN" key ident sha extra
+  [ -f "$path" ] || {
+    echo "selftest: --scope-plan ${path} is not there" >&2
+    exit "$EXIT_MISUSE"
+  }
+  while IFS=$'\t' read -r key ident sha extra || [ -n "${key:-}" ]; do
+    case "$key" in ''|\#*) continue ;; esac
+    if [ "$key" != "inherit" ] || [ -z "${ident:-}" ] || [ -z "${sha:-}" ] || [ -n "${extra:-}" ]; then
+      echo "selftest: ${path}: not an \`inherit<TAB>ID<TAB>SHA\` row: ${key} ${ident:-} ${sha:-}" >&2
+      exit "$EXIT_MISUSE"
+    fi
+    case "$sha" in *[!0-9a-f]*)
+      echo "selftest: ${path}: '${sha}' is not a commit for '${ident}'" >&2
+      exit "$EXIT_MISUSE"
+      ;;
+    esac
+    SCOPE_INHERIT["$ident"]="$sha"
+  done < "$path"
 }
 
 # --- the cost harvest -------------------------------------------------------
@@ -936,8 +1000,9 @@ seeded_case() {
   in_shard "$ident" || return 0
   SELFTEST_CASES=$(( SELFTEST_CASES + 1 ))
 
-  # A `test` case says which tests it needs; anything else says nothing,
-  # because `--scope` narrows that one check and verify.sh refuses it
+  # A `test` case says which tests it needs; an `injections` case MAY name the
+  # one injection it needs (#112); anything else says nothing, because
+  # `--scope` narrows only those two checks and verify.sh refuses it
   # elsewhere. Both halves are reported here rather than left to become a
   # confusing exit 2 from inside the box, and scripts/check-fault-manifest.py
   # refuses the same two states before a run ever starts.
@@ -957,10 +1022,12 @@ seeded_case() {
       return
     fi
     scoped=(--scope "$scope")
+  elif [ "$check" = "injections" ] && [ -n "$scope" ]; then
+    scoped=(--scope "$scope")
   elif [ -n "$scope" ]; then
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- A SCOPE ON A CHECK THAT TAKES NONE\n' \
       "$(( SECONDS - started ))" "$check" "$label"
-    SELFTEST_BROKEN+=("${label}: only the test check takes a scope")
+    SELFTEST_BROKEN+=("${label}: only the test and injections checks take a scope")
     shard_cost "$ident" "$started_ms" "$label"
     return
   fi
@@ -1012,6 +1079,15 @@ seeded_case() {
   state_before="$(sandbox_state "$box")"
   ( cd "$box" && "$inject" ) || injected=$?
   state_after="$(sandbox_state "$box")"
+  # WHAT THIS FAULT TOUCHED, for #112's scoping: the files between the two
+  # trees `sandbox_state` just wrote (its first line), read off the sandbox
+  # rather than parsed out of the injection's body. The census carries them,
+  # and the `main` run's census is what a PR's scope is decided from.
+  local touched
+  while IFS= read -r touched; do
+    [ -n "$touched" ] && SELFTEST_TOUCHED+=("${ident}"$'\t'"${touched}")
+  done < <(git -C "$box" diff-tree -r --name-only \
+             "${state_before%%$'\n'*}" "${state_after%%$'\n'*}" 2> /dev/null)
   case "${state_before}${state_after}" in
     *"${STATE_UNREADABLE}"*)
       printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE READ\n' \
@@ -1579,6 +1655,51 @@ source = source.replace(first, "        PRECEDENCE_SWAP", 1)
 source = source.replace(second, first, 1)
 source = source.replace("        PRECEDENCE_SWAP", second, 1)
 path.write_text(source, encoding="utf-8")
+EOF
+}
+
+# The session event log's cross-line rules (#117 R2c I1, the courier patch from
+# track three), each disabled in turn: a line the reader must refuse is then
+# read as a log. Measured by track three before the courier; wired here.
+inject_log_seq_gap_read_as_a_log() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "if line.seq != index as u64 {"
+new = "if false && line.seq != index as u64 {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_reference_to_anything_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "if !requests.contains(request) =>"
+new = "if false && !requests.contains(request) =>"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_settlement_chain_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "if *from != state {"
+new = "if false && *from != state {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
@@ -4305,6 +4426,22 @@ EOF
 # empty-shard refusal; shard 1 alone carries roughly half the harvest's
 # total cost, which is far past 3x any other shard's share for any shard
 # count `--emit` would ever produce.
+# The scope derivation forgetting what a fault's injection touched (#112): a
+# PR editing exactly the file a fault seeds into would then inherit that
+# fault, at a commit where the file was something else. The fixture that
+# pins the rule is what goes red.
+inject_scope_ignores_touched() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/scope-selftest.py")
+source = path.read_text(encoding="utf-8")
+old = "        hit = reaches(touched.get(ident, set()), changed_files)\n"
+new = "        hit = None\n"
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
 inject_shard_assignment_outlier() {
   python3 - <<'EOF'
 import pathlib
@@ -6599,8 +6736,10 @@ selftest() {
   # rather than a file-scope `declare -A`, which the bash 3.2 the ordinary gate
   # still runs on refuses outright; see load_shard_plan.
   local -A SHARD_OF=()
+  local -A SCOPE_INHERIT=()
   now_ms; local selftest_started_ms="$NOW_MS"
   [ "$SELFTEST_SHARD" -eq 0 ] || load_shard_plan
+  [ -z "$SELFTEST_SCOPE_PLAN" ] || load_scope_plan
   scratch; SELFTEST_TARGET="${SCRATCH}/target"
   scratch; SELFTEST_LOGS="$SCRATCH"
   # DERIVE MODE KEEPS ITS LOGS. `selftest_cleanup` removes every scratch it
@@ -6684,6 +6823,12 @@ selftest() {
     'regimen/fixtures/invalid/reasoning-effort-without-budget\.toml' 'test:conformance/formats::regimen'
   seeded_case "two ids over one substrate"            test     inject_record_substrates_indistinguishable \
     'record/fixtures/invalid/substrates-indistinguishable\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a gap in a log's seq read as a log" test inject_log_seq_gap_read_as_a_log \
+    'a_gap_in_seq_is_refused \.\.\. FAILED' 'lib/formats::log::tests'
+  seeded_case "a log reference to anything read as a request" test inject_log_reference_to_anything_read \
+    'a_reference_to_anything_but_an_earlier_request_is_refused \.\.\. FAILED' 'lib/formats::log::tests'
+  seeded_case "a log settlement that leaves a state it is not in" test inject_log_settlement_chain_unchecked \
+    'a_settlement_that_does_not_leave_the_state_it_is_in_is_refused \.\.\. FAILED' 'lib/formats::log::tests'
   seeded_case "a head change that is not a change"    test     inject_record_prefix_change_not_a_change \
     'record/fixtures/invalid/prefix-change-that-is-not-a-change\.jsonl' 'test:conformance/formats::record'
   seeded_case "the miss classes reordered"           test     inject_record_prefix_precedence_reordered \
@@ -6838,7 +6983,7 @@ selftest() {
   seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
     'but the committed file hashes to'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
-    'inject_that_changes_nothing'
+    'inject_that_changes_nothing  exit=' inject_that_changes_nothing
   seeded_case "a nested table flattened"              test     inject_regimen_nested_table_flattened \
     'formats::regimen::tests::a_table_may_hold_one_table_and_no_more \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
@@ -7021,6 +7166,8 @@ selftest() {
     'a scope naming another target selected something'
   seeded_case "a shard split balanced by count"        derive   inject_derive_shards_packs_by_count \
     'not two equal halves'
+  seeded_case "a scope that forgets what a fault touched" derive inject_scope_ignores_touched \
+    'FAIL  a file the fault.s injection touched re-proves it'
   seeded_case "an outlier shard graded against the mean" derive inject_derive_shards_outlier_against_the_mean \
     'produced 0 finding\(s\)'
   seeded_case "a shard carrying three times the median" ci      inject_shard_assignment_outlier \
@@ -7631,7 +7778,7 @@ def share(shard, n=None, of=SHARDS):
     return [i for i in range(1, n + 1) if (i - 1) % of + 1 == shard]
 
 
-def write(case, shard, ordinals, said_total=None, said_shards=None):
+def write(case, shard, ordinals, said_total=None, said_shards=None, inherited=()):
     # Each shard's artifact arrives in a directory of its own, as
     # download-artifact leaves them.
     where = root / case / f"shard-{shard}"
@@ -7640,7 +7787,10 @@ def write(case, shard, ordinals, said_total=None, said_shards=None):
         f"shard\t{shard}\n"
         f"shards\t{SHARDS if said_shards is None else said_shards}\n"
         f"total\t{total if said_total is None else said_total}\n"
-        + "".join(f"ordinal\t{n}\n" for n in ordinals),
+        + "".join(f"ordinal\t{n}\n" for n in ordinals)
+        # #112: a fault the scope plan inherited, declared by the shard that
+        # owns it with the commit it was last seen red at.
+        + "".join(f"inherited\t{n}\tfault.{n}\tabc1234\n" for n in inherited),
         encoding="utf-8",
     )
 
@@ -7650,6 +7800,11 @@ def write(case, shard, ordinals, said_total=None, said_shards=None):
 
 for k in range(1, SHARDS + 1):
     write("whole", k, share(k))
+    # Each shard inherits its first fault and runs the rest: every fault is
+    # still accounted for once, and none of the inherited is called a pass.
+    write("inherited-whole", k, share(k)[1:], inherited=share(k)[:1])
+    # Shard 1 both runs its first fault and declares it inherited.
+    write("ran-and-inherited", k, share(k), inherited=share(k)[:1] if k == 1 else ())
     write("skipped", k, share(k)[1:] if k == 2 else share(k))
     if k != 3:
         write("missing", k, share(k))
@@ -7687,6 +7842,10 @@ EOF
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/wrong-total"
   expect_exit "one fault claimed by two shards" 1 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/twice"
+  expect_exit "a whole with some faults inherited rather than re-proven" 0 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/inherited-whole"
+  expect_exit "one fault both re-proven and declared inherited" 1 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/ran-and-inherited"
   expect_exit "no shard reporting at all is not a pass" 1 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/none"
   expect_exit "shards that disagree about how many there are" 1 \
@@ -7841,6 +8000,10 @@ EOF
     bash "${ROOT}/verify.sh" --only test --scope 'whatever'
   expect_exit "a scope without exactly --only test is a misuse" 2 \
     bash "${ROOT}/verify.sh" --scope lib
+  # The injections check's scope gets the same control (#112): a name nothing
+  # defines applies zero injections, and zero inert would read as a pass.
+  expect_exit "an injection scope naming nothing defined is not a pass" 1 \
+    bash "${ROOT}/verify.sh" --only injections --scope inject_this_repository_does_not_define
   expect_exit "a shard outside 1..N is a misuse" 2 \
     bash "${ROOT}/verify.sh" --selftest --shard 9/8
 
@@ -7895,6 +8058,11 @@ EOF
   printf 'selftest-census: shard %d of %d ran %d of %d fault(s)\n' \
     "$(( SELFTEST_SHARD == 0 ? 1 : SELFTEST_SHARD ))" \
     "$SELFTEST_SHARDS" "${#SELFTEST_RAN[@]}" "$SELFTEST_UNITS"
+  if [ "${#SELFTEST_INHERITED[@]}" -gt 0 ]; then
+    printf 'selftest-census: %d fault(s) inherited, not re-proven -- each at the commit it was last seen red:\n' \
+      "${#SELFTEST_INHERITED[@]}"
+    printf '  %s\n' "${SELFTEST_INHERITED[@]}"
+  fi
   if [ "$SELFTEST_UNPLANNED" -gt 0 ]; then
     printf 'selftest: %d fault(s) unplanned in %s; balance approximate -- each is assigned a shard by a hash of its id\n' \
       "$SELFTEST_UNPLANNED" "$SHARD_PLAN"
@@ -7909,7 +8077,22 @@ EOF
       # predicted (ruled on #108, 2026-09-24). Reported, never graded: the
       # budget is a printed number, not a gate (#112).
       printf 'elapsed\t%d\n' "$SECONDS"
-      printf 'ordinal\t%s\n' ${SELFTEST_RAN+"${SELFTEST_RAN[@]}"}
+      # The commit these verdicts are about, so a `main` run's census can say
+      # at which sha each fault was last seen red (#112).
+      printf 'commit\t%s\n' "$(git -C "$ROOT" rev-parse HEAD 2> /dev/null || echo unknown)"
+      # Each fault this shard ran, by ordinal AND id: the id is what a later
+      # scope plan inherits by, and ordinals alone name nothing once the list
+      # moves. Ran means red here -- a shard that let one go green fails.
+      # Guarded, because `printf FORMAT` with no arguments still prints the
+      # format once: an empty list would write a bare `inherited<TAB>` row,
+      # which the census reader refuses -- every shard that inherits nothing
+      # would fail the gate (found by #130's review).
+      [ "${#SELFTEST_RAN_IDS[@]}" -eq 0 ] ||
+        printf 'ordinal\t%s\n' "${SELFTEST_RAN_IDS[@]}"
+      [ "${#SELFTEST_INHERITED[@]}" -eq 0 ] ||
+        printf 'inherited\t%s\n' "${SELFTEST_INHERITED[@]}"
+      [ "${#SELFTEST_TOUCHED[@]}" -eq 0 ] ||
+        printf 'touched\t%s\n' "${SELFTEST_TOUCHED[@]}"
     } > "$SELFTEST_CENSUS" || {
       echo "selftest: the census could not be written to ${SELFTEST_CENSUS}" >&2
       SELFTEST_BROKEN+=("the census could not be written")
@@ -7955,7 +8138,7 @@ EOF
   # records the transcript: `--shard 275/1000` exits 2 naming the empty
   # shard, `--shard 1/8` runs 35 of 274 and still declares the pass. That is
   # weaker than a fixture and it is what there is.
-  if [ "${#SELFTEST_RAN[@]}" -eq 0 ]; then
+  if [ "${#SELFTEST_RAN[@]}" -eq 0 ] && [ "${#SELFTEST_INHERITED[@]}" -eq 0 ]; then
     echo "selftest: this run selected no seeded case, so it proves nothing" >&2
     if [ "$SELFTEST_SHARD" -ne 0 ]; then
       echo "selftest: shard ${SELFTEST_SHARD} of ${SELFTEST_SHARDS} is empty; \
@@ -7963,7 +8146,11 @@ there are ${SELFTEST_UNITS} case(s) to divide" >&2
     fi
     return "$EXIT_MISUSE"
   fi
-  echo "selftest: every gate was seen red on its own seeded fault."
+  if [ "${#SELFTEST_INHERITED[@]}" -gt 0 ]; then
+    echo "selftest: every fault this run re-proved was seen red on its own seeded fault; ${#SELFTEST_INHERITED[@]} inherited, declared above."
+  else
+    echo "selftest: every gate was seen red on its own seeded fault."
+  fi
 }
 
 # --------------------------------------------------------------------------
@@ -8003,12 +8190,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --scope)
       [ "$#" -ge 2 ] || { echo "verify: --scope needs a spec" >&2; exit "$EXIT_MISUSE"; }
-      scope_args "$2" || {
-        echo "verify: --scope '$2': want lib, bins, all or test:NAME, each" \
-             "optionally followed by /FILTER" >&2
-        exit "$EXIT_MISUSE"
-      }
-      VERIFY_TEST_SCOPE="$2"
+      # Read now, graded below once the check it narrows is known: a test
+      # spec and an injection name are different spellings.
+      VERIFY_SCOPE="$2"
+      VERIFY_SCOPE_GIVEN=1
       shift 2
       ;;
     --range)
@@ -8056,6 +8241,14 @@ while [ "$#" -gt 0 ]; do
       esac
       shift 2
       ;;
+    --scope-plan)
+      [ "$#" -ge 2 ] || { echo "verify: --scope-plan needs a path" >&2; exit "$EXIT_MISUSE"; }
+      case "$2" in
+        /*) SELFTEST_SCOPE_PLAN="$2" ;;
+        *)  SELFTEST_SCOPE_PLAN="$(pwd)/$2" ;;
+      esac
+      shift 2
+      ;;
     --list) printf '%s\n' "${CHECKS[@]}"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "verify: unknown argument '$1'" >&2; usage >&2; exit "$EXIT_MISUSE" ;;
@@ -8068,8 +8261,14 @@ cd "$ROOT"
 # an ordinary run would let a workflow think it had sharded a gate that in
 # fact ran whole, or ran nothing.
 if [ "$mode" != "selftest" ] &&
-   { [ "$SELFTEST_SHARD" -ne 0 ] || [ -n "$SELFTEST_CENSUS" ]; }; then
-  echo "verify: --shard and --census are for --selftest" >&2
+   { [ "$SELFTEST_SHARD" -ne 0 ] || [ -n "$SELFTEST_CENSUS" ] || [ -n "$SELFTEST_SCOPE_PLAN" ]; }; then
+  echo "verify: --shard, --census and --scope-plan are for --selftest" >&2
+  exit "$EXIT_MISUSE"
+fi
+# A harvest measures every fault, so a plan that inherits some of them would
+# harvest a list with holes in it -- and pack those faults as free.
+if [ -n "$SELFTEST_SCOPE_PLAN" ] && [ -n "$SELFTEST_COST_DIR" ]; then
+  echo "verify: --scope-plan and --derive-shards cannot be combined; a harvest measures every fault" >&2
   exit "$EXIT_MISUSE"
 fi
 
@@ -8077,11 +8276,38 @@ fi
 # only one asked for. `verify.sh --scope lib` on its own would otherwise read
 # as "run everything" while running a fraction of the tests, and read that way
 # in a workflow, where nobody would see it.
-if [ -n "$VERIFY_TEST_SCOPE" ] &&
-   { [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ] ||
-     [ "${selected[0]-}" != "test" ]; }; then
-  echo "verify: --scope narrows the test check, so it needs exactly --only test" >&2
-  exit "$EXIT_MISUSE"
+# Graded on "was --scope given", never on its value: an empty `--scope ''`
+# -- an unset variable in a caller -- is a spelling nobody defined, and must
+# be a misuse rather than silently no scope at all.
+if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
+  if [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ]; then
+    echo "verify: --scope narrows one check, so it needs exactly --only test or --only injections" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  case "${selected[0]}" in
+    test)
+      scope_args "$VERIFY_SCOPE" || {
+        echo "verify: --scope '$VERIFY_SCOPE': want lib, bins, all or test:NAME, each" \
+             "optionally followed by /FILTER" >&2
+        exit "$EXIT_MISUSE"
+      }
+      VERIFY_TEST_SCOPE="$VERIFY_SCOPE"
+      ;;
+    injections)
+      case "$VERIFY_SCOPE" in
+        inject_*[!a-z0-9_]*|inject_) ;;
+        inject_*) VERIFY_INJECTION_SCOPE="$VERIFY_SCOPE" ;;
+      esac
+      [ -n "$VERIFY_INJECTION_SCOPE" ] || {
+        echo "verify: --scope '$VERIFY_SCOPE': the injections check takes one injection's name, inject_..." >&2
+        exit "$EXIT_MISUSE"
+      }
+      ;;
+    *)
+      echo "verify: --scope narrows one check, so it needs exactly --only test or --only injections" >&2
+      exit "$EXIT_MISUSE"
+      ;;
+  esac
 fi
 
 # A range narrows ONE check, the same way a scope does, and for a sharper

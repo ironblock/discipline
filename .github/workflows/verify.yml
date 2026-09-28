@@ -51,6 +51,10 @@ jobs:
 
   selftest:
     uses: ./.github/workflows/gate-selftest.yml
+    # `actions: read` for the scope plan's `main` censuses (#112).
+    permissions:
+      contents: read
+      actions: read
 
   gate:
     name: gate

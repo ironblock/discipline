@@ -145,7 +145,7 @@ jobs:
           cargo --version
           rustc --version
 
-      # The version is the exact one `diet/Cargo.toml` pins the crate to --
+      # The version is the exact one `diet/wasm/Cargo.toml` pins the crate to --
       # `wasm-bindgen`'s bindgen format is an unstable schema shared between
       # the crate and this CLI, and a mismatch is refused outright rather
       # than warned about (measured on #78; see that Cargo.toml comment).
@@ -161,15 +161,15 @@ jobs:
       # explicitly here so this cannot go dormant the same way twice.
       - name: Lint every wasm feature combination this crate declares
         run: |
-          cd diet
+          cd diet/wasm
           cargo clippy --all-targets --no-default-features --features wasm -- -D warnings
           cargo clippy --all-targets --no-default-features --features wasm,wasm-seeded-host-call-trap -- -D warnings
 
-      # `diet/tests/wasm_conformance.rs` builds both wasm32 artifacts itself
+      # `diet/wasm/tests/wasm_conformance.rs` builds both wasm32 artifacts itself
       # (the plain conformance build and the seeded-trap build) and runs
       # them through Node -- this one command is the whole job. See that
       # file's own header for why it does not assume a prior build step.
       - name: Prove the wasm32 read side against native, and the trap control against a real failure
         run: |
-          cd diet
+          cd diet/wasm
           cargo test --no-default-features --features wasm --test wasm_conformance

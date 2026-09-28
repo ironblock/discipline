@@ -11,7 +11,7 @@
 - Judgment compiled into data: Do the expensive judgment once, version it, and let cheap machinery apply it. A sense-description is a salience specification authored by a model capable of judgment, executed by a model capable only of distance. *Specimen: an abstract sentence matched concrete transcript prose at cosine 0.82.*
 - Deterministic projections over interpretation chains: No subagent search parties where a purpose-built tool produces receipts at zero entropy. Every summarize-then-interpret hop is a lossy re-encode.
 - One grammar per format under `diet/formats/<name>/`, with `fixtures/valid/` and `fixtures/invalid/` and a `.reason` beside each invalid fixture; the conformance test is the format's definition.
-- The CLI (`diet check-*`, `diet parse-*`) is the only way anything outside this crate reads a format; the resolver refuses a stale or planted binary rather than choosing.
+- The CLI (`diet check-*`, `diet parse-*`) is the only way anything outside this library reads a format; the resolver refuses a stale or planted binary rather than choosing. What this forbids is a foreign reader: a second implementation of the format. `diet/wasm` is not one; it is the same library under a second build target, calling `diet`'s own format functions, conformance-equal to native by #78's gate.
 - The working object: patches are typed, dedup aliases rather than rebinds, a turn is atomic and order-independent (the permutation test), and the regimen is immutable for the session.
 
 

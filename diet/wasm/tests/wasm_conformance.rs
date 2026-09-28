@@ -3,9 +3,9 @@
 //! `record` and `regimen` corpora, *in a wasm runtime* -- and a host call
 //! reachable from the read path fails that job rather than passing quietly.
 //!
-//! `diet::wasm::check_record`/`check_regimen` carry no logic of their own
-//! (see that module) -- they are [`crate::formats::record::project`] and
-//! [`crate::formats::regimen::project`] with a `#[wasm_bindgen]` attribute,
+//! `diet_wasm::check_record`/`check_regimen` carry no logic of their own
+//! (see that crate) -- they are `diet::formats::record::project` and
+//! `diet::formats::regimen::project` with a `#[wasm_bindgen]` attribute,
 //! nothing else. So calling them in-process, compiled for THIS test
 //! binary's own native target, is calling the identical code the wasm32
 //! build ships; the comparison below is the same function on two targets,
@@ -20,7 +20,7 @@
 //! rather than trapping, so `Instant`-style panics are the only calls that
 //! genuinely trap on their own. Row 4's control does not rely on finding
 //! one of those -- it seeds a host call **and unwraps its `Result`**
-//! (`wasm::seeded_host_call_trap`), the shape a real regression on this
+//! (`diet_wasm::seeded_host_call_trap`), the shape a real regression on this
 //! path would actually take, and that traps regardless of which stdlib call
 //! it is.
 //!
@@ -31,7 +31,7 @@
 //! standard the seeded-fault manifests hold to. It requires the
 //! `wasm32-unknown-unknown` target and a `wasm-bindgen` binary on `PATH`
 //! whose version matches the pinned crate version exactly (see the
-//! `Cargo.toml` comment on why that pin is exact); missing either is a
+//! `diet/wasm/Cargo.toml` comment on why that pin is exact); missing either is a
 //! loud failure, not a skip -- a conformance job that passes because its
 //! own toolchain silently was not there is the isolation lane's `bwrap`
 //! lesson wearing a different lane's clothes.
@@ -56,8 +56,14 @@ fn crate_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
 }
 
+/// `diet/`, where the `record` and `regimen` conformance corpora live -- this
+/// crate is a member nested inside it, not a second home for the fixtures.
+fn diet_root() -> PathBuf {
+    crate_root().join("..")
+}
+
 fn target_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/wasm-conformance")
+    crate_root().join("../../target/wasm-conformance")
 }
 
 /// Every file directly in `dir` whose extension is exactly `ext`, sorted.
@@ -104,7 +110,7 @@ fn build_wasm(label: &str, features: &str) -> PathBuf {
          is the wasm32-unknown-unknown target installed (`rustup target add wasm32-unknown-unknown`)?"
     );
 
-    let wasm_artifact = target_dir.join("wasm32-unknown-unknown/debug/diet.wasm");
+    let wasm_artifact = target_dir.join("wasm32-unknown-unknown/debug/diet_wasm.wasm");
     assert!(
         wasm_artifact.is_file(),
         "cargo build succeeded but {} is missing",
@@ -117,7 +123,7 @@ fn build_wasm(label: &str, features: &str) -> PathBuf {
 /// itself launched from `cwd` -- both `wasm_artifact` and `out_dir` are
 /// absolute, so `cwd` has no reason to matter, and row 3 exists to check
 /// that belief rather than assume it. Returns the generated Node glue
-/// (`<crate>.js`).
+/// (`diet_wasm.js`).
 fn bind_nodejs(wasm_artifact: &Path, out_dir: &Path, cwd: &Path) -> PathBuf {
     let status = Command::new("wasm-bindgen")
         .current_dir(cwd)
@@ -128,7 +134,7 @@ fn bind_nodejs(wasm_artifact: &Path, out_dir: &Path, cwd: &Path) -> PathBuf {
         .unwrap_or_else(|err| {
             panic!(
                 "could not run `wasm-bindgen` ({err}); install the exact version \
-                 diet/Cargo.toml pins with `cargo install wasm-bindgen-cli --version 0.2.100 --locked`"
+                 diet/wasm/Cargo.toml pins with `cargo install wasm-bindgen-cli --version 0.2.100 --locked`"
             )
         });
     assert!(
@@ -138,7 +144,7 @@ fn bind_nodejs(wasm_artifact: &Path, out_dir: &Path, cwd: &Path) -> PathBuf {
         cwd.display()
     );
 
-    let glue = out_dir.join("diet.js");
+    let glue = out_dir.join("diet_wasm.js");
     assert!(
         glue.is_file(),
         "wasm-bindgen did not produce {}",
@@ -270,12 +276,12 @@ fn call_wasm_batch(
     results
 }
 
-/// The native reference: the identical `diet::wasm::*` function, compiled
+/// The native reference: the identical `diet_wasm::*` function, compiled
 /// for this test binary's own target.
 fn native_verdict(func: &str, source: &str) -> String {
     match func {
-        "check_record" => diet::wasm::check_record(source),
-        "check_regimen" => diet::wasm::check_regimen(source),
+        "check_record" => diet_wasm::check_record(source),
+        "check_regimen" => diet_wasm::check_regimen(source),
         other => panic!("no native counterpart wired for {other}"),
     }
 }
@@ -302,7 +308,7 @@ fn unrepresentable_at_this_boundary(format_dir: &str) -> &'static [&'static str]
 }
 
 fn assert_corpus_matches(format_dir: &str, ext: &str, func: &str) {
-    let root = crate_root()
+    let root = diet_root()
         .join("formats")
         .join(format_dir)
         .join("fixtures");
@@ -370,7 +376,7 @@ fn regimen_corpus_matches_between_native_and_wasm() {
 }
 
 /// Row 4's control, proved rather than assumed: a host call reachable from
-/// the read path must fail the job. `wasm::seeded_host_call_trap` is that
+/// the read path must fail the job. `diet_wasm::seeded_host_call_trap` is that
 /// call, built only into this test's own separate artifact -- never the
 /// artifact `record_corpus_matches_between_native_and_wasm` exercises, and
 /// never a shipped one, since the feature it lives behind is never enabled
@@ -450,13 +456,13 @@ fn relative_files_walks_into_subdirectories() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("snippets/abc123"))
         .unwrap_or_else(|err| panic!("cannot create {}: {err}", root.display()));
-    std::fs::write(root.join("diet.js"), b"top-level").unwrap();
+    std::fs::write(root.join("diet_wasm.js"), b"top-level").unwrap();
     std::fs::write(root.join("snippets/abc123/inline.js"), b"nested").unwrap();
 
     assert_eq!(
         relative_files(&root),
         vec![
-            PathBuf::from("diet.js"),
+            PathBuf::from("diet_wasm.js"),
             PathBuf::from("snippets/abc123/inline.js"),
         ],
         "the walk must find the top-level file AND the one nested under snippets/"
@@ -479,11 +485,13 @@ fn ts_bindings_are_byte_identical_from_two_different_working_directories() {
     let out_a = root.join("from-crate-root");
     let cwd_a = crate_root();
     let out_b = root.join("from-workspace-root");
-    let cwd_b = crate_root()
-        .parent()
-        .expect("diet/ has a parent directory")
-        .to_path_buf();
-    assert_ne!(cwd_a, cwd_b, "the two runs must actually differ in cwd");
+    let cwd_b = std::fs::canonicalize(crate_root().join("../.."))
+        .expect("the workspace root, two levels above diet/wasm/, exists");
+    assert_ne!(
+        std::fs::canonicalize(&cwd_a).expect("the crate root exists"),
+        cwd_b,
+        "the two runs must actually differ in cwd"
+    );
 
     bind_nodejs(wasm_artifact, &out_a, &cwd_a);
     bind_nodejs(wasm_artifact, &out_b, &cwd_b);

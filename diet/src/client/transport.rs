@@ -237,7 +237,7 @@ impl Http {
 pub const MAX_REPLY_BYTES: usize = 64 * 1024 * 1024;
 
 /// Whether an I/O error is the deadline arriving.
-fn is_timeout(error: &io::Error) -> bool {
+pub(super) fn is_timeout(error: &io::Error) -> bool {
     matches!(
         error.kind(),
         io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
@@ -364,7 +364,7 @@ impl Transport for Http {
 }
 
 /// Where the headers end, if they have.
-fn header_end(raw: &[u8]) -> Option<usize> {
+pub(super) fn header_end(raw: &[u8]) -> Option<usize> {
     raw.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
@@ -375,7 +375,7 @@ fn header_end(raw: &[u8]) -> Option<usize> {
 /// reader and call the result unreadable -- a true statement about the wrong
 /// thing, and one that would send somebody looking at the model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Framing {
+pub(super) enum Framing {
     /// `Content-Length` announced this many bytes.
     Length(usize),
     /// `Transfer-Encoding: chunked`.
@@ -412,7 +412,7 @@ fn header<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
 /// `Transfer-Encoding` wins over `Content-Length` where a server sends both,
 /// which is what RFC 9112 says and also the safe way round: reading a chunked
 /// body as a flat one hands framing bytes to a parser.
-fn framing(headers: &str) -> Framing {
+pub(super) fn framing(headers: &str) -> Framing {
     if header(headers, "transfer-encoding")
         .is_some_and(|value| value.to_ascii_lowercase().contains("chunked"))
     {
@@ -435,44 +435,85 @@ enum Chunked {
     Broken(String),
 }
 
-/// Decode a chunked body.
-fn dechunk(raw: &[u8]) -> Chunked {
-    let mut out = Vec::new();
-    let mut rest = raw;
-    loop {
-        let Some(end) = rest.windows(2).position(|window| window == b"\r\n") else {
-            return Chunked::More;
-        };
-        let line = String::from_utf8_lossy(&rest[..end]);
-        // A chunk size may carry extensions after a `;`. They are not ours to
-        // interpret, but they are legal, so they are skipped rather than
-        // treated as part of the number.
-        let digits = line.split(';').next().unwrap_or_default().trim();
-        let Ok(size) = usize::from_str_radix(digits, 16) else {
-            return Chunked::Broken(format!("`{digits}` is not a chunk size"));
-        };
-        rest = &rest[end + 2..];
-        if size == 0 {
-            // Trailers, then the blank line. Waiting for that terminator is
-            // what keeps a trailer out of the body.
-            return match rest.windows(2).position(|window| window == b"\r\n") {
-                Some(_) => Chunked::Whole(out),
-                None => Chunked::More,
+/// A chunked body, decoded as it arrives.
+///
+/// The ONE chunk decoder in this crate. [`dechunk`] is this fed a whole body
+/// at once, and a streamed reply (`super::stream`) is this fed each read as
+/// it lands -- two decoders of one framing would be two readers that can
+/// disagree about where a body ends, which is the class this crate is built
+/// against. Nothing is consumed until a whole unit (a size line and its
+/// chunk, or the terminal chunk and its blank line) has arrived, so a read
+/// that ends mid-chunk simply leaves it pending for the next.
+#[derive(Debug, Default)]
+pub(super) struct Dechunker {
+    pending: Vec<u8>,
+    done: bool,
+}
+
+impl Dechunker {
+    /// Feed `bytes`; return whatever body they complete.
+    ///
+    /// # Errors
+    ///
+    /// Why the bytes are not chunked framing at all.
+    pub(super) fn feed(&mut self, bytes: &[u8]) -> Result<Vec<u8>, String> {
+        let mut out = Vec::new();
+        if self.done {
+            return Ok(out);
+        }
+        self.pending.extend_from_slice(bytes);
+        let mut consumed = 0;
+        loop {
+            let rest = &self.pending[consumed..];
+            let Some(end) = rest.windows(2).position(|window| window == b"\r\n") else {
+                break;
             };
+            let line = String::from_utf8_lossy(&rest[..end]);
+            // A chunk size may carry extensions after a `;`. They are not
+            // ours to interpret, but they are legal, so they are skipped
+            // rather than treated as part of the number.
+            let digits = line.split(';').next().unwrap_or_default().trim();
+            let Ok(size) = usize::from_str_radix(digits, 16) else {
+                return Err(format!("`{digits}` is not a chunk size"));
+            };
+            let rest = &rest[end + 2..];
+            if size == 0 {
+                // Trailers, then the blank line. Waiting for that terminator
+                // is what keeps a trailer out of the body.
+                self.done = rest.windows(2).any(|window| window == b"\r\n");
+                break;
+            }
+            // `rest.len() < size + 2` is what this was, and `size` comes off
+            // the wire: `ffffffffffffffff` is a legal hex chunk size, the add
+            // overflows, and the client panics -- which is the one outcome a
+            // record cannot spell. Subtracting from a length we hold cannot
+            // overflow.
+            if rest.len().saturating_sub(2) < size {
+                break;
+            }
+            out.extend_from_slice(&rest[..size]);
+            if &rest[size..size + 2] != b"\r\n" {
+                return Err("a chunk does not end where its size says".to_owned());
+            }
+            consumed += end + 2 + size + 2;
         }
-        // `rest.len() < size + 2` is what this was, and `size` comes off the
-        // wire: `ffffffffffffffff` is a legal hex chunk size, the add
-        // overflows, and the client panics -- which is the one outcome a
-        // record cannot spell. Subtracting from a length we hold cannot
-        // overflow.
-        if rest.len().saturating_sub(2) < size {
-            return Chunked::More;
-        }
-        out.extend_from_slice(&rest[..size]);
-        if &rest[size..size + 2] != b"\r\n" {
-            return Chunked::Broken("a chunk does not end where its size says".to_owned());
-        }
-        rest = &rest[size + 2..];
+        self.pending.drain(..consumed);
+        Ok(out)
+    }
+
+    /// Whether the terminal chunk has arrived.
+    pub(super) fn is_done(&self) -> bool {
+        self.done
+    }
+}
+
+/// Decode a chunked body that is all here: [`Dechunker`], fed once.
+fn dechunk(raw: &[u8]) -> Chunked {
+    let mut decoder = Dechunker::default();
+    match decoder.feed(raw) {
+        Err(why) => Chunked::Broken(why),
+        Ok(body) if decoder.is_done() => Chunked::Whole(body),
+        Ok(_) => Chunked::More,
     }
 }
 
@@ -541,7 +582,7 @@ fn finish(raw: &[u8]) -> Result<HttpReply, TransportFailure> {
 }
 
 /// The status code the first line carries.
-fn status_of(headers: &str) -> Result<u16, TransportFailure> {
+pub(super) fn status_of(headers: &str) -> Result<u16, TransportFailure> {
     let first = headers.split("\r\n").next().unwrap_or_default();
     let mut parts = first.split(' ');
     let version = parts.next().unwrap_or_default();

@@ -187,6 +187,21 @@ pub fn digest_of(acts: &[Act]) -> String {
                     piece(&mut canonical, chunk);
                 }
             }
+            Act::StreamThenHold(chunks) => {
+                let _ = write!(canonical, "stream-then-hold;{};", chunks.len());
+                for chunk in chunks {
+                    piece(&mut canonical, chunk);
+                }
+            }
+            Act::Raw(bytes) => {
+                // Hex rather than a lossy decode: two different byte strings
+                // that are not UTF-8 must not canonicalise alike.
+                let _ = write!(canonical, "raw;{};", bytes.len());
+                for byte in bytes {
+                    let _ = write!(canonical, "{byte:02x}");
+                }
+                canonical.push(';');
+            }
             Act::AnswerAndHold(body, held) => {
                 let _ = write!(canonical, "answer-and-hold;{};", held.as_nanos());
                 piece(&mut canonical, body);

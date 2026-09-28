@@ -166,6 +166,31 @@ pub fn body(shape: &RequestShape) -> String {
     out
 }
 
+/// The streaming form of [`body`]: the same bytes, then `"stream":true` and
+/// `"stream_options":{"include_usage":true}` before the closing brace.
+///
+/// Appended at the END so the head is untouched: [`head`] is still the
+/// opening of what goes out, and a streamed request hashes to the same
+/// `request.head_sha256` as the same request unstreamed -- the prefix a
+/// server caches does not depend on how the answer is delivered.
+///
+/// `include_usage` is not decoration. Measured against llama-server
+/// (`4df29be`, #117): a streamed reply without it carries `timings` on its
+/// last chunk and NO `usage` at all, and a record's token counts are
+/// required; with it, one extra chunk carries both.
+///
+/// # Panics
+///
+/// Never: [`body`] closes its object as the last thing it writes.
+#[must_use]
+pub fn streaming_body(shape: &RequestShape) -> String {
+    let whole = body(shape);
+    let open = whole
+        .strip_suffix('}')
+        .expect("`body` closes its object as the last thing it writes");
+    format!("{open},\"stream\":true,\"stream_options\":{{\"include_usage\":true}}}}")
+}
+
 /// The FROZEN HEAD of `shape`: everything a server can reuse from its cache.
 ///
 /// The opening of [`body`], byte for byte, ending mid-array just before the
@@ -245,6 +270,10 @@ fn message(message: &super::shape::Message, out: &mut String) {
     string(message.role.tag(), out);
     out.push_str(",\"content\":");
     string(&message.content, out);
+    if let Some(reasoning) = &message.reasoning {
+        out.push_str(",\"reasoning_content\":");
+        string(reasoning, out);
+    }
     out.push('}');
 }
 
@@ -463,6 +492,33 @@ mod tests {
     }
 
     #[test]
+    fn an_assistant_messages_reasoning_goes_on_the_wire_as_it_came() {
+        let mut answered = Message::new(Role::Assistant, "225.");
+        // Untrimmed, trailing newline and all: the server's template renders
+        // it back byte for byte, and a changed byte is a cold prefix (#117,
+        // Q10).
+        answered.reasoning = Some("We need the difference.\n".to_owned());
+        let rendered = body(&RequestShape {
+            messages: vec![
+                Message::new(Role::User, "how long?"),
+                answered,
+                Message::new(Role::User, "and back?"),
+            ],
+            ..shape(SamplerCard::empty())
+        });
+        let parsed: serde_json::Value = serde_json::from_str(&rendered).expect("the body is JSON");
+        assert_eq!(
+            parsed["messages"][1]["reasoning_content"],
+            serde_json::json!("We need the difference.\n")
+        );
+        assert_eq!(parsed["messages"][1]["content"], serde_json::json!("225."));
+        assert!(
+            parsed["messages"][0].get("reasoning_content").is_none(),
+            "a message with no reasoning carries no reasoning field: {rendered}"
+        );
+    }
+
+    #[test]
     fn a_message_with_a_quote_or_a_newline_survives_the_round_trip() {
         let rendered = body(&RequestShape {
             messages: vec![Message::new(Role::User, "say \"hi\"\nthen stop\ttidily")],
@@ -634,6 +690,25 @@ mod tests {
         assert_eq!(
             read(&Dialect::llama_cpp(), "[1, 2]"),
             Err(WireError::NotAnObject)
+        );
+    }
+
+    #[test]
+    fn a_streaming_body_is_the_body_with_streaming_asked_for_and_the_same_head() {
+        let shape = shape(SamplerCard::empty());
+        let streaming = super::streaming_body(&shape);
+        assert!(
+            streaming.starts_with(&super::head(&shape)),
+            "streaming moved the head, so a streamed request hashes as another prefix"
+        );
+        let plain = body(&shape);
+        assert!(streaming.starts_with(plain.strip_suffix('}').unwrap()));
+        let parsed: serde_json::Value =
+            serde_json::from_str(&streaming).expect("the streaming body is JSON");
+        assert_eq!(parsed["stream"], serde_json::Value::Bool(true));
+        assert_eq!(
+            parsed["stream_options"]["include_usage"],
+            serde_json::Value::Bool(true)
         );
     }
 }

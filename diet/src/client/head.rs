@@ -56,9 +56,15 @@
 //!
 //! It names a message that LEFT the frozen history; it does not say the
 //! message was reasoning. #79's live-incident class 1 is a harness dropping
-//! the model's own thinking between tool calls, and nothing in a head marks a
-//! message as thinking -- a rule that guessed would fire on every edited
-//! system prompt. It names the role a message was SENT under; it does not say
+//! the model's own thinking between tool calls. Since #117's I5r an assistant
+//! message carries its reasoning as a field (`Message::reasoning`), and the
+//! fingerprint covers it -- a head whose reasoning was dropped has a
+//! different digest. But the record has no delta for "this message's
+//! reasoning changed", so such a change is reported as
+//! [`PrefixReason::Unattributed`], the residual, until the record gains one
+//! (requested of track one on demand, #136's first review). Nothing sets
+//! reasoning on a fingerprinted head yet: `drive::run` never does, and the
+//! session computes no head. It names the role a message was SENT under; it does not say
 //! what the chat template rendered it as, because no server this client
 //! speaks to returns its rendered head. Both halves are stated rather than
 //! filled in, which is the same disclosure `drive`'s module header already
