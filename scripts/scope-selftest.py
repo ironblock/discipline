@@ -61,6 +61,9 @@ MANIFEST_READER = ROOT / "scripts" / "check-fault-manifest.py"
 # A top-level shell function in verify.sh, by the same shape check-injections
 # reads injections with: `name() {` at column 0, closed by `}` at column 0.
 FUNCTION = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(\) \{\n(.*?)^\}\n", re.M | re.S)
+# ...and the one-line form, `check_parity() { python3 scripts/...; }`, which
+# ten of the checks are spelled in.
+ONE_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(\) \{ (.*) \}\n", re.M)
 SCRIPT = re.compile(r"scripts/[A-Za-z0-9_./-]+")
 CALL = re.compile(r"\b([a-z_][a-z0-9_]*)\b")
 
@@ -107,13 +110,15 @@ class Unusable(Exception):
 
 
 def functions(text: str) -> dict[str, str]:
-    """Every top-level function's body, by name."""
-    return {m.group(1): m.group(2) for m in FUNCTION.finditer(text)}
+    """Every top-level function's body, by name, in either spelling."""
+    found = {m.group(1): m.group(2) for m in ONE_LINE.finditer(text)}
+    found.update({m.group(1): m.group(2) for m in FUNCTION.finditer(text)})
+    return found
 
 
 def outside_functions(text: str) -> str:
     """verify.sh with every top-level function removed: its own top-level code."""
-    return FUNCTION.sub("", text)
+    return ONE_LINE.sub("", FUNCTION.sub("", text))
 
 
 def without_cases(body: str) -> str:
@@ -148,14 +153,18 @@ def changed_functions(base: str, head: str) -> set[str]:
     return changed
 
 
-def check_scripts(bodies: dict[str, str], check: str) -> set[str]:
-    """The scripts a check function reaches: its own, and those of the
-    functions it calls, one level down -- `build_diet`, `resolve_diet`."""
+def check_units(bodies: dict[str, str], check: str) -> set[str]:
+    """The verify.sh functions a check runs: itself, and those it calls, one
+    level down -- `build_diet`, `resolve_diet`. A change to any re-proves it."""
     body = bodies.get(f"check_{check}", "")
-    found = set(SCRIPT.findall(body))
-    for called in set(CALL.findall(body)) & set(bodies):
-        if called != f"check_{check}":
-            found |= set(SCRIPT.findall(bodies[called]))
+    return {f"check_{check}"} | (set(CALL.findall(body)) & set(bodies))
+
+
+def check_scripts(bodies: dict[str, str], check: str) -> set[str]:
+    """The scripts those functions name."""
+    found: set[str] = set()
+    for unit in check_units(bodies, check):
+        found |= set(SCRIPT.findall(bodies.get(unit, "")))
     return found
 
 
@@ -164,10 +173,21 @@ def check_scripts(bodies: dict[str, str], check: str) -> set[str]:
 # --------------------------------------------------------------------------
 
 
+def module_data(path: str, root: pathlib.Path) -> str | None:
+    """The data directory beside a Rust module, `diet/formats/record/` for
+    `formats::record`: its fixtures and corpora are what its tests read."""
+    parts = [p for p in path.split("::") if p and p != "crate"]
+    for end in range(len(parts), 0, -1):
+        candidate = "diet/" + "/".join(parts[:end]) + "/"
+        if parts[0] != "src" and (root / candidate).is_dir():
+            return candidate
+    return None
+
+
 def module_file(path: str, root: pathlib.Path) -> str | None:
     """The source file a Rust path like `client::tests::name` lives in: the
     longest prefix that names a file, `a/b.rs` or `a/b/mod.rs`."""
-    parts = [p for p in path.split("::") if p]
+    parts = [p for p in path.split("::") if p and p != "crate"]
     for end in range(len(parts), 0, -1):
         stem = "/".join(parts[:end])
         for candidate in (f"diet/src/{stem}.rs", f"diet/src/{stem}/mod.rs"):
@@ -192,6 +212,9 @@ def scope_files(scope: str | None, root: pathlib.Path) -> set[str]:
     if flt:
         placed = module_file(flt, root)
         found.add(placed if placed else ANY_RUST)
+        data = module_data(flt, root)
+        if data:
+            found.add(data)
     elif not target.startswith("test:"):
         found.add(ANY_RUST)
     return found
@@ -203,6 +226,9 @@ def catches_files(catches: list[str], root: pathlib.Path) -> set[str]:
     for name in catches:
         placed = module_file(name, root) if "::" in name else None
         found.add(placed if placed else ANY_RUST)
+        data = module_data(name, root) if "::" in name else None
+        if data:
+            found.add(data)
     return found
 
 
@@ -241,13 +267,14 @@ def dependencies(root: pathlib.Path, text: str) -> dict[str, tuple[set[str], set
         files = check_scripts(bodies, check) | CHECK_INPUTS.get(check, set())
         if check == "test":
             files |= scope_files(scope, root)
-        deps[ident] = (files, {inject, f"check_{check}", f"case:{ident}"})
+        deps[ident] = (files, {inject, f"case:{ident}"} | check_units(bodies, check))
 
     for manifest in sorted(root.glob("diet/*/gate.toml")):
         lane = tomllib.loads(manifest.read_text(encoding="utf-8"))
         where = str(manifest.relative_to(root))
         for fault in lane.get("fault", []):
-            files = {where, fault.get("target", ANY_RUST)}
+            # The lane's own directory, gate.toml and fixtures with it.
+            files = {str(manifest.parent.relative_to(root)) + "/", fault.get("target", ANY_RUST)}
             files |= catches_files(fault.get("catches", []), root)
             deps[fault["id"]] = (files, {"check_lanes"})
 
@@ -255,10 +282,11 @@ def dependencies(root: pathlib.Path, text: str) -> dict[str, tuple[set[str], set
         table = f"scripts/{kind}-patterns.tsv"
         seeder = f"scripts/seed-{kind}-fault.sh"
         files = {table, seeder} | check_scripts(bodies, kind)
+        units = check_units(bodies, kind)
         for line in (root / table).read_text(encoding="utf-8").splitlines():
             label = line.split("\t", 1)[0].strip()
             if label and not label.startswith("#"):
-                deps.setdefault(f"{kind}.{label}", (set(files), {f"check_{kind}"}))
+                deps.setdefault(f"{kind}.{label}", (set(files), set(units)))
 
     bad = root / "tests" / "fixtures" / "results-bad"
     if bad.is_dir():
@@ -266,7 +294,7 @@ def dependencies(root: pathlib.Path, text: str) -> dict[str, tuple[set[str], set
         for fixture in sorted(p for p in bad.iterdir() if p.is_dir()):
             deps[f"results.{fixture.name}"] = (
                 files | {f"tests/fixtures/results-bad/{fixture.name}/"},
-                {"check_results"},
+                check_units(bodies, "results"),
             )
     return deps
 
@@ -365,24 +393,30 @@ def decide(
     return rerun, inherit
 
 
-def changed_since(base: str, root: pathlib.Path) -> tuple[set[str], set[str]]:
-    """(files the diff touches, verify.sh units that changed) since `base`."""
+def changed_since(since: str, root: pathlib.Path) -> tuple[set[str], set[str]]:
+    """(files that differ, verify.sh units that changed) between `since` and
+    HEAD.
+
+    Measured from the commit a fault was last seen red at, NOT from the PR's
+    merge base: whatever landed on `main` after that run is part of what the
+    inheritance would be vouching for (found by #130's review). And
+    `--no-renames`, because a rename is listed under its new path only, and
+    the old path is the one a fault depends on.
+    """
     diff = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}...HEAD"], capture_output=True, text=True, cwd=root
+        ["git", "diff", "--no-renames", "--name-only", since, "HEAD"],
+        capture_output=True, text=True, cwd=root,
     )
     if diff.returncode != 0:
-        raise Unusable(f"git diff {base}...HEAD exited {diff.returncode}: {diff.stderr.strip()}")
+        raise Unusable(f"git diff {since} HEAD exited {diff.returncode}: {diff.stderr.strip()}")
     files = {line for line in diff.stdout.splitlines() if line}
     units: set[str] = set()
     if "verify.sh" in files:
-        merge_base = subprocess.run(
-            ["git", "merge-base", base, "HEAD"], capture_output=True, text=True, cwd=root
-        )
         old = subprocess.run(
-            ["git", "show", f"{merge_base.stdout.strip()}:verify.sh"], capture_output=True, text=True, cwd=root
+            ["git", "show", f"{since}:verify.sh"], capture_output=True, text=True, cwd=root
         )
-        if merge_base.returncode != 0 or old.returncode != 0:
-            raise Unusable("the base's verify.sh could not be read")
+        if old.returncode != 0:
+            raise Unusable(f"verify.sh at {since} could not be read")
         new = (root / "verify.sh").read_text(encoding="utf-8")
         units = changed_functions(old.stdout, new)
         if outside_functions(old.stdout) != outside_functions(new):
@@ -448,6 +482,52 @@ def _results_lane_real_tree():
     lanes = {i.split(".", 1)[0] for i in rerun}
     if not rerun or not lanes <= {"results", "recompute"}:
         return f"a results/ change re-proved {sorted(lanes)}, not the results lane"
+    return None
+
+
+def _real_rerun(files=(), units=()):
+    text = (ROOT / "verify.sh").read_text(encoding="utf-8")
+    faults = listed_faults(ROOT)
+    red = {i: "abc1234" for i in faults}
+    rerun, _ = decide(faults, dependencies(ROOT, text), red, {}, set(files), set(units), lambda sha: True)
+    return rerun
+
+
+@fixture("a script a one-line check function calls re-proves that check's faults")
+def _one_line_checks():
+    for script, check in (("scripts/check-results.py", "results"), ("scripts/check-library.py", "library"),
+                          ("scripts/check-fault-manifest.py", None), ("scripts/hygiene.sh", "hygiene")):
+        rerun = _real_rerun(files={script})
+        if check and not any(i.startswith(f"{check}.") for i in rerun):
+            return f"{script} changed and no {check}.* fault was re-proven"
+    rerun = _real_rerun(files={"verify.sh"}, units={"build_diet"})
+    if not any(i.startswith("results.") for i in rerun):
+        return "build_diet, which check_results calls, changed and no results.* fault was re-proven"
+    return None
+
+
+@fixture("a fixture the catching tests read re-proves the fault")
+def _catcher_fixtures():
+    rerun = _real_rerun(files={"diet/formats/record/fixtures/invalid/prefix-change-that-is-not-a-change.jsonl"})
+    if "test.record_prefix_change_not_a_change" not in rerun:
+        return f"a record fixture changed and its fault was inherited; re-proven: {sorted(rerun)[:5]}"
+    return None
+
+
+@fixture("a rename is seen at its old path")
+def _renames():
+    import tempfile
+    with tempfile.TemporaryDirectory() as box:
+        run = lambda *a: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a],
+                                        cwd=box, capture_output=True, text=True, check=True)
+        run("init", "-q")
+        (pathlib.Path(box) / "a.rs").write_text("fn a() {}\n" * 20, encoding="utf-8")
+        run("add", "-A"); run("commit", "-qm", "one")
+        base = run("rev-parse", "HEAD").stdout.strip()
+        run("mv", "a.rs", "b.rs"); run("commit", "-qm", "two")
+        files, _ = changed_since(base, pathlib.Path(box))
+    if "a.rs" not in files:
+        return f"a rename was listed as {sorted(files)}, without the old path"
     return None
 
 
@@ -586,7 +666,7 @@ def selftest() -> int:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    parser.add_argument("--base", help="the ref the PR is measured against")
+    parser.add_argument("--base", help="the ref the PR targets; recorded in the plan. Each inheritance is measured from the commit its fault was last seen red at")
     parser.add_argument("--census", help="a directory of census files from main's full run")
     parser.add_argument("--out", help="where to write the plan")
     parser.add_argument("--selftest", action="store_true", help="run the fixtures and exit")
@@ -602,11 +682,29 @@ def main(argv: list[str]) -> int:
         deps = dependencies(ROOT, text)
         census = pathlib.Path(args.census)
         red, touched = read_census(census) if census.is_dir() else ({}, {})
-        files, units = changed_since(args.base, ROOT)
+        reachable = is_ancestor(ROOT)
+        # One diff per commit the census names (a `main` run has one), each
+        # measured from that commit to this head.
+        rerun: dict[str, str] = {}
+        inherit: dict[str, str] = {}
+        by_sha: dict[str, dict[str, str]] = {}
+        for ident, kind in faults.items():
+            sha = red.get(ident)
+            if sha and reachable(sha):
+                by_sha.setdefault(sha, {})[ident] = kind
+        placed = {i for group in by_sha.values() for i in group}
+        unplaced = {i: k for i, k in faults.items() if i not in placed}
+        got_rerun, got_inherit = decide(unplaced, deps, red, touched, set(), set(), reachable)
+        rerun.update(got_rerun)
+        inherit.update(got_inherit)
+        for sha, group in sorted(by_sha.items()):
+            files, units = changed_since(sha, ROOT)
+            got_rerun, got_inherit = decide(group, deps, red, touched, files, units, reachable)
+            rerun.update(got_rerun)
+            inherit.update(got_inherit)
     except (Unusable, OSError) as err:
         print(f"scope-selftest: {err}", file=sys.stderr)
         return EXIT_BROKEN
-    rerun, inherit = decide(faults, deps, red, touched, files, units, is_ancestor(ROOT))
     body = "".join(f"inherit\t{i}\t{s}\n" for i, s in sorted(inherit.items()))
     pathlib.Path(args.out).write_text(
         f"# scope-selftest: {len(rerun)} re-proven, {len(inherit)} inherited, against {args.base}\n" + body,

@@ -8007,9 +8007,16 @@ EOF
       # Each fault this shard ran, by ordinal AND id: the id is what a later
       # scope plan inherits by, and ordinals alone name nothing once the list
       # moves. Ran means red here -- a shard that let one go green fails.
-      printf 'ordinal\t%s\n' ${SELFTEST_RAN_IDS+"${SELFTEST_RAN_IDS[@]}"}
-      printf 'inherited\t%s\n' ${SELFTEST_INHERITED+"${SELFTEST_INHERITED[@]}"}
-      printf 'touched\t%s\n' ${SELFTEST_TOUCHED+"${SELFTEST_TOUCHED[@]}"}
+      # Guarded, because `printf FORMAT` with no arguments still prints the
+      # format once: an empty list would write a bare `inherited<TAB>` row,
+      # which the census reader refuses -- every shard that inherits nothing
+      # would fail the gate (found by #130's review).
+      [ "${#SELFTEST_RAN_IDS[@]}" -eq 0 ] ||
+        printf 'ordinal\t%s\n' "${SELFTEST_RAN_IDS[@]}"
+      [ "${#SELFTEST_INHERITED[@]}" -eq 0 ] ||
+        printf 'inherited\t%s\n' "${SELFTEST_INHERITED[@]}"
+      [ "${#SELFTEST_TOUCHED[@]}" -eq 0 ] ||
+        printf 'touched\t%s\n' "${SELFTEST_TOUCHED[@]}"
     } > "$SELFTEST_CENSUS" || {
       echo "selftest: the census could not be written to ${SELFTEST_CENSUS}" >&2
       SELFTEST_BROKEN+=("the census could not be written")
