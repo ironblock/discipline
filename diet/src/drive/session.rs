@@ -2083,23 +2083,11 @@ pub(in crate::drive) mod tests {
             .collect()
     }
 
-    #[test]
-    fn every_event_the_session_logs_is_a_line_the_log_format_reads() {
-        for logged in one_of_every_event() {
-            let rendered = render(&logged);
-            assert!(!rendered.contains('\n'), "a line broke: {rendered}");
-            assert_eq!(
-                log::line(&rendered),
-                Ok(line_of(&logged)),
-                "{rendered} does not read back as the line it was written from"
-            );
-        }
-
-        // A round trip cannot see a conversion that loses or mistranslates
-        // something on the way in -- it reads back whatever was written -- so
-        // what EVERY sample becomes is written out here, one line each, in
-        // `one_of_every_event`'s order (#140's first review).
-        let expected = vec![
+    /// What each of `one_of_every_event`'s samples must become, in order.
+    /// A table, one entry per variant, so its length is its content.
+    #[allow(clippy::too_many_lines)]
+    fn the_lines_of_every_event() -> Vec<log::Event> {
+        vec![
             log::Event::SessionStart {
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
@@ -2181,7 +2169,26 @@ pub(in crate::drive) mod tests {
                 blocked: 50,
                 ended_by: log::GapEnd::Ask,
             },
-        ];
+        ]
+    }
+
+    #[test]
+    fn every_event_the_session_logs_is_a_line_the_log_format_reads() {
+        for logged in one_of_every_event() {
+            let rendered = render(&logged);
+            assert!(!rendered.contains('\n'), "a line broke: {rendered}");
+            assert_eq!(
+                log::line(&rendered),
+                Ok(line_of(&logged)),
+                "{rendered} does not read back as the line it was written from"
+            );
+        }
+
+        // A round trip cannot see a conversion that loses or mistranslates
+        // something on the way in -- it reads back whatever was written -- so
+        // what EVERY sample becomes is written out here, one line each, in
+        // `one_of_every_event`'s order (#140's first review).
+        let expected = the_lines_of_every_event();
         let written: Vec<log::Event> = one_of_every_event()
             .iter()
             .map(|logged| line_of(logged).event)
