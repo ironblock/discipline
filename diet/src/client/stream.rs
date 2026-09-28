@@ -207,6 +207,30 @@ pub trait Streaming: Send + Sync {
 pub struct HttpStream {
     endpoint: Endpoint,
     reply_cap: usize,
+    bearer: Option<Bearer>,
+}
+
+/// A credential sent as `Authorization: Bearer <key>` -- what the DoD-1
+/// endpoint requires (#117, the I5 manual check). Never printed: its
+/// `Debug` says only that there is one, so a transport logged for the
+/// record does not carry the key into it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Bearer(String);
+
+impl Bearer {
+    /// A bearer credential, or nothing when `key` is empty or holds a
+    /// character that would end the header line and start another.
+    #[must_use]
+    pub fn new(key: &str) -> Option<Self> {
+        let usable = !key.is_empty() && !key.chars().any(char::is_control);
+        usable.then(|| Self(key.to_owned()))
+    }
+}
+
+impl fmt::Debug for Bearer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Bearer(<redacted>)")
+    }
 }
 
 impl HttpStream {
@@ -217,7 +241,15 @@ impl HttpStream {
         Self {
             endpoint,
             reply_cap: transport::MAX_REPLY_BYTES,
+            bearer: None,
         }
+    }
+
+    /// The same, sending `bearer` with every request.
+    #[must_use]
+    pub fn with_bearer(mut self, bearer: Bearer) -> Self {
+        self.bearer = Some(bearer);
+        self
     }
 
     /// The same, with a smaller cap -- the unstreamed transport's reason,
@@ -228,6 +260,7 @@ impl HttpStream {
         Self {
             endpoint,
             reply_cap,
+            bearer: None,
         }
     }
 }
@@ -289,9 +322,16 @@ impl Streaming for HttpStream {
         let _closing = Closing(handle);
 
         let body = wire::streaming_body(shape);
+        let authorization = self
+            .bearer
+            .as_ref()
+            .map_or_else(String::new, |Bearer(key)| {
+                format!("Authorization: Bearer {key}\r\n")
+            });
         let request = format!(
             "POST {} HTTP/1.1\r\nHost: {}:{}\r\nContent-Type: application/json\r\n\
-             Accept: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+             Accept: text/event-stream\r\n{authorization}Content-Length: {}\r\n\
+             Connection: close\r\n\r\n{}",
             self.endpoint.path,
             self.endpoint.host,
             self.endpoint.port,
@@ -990,6 +1030,51 @@ mod tests {
                 (false, "answer".to_owned())
             ]
         );
+    }
+
+    #[test]
+    fn a_bearer_credential_is_sent_as_an_authorization_header_and_only_then() {
+        let with = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");
+        let bearer = Bearer::new("k3y-for-the-endpoint").expect("a usable key");
+        let ended = HttpStream::new(endpoint(&with)).with_bearer(bearer).stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |_| {},
+        );
+        assert!(ended.is_ok(), "{ended:?}");
+        let heads = with.heads();
+        assert!(
+            heads[0].contains("\r\nAuthorization: Bearer k3y-for-the-endpoint\r\n"),
+            "{heads:?}"
+        );
+
+        let without = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");
+        let ended = HttpStream::new(endpoint(&without)).stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |_| {},
+        );
+        assert!(ended.is_ok(), "{ended:?}");
+        assert!(
+            !without.heads()[0].contains("Authorization"),
+            "a transport with no key sent a credential"
+        );
+    }
+
+    #[test]
+    fn a_bearer_credential_is_never_printed_and_never_breaks_a_line() {
+        let transport = HttpStream::new(
+            Endpoint::parse("http://127.0.0.1:1/v1/chat/completions").expect("an endpoint"),
+        )
+        .with_bearer(Bearer::new("k3y-for-the-endpoint").expect("a usable key"));
+        let printed = format!("{transport:?}");
+        assert!(!printed.contains("k3y"), "the key was printed: {printed}");
+        assert!(printed.contains("<redacted>"), "{printed}");
+        for unusable in ["", "k3y\r\nX-Injected: yes", "k3y\n"] {
+            assert!(Bearer::new(unusable).is_none(), "{unusable:?} was accepted");
+        }
     }
 
     /// A piece's text, where the stream under test carries answer text only.

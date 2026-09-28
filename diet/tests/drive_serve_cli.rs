@@ -292,3 +292,47 @@ fn a_drive_server_answers_an_allowed_origin_through_its_proxy_host() {
         assert_eq!(refused.status.code(), Some(2), "{never}");
     }
 }
+
+#[test]
+fn a_drive_server_sends_the_endpoint_key_from_a_file_never_an_argument() {
+    let stub = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");
+    let key_file = HeadFile(
+        std::env::temp_dir().join(format!("diet-drive-serve-key-{}.txt", std::process::id())),
+    );
+    std::fs::write(&key_file.0, "k3y-for-the-endpoint\n").expect("the key file is written");
+    let key_path = key_file.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--key-file", &key_path]);
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    // Waits for the answer, so the request has reached the stub.
+    let _ = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains(r#""to":"awaiting""#),
+    );
+    let heads = stub.heads();
+    assert!(
+        heads
+            .first()
+            .is_some_and(|head| head.contains("\r\nAuthorization: Bearer k3y-for-the-endpoint\r\n")),
+        "the key file's key was not sent: {heads:?}"
+    );
+
+    // There is no flag that takes the key itself.
+    let refused = Command::new(DRIVE)
+        .args([
+            "serve",
+            "--endpoint",
+            &stub.url(),
+            "--model",
+            "m",
+            "--head",
+            "x",
+            "--key",
+            "k3y",
+        ])
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(refused.status.code(), Some(2));
+}

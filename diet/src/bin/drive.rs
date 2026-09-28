@@ -37,7 +37,7 @@ use diet::client::Client;
 use diet::client::shape::{
     Concurrency, Dialect, Limits, Message, RequestShape, Role, SamplerCard, Serving,
 };
-use diet::client::stream::HttpStream;
+use diet::client::stream::{Bearer, HttpStream};
 use diet::client::stub::Stub;
 use diet::client::transport::{Endpoint, Http};
 use diet::drive::regimen::{SUBSTRATE_KEYS, regime_of};
@@ -73,7 +73,7 @@ const SERVE: &str = "serve";
 
 fn serve_usage() -> String {
     let mut out = String::from(
-        "usage: diet-drive serve --endpoint URL --model NAME --head FILE\n\
+        "usage: diet-drive serve --endpoint URL --model NAME --head FILE [--key-file FILE]\n\
          \x20                       [--port N] [--allow-origin URL]... [--max-output-tokens N]\n\n",
     );
     out.push_str("Serves one interactive session over HTTP + SSE on 127.0.0.1 ONLY:\n");
@@ -81,6 +81,8 @@ fn serve_usage() -> String {
     out.push_str("commands. <FILE> is the trunk's system message. The first line on\n");
     out.push_str("stdout is JSON naming the address it listens on and when it opened.\n");
     out.push_str("--allow-origin admits a page's origin (a development proxy's).\n");
+    out.push_str("--key-file names a file holding the endpoint's key, sent as a bearer\n");
+    out.push_str("credential; it is never taken as an argument.\n");
     out.push_str("There is no --listen: binding beyond loopback arrives with auth.\n");
     out
 }
@@ -94,6 +96,7 @@ fn serve(args: &[String]) -> ExitCode {
     let mut endpoint = None;
     let mut model = None;
     let mut head = None;
+    let mut key_file = None;
     let mut port: u16 = 0;
     let mut allowed_origins = Vec::new();
     let mut max_output_tokens: u32 = 512;
@@ -111,6 +114,9 @@ fn serve(args: &[String]) -> ExitCode {
             true
         } else if flag == "--head" {
             head = Some(value.clone());
+            true
+        } else if flag == "--key-file" {
+            key_file = Some(value.clone());
             true
         } else if flag == "--allow-origin" {
             let origin = is_an_origin(value);
@@ -165,7 +171,14 @@ fn serve(args: &[String]) -> ExitCode {
             );
         }
     };
-    let session = std::sync::Arc::new(Session::open(HttpStream::new(endpoint), shape));
+    let mut transport = HttpStream::new(endpoint);
+    if let Some(key_file) = key_file {
+        match bearer_from(&key_file) {
+            Ok(bearer) => transport = transport.with_bearer(bearer),
+            Err(why) => return fail(EXIT_INPUT, &why),
+        }
+    }
+    let session = std::sync::Arc::new(Session::open(transport, shape));
     let opened = session.opened();
     let config = Config {
         allowed_origins,
@@ -198,6 +211,21 @@ fn announcement(listening: &str, opened: u64) -> String {
         &mut out,
     );
     out
+}
+
+/// The endpoint's key, from a FILE: an argument is readable by anyone who
+/// can list the machine's processes. One trailing line break is the file's,
+/// not the key's; an empty key, or one with a line break inside it, is
+/// refused rather than sent.
+fn bearer_from(path: &str) -> Result<Bearer, String> {
+    let written =
+        std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
+    let key = written
+        .strip_suffix("\r\n")
+        .or_else(|| written.strip_suffix('\n'))
+        .unwrap_or(&written);
+    Bearer::new(key)
+        .ok_or_else(|| format!("{path} holds no usable key: empty, or a line break inside it"))
 }
 
 /// An origin as a browser sends it: a scheme, `://`, a host and port, and
