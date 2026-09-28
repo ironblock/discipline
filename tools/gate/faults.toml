@@ -6239,6 +6239,102 @@ failure_class = "client.canned-plays-reasoning-as-text"
 migrated = false
 
 [[fault]]
+id = "drive.session-a-line-drops-the-partial"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-line-drops-the-partial"
+failure_class = "drive.session-a-line-drops-the-partial"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-timeout-line-says-transport"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-timeout-line-says-transport"
+failure_class = "drive.session-a-timeout-line-says-transport"
+migrated = false
+
+[[fault]]
+id = "drive.serve-the-id-is-not-the-seq"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-the-id-is-not-the-seq"
+failure_class = "drive.serve-the-id-is-not-the-seq"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-drops-the-head"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-drops-the-head"
+failure_class = "drive.serve-bin-drops-the-head"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-binds-everywhere"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-binds-everywhere"
+failure_class = "drive.serve-bin-binds-everywhere"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-ignores-allow-origin"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-ignores-allow-origin"
+failure_class = "drive.serve-bin-ignores-allow-origin"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-reasoning-line-is-text"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-reasoning-line-is-text"
+failure_class = "drive.session-a-reasoning-line-is-text"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-crash-line-says-transport"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-crash-line-says-transport"
+failure_class = "drive.session-a-crash-line-says-transport"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-refusal-line-says-another"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-refusal-line-says-another"
+failure_class = "drive.session-a-refusal-line-says-another"
+migrated = false
+
+[[fault]]
+id = "drive.session-an-empty-partial-is-written"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-an-empty-partial-is-written"
+failure_class = "drive.session-an-empty-partial-is-written"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-crash-forgets-what-arrived"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-crash-forgets-what-arrived"
+failure_class = "drive.session-a-crash-forgets-what-arrived"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-accepts-any-allow-origin"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-accepts-any-allow-origin"
+failure_class = "drive.serve-bin-accepts-any-allow-origin"
+migrated = false
+
+[[fault]]
 id = "adapters.compaction-read-as-a-turn"
 kind = "lane-fault"
 check = "lanes"

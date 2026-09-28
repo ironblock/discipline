@@ -2888,7 +2888,9 @@ mod tests {
                 // only thing that runs the program. A `catches` naming one of
                 // them has to be checkable here too, or the half of this lane
                 // that is a second process is the half the guard does not see.
-                include_str!("../../tests/drive_cli.rs")
+                include_str!("../../tests/drive_cli.rs"),
+                // `diet-drive serve` as a program (#117 R2c, I5).
+                include_str!("../../tests/drive_serve_cli.rs")
             ),
             "drive",
         );
