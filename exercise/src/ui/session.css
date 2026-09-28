@@ -346,7 +346,7 @@
   position: relative;
 }
 
-/* A tool's result sits close under the call it answers: a pair, input and output. */
+/* A tool call sits close under the message that wrote it. */
 .ex-trunk__node[data-kind='tool'] {
   margin-top: -0.5rem;
 }

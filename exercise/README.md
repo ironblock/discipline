@@ -24,11 +24,11 @@ CI runs the same thing as the repository's `exercise` check (`./verify.sh --only
   went in -- its role, and what it read -- and its footer what came out, in
   one shape for both: `+100 tok in 5.0 s (20 t/s pp)`, counting up while it
   runs (and, while it reads, its top edge fills with the new part). A tool
-  call is its own block after the message that wrote it, with what writing
-  it took; its result is the block below, with the tool's stats instead of
-  tokens -- `18 lines · 475 B in 30 ms`, and its exit -- a pair, like a
-  REPL's input and output. A result shows its first lines, and what it holds
-  back opens from under them.
+  call is one block after the message that wrote it, by the same rule: its
+  header what writing it took, its body like a REPL -- the command, and what
+  it printed under it, first lines until opened from under them -- and its
+  footer the tool's stats instead of tokens: `18 lines · 475 B in 30 ms`,
+  and its exit.
 - **Behind the curtain**, each server slot other than the trunk's is a
   column. An interview sits level with the trunk message it came from, in
   the slot that served it, with the patches it landed, cabled to it. A seam

@@ -362,13 +362,13 @@ export const VoxelStress: Story = {
   name: '13 · OpenCode: native calls, several a step',
   args: { recording: 'voxel-stress' },
   play: async ({ canvasElement }) => {
-    await expect(canvasElement.querySelectorAll('.ex-pair')).toHaveLength(105);
+    await expect(canvasElement.querySelectorAll('.ex-block--tool')).toHaveLength(105);
     await expect(canvasElement.querySelectorAll('.ex-branchcell')).toHaveLength(14);
-    // The first call of a step says what writing the calls took: a time, with its tokens unknown.
-    const shares = [...canvasElement.querySelectorAll('.ex-pair > .ex-block:first-child .ex-block__foot')].map((f) => f.textContent ?? '');
+    // The first call of a step says what writing the calls took, in its header: a time, with its tokens unknown.
+    const shares = [...canvasElement.querySelectorAll('.ex-block--tool > .ex-block__head .ex-block__flow')].map((f) => f.textContent ?? '');
     await expect(shares.length).toBeGreaterThan(0);
     await expect(shares.every((s) => /^\+\? tok in /.test(s))).toBe(true);
-    // A step's calls are pairs in turn: nine of them after one message.
+    // A step's calls are blocks in turn: nine of them after one message.
     const runs = [...canvasElement.querySelectorAll('.ex-trunk__node')].map((n) => n.getAttribute('data-kind'));
     let longest = 0;
     let run = 0;
@@ -377,10 +377,9 @@ export const VoxelStress: Story = {
       longest = Math.max(longest, run);
     }
     await expect(longest).toBe(9);
-    // A later call of a step says nothing of its own: its block is its head, with no room left for a body.
-    const later = [...canvasElement.querySelectorAll('.ex-pair > .ex-block:first-child')].find((b) => b.querySelector('.ex-block__foot') === null) as HTMLElement;
-    const head = later.querySelector('.ex-block__head') as HTMLElement;
-    await expect(Math.abs(later.getBoundingClientRect().bottom - head.getBoundingClientRect().bottom)).toBeLessThan(2);
+    // A later call of a step says nothing of what writing it took: its header is its chip alone.
+    const heads = [...canvasElement.querySelectorAll('.ex-block--tool > .ex-block__head')];
+    await expect(heads.filter((h) => h.children.length === 1).length).toBe(105 - shares.length);
     await expect(canvasElement.textContent).not.toMatch(/\b1 lines\b/);
     await expect(canvasElement.querySelector('.ex-header__unknown')?.getAttribute('title')).toContain('compaction');
   },

@@ -1,67 +1,9 @@
 /*
- * A tool call and its result: a pair, like a REPL's input and output, one
- * node of the trunk -- the call's block and the result's, close together.
+ * A tool call (ToolCall.tsx): its body reads like a REPL -- the command,
+ * and under it what it printed -- in the tool's own text, on the block,
+ * not in a well.
  */
-.ex-pair {
-  display: grid;
-  /* One column that never grows past the trunk, as the era's: wide content scrolls inside its block. */
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0.35rem;
-}
-
-/* Written as one with the message above: the whole closes the call, marked so. */
-.ex-pair__both {
-  color: var(--ink-faint);
-}
-
-/* A call's command, in its header: opens the rest of a script. */
-.ex-tool__head {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  width: 100%;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink-tool);
-  font: var(--size-tool) / 1.5 var(--font-tool);
-  text-align: left;
-  cursor: pointer;
-}
-
-.ex-tool__head:disabled {
-  cursor: default;
-}
-
-.ex-tool__caret {
-  width: 1ch;
-  color: var(--ink-faint);
-}
-
-/* Nothing to open: no caret, and no room kept for one -- the command sits after the chip as any header's line does. */
-.ex-tool__head:disabled .ex-tool__caret {
-  display: none;
-}
-
-.ex-tool__prompt {
-  color: var(--ink-faint);
-}
-
-.ex-tool__command {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ex-tool__more {
-  color: var(--ink-faint);
-  white-space: nowrap;
-}
-
-/* The rest of a script, and what it printed: the tool's own text, set as its command is -- on the block, not in a well. */
-.ex-tool__script,
+.ex-tool__call,
 .ex-tool__output {
   margin: 0;
   max-height: 22rem;
@@ -69,6 +11,17 @@
   font: var(--size-tool) / 1.5 var(--font-tool);
   color: var(--ink-tool);
   white-space: pre;
+}
+
+.ex-tool__output {
+  margin-top: 0.35rem;
+}
+
+/* The shell's prompt, a script cut short, and a whole written as one: said, quietly. */
+.ex-tool__prompt,
+.ex-tool__clip,
+.ex-tool__both {
+  color: var(--ink-faint);
 }
 
 .ex-exit--ok { color: var(--ok); }

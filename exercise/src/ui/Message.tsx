@@ -78,7 +78,7 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
  * reading is its header, along its top edge -- right under the ask or tool
  * output it mostly is; the writing is its body, reasoning in italic then the
  * answer streamed from line 1, and its footer. Both count up while they run.
- * The tool calls it ended in (`calls`) are the nodes after it (ToolPair):
+ * The tool calls it ended in (`calls`) are the nodes after it (ToolBlock):
  * then its footer is its text's share, where the drive said where the calls
  * began, and nothing where it did not -- the whole closes the first call.
  * Having written no text, it is one row: what it read.

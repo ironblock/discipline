@@ -27,7 +27,7 @@ import { SessionHeader } from './SessionHeader.tsx';
 import { laneStyle } from './sets.ts';
 import { ClockContext, HotEntriesContext, SurfaceContext, TargetContext } from './surface.tsx';
 import type { Surface } from './surface.tsx';
-import { ToolPair } from './ToolCall.tsx';
+import { ToolBlock } from './ToolCall.tsx';
 import './session.css';
 
 export interface SessionViewProps {
@@ -510,8 +510,8 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
 }
 
 /**
- * One node of the trunk. A tool node is a call and its result (ToolPair);
- * the assistant message that wrote the call is found by it, as the calls it
+ * One node of the trunk. A tool node is a call and what it printed
+ * (ToolBlock); the assistant message that wrote the call is found by it, as the calls it
  * ended in are found by the message, among the era's nodes.
  */
 function TrunkBlock({ node, era }: { readonly node: TrunkNode; readonly era: readonly TrunkNode[] }) {
@@ -523,7 +523,7 @@ function TrunkBlock({ node, era }: { readonly node: TrunkNode; readonly era: rea
     case 'tool': {
       const caller = era.find((n): n is Folded<AssistantNode> => n.kind === 'assistant' && n.id === node.after);
       const first = era.find((n) => n.kind === 'tool' && n.after === node.after) === node;
-      return <ToolPair node={node} caller={caller} first={first} />;
+      return <ToolBlock node={node} caller={caller} first={first} />;
     }
     case 'settled':
       return <TurnEnd node={node} />;
