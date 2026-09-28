@@ -3,28 +3,17 @@ name: harvest-shards
 # The step below runs the WHOLE fault list unsharded, isolation lane
 # included, which is a 70+ minute run -- exactly the cost sharding exists so
 # that no ordinary push has to pay it. This workflow is how
-# tools/gate/shards.tsv gets that cost paid on purpose, on the two occasions
-# that call for it:
+# tools/gate/shards.tsv gets that cost paid on purpose: MANUALLY, via
+# `workflow_dispatch`, against whichever ref's shards.tsv needs a fresh
+# harvest. Nothing else triggers it.
 #
-#   * MANUALLY, via `workflow_dispatch`, against whichever ref's shards.tsv
-#     needs a fresh harvest -- `main` for a routine re-balance as the fault
-#     list grows at large.
-#   * AUTOMATICALLY, on a `push` that touches `tools/gate/faults.toml`, on
-#     ANY branch (not only `main`), to re-balance the plan for the faults
-#     that push added. NOTHING WAITS ON IT (ruled on #108, 2026-09-24): an
-#     unplanned fault already runs in the shard a hash of its id picks, and
-#     `derive-shards.py --check` reports the drift rather than refusing it.
-#     When this trigger was added it healed a coverage refusal; that
-#     refusal is gone, and this workflow retires with the shard plan under
-#     #112. Excluded on `harvest-shards/**`, this workflow's own landing
-#     branches, so its own commit does not retrigger itself.
-#
-# `paths: ['tools/gate/faults.toml']` IS THE BUDGET, ruled on #87
-# (2026-09-24): one ~76-minute unsharded run per push that actually touches
-# the manifest, and nothing wider by default. `concurrency` cancels a
-# superseded run on the same ref rather than queuing a second 76-minute job
-# behind it -- a second push to the same branch means the first harvest's
-# numbers are already stale.
+# The `push` trigger on `tools/gate/faults.toml` is REMOVED (ruled on #112,
+# 2026-09-27). Once an unplanned fault ran in the shard a hash of its id picks
+# (#108), nothing waited on its output, and it cost 77 minutes on a branch
+# whose only change to the manifest came in with a merge of `main` (#113).
+# This workflow retires with the shard plan under #112. `concurrency` cancels
+# a superseded dispatch on the same ref rather than queuing a second
+# 76-minute job behind it.
 #
 # Composes with scripts/derive-shards.py --check's substrate refusal (the
 # ruling on #87's defect 1, 2026-09-23: "re-harvest on the runner, and make
@@ -32,18 +21,13 @@ name: harvest-shards
 # (2026-09-24: an undeclared substrate is a disclosed placeholder, not a
 # refusal -- which is what let this workflow reach the default branch at
 # all, since `workflow_dispatch` only lists a workflow that is already
-# there). Either trigger opens its PR against the ref it ran on, never
+# there). It opens its PR against the ref it ran on, never
 # against `main` regardless of where it ran. `--check` refuses a plan
 # harvested anywhere else, by name, so a plan this workflow did not produce
 # cannot pass as if it had.
 
 on:
   workflow_dispatch:
-  push:
-    branches-ignore:
-      - 'harvest-shards/**'
-    paths:
-      - 'tools/gate/faults.toml'
 
 concurrency:
   group: harvest-shards-${{ github.ref }}
@@ -141,4 +125,4 @@ jobs:
             --base "${{ github.ref_name }}" \
             --head "$branch" \
             --title "derive-shards: re-harvest against ${{ github.ref_name }}" \
-            --body "A runner harvest from this workflow (dispatch, or a push touching \`tools/gate/faults.toml\`) against \`${{ github.ref_name }}\`. \`derive-shards.py --check\` refuses a plan harvested anywhere else, by name; this is what makes it pass."
+            --body "A runner harvest from this workflow, dispatched against \`${{ github.ref_name }}\`. \`derive-shards.py --check\` refuses a plan harvested anywhere else, by name; this is what makes it pass."

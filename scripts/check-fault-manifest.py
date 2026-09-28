@@ -125,7 +125,7 @@ def observed() -> dict[str, set[str]]:
         ident = f"{check}.{inject.removeprefix('inject_')}"
         seen["seeded-gate"].add(ident)
         DETAILS[ident] = {"label": label, "legacy_signature": sig}
-        # Only the `test` check takes a scope, so only its cases carry a
+        # Only the `test` check's scope is a cargo target, so only its cases carry a
         # target here. Recording an empty one for the rest would make three
         # hundred manifest entries restate that a Python check has no cargo
         # test target.

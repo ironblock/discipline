@@ -6,6 +6,7 @@
 #   verify.sh                 run every check
 #   verify.sh --only CHECK    run one check (repeatable)
 #   verify.sh --only test --scope SPEC   narrow the test check (selftest only)
+#   verify.sh --only injections --scope inject_NAME   apply one injection (selftest only)
 #   verify.sh --only history --range A..B   scan an explicit range, to repro
 #   verify.sh --list          name the checks, in order
 #   verify.sh --selftest      prove the gate goes red on seeded faults (bash 4+)
@@ -131,6 +132,8 @@ check_clippy() { cargo clippy --workspace --all-targets -- -D warnings; }
 # and scripts/check-ci-coverage.py refuses the spelling in any workflow the
 # gate depends on.
 VERIFY_TEST_SCOPE=""
+VERIFY_SCOPE=""
+VERIFY_SCOPE_GIVEN=""
 
 # SPEC is TARGET or TARGET/FILTER.
 #   lib            the library's own tests
@@ -402,7 +405,15 @@ check_history() {
 # something before the RED it produces counts as anything. This runs on every
 # invocation and not only in --selftest: an inert injection is introduced by
 # an edit, and the edit is what should fail.
-check_injections() { python3 scripts/check-injections.py; }
+# `--scope NAME` narrows the check to applying ONE injection (#112): the static
+# questions still read the whole file, since they cost seconds. It exists for
+# the seeded case that plants an inert injection -- the smallest input that
+# shows the applier fires is the one injection it planted, not all of them,
+# and applying all of them made that one case 225 s on the runner.
+VERIFY_INJECTION_SCOPE=""
+check_injections() {
+  python3 scripts/check-injections.py . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"}
+}
 
 # The merge resolver, exercised on fixtures before it is trusted to resolve a
 # merge. `merge-gate.py` rebuilds the gate files from both sides by name, and
@@ -920,8 +931,9 @@ seeded_case() {
   in_shard "$ident" || return 0
   SELFTEST_CASES=$(( SELFTEST_CASES + 1 ))
 
-  # A `test` case says which tests it needs; anything else says nothing,
-  # because `--scope` narrows that one check and verify.sh refuses it
+  # A `test` case says which tests it needs; an `injections` case MAY name the
+  # one injection it needs (#112); anything else says nothing, because
+  # `--scope` narrows only those two checks and verify.sh refuses it
   # elsewhere. Both halves are reported here rather than left to become a
   # confusing exit 2 from inside the box, and scripts/check-fault-manifest.py
   # refuses the same two states before a run ever starts.
@@ -941,10 +953,12 @@ seeded_case() {
       return
     fi
     scoped=(--scope "$scope")
+  elif [ "$check" = "injections" ] && [ -n "$scope" ]; then
+    scoped=(--scope "$scope")
   elif [ -n "$scope" ]; then
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- A SCOPE ON A CHECK THAT TAKES NONE\n' \
       "$(( SECONDS - started ))" "$check" "$label"
-    SELFTEST_BROKEN+=("${label}: only the test check takes a scope")
+    SELFTEST_BROKEN+=("${label}: only the test and injections checks take a scope")
     shard_cost "$ident" "$started_ms" "$label"
     return
   fi
@@ -6815,7 +6829,7 @@ selftest() {
   seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
     'but the committed file hashes to'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
-    'inject_that_changes_nothing'
+    'inject_that_changes_nothing  exit=' inject_that_changes_nothing
   seeded_case "a nested table flattened"              test     inject_regimen_nested_table_flattened \
     'formats::regimen::tests::a_table_may_hold_one_table_and_no_more \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
@@ -7816,6 +7830,10 @@ EOF
     bash "${ROOT}/verify.sh" --only test --scope 'whatever'
   expect_exit "a scope without exactly --only test is a misuse" 2 \
     bash "${ROOT}/verify.sh" --scope lib
+  # The injections check's scope gets the same control (#112): a name nothing
+  # defines applies zero injections, and zero inert would read as a pass.
+  expect_exit "an injection scope naming nothing defined is not a pass" 1 \
+    bash "${ROOT}/verify.sh" --only injections --scope inject_this_repository_does_not_define
   expect_exit "a shard outside 1..N is a misuse" 2 \
     bash "${ROOT}/verify.sh" --selftest --shard 9/8
 
@@ -7978,12 +7996,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --scope)
       [ "$#" -ge 2 ] || { echo "verify: --scope needs a spec" >&2; exit "$EXIT_MISUSE"; }
-      scope_args "$2" || {
-        echo "verify: --scope '$2': want lib, bins, all or test:NAME, each" \
-             "optionally followed by /FILTER" >&2
-        exit "$EXIT_MISUSE"
-      }
-      VERIFY_TEST_SCOPE="$2"
+      # Read now, graded below once the check it narrows is known: a test
+      # spec and an injection name are different spellings.
+      VERIFY_SCOPE="$2"
+      VERIFY_SCOPE_GIVEN=1
       shift 2
       ;;
     --range)
@@ -8052,11 +8068,38 @@ fi
 # only one asked for. `verify.sh --scope lib` on its own would otherwise read
 # as "run everything" while running a fraction of the tests, and read that way
 # in a workflow, where nobody would see it.
-if [ -n "$VERIFY_TEST_SCOPE" ] &&
-   { [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ] ||
-     [ "${selected[0]-}" != "test" ]; }; then
-  echo "verify: --scope narrows the test check, so it needs exactly --only test" >&2
-  exit "$EXIT_MISUSE"
+# Graded on "was --scope given", never on its value: an empty `--scope ''`
+# -- an unset variable in a caller -- is a spelling nobody defined, and must
+# be a misuse rather than silently no scope at all.
+if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
+  if [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ]; then
+    echo "verify: --scope narrows one check, so it needs exactly --only test or --only injections" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  case "${selected[0]}" in
+    test)
+      scope_args "$VERIFY_SCOPE" || {
+        echo "verify: --scope '$VERIFY_SCOPE': want lib, bins, all or test:NAME, each" \
+             "optionally followed by /FILTER" >&2
+        exit "$EXIT_MISUSE"
+      }
+      VERIFY_TEST_SCOPE="$VERIFY_SCOPE"
+      ;;
+    injections)
+      case "$VERIFY_SCOPE" in
+        inject_*[!a-z0-9_]*|inject_) ;;
+        inject_*) VERIFY_INJECTION_SCOPE="$VERIFY_SCOPE" ;;
+      esac
+      [ -n "$VERIFY_INJECTION_SCOPE" ] || {
+        echo "verify: --scope '$VERIFY_SCOPE': the injections check takes one injection's name, inject_..." >&2
+        exit "$EXIT_MISUSE"
+      }
+      ;;
+    *)
+      echo "verify: --scope narrows one check, so it needs exactly --only test or --only injections" >&2
+      exit "$EXIT_MISUSE"
+      ;;
+  esac
 fi
 
 # A range narrows ONE check, the same way a scope does, and for a sharper

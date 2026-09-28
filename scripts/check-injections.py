@@ -434,7 +434,25 @@ def restore(box: Path, root: Path, pristine: dict[str, str]) -> None:
 
 
 def main() -> int:
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    # `[ROOT] [--only NAME]`. `--only` applies ONE injection rather than every
+    # one (#112): a seeded case that plants an inert injection proves the
+    # applier fires by applying the one it planted, which is the smallest
+    # input that exercises the mechanism. The static questions below still
+    # read the whole file -- they cost seconds, and an undefined name or an
+    # unportable body is a finding whatever was asked for.
+    args = sys.argv[1:]
+    only = None
+    if "--only" in args:
+        at = args.index("--only")
+        if at + 1 >= len(args):
+            print("check-injections: --only needs an injection's name", file=sys.stderr)
+            return 2
+        only = args[at + 1]
+        del args[at : at + 2]
+    if len(args) > 1:
+        print(f"check-injections: unexpected arguments {args[1:]}", file=sys.stderr)
+        return 2
+    root = Path(args[0] if args else ".").resolve()
     text = (root / "verify.sh").read_text(encoding="utf-8")
     names = [match.group(1) for match in FUNC.finditer(text)]
     if not names:
@@ -549,6 +567,20 @@ def main() -> int:
         )
         return 1
 
+    # A scope naming nothing defined is refused, not run: applying zero
+    # injections and reporting zero inert is a check of nothing reading as a
+    # pass -- the same control `check_test` puts on a test scope.
+    applied = names
+    if only is not None:
+        if only not in names:
+            print(
+                f"check-injections: the scope names {only}, which verify.sh does "
+                f"not define; a check of nothing is not a pass",
+                file=sys.stderr,
+            )
+            return 1
+        applied = [only]
+
     tracked = tracked_files(root)
     helpers = "\n".join(match.group(0) for match in HELPERS.finditer(text))
 
@@ -558,7 +590,7 @@ def main() -> int:
         populate(box, root, tracked)
         pristine = digests(box)
         before = fingerprint(box, pristine)
-        for name in names:
+        for name in applied:
             body = re.search(rf"^{name}\(\) \{{\n.*?^\}}\n", text, re.M | re.S)
             if body is None:
                 inert.append((name, 2, "its body could not be extracted"))
@@ -597,9 +629,9 @@ def main() -> int:
         shutil.rmtree(box, ignore_errors=True)
 
     print(
-        f"check-injections: {len(names)} injection(s), {len(inert)} that change "
-        f"nothing or do not finish; every struct literal inside one names every "
-        f"field its type declares"
+        f"check-injections: {len(applied)} of {len(names)} injection(s) applied, "
+        f"{len(inert)} that change nothing or do not finish; every struct literal "
+        f"inside one names every field its type declares"
     )
     for name, code, err in inert:
         print(f"  {name}  exit={code}  {err}")

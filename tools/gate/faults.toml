@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 119
+mechanics_assertions = 120
 unseedable_guards = 2
 migrated = 0
 
@@ -578,7 +578,7 @@ kind = "seeded-gate"
 check = "injections"
 label = "an injection that changes nothing"
 failure_class = "gate.injection-inert"
-legacy_signature = "inject_that_changes_nothing"
+legacy_signature = "inject_that_changes_nothing  exit="
 migrated = false
 
 [[fault]]
@@ -3675,6 +3675,14 @@ id = "mech.a-test-scope-that-selects-nothing-is-not-a-pass"
 kind = "mechanics"
 check = "test"
 label = "a test scope that selects nothing is not a pass"
+failure_class = "scope.selected-nothing"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.an-injection-scope-naming-nothing-defined-is-not-a-pass"
+kind = "mechanics"
+check = "injections"
+label = "an injection scope naming nothing defined is not a pass"
 failure_class = "scope.selected-nothing"
 legacy_signature = ""
 migrated = false
