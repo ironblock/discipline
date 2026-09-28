@@ -26,7 +26,7 @@ import { Seam } from './Seam.tsx';
 import { SessionHeader } from './SessionHeader.tsx';
 import { laneStyle } from './sets.ts';
 import { ClockContext, HotEntriesContext, SurfaceContext, TargetContext } from './surface.tsx';
-import type { Surface } from './surface.tsx';
+import type { Room, Surface } from './surface.tsx';
 import { ToolBlock } from './ToolCall.tsx';
 import './session.css';
 
@@ -59,8 +59,15 @@ interface Placement extends Placed {
  * and its cable bends to reach it. The trunk never moves for a branch.
  */
 export function SessionView({ session, link = 'live', surface, onSurface, composer, follow = false }: SessionViewProps) {
-  const lanes = surface.curtain ? laneSlots(session) : [];
-  const condensed = surface.curtain && surface.condensed === true;
+  // What the row has room for beside the trunk (measured below): whole side calls, bars, or neither. With
+  // less room than the curtain asks for, side calls condense to bars; with none, the curtain draws closed.
+  // Either way a side call that cannot open in its lane opens under the message it came from (`inline`).
+  const [room, setRoom] = useState<Room>('whole');
+  const [inline, setInline] = useState<ReadonlySet<string>>(new Set());
+  const slots = laneSlots(session);
+  const curtain = surface.curtain && room !== 'none';
+  const lanes = curtain ? slots : [];
+  const condensed = curtain && (surface.condensed === true || room === 'bars');
   const gap = condensed ? STACK_GAP_CONDENSED : STACK_GAP;
   // A bar pressed while condensed: that side call, opened, once the curtain is.
   const [revealed, setRevealed] = useState<string>();
@@ -80,18 +87,26 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
   // Working memory is always on the right: a column when the row has room for it, a drawer when not.
   const root = useRef<HTMLDivElement>(null);
   const need = useRef<HTMLDivElement>(null);
+  const needWhole = useRef<HTMLDivElement>(null);
+  const needBars = useRef<HTMLDivElement>(null);
   const [drawer, setDrawer] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   useLayoutEffect(() => {
     const el = root.current;
     const probe = need.current;
     if (!el || !probe) return;
-    const fit = () => setDrawer(probe.offsetWidth > el.clientWidth);
+    const fit = () => {
+      const width = el.clientWidth;
+      setDrawer(probe.offsetWidth > width);
+      const whole = needWhole.current?.offsetWidth ?? 0;
+      const bars = needBars.current?.offsetWidth ?? 0;
+      setRoom(whole <= width ? 'whole' : bars <= width ? 'bars' : 'none');
+    };
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [lanes.length]);
+  }, [lanes.length, slots.length]);
   useEffect(() => {
     if (!drawer || !drawerOpen) return;
     const close = (e: KeyboardEvent) => {
@@ -100,16 +115,27 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
     window.addEventListener('keydown', close);
     return () => window.removeEventListener('keydown', close);
   }, [drawer, drawerOpen]);
+  // Side calls opened under their message, all together or none: for a peek, every one off a message.
+  const toggleInline = (ids: readonly string[]) =>
+    setInline((was) => {
+      const next = new Set(was);
+      const opening = ids.some((id) => !was.has(id));
+      for (const id of ids) {
+        if (opening) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
   // The address's `#<id>`, if any (see the deep-link effect below).
   const [target, setTarget] = useState<string>();
   const wentTo = useRef<string>(undefined);
   // What each side call wrote, as wires into working memory; and what is lit.
   const wires = useMemo<readonly Wire[]>(
     () =>
-      surface.curtain
+      curtain
         ? [...session.branches.values()].flat().flatMap((b) => b.patches.map((p) => ({ branch: b.id, entry: p.entryId, lane: b.lane, op: p.op })))
         : [],
-    [session, surface.curtain],
+    [session, curtain],
   );
   // What is pointed at (or focused), and the chain it lights (chain.ts); the address's target when nothing is.
   const [pointed, setPointed] = useState<Pointed>({});
@@ -157,7 +183,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
   // The trunk's cables routed as a harness (harness.ts), when the surface asks.
   // How lines are drawn, and which: the person's preferences.
   const prefs = usePrefs();
-  const wiring = surface.curtain ? wiringOf(prefs) : undefined;
+  const wiring = curtain ? wiringOf(prefs) : undefined;
   const minimap = prefs.minimap === 'on';
   const cabled = useMemo<readonly Cabled[]>(() => {
     if (!wiring || !columns) return [];
@@ -191,7 +217,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
       };
     });
     // `lanes` and `laneBranches` are derived from `session` and `surface`.
-  }, [wiring, columns, placed, session, surface.curtain]);
+  }, [wiring, columns, placed, session, curtain]);
 
   const layout = useCallback(() => {
     const root = stage.current;
@@ -263,7 +289,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
     setHeight((prev) => (prev === bottom ? prev : bottom));
     setSeamPad((prev) => (sameNumbers(prev, pads) ? prev : pads));
     // `lanes`, `laneBranches` and `gap` are derived from `session` and `surface`.
-  }, [session, surface.curtain, condensed]);
+  }, [session, curtain, condensed]);
 
   useLayoutEffect(() => {
     layout();
@@ -358,8 +384,9 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
       <HotEntriesContext.Provider value={hot.entries}>
       <div
         ref={root}
-        className={`ex-session${minimap ? ' ex-session--minimap' : ''}${surface.gaps ? ' ex-gaps' : ''}${surface.curtain ? ' ex-session--curtain' : ''}${condensed ? ' ex-session--condensed' : ''}`}
-        style={{ ['--lanes' as string]: lanes.length, ...laneStyle(busyLane(session)) }}
+        className={`ex-session${minimap ? ' ex-session--minimap' : ''}${surface.gaps ? ' ex-gaps' : ''}${curtain ? ' ex-session--curtain' : ''}${condensed ? ' ex-session--condensed' : ''}`}
+        style={{ ['--lanes' as string]: lanes.length, ['--slots' as string]: slots.length, ...laneStyle(busyLane(session)) }}
+        data-room={room}
         data-state={session.state}
         data-link={link}
         data-lanes-busy={session.occupancy.some((holder, slot) => holder !== undefined && slot !== session.trunkSlot) ? '' : undefined}
@@ -376,9 +403,11 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
         {prefs.memoryLines === 'on' ? <Links wires={wires} hot={hot} {...(wiring ? { wiring } : {})} revision={[session, placed, seamPad, drawer, drawerOpen, condensed]} /> : null}
         {/* As wide as the row must be for working memory to sit beside it (session.css, --need). */}
         <div className="ex-session__need" ref={need} aria-hidden="true" />
-        {minimap ? <Minimap stage={stage} revision={[session, placed, seamPad, surface.curtain]} curtain={surface.curtain} /> : null}
+        <div className="ex-session__need" data-for="whole" ref={needWhole} aria-hidden="true" />
+        <div className="ex-session__need" data-for="bars" ref={needBars} aria-hidden="true" />
+        {minimap ? <Minimap stage={stage} revision={[session, placed, seamPad, curtain]} curtain={curtain} /> : null}
         <div className="ex-session__header">
-          <SessionHeader session={session} link={link} surface={surface} {...(onSurface ? { onSurface } : {})} />
+          <SessionHeader session={session} link={link} surface={surface} room={room} {...(onSurface ? { onSurface } : {})} />
         </div>
         <div className="ex-session__main">
           <div className="ex-session__columns">
@@ -409,7 +438,7 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                       <div
                         className="ex-era__seam"
                         ref={seamRef(era.index)}
-                        style={surface.curtain ? { paddingTop: seamPad.get(era.index) ?? 0 } : undefined}
+                        style={curtain ? { paddingTop: seamPad.get(era.index) ?? 0 } : undefined}
                       >
                         <Seam node={era.seam} />
                       </div>
@@ -428,21 +457,31 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                           className="ex-trunk__node"
                           key={node.id}
                           ref={anchorRef(node.id)}
-                          data-node={surface.curtain && branches.length > 0 ? node.id : undefined}
+                          data-node={curtain && branches.length > 0 ? node.id : undefined}
                           data-hot={hot.nodes.has(node.id) ? '' : undefined}
                           data-kind={node.kind}
                         >
                           <TrunkBlock node={node} era={era.nodes} />
-                          {!surface.curtain && branches.length > 0 ? (
+                          {!curtain && branches.length > 0 ? (
                             <button
                               type="button"
                               className="ex-peek"
                               title={`${branches.length} side call${branches.length === 1 ? '' : 's'} off this message`}
-                              onClick={() => onSurface?.({ ...surface, curtain: true })}
+                              aria-expanded={room === 'none' ? branches.some((b) => inline.has(b.id)) : undefined}
+                              onClick={() => (room === 'none' ? toggleInline(branches.map((b) => b.id)) : onSurface?.({ ...surface, curtain: true }))}
                             >
                               ↳ {branches.length}
                             </button>
                           ) : null}
+                          {room !== 'whole'
+                            ? branches
+                                .filter((b) => inline.has(b.id))
+                                .map((b) => (
+                                  <div className="ex-inline" key={b.id} style={laneStyle(b.lane)}>
+                                    <Branch node={b} open />
+                                  </div>
+                                ))
+                            : null}
                         </div>
                       );
                     })}
@@ -463,15 +502,17 @@ export function SessionView({ session, link = 'live', surface, onSurface, compos
                       wired={wiring !== undefined}
                       hot={hot.branches.has(branch.id)}
                       open={branch.id === revealed}
-                      {...(onSurface
-                        ? {
-                            onOpen: () => {
-                              setRevealed(branch.id);
-                              scrolledTo.current = undefined;
-                              onSurface({ ...surface, condensed: false });
-                            },
-                          }
-                        : {})}
+                      {...(room === 'bars'
+                        ? { onOpen: () => toggleInline([branch.id]) }
+                        : onSurface
+                          ? {
+                              onOpen: () => {
+                                setRevealed(branch.id);
+                                scrolledTo.current = undefined;
+                                onSurface({ ...surface, condensed: false });
+                              },
+                            }
+                          : {})}
                     />
                   ))}
                 </div>

@@ -77,6 +77,13 @@
   --x-memory: calc(100% - 1rem);
 }
 
+/* What the row needs for whole side calls beside the trunk at its floor, and for bars (SessionView's
+   `room`): measured from the slots the session has, whatever the curtain draws now. */
+.ex-session {
+  --need-whole: calc(var(--trunk-floor) + var(--slots, 0) * (var(--lane-width-whole) + var(--gutter)) + var(--mm-space) + 2rem);
+  --need-bars: calc(var(--trunk-floor) + var(--slots, 0) * (var(--lane-width-condensed) + var(--gutter)) + var(--mm-space) + 2rem);
+}
+
 .ex-session__need {
   position: absolute;
   width: var(--need);
@@ -84,6 +91,9 @@
   visibility: hidden;
   pointer-events: none;
 }
+
+.ex-session__need[data-for='whole'] { width: var(--need-whole); }
+.ex-session__need[data-for='bars'] { width: var(--need-bars); }
 
 .ex-session--minimap {
   --mm-space: calc(var(--minimap-width) + 1.25rem);
@@ -376,6 +386,17 @@
 
 .ex-peek:hover {
   color: var(--ink-interview);
+}
+
+/* No room beside the trunk: the marker sits under its message, in the trunk's own column. */
+.ex-session[data-room='none'] .ex-peek {
+  position: static;
+  margin-top: 0.35rem;
+}
+
+/* A side call opened under the message it came from, where its lane has no room for it. */
+.ex-inline {
+  margin: 0.5rem 0 0 1.25rem;
 }
 
 /* A seam crosses every column: the refill changes the prefix every slot forks from. */

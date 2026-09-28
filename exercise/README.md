@@ -34,7 +34,9 @@ CI runs the same thing as the repository's `exercise` check (`./verify.sh --only
   the slot that served it, with the patches it landed, cabled to it. A seam
   is drawn across every column, as the one deliberate prefill event.
   Condensed, each side call is a bar that keeps its place and grows as it
-  writes.
+  writes. Narrow, the curtain draws no more than the row has room for:
+  bars when whole side calls do not fit, closed when bars do not either;
+  then a side call opens under the message it came from.
 - **Working memory** is always on the right: a column when the row has
   room, a drawer on the right edge when it does not. Each side call on
   screen has a line into every entry it wrote.

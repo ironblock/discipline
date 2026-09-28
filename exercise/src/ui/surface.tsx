@@ -1,6 +1,9 @@
 import { createContext, useContext } from 'react';
 
 /** How much of the machinery the person has asked to see. */
+/** What the row has room for beside the trunk: whole side calls, bars, or neither (session.css, --need-whole, --need-bars). */
+export type Room = 'whole' | 'bars' | 'none';
+
 export interface Surface {
   /** Behind the curtain: the slot lanes, working memory, provenance. */
   readonly curtain: boolean;

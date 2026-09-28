@@ -425,3 +425,66 @@ export const LinesDrawerShut: Story = {
     await expect(document.querySelectorAll('.ex-links path.ex-link')).toHaveLength(0);
   },
 };
+
+/** The whole surface in a column as wide as a device: SessionView measures its own width, not the window's. */
+const narrow = (width: number) =>
+  function Render(args: MomentArgs) {
+    return <div style={{ width }}>{meta.render(args)}</div>;
+  };
+
+/** Every horizontal extent inside the surface: nothing may reach past its right edge. */
+const overflow = (root: HTMLElement) => {
+  const edge = (q(root, '.ex-session') as HTMLElement).getBoundingClientRect().right;
+  return [...root.querySelectorAll('.ex-block, .ex-composer, .ex-header')].filter((e) => e.getBoundingClientRect().right > edge + 1).length;
+};
+
+/**
+ * A phone: no room beside the trunk for side calls even as bars, so the
+ * curtain draws closed -- the header says why the rest cannot be picked --
+ * and a message's marker opens its side calls under it, in the trunk.
+ */
+export const NarrowPhone: Story = {
+  name: 'narrow · a phone: side calls open under their message',
+  args: { cursor: MOMENTS.done },
+  globals: { minimap: 'off' },
+  render: narrow(375),
+  play: async ({ canvasElement }) => {
+    const session = q(canvasElement, '.ex-session') as HTMLElement;
+    await waitFor(async () => expect(session.dataset['room']).toBe('none'));
+    await expect(session.classList.contains('ex-session--curtain')).toBe(false);
+    await expect((q(canvasElement, 'input[name="ex-curtain"][value="open"]') as HTMLInputElement).disabled).toBe(true);
+    await expect((q(canvasElement, 'input[name="ex-curtain"][value="closed"]') as HTMLInputElement).checked).toBe(true);
+    await expect(overflow(canvasElement)).toBe(0);
+    await expect(q(canvasElement, '.ex-trunk')!.getBoundingClientRect().width).toBeGreaterThan(300);
+    const node = q(canvasElement, '.ex-trunk__node:has(> .ex-peek)') as HTMLElement;
+    await userEvent.click(node.querySelector('.ex-peek') as HTMLElement);
+    const opened = node.querySelector('.ex-inline .ex-block--lane') as HTMLElement;
+    await expect(opened.classList.contains('ex-block--thin')).toBe(false);
+    await expect(overflow(canvasElement)).toBe(0);
+    await userEvent.click(node.querySelector('.ex-peek') as HTMLElement);
+    await expect(node.querySelector('.ex-inline')).toBeNull();
+  },
+};
+
+/**
+ * A tablet: room for side calls as bars, not whole, so they condense; a
+ * bar pressed opens its side call under the message it came from.
+ */
+export const NarrowTablet: Story = {
+  name: 'narrow · a tablet: side calls condense to bars',
+  args: { cursor: MOMENTS.done },
+  globals: { minimap: 'off' },
+  render: narrow(700),
+  play: async ({ canvasElement }) => {
+    const session = q(canvasElement, '.ex-session') as HTMLElement;
+    await waitFor(async () => expect(session.dataset['room']).toBe('bars'));
+    await expect(session.classList.contains('ex-session--condensed')).toBe(true);
+    await expect((q(canvasElement, 'input[name="ex-curtain"][value="open"]') as HTMLInputElement).disabled).toBe(true);
+    await expect(overflow(canvasElement)).toBe(0);
+    await expect(q(canvasElement, '.ex-trunk')!.getBoundingClientRect().width).toBeGreaterThanOrEqual(320);
+    const bar = q(canvasElement, '.ex-bar') as HTMLElement;
+    await userEvent.click(bar);
+    await expect(session.classList.contains('ex-session--condensed')).toBe(true);
+    await expect(q(canvasElement, '.ex-trunk .ex-inline .ex-block--lane')).not.toBeNull();
+  },
+};

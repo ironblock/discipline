@@ -126,6 +126,12 @@
   color: var(--ink-muted);
 }
 
+/* Not now: the row has no room for it (its title says so). */
+.ex-segment:has(input:disabled) {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .ex-segment[data-on] {
   background: var(--chip);
   color: var(--ink);

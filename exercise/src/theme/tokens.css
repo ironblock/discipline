@@ -203,7 +203,11 @@
   --trunk-width: 46rem;
   /* The narrowest the trunk may get before working memory gives up its column for a drawer. */
   --trunk-min: 34rem;
-  --lane-width: 22rem;
+  /* The narrowest the trunk gets beside side calls: below it they condense to bars, and then close. */
+  --trunk-floor: 20rem;
+  /* A lane holding whole side calls; --lane-width is what it holds now (condensed: bars). */
+  --lane-width-whole: 22rem;
+  --lane-width: var(--lane-width-whole);
   /* A lane when the curtain is condensed: one bar wide. */
   --lane-width-condensed: 0.875rem;
   --memory-width: 20rem;

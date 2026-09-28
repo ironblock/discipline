@@ -3,13 +3,15 @@ import type { Session } from '../session/fold.ts';
 import { Settings } from './Prefs.tsx';
 import { Segments } from './Segments.tsx';
 import { laneStyle } from './sets.ts';
-import type { Surface } from './surface.tsx';
+import type { Room, Surface } from './surface.tsx';
 import './header.css';
 
 export interface SessionHeaderProps {
   readonly session: Session;
   readonly link?: Link;
   readonly surface: Surface;
+  /** What the row has room for beside the trunk (SessionView): the curtain can draw no more than that. */
+  readonly room?: Room;
   readonly onSurface?: (next: Surface) => void;
 }
 
@@ -17,7 +19,9 @@ export interface SessionHeaderProps {
 const CURTAIN = ['closed', 'condensed', 'open'] as const;
 
 /** One quiet line: what is running this session, where it is, and the switches for seeing more. */
-export function SessionHeader({ session, link = 'live', surface, onSurface }: SessionHeaderProps) {
+export function SessionHeader({ session, link = 'live', surface, room = 'whole', onSurface }: SessionHeaderProps) {
+  const unavailable = CURTAIN.filter((c) => (room === 'bars' && c === 'open') || (room === 'none' && c !== 'closed'));
+  const drawn = !surface.curtain || room === 'none' ? 'closed' : surface.condensed === true || room === 'bars' ? 'condensed' : 'open';
   return (
     <header className="ex-header">
       <span className="ex-header__item">
@@ -68,8 +72,10 @@ export function SessionHeader({ session, link = 'live', surface, onSurface }: Se
             <Segments
               name="curtain"
               options={CURTAIN}
-              value={!surface.curtain ? 'closed' : surface.condensed === true ? 'condensed' : 'open'}
+              value={drawn}
               onPick={(next) => onSurface({ ...surface, curtain: next !== 'closed', condensed: next === 'condensed' })}
+              unavailable={unavailable}
+              why="no room beside the trunk at this width: a side call opens under its message"
             />
           </span>
           <label className="ex-header__toggle">
