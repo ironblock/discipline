@@ -59,10 +59,9 @@
 //! the model's own thinking between tool calls. Since #117's I5r an assistant
 //! message carries its reasoning as a field (`Message::reasoning`), and the
 //! fingerprint covers it -- a head whose reasoning was dropped has a
-//! different digest. But the record has no delta for "this message's
-//! reasoning changed", so such a change is reported as
-//! [`PrefixReason::Unattributed`], the residual, until the record gains one
-//! (requested of track one on demand, #136's first review). Nothing sets
+//! different digest, and the diff names it: a
+//! [`PrefixDelta::ReasoningChanged`] for the message, class
+//! [`PrefixReason::Reasoning`] (#92, requested from #136's first review). Nothing sets
 //! reasoning on a fingerprinted head yet: `drive::run` never does, and the
 //! session computes no head. It names the role a message was SENT under; it does not say
 //! what the chat template rendered it as, because no server this client
@@ -475,7 +474,17 @@ fn messages_diff(previous: &[Message], now: &[Message], diff: &mut Vec<PrefixDel
             .all(|(before, after)| before.role == after.role);
     if paired {
         for (offset, (before, after)) in was.iter().zip(is).enumerate() {
-            lines_diff(index(head + offset), &before.content, &after.content, diff);
+            let message = index(head + offset);
+            lines_diff(message, &before.content, &after.content, diff);
+            // The reasoning a message carries back is part of the head since
+            // #117 I5r; a change there is named, not left to the residual.
+            if before.reasoning != after.reasoning {
+                diff.push(PrefixDelta::ReasoningChanged {
+                    message,
+                    was_chars: before.reasoning.as_deref().map(chars).unwrap_or_default(),
+                    now_chars: after.reasoning.as_deref().map(chars).unwrap_or_default(),
+                });
+            }
         }
         return;
     }
@@ -579,7 +588,7 @@ mod tests {
         Limits, Message, RequestShape, Role, SamplerCard, SamplerSetting, ToolDefinition,
     };
     use super::super::wire;
-    use super::{Head, PrefixDelta, PrefixReason, Watch, timestamps};
+    use super::{Count, Head, PrefixDelta, PrefixReason, Watch, timestamps};
     use crate::formats::record::json::Value;
 
     fn shape(messages: Vec<Message>) -> RequestShape {
@@ -898,6 +907,99 @@ mod tests {
                 was: "\"low\"".to_owned(),
                 now: "\"high\"".to_owned(),
             }]
+        );
+    }
+
+    /// #92 (from #136's review): a head that differs only in the reasoning an
+    /// assistant message carries back is NAMED, not left to the residual --
+    /// and its text lines, which did not move, produce nothing.
+    #[test]
+    fn a_change_to_reasoning_alone_is_reasoning_not_the_residual() {
+        let thought = |reasoning: Option<&str>| {
+            let mut answer = Message::new(Role::Assistant, "the answer");
+            answer.reasoning = reasoning.map(str::to_owned);
+            Head::of(&shape(vec![
+                Message::new(Role::System, "the regimen"),
+                Message::new(Role::User, "turn one"),
+                answer,
+                Message::new(Role::User, "turn two"),
+            ]))
+        };
+        let kept = thought(Some("first I will count the words"));
+        let dropped = thought(None);
+        let change = dropped
+            .change_from(&kept)
+            .expect("the reasoning is part of the head, so dropping it moves it");
+        assert_eq!(change.reason, PrefixReason::Reasoning);
+        assert_eq!(
+            change.diff,
+            [PrefixDelta::ReasoningChanged {
+                message: 2,
+                was_chars: Count::new(28).expect("28 is a count"),
+                now_chars: Count::default(),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_reasoning_change_is_named_whether_added_rewritten_or_beside_a_text_change() {
+        let head = |content: &str, reasoning: Option<&str>| {
+            let mut answer = Message::new(Role::Assistant, content);
+            answer.reasoning = reasoning.map(str::to_owned);
+            Head::of(&shape(vec![
+                Message::new(Role::System, "the regimen"),
+                Message::new(Role::User, "turn one"),
+                answer,
+                Message::new(Role::User, "turn two"),
+            ]))
+        };
+        let chars = |n: u64| Count::new(n).expect("a count");
+        let reasoning_deltas = |from: &Head, to: &Head| -> Vec<PrefixDelta> {
+            to.change_from(from)
+                .expect("the head moved")
+                .diff
+                .into_iter()
+                .filter(|delta| matches!(delta, PrefixDelta::ReasoningChanged { .. }))
+                .collect()
+        };
+        // Added where there was none.
+        assert_eq!(
+            reasoning_deltas(&head("the answer", None), &head("the answer", Some("abc"))),
+            [PrefixDelta::ReasoningChanged {
+                message: 2,
+                was_chars: Count::default(),
+                now_chars: chars(3),
+            }]
+        );
+        // Rewritten to something else of a different length.
+        assert_eq!(
+            reasoning_deltas(
+                &head("the answer", Some("abc")),
+                &head("the answer", Some("abcde"))
+            ),
+            [PrefixDelta::ReasoningChanged {
+                message: 2,
+                was_chars: chars(3),
+                now_chars: chars(5),
+            }]
+        );
+        // Beside a change to the text: both are named, the text by its line.
+        let both = head("another answer", Some("abcde"))
+            .change_from(&head("the answer", Some("abc")))
+            .expect("the head moved");
+        assert!(
+            both.diff
+                .iter()
+                .any(|delta| matches!(delta, PrefixDelta::LineChanged { message: 2, .. })),
+            "{:?}",
+            both.diff
+        );
+        assert!(
+            both.diff
+                .iter()
+                .any(|delta| matches!(delta, PrefixDelta::ReasoningChanged { message: 2, .. })),
+            "{:?}",
+            both.diff
         );
     }
 

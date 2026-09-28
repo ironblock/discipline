@@ -7594,13 +7594,22 @@ root = pathlib.Path(sys.argv[1])
 # Fixed stamps rather than offsets from now, so the three cases differ by
 # years and no clock skew can reorder them.
 OLD, BUILT, NEW = 1577836800, 1609459200, 1767225600  # 2020, 2021, 2026
-CASES = ("a-grammar-it-embeds", "nothing-newer", "dep-info-narrows")
+CASES = (
+    "a-grammar-it-embeds",
+    "nothing-newer",
+    "dep-info-narrows",
+    "a-drive-only-edit",
+    "a-diet-source-edit",
+    "a-nested-trees-dep-info",
+)
 TREE = (
     "Cargo.toml",
     "Cargo.lock",
     "rust-toolchain.toml",
     "diet/Cargo.toml",
     "diet/src/lib.rs",
+    "diet/src/bin/diet.rs",
+    "diet/src/bin/drive.rs",
     "diet/formats/record/grammar.pest",
     "diet/formats/record/fixtures/one.json",
 )
@@ -7637,10 +7646,41 @@ stamp(root / CASES[0] / "diet/formats/record/grammar.pest", NEW)
 # must not become widening when there is one.
 narrows = root / CASES[2]
 (narrows / "diet-bin.d").write_text(
-    f"{narrows / 'diet-bin'}: diet/src/lib.rs\n", encoding="utf-8"
+    f"{narrows / 'diet-bin'}: diet/src/lib.rs diet/src/bin/diet.rs\n", encoding="utf-8"
 )
 stamp(narrows / "diet-bin.d", BUILT)
 stamp(narrows / "diet/formats/record/fixtures/one.json", NEW)
+
+# #138: THE DEP-INFO IS THE SOURCE LIST, for Rust files too. `diet/src` as a
+# whole used to count, so an edit to `bin/drive.rs` -- another binary's
+# source, which `diet` is not built from -- read `diet` as stale, and
+# `cargo build` could not clear it. The `.d` below is what cargo writes for
+# `diet`: its library and its own `bin/diet.rs`, never `bin/drive.rs`.
+for case, edited in (("a-drive-only-edit", "diet/src/bin/drive.rs"),
+                     ("a-diet-source-edit", "diet/src/lib.rs")):
+    here = root / case
+    (here / "diet-bin.d").write_text(
+        f"{here / 'diet-bin'}: diet/src/lib.rs diet/src/bin/diet.rs\n", encoding="utf-8"
+    )
+    stamp(here / "diet-bin.d", BUILT)
+    stamp(here / edited, NEW)
+
+# #147's review: a `.d` from a worktree NESTED inside this one names only
+# files inside this tree, and every one of them is the nested tree's. It does
+# not name this checkout's own `diet/src/bin/diet.rs`, so it narrows nothing;
+# this checkout's `lib.rs`, newer than the binary, still makes it stale.
+nested = root / "a-nested-trees-dep-info"
+inner = ".claude/worktrees/x/diet/src"
+for name in ("lib.rs", "bin/diet.rs"):
+    path = nested / inner / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("x\n", encoding="utf-8")
+    stamp(path, OLD)
+(nested / "diet-bin.d").write_text(
+    f"{nested / 'diet-bin'}: {inner}/lib.rs {inner}/bin/diet.rs\n", encoding="utf-8"
+)
+stamp(nested / "diet-bin.d", BUILT)
+stamp(nested / "diet/src/lib.rs", NEW)
 PYEOF
   expect_exit "a grammar changed under a binary with no dep-info is stale" 2 \
     bash -c "cd '${depless}/a-grammar-it-embeds' \
@@ -7653,6 +7693,18 @@ PYEOF
   expect_exit "a dep-info that does narrow still narrows" 0 \
     bash -c "cd '${depless}/dep-info-narrows' \
       && DIET_BIN='${depless}/dep-info-narrows/diet-bin' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+  expect_exit "an edit to another binary's source leaves diet fresh" 0 \
+    bash -c "cd '${depless}/a-drive-only-edit' \
+      && DIET_BIN='${depless}/a-drive-only-edit/diet-bin' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+  expect_exit "an edit to a source diet is built from is stale" 2 \
+    bash -c "cd '${depless}/a-diet-source-edit' \
+      && DIET_BIN='${depless}/a-diet-source-edit/diet-bin' \
+      python3 '${ROOT}/scripts/resolve-diet.py'"
+  expect_exit "a nested tree's dep-info does not narrow this one" 2 \
+    bash -c "cd '${depless}/a-nested-trees-dep-info' \
+      && DIET_BIN='${depless}/a-nested-trees-dep-info/diet-bin' \
       python3 '${ROOT}/scripts/resolve-diet.py'"
 
   # --- the resolver's own suite cannot report a pass it did not measure ---

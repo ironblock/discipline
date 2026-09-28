@@ -92,8 +92,16 @@ def candidates() -> tuple[pathlib.Path, ...]:
 # not clear it, because cargo correctly rebuilds nothing when no source
 # changed. The workaround was `touch diet/src/lib.rs && cargo build`, which is
 # a strange thing to have to know and was reported as such (#50).
+#
+# `diet/src` AS A WHOLE IS NOT ONE EITHER (#138), and was until 2026-09-28.
+# It holds other binaries' sources -- `bin/drive.rs` is `diet-drive`'s, not
+# `diet`'s -- so an edit to one read `diet` as stale, and `cargo build`
+# could not clear it, because nothing `diet` is built from had changed: the
+# #50 class again, one directory further in. The Rust files `diet` is built
+# from are cargo's dep-info to say (`embedded()` below), and when there is no
+# dep-info to trust, `embedded()` falls back to the whole of `diet/`, which
+# still contains all of `diet/src`.
 SOURCES = (
-    pathlib.Path("diet/src"),
     pathlib.Path("diet/Cargo.toml"),
     pathlib.Path("Cargo.toml"),
     pathlib.Path("Cargo.lock"),
@@ -124,6 +132,14 @@ DEP_TARGET = re.compile(r"^(?P<target>(?:[^:\\]|\\.)+):\s*(?P<deps>.*)$")
 # What a binary embeds when its dep-info cannot say. Not a guess at the set:
 # the directory that contains it, whole.
 UNNARROWED = pathlib.Path("diet")
+
+# The binary's own crate root. Dep-info that does not name THIS checkout's copy
+# of it is not dep-info about this checkout's `diet` (#147's review): a build
+# of a worktree nested inside this one -- the desktop app's
+# `.claude/worktrees/<x>` -- writes a `.d` whose every path is inside this
+# tree, and all of them are the nested tree's files. Trusting it would check
+# someone else's sources and none of these.
+CRATE_ROOT = pathlib.Path("diet/src/bin/diet.rs")
 
 
 def embedded(binary: pathlib.Path) -> list[pathlib.Path]:
@@ -191,7 +207,11 @@ def embedded(binary: pathlib.Path) -> list[pathlib.Path]:
     # for the same reason: a list that cannot be trusted to be complete
     # cannot be trusted to say that nothing changed. An unparseable file
     # lands here too -- no line matches, `found` stays empty.
-    if not found:
+    #
+    # And dep-info that does not name this checkout's own crate root is about
+    # another checkout's `diet` -- a nested worktree's build -- however much of
+    # it happens to resolve inside this tree.
+    if not found or CRATE_ROOT not in found:
         return [UNNARROWED]
     return sorted(found)
 

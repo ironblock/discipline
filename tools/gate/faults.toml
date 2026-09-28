@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 122
+mechanics_assertions = 125
 unseedable_guards = 3
 migrated = 0
 
@@ -4173,6 +4173,30 @@ legacy_signature = ""
 migrated = false
 
 [[fault]]
+id = "mech.a-nested-tree-s-dep-info-does-not-narrow-this-one"
+kind = "mechanics"
+check = "results"
+label = "a nested tree's dep-info does not narrow this one"
+failure_class = "resolver.foreign-dep-info"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.an-edit-to-another-binary-s-source-leaves-diet-fresh"
+kind = "mechanics"
+check = "results"
+label = "an edit to another binary's source leaves diet fresh"
+failure_class = "resolver.foreign-source"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.an-edit-to-a-source-diet-is-built-from-is-stale"
+kind = "mechanics"
+check = "results"
+label = "an edit to a source diet is built from is stale"
+failure_class = "resolver.stale-source"
+legacy_signature = ""
+migrated = false
+[[fault]]
 id = "mech.a-dep-info-that-does-narrow-still-narrows"
 kind = "mechanics"
 check = "regimen"
@@ -6258,6 +6282,22 @@ failure_class = "client.canned-plays-reasoning-as-text"
 migrated = false
 
 [[fault]]
+id = "client.head-a-reasoning-change-is-unattributed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.head-a-reasoning-change-is-unattributed"
+failure_class = "client.head-a-reasoning-change-is-unattributed"
+migrated = false
+
+[[fault]]
+id = "client.head-only-a-dropped-reasoning-is-named"
+kind = "lane-fault"
+check = "lanes"
+label = "client.head-only-a-dropped-reasoning-is-named"
+failure_class = "client.head-only-a-dropped-reasoning-is-named"
+migrated = false
+
+[[fault]]
 id = "drive.session-a-line-drops-the-partial"
 kind = "lane-fault"
 check = "lanes"
@@ -6351,6 +6391,70 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.serve-bin-accepts-any-allow-origin"
 failure_class = "drive.serve-bin-accepts-any-allow-origin"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-refused-commands-gap-is-logged"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-refused-commands-gap-is-logged"
+failure_class = "drive.session-a-refused-commands-gap-is-logged"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-gap-is-logged-after-its-commands-outcome"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-gap-is-logged-after-its-commands-outcome"
+failure_class = "drive.session-a-gap-is-logged-after-its-commands-outcome"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-gap-citing-any-settling-is-logged"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-gap-citing-any-settling-is-logged"
+failure_class = "drive.session-a-gap-citing-any-settling-is-logged"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-gap-ended-by-another-command-is-logged"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-gap-ended-by-another-command-is-logged"
+failure_class = "drive.session-a-gap-ended-by-another-command-is-logged"
+migrated = false
+
+[[fault]]
+id = "drive.serve-a-gap-with-more-than-its-shape-is-accepted"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-a-gap-with-more-than-its-shape-is-accepted"
+failure_class = "drive.serve-a-gap-with-more-than-its-shape-is-accepted"
+migrated = false
+
+[[fault]]
+id = "drive.session-an-admitted-command-leaves-the-gap-open"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-an-admitted-command-leaves-the-gap-open"
+failure_class = "drive.session-an-admitted-command-leaves-the-gap-open"
+migrated = false
+
+[[fault]]
+id = "drive.session-an-admitted-end-drops-its-gap"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-an-admitted-end-drops-its-gap"
+failure_class = "drive.session-an-admitted-end-drops-its-gap"
+migrated = false
+
+[[fault]]
+id = "drive.session-an-unwritable-duration-is-capped"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-an-unwritable-duration-is-capped"
+failure_class = "drive.session-an-unwritable-duration-is-capped"
 migrated = false
 
 [[fault]]

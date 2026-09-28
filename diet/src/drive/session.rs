@@ -126,6 +126,63 @@ vocabulary! {
 }
 
 vocabulary! {
+    /// What ended an idle gap: the command that carried it.
+    GapEnd {
+        /// An ask.
+        Ask => "ask",
+        /// A seam.
+        Seam => "seam",
+        /// A stop.
+        Cancel => "cancel",
+        /// The end of the session.
+        End => "end",
+    }
+}
+
+/// An idle gap, as the surface measured it and sent it with the command that
+/// ended it (#117, Q4 and D13 (c)): five durations in integer milliseconds
+/// on the surface's own clock, what ended it, and the `turn.settled` that
+/// opened it. Durations only, never content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IdleGap {
+    /// The sequence number of the [`Event::TurnSettled`] that opened it.
+    pub opened_by: u64,
+    /// From the settling to the first sign the person was present.
+    pub notice: u64,
+    /// From the end of `notice` to the first keystroke or seam click.
+    pub read: u64,
+    /// From the first keystroke to the accepted send or declare.
+    pub compose: u64,
+    /// Time the page was hidden, taken out of the phase it interrupted.
+    pub away: u64,
+    /// From the first send refused because work was in flight to the
+    /// accepted send.
+    pub blocked: u64,
+    /// What ended it.
+    pub ended_by: GapEnd,
+}
+
+/// Why a gap sent with a command was not logged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GapError {
+    /// It does not cite the latest settling, or that settling's gap was
+    /// already logged: a gap is opened by the latest `turn.settled`, once.
+    NotTheOpenGap {
+        /// The settling it cited.
+        opened_by: u64,
+    },
+    /// A duration too large for the log's integers to hold.
+    NotACount,
+    /// It says a different command ended it than the one carrying it.
+    EndedByAnotherCommand {
+        /// What it says.
+        says: GapEnd,
+        /// The command that carried it.
+        carried_by: CommandKind,
+    },
+}
+
+vocabulary! {
     /// Which lane a request is made on. The trunk is the only one until R4.
     Lane {
         /// The canonical session.
@@ -262,6 +319,9 @@ pub enum Event {
         /// How it ended.
         reason: SettleReason,
     },
+    /// A person's idle gap, logged immediately before the outcome of the
+    /// command that ended it, admitted or refused.
+    IdleGap(IdleGap),
 }
 
 /// An ask the session admitted.
@@ -273,14 +333,18 @@ pub struct Admitted {
     pub turn: u32,
 }
 
-/// Why [`Session::cancel`] did not stop anything.
+/// Why a command did not do what it asked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CancelError {
-    /// The session refused it, and logged the refusal.
+pub enum Rejected {
+    /// The session refused it, and logged the refusal (and any gap it
+    /// carried, before it).
     Refused(Refusal),
-    /// It named a turn that was never admitted. That is not a command the
-    /// session can refuse, so nothing is logged.
+    /// A cancel named a turn that was never admitted. That is not a command
+    /// the session can refuse, so nothing is logged.
     NoSuchTurn(u32),
+    /// The gap it carried cannot be logged, so neither it nor the command
+    /// is: the command was not carried out.
+    BadGap(GapError),
 }
 
 /// An event and its place in the log.
@@ -311,14 +375,83 @@ struct State {
     /// Asks admitted so far: the latest turn's number.
     turns: u32,
     opened_at: Instant,
+    /// The latest `turn.settled`, while no gap has been logged against it.
+    gap_open: Option<u64>,
+    /// The gap the command being handled carries, and that command, not yet
+    /// checked: checked only if the command is admitted.
+    carried: Option<(IdleGap, CommandKind)>,
+    /// A checked gap waiting for its admitted command's outcome: the next
+    /// event pushed, under the same lock.
+    pending_gap: Option<IdleGap>,
 }
 
 impl State {
     fn push(&mut self, event: Event) -> u64 {
+        // An admitted command's gap is logged immediately BEFORE that
+        // command's outcome, under the same lock (#117, D13 (c)).
+        if let Some(gap) = self.pending_gap.take() {
+            self.gap_open = None;
+            self.append(Event::IdleGap(gap));
+        }
+        self.append(event)
+    }
+
+    fn append(&mut self, event: Event) -> u64 {
         let seq = u64::try_from(self.log.len()).expect("a log longer than u64 cannot be built");
         let t = u64::try_from(self.opened_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+        if matches!(event, Event::TurnSettled { .. }) {
+            self.gap_open = Some(seq);
+        }
         self.log.push(Logged { seq, t, event });
         seq
+    }
+
+    /// Hold the gap a command carries until the command is admitted or
+    /// refused.
+    fn carry(&mut self, gap: Option<IdleGap>, command: CommandKind) {
+        self.carried = gap.map(|gap| (gap, command));
+    }
+
+    /// A command was admitted. The gap it carries is checked and held for its
+    /// outcome; and whatever gap was open ended here, carried or not (a gap
+    /// ends at the command that ends it -- left open, a later command could
+    /// log it after the one that really ended it, or after the session
+    /// ended; #146's first review).
+    ///
+    /// # Errors
+    ///
+    /// [`Rejected::BadGap`] when the carried gap cannot be logged: then the
+    /// command is not carried out and nothing is logged.
+    fn admit(&mut self) -> Result<(), Rejected> {
+        if let Some((gap, command)) = self.carried.take() {
+            let ends = match command {
+                CommandKind::Ask => GapEnd::Ask,
+                CommandKind::Cancel => GapEnd::Cancel,
+                CommandKind::DeclareSeam => GapEnd::Seam,
+                CommandKind::End => GapEnd::End,
+            };
+            if gap.ended_by != ends {
+                return Err(Rejected::BadGap(GapError::EndedByAnotherCommand {
+                    says: gap.ended_by,
+                    carried_by: command,
+                }));
+            }
+            if self.gap_open != Some(gap.opened_by) {
+                return Err(Rejected::BadGap(GapError::NotTheOpenGap {
+                    opened_by: gap.opened_by,
+                }));
+            }
+            let durations = [gap.notice, gap.read, gap.compose, gap.away, gap.blocked];
+            if durations
+                .iter()
+                .any(|duration| i64::try_from(*duration).is_err())
+            {
+                return Err(Rejected::BadGap(GapError::NotACount));
+            }
+            self.pending_gap = Some(gap);
+        }
+        self.gap_open = None;
+        Ok(())
     }
 
     fn move_to(&mut self, to: Settlement) {
@@ -328,6 +461,11 @@ impl State {
     }
 
     fn refuse(&mut self, command: CommandKind, because: Refusal) -> Refusal {
+        // A refused command's gap is neither logged nor closed (ruled on
+        // #146, amending D13 (c)): the person has not been served yet, and the
+        // admitted command that follows carries the gap -- its `blocked`
+        // running from this refusal.
+        self.carried = None;
         let during = self.settlement;
         self.push(Event::Refused {
             command,
@@ -396,6 +534,9 @@ impl<S: Streaming + 'static> Session<S> {
             flight: None,
             turns: 0,
             opened_at: Instant::now(),
+            gap_open: None,
+            carried: None,
+            pending_gap: None,
         };
         state.push(Event::Started {
             opened,
@@ -415,25 +556,33 @@ impl<S: Streaming + 'static> Session<S> {
     /// Send an ask to the trunk. Returns the sequence number of its
     /// [`Event::Asked`] and the turn it begins; the answer arrives in the log.
     ///
+    /// `gap` is the idle gap this ask ended, if the surface measured one. If
+    /// the ask is admitted, the gap is logged immediately before it; if it is
+    /// refused, the gap is neither logged nor closed, and the next admitted
+    /// command carries it.
+    ///
     /// # Errors
     ///
     /// [`Refusal::InFlight`] while a turn or a capture is in flight, and
-    /// [`Refusal::Ended`] once the session has ended. Either is also logged.
-    pub fn ask(&self, text: &str) -> Result<Admitted, Refusal> {
+    /// [`Refusal::Ended`] once the session has ended; either is also logged.
+    /// [`Rejected::BadGap`] when `gap` cannot be logged, and then nothing is.
+    pub fn ask(&self, text: &str, gap: Option<IdleGap>) -> Result<Admitted, Rejected> {
         let mut state = self.shared.lock();
+        state.carry(gap, CommandKind::Ask);
         match state.settlement {
             Settlement::Awaiting => {}
             Settlement::Turn | Settlement::Capture => {
                 let refused = state.refuse(CommandKind::Ask, Refusal::InFlight);
                 self.shared.changed.notify_all();
-                return Err(refused);
+                return Err(Rejected::Refused(refused));
             }
             Settlement::Ended => {
                 let refused = state.refuse(CommandKind::Ask, Refusal::Ended);
                 self.shared.changed.notify_all();
-                return Err(refused);
+                return Err(Rejected::Refused(refused));
             }
         }
+        state.admit()?;
         state.turns += 1;
         let turn = state.turns;
         let seq = state.push(Event::Asked {
@@ -497,22 +646,25 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// # Errors
     ///
-    /// [`CancelError::NoSuchTurn`] for a turn never admitted (not logged).
+    /// [`Rejected::NoSuchTurn`] for a turn never admitted (not logged), and
+    /// [`Rejected::BadGap`] when `gap` cannot be logged (nothing is).
     /// Otherwise refused, and logged: [`Refusal::Ended`] once the session
     /// has ended, [`Refusal::Stale`] for a turn older than the latest, and
     /// [`Refusal::NothingInFlight`] when the latest turn has no call in
     /// flight.
-    pub fn cancel(&self, turn: u32) -> Result<(), CancelError> {
+    pub fn cancel(&self, turn: u32, gap: Option<IdleGap>) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
         let latest = state.turns;
         if turn == 0 || turn > latest {
-            return Err(CancelError::NoSuchTurn(turn));
+            return Err(Rejected::NoSuchTurn(turn));
         }
+        state.carry(gap, CommandKind::Cancel);
         let because = match (state.settlement, state.flight.as_ref()) {
             (Settlement::Ended, _) => Refusal::Ended,
             _ if turn < latest => Refusal::Stale,
             (Settlement::Turn, Some(flight)) => {
                 let cancel = flight.cancel.clone();
+                state.admit()?;
                 state.push(Event::StopAsked { turn });
                 drop(state);
                 self.shared.changed.notify_all();
@@ -527,7 +679,7 @@ impl<S: Streaming + 'static> Session<S> {
         let refused = state.refuse(CommandKind::Cancel, because);
         drop(state);
         self.shared.changed.notify_all();
-        Err(CancelError::Refused(refused))
+        Err(Rejected::Refused(refused))
     }
 
     /// Declare a seam. Not built until #117 R6.
@@ -535,9 +687,11 @@ impl<S: Streaming + 'static> Session<S> {
     /// # Errors
     ///
     /// Always: [`Refusal::SeamNotBuilt`], or [`Refusal::Ended`] once the
-    /// session has ended. Logged either way.
-    pub fn declare_seam(&self) -> Result<(), Refusal> {
+    /// session has ended. Logged either way; a refused command's `gap` is
+    /// neither logged nor closed.
+    pub fn declare_seam(&self, gap: Option<IdleGap>) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
+        state.carry(gap, CommandKind::DeclareSeam);
         let because = if state.settlement == Settlement::Ended {
             Refusal::Ended
         } else {
@@ -546,7 +700,7 @@ impl<S: Streaming + 'static> Session<S> {
         let refused = state.refuse(CommandKind::DeclareSeam, because);
         drop(state);
         self.shared.changed.notify_all();
-        Err(refused)
+        Err(Rejected::Refused(refused))
     }
 
     /// End the session.
@@ -554,18 +708,21 @@ impl<S: Streaming + 'static> Session<S> {
     /// # Errors
     ///
     /// [`Refusal::InFlight`] while a turn or a capture is in flight -- stop
-    /// it first -- and [`Refusal::Ended`] if it already ended. Logged.
-    pub fn end(&self) -> Result<(), Refusal> {
+    /// it first -- and [`Refusal::Ended`] if it already ended; logged, and the
+    /// refused `gap` is neither logged nor closed. Or [`Rejected::BadGap`]
+    /// when an admitted end's `gap` cannot be logged: then it does not end,
+    /// and nothing is logged.
+    pub fn end(&self, gap: Option<IdleGap>) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
+        state.carry(gap, CommandKind::End);
         let outcome = match state.settlement {
-            Settlement::Awaiting => {
-                state.move_to(Settlement::Ended);
-                Ok(())
-            }
-            Settlement::Turn | Settlement::Capture => {
-                Err(state.refuse(CommandKind::End, Refusal::InFlight))
-            }
-            Settlement::Ended => Err(state.refuse(CommandKind::End, Refusal::Ended)),
+            Settlement::Awaiting => state.admit().map(|()| state.move_to(Settlement::Ended)),
+            Settlement::Turn | Settlement::Capture => Err(Rejected::Refused(
+                state.refuse(CommandKind::End, Refusal::InFlight),
+            )),
+            Settlement::Ended => Err(Rejected::Refused(
+                state.refuse(CommandKind::End, Refusal::Ended),
+            )),
         };
         drop(state);
         self.shared.changed.notify_all();
@@ -743,6 +900,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             status: None,
             partial: arrived(partial),
         },
+        Event::IdleGap(gap) => gap_line(gap),
         Event::TurnSettled { turn, reason } => log::Event::TurnSettled {
             turn: *turn,
             reason: settle_reason_in_the_log(*reason),
@@ -781,6 +939,23 @@ fn failed_line(request: u64, failure: &TransportFailure, partial: &str) -> log::
 /// when anything did" -- absent when nothing did, never an empty string.
 fn arrived(partial: &str) -> Option<String> {
     (!partial.is_empty()).then(|| partial.to_owned())
+}
+
+fn gap_line(gap: &IdleGap) -> log::Event {
+    log::Event::IdleGap {
+        opened_by: gap.opened_by,
+        notice: gap.notice,
+        read: gap.read,
+        compose: gap.compose,
+        away: gap.away,
+        blocked: gap.blocked,
+        ended_by: match gap.ended_by {
+            GapEnd::Ask => log::GapEnd::Ask,
+            GapEnd::Seam => log::GapEnd::Seam,
+            GapEnd::Cancel => log::GapEnd::Cancel,
+            GapEnd::End => log::GapEnd::End,
+        },
+    }
 }
 
 fn role_of(role: Role) -> log::Role {
@@ -1060,7 +1235,10 @@ pub(in crate::drive) mod tests {
     #[test]
     fn an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order() {
         let session = Session::open(Canned::new([deltas(&["Hel", "lo", "!"])]), template());
-        assert_eq!(session.ask("say hello"), Ok(Admitted { seq: 1, turn: 1 }));
+        assert_eq!(
+            session.ask("say hello", None),
+            Ok(Admitted { seq: 1, turn: 1 })
+        );
         let log = wait_until(&session, "the turn to settle", settled);
         assert_eq!(
             events(&log[1..]),
@@ -1123,7 +1301,9 @@ pub(in crate::drive) mod tests {
         let canned = Canned::new([deltas(&["one"]), deltas(&["two"]), deltas(&["three"])]);
         let session = Session::open(canned, template());
         for (index, ask) in ["first", "second", "third"].into_iter().enumerate() {
-            session.ask(ask).expect("an ask while awaiting is accepted");
+            session
+                .ask(ask, None)
+                .expect("an ask while awaiting is accepted");
             wait_until(&session, "the turn to settle", |log| {
                 log.iter()
                     .filter(|logged| matches!(logged.event, Event::Answered { .. }))
@@ -1168,14 +1348,17 @@ pub(in crate::drive) mod tests {
             Step::Delta("lo".to_owned()),
         ]]);
         let session = Session::open(canned, template());
-        session.ask("first").expect("accepted");
+        session.ask("first", None).expect("accepted");
         wait_until(&session, "the first piece", |log| {
             log.iter()
                 .any(|logged| matches!(logged.event, Event::Delta { .. }))
         });
 
-        assert_eq!(session.ask("second"), Err(Refusal::InFlight));
-        assert_eq!(session.end(), Err(Refusal::InFlight));
+        assert_eq!(
+            session.ask("second", None),
+            Err(Rejected::Refused(Refusal::InFlight))
+        );
+        assert_eq!(session.end(None), Err(Rejected::Refused(Refusal::InFlight)));
         let log = session.events_from(0);
         assert!(
             log.iter().any(|logged| logged.event
@@ -1214,7 +1397,7 @@ pub(in crate::drive) mod tests {
             deltas(&["again"]),
         ]);
         let session = Session::open(canned, template());
-        session.ask("first").expect("accepted");
+        session.ask("first", None).expect("accepted");
         // The cancel goes in once the call is BLOCKED, never in the window
         // between its first piece and the gate: there, the call's own flag
         // check would stop it and this test would pass with the stopper
@@ -1224,7 +1407,7 @@ pub(in crate::drive) mod tests {
             "the call never reached the gate"
         );
 
-        assert_eq!(session.cancel(1), Ok(()));
+        assert_eq!(session.cancel(1, None), Ok(()));
         let log = wait_until(&session, "the stopped turn to settle", settled);
         let tail = events(&log[log.len() - 4..]);
         assert_eq!(
@@ -1249,7 +1432,9 @@ pub(in crate::drive) mod tests {
 
         // The next ask goes out on the prefix the last SETTLED turn left:
         // nothing of the stopped one.
-        session.ask("second").expect("accepted after a cancel");
+        session
+            .ask("second", None)
+            .expect("accepted after a cancel");
         wait_until(&session, "the second turn", |log| {
             log.iter()
                 .any(|logged| matches!(logged.event, Event::Answered { .. }))
@@ -1271,7 +1456,7 @@ pub(in crate::drive) mod tests {
             Step::Fail(failure.clone()),
         ]]);
         let session = Session::open(canned, template());
-        session.ask("first").expect("accepted");
+        session.ask("first", None).expect("accepted");
         let log = wait_until(&session, "the failed turn to settle", settled);
         assert!(log.iter().any(|logged| logged.event
             == Event::Failed {
@@ -1294,7 +1479,7 @@ pub(in crate::drive) mod tests {
             Step::Reject(503, "busy".to_owned()),
         ]]);
         let session = Session::open(canned, template());
-        session.ask("first").expect("accepted");
+        session.ask("first", None).expect("accepted");
         let log = wait_until(&session, "the refused turn to settle", settled);
         assert!(log.iter().any(|logged| logged.event
             == Event::Rejected {
@@ -1335,7 +1520,7 @@ pub(in crate::drive) mod tests {
     #[test]
     fn a_turn_whose_thread_panics_still_settles_and_the_session_goes_on() {
         let session = Session::open(Panics, template());
-        session.ask("first").expect("accepted");
+        session.ask("first", None).expect("accepted");
         let log = wait_until(&session, "the crashed turn to settle", settled);
         let tail = events(&log[log.len() - 3..]);
         assert_eq!(
@@ -1359,7 +1544,7 @@ pub(in crate::drive) mod tests {
         );
         assert_eq!(session.trunk(), [Message::new(Role::System, HEAD)]);
         assert!(
-            session.ask("again").is_ok(),
+            session.ask("again", None).is_ok(),
             "a crashed turn left the session refusing asks"
         );
     }
@@ -1384,14 +1569,14 @@ pub(in crate::drive) mod tests {
         template.limits.call = Duration::from_secs(30);
         template.limits.attempt = Duration::from_secs(30);
         let session = Session::open(transport, template);
-        session.ask("first").expect("accepted");
+        session.ask("first", None).expect("accepted");
         wait_until(&session, "the first piece", |log| {
             log.iter()
                 .any(|logged| matches!(logged.event, Event::Delta { .. }))
         });
         // The server is holding the connection open and sending nothing: the
         // turn's thread is blocked in a read that only the stopper can end.
-        assert_eq!(session.cancel(1), Ok(()));
+        assert_eq!(session.cancel(1, None), Ok(()));
         let log = wait_until(&session, "the stopped turn to settle", settled);
         assert!(
             log.iter().any(|logged| logged.event
@@ -1438,7 +1623,7 @@ pub(in crate::drive) mod tests {
             HttpStream::new(Endpoint::parse(&stub.url()).expect("the stub's URL is an endpoint"));
         let session = Session::open(transport, template());
         for (turn, ask) in [(1_usize, "how long?"), (2, "and back?")] {
-            session.ask(ask).expect("accepted");
+            session.ask(ask, None).expect("accepted");
             wait_until(&session, "the turn to settle", |log| {
                 log.iter()
                     .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
@@ -1492,22 +1677,34 @@ pub(in crate::drive) mod tests {
         let session = Session::open(Canned::new([deltas(&["done"])]), template());
         // A cancel for a turn that was never admitted is not a command the
         // session can refuse: it says so, and logs nothing.
-        assert_eq!(session.cancel(1), Err(CancelError::NoSuchTurn(1)));
-        session.ask("one").expect("accepted");
+        assert_eq!(session.cancel(1, None), Err(Rejected::NoSuchTurn(1)));
+        session.ask("one", None).expect("accepted");
         wait_until(&session, "the turn to settle", settled);
         assert_eq!(
-            session.cancel(1),
-            Err(CancelError::Refused(Refusal::NothingInFlight))
+            session.cancel(1, None),
+            Err(Rejected::Refused(Refusal::NothingInFlight))
         );
-        assert_eq!(session.cancel(0), Err(CancelError::NoSuchTurn(0)));
-        assert_eq!(session.cancel(2), Err(CancelError::NoSuchTurn(2)));
-        assert_eq!(session.declare_seam(), Err(Refusal::SeamNotBuilt));
-        assert_eq!(session.end(), Ok(()));
+        assert_eq!(session.cancel(0, None), Err(Rejected::NoSuchTurn(0)));
+        assert_eq!(session.cancel(2, None), Err(Rejected::NoSuchTurn(2)));
+        assert_eq!(
+            session.declare_seam(None),
+            Err(Rejected::Refused(Refusal::SeamNotBuilt))
+        );
+        assert_eq!(session.end(None), Ok(()));
         assert_eq!(session.settlement(), Settlement::Ended);
-        assert_eq!(session.ask("too late"), Err(Refusal::Ended));
-        assert_eq!(session.cancel(1), Err(CancelError::Refused(Refusal::Ended)));
-        assert_eq!(session.declare_seam(), Err(Refusal::Ended));
-        assert_eq!(session.end(), Err(Refusal::Ended));
+        assert_eq!(
+            session.ask("too late", None),
+            Err(Rejected::Refused(Refusal::Ended))
+        );
+        assert_eq!(
+            session.cancel(1, None),
+            Err(Rejected::Refused(Refusal::Ended))
+        );
+        assert_eq!(
+            session.declare_seam(None),
+            Err(Rejected::Refused(Refusal::Ended))
+        );
+        assert_eq!(session.end(None), Err(Rejected::Refused(Refusal::Ended)));
         let refusals: Vec<(CommandKind, Refusal, Settlement)> = session
             .events_from(0)
             .into_iter()
@@ -1549,7 +1746,7 @@ pub(in crate::drive) mod tests {
     #[test]
     fn the_log_is_numbered_by_position_and_a_reader_can_resume_from_any_point() {
         let session = Session::open(Canned::new([deltas(&["a", "b"])]), template());
-        session.ask("go").expect("accepted");
+        session.ask("go", None).expect("accepted");
         let log = wait_until(&session, "the turn to settle", settled);
         for (index, logged) in log.iter().enumerate() {
             assert_eq!(logged.seq, index as u64);
@@ -1571,16 +1768,22 @@ pub(in crate::drive) mod tests {
             ],
         ]);
         let session = Session::open(canned, template());
-        session.ask("first").expect("accepted");
+        session.ask("first", None).expect("accepted");
         wait_until(&session, "the first turn to settle", settled);
-        assert_eq!(session.ask("second").map(|admitted| admitted.turn), Ok(2));
+        assert_eq!(
+            session.ask("second", None).map(|admitted| admitted.turn),
+            Ok(2)
+        );
         assert!(
             gate.wait_for_a_waiter(Duration::from_secs(10)),
             "the second call never reached the gate"
         );
 
         // The stop meant for turn 1, arriving late, while turn 2 is in flight.
-        assert_eq!(session.cancel(1), Err(CancelError::Refused(Refusal::Stale)));
+        assert_eq!(
+            session.cancel(1, None),
+            Err(Rejected::Refused(Refusal::Stale))
+        );
         gate.open();
         let log = wait_until(&session, "the second turn to settle", |log| {
             log.iter()
@@ -1630,14 +1833,14 @@ pub(in crate::drive) mod tests {
             SettleReason::Failed,
         ];
         for turn in 1..=5u32 {
-            let admitted = session.ask("go").expect("accepted while awaiting");
+            let admitted = session.ask("go", None).expect("accepted while awaiting");
             assert_eq!(admitted.turn, turn);
             if turn == 2 {
                 assert!(
                     gate.wait_for_a_waiter(Duration::from_secs(10)),
                     "the call never reached the gate"
                 );
-                assert_eq!(session.cancel(2), Ok(()));
+                assert_eq!(session.cancel(2, None), Ok(()));
             }
             wait_until(&session, "the turn to settle", |log| {
                 log.iter()
@@ -1651,7 +1854,7 @@ pub(in crate::drive) mod tests {
 
         // A crashed thread settles its turn too, through the other door.
         let crashing = Session::open(Panics, template());
-        crashing.ask("go").expect("accepted");
+        crashing.ask("go", None).expect("accepted");
         let crashed_log = wait_until(&crashing, "the crashed turn to settle", settled);
 
         for (turn, reason) in (1..=5u32).zip(expected) {
@@ -1710,7 +1913,7 @@ pub(in crate::drive) mod tests {
     #[test]
     fn every_call_is_a_request_and_what_it_produced_names_it() {
         let session = Session::open(Canned::new([deltas(&["a", "b"])]), template());
-        session.ask("go").expect("accepted");
+        session.ask("go", None).expect("accepted");
         let log = wait_until(&session, "the turn to settle", settled);
         let requests: Vec<u64> = log
             .iter()
@@ -1776,7 +1979,7 @@ pub(in crate::drive) mod tests {
             Step::Delta("b".to_owned()),
         ]]);
         let session = Session::open(canned, template());
-        session.ask("go").expect("accepted");
+        session.ask("go", None).expect("accepted");
         assert!(
             gate.wait_for_a_waiter(Duration::from_secs(10)),
             "the call never reached the gate"
@@ -1804,7 +2007,8 @@ pub(in crate::drive) mod tests {
 
     /// One of every event, and a match with no wildcard that names each
     /// variant: an event added to [`Event`] fails to compile here until it
-    /// has a sample, and so a line.
+    /// has a sample, and so a line. One entry per variant is its length.
+    #[allow(clippy::too_many_lines)]
     fn one_of_every_event() -> Vec<Logged> {
         let events = vec![
             Event::Started {
@@ -1869,6 +2073,15 @@ pub(in crate::drive) mod tests {
                 turn: 1,
                 reason: SettleReason::MaxSteps,
             },
+            Event::IdleGap(IdleGap {
+                opened_by: 13,
+                notice: 120,
+                read: 2_400,
+                compose: 3_100,
+                away: 0,
+                blocked: 50,
+                ended_by: GapEnd::Ask,
+            }),
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -1887,9 +2100,10 @@ pub(in crate::drive) mod tests {
                 Event::Crashed { .. } => 11,
                 Event::Failed { .. } => 12,
                 Event::TurnSettled { .. } => 13,
+                Event::IdleGap(_) => 14,
             });
         }
-        assert_eq!(kinds.len(), 14, "a variant has no sample");
+        assert_eq!(kinds.len(), 15, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -1901,23 +2115,11 @@ pub(in crate::drive) mod tests {
             .collect()
     }
 
-    #[test]
-    fn every_event_the_session_logs_is_a_line_the_log_format_reads() {
-        for logged in one_of_every_event() {
-            let rendered = render(&logged);
-            assert!(!rendered.contains('\n'), "a line broke: {rendered}");
-            assert_eq!(
-                log::line(&rendered),
-                Ok(line_of(&logged)),
-                "{rendered} does not read back as the line it was written from"
-            );
-        }
-
-        // A round trip cannot see a conversion that loses or mistranslates
-        // something on the way in -- it reads back whatever was written -- so
-        // what EVERY sample becomes is written out here, one line each, in
-        // `one_of_every_event`'s order (#140's first review).
-        let expected = vec![
+    /// What each of `one_of_every_event`'s samples must become, in order.
+    /// A table, one entry per variant, so its length is its content.
+    #[allow(clippy::too_many_lines)]
+    fn the_lines_of_every_event() -> Vec<log::Event> {
+        vec![
             log::Event::SessionStart {
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
@@ -1990,7 +2192,35 @@ pub(in crate::drive) mod tests {
                 turn: 1,
                 reason: log::SettleReason::MaxSteps,
             },
-        ];
+            log::Event::IdleGap {
+                opened_by: 13,
+                notice: 120,
+                read: 2_400,
+                compose: 3_100,
+                away: 0,
+                blocked: 50,
+                ended_by: log::GapEnd::Ask,
+            },
+        ]
+    }
+
+    #[test]
+    fn every_event_the_session_logs_is_a_line_the_log_format_reads() {
+        for logged in one_of_every_event() {
+            let rendered = render(&logged);
+            assert!(!rendered.contains('\n'), "a line broke: {rendered}");
+            assert_eq!(
+                log::line(&rendered),
+                Ok(line_of(&logged)),
+                "{rendered} does not read back as the line it was written from"
+            );
+        }
+
+        // A round trip cannot see a conversion that loses or mistranslates
+        // something on the way in -- it reads back whatever was written -- so
+        // what EVERY sample becomes is written out here, one line each, in
+        // `one_of_every_event`'s order (#140's first review).
+        let expected = the_lines_of_every_event();
         let written: Vec<log::Event> = one_of_every_event()
             .iter()
             .map(|logged| line_of(logged).event)
@@ -2025,10 +2255,10 @@ pub(in crate::drive) mod tests {
         ]);
         let session = Session::open(canned, template());
         for turn in 1..=4_u32 {
-            session.ask("go").expect("accepted");
+            session.ask("go", None).expect("accepted");
             if turn == 2 {
                 assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
-                assert_eq!(session.cancel(2), Ok(()));
+                assert_eq!(session.cancel(2, None), Ok(()));
             }
             wait_until(&session, "the turn to settle", |log| {
                 log.iter()
@@ -2045,6 +2275,203 @@ pub(in crate::drive) mod tests {
             .collect();
         let read = log::parse(&document).expect("the session's log is a v0 log");
         assert_eq!(read.len(), session.events_from(0).len());
+    }
+
+    fn gap(opened_by: u64, ended_by: GapEnd) -> IdleGap {
+        IdleGap {
+            opened_by,
+            notice: 120,
+            read: 2_400,
+            compose: 3_100,
+            away: 0,
+            blocked: 0,
+            ended_by,
+        }
+    }
+
+    fn settling_seq(log: &[Logged], turn: u32) -> u64 {
+        log.iter()
+            .find(|logged| matches!(logged.event, Event::TurnSettled { turn: settled, .. } if settled == turn))
+            .map(|logged| logged.seq)
+            .expect("the turn settled")
+    }
+
+    #[test]
+    fn a_refused_commands_gap_is_neither_logged_nor_closed_and_the_admitted_one_carries_it() {
+        let session = Session::open(
+            Canned::new([deltas(&["one"]), deltas(&["two"])]),
+            template(),
+        );
+        session.ask("first", None).expect("accepted");
+        let log = wait_until(&session, "the first turn to settle", settled);
+        let first = settling_seq(&log, 1);
+
+        // Refused: a seam is not built. The gap it carried is not logged, and
+        // it stays open (ruled on #146, amending D13 (c)).
+        assert_eq!(
+            session.declare_seam(Some(gap(first, GapEnd::Seam))),
+            Err(Rejected::Refused(Refusal::SeamNotBuilt))
+        );
+        assert!(
+            !session
+                .events_from(0)
+                .iter()
+                .any(|logged| matches!(logged.event, Event::IdleGap(_))),
+            "a refused command's gap was logged"
+        );
+
+        // Admitted: the ask that follows carries the gap, its `blocked`
+        // running from the refusal, and it is the one gap logged -- right
+        // before the ask.
+        let mut carried = gap(first, GapEnd::Ask);
+        carried.blocked = 850;
+        session.ask("second", Some(carried)).expect("accepted");
+        let log = wait_until(&session, "the second turn to settle", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+                && settled(log)
+        });
+        let gaps: Vec<usize> = log
+            .iter()
+            .enumerate()
+            .filter(|(_, logged)| matches!(logged.event, Event::IdleGap(_)))
+            .map(|(at, _)| at)
+            .collect();
+        assert_eq!(gaps.len(), 1, "{log:#?}");
+        assert_eq!(log[gaps[0]].event, Event::IdleGap(carried));
+        assert!(matches!(
+            log[gaps[0] + 1].event,
+            Event::Asked { turn: 2, .. }
+        ));
+        let document: String = log.iter().map(|logged| render(logged) + "\n").collect();
+        log::parse(&document).expect("a log carrying a gap is a v0 log");
+    }
+
+    #[test]
+    fn a_gap_closes_at_the_command_that_ends_it_even_when_that_command_carries_none() {
+        let gate = Gate::new();
+        let session = Session::open(
+            Canned::new([
+                deltas(&["one"]),
+                vec![Step::Delta("par".to_owned()), Step::Hold(gate.clone())],
+            ]),
+            template(),
+        );
+        session.ask("first", None).expect("accepted");
+        let log = wait_until(&session, "the first turn to settle", settled);
+        let first = settling_seq(&log, 1);
+
+        // The second ask ends turn 1's gap without carrying it.
+        session.ask("second", None).expect("accepted");
+        assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        assert_eq!(
+            session.cancel(2, Some(gap(first, GapEnd::Cancel))),
+            Err(Rejected::BadGap(GapError::NotTheOpenGap {
+                opened_by: first
+            })),
+            "a gap was logged after the ask that ended it"
+        );
+        assert_eq!(session.cancel(2, None), Ok(()));
+        let log = wait_until(&session, "the second turn to settle", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+                && settled(log)
+        });
+        let second = settling_seq(&log, 2);
+
+        // An end ends the gap too; nothing logs one after the session ended.
+        assert_eq!(session.end(None), Ok(()));
+        assert_eq!(
+            session.declare_seam(Some(gap(second, GapEnd::Seam))),
+            Err(Rejected::Refused(Refusal::Ended))
+        );
+        assert!(
+            !session
+                .events_from(0)
+                .iter()
+                .any(|logged| matches!(logged.event, Event::IdleGap(_))),
+            "a gap was logged"
+        );
+    }
+
+    #[test]
+    fn an_admitted_end_logs_the_gap_it_carries_before_it_ends() {
+        let session = Session::open(Canned::new([deltas(&["one"])]), template());
+        session.ask("first", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let settling = settling_seq(&log, 1);
+        assert_eq!(session.end(Some(gap(settling, GapEnd::End))), Ok(()));
+        let log = session.events_from(0);
+        let at = log.len() - 1;
+        assert_eq!(
+            log[at].event,
+            Event::Settled {
+                from: Settlement::Awaiting,
+                to: Settlement::Ended
+            }
+        );
+        assert_eq!(
+            log[at - 1].event,
+            Event::IdleGap(gap(settling, GapEnd::End))
+        );
+
+        // And a duration the log cannot write is refused, not capped.
+        let fresh = Session::open(Canned::new([deltas(&["one"])]), template());
+        fresh.ask("first", None).expect("accepted");
+        let log = wait_until(&fresh, "the turn to settle", settled);
+        let mut huge = gap(settling_seq(&log, 1), GapEnd::End);
+        huge.away = u64::MAX;
+        assert_eq!(
+            fresh.end(Some(huge)),
+            Err(Rejected::BadGap(GapError::NotACount))
+        );
+    }
+
+    #[test]
+    fn a_gap_the_session_cannot_log_is_rejected_and_nothing_is_logged() {
+        let session = Session::open(Canned::new([deltas(&["one"])]), template());
+        // No settling yet: there is no gap to close.
+        assert_eq!(
+            session.ask("first", Some(gap(0, GapEnd::Ask))),
+            Err(Rejected::BadGap(GapError::NotTheOpenGap { opened_by: 0 }))
+        );
+        session.ask("first", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let settling = settling_seq(&log, 1);
+        let before = log.len();
+
+        // A gap that cites anything but the latest settling.
+        assert_eq!(
+            session.end(Some(gap(settling - 1, GapEnd::End))),
+            Err(Rejected::BadGap(GapError::NotTheOpenGap {
+                opened_by: settling - 1
+            }))
+        );
+        // A gap that says another command ended it.
+        assert_eq!(
+            session.end(Some(gap(settling, GapEnd::Ask))),
+            Err(Rejected::BadGap(GapError::EndedByAnotherCommand {
+                says: GapEnd::Ask,
+                carried_by: CommandKind::End
+            }))
+        );
+        assert_eq!(
+            session.events_from(0).len(),
+            before,
+            "a gap that could not be logged left something in the log"
+        );
+        assert_eq!(
+            session.settlement(),
+            Settlement::Awaiting,
+            "a rejected end ended"
+        );
+
+        // And the gap is still open for the command that does end it.
+        assert_eq!(session.end(Some(gap(settling, GapEnd::End))), Ok(()));
     }
 
     #[test]
