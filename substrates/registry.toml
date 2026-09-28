@@ -407,10 +407,22 @@ Launch flags and the three model files' digests are identical to the 2026-09-04 
 capture under `--hash-models`; the deployment digest, its version and the kernel \
 are the only fields that changed."""
 canary = """
-Canary e0827, k = 36, expected rate 1.00: draw 1 read 35 of 36 (the instrument's \
-verdict DRIFT), draw 2 read 36 of 36 (PASS); 71 of 72 over both draws, recorded \
-here so a later behavioural difference from the August baselines is checked \
-against this kernel and deployment change before it is read as an effect."""
+Canary e0827, k = 36. The expected rate once written here, 1.00, was the \
+instrument's bootstrap placeholder, retired by the ruling on #114 (2026-09-28): \
+the baseline is the hit rate pooled over every committed draw of this fixture on \
+this instance, with its Wilson interval, and a draw reads DRIFT iff that pooled \
+rate falls outside the draw's own Wilson interval at z = 2.576 (99%). Committed \
+draws so far: 35 and 36 at this entry's registration; 35, 36 (before) and 36 \
+(after) in the parity fire's window, results/2026-09-25-extraction-acceptance-parity/; \
+36 (before) and 35, 35, 34 (after) in (b')'s window, \
+results/2026-09-27-false-nomination-edit-rate/ -- 318 of 324, 0.9815, Wilson 99% \
+[0.950, 0.993]. Against it a draw of 34 or more in 36 passes and 33 or fewer \
+reads DRIFT. Every miss recorded so far has the same text: the model issues a \
+shell command reading the anchor's source instead of naming the anchor (84 \
+characters, window/canary-capture.jsonl in (b')'s record). The pooled baseline \
+file is written with the next window's pre-run draw added to the pool, by the \
+instrument's canary_pool.py; the misses of every draw from then on are recorded \
+beside the count."""
 current = true
 
 [[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
