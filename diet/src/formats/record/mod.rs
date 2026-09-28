@@ -755,10 +755,12 @@ vocabulary! {
         /// declares for #94's resolved effort level -- so the record says the
         /// half it measured and does not claim the other.
         ///
-        /// **What this cannot say is that what left was REASONING.** #79's
-        /// class 1 is a harness dropping the model's own thinking between
-        /// tool calls; nothing in a head marks a message as reasoning, so
-        /// this names a message that left and declines to name it thinking. A
+        /// **What this cannot say is that a WHOLE MESSAGE that left was
+        /// reasoning.** #79's class 1 is a harness dropping the model's own
+        /// thinking between tool calls. Thinking carried as a message's
+        /// `reasoning` field is named by [`PrefixReason::Reasoning`] below;
+        /// but nothing in a head marks a whole message as reasoning, so a
+        /// message that left is named as a message and not as thinking. A
         /// rule that guessed would fire on every edited system prompt.
         Injection => "injection",
         /// A frozen message kept its text and changed its REASONING: the
@@ -939,7 +941,10 @@ pub enum PrefixDelta {
     /// text, the way [`PrefixDelta::MessageAdded`] carries one: the reasoning
     /// itself is already on the request row that sent it. A message with no
     /// reasoning counts 0, so "dropped" is `now_chars: 0` -- and an absent
-    /// field and an empty one read the same here.
+    /// field and an empty one read the same here. EQUAL COUNTS DO NOT MEAN
+    /// NOTHING MOVED: the row exists because the digests differ, and an
+    /// absent field becoming an empty one (a real byte change on the wire)
+    /// or an edit of the same length both read `was_chars == now_chars`.
     ReasoningChanged {
         /// Which message.
         message: u32,
@@ -964,11 +969,11 @@ impl PrefixDelta {
             Self::KwargAdded { .. } => DeltaKind::KwargAdded,
             Self::KwargRemoved { .. } => DeltaKind::KwargRemoved,
             Self::MessageAdded { .. } => DeltaKind::MessageAdded,
-            Self::ReasoningChanged { .. } => DeltaKind::ReasoningChanged,
             Self::MessageRemoved { .. } => DeltaKind::MessageRemoved,
             Self::LineChanged { .. } => DeltaKind::LineChanged,
             Self::LineAdded { .. } => DeltaKind::LineAdded,
             Self::LineRemoved { .. } => DeltaKind::LineRemoved,
+            Self::ReasoningChanged { .. } => DeltaKind::ReasoningChanged,
         }
     }
 
