@@ -389,6 +389,7 @@ mod formats {
     per_format!(
         decline,
         interview,
+        log,
         operating_points,
         record,
         regimen,
