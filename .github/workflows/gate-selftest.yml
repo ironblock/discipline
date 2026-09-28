@@ -33,6 +33,9 @@ on:
 
 permissions:
   contents: read
+  # To read the latest `main` run's census artifacts, which a pull request's
+  # scope plan is derived from (#112).
+  actions: read
 
 jobs:
   # One short job, so that the matrix below can be a number this repository
@@ -67,6 +70,50 @@ jobs:
           shards="$(python3 scripts/derive-shards.py --matrix)"
           echo "shards=${shards}" >> "$GITHUB_OUTPUT"
           echo "the assignment derives ${shards}"
+
+      # A PULL REQUEST RE-PROVES ONLY WHAT ITS DIFF CAN REACH (#112). The
+      # latest successful `main` run's censuses say which faults ran red there,
+      # at which commit, and which files each fault's injection touched;
+      # scripts/scope-selftest.py turns that and this diff into a plan of
+      # faults to INHERIT, each declared in this run's census at the commit it
+      # was last seen red -- never counted as passed. No `main` census, or
+      # none this branch can reach, is a plan that inherits nothing, and every
+      # fault runs. A push to `main` is never scoped: it is the full run the
+      # next pull request's plan is read from.
+      - name: Fetch the history the scope is measured against
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --quiet origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" --unshallow || git fetch --no-tags --quiet origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+      - name: Read the latest main run's censuses
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "${{ runner.temp }}/main-census"
+          run_id="$(gh run list --repo "${{ github.repository }}" --workflow verify.yml \
+            --branch "${{ github.base_ref }}" --event push --status success --limit 1 \
+            --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -n "$run_id" ]; then
+            gh run download "$run_id" --repo "${{ github.repository }}" \
+              --pattern 'selftest-census-*' --dir "${{ runner.temp }}/main-census" \
+              || echo "::warning::main run ${run_id} has no census to read; every fault runs"
+          else
+            echo "::warning::no successful main run to read; every fault runs"
+          fi
+      - name: Derive this pull request's scope plan
+        if: github.event_name == 'pull_request'
+        run: >-
+          python3 scripts/scope-selftest.py
+          --base "origin/${{ github.base_ref }}"
+          --census "${{ runner.temp }}/main-census"
+          --out "${{ runner.temp }}/scope-plan.tsv"
+      - name: Keep the scope plan
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-scope-plan
+          path: ${{ runner.temp }}/scope-plan.tsv
+          if-no-files-found: error
+          retention-days: 7
 
   selftest:
     name: selftest ${{ matrix.shard }}
@@ -116,11 +163,19 @@ jobs:
       - name: Declare this a host where the sandbox is required
         run: echo "DIET_REQUIRE_SANDBOX=1" >> "$GITHUB_ENV"
 
+      - name: The scope plan this pull request's plan job derived
+        if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@v4
+        with:
+          name: selftest-scope-plan
+          path: ${{ runner.temp }}
+
       - name: ./verify.sh --selftest --shard ${{ matrix.shard }}
         run: >-
           ./verify.sh --selftest
           --shard ${{ matrix.shard }}/${{ strategy.job-total }}
           --census "${{ runner.temp }}/census.tsv"
+          ${{ github.event_name == 'pull_request' && format('--scope-plan {0}/scope-plan.tsv', runner.temp) || '' }}
 
       # Uploaded only on success, deliberately. A shard that failed has
       # already failed the build; its census would say nothing the failure
