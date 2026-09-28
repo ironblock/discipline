@@ -4,7 +4,7 @@ import { expect, userEvent, waitFor } from 'storybook/test';
 
 import { PHASES } from '../App.tsx';
 import { cableOf } from './cables.ts';
-import { fillContrast } from './contrast.ts';
+import { colourContrast, contrast, fillContrast } from './contrast.ts';
 import { RECORDINGS, recordedAt } from '../drive/recorded.ts';
 import type { RecordingName } from '../drive/recorded.ts';
 import { fold } from '../session/fold.ts';
@@ -384,3 +384,60 @@ export const VoxelStress: Story = {
     await expect(canvasElement.querySelector('.ex-header__unknown')?.getAttribute('title')).toContain('compaction');
   },
 };
+
+/**
+ * The chrome around the trunk, legible in every look: the seam, working
+ * memory, the receipt and the header read at WCAG AA for small text (4.5:1)
+ * -- text set in the faint ink, a label or an id, at 3:1, as a footer's
+ * units are; an entry struck out as superseded or retired is faint on
+ * purpose, and not held to it. The minimap's seams stand off its track, and
+ * its alarm ticks off the page-coloured halo they are drawn in, at 3:1, as a
+ * mark that carries meaning must (WCAG 1.4.11).
+ */
+const LEGIBLE = [
+  '.ex-seam__kind',
+  '.ex-seam__reason',
+  '.ex-header__item',
+  '.ex-lanehead',
+  ".ex-memory__entry:not([data-state='superseded'], [data-state='retired']) :is(.ex-memory__text, .ex-memory__id)",
+  '.ex-receipt__head',
+  '.ex-receipt dt',
+  '.ex-receipt dd',
+] as const;
+
+/** An alarm tick against the halo it is drawn in -- which must be there, in the page's colour. */
+function haloContrast(el: Element): number {
+  const tick = getComputedStyle(el, '::after');
+  const page = getComputedStyle(el.closest('.ex-root') ?? document.body).backgroundColor;
+  if (!tick.boxShadow.startsWith(`${page} 0px 0px 0px 1px`)) return 0;
+  return colourContrast(tick.backgroundColor, page);
+}
+
+/** Measured at rest: with motion still, an entry that just landed is not mid-flash. */
+const ChromeLegible: Story = {
+  play: async ({ canvasElement }) => {
+    await waitFor(() => expect(canvasElement.querySelectorAll('.ex-mm__seam').length).toBeGreaterThan(0));
+    // The faint ink, as this look resolves it: text in it is held to 3:1.
+    const probe = canvasElement.querySelector('.ex-root, .ex-session')!.appendChild(document.createElement('span'));
+    probe.style.color = 'var(--ink-faint)';
+    const faint = getComputedStyle(probe).color;
+    probe.remove();
+    const failing = [
+      ...LEGIBLE.flatMap((selector) =>
+        [...canvasElement.querySelectorAll(selector)].map((el) => ({ what: `${selector.slice(-24)}`, floor: getComputedStyle(el).color === faint ? 3 : 4.5, ratio: contrast(el) })),
+      ),
+      ...[...canvasElement.querySelectorAll('.ex-mm__seam')].map((el) => ({ what: 'minimap seam', floor: 3, ratio: fillContrast(el) })),
+      ...[...canvasElement.querySelectorAll('.ex-minimap > [data-alarm]')].map((el) => ({ what: `minimap ${el.getAttribute('data-alarm')} tick`, floor: 3, ratio: haloContrast(el) })),
+    ]
+      .filter(({ ratio, floor }) => ratio < floor)
+      .map(({ what, floor, ratio }) => `${what} ${ratio.toFixed(2)} < ${floor}`);
+    await expect([...new Set(failing)]).toEqual([]);
+  },
+};
+
+export const ChromeBloom: Story = { ...ChromeLegible, name: 'chrome · legible, bloom', globals: { theme: 'bloom', mode: 'dark', motion: 'off' } };
+export const ChromeBloomLight: Story = { ...ChromeLegible, name: 'chrome · legible, bloom in daylight', globals: { theme: 'bloom', mode: 'light', motion: 'off' } };
+export const ChromePaper: Story = { ...ChromeLegible, name: 'chrome · legible, paper', globals: { theme: 'paper', mode: 'light', motion: 'off' } };
+export const ChromePaperDark: Story = { ...ChromeLegible, name: 'chrome · legible, paper in the dark', globals: { theme: 'paper', mode: 'dark', motion: 'off' } };
+export const ChromeEmboss: Story = { ...ChromeLegible, name: 'chrome · legible, emboss', globals: { theme: 'emboss', mode: 'dark', motion: 'off' } };
+export const ChromeEmbossLight: Story = { ...ChromeLegible, name: 'chrome · legible, emboss in daylight', globals: { theme: 'emboss', mode: 'light', motion: 'off' } };

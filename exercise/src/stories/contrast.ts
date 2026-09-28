@@ -27,9 +27,10 @@ export function contrast(el: Element): number {
 /**
  * WCAG contrast of an element's FILL against what is behind it: its own
  * background colour painted over its ancestors', against theirs alone.
- * For marks that carry no text -- a minimap's slivers.
+ * For marks that carry no text -- a minimap's slivers. With `pseudo`, the
+ * mark is that pseudo-element's fill, over the element's own.
  */
-export function fillContrast(el: Element): number {
+export function fillContrast(el: Element, pseudo?: '::before' | '::after'): number {
   const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('no 2d canvas');
   const paint = (colour: string): readonly [number, number, number] => {
@@ -39,12 +40,28 @@ export function fillContrast(el: Element): number {
     return [r, g, b];
   };
   const layers: string[] = [];
-  for (let at: Element | null = el.parentElement; at; at = at.parentElement) layers.unshift(getComputedStyle(at).backgroundColor);
+  for (let at: Element | null = pseudo ? el : el.parentElement; at; at = at.parentElement) layers.unshift(getComputedStyle(at).backgroundColor);
   paint('#000');
   let behind: readonly [number, number, number] = [0, 0, 0];
   for (const colour of layers) behind = paint(colour);
-  const mark = paint(getComputedStyle(el).backgroundColor);
+  const mark = paint(getComputedStyle(el, pseudo).backgroundColor);
   const [hi, lo] = [luminance(mark), luminance(behind)].sort((a, b) => b - a) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** WCAG contrast of two colours, as the page resolves them. */
+export function colourContrast(a: string, b: string): number {
+  const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('no 2d canvas');
+  const paint = (colour: string): readonly [number, number, number] => {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, 1, 1);
+    ctx.fillStyle = colour;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r = 0, g = 0, b = 0] = ctx.getImageData(0, 0, 1, 1).data;
+    return [r, g, b];
+  };
+  const [hi, lo] = [luminance(paint(a)), luminance(paint(b))].sort((x, y) => y - x) as [number, number];
   return (hi + 0.05) / (lo + 0.05);
 }
 

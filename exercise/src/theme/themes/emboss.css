@@ -33,7 +33,7 @@
   --rule: #272b31;
   --ink: #e4e6ea;
   --ink-muted: #939aa5;
-  --ink-faint: #646a75;
+  --ink-faint: #6a707b;
   --ink-reasoning: #e2e5e9;
   --fill-system: color-mix(in oklab, var(--page) 88%, var(--lamp-diet-asks));
   --fill-user: color-mix(in oklab, var(--page) 84%, var(--lamp-you));

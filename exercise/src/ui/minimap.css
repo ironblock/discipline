@@ -60,7 +60,8 @@
   box-shadow: 0 0 6px var(--c);
 }
 
-/* Something went wrong: a tick in its alarm colour, over its sliver, the full width. */
+/* Something went wrong: a tick in its alarm colour, over its sliver, the full width -- haloed in the
+   page's colour, so it stands off whatever sliver it crosses, however bright. */
 .ex-minimap > [data-alarm]::after {
   content: '';
   position: absolute;
@@ -70,11 +71,12 @@
   height: 3px;
   border-radius: 1px;
   background: var(--warn);
+  box-shadow: 0 0 0 1px var(--page);
 }
 
 .ex-minimap > [data-alarm='bad']::after {
   background: var(--bad);
-  box-shadow: 0 0 4px var(--bad);
+  box-shadow: 0 0 0 1px var(--page), 0 0 4px var(--bad);
 }
 
 .ex-mm__lens {
