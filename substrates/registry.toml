@@ -417,9 +417,12 @@ draws so far: 35 and 36 at this entry's registration; 35, 36 (before) and 36 \
 36 (before) and 35, 35, 34 (after) in (b')'s window, \
 results/2026-09-27-false-nomination-edit-rate/ -- 318 of 324, 0.9815, Wilson 99% \
 [0.950, 0.993]. Against it a draw of 34 or more in 36 passes and 33 or fewer \
-reads DRIFT. Every miss recorded so far has the same text: the model issues a \
-shell command reading the anchor's source instead of naming the anchor (84 \
-characters, window/canary-capture.jsonl in (b')'s record). The pooled baseline \
+reads DRIFT. The committed draws record each miss's length and time only, and \
+every miss in them is 84 characters in 0.9 s; their text was not kept. A \
+separate 36-call replay of the canary's own request after (b')'s window -- not a \
+canary draw, and not pooled -- kept every reply (window/canary-capture.jsonl in \
+(b')'s record): its 2 misses are one text, a shell command reading the anchor's \
+source instead of naming the anchor, 84 characters. The pooled baseline \
 file is written with the next window's pre-run draw added to the pool, by the \
 instrument's canary_pool.py; the misses of every draw from then on are recorded \
 beside the count."""
