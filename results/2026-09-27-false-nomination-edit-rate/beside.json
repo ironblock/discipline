@@ -1,0 +1,205 @@
+{
+ "0.0556": {
+  "acknowledgement": {
+   "advisory": {
+    "named": 59,
+    "verdicts": {
+     "accepts": 2,
+     "declines": 35,
+     "ignores": 6,
+     "questions": 16
+    }
+   },
+   "imperative": {
+    "named": 88,
+    "verdicts": {
+     "accepts": 50,
+     "declines": 6,
+     "ignores": 7,
+     "questions": 25
+    }
+   },
+   "sham": {
+    "named": 20,
+    "verdicts": {
+     "declines": 1,
+     "ignores": 17,
+     "questions": 2
+    }
+   }
+  },
+  "per_session_cost": {
+   "advisory": "787/27500",
+   "imperative": "3148/6875"
+  }
+ },
+ "0.4": {
+  "acknowledgement": {
+   "advisory": {
+    "named": 58,
+    "verdicts": {
+     "accepts": 2,
+     "declines": 28,
+     "ignores": 8,
+     "questions": 20
+    }
+   },
+   "imperative": {
+    "named": 87,
+    "verdicts": {
+     "accepts": 52,
+     "declines": 9,
+     "ignores": 3,
+     "questions": 23
+    }
+   },
+   "sham": {
+    "named": 22,
+    "verdicts": {
+     "declines": 1,
+     "ignores": 20,
+     "questions": 1
+    }
+   }
+  },
+  "per_session_cost": {
+   "advisory": "2/165",
+   "imperative": "52/165"
+  }
+ },
+ "0.6": {
+  "acknowledgement": {
+   "advisory": {
+    "named": 52,
+    "verdicts": {
+     "accepts": 2,
+     "declines": 31,
+     "ignores": 10,
+     "questions": 9
+    }
+   },
+   "imperative": {
+    "named": 84,
+    "verdicts": {
+     "accepts": 55,
+     "declines": 4,
+     "ignores": 4,
+     "questions": 21
+    }
+   },
+   "sham": {
+    "named": 15,
+    "verdicts": {
+     "declines": 1,
+     "ignores": 13,
+     "questions": 1
+    }
+   }
+  },
+  "per_session_cost": {
+   "advisory": "2/495",
+   "imperative": "106/495"
+  }
+ },
+ "0.6222": {
+  "acknowledgement": {
+   "advisory": {
+    "named": 58,
+    "verdicts": {
+     "accepts": 2,
+     "declines": 28,
+     "ignores": 12,
+     "questions": 16
+    }
+   },
+   "imperative": {
+    "named": 84,
+    "verdicts": {
+     "accepts": 50,
+     "declines": 5,
+     "ignores": 7,
+     "questions": 22
+    }
+   },
+   "sham": {
+    "named": 18,
+    "verdicts": {
+     "declines": 1,
+     "ignores": 16,
+     "questions": 1
+    }
+   }
+  },
+  "per_session_cost": {
+   "advisory": "1889/247500",
+   "imperative": "88783/495000"
+  }
+ },
+ "0.8": {
+  "acknowledgement": {
+   "advisory": {
+    "named": 50,
+    "verdicts": {
+     "accepts": 3,
+     "declines": 30,
+     "ignores": 4,
+     "questions": 13
+    }
+   },
+   "imperative": {
+    "named": 86,
+    "verdicts": {
+     "accepts": 49,
+     "declines": 9,
+     "ignores": 8,
+     "questions": 20
+    }
+   },
+   "sham": {
+    "named": 13,
+    "verdicts": {
+     "ignores": 12,
+     "questions": 1
+    }
+   }
+  },
+  "per_session_cost": {
+   "advisory": "2/495",
+   "imperative": "46/495"
+  }
+ },
+ "1.0": {
+  "acknowledgement": {
+   "advisory": {
+    "named": 56,
+    "verdicts": {
+     "accepts": 3,
+     "declines": 25,
+     "ignores": 13,
+     "questions": 15
+    }
+   },
+   "imperative": {
+    "named": 84,
+    "verdicts": {
+     "accepts": 47,
+     "declines": 6,
+     "ignores": 8,
+     "questions": 23
+    }
+   },
+   "sham": {
+    "named": 21,
+    "verdicts": {
+     "declines": 2,
+     "ignores": 17,
+     "questions": 2
+    }
+   }
+  },
+  "per_session_cost": {
+   "advisory": "0",
+   "imperative": "0"
+  }
+ }
+}

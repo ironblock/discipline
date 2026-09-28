@@ -1,0 +1,19 @@
+{
+ "canary_after": [
+  "PASS"
+ ],
+ "canary_before": [
+  "DRIFT",
+  "PASS"
+ ],
+ "fingerprint_after": 0,
+ "fingerprint_before": 0,
+ "instance_after": "2026-09-20",
+ "instance_before": "2026-09-20",
+ "seatb_canary": {
+  "draft_n": false,
+  "think": false
+ },
+ "verify_after": 0,
+ "verify_before": 0
+}

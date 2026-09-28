@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 49
+faults = 53
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -483,6 +483,7 @@ anchor = '''
 becomes = '''
 '''
 catches = [
+    "client::head::tests::a_template_argument_that_moved_is_named_by_its_key",
     "client::wire::tests::a_template_kwarg_is_sent_in_the_object_the_template_reads_and_not_beside_the_sampler",
 ]
 
@@ -558,6 +559,7 @@ pub fn body(shape: &RequestShape) -> String {
     }'''
 catches = [
     "client::head::tests::the_head_is_the_bytes_the_body_starts_with",
+    "client::wire::tests::a_template_kwarg_is_sent_in_the_object_the_template_reads_and_not_beside_the_sampler",
 ]
 
 [[fault]]
@@ -656,6 +658,7 @@ becomes = '''
 catches = [
     "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
     "client::stream::tests::a_canned_stream_held_mid_answer_is_woken_by_a_cancel_and_says_so",
+    "client::stream::tests::a_stop_asked_while_a_piece_is_delivered_is_a_cancel_not_a_failure",
     "client::stream::tests::asking_runs_every_stopper_once_and_asking_again_runs_none",
 ]
 
@@ -688,6 +691,7 @@ becomes = '''
         cancel.on_cancel(move || drop(waker));'''
 catches = [
     "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
+    "client::stream::tests::a_stop_asked_while_a_piece_is_delivered_is_a_cancel_not_a_failure",
 ]
 
 [[fault]]
@@ -701,6 +705,7 @@ becomes = '''
         if data == "[NEVER]" {'''
 catches = [
     "client::stream::tests::a_chunk_boundary_inside_an_event_is_invisible_to_the_reader",
+    "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
 ]
@@ -717,6 +722,9 @@ becomes = '''
 catches = [
     "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
     "client::stream::tests::a_chunk_boundary_inside_an_event_is_invisible_to_the_reader",
+    "client::stream::tests::a_close_framed_stream_whose_last_bytes_are_a_bare_cr_is_read_when_it_closes",
+    "client::stream::tests::a_stop_asked_while_a_piece_is_delivered_is_a_cancel_not_a_failure",
+    "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
     "client::stream::tests::an_event_ended_by_a_bare_cr_as_the_last_bytes_of_the_stream_is_read",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
@@ -764,6 +772,7 @@ anchor = '''
 becomes = '''
             let event: Vec<u8> = std::mem::take(&mut self.pending);'''
 catches = [
+    "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
 ]
@@ -835,6 +844,7 @@ anchor = '''
 becomes = '''
             (b'\r', Some(_)) => {}'''
 catches = [
+    "client::stream::tests::a_close_framed_stream_whose_last_bytes_are_a_bare_cr_is_read_when_it_closes",
     "client::stream::tests::an_event_ended_by_a_bare_cr_as_the_last_bytes_of_the_stream_is_read",
     "client::stream::tests::every_legal_line_ending_ends_an_event_and_a_split_crlf_is_one_ending",
 ]
@@ -875,6 +885,7 @@ anchor = '''
 becomes = '''
             *last = b'\r';'''
 catches = [
+    "client::stream::tests::a_close_framed_stream_whose_last_bytes_are_a_bare_cr_is_read_when_it_closes",
     "client::stream::tests::an_event_ended_by_a_bare_cr_as_the_last_bytes_of_the_stream_is_read",
 ]
 
@@ -889,4 +900,56 @@ becomes = '''
                 return reading.at_close();'''
 catches = [
     "client::stream::tests::a_close_framed_stream_whose_last_bytes_are_a_bare_cr_is_read_when_it_closes",
+]
+
+[[fault]]
+id = "client.stream-reads-reasoning-as-text"
+failure_class = "client.stream-reads-reasoning-as-text"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                on_delta(Piece::Reasoning(piece));'''
+becomes = '''
+                on_delta(Piece::Text(piece));'''
+catches = [
+    "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
+]
+
+[[fault]]
+id = "client.stream-drops-reasoning"
+failure_class = "client.stream-drops-reasoning"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                on_delta(Piece::Reasoning(piece));'''
+becomes = '''
+                let _ = piece;'''
+catches = [
+    "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
+]
+
+[[fault]]
+id = "client.wire-drops-reasoning"
+failure_class = "client.wire-drops-reasoning"
+target = "diet/src/client/wire.rs"
+expect_exit = 101
+anchor = '''
+    if let Some(reasoning) = &message.reasoning {'''
+becomes = '''
+    if let Some(reasoning) = None::<&String> {'''
+catches = [
+    "client::wire::tests::an_assistant_messages_reasoning_goes_on_the_wire_as_it_came",
+]
+
+[[fault]]
+id = "client.canned-plays-reasoning-as-text"
+failure_class = "client.canned-plays-reasoning-as-text"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                Step::Reasoning(text) => on_delta(Piece::Reasoning(&text)),'''
+becomes = '''
+                Step::Reasoning(text) => on_delta(Piece::Text(&text)),'''
+catches = [
+    "client::stream::tests::a_canned_stream_plays_reasoning_as_reasoning_and_text_as_text",
 ]

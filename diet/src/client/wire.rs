@@ -270,6 +270,10 @@ fn message(message: &super::shape::Message, out: &mut String) {
     string(message.role.tag(), out);
     out.push_str(",\"content\":");
     string(&message.content, out);
+    if let Some(reasoning) = &message.reasoning {
+        out.push_str(",\"reasoning_content\":");
+        string(reasoning, out);
+    }
     out.push('}');
 }
 
@@ -484,6 +488,33 @@ mod tests {
         assert!(
             !rendered.contains("0.6000"),
             "nothing on this path went through a float: {rendered}"
+        );
+    }
+
+    #[test]
+    fn an_assistant_messages_reasoning_goes_on_the_wire_as_it_came() {
+        let mut answered = Message::new(Role::Assistant, "225.");
+        // Untrimmed, trailing newline and all: the server's template renders
+        // it back byte for byte, and a changed byte is a cold prefix (#117,
+        // Q10).
+        answered.reasoning = Some("We need the difference.\n".to_owned());
+        let rendered = body(&RequestShape {
+            messages: vec![
+                Message::new(Role::User, "how long?"),
+                answered,
+                Message::new(Role::User, "and back?"),
+            ],
+            ..shape(SamplerCard::empty())
+        });
+        let parsed: serde_json::Value = serde_json::from_str(&rendered).expect("the body is JSON");
+        assert_eq!(
+            parsed["messages"][1]["reasoning_content"],
+            serde_json::json!("We need the difference.\n")
+        );
+        assert_eq!(parsed["messages"][1]["content"], serde_json::json!("225."));
+        assert!(
+            parsed["messages"][0].get("reasoning_content").is_none(),
+            "a message with no reasoning carries no reasoning field: {rendered}"
         );
     }
 
