@@ -442,7 +442,8 @@ check_resolver() { python3 scripts/check-merge-gate.py; }
 check_derive() {
   python3 scripts/derive-scopes.py --selftest &&
     python3 scripts/derive-shards.py --selftest &&
-    python3 scripts/scope-selftest.py --selftest
+    python3 scripts/scope-selftest.py --selftest &&
+    python3 scripts/selftest-drift.py --selftest
 }
 
 # The fault-migration manifest defines what parity means for the replacement
@@ -531,6 +532,12 @@ usage() {
 
 SELFTEST_SCRATCH=()
 SELFTEST_BROKEN=()
+# Each fault this run did not see red, as `ID<TAB>CHECK<TAB>WHY`, written to
+# the census. On `main` and the nightly, a shard that fails keeps its census,
+# and scripts/selftest-drift.py opens an issue labelled `check:<CHECK>` for
+# each row (#112). SELFTEST_BROKEN is the run's verdict; this is the per-fault
+# record the verdict is about, for the rows that have a fault to name.
+SELFTEST_NOT_RED=()
 SEEDED_CHECKS=()
 SELFTEST_CASES=0
 SELFTEST_LOGS=""
@@ -758,6 +765,11 @@ claim_fault() {
   SELFTEST_RAN+=("$SELFTEST_UNITS")
   SELFTEST_RAN_IDS+=("${SELFTEST_UNITS}"$'\t'"${ident}")
   return 0
+}
+
+# Record a fault this run did not see red, by id and by the check it proves.
+not_red() {
+  SELFTEST_NOT_RED+=("$1"$'\t'"$2"$'\t'"$3")
 }
 
 # Read `--scope-plan` into SCOPE_INHERIT, `selftest`'s local like SHARD_OF.
@@ -1002,6 +1014,7 @@ seeded_case() {
       printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- NO TEST SCOPE DECLARED\n' \
         "$(( SECONDS - started ))" "$check" "$label"
       SELFTEST_BROKEN+=("${label}: a test case must name the tests it needs")
+      not_red "$ident" "$check" "a test case must name the tests it needs"
       shard_cost "$ident" "$started_ms" "$label"
       return
     fi
@@ -1012,6 +1025,7 @@ seeded_case() {
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- A SCOPE ON A CHECK THAT TAKES NONE\n' \
       "$(( SECONDS - started ))" "$check" "$label"
     SELFTEST_BROKEN+=("${label}: only the test and injections checks take a scope")
+    not_red "$ident" "$check" "only the test and injections checks take a scope"
     shard_cost "$ident" "$started_ms" "$label"
     return
   fi
@@ -1040,6 +1054,7 @@ seeded_case() {
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE BUILT\n' \
       "$(( SECONDS - started ))" "$check" "$label"
     SELFTEST_BROKEN+=("${label}: the sandbox could not be built")
+    not_red "$ident" "$check" "the sandbox could not be built"
     shard_cost "$ident" "$started_ms" "$label"
     return
   fi
@@ -1077,6 +1092,7 @@ seeded_case() {
       printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE SANDBOX COULD NOT BE READ\n' \
         "$(( SECONDS - started ))" "$check" "$label"
       SELFTEST_BROKEN+=("${label}: the sandbox's state could not be read")
+      not_red "$ident" "$check" "the sandbox's state could not be read"
       shard_cost "$ident" "$started_ms" "$label"
       return
       ;;
@@ -1109,6 +1125,7 @@ seeded_case() {
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE INJECTION EXITED %d\n' \
       "$(( SECONDS - started ))" "$check" "$label" "$injected"
     SELFTEST_BROKEN+=("${label}: ${inject} exited ${injected}, so whatever it left is not the fault")
+    not_red "$ident" "$check" "${inject} exited ${injected}, so whatever it left is not the fault"
     shard_cost "$ident" "$started_ms" "$label"
     return
   fi
@@ -1117,6 +1134,7 @@ seeded_case() {
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- THE INJECTION CHANGED NOTHING\n' \
       "$(( SECONDS - started ))" "$check" "$label"
     SELFTEST_BROKEN+=("${label}: ${inject} changed nothing, so the case proves nothing")
+    not_red "$ident" "$check" "${inject} changed nothing, so the case proves nothing"
     shard_cost "$ident" "$started_ms" "$label"
     return
   fi
@@ -1135,12 +1153,14 @@ seeded_case() {
     printf 'GREEN  %4ds verify.sh --only %-8s exit %-3d  %s  <-- THE GATE DID NOT FIRE\n' \
       "$(( SECONDS - started ))" "$check" "$rc" "$label"
     SELFTEST_BROKEN+=("${label}: the gate did not fire")
+    not_red "$ident" "$check" "the gate did not fire"
     sed -n '1,40p' "$log" >&2
   elif ! grep -qE -- "$expect" "$log"; then
     printf 'WRONG  %4ds verify.sh --only %-8s exit %-3d  %s  <-- RED, BUT NOT FOR ITS OWN FAULT\n' \
       "$(( SECONDS - started ))" "$check" "$rc" "$label"
     printf '      the log carries no match for: %s\n' "$expect"
     SELFTEST_BROKEN+=("${label}: red for the wrong reason")
+    not_red "$ident" "$check" "red for the wrong reason"
     sed -n '1,40p' "$log" >&2
   else
     printf 'RED    %4ds verify.sh --only %-8s exit %-3d  %s\n' \
@@ -5857,9 +5877,11 @@ prove_patterns() {
         "$([ "$twin" = true ] && printf 'twin ' || true)" \
         "$([ "$welded" = true ] && printf 'welded' || true)"
       SELFTEST_BROKEN+=("${kind} pattern ${label}: not every form")
+      not_red "${kind}.${label}" "$kind" "not every form"
     else
       printf 'GREEN hygiene.sh exit %-3d  %s  <-- PATTERN DID NOT FIRE\n' "$rc" "$label"
       SELFTEST_BROKEN+=("${kind} pattern ${label}")
+      not_red "${kind}.${label}" "$kind" "the pattern did not fire"
     fi
     shard_cost "${kind}.${label}" "$started_ms" "${kind} pattern ${label}"
   done < "${ROOT}/${table}"
@@ -7372,13 +7394,16 @@ selftest() {
     if [ -z "$want" ]; then
       printf 'GREEN %-52s <-- NO FAULT DECLARED FOR THIS FIXTURE\n' "$name"
       SELFTEST_BROKEN+=("results fixture $name: declared by no fault")
+      not_red "results.${name}" results "declared by no fault"
     elif [ "$rc" -ne 1 ]; then
       printf 'GREEN exit %-3d %-46s <-- FIXTURE DID NOT FAIL\n' "$rc" "$name"
       SELFTEST_BROKEN+=("results fixture $name")
+      not_red "results.${name}" results "the fixture did not fail"
     elif ! grep -qF "[$want]" <<<"$out"; then
       printf 'GREEN exit %-3d %-46s <-- RED FOR THE WRONG REASON, wanted %s\n' \
         "$rc" "$name" "$want"
       SELFTEST_BROKEN+=("results fixture $name: red, but not $want")
+      not_red "results.${name}" results "red, but not $want"
     else
       printf 'RED   exit %-3d %-46s %s\n' "$rc" "$name" "$want"
     fi
@@ -7538,6 +7563,8 @@ selftest() {
         printf 'inherited\t%s\n' "${SELFTEST_INHERITED[@]}"
       [ "${#SELFTEST_TOUCHED[@]}" -eq 0 ] ||
         printf 'touched\t%s\n' "${SELFTEST_TOUCHED[@]}"
+      [ "${#SELFTEST_NOT_RED[@]}" -eq 0 ] ||
+        printf 'not_red\t%s\n' "${SELFTEST_NOT_RED[@]}"
     } > "$SELFTEST_CENSUS" || {
       echo "selftest: the census could not be written to ${SELFTEST_CENSUS}" >&2
       SELFTEST_BROKEN+=("the census could not be written")
@@ -7992,7 +8019,7 @@ def share(shard, n=None, of=SHARDS):
     return [i for i in range(1, n + 1) if (i - 1) % of + 1 == shard]
 
 
-def write(case, shard, ordinals, said_total=None, said_shards=None, inherited=()):
+def write(case, shard, ordinals, said_total=None, said_shards=None, inherited=(), not_red=()):
     # Each shard's artifact arrives in a directory of its own, as
     # download-artifact leaves them.
     where = root / case / f"shard-{shard}"
@@ -8004,7 +8031,9 @@ def write(case, shard, ordinals, said_total=None, said_shards=None, inherited=()
         + "".join(f"ordinal\t{n}\n" for n in ordinals)
         # #112: a fault the scope plan inherited, declared by the shard that
         # owns it with the commit it was last seen red at.
-        + "".join(f"inherited\t{n}\tfault.{n}\tabc1234\n" for n in inherited),
+        + "".join(f"inherited\t{n}\tfault.{n}\tabc1234\n" for n in inherited)
+        # #112: a fault the shard ran and did not see red.
+        + "".join(f"not_red\tfault.{n}\ttest\tthe gate did not fire\n" for n in not_red),
         encoding="utf-8",
     )
 
@@ -8019,6 +8048,9 @@ for k in range(1, SHARDS + 1):
     write("inherited-whole", k, share(k)[1:], inherited=share(k)[:1])
     # Shard 1 both runs its first fault and declares it inherited.
     write("ran-and-inherited", k, share(k), inherited=share(k)[:1] if k == 1 else ())
+    # Every ordinal accounted for, and one of them not seen red: a partition
+    # is not a whole when a part of it failed (#112).
+    write("one-not-red", k, share(k), not_red=share(k)[:1] if k == 1 else ())
     write("skipped", k, share(k)[1:] if k == 2 else share(k))
     if k != 3:
         write("missing", k, share(k))
@@ -8060,6 +8092,11 @@ EOF
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/inherited-whole"
   expect_exit "one fault both re-proven and declared inherited" 1 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/ran-and-inherited"
+  # Exit 1 alone cannot fail: a reader that did not know the row refused it as
+  # an unknown key. The assertion is that it names the fault.
+  expect_exit "a whole with one fault not seen red names the fault" 0 \
+    bash -c 'rc=0; out="$(python3 "$1" "$2" 2>&1)" || rc=$?; [ "$rc" -eq 1 ] && grep -qF "fault.1 was not seen red" <<<"$out"' \
+    _ "${ROOT}/scripts/check-selftest-census.py" "${census}/one-not-red"
   expect_exit "no shard reporting at all is not a pass" 1 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/none"
   expect_exit "shards that disagree about how many there are" 1 \

@@ -299,6 +299,18 @@ def dependencies(root: pathlib.Path, text: str) -> dict[str, tuple[set[str], set
     return deps
 
 
+def checks_of(root: pathlib.Path, text: str) -> dict[str, str]:
+    """id -> the check verify.sh proves the fault against: the `CHECK` a
+    `not_red` row names, and so the `check:<CHECK>` label a drift issue on
+    `main` carries (#112). A fault this cannot place is named by its id's
+    first word, which is the check for every case whose id verify.sh derives."""
+    checks = {ident: case[1] for ident, case in case_lines(text).items()}
+    for manifest in sorted(root.glob("diet/*/gate.toml")):
+        for fault in tomllib.loads(manifest.read_text(encoding="utf-8")).get("fault", []):
+            checks[fault["id"]] = "lanes"
+    return checks
+
+
 # --------------------------------------------------------------------------
 # the main run's census
 # --------------------------------------------------------------------------
@@ -633,6 +645,19 @@ def _mechanics_outside_machinery():
     return None
 
 
+@fixture("the check a fault is labelled by is the check verify.sh proves it against")
+def _checks_of():
+    checks = checks_of(ROOT, (ROOT / "verify.sh").read_text(encoding="utf-8"))
+    for ident, want in (("ci.ci_trunk_run_cancelled", "ci"), ("test.log_bindings_stale", "test"),
+                        ("injections.inert_injection", "injections")):
+        if checks.get(ident) != want:
+            return f"{ident} labelled {checks.get(ident)!r}, not {want!r}"
+    lane = next((i for i, c in checks.items() if c == "lanes"), None)
+    if lane is None or lane.startswith("lanes."):
+        return f"no lane fault labelled `lanes` by its own id: {lane}"
+    return None
+
+
 @fixture("the census gives each fault the commit it last ran red at, and what it touched")
 def _census():
     import tempfile
@@ -687,6 +712,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--base", help="the ref the PR targets; recorded in the plan. Each inheritance is measured from the commit its fault was last seen red at")
     parser.add_argument("--census", help="a directory of census files from main's full run")
     parser.add_argument("--out", help="where to write the plan")
+    parser.add_argument("--checks-out", help="also write the checks whose faults are re-proven, one per line, for selftest-drift.py block")
     parser.add_argument("--selftest", action="store_true", help="run the fixtures and exit")
     args = parser.parse_args(argv)
     if args.selftest:
@@ -723,6 +749,10 @@ def main(argv: list[str]) -> int:
     except (Unusable, OSError) as err:
         print(f"scope-selftest: {err}", file=sys.stderr)
         return EXIT_BROKEN
+    if args.checks_out:
+        named = checks_of(ROOT, text)
+        touched = sorted({named.get(i, i.split(".", 1)[0]) for i in rerun})
+        pathlib.Path(args.checks_out).write_text("".join(f"{c}\n" for c in touched), encoding="utf-8")
     body = "".join(f"inherit\t{i}\t{s}\n" for i, s in sorted(inherit.items()))
     pathlib.Path(args.out).write_text(
         f"# scope-selftest: {len(rerun)} re-proven, {len(inherit)} inherited, against {args.base}\n" + body,

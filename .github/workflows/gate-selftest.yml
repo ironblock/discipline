@@ -36,6 +36,9 @@ permissions:
   # To read the latest `main` run's census artifacts, which a pull request's
   # scope plan is derived from (#112).
   actions: read
+  # To ask whether a check this pull request re-proves has an open drift issue
+  # on `main` (#112).
+  issues: read
 
 jobs:
   # One short job, so that the matrix below can be a number this repository
@@ -106,6 +109,19 @@ jobs:
           --base "origin/${{ github.base_ref }}"
           --census "${{ runner.temp }}/main-census"
           --out "${{ runner.temp }}/scope-plan.tsv"
+          --checks-out "${{ runner.temp }}/checks.txt"
+
+      # A FAULT FOUND NOT RED ON `main` BLOCKS THE NEXT PULL REQUEST THAT
+      # TOUCHES ITS CHECK (#112, ruled 2026-09-27). The `main` run and the
+      # nightly open an issue labelled `check:<name>` for each such fault;
+      # this refuses while one is open for any check whose faults this pull
+      # request re-proves, and names it. Before any shard starts, so the
+      # refusal is the first thing the run says.
+      - name: No open drift issue against a check this pull request re-proves
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/selftest-drift.py block "${{ runner.temp }}/checks.txt"
       - name: Keep the scope plan
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
@@ -187,4 +203,20 @@ jobs:
           name: selftest-census-${{ matrix.shard }}
           path: ${{ runner.temp }}/census.tsv
           if-no-files-found: error
+          retention-days: 7
+
+      # ...and on `main` and the nightly, a shard that FAILED keeps its census
+      # under another name, because its `not_red` rows are what
+      # scripts/selftest-drift.py opens issues from (#112). Not under
+      # `selftest-census-*`: the gate's census check reads that pattern, and a
+      # failed shard's partial census is not a part of a whole. `ignore`,
+      # because a shard that failed before the census was written has nothing
+      # to keep, and its failure is already the build's.
+      - name: Keep a failed shard's census for the drift issues
+        if: failure() && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-not-red-${{ matrix.shard }}
+          path: ${{ runner.temp }}/census.tsv
+          if-no-files-found: ignore
           retention-days: 7
