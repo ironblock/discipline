@@ -6177,6 +6177,14 @@ failure_class = "client.wire-drops-reasoning"
 migrated = false
 
 [[fault]]
+id = "client.canned-plays-reasoning-as-text"
+kind = "lane-fault"
+check = "lanes"
+label = "client.canned-plays-reasoning-as-text"
+failure_class = "client.canned-plays-reasoning-as-text"
+migrated = false
+
+[[fault]]
 id = "adapters.compaction-read-as-a-turn"
 kind = "lane-fault"
 check = "lanes"
