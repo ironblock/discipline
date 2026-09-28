@@ -1,0 +1,47 @@
+note: e0827 is a fork.response; replaying its request e0826
+  e0827: 20 messages, digest VERIFIED sha=a7d695adc2f9f666 n=19 ver=1
+replaying e0827: 20 messages, params={"temperature": 0.6, "top_k": 20, "top_p": 1.0, "max_tokens": 4096, "preserve_thinking": true, "enable_thinking": false}
+digest: sha=a7d695adc2f9f666 n=19 ver=1  (matches baseline)
+anchor: 'common_chat_templates_apply'   k=36
+
+    1/36  HIT     9.7s   2145 chars
+    2/36  HIT     9.8s   2319 chars
+    3/36  HIT     9.6s   2237 chars
+    4/36  HIT     6.5s   1518 chars
+    5/36  HIT     9.3s   1934 chars
+    6/36  HIT     4.5s   1068 chars
+    7/36  HIT     9.0s   2149 chars
+    8/36  HIT    12.3s   2540 chars
+    9/36  HIT     9.9s   2343 chars
+   10/36  HIT     7.3s   1561 chars
+   11/36  HIT     9.0s   1808 chars
+   12/36  HIT     3.8s    945 chars
+   13/36  HIT     3.7s    793 chars
+   14/36  HIT     9.4s   1924 chars
+   15/36  HIT     9.4s   1969 chars
+   16/36  HIT     9.2s   2010 chars
+   17/36  HIT     4.9s   1059 chars
+   18/36  HIT     5.5s   1530 chars
+   19/36  HIT    13.5s   2695 chars
+   20/36  HIT    11.8s   2540 chars
+   21/36  HIT     6.6s   1461 chars
+   22/36  HIT    12.0s   2755 chars
+   23/36  HIT     7.1s   1457 chars
+   24/36  HIT     3.5s    842 chars
+   25/36  HIT     2.5s    659 chars
+   26/36  HIT     2.7s    591 chars
+   27/36  miss    0.9s     84 chars
+   28/36  HIT     9.6s   2257 chars
+   29/36  HIT     8.2s   1807 chars
+   30/36  HIT    10.1s   2175 chars
+   31/36  HIT     4.9s   1224 chars
+   32/36  HIT     7.4s   1658 chars
+   33/36  HIT    12.3s   2692 chars
+   34/36  HIT     3.0s    717 chars
+   35/36  HIT     8.1s   2001 chars
+   36/36  HIT     8.3s   2035 chars
+
+rate: 35/36 = 0.972   95% CI [0.858, 0.995]
+latency: median 8.3s  max 13.5s  total 275s
+
+verdict: DRIFT — canary expected 1.00, observed CI [0.86,1.00] — SUBSTRATE DRIFT, other verdicts in this run are void

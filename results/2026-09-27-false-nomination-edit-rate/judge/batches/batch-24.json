@@ -1,0 +1,245 @@
+{
+"batch": 24,
+"items": [
+{
+"id": "604a4467572a",
+"entry": "** NONE — I have enough information to provide a comprehensive summary of what Babylon Lite is and how it differs from classic Babylon.js. The task was to tell you what's new and different, and I've now read all the key documentation, source structure, and configuration files.",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "af9bb4d52b4d",
+"entry": "Beellama's checkpoint creation logic at line 3885 uses `is_user_start` and `is_last_user_message` boolean flags instead of the upstream's `n_before_user` integer comparison — IMPLICATION: The checkpoint decision logic was refactored to use message-span-derived booleans rather than a precomputed token count, which is a cleaner design but means the `message_spans` field must be populated for checkpoints to work correctly",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "6dbd5731abdf",
+"entry": "The server has two operational modes — a **router mode** (multi-model) and a **child/single-server mode** — and the handler path differs significantly between them. In router mode, `proxy_post` forwards requests to child servers via `models.proxy_request()`. IMPLICATION: I need to find where the actual chat completion logic lives in the non-router path, which is likely in `server-task.cpp` or `server-context.cpp`.",
+"reasoning": "Now I found it. The actual handler is defined in `server-context.cpp` at line 4716. Let me read that function.",
+"prose": "Let me read the `post_chat_completions` handler in server-context.cpp:\n\n"
+},
+{
+"id": "8b9b02cbe9f8",
+"entry": "What is `render_message_to_json` and how does it format messages for the Jinja context?",
+"reasoning": "The output got cut off. Let me search more specifically for where the Jinja template is actually rendered with the tools context.",
+"prose": ""
+},
+{
+"id": "871ad68aafbf",
+"entry": "What functional changes exist in the shared files with significant size deltas — particularly `server-context.cpp` (+175KB in beellama), `server-task.cpp` (+41KB), `server-common.h` (larger), and `server-models.cpp` (-27KB)?",
+"reasoning": "Now I have a clear picture. Let me also check what the beellama README says about these differences.",
+"prose": ""
+},
+{
+"id": "fdcaa4905b5b",
+"entry": "The PBR features in Babylon Lite are covered in Lite to parity with Babylon.js.",
+"reasoning": "Now I have a good understanding of Babylon Lite. Let me also check the architecture docs and the porting guide for more context, then provide a comprehensive summary.",
+"prose": ""
+},
+{
+"id": "6cbf7fa1791d",
+"entry": "Cannot use custom grammar constraints with tools (throws invalid_argument)",
+"reasoning": "The user is asking me to check whether the note \"Cannot use custom grammar constraints with tools (throws invalid_argument)\" is still valid. Let me search for this validation in the code.",
+"prose": ""
+},
+{
+"id": "03260d2efed2",
+"entry": "The `alloc()` method's LCP-based deduplication — it removes obsolete cached prompts fully contained in the new prompt and skips saving if the prompt already exists. This matters for understanding cache bloat and eviction behavior. (server-task.cpp, lines 1620+)",
+"reasoning": "",
+"prose": "Now let me also check the upstream llama.cpp tools/server for comparison to identify what's truly new vs. modified:\n\n"
+},
+{
+"id": "7a626d31d2fb",
+"entry": "The README.md is ~97KB and the output was truncated (93,144 chars omitted) — IMPLICATION: I need to read specific sections of the README to find the API endpoint documentation rather than reading the whole file at once",
+"reasoning": "The user wants me to read server.cpp to understand how a /v1/chat/completions request flows from the HTTP handler to the slot system. Let me read that file.",
+"prose": ""
+},
+{
+"id": "b0e97e92edb9",
+"entry": "Upstream's `server-models.h` uses a static `setup_child_server()` and `notify_router_sleeping_state()` pattern, while beellama's uses instance methods (`setup()`, `notify_to_router()`) with a more sophisticated `conv_model_tracker` for conversation-to-model routing — the beellama fork has evolved the router model management with resumable streaming awareness. — IMPLICATION: When comparing routing behavior, the key divergence is in how conversation IDs are tracked across child instances and how stream sessions are resolved.",
+"reasoning": "",
+"prose": "The entry holds — the diffs confirm exactly that beellama's `server-models.h` evolved the router with instance methods and `conv_model_tracker` for resumable streaming awareness.\n\n"
+},
+{
+"id": "043ae2b30226",
+"entry": "The parity testing infrastructure (pixel-diff golden references, `tests/lite/parity/`) is a key part of their quality assurance strategy — ensures Lite produces pixel-identical output to Babylon.js (in `tests/lite/parity/`)",
+"reasoning": "Let me look at the GUIDANCE.md and AGENTS.md files to understand more about the project's direction and goals. Also let me check the porting guide.",
+"prose": ""
+},
+{
+"id": "cc7cbe2feeef",
+"entry": "Tool definition rendering is NOT done by the server code directly — it's delegated to Jinja template rendering via `common_chat_template_direct_apply()` which passes `params.tools` (as OpenAI-compatible JSON) into the model's embedded Jinja template — IMPLICATION: the server doesn't format tool definitions itself; the model's chat template (Jinja) does all the rendering, and the server just provides structured data",
+"reasoning": "The user is pointing out that my previous understanding was incomplete. Let me look more carefully at where `tools` is extracted from the request body and also check if there's any server-side tool rendering/formatting that happens BEFORE the Jinja template rendering. Let me find where `tools` comes from in the request processing.",
+"prose": "You're right — I need to correct my understanding. Let me trace where `tools` is extracted from the HTTP request body to see if any server-side formatting happens before Jinja rendering.\n\n"
+},
+{
+"id": "2a141bd53f91",
+"entry": "`server-task.cpp` line 88 references `grammar_triggers` — conditional grammar switching mechanism not yet explored",
+"reasoning": "The user is asking me to note whether a specific working record entry may be affected. The entry says \"`server-task.cpp` line 88 references `grammar_triggers` — conditional grammar switching mechanism not yet explored\".\n\nI haven't examined the beellama fork's server-task.cpp yet, and I don't know if grammar_triggers still exists there. The beellama fork removed `server-schema.cpp` and `server-schema.h`, and grammar_triggers was defined in the schema system. So it's very likely that grammar_triggers handling has changed or been moved.\n\nLet me note that this entry may be affected since the beellama fork has a significantly different file structure (no server-schema.cpp), and grammar_triggers was part of the schema system. I should continue the investigation.",
+"prose": "The working record entry about `grammar_triggers` in `server-task.cpp` line 88 **may be affected** — beellama removed `server-schema.cpp` entirely (where grammar_triggers schema handling lived), so that mechanism may have been restructured or removed. I'll continue examining the differences.\n\n"
+},
+{
+"id": "9b5106179798",
+"entry": "How the HTTP layer's `res->next` callback actually writes chunks to the socket (the content provider mechanism)",
+"reasoning": "The user's working record note is about the HTTP layer's `res->next` callback and how it writes chunks to the socket. My current investigation is about slot checkpointing and KV cache save/restore, which is a different topic. The note should be carried on since it's still an open question unrelated to my current investigation.\n\nLet me now look at the prompt cache load path in `launch_slot_with_task` - I need to see the section where `prompt_load` is called. Let me search for it.",
+"prose": "Let me find the prompt cache load path in slot assignment:\n\n"
+},
+{
+"id": "cc4be3c9b0b5",
+"entry": "The README.md is ~97KB and the output was truncated (93,144 chars omitted) — IMPLICATION: I need to read specific sections of the README to find the API endpoint documentation rather than reading the whole file at once",
+"reasoning": "The user wants me to:\n1. Update my working record - supersede the previous entry about README.md being truncated\n2. Read server.cpp to explain the request flow for /v1/chat/completions\n3. Name the key functions involved\n\nLet me start by reading server.cpp.",
+"prose": "**Working record update:** The entry \"The README.md is ~97KB and the output was truncated (93,144 chars omitted) — IMPLICATION: I need to read specific sections of the README to find the API endpoint documentation rather than reading the whole file at once\" is **superseded**. I successfully extracted the endpoint documentation via `grep -n \"## \"` which revealed all section headers without needing to read the full file. The full `cat` was unnecessary for endpoint discovery.\n\nNow let me read `server.cpp`:\n\n"
+},
+{
+"id": "65e3baced3d0",
+"entry": "`cache_idle_slots` automatically saves idle slots to the in-memory prompt cache when a new task starts, but only when `cache_ram_mib > 0` — IMPLICATION: without explicit cache configuration, idle slot state is lost when the slot is reassigned; the auto-save behavior is silently disabled",
+"reasoning": "The working record note says: \"`cache_idle_slots` automatically saves idle slots to the in-memory prompt cache when a new task starts, but only when `cache_ram_mib > 0` — IMPLICATION: without explicit cache configuration, idle slot state is lost when the slot is reassigned; the auto-save behavior is silently disabled\"\n\nLet me verify this by looking at the `cache_idle_slots` logic and how `prompt_cache` is initialized. I need to check if `cache_ram_mib` being 0 or negative disables the prompt cache entirely.",
+"prose": "Let me verify the cache initialization and `cache_idle_slots` interaction:\n\n"
+},
+{
+"id": "a47b0fce7af7",
+"entry": "The `sse_ping_interval` timeout mechanism at the bottom — sends `:\\n\\n` keep-alive pings to prevent client-side timeouts (`server-context.cpp` ~line 3995)",
+"reasoning": "",
+"prose": "The note about `sse_ping_interval` at ~line 3995 is still accurate — I can see it at line ~3995 in the earlier output. Let me continue tracing the stop conditions and the final response path."
+},
+{
+"id": "c49f55db8d73",
+"entry": "Diff key shared files (e.g., server-context.cpp, server-common.cpp) against upstream to identify modifications",
+"reasoning": "The user wants me to find references to `n_before_user` and checkpoint behavior in the beellama fork. Let me search for these terms in the server code.",
+"prose": ""
+},
+{
+"id": "4c3737b90a70",
+"entry": "Trace how tool/function definitions are rendered into the chat template — look for `tools`, `tool_call`, `function_call` handling in template application code",
+"reasoning": "The working record entry to update is about tool/function definitions rendering, but that's not directly related to what I'm currently investigating (SSE streaming). The user's current question is about SSE streaming, not about tool rendering. Let me look at the working record entries to find the most relevant one that might be superseded.\n\nActually, looking at the working record, I see entries #192-#207 are about tool/function rendering. But the user's current question is about SSE streaming. None of the existing entries are about SSE streaming specifically. Let me continue tracing the SSE streaming code and update the working record when I have findings about streaming.\n\nLet me look at where partial results are created in the slot update loop.",
+"prose": ""
+},
+{
+"id": "62e50f4e64fc",
+"entry": "`packages/babylon-lite/` — the actual engine library source, need to examine for structural differences vs full Babylon.js",
+"reasoning": "The user is asking me to update my working record. Let me look at the Babylon.js packages structure to compare with Babylon Lite.",
+"prose": ""
+},
+{
+"id": "0f5f34ce4b9b",
+"entry": "How does the KV cache reuse actually work in `server-context.cpp` around line 2839 — need to see the full chunk-based cache reuse mechanism",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "45d17816d66e",
+"entry": "`common_batch_clear(batch)` at the end — the batch population phase follows, which is where tokens from all active slots get queued for actual llama.cpp decoding.",
+"reasoning": "",
+"prose": "Let me first issue the correction, then continue the comparison.\n\n**Correction for entry #215:** The `common_batch_clear(batch)` call at the tail of `update_slots()` doesn't precede the batch population phase — it *terminates* it. The batch is already fully populated from all active slots' tokens by the time `common_batch_clear(batch)` runs. The clear happens after `llama_decode()` has consumed the batch, resetting it for the next iteration of the inference loop. The sequence is: populate batch → `llama_decode()` → `common_batch_clear()` → loop back to repopulate.\n\nNow continuing the file comparison:\n\n"
+},
+{
+"id": "9ab1b0b72f6f",
+"entry": "Tool definition rendering is NOT done by the server code directly — it's delegated to Jinja template rendering via `common_chat_template_direct_apply()` which passes `params.tools` (as OpenAI-compatible JSON) into the model's embedded Jinja template — IMPLICATION: the server doesn't format tool definitions itself; the model's chat template (Jinja) does all the rendering, and the server just provides structured data",
+"reasoning": "The user wants to understand how chat templates are applied server-side in llama.cpp, specifically where tool/function definition rendering happens for chat completions. Let me look at the function signature and where `tools` comes from in the HTTP request processing.\n\nLet me search for where the `tools` JSON is extracted from the request body.",
+"prose": "Let me look at the function signature and where `tools` is extracted from the HTTP request body.\n\n"
+},
+{
+"id": "5eb9dbf7270f",
+"entry": "The `frame-graph` module in the index — indicates a node-based/frame-graph rendering architecture, which is a significant architectural shift from Babylon.js",
+"reasoning": "",
+"prose": "**Correction to working record:** The entry \"The `frame-graph` module in the index — indicates a node-based/frame-graph rendering architecture\" is **superseded**. I need to investigate what it actually is before making architectural claims. Let me do that now, then find the Minecraft clone.\n\n"
+},
+{
+"id": "07f0117b6fad",
+"entry": "The Jinja path selects between `template_default` and `template_tool_use` based on whether `params.tools.is_array()` — two separate chat templates can exist per model, with the tool-aware template activated only when tools are present — IMPLICATION: models need a `template_tool_use` variant in their tokenizer metadata for tool rendering to work correctly",
+"reasoning": "The user is asking me to update my working record. The entry they're referring to is about the Jinja path selecting between `template_default` and `template_tool_use`. Let me look at the actual code again to understand the correct behavior.\n\nFrom line 2633-2634 of chat.cpp:\n```cpp\nparams.tools = common_chat_tools_to_json_oaicompat(inputs.tools);\nconst auto & tmpl =\n    params.tools.is_array() && tmpls->template_tool_use ? *tmpls->template_tool_use : *tmpls->template_default;\n```\n\nSo the logic is:\n1. If `params.tools` is a non-null array AND `tmpls->template_tool_use` exists → use `template_tool_use`\n2. Otherwise → use `template_default`\n\nThe user says this entry is \"superseded\" and I need to state a correction. But they haven't told me what the correction is. Let me re-read the code more carefully to see if I'm missing something.\n\nActually, looking at the code again:\n- `params.tools.is_array()` - this checks if tools is a JSON array\n- `tmpls->template_tool_use` - this checks if a tool-use template exists\n\nThe condition is: `params.tools.is_array() && tmpls->template_tool_use`\n\nWait, `params.tools` comes from `common_chat_tools_to_json_oaicompat(inputs.tools)`. Looking at that function (line 511):\n\n\nIf tools is empty, it returns an empty `json()` object which is null, not an array. If there are tools, it returns a JSON array. So `params.tools.is_array()` is true only when there are actual tools present. The working record entry appears accurate based on this logic, but the user is indicating it's superseded, so I need to reconsider what might have changed or what I'm overlooking.\n\nLooking back at the condition more carefully: `params.tools.is_array() && tmpls->template_tool_use ? *tmpls->template_tool_use : *tmpls->template_default`. The key insight is that when tools are provided but no `template_tool_use` variant exists, the system falls back to `template_default` rather than throwing an error. This means tool rendering isn't strictly dependent on a dedicated tool-use template being present.",
+"prose": "**Correction:** The previous entry was incomplete. The actual behavior is a **two-level fallback**, not a hard requirement:\n\n1. If `tools` is a non-empty JSON array **AND** `tmpls->template_tool_use` exists → use `template_tool_use`\n2. **Otherwise** (either no tools, OR tools present but no `template_tool_use` variant) → fall back to `template_default`\n\nThis means tool rendering does **not** strictly require a `template_tool_use` variant—when tools are present but only `template_default` exists, the default template is still used (and the Jinja context still receives the `tools` variable, so templates that natively support tools via Jinja variables will still work). The `template_tool_use` is an optimization for models that have a *separate* tool-aware template variant, not a requirement.\n\nNow continuing with the investigation into how tools are actually rendered into the prompt:\n\n"
+},
+{
+"id": "94a2bfab2e00",
+"entry": "NONE — The shell environment is simply empty. There's no Babylon Lite codebase checked out here, so I can't search for or examine the Minecraft clone scene.",
+"reasoning": "",
+"prose": "Let me find the actual project structure first:\n\n"
+},
+{
+"id": "9d8e67286669",
+"entry": "What is `render_message_to_json` and how does it format messages for the Jinja context?",
+"reasoning": "Let me look at the actual `common_chat_template_direct_apply_impl` function which does the Jinja rendering.",
+"prose": ""
+},
+{
+"id": "d73aac9d219f",
+"entry": "Look at `llama_state_seq_get_data_ext` and related llama.cpp C API functions to understand what KV cache data is actually serialized",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "24422d1bf4c1",
+"entry": "The `load` method's dual-scoring heuristic using `f_keep` (preservation of cached prompt) and `sim` (similarity to new prompt) with a 0.25 threshold — this is the eviction/selection policy for picking the best cached KV state (`server-task.cpp`, lines ~1676–1700)",
+"reasoning": "",
+"prose": "Let me verify the exact dual-scoring heuristic and threshold in the `load` method to correct the record."
+},
+{
+"id": "c8e8e9bd5ed9",
+"entry": "The `process_mtmd_prompt` vs `tokenize_input_prompts` branching for multimodal vs regular prompts",
+"reasoning": "Wait, I'm getting confused. The user is asking about ~/git/reference/llama.cpp. Let me re-read the file path. The user said \"llama.cpp server at ~/git/reference/llama.cpp\" and I've been reading from that path. The file is 218KB according to the ls output. Let me continue reading the code.",
+"prose": "Let me also see `launch_slot_with_task` and `update_slots`:\n\n"
+},
+{
+"id": "dcc177b37fe8",
+"entry": "The server has two operational modes — a **router mode** (multi-model) and a **child/single-server mode** — and the handler path differs significantly between them. In router mode, `proxy_post` forwards requests to child servers via `models.proxy_request()`. IMPLICATION: I need to find where the actual chat completion logic lives in the non-router path, which is likely in `server-task.cpp` or `server-context.cpp`.",
+"reasoning": "Now I found it - the actual handler is in server-context.cpp at line 4716. Let me read that section to understand the flow.",
+"prose": "Let me read the handler in server-context.cpp:\n\n"
+},
+{
+"id": "1fcc7dff73d5",
+"entry": "`pre_decode()` and `batch.render()` are called to prepare the llama batch before decoding — these bridge slot state to the actual llama.cpp inference engine (`server-context.cpp`, line ~2802)",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "cd522d723710",
+"entry": "The parity testing infrastructure (pixel-diff golden references, `tests/lite/parity/`) is a key part of their quality assurance strategy — ensures Lite produces pixel-identical output to Babylon.js (in `tests/lite/parity/`)",
+"reasoning": "The automated process is asking me to correct a working record entry about the parity testing infrastructure. Let me update that entry with more accurate information based on what I've learned.",
+"prose": "**Correction:** The parity testing infrastructure uses Playwright-based pixel-diff tests comparing Babylon Lite scenes against immutable golden reference screenshots stored in `reference/lite/`. The tests live in `tests/lite/parity/scenes/` and are validated by running `pnpm test:parity`. The golden references are described as \"immutable\" in the documentation, meaning they serve as the authoritative baseline that Lite must match.\n\n---\n\nLet me continue exploring the Babylon.js package structure for comparison:\n\n"
+},
+{
+"id": "e61b8b841ef4",
+"entry": "Upstream's `struct server_prompt` had a `data` field of type `server_prompt_data` holding the main KV state, but beellama's version has no such field — IMPLICATION: the checkpoint data lifecycle is managed externally via function callbacks (`can_restore`, `restore`, `clear`) rather than being embedded in the prompt object itself",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "c937b85b82cb",
+"entry": "Search for `common_params` defaults in `common.cpp` or `common.h` to find global sampling defaults",
+"reasoning": "Let me look at the key file `server-common.cpp` where `common_chat_templates_apply` is called, and also `server-chat.cpp` where the chat formatting happens. Let me read the relevant sections.",
+"prose": "Let me read the key function in server-common.cpp where chat templates are applied with tools.\n\n"
+},
+{
+"id": "23054b10a6cb",
+"entry": "`workaround::map_developer_role_to_system(params.messages)` — role mapping workaround for templates that don't support \"developer\" role (chat.cpp, line ~2671)",
+"reasoning": "The user is asking me to update a working record entry about the developer role mapping workaround. Let me check what the current understanding is and correct it based on what I found.\n\nLooking back at my earlier findings, at `common/chat.cpp:2671` area, I saw:\n\n```cpp\nif (src.find(\"<|channel|>\") == std::string::npos) {\n    // map developer to system for all models except for GPT-OSS\n    workaround::map_developer_role_to_system(params.messages);\n}\n```\n\nSo the correction is: this workaround specifically maps \"developer\" role to \"system\" for all models EXCEPT GPT-OSS (which uses `<|channel|>` tokens). The original entry didn't mention the GPT-OSS exception.\n\nLet me state this correction clearly.",
+"prose": "Correction: The `workaround::map_developer_role_to_system(params.messages)` call at `common/chat.cpp:2671` is **conditional** — it only maps \"developer\" → \"system\" for templates that do **not** contain the `<|channel|>` token. GPT-OSS templates (which use `<|channel|>`) are explicitly excluded and keep the \"developer\" role intact. The original entry omitted this GPT-OSS exception."
+},
+{
+"id": "a77b13dac3c9",
+"entry": "How does `res->next` callback get invoked by the HTTP layer — need to see the HTTP response streaming mechanism",
+"reasoning": "The note about `res->next` is still valid - I need to see how the HTTP layer invokes the `res->next` callback to stream chunks. Let me look at the HTTP response layer.",
+"prose": "The note about `res->next` still holds. Let me trace how the HTTP layer invokes the streaming callback:\n\n"
+},
+{
+"id": "3a73f36e5c24",
+"entry": "** NONE — I have enough information to provide a comprehensive summary of what Babylon Lite is and how it differs from classic Babylon.js. The task was to tell you what's new and different, and I've now read all the key documentation, source structure, and configuration files.",
+"reasoning": "",
+"prose": "Let me check the Babylon.js public packages more carefully:\n\n"
+},
+{
+"id": "95859e139299",
+"entry": "Function calling / tool use support with `--jinja` flag (README.md, Anthropic API section)",
+"reasoning": "",
+"prose": "Correction: The entry about `--jinja` flag for function calling/tool use in the Anthropic API section was based on a misreading — the `--jinja` flag is actually for template rendering control in general, not specifically for function calling. Function calling support is a separate feature implemented through the request body's `tools` parameter, not a CLI flag. I'll update this in the working record.\n\nNow let me explore the source files available:"
+},
+{
+"id": "c2eec5fcce2b",
+"entry": "The `load` method's dual-scoring heuristic using `f_keep` (preservation of cached prompt) and `sim` (similarity to new prompt) with a 0.25 threshold — this is the eviction/selection policy for picking the best cached KV state (`server-task.cpp`, lines ~1676–1700)",
+"reasoning": "",
+"prose": "Let me verify that note by checking the actual threshold value in the current code:\n\n"
+}
+]
+}
