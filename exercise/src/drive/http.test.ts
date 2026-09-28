@@ -193,3 +193,27 @@ describe('HttpTransport: closed and reopened', () => {
     expect(sources.map((s) => s.url)).toEqual(['/events?from=0', '/events?from=2']);
   });
 });
+
+describe('HttpTransport: the idle gap a command ends (Q4)', () => {
+  const gap = { opened_by: 7, notice: 100, read: 2000, compose: 900, away: 0, blocked: 0, ended_by: 'ask' as const };
+
+  it('holds it, sending the command without it, while diet does not take it (serve.rs 400s an unknown key)', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });
+    await transport.dispatch({ kind: 'ask', text: 'hi' }, { idle_gap: gap });
+    expect(posted).toEqual([{ kind: 'ask', text: 'hi' }]);
+    expect(transport.held()).toEqual([gap]);
+  });
+
+  it('sends it on the command once told the route exists', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const web: Web = {
+      EventSource: FakeSource,
+      fetch: async (_url, init) => (posted.push(JSON.parse(String(init?.body)) as Record<string, unknown>), new Response('{}', { status: 200 })),
+    };
+    const transport = new HttpTransport('', web, { idleGap: true });
+    await transport.dispatch({ kind: 'ask', text: 'hi' }, { idle_gap: gap });
+    expect(posted).toEqual([{ kind: 'ask', text: 'hi', idle_gap: gap }]);
+    expect(transport.held()).toEqual([]);
+  });
+});

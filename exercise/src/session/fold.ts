@@ -205,8 +205,31 @@ export interface Holder {
   readonly lane: Lane;
 }
 
+/**
+ * An idle gap, as the surface measured it and `diet` logged it (Q4): its
+ * phases, what ended it, and its residual -- how far the five miss the gap's
+ * wall clock on the log's own stamps (the settling to this line). Reported,
+ * never refused: the surface's clock and the log's are not the same clock.
+ */
+export interface GapNode {
+  readonly id: string;
+  /** The `turn.settled` that opened it. */
+  readonly openedBy: string;
+  readonly notice: number;
+  readonly read: number;
+  readonly compose: number;
+  readonly away: number;
+  readonly blocked: number;
+  readonly endedBy: string;
+  readonly residual?: number;
+}
+
 export interface Session {
   readonly state: SessionState;
+  /** The `seq` of the latest `turn.settled`: the gap a person's next command ends opened there. */
+  readonly lastSettled?: number;
+  /** Every idle gap the log carries. */
+  readonly gaps: readonly Folded<GapNode>[];
   /** When the session opened, ms since the Unix epoch: the stream's identity (Q11). 0 before it has. */
   readonly opened: number;
   readonly arm: string;
@@ -321,6 +344,7 @@ export function fold(lines: readonly LogLine[]): Session {
       trunkSlot: 0,
       phase: '',
       eras: [],
+      gaps: [],
       branches: new Map(),
       memory: [],
       occupancy: [],
@@ -363,6 +387,9 @@ export function fold(lines: readonly LogLine[]): Session {
   const era = () => eras[eras.length - 1]!;
 
   const unknown = new Map<string, number>();
+  const settles = new Map<number, LineOf<'turn.settled'>>();
+  const gaps: Folded<GapNode>[] = [];
+  let lastSettled: number | undefined;
   let phase = start.phase ?? '';
   let openTurn: number | undefined;
   let lastAskSeq = -1;
@@ -374,8 +401,26 @@ export function fold(lines: readonly LogLine[]): Session {
       case 'session.start':
       case 'refused':
       case 'stop.asked':
-      case 'idle.gap':
         break;
+      case 'idle.gap': {
+        const opened = settles.get(e.opened_by);
+        const measured = e.notice + e.read + e.compose + e.away + e.blocked;
+        gaps.push(
+          brand<GapNode>({
+            id: id(e.seq),
+            openedBy: id(e.opened_by),
+            notice: e.notice,
+            read: e.read,
+            compose: e.compose,
+            away: e.away,
+            blocked: e.blocked,
+            endedBy: e.ended_by,
+            ...(opened ? { residual: measured - (e.t - opened.t) } : {}),
+            ...provenance(e),
+          }),
+        );
+        break;
+      }
       case 'settlement':
         settledTo = e.to;
         break;
@@ -426,6 +471,8 @@ export function fold(lines: readonly LogLine[]): Session {
         break;
       }
       case 'turn.settled':
+        settles.set(e.seq, e);
+        lastSettled = e.seq;
         if (openTurn === e.turn) openTurn = undefined;
         // A turn that ended on its own, or was cancelled (the message says so), needs no mark.
         if (e.reason !== 'final' && e.reason !== 'cancelled') era().slots.push({ kind: 'settled', line: e });
@@ -637,6 +684,8 @@ export function fold(lines: readonly LogLine[]): Session {
 
   return {
     state,
+    ...(lastSettled !== undefined ? { lastSettled } : {}),
+    gaps,
     opened: start.opened,
     arm: start.arm ?? '',
     model: start.model,

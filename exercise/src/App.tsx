@@ -6,7 +6,8 @@ import { ReplayTransport } from './drive/recorded.ts';
 import { SESSIONS } from './drive/sessions.ts';
 import type { SessionName } from './drive/sessions.ts';
 import { SPECIMEN } from './drive/specimen.ts';
-import type { DriveTransport, Link } from './drive/transport.ts';
+import type { Command, DriveTransport, Link } from './drive/transport.ts';
+import { useIdleGap } from './session/useIdleGap.ts';
 import { useSession } from './session/useSession.ts';
 import { SessionView } from './ui/SessionView.tsx';
 import type { Surface } from './ui/surface.tsx';
@@ -34,6 +35,14 @@ export function App({ speed = 1, recording, drive = false }: { readonly speed?: 
   );
   useEffect(() => () => transport.close(), [transport]);
   const session = useSession(transport);
+  // The idle gap a settled turn opens, carried by the command that ends it -- when that command is one the drive
+  // should admit: an ask or a refill with nothing in flight, a cancel with something (Q4).
+  const gap = useIdleGap(session);
+  const dispatch = (command: Command) => {
+    const admissible = command.kind === 'cancel' ? session.state !== 'awaiting' && session.state !== 'ended' : session.state === 'awaiting';
+    const idleGap = admissible ? gap.take(command.kind === 'ask' ? 'ask' : command.kind === 'seam' ? 'seam' : 'cancel') : undefined;
+    return transport.dispatch(command, idleGap ? { idle_gap: idleGap } : undefined);
+  };
   const [link, setLink] = useState<{ readonly link: Link; readonly why?: string }>({ link: 'live' });
   useEffect(() => (transport as DriveTransport).watchLink?.((next, why) => setLink(why === undefined ? { link: next } : { link: next, why })), [transport]);
   const [surface, setSurface] = useState<Surface>({ curtain: true, gaps: false });
@@ -48,7 +57,7 @@ export function App({ speed = 1, recording, drive = false }: { readonly speed?: 
       follow
       composer={{
         phases: PHASES,
-        dispatch: (command) => transport.dispatch(command),
+        dispatch,
         hint: drive
           ? `driving: diet's session, over HTTP`
           : recording

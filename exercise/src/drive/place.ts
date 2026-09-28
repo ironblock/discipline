@@ -43,6 +43,11 @@ export class Placer {
     return this.#labels;
   }
 
+  /** A line already in the log's shape (the surface's own `idle.gap`), given the next `seq`. */
+  line(line: Placed): LogLine {
+    return { ...line, seq: this.#seq++ } as LogLine;
+  }
+
   /** One scripted event, as the log's line or lines. */
   place(event: Unplaced | DriveEvent): LogLine[] {
     return this.#lines(event).map((line) => ({ ...line, seq: this.#seq++ }) as LogLine);

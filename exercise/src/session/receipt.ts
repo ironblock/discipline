@@ -21,12 +21,16 @@ export interface Receipt {
   /** Side-call time, ms: each side call from its request to its settling. */
   readonly sideCallMs: number;
   /**
-   * The part of it inside a person's gap, ms. A GAP runs from the trunk
-   * handing the turn back (`turn.settled`) to that person's next act -- an
-   * ask, or a declared refill. The log cannot tell reading from waiting on
-   * capture; `idle.gap` (#117, from the surface) will.
+   * The part of it inside a person's gap, ms. A gap the surface measured
+   * (`idle.gap`, Q4) counts only its attended time -- notice, read and
+   * compose, laid from the settling in that order -- not time blocked on
+   * work in flight, nor away. A gap it did not measure runs from the
+   * settling to the person's next ask or refill, whole: an upper bound.
    */
   readonly inGapMs: number;
+  /** How many gaps were measured, of how many: the sixth number is exact only when all were. */
+  readonly gapsMeasured: number;
+  readonly gapsTotal: number;
 }
 
 type Span = readonly [number, number];
@@ -58,9 +62,14 @@ export function receiptOf(lines: readonly LogLine[]): Omit<Receipt, 'liveEntries
     return from === undefined ? [] : [[from, settled.get(f.seq)?.t ?? now] as const];
   });
 
-  // Each person's gap: the turn handed back, to their next ask or refill.
+  // Each person's gap: the turn handed back, to their next ask or refill -- or, measured, its attended part.
   const acts = [...asks, ...of('seam')].map((e) => e.t).sort((a, b) => a - b);
-  const gaps: Span[] = of('turn.settled').map((s) => [s.t, acts.find((t) => t > s.t) ?? now] as const);
+  const measured = new Map(of('idle.gap').map((g) => [g.opened_by, g] as const));
+  const settles = of('turn.settled');
+  const gaps: Span[] = settles.map((s) => {
+    const m = measured.get(s.seq);
+    return m ? ([s.t, s.t + m.notice + m.read + m.compose] as const) : ([s.t, acts.find((t) => t > s.t) ?? now] as const);
+  });
 
   const overlap = (a: Span, b: Span) => Math.max(0, Math.min(a[1], b[1]) - Math.max(a[0], b[0]));
   return {
@@ -71,5 +80,7 @@ export function receiptOf(lines: readonly LogLine[]): Omit<Receipt, 'liveEntries
     idleBeforeRefill,
     sideCallMs: sideCalls.reduce((sum, [a, b]) => sum + (b - a), 0),
     inGapMs: sideCalls.reduce((sum, call) => sum + gaps.reduce((g, gap) => g + overlap(call, gap), 0), 0),
+    gapsMeasured: settles.filter((s) => measured.has(s.seq)).length,
+    gapsTotal: settles.length,
   };
 }

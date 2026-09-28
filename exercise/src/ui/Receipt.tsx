@@ -22,11 +22,13 @@ export function Receipt({ receipt: r }: { readonly receipt: Numbers }) {
     },
     {
       measure: 'side-call-time-in-gap',
-      // An upper bound until the log can tell reading from waiting: it says so.
-      value: r.sideCallMs === 0 ? '–' : `≤ ${Math.round((100 * r.inGapMs) / r.sideCallMs)}%`,
+      // Exact when every gap was measured (idle.gap, Q4); an upper bound, and said so, while any was not.
+      value: r.sideCallMs === 0 ? '–' : `${r.gapsMeasured < r.gapsTotal ? '≤ ' : ''}${Math.round((100 * r.inGapMs) / r.sideCallMs)}%`,
       label: 'side-call time in a gap',
       title:
-        'side-call time inside a person’s gap: from the trunk handing the turn back to their next ask or refill. The log cannot yet tell reading from waiting on capture, so this is an upper bound until the surface records idle gaps.',
+        r.gapsMeasured < r.gapsTotal
+          ? `side-call time inside a person’s gap. ${r.gapsTotal - r.gapsMeasured} of ${r.gapsTotal} gaps were not measured, and count whole -- the turn handed back to the next ask or refill -- so this is an upper bound.`
+          : 'side-call time inside the attended part of each gap -- noticing, reading, composing -- as the surface measured it: not time blocked on work in flight, nor away.',
     },
   ];
   return (

@@ -14,6 +14,7 @@ import type { LogLine } from './log.ts';
 import { place as placeAll, Placer } from './place.ts';
 import type { Response, Unplaced } from './script.ts';
 import type { Beat, Trigger } from './specimen.ts';
+import type { IdleGapBody } from '../session/gap.ts';
 import type { Ack, Command, DriveTransport } from './transport.ts';
 
 /** The gap a snapshot assumes between beats: a person reading, then typing. */
@@ -132,7 +133,9 @@ export class CannedTransport implements DriveTransport {
     return () => this.#listeners.delete(listener);
   }
 
-  dispatch(command: Command): Promise<Ack> {
+  dispatch(command: Command, extras?: { readonly idle_gap?: IdleGapBody }): Promise<Ack> {
+    // As the drive will (#117): the gap a command ends is logged just before its outcome, admitted or refused.
+    if (extras?.idle_gap) this.#push(this.#placer.line({ kind: 'idle.gap', t: this.#now(), ...extras.idle_gap }));
     switch (command.kind) {
       case 'ask':
         return Promise.resolve(this.#fire('send', command.text));
@@ -208,10 +211,12 @@ export class CannedTransport implements DriveTransport {
 
   #emit(event: Unplaced): void {
     this.#played.push(event);
-    for (const line of this.#placer.place(event)) {
-      this.#log.push(line);
-      for (const listener of this.#listeners) listener(line);
-    }
+    for (const line of this.#placer.place(event)) this.#push(line);
+  }
+
+  #push(line: LogLine): void {
+    this.#log.push(line);
+    for (const listener of this.#listeners) listener(line);
   }
 }
 

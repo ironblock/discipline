@@ -24,6 +24,7 @@
  * and all, never retried blind.
  */
 
+import type { IdleGapBody } from '../session/gap.ts';
 import type { LogLine } from './log.ts';
 import type { Ack, Command, DriveTransport, Link } from './transport.ts';
 
@@ -65,9 +66,21 @@ export function whyClosed(status: number | undefined): string {
   }
 }
 
+export interface HttpOptions {
+  /**
+   * Send a command's `idle_gap` (Q4). Off until `diet` takes it: `serve.rs`
+   * answers 400 to a key a command does not take, so sending it early would
+   * refuse every ask. Track three builds the route after I3 and I5 (#117,
+   * 2026-09-28); until then the transport holds what it measured (`held`).
+   */
+  readonly idleGap?: boolean;
+}
+
 export class HttpTransport implements DriveTransport {
   readonly #base: string;
   readonly #web: Web;
+  readonly #sendsGaps: boolean;
+  readonly #held: IdleGapBody[] = [];
   readonly #log: LogLine[] = [];
   readonly #listeners = new Set<(line: LogLine) => void>();
   readonly #watchers = new Set<(link: Link, why?: string) => void>();
@@ -83,9 +96,15 @@ export class HttpTransport implements DriveTransport {
   /** Bumped by `close()`: a probe begun before it does nothing after. */
   #epoch = 0;
 
-  constructor(base = '', web: Web = { EventSource: globalThis.EventSource, fetch: globalThis.fetch.bind(globalThis) }) {
+  constructor(base = '', web: Web = { EventSource: globalThis.EventSource, fetch: globalThis.fetch.bind(globalThis) }, options: HttpOptions = {}) {
     this.#base = base.replace(/\/$/, '');
     this.#web = web;
+    this.#sendsGaps = options.idleGap ?? false;
+  }
+
+  /** The idle gaps measured and not sent, while `diet` does not take them yet. */
+  held(): readonly IdleGapBody[] {
+    return this.#held;
   }
 
   subscribe(listener: (line: LogLine) => void): () => void {
@@ -101,9 +120,12 @@ export class HttpTransport implements DriveTransport {
     return () => this.#watchers.delete(listener);
   }
 
-  async dispatch(command: Command): Promise<Ack> {
-    const body = this.#body(command);
-    if (typeof body['refused'] === 'string') return { ok: false, refused: body['refused'] };
+  async dispatch(command: Command, extras?: { readonly idle_gap?: IdleGapBody }): Promise<Ack> {
+    const plain = this.#body(command);
+    if (typeof plain['refused'] === 'string') return { ok: false, refused: plain['refused'] };
+    const gap = extras?.idle_gap;
+    if (gap && !this.#sendsGaps) this.#held.push(gap);
+    const body = gap && this.#sendsGaps ? { ...plain, idle_gap: gap } : plain;
     let reply: Response;
     try {
       reply = await this.#web.fetch(`${this.#base}/commands`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

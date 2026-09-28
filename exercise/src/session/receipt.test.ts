@@ -65,3 +65,38 @@ describe('the receipt: six numbers a session is measured on (#31)', () => {
     expect(r.inGapMs).toBe(r.sideCallMs);
   });
 });
+
+describe('the sixth number, once the surface measures the gaps (Q4)', () => {
+  // A turn settles at 100; a side call runs 100..600; the person reads to 300, composes to 400, is blocked to 900.
+  const rows = [
+    { kind: 'ask', t: 0, turn: 1, text: 'a' },
+    { kind: 'turn.settled', t: 100, turn: 1, reason: 'final' },
+    { kind: 'fork', t: 100, id: 'f', lane: 'interview', slot: 1, of_turn: 1, at: 'x', why: '', question: '', prefix_tokens: 0 },
+    { kind: 'request', t: 100, id: 'fq', lane: 'interview', slot: 1, turn: 1, fork: 'f' },
+    { kind: 'fork.settled', t: 600, id: 'f', outcome: 'value' },
+  ];
+  const measuredGap = (opened: number) => ({ seq: 0, kind: 'idle.gap', t: 900, opened_by: opened, notice: 0, read: 200, compose: 100, away: 0, blocked: 500, ended_by: 'ask' }) as unknown as LogLine;
+
+  it('counts side-call time inside the attended part only -- not time blocked -- and says it is exact', () => {
+    const placed = log(rows);
+    const settled = placed.find((l) => l.kind === 'turn.settled')!;
+    const r = receiptOf([...placed, { ...measuredGap(settled.seq), seq: placed.length } as LogLine]);
+    expect(r).toMatchObject({ sideCallMs: 500, inGapMs: 300, gapsMeasured: 1, gapsTotal: 1 });
+  });
+
+  it('counts an unmeasured gap whole, and says so', () => {
+    const r = receiptOf(log(rows));
+    expect(r).toMatchObject({ sideCallMs: 500, inGapMs: 500, gapsMeasured: 0, gapsTotal: 1 });
+  });
+
+  it('folds a measured gap with its residual against the log’s own stamps', () => {
+    const placed = log(rows);
+    const settled = placed.find((l) => l.kind === 'turn.settled')!;
+    const start = { seq: 0, t: 0, kind: 'session.start', version: 0, opened: 1, model: 'm', head: [] } as unknown as LogLine;
+    const lines = [start, ...placed.map((l) => ({ ...l, seq: l.seq + 1 }) as LogLine)];
+    const gapLine = { ...measuredGap(settled.seq + 1), seq: lines.length } as LogLine;
+    const [gapNode] = fold([...lines, gapLine]).gaps;
+    // 800 measured against 900 - 100 = 800 on the log's stamps.
+    expect(gapNode).toMatchObject({ openedBy: String(settled.seq + 1), residual: 0, endedBy: 'ask' });
+  });
+});

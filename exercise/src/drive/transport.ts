@@ -8,6 +8,7 @@
  * tail), and each command is one POST -- and nothing above this file changes.
  */
 
+import type { IdleGapBody } from '../session/gap.ts';
 import type { LogLine, Open } from './log.ts';
 
 /**
@@ -59,7 +60,12 @@ export type Link = 'live' | 'reconnecting' | 'lost';
 export interface DriveTransport {
   /** Every event so far, in order, then each new one. Returns an unsubscribe. */
   subscribe(listener: (line: LogLine) => void): () => void;
-  dispatch(command: Command): Promise<Ack>;
+  /**
+   * One command. `idle_gap`: the idle gap it ends, as the surface measured it
+   * (Q4), which the drive logs as `idle.gap` just before the command's
+   * outcome, admitted or refused (ruled on #117, 2026-09-28).
+   */
+  dispatch(command: Command, extras?: { readonly idle_gap?: IdleGapBody }): Promise<Ack>;
   /** The connection's state now, then each change, and why when it is not live. Absent: always `live`. */
   watchLink?(listener: (link: Link, why?: string) => void): () => void;
 }
