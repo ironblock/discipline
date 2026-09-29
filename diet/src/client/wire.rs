@@ -656,9 +656,27 @@ mod tests {
     }
 
     #[test]
+    fn the_llama_cpp_chat_reply_has_no_sampler_echo_site() {
+        // #159, on the server's own bytes (C5, pinned by digest in the
+        // test above): the chat endpoint's reply carries no
+        // `generation_settings`, so the dialect declares no echo site, and
+        // a pin is "not reported by any site" rather than "absent from one".
+        let (_, body) = UNSTREAMED
+            .split_once("\r\n\r\n")
+            .expect("headers, then the body");
+        assert!(!body.contains("generation_settings"), "C5 carries no echo");
+        let reply = read(&Dialect::llama_cpp(), body).expect("a readable reply");
+        assert!(
+            !reply.echo_site_declared,
+            "the dialect claims an echo site C5 does not have"
+        );
+        assert!(reply.sampler_echo.is_empty());
+    }
+
+    #[test]
     fn a_declared_path_reads_what_is_there_and_nothing_when_it_is_not() {
         let reply = read(
-            &Dialect::llama_cpp(),
+            &Dialect::echoing(),
             "{\"choices\":[{\"message\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}],\
              \"usage\":{\"prompt_tokens\":9,\"completion_tokens\":2},\
              \"timings\":{\"cache_n\":7},\
@@ -687,7 +705,7 @@ mod tests {
     #[test]
     fn a_declared_echo_site_that_is_absent_is_declared_and_not_present() {
         let reply = read(
-            &Dialect::llama_cpp(),
+            &Dialect::echoing(),
             "{\"choices\":[{\"message\":{\"content\":\"hi\"}}]}",
         )
         .expect("a readable reply");

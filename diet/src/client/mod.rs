@@ -880,7 +880,7 @@ mod tests {
 
     /// The common case, so every other test's setup can be trusted.
     fn honest(acts: Vec<Act>, shape: &RequestShape) -> (super::Call, Vec<String>) {
-        drive(acts, shape, Dialect::llama_cpp(), Concurrency::Declared(2))
+        drive(acts, shape, Dialect::echoing(), Concurrency::Declared(2))
     }
 
     // -----------------------------------------------------------------------
@@ -1344,7 +1344,7 @@ mod tests {
         let (llama, _) = drive(
             vec![Act::Answer(body.clone())],
             &shaped(card(), 5_000, 20_000, 0),
-            Dialect::llama_cpp(),
+            Dialect::echoing(),
             Concurrency::Declared(2),
         );
         let cache = &llama.outcome.answer().expect("answered").cache;
@@ -1385,13 +1385,13 @@ mod tests {
         let (declared, _) = drive(
             vec![Act::Answer(answered("an answer", "stop", HONEST_ECHO))],
             &shaped(card(), 5_000, 20_000, 0),
-            Dialect::llama_cpp(),
+            Dialect::echoing(),
             Concurrency::Declared(1),
         );
         let (undeclared, _) = drive(
             vec![Act::Answer(answered("an answer", "stop", HONEST_ECHO))],
             &shaped(card(), 5_000, 20_000, 0),
-            Dialect::llama_cpp(),
+            Dialect::echoing(),
             Concurrency::Undeclared,
         );
 
@@ -1596,7 +1596,7 @@ mod tests {
             Http::new(Endpoint::parse(&url).expect("an endpoint")),
             Serving {
                 concurrency: Concurrency::Declared(1),
-                dialect: Dialect::llama_cpp(),
+                dialect: Dialect::echoing(),
             },
         );
         let mut ids = IdSource::new("turn-1/main");
@@ -1677,7 +1677,7 @@ mod tests {
             Http::with_reply_cap(Endpoint::parse(&stub.url()).expect("an endpoint"), 16),
             Serving {
                 concurrency: Concurrency::Declared(1),
-                dialect: Dialect::llama_cpp(),
+                dialect: Dialect::echoing(),
             },
         );
         let mut ids = IdSource::new("turn-1/main");
