@@ -3,7 +3,7 @@
 word = "pass"
 strict_beside = "pass"
 instrument = "substrates/admission/depth-probe, the four-constraint (admission) set, five application samples plus one retrieval per cell, fractions 0 / 0.5 / 0.9 / 0.95 of the registry's 160,000-token pool with the other slot cleared"
-reading = "control 5/5; 0.5 (79,848 tokens) 5/5; 0.9 (143,586) 5/5; 0.95 (151,622) 5/5; retrieval 1/1 at every cell; no server error, no truncation, no thinking-off sample"
+reading = "control 5/5; 0.5 (79,848 tokens) 5/5; 0.9 (143,586 tokens) 5/5; 0.95 (151,622 tokens) 5/5; retrieval 1/1 at every cell; no server error, no truncation, no thinking-off sample"
 criterion = "substrates/admission/depth-probe/criterion.toml: every cell within one sample of the control (planning, #143, comment 5885436821); the strict reading (every sample at every cell) beside it, never the word"
 sampler = "the registry's sampler card: temperature 0.6, top_k 20, top_p 1.0, min_p 0.0; thinking on as served; max_tokens 4096"
 identity = "the floor's serving process, pid unchanged since the cells window, exe digest read after the window equal to this fingerprint's engine (raw/identity-after.txt); VRAM and health the same before and after, transcribed (raw/window-readings.txt)"

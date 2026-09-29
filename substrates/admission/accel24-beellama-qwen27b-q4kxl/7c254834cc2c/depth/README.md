@@ -34,8 +34,10 @@ This is the admission depth probe (`substrates/admission/depth-probe/`, #179, me
   - the tier is admission's, and the ladder is the ruled fractions of the registry's `serving_context`, with every cell present and full;
   - the sampler is the registry's card and `max_tokens` is 4096;
   - the identity is this fingerprint's engine and the served template is this fingerprint's (both read from `../fingerprint.json`);
-  - `cell.toml`'s word and digests agree.
+  - every cell's target is its fraction of the pool, its rendered depth reached the target within 2% without exceeding it, and every deeper cell carries all four counter-examples, in the summary and in every row;
+  - the pid after the window is the pid read before and after it;
+  - `cell.toml`'s word, reading and digests agree, and every file in `raw/` is pinned.
 
-  It was seen red on seven seeded faults: the word flipped to `fail`; one 0.95 sample's grade flipped, with the rows' digest re-pinned; the committed corpus manifest changed by one byte; the 0.95 cell dropped with the summary and decision regenerated and re-pinned; the temperature, `max_tokens` and template digest each changed and re-pinned.
+  It was seen red on eleven seeded faults: the word flipped to `fail`; one 0.95 sample's grade flipped, with the rows' digest re-pinned; the committed corpus manifest changed by one byte; the 0.95 cell dropped with the summary and decision regenerated and re-pinned; the temperature, `max_tokens` and template digest each changed and re-pinned; the 0.95 cell made shallow and unplanted, regenerated and re-pinned; an unpinned raw file edited; the pid changed; the reading misstated.
 
 **This is one of admission's three results for this fingerprint.** The cells are in `../cells.toml`, and the parity fire is separate. The admission word is written by hand where #143 says, not here.

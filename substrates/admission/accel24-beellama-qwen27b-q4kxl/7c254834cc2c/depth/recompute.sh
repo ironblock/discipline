@@ -31,7 +31,28 @@ if [c[0] for c in meta["cells"]] != [0.0, 0.5, 0.9, 0.95] or meta["serving_conte
 if sorted(summ) != sorted(str(c[0]) for c in meta["cells"]): fails.append(f"the summary's cells {sorted(summ)} are not the ladder's")
 for f, c in summ.items():
     if c["application"]["n"] != meta["samples"] or c["application"]["n"] < 5 or c["retrieval"]["n"] != 1:
-        fails.append(f"cell {f} holds {c['application']['n']} application and {c['retrieval']['n']} retrieval samples")
+        fails.append(f"cell {f} holds {c['application']['n']} application and {c['retrieval']['n']} retrieval samples; the run declared {meta['samples']} and one")
+# depth, which is what this cell measures: each target is its fraction of the pool, each cell reached it within
+# the instrument's default tolerance (0.02) without exceeding it, and every deeper cell carries all four counter-examples
+for frac, target in meta["cells"]:
+    c = summ.get(str(frac))
+    if target != round(frac * meta["serving_context"]): fails.append(f"cell {frac}'s target {target} is not its fraction of the pool")
+    if c and frac > 0 and not (target * 0.98 <= c["depth_rendered"] <= target): fails.append(f"cell {frac} rendered {c['depth_rendered']} tokens against a target of {target}")
+    if c and c["planted"] != (0 if frac == 0 else 4): fails.append(f"cell {frac} planted {c['planted']} counter-examples")
+rows = [json.loads(l) for l in (here / "raw/rows.jsonl").read_text().splitlines()]
+for r in rows:
+    c = summ.get(str(r["fraction"]))
+    if not c or (r["depth_rendered"], r["planted"]) != (c["depth_rendered"], c["planted"]): fails.append(f"a row at {r['fraction']} disagrees with its cell's depth or planting")
+names = sorted(p.name for p in (here / "raw").iterdir())
+cell0 = tomllib.loads((here / "cell.toml").read_text())
+if names != sorted(cell0["raw"]): fails.append(f"raw/ holds {names}; cell.toml pins {sorted(cell0['raw'])}")
+fmt = lambda f, c: ("control" if f == "0.0" else f"{f} ({c['depth_rendered']:,} tokens)") + f" {c['application']['pass']}/{c['application']['n']}"
+want = "; ".join(fmt(f, summ[f]) for f in sorted(summ, key=float))
+if not cell0["reading"].startswith(want): fails.append(f"cell.toml's reading does not begin with the summary's counts: {want}")
+pid = re.search(r"pid=(\d+)", (here / "raw/identity-after.txt").read_text()).group(1)
+wr = (here / "raw/window-readings.txt").read_text()
+reads = {l.split(" ", 1)[0]: l for l in wr.splitlines() if l.startswith(("before ", "after "))}
+if not all(f"pid {pid}" in reads.get(k, "") for k in ("before", "after")): fails.append("the pid after the window is not the pid read before and after it")
 card = dict((k, float(v)) for k, v in re.findall(r"(\w+) ([0-9.]+)", reg["sampler_card"]))
 if {k: float(v) for k, v in meta["sampler"].items()} != card: fails.append(f"the sampler {meta['sampler']} is not the registry's card {card}")
 if meta["max_tokens"] != 4096: fails.append("max_tokens is not the declared 4096")
