@@ -6,10 +6,10 @@ This is one of the three results admission requires. It is built to planning's r
 
 | the ruling | how the probe meets it |
 |---|---|
-| **Corpus:** this repository's source plus tokio, both permissive, digest-pinned (reconciled on #143, 07:09Z) | `make_corpus.py` writes `corpus/manifest.json` from named repositories at pinned commits: every `.rs` file under each root as a file read, every directory as a listing, the root's first-parent diffs in the last 12 commits, each with the sha256 of the exact bytes read. `self` at `1833b8e` (`diet/src`: 58 reads, 15 listings, 12 diffs) and `tokio` at `tokio-1.53.1` (`tokio/src`: 377 reads, 62 listings, 12 diffs): 435 reads, 6.2 MB. The manifest records each repository's name, URL and commit, never a local path; `--repo tokio=PATH` names a local clone, and the probe refuses any mismatch. No tokio source is committed: `corpus/NOTICE` and `corpus/LICENSE-tokio` (MIT). |
+| **Corpus:** this repository's source plus tokio, both permissive, digest-pinned (reconciled on #143, 07:09Z) | `make_corpus.py` writes `corpus/manifest.json` from named repositories at pinned commits: every `.rs` file under each root as a file read, every directory as a listing, the root's first-parent diffs in the last 12 commits, each with the sha256 of the exact bytes read. `self` at `1833b8e` (`diet/src`: 58 reads, 15 listings, 12 diffs) and `tokio` at `tokio-1.53.1` (`tokio/src`: 377 reads, 62 listings, 12 diffs): 435 reads, 6.2 MB. The manifest records each repository's name, URL and commit, never a local path; `--repo tokio=PATH` names a local clone, and the probe refuses any mismatch. `make_corpus.py` refuses to write a manifest outside this repository, so the relative path to the counter-examples never climbs through a local tree. No tokio source is committed: `corpus/NOTICE` and `corpus/LICENSE-tokio` (MIT). |
 | **Counter-examples** from a committed script, planted at declared depths, pinned by digest | `counterexamples.py` writes `counterexamples.json`: one Rust file-read turn per constraint, each asserting the constraint's opposite. The four-constraint set is planted at 0.2/0.4/0.6/0.8 of the padding. Deterministic (written twice, byte-identical). Its sha256 is in the manifest. |
 | **Ladder:** fractions of the rung's declared `serving_context`, 0.5 / 0.9 / 0.95, plus the zero-pad control; under `--kv-unified` that context is the pool every slot shares, and the fractions are of the pool with the other slot cleared and declared empty | `--serving-context` and `--fractions` (default `0 0.5 0.9 0.95`). A cell's padding is sized by bisection on the server's own token count, and refused if it misses its target by more than `--tolerance`. The run refuses a ladder whose deepest cell plus `max_tokens` exceeds the server's per-slot context. |
-| **Five samples per cell**, the rung's supported coding configuration, thinking on | `--samples 5`; `--sampler` is the rung's configuration. **Thinking is checked, not assumed:** a sample with no reasoning is counted as `thinking_off`, and its cell reads `unadjudicated`. |
+| **Five samples per cell** plus one retrieval sample, the rung's supported coding configuration, thinking on | `--samples 5`; retrieval is on by default (`--no-retrieval` turns it off; the eight-constraint set has none); `--sampler` is the rung's configuration. **Thinking is checked, not assumed:** a sample with no reasoning is counted as `thinking_off`, and its cell reads `unadjudicated`. |
 | **Word:** `no cliff` = every cell's pass count within one sample of the control's; the strict reading (every sample at every cell) reported beside it, never as the word | `decide` returns `pass` / `fail` / `unadjudicated` from `summary.json` and a criterion TOML (`within = 1`, `min_samples = 5`, `max_errors = 0`). A cell with a server error, a thinking-off sample or too few samples is `unadjudicated`, never `pass`. A cliff outranks an unadjudicated cell. The control itself must be adjudicable. `decide` also reports `strict_beside`. **Read `summary.json` with care:** its raw counts include samples whose cell is unadjudicated (a thinking-off sample's grade still counts in its cell's `pass`), so a cell can show 4/5 and still read `unadjudicated`; the word is `decide`'s, never the raw count. |
 | **The grader is mechanical**, one deterministic check per constraint, a seeded fault per constraint | `CHECKS` in `depth_probe.py`: one check per constraint on the answer's final code block. `fixtures/graders.json` violates every constraint alone, in both sets, and the selftest refuses a constraint without such a fixture. No model grades anything. |
 | **The four-constraint set is the admission probe**; the eight-constraint set is a second probe | `--tier supported` (the default) is admission's. `--tier hard` is the second probe. `meta.json` records which, as `admission: true/false`. |
@@ -35,7 +35,7 @@ What is not carried over: the original's default endpoint and machine-specific c
 
 ```
 python3 depth_probe.py run --endpoint http://HOST:PORT --corpus corpus/manifest.json --repo tokio=PATH/TO/tokio --tier supported \
-    --serving-context 160000 --samples 5 --retrieval \
+    --serving-context 160000 --samples 5 \
     --sampler '{"temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0}' --out OUT
 python3 depth_probe.py summarise OUT/rows.jsonl > OUT/summary.json
 python3 depth_probe.py decide OUT/summary.json criterion.toml
@@ -65,8 +65,10 @@ python3 depth_probe.py decide OUT/summary.json criterion.toml
     - slots cleared, requests pinned, depths reached;
   - counter-examples planted at their declared fractions (three padding lengths);
   - the depth-tolerance refusal and the ladder-capacity refusal;
-  - 11 `decide` cases, and the strict reading beside the word.
-- **`python3 mutants.py`** seeds 15 mutations and requires the selftest to exit 1 on each. **All 15 are killed:**
+  - 11 `decide` cases, and the strict reading beside the word;
+  - retrieval on by default;
+  - the digest checks: a tampered file-source entry, a git-source entry that does not hash as pinned (and one that does), a counter-examples file that does not hash as pinned, each refused.
+- **`python3 mutants.py`** seeds 19 mutations and requires the selftest to exit 1 on each. **All 19 are killed:**
   - two grader checks dropped;
   - the first code block graded;
   - counter-examples not planted;
@@ -79,7 +81,9 @@ python3 depth_probe.py decide OUT/summary.json criterion.toml
   - counter-examples planted one turn early;
   - the depth-tolerance refusal removed;
   - the ladder-capacity refusal removed;
-  - the strict reading always met.
+  - the strict reading always met;
+  - each of the three digest checks dropped;
+  - retrieval off by default.
 - **`fixtures/corpus/`** is a synthetic corpus for the tests, not a probe corpus.
 
 ## Window estimate (floor: a 160,000-token pool, 2 slots)

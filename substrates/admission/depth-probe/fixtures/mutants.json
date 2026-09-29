@@ -74,6 +74,26 @@
    "label": "the strict reading always met",
    "old": "\"strict_beside\": \"pass\" if strict else \"not met\"",
    "new": "\"strict_beside\": \"pass\""
+  },
+  {
+   "label": "the file-source digest check dropped",
+   "old": "                if sha(b) != e[\"sha256\"]:\n                    raise SystemExit(f\"depth_probe: corpus {kind}",
+   "new": "                if False:\n                    raise SystemExit(f\"depth_probe: corpus {kind}"
+  },
+  {
+   "label": "the git-source digest check dropped",
+   "old": "                    if sha(b) != e[\"sha256\"]:\n                        raise SystemExit(f\"depth_probe: {src['name']}",
+   "new": "                    if False:\n                        raise SystemExit(f\"depth_probe: {src['name']}"
+  },
+  {
+   "label": "the counter-examples digest check dropped",
+   "old": "    if want_sha and sha(b) != want_sha:",
+   "new": "    if False:"
+  },
+  {
+   "label": "retrieval off by default",
+   "old": "action=argparse.BooleanOptionalAction, default=True,",
+   "new": "action=argparse.BooleanOptionalAction, default=False,"
   }
  ]
 }

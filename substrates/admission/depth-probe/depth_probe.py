@@ -334,7 +334,7 @@ def fake_server(script, n_ctx=100000):
     return srv, state
 
 def cmd_selftest(a) -> int:
-    import contextlib, io, tempfile
+    import contextlib, io, shutil, tempfile
     fx = json.loads((HERE / "fixtures/graders.json").read_text()); bad = 0
     def check(ok, label, extra=""):
         nonlocal bad; bad += not ok; print(f"{'ok  ' if ok else 'FAIL'}  {label}" + ("" if ok else f" {extra}"))
@@ -396,19 +396,47 @@ def cmd_selftest(a) -> int:
         check(refused, "run: a ladder whose deepest cell plus max_tokens exceeds the per-slot context is refused")
     finally:
         srv2.shutdown()
+    bare = parser().parse_args(["run", "--endpoint", "x", "--corpus", "x", "--serving-context", "1", "--sampler", "{}", "--out", "x"])
+    check(bare.retrieval is True, "run: retrieval is on unless --no-retrieval is given (as ruled)")
+    # digests: a corpus entry or a counter-examples file that does not hash as the manifest says is refused
+    with tempfile.TemporaryDirectory() as td:
+        t = pathlib.Path(td) / "corpus"; shutil.copytree(HERE / "fixtures/corpus", t)
+        (t / "net.rs").write_bytes((t / "net.rs").read_bytes() + b"// tampered\n")
+        refused = False
+        try: load_corpus(t / "manifest.json")
+        except SystemExit: refused = True
+        check(refused, "load_corpus: a tampered file-source entry is refused")
+        refused = False
+        try: load_counterexamples(HERE / "fixtures/corpus/counterexamples.json", "supported", "0" * 64)
+        except SystemExit: refused = True
+        check(refused, "load_counterexamples: a counter-examples file that does not hash as pinned is refused")
+        g = pathlib.Path(td) / "repo"; g.mkdir(); (g / "src").mkdir(); (g / "src/a.rs").write_text("pub fn a() {}\n")
+        run = lambda *a: subprocess.run(["git", "-C", str(g), "-c", "user.name=t", "-c", "user.email=t@t", *a], capture_output=True, check=True).stdout
+        run("init", "-q"); run("add", "."); run("commit", "-qm", "a"); head = run("rev-parse", "HEAD").decode().strip()
+        entry = {"path": "src/a.rs", "label": "cat src/a.rs", "sha256": sha(b"pub fn a() {}\n")}
+        man = {"source": "git", "sources": [{"name": "fx", "commit": head, "root": "src", "reads": [entry], "listings": [], "diffs": []}]}
+        (pathlib.Path(td) / "git.json").write_text(json.dumps(man))
+        check(len(load_corpus(pathlib.Path(td) / "git.json", {"fx": str(g)})["reads"]) == 1, "load_corpus: a git-source entry that hashes as pinned loads")
+        entry["sha256"] = "0" * 64; (pathlib.Path(td) / "git.json").write_text(json.dumps(man))
+        refused = False
+        try: load_corpus(pathlib.Path(td) / "git.json", {"fx": str(g)})
+        except SystemExit: refused = True
+        check(refused, "load_corpus: a git-source entry that does not hash as pinned is refused")
     for c in json.loads((HERE / "fixtures/decide.json").read_text())["cases"]:
         dd = decide(c["summary"], c["criterion"]); check(dd["word"] == c["word"], f"decide: {c['label']}", f"got {dd['word']}")
         if "strict" in c: check(dd.get("strict_beside") == c["strict"], f"decide: strict beside -- {c['label']}", f"got {dd.get('strict_beside')}")
     print(f"depth_probe selftest: {'all pass' if not bad else f'{bad} failing'}"); return 1 if bad else 0
 
-def main(argv) -> int:
+def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run"); r.add_argument("--endpoint", required=True); r.add_argument("--corpus", required=True)
     r.add_argument("--tier", choices=list(TIERS), default="supported")
     r.add_argument("--serving-context", type=int, required=True, help="the rung's declared serving_context")
     r.add_argument("--fractions", type=float, nargs="+", default=[0.0, 0.5, 0.9, 0.95])
-    r.add_argument("--samples", type=int, default=5); r.add_argument("--retrieval", action="store_true")
+    r.add_argument("--samples", type=int, default=5)
+    r.add_argument("--retrieval", action=argparse.BooleanOptionalAction, default=True,
+                   help="one retrieval sample per cell, on by default as ruled (#143); the hard tier has no retrieval question")
     r.add_argument("--max-tokens", type=int, default=4096); r.add_argument("--seed", type=int, default=2000)
     r.add_argument("--chunk-chars", type=int, default=4000); r.add_argument("--tolerance", type=float, default=0.02)
     r.add_argument("--sampler", required=True, help='the rung\'s supported coding configuration, JSON, e.g. {"temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0}')
@@ -417,7 +445,10 @@ def main(argv) -> int:
     s = sub.add_parser("summarise"); s.add_argument("rows"); s.set_defaults(fn=cmd_summarise)
     d = sub.add_parser("decide"); d.add_argument("summary"); d.add_argument("criterion"); d.set_defaults(fn=cmd_decide)
     t = sub.add_parser("selftest"); t.set_defaults(fn=cmd_selftest)
-    a = ap.parse_args(argv); return a.fn(a)
+    return ap
+
+def main(argv) -> int:
+    a = parser().parse_args(argv); return a.fn(a)
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

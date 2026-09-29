@@ -34,6 +34,9 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument("counterexamples"); ap.add_argument("out"); ap.add_argument("sources", nargs="+")
     ap.add_argument("--diffs", type=int, default=12); a = ap.parse_args()
     out, ce = pathlib.Path(a.out), pathlib.Path(a.counterexamples)
+    top = pathlib.Path(git(str(ce.resolve().parent), "rev-parse", "--show-toplevel").decode().strip()).resolve()
+    if not out.parent.resolve().is_relative_to(top):  # else the relative path would climb through the local tree
+        raise SystemExit(f"make_corpus: write the manifest inside the repository that holds {ce.name}, so no local path enters it")
     manifest = {"source": "git", "sources": [source(s, a.diffs) for s in a.sources],
                 "counterexamples": str(ce.resolve().relative_to(out.parent.resolve(), walk_up=True)),
                 "counterexamples_sha256": hashlib.sha256(ce.read_bytes()).hexdigest(), "written_by": "make_corpus.py"}

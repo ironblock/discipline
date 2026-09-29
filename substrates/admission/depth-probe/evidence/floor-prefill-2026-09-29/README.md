@@ -10,7 +10,7 @@ Measured with production up, on `accel24-beellama-qwen27b-q4kxl`: `-np 2 --kv-un
 | 149,962 | 737.7 | 203.5 | `prefill-floor-150.json` |
 
 **`console.log` is three captures appended in order, not one stream:**
-- run 1's stdout: the GPU line, the 40k and 75k rows;
+- run 1's stdout: the GPU line (line 1, `0 %`: `nvidia-smi --query-gpu=utilization.gpu`, read just before the run), then the 40k and 75k rows;
 - run 2's last six lines, stdout and stderr: the end of the 150k failure's traceback, then the health check;
 - run 3's stdout: the committed 125k JSON printed back, the two slot clears, the 150k row, the health check.
 
