@@ -115,6 +115,23 @@
    "file": "make_corpus.py",
    "old": "    if not out.parent.resolve().is_relative_to(top):",
    "new": "    if False:"
+  },
+  {
+   "label": "run reads /props before checking the counter-examples pin",
+   "old": "    ces = load_counterexamples(mpath.parent",
+   "new": "    srv.call(\"/props\")\n    ces = load_counterexamples(mpath.parent"
+  },
+  {
+   "label": "make_corpus lists without the trailing slash",
+   "file": "make_corpus.py",
+   "old": "git(path, \"ls-tree\", \"--name-only\", commit, d + \"/\")",
+   "new": "git(path, \"ls-tree\", \"--name-only\", commit, d)"
+  },
+  {
+   "label": "make_corpus reads non-Rust files",
+   "file": "make_corpus.py",
+   "old": " if p.endswith(\".rs\")]",
+   "new": "]"
   }
  ]
 }

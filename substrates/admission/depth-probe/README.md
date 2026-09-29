@@ -69,8 +69,8 @@ python3 depth_probe.py decide OUT/summary.json criterion.toml
   - retrieval on by default;
   - the digest checks: a tampered file-source entry, a git-source entry that does not hash as pinned (and one that does), a counter-examples file that does not hash as pinned, each refused;
   - through `run`: a wrong or missing counter-examples pin refused before any request, and `--no-retrieval` running no retrieval sample;
-  - `make_corpus.py` refusing a manifest outside the tree that holds the counter-examples, and recording a relative path inside it.
-- **`python3 mutants.py`** seeds 23 mutations and requires the selftest to exit 1 on each. **All 23 are killed:**
+  - `make_corpus.py` refusing a manifest outside the tree that holds the counter-examples, and recording a relative path inside it; only Rust files becoming reads; its manifest loading back through `load_corpus` with every digest agreeing.
+- **`python3 mutants.py`** seeds 26 mutations and requires the selftest to exit 1 on each. **All 26 are killed:**
   - two grader checks dropped;
   - the first code block graded;
   - counter-examples not planted;
@@ -87,7 +87,9 @@ python3 depth_probe.py decide OUT/summary.json criterion.toml
   - each of the three digest checks dropped;
   - retrieval off by default, and `--no-retrieval` ignored;
   - `run` passing no counter-examples pin, and a missing pin accepted;
-  - `make_corpus.py`'s outside-the-tree refusal removed.
+  - `make_corpus.py`'s outside-the-tree refusal removed;
+  - `run` reading `/props` before checking the pin;
+  - `make_corpus.py` listing without the trailing slash, and reading non-Rust files.
 - **`fixtures/corpus/`** is a synthetic corpus for the tests, not a probe corpus.
 
 ## Window estimate (floor: a 160,000-token pool, 2 slots)

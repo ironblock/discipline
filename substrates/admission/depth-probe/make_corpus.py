@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Write the depth probe's corpus manifest (#143, as ruled and reconciled): named repositories, each at a
-pinned commit -- every Rust file under its root as a file read, every directory under it as a listing,
+pinned commit -- every Rust file under its root as a file read, every directory holding one as a listing,
 and the first-parent diffs of its root in the last N commits -- each entry with the sha256 of the exact
 bytes the probe will read, so the corpus recomputes by digest. The counter-examples file is pinned
 alongside. A source is NAME=PATH@COMMIT:ROOT[=URL]; the manifest records the name, URL and commit, never

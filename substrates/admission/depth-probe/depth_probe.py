@@ -4,8 +4,8 @@ rules stated in a session's first user turn after padding that fills a fraction 
 serving context? The design is the research program's T2 (a multi-demand coding task under competing
 constraints, graded mechanically on the emitted code), reimplemented for the gym.
 
-  - Corpus: this repository's own tree at a pinned commit (corpus/manifest.json, written by
-    make_corpus.py): real file reads, directory listings and diffs; plus one generated counter-example
+  - Corpus: this repository's source plus tokio, each at a pinned commit (corpus/manifest.json, written
+    by make_corpus.py): real file reads, directory listings and diffs, each by digest; plus one generated counter-example
     per constraint (counterexamples.json, written by counterexamples.py), planted at declared depths.
   - Ladder: fractions of the rung's declared serving context (0.5, 0.9, 0.95) and the zero-pad control.
   - Five samples per cell, in the rung's supported coding configuration, thinking on (checked per sample).
@@ -314,7 +314,7 @@ def fake_server(script, n_ctx=100000):
             b = json.dumps(obj).encode(); self.send_response(code); self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
         def do_GET(self):
-            self._send({"chat_template": "fake", "total_slots": 2, "default_generation_settings": {"n_ctx": n_ctx}})
+            state["calls"].append((self.path, None)); self._send({"chat_template": "fake", "total_slots": 2, "default_generation_settings": {"n_ctx": n_ctx}})
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"]))); state["calls"].append((self.path, body))
             if self.path == "/apply-template":
@@ -452,6 +452,7 @@ def cmd_selftest(a) -> int:
     sys.path.insert(0, str(HERE)); import make_corpus
     with tempfile.TemporaryDirectory() as td:
         g = pathlib.Path(td) / "repo"; (g / "src").mkdir(parents=True); (g / "src/a.rs").write_text("pub fn a() {}\n")
+        (g / "src/NOTES.md").write_text("not Rust\n")
         shutil.copy(HERE / "fixtures/corpus/counterexamples.json", g / "ce.json")
         run = lambda *a: subprocess.run(["git", "-C", str(g), "-c", "user.name=t", "-c", "user.email=t@t", *a], capture_output=True, check=True)
         run("init", "-q"); run("add", "."); run("commit", "-qm", "a")
@@ -462,7 +463,12 @@ def cmd_selftest(a) -> int:
         except SystemExit: refused = True
         check(refused and not outside.exists(), "make_corpus: a manifest outside the tree that holds the counter-examples is refused")
         with contextlib.redirect_stdout(io.StringIO()): make_corpus.main([str(g / "ce.json"), str(g / "m.json"), f"fx={g}@HEAD:src"])
-        check(json.loads((g / "m.json").read_text())["counterexamples"] == "ce.json", "make_corpus: a manifest inside the tree records a relative path")
+        mc = json.loads((g / "m.json").read_text())
+        check(mc["counterexamples"] == "ce.json", "make_corpus: a manifest inside the tree records a relative path")
+        check([e["path"] for e in mc["sources"][0]["reads"]] == ["src/a.rs"], "make_corpus: only Rust files become file reads", f"{mc['sources'][0]['reads']}")
+        got = load_corpus(g / "m.json", {"fx": str(g)})  # what make_corpus writes, load_corpus reads back by digest
+        check((len(got["reads"]), len(got["listings"]), len(got["diffs"])) == (1, 1, 1), "make_corpus: its manifest loads back, every digest agreeing",
+              f"{[(k, len(v)) for k, v in got.items()]}")
     for c in json.loads((HERE / "fixtures/decide.json").read_text())["cases"]:
         dd = decide(c["summary"], c["criterion"]); check(dd["word"] == c["word"], f"decide: {c['label']}", f"got {dd['word']}")
         if "strict" in c: check(dd.get("strict_beside") == c["strict"], f"decide: strict beside -- {c['label']}", f"got {dd.get('strict_beside')}")
