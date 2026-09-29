@@ -82,8 +82,28 @@ manifest = (here.parent / "raw/engine-manifest.txt").read_text()
 if not run or f"cand_file {run.group(1)} llama-server" not in manifest: fails.append("the running candidate's exe is not this fingerprint's llama-server")
 if not re.search(rf"cand_weights {fp['weights']['main']} ", idb): fails.append("the candidate's weights are not this fingerprint's")
 if not run or not re.search(rf"candidate up server={run.group(2)} exe={run.group(1)[:16]} ", wl): fails.append("the window log's candidate is not the identity's")
-if not re.search(r"production stopped", wl) or not re.search(r"restored: pid=\d+ exe=980845d60ae7a820 cmdline_same=yes", wl): fails.append("the window log does not show production stopped and restored on its own exe and line")
+if not re.search(r"production stopped", wl) or not re.search(r"restored: pid=\d+ exe=[0-9a-f]{16} cmdline_same=yes", wl): fails.append("the window log does not show production stopped and restored on its own line")
 ml = (here / "raw/mac.log").read_text(); rc = (here / "raw/restore-checks.txt").read_text()
+# the probe ran while the candidate served: the box waited for it (done=yes), the probe started after the
+# candidate was up and ended before the restore began (the two logs share UTC timestamps)
+ts = lambda text, pat: (m.group(1) if (m := re.search(r"^(\S+Z) " + pat, text, re.M)) else None)
+up, start, end, rbeg = ts(wl, "candidate up"), ts(ml, "depth start"), ts(ml, "depth run rc=0"), ts(wl, "restore: begin")
+if "depth wait over (done=yes)" not in wl: fails.append("the box did not record the probe's completion before restoring")
+if not (up and start and end and rbeg and up < start < end < rbeg): fails.append(f"the probe ({start} to {end}) did not run inside the candidate's window ({up} to {rbeg})")
+# the serving line: the script's line is the fingerprint's, and the server's own start-up reports the ruled pool and slots
+cline = re.search(r'^CLINE="-m \$CW (.*)"$', (here / "raw/d143c.sh").read_text(), re.M)
+flags = re.sub(r" --host \S+ --port \S+", "", cline.group(1)) if cline else ""
+if flags.split() != fp["serving_line"].replace(",", "").split(): fails.append(f"the launched line {flags!r} is not the fingerprint's serving line")
+st = (here / "raw/server-startup.log").read_text()
+if f"n_slots = {reg['serving_slots']}, n_ctx_slot = {reg['serving_context']}, kv_unified = 'true'" not in st: fails.append("the server's start-up does not report the registry's slots and pool")
+if (meta["total_slots"], meta["n_ctx_per_slot"]) != (reg["serving_slots"], reg["serving_context"]): fails.append("the probe's /props read is not the registry's slots and pool")
+if not re.search(r"cand_commit [0-9a-f]{40} dirty=0$", idb, re.M): fails.append("the candidate's source tree was not clean")
+# the restore brought back the floor's own exe: the one read before the stop
+pe = re.search(r"prod_exe ([0-9a-f]{64})", idb)
+if not pe or not re.search(rf"restored: pid=\d+ exe={pe.group(1)[:16]} cmdline_same=yes", wl): fails.append("the restored exe is not the one read before the stop")
+cell_t = tomllib.loads((here / "cell.toml").read_text())
+stop, rest = ts(wl, "production stopped"), ts(wl, "restored:")
+if not (stop and rest and stop[11:19] in cell_t["downtime"] and rest[11:19] in cell_t["downtime"]): fails.append("cell.toml's downtime is not the window log's")
 for need, where, what in (("fingerprint rc=0", ml, "the fingerprint check"), ("verify-box rc=0", ml, "the box verification"), ("depth run rc=0", ml, "the probe run"),
                           ("SUBSTRATE IDENTICAL", rc, "the fingerprint verdict"), ("verify-box: PASS", rc, "the verification verdict"), ("verdict: PASS", rc, "the canary verdict")):
     if need not in where: fails.append(f"{what} is not recorded as passing")

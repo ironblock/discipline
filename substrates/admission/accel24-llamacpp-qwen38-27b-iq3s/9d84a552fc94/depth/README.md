@@ -20,6 +20,7 @@ This is the admission depth probe (`substrates/admission/depth-probe/`, #179; th
 
 **Identity:**
 - **What was read in this window:** the running server's exe (`865044a2…`) is this fingerprint's `llama-server` (`../raw/engine-manifest.txt`), and its weights (`58fd8267…`) are this fingerprint's. The source tree is mainline `4ceb171`, clean (`raw/identity-before.txt`).
+- **The serving line:** the running process's command line was not read in this window. The line rests on two things: the launch script's line, which equals the fingerprint's serving line, and the server's own start-up report (`raw/server-startup.log`: 2 slots, a 229,376 pool, unified), which the probe's `/props` read confirms.
 - **What was not re-hashed:** the build's other files and the container's libraries. The fingerprint's engine component is the digest of the whole manifest, so this window confirms its binary and weights, not every library.
 
 **Downtime and restore:**
@@ -37,18 +38,21 @@ This is the admission depth probe (`substrates/admission/depth-probe/`, #179; th
 - `raw/console.log`: the probe's per-sample lines.
 - `raw/mac.log`: the Mac side's step log.
 - `raw/window.log` and `raw/identity-before.txt`: the box side's step log and the identity it read, both written by the box script.
+- `raw/server-startup.log`: the first 11 lines of the candidate server's log (start-up to listening), extracted, with home paths scrubbed (`scrub.json`).
 - `raw/restore-checks.txt`: the verdict lines of the three post-restore checks, extracted by grep. Their full logs stay local, because they name the box's devices.
 - `raw/mac.sh` and `raw/d143c.sh`: the two scripts as run. `d143c.sh` has one private build-container name scrubbed, recorded in `scrub.json` with its pre-scrub digest.
 - `recompute.sh`: summarises the rows and decides again through the committed instrument and criterion, requiring both outputs to match byte for byte. It also checks:
   - the corpus manifest is the committed one, and the served template is this fingerprint's;
   - the tier is admission's, and the ladder is the ruled fractions of the registry's `serving_context`, every cell present and full, each target reached within 2% without exceeding it and carrying its counter-examples;
   - the sampler is the registry's declared card and `max_tokens` is 4096;
-  - the running exe and weights are this fingerprint's, the window log's candidate is that process, and production was restored on its own exe and line;
+  - the running exe and weights are this fingerprint's, the source tree clean, the window log's candidate is that process, and production was restored with the exe read before the stop and its own line;
+  - the probe ran inside the candidate's window: the box recorded its completion, and it started after the candidate was up and ended before the restore began;
+  - the launched line is the fingerprint's serving line, the server's start-up and `/props` report the registry's slots and pool, and `cell.toml`'s downtime is the window log's;
   - the probe, the fingerprint check, the verification and the canary are recorded as passing;
   - every row regrades to its stored grade, every cell's samples are numbered 0 to 4 once each, and the server's prompt count equals the depth on every application row;
   - the console log is the rows';
   - `cell.toml`'s word, whole reading and digests agree, and every file in `raw/` is pinned.
 
-  It was seen red on eleven seeded faults: the 0.95 cell dropped; the temperature changed; the 0.95 cell made shallow and unplanted; a retrieval failure; a sample's code swapped with its grade kept; the running exe, the weights, and the window's candidate pid each changed; production restored on another line; the canary failed; the fingerprint differed. Each was re-pinned.
+  It was seen red on eighteen seeded faults: the 0.95 cell dropped; the temperature changed; the 0.95 cell made shallow and unplanted; a retrieval failure; a sample's code swapped with its grade kept; the running exe, the weights, and the window's candidate pid each changed; production restored on another line; the canary failed; the fingerprint differed; the box's wait timed out; the restore moved inside the probe; the launched line changed; the source tree dirty; the pre-stop exe changed; the downtime misstated; the start-up's slot count changed. Each was re-pinned.
 
 **This is one of admission's three results for this fingerprint.** The cells are in `../cells.toml`. The parity fire waits on I5 and its pre-registration. The candidate's admission waits on all three.

@@ -7,6 +7,8 @@
   }
  },
  "extracted": {
-  "raw/restore-checks.txt": "the verdict lines of the three post-restore checks, extracted by grep from their logs (verify-box's final line; the fingerprint check's digest and verdict lines; the canary's rate and verdict), which stay local because the full logs name the box's devices"
- }
+  "raw/restore-checks.txt": "the verdict lines of the three post-restore checks, extracted by grep from their logs (verify-box's final line; the fingerprint check's digest and verdict lines; the canary's rate and verdict), which stay local because the full logs name the box's devices",
+  "raw/server-startup.log": "the first 11 lines of the candidate server's log (start-up to listening), extracted, then 2 home paths replaced by ~; pre-scrub sha256 of those 11 lines 18cb5df0e0f45552fbbc94ba0f703cbbd1a4358ff06b51815716e78f12d11413; the full log stays local"
+ },
+ "rule_home": "an absolute home path (/home/<name>, /var/home/<name>, /Users/<name>) replaced by ~"
 }
