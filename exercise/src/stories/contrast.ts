@@ -6,22 +6,9 @@
  * images -- grain, glass, pools -- are ignored: this is the fill's contrast.
  */
 export function contrast(el: Element): number {
-  const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
-  if (!ctx) throw new Error('no 2d canvas');
-  const paint = (colour: string): readonly [number, number, number] => {
-    ctx.fillStyle = colour;
-    ctx.fillRect(0, 0, 1, 1);
-    const [r = 0, g = 0, b = 0] = ctx.getImageData(0, 0, 1, 1).data;
-    return [r, g, b];
-  };
-  const layers: string[] = [];
-  for (let at: Element | null = el; at; at = at.parentElement) layers.unshift(getComputedStyle(at).backgroundColor);
-  paint('#000');
-  let behind: readonly [number, number, number] = [0, 0, 0];
-  for (const colour of layers) behind = paint(colour);
-  const text = paint(getComputedStyle(el).color);
-  const [hi, lo] = [luminance(text), luminance(behind)].sort((a, b) => b - a) as [number, number];
-  return (hi + 0.05) / (lo + 0.05);
+  const paint = painter();
+  const behind = over(paint, el);
+  return ratio(paint(getComputedStyle(el).color), behind);
 }
 
 /**
@@ -31,46 +18,54 @@ export function contrast(el: Element): number {
  * mark is that pseudo-element's fill, over the element's own.
  */
 export function fillContrast(el: Element, pseudo?: '::before' | '::after'): number {
-  const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
-  if (!ctx) throw new Error('no 2d canvas');
-  const paint = (colour: string): readonly [number, number, number] => {
-    ctx.fillStyle = colour;
-    ctx.fillRect(0, 0, 1, 1);
-    const [r = 0, g = 0, b = 0] = ctx.getImageData(0, 0, 1, 1).data;
-    return [r, g, b];
-  };
-  const layers: string[] = [];
-  for (let at: Element | null = pseudo ? el : el.parentElement; at; at = at.parentElement) layers.unshift(getComputedStyle(at).backgroundColor);
-  paint('#000');
-  let behind: readonly [number, number, number] = [0, 0, 0];
-  for (const colour of layers) behind = paint(colour);
-  const mark = paint(getComputedStyle(el, pseudo).backgroundColor);
-  const [hi, lo] = [luminance(mark), luminance(behind)].sort((a, b) => b - a) as [number, number];
-  return (hi + 0.05) / (lo + 0.05);
+  const paint = painter();
+  const behind = over(paint, pseudo ? el : el.parentElement);
+  return ratio(paint(getComputedStyle(el, pseudo).backgroundColor), behind);
 }
 
 /** WCAG contrast of two colours, as the page resolves them. */
 export function colourContrast(a: string, b: string): number {
+  const paint = painter();
+  const on = (colour: string) => (paint('#000'), paint(colour));
+  return ratio(on(a), on(b));
+}
+
+type Rgb = readonly [number, number, number];
+
+/** A one-pixel canvas: paint a colour over what is there, and read back what the pixel became. */
+function painter(): (colour: string) => Rgb {
   const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('no 2d canvas');
-  const paint = (colour: string): readonly [number, number, number] => {
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, 1, 1);
+  return (colour) => {
     ctx.fillStyle = colour;
     ctx.fillRect(0, 0, 1, 1);
     const [r = 0, g = 0, b = 0] = ctx.getImageData(0, 0, 1, 1).data;
     return [r, g, b];
   };
-  const [hi, lo] = [luminance(paint(a)), luminance(paint(b))].sort((x, y) => y - x) as [number, number];
+}
+
+/** Black, then every background from the root down to `from`, painted in order: what shows behind `from`'s content. */
+function over(paint: (colour: string) => Rgb, from: Element | null): Rgb {
+  const layers: string[] = [];
+  for (let at = from; at; at = at.parentElement) layers.unshift(getComputedStyle(at).backgroundColor);
+  let behind = paint('#000');
+  for (const colour of layers) behind = paint(colour);
+  return behind;
+}
+
+function ratio(a: Rgb, b: Rgb): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
   return (hi + 0.05) / (lo + 0.05);
 }
 
-function luminance([r, g, b]: readonly [number, number, number]): number {
-  const lin = (c: number) => {
-    const s = c / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+/** sRGB to linear light, IEC 61966-2-1's threshold. */
+const linear = (c: number) => {
+  const s = c / 255;
+  return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+};
+
+function luminance([r, g, b]: Rgb): number {
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
 }
 
 /**
@@ -86,28 +81,14 @@ export function apart(a: Element, b: Element): number {
   return Math.hypot(la - lb, aa - ab, ba - bb);
 }
 
-function painted(el: Element): readonly [number, number, number] {
-  const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
-  if (!ctx) throw new Error('no 2d canvas');
-  const paint = (colour: string): readonly [number, number, number] => {
-    ctx.fillStyle = colour;
-    ctx.fillRect(0, 0, 1, 1);
-    const [r = 0, g = 0, bl = 0] = ctx.getImageData(0, 0, 1, 1).data;
-    return [r, g, bl];
-  };
-  const layers: string[] = [];
-  for (let at: Element | null = el.parentElement; at; at = at.parentElement) layers.unshift(getComputedStyle(at).backgroundColor);
-  paint('#000');
-  for (const colour of layers) paint(colour);
+function painted(el: Element): Rgb {
+  const paint = painter();
+  over(paint, el.parentElement);
   return paint(getComputedStyle(el).color);
 }
 
-function oklab([r, g, b]: readonly [number, number, number]): readonly [number, number, number] {
-  const lin = (c: number) => {
-    const s = c / 255;
-    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  };
-  const [lr, lg, lb] = [lin(r), lin(g), lin(b)];
+function oklab([r, g, b]: Rgb): Rgb {
+  const [lr, lg, lb] = [linear(r), linear(g), linear(b)];
   const l = Math.cbrt(0.4122214708 * lr + 0.5363019296 * lg + 0.0514459929 * lb);
   const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
   const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);

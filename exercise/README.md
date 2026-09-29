@@ -14,7 +14,7 @@ workflow requirements this application expresses, not the other way round.
 pnpm install
 pnpm dev              # the harness on the canned transport, http://localhost:5173 (?speed=4 to hurry it)
 pnpm storybook        # the surface at every moment of the specimen, http://localhost:6006
-pnpm verify           # typecheck, lint, unit tests, every story as a browser test
+pnpm verify           # typecheck, lint, unit tests, every story as a browser test (but Session/Live, driven by hand)
 pnpm perf             # a performance trace: frames, long frames, layout, style, script, a profile (--ablate, --css)
 ```
 
@@ -36,7 +36,8 @@ byte (a random-weight model, so the words are noise), at
 `scripts/model-stand-in.head.txt` as the head.
 
 `pnpm perf` (`scripts/perf.mjs`) drives a production build in headless
-Chromium through three sessions -- replay, scroll, pointing -- and says
+Chromium through three sessions -- the kitchen sink, `first-drive` and
+`voxel-stress` -- each in three phases (replay, scroll, pointing), and says
 where frames go. Headless Chromium rasterises and composites in software:
 its script, style and layout numbers are the app's, its paint and
 compositing numbers are not (glass costs frames there and none on a GPU).

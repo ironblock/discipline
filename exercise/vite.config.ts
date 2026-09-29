@@ -27,9 +27,10 @@ const configure: NonNullable<ProxyOptions['configure']> = (proxy) => {
 const proxied = drive ? Object.fromEntries(['/events', '/commands'].map((route) => [route, { target: drive, changeOrigin: false, configure }])) : undefined;
 
 // One config for the app (`pnpm dev`), Storybook and Vitest. Two test
-// projects: every story is a browser test (`storybook`), and the fold -- the
-// one place events become what the surface draws -- has plain unit tests
-// (`unit`), because its cases are sequences, not pictures.
+// projects: every story that is not tagged `!test` is a browser test
+// (`storybook`), and every `*.test.ts` is a plain unit test in Node (`unit`)
+// -- the fold, the transports, the layout maths: cases that are sequences,
+// not pictures.
 export default defineConfig({
   plugins: [react()],
   ...(proxied ? { server: { proxy: proxied } } : {}),

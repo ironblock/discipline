@@ -24,7 +24,7 @@
  * machine's; compare runs, and phases, with each other.
  */
 
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -351,5 +351,6 @@ try {
 } finally {
   await browser.close();
   await new Promise((done) => server.httpServer.close(done));
+  rmSync(outDir, { recursive: true, force: true });
 }
 if (OUT) writeFileSync(OUT, JSON.stringify({ viewport: VIEWPORT, replaySpeed: REPLAY_SPEED, reports }, null, 1));

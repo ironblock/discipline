@@ -58,6 +58,7 @@ export const WhileTestsRun: Story = {
   args: { t: Number(events.find((e) => e['kind'] === 'fork' && e['lane'] === 'extraction' && e['of_turn'] === 3)?.['t']) + 400 },
   play: async ({ canvasElement }) => {
     const running = canvasElement.querySelector('.ex-branchcell [data-outcome="running"]')?.closest('.ex-branchcell');
+    await expect(running).toBeTruthy();
     await expect(running?.querySelector('[data-lane="extraction"]')).not.toBeNull();
     await waitFor(async () => expect(cableOf(canvasElement, running?.getAttribute('data-branch') ?? '')).toMatchObject({ live: true }));
   },

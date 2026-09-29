@@ -346,10 +346,10 @@ check_pages() {
   bash scripts/hygiene.sh --patterns scripts/pages-patterns.tsv --tree pages
 }
 
-# The web surface in exercise/: its typecheck, its lint, and every story as a
-# browser test (Vitest runs each Storybook story in Chromium, the plain unit
-# tests in Node). It needs Node and pnpm, at the versions exercise/package.json
-# declares. The install is frozen to the lockfile; the browser is fetched only
+# The web surface in exercise/: its typecheck, its lint, and every story but
+# Session/Live (driven by hand) as a browser test (Vitest runs each Storybook
+# story in Chromium, the plain unit tests in Node). It needs Node and pnpm, at
+# the versions exercise/package.json declares. The install is frozen to the lockfile; the browser is fetched only
 # when the machine does not have it yet, and only after the cheap steps pass.
 check_exercise() {
   (

@@ -206,6 +206,7 @@ export const MemoryDrawer: Story = {
     const drawer = () => q(canvasElement, '.ex-session__memory') as HTMLElement;
     await expect(q(canvasElement, '.ex-session[data-drawer]')).not.toBeNull();
     await expect(drawer().inert).toBe(false);
+    await expect(q(canvasElement, '.ex-session__memory .ex-memory')).not.toBeNull();
     await expect(q(canvasElement, '.ex-session__memory .ex-memory')?.closest('[inert]')).not.toBeNull();
     await userEvent.click(tab);
     await expect(tab.getAttribute('aria-expanded')).toBe('true');
@@ -297,21 +298,25 @@ export const DeepLink: Story = {
   args: { cursor: MOMENTS.done },
   render: ({ cursor }) => <OpenedByLink cursor={cursor} />,
   play: async ({ canvasElement }) => {
-    window.scrollTo(0, 0);
-    // A side call's address is its line's `seq`, as every node's is.
-    const target = idAt(MOMENTS.done, 'i/1');
-    window.location.hash = `#${target}`;
-    (canvasElement.querySelector('[data-open]') as HTMLElement).click();
-    await waitFor(async () => expect(canvasElement.querySelector(`[id="${target}"]`)?.hasAttribute('data-target')).toBe(true));
-    await waitFor(async () => {
-      const box = canvasElement.querySelector(`[id="${target}"]`)?.getBoundingClientRect();
-      await expect((box?.top ?? -1) >= 0 && (box?.bottom ?? Infinity) <= window.innerHeight).toBe(true);
-    });
-    const ids = [...canvasElement.querySelectorAll('[data-id]')].map((el) => [el.id, el.getAttribute('data-id')]);
-    await expect(ids.filter(([id, data]) => id !== data)).toEqual([]);
-    await expect(new Set(ids.map(([id]) => id)).size).toBe(ids.length);
-    await expect(canvasElement.querySelector('[id="memory/d1"]')).not.toBeNull();
-    history.replaceState(null, '', window.location.pathname + window.location.search);
+    try {
+      window.scrollTo(0, 0);
+      // A side call's address is its line's `seq`, as every node's is.
+      const target = idAt(MOMENTS.done, 'i/1');
+      window.location.hash = `#${target}`;
+      (canvasElement.querySelector('[data-open]') as HTMLElement).click();
+      await waitFor(async () => expect(canvasElement.querySelector(`[id="${target}"]`)?.hasAttribute('data-target')).toBe(true));
+      await waitFor(async () => {
+        const box = canvasElement.querySelector(`[id="${target}"]`)?.getBoundingClientRect();
+        await expect((box?.top ?? -1) >= 0 && (box?.bottom ?? Infinity) <= window.innerHeight).toBe(true);
+      });
+      const ids = [...canvasElement.querySelectorAll('[data-id]')].map((el) => [el.id, el.getAttribute('data-id')]);
+      await expect(ids.filter(([id, data]) => id !== data)).toEqual([]);
+      await expect(new Set(ids.map(([id]) => id)).size).toBe(ids.length);
+      await expect(canvasElement.querySelector('[id="memory/d1"]')).not.toBeNull();
+    } finally {
+      // Whatever happened, the address is left as found: a later story does not open on this one's hash.
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
   },
 };
 
@@ -363,8 +368,7 @@ export const LinesIntoMemory: Story = {
     cell.scrollIntoView({ block: 'center' });
     const lines = () => [...document.querySelectorAll(`.ex-links path.ex-link[data-from="${id('i/1')}"]`)];
     await waitFor(async () => expect(lines().length).toBeGreaterThan(0));
-    const entries = [...new Set([...document.querySelectorAll(`.ex-links path.ex-link[data-from="${id('i/1')}"]`)].map((l) => l.getAttribute('data-entry')))];
-    await waitFor(async () => expect(lines().length).toBeGreaterThan(0));
+    const entries = [...new Set(lines().map((l) => l.getAttribute('data-entry')))];
     for (const entry of entries) await expect(canvasElement.querySelector(`[id="memory/${entry}"]`)).not.toBeNull();
     await expect(lines().some((l) => l.hasAttribute('data-hot'))).toBe(false);
     await userEvent.hover(cell.querySelector('.ex-block') as HTMLElement);
@@ -402,7 +406,7 @@ export const ChainFromANode: Story = {
     });
     await userEvent.hover(node.querySelector('.ex-block') as HTMLElement);
     await waitFor(async () => expect(lit()).toEqual({ node: true, sides: true, cables: true, others: true }));
-    // Its entries are lit too, and only those.
+    // Its entries are lit too.
     await expect(q(canvasElement, '.ex-memory__entry[data-hot]')).not.toBeNull();
     await userEvent.unhover(node.querySelector('.ex-block') as HTMLElement);
     await waitFor(async () => expect(node.hasAttribute('data-hot')).toBe(false));
@@ -463,8 +467,13 @@ export const LinesDrawerShut: Story = {
     const cell = q(canvasElement, `[data-branch="${id('i/1')}"]`) as HTMLElement;
     await waitFor(async () => expect(cell.style.visibility).not.toBe('hidden'));
     cell.scrollIntoView({ block: 'center' });
-    await new Promise((r) => setTimeout(r, 300));
-    await expect(document.querySelectorAll('.ex-links path.ex-link')).toHaveLength(0);
+    // Open, the drawer has lines into it -- so none, shut, is the drawer's doing, not lines not drawn yet.
+    const lines = () => document.querySelectorAll('.ex-links path.ex-link').length;
+    const tab = await within(canvasElement).findByRole('button', { name: /working memory/ });
+    await userEvent.click(tab);
+    await waitFor(async () => expect(lines()).toBeGreaterThan(0));
+    await userEvent.click(tab);
+    await waitFor(async () => expect(lines()).toBe(0));
   },
 };
 

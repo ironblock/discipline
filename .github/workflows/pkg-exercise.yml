@@ -4,11 +4,12 @@ name: pkg-exercise
 # .github/check-owners.tsv says this package owns -- derived, never named
 # here, so the table and the workflow cannot drift apart.
 #
-# The toolchain comes from the package's own declarations, not from this
-# file: pnpm's version from `packageManager` in exercise/package.json, Node's
-# major from its `engines`. The check itself installs the dependencies and
-# fetches the browser; this job only adds the browser's system libraries,
-# which need the runner's package manager.
+# pnpm's version comes from `packageManager` in exercise/package.json. Node's
+# major is pinned here (and in gate-selftest.yml) to the one its `engines`
+# asks for at least: change them together. The check itself installs the
+# dependencies and fetches the browser; this job installs them first only to
+# reach Playwright's CLI, for the browser's system libraries, which need the
+# runner's package manager -- the check's own install then has nothing to do.
 
 on:
   workflow_call:
@@ -33,7 +34,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: exercise/pnpm-lock.yaml
 
-      - name: Install the browser's system libraries
+      - name: Install the dependencies, and the browser's system libraries
         run: |
           set -euo pipefail
           cd exercise

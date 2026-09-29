@@ -82,7 +82,7 @@ export const BlockTones: Story = {
  * The header and footer are quiet, not illegible: on every trunk fill, what
  * went in and came out, and a number, read at WCAG AA for small text
  * (4.5:1), and a unit and the role chip at 3:1.
- * Checked in every canonical look (colo and paper, dark and light), and with bloom's footer inline.
+ * Checked here in the default look, and in bloom in daylight below.
  */
 export const BlockFooterContrast: Story = {
   name: 'Block · footer contrast',
@@ -97,6 +97,7 @@ export const BlockFooterContrast: Story = {
   ),
   play: async ({ canvasElement }) => {
     const floors = [['.ex-block__flow', 4.5], ['.ex-stat', 4.5], ['.ex-stat__unit', 3], ['.ex-block__label', 3]] as const;
+    await expect(floors.filter(([selector]) => canvasElement.querySelector(selector) === null).map(([selector]) => selector)).toEqual([]);
     const failing = floors.flatMap(([selector, floor]) =>
       [...canvasElement.querySelectorAll(selector)]
         .map((el) => ({ el, ratio: contrast(el) }))
@@ -126,19 +127,23 @@ export const SettingsPanel: Story = {
     </Preferred>
   ),
   play: async ({ canvasElement }) => {
-    const root = canvasElement.querySelector('.ex-settings')?.closest('.ex-root');
-    const group = (label: string) => canvas(canvasElement).getByRole('radiogroup', { name: label });
-    await userEvent.click(canvas(canvasElement).getByRole('button', { name: 'settings' }));
-    await userEvent.click(canvas(group('theme')).getByRole('radio', { name: 'paper' }));
-    await userEvent.click(canvas(group('mode')).getByRole('radio', { name: 'light' }));
-    await expect([root?.getAttribute('data-theme'), root?.getAttribute('data-mode')]).toEqual(['paper', 'light']);
-    await userEvent.click(canvas(group('motion')).getByRole('radio', { name: 'off' }));
-    await expect(root?.getAttribute('data-motion')).toBe('still');
-    await expect(canvas(canvasElement).queryByRole('radiogroup', { name: 'corners' })).not.toBeNull();
-    await userEvent.click(canvas(group('connectors')).getByRole('radio', { name: 'sweep' }));
-    await expect(canvas(canvasElement).queryByRole('radiogroup', { name: 'corners' })).toBeNull();
-    await expect(JSON.parse(localStorage.getItem('exercise.prefs') ?? '{}')).toMatchObject({ theme: 'paper', mode: 'light', motion: 'off', connectors: 'sweep' });
-    localStorage.removeItem('exercise.prefs');
+    try {
+      const root = canvasElement.querySelector('.ex-settings')?.closest('.ex-root');
+      const group = (label: string) => canvas(canvasElement).getByRole('radiogroup', { name: label });
+      await userEvent.click(canvas(canvasElement).getByRole('button', { name: 'settings' }));
+      await userEvent.click(canvas(group('theme')).getByRole('radio', { name: 'paper' }));
+      await userEvent.click(canvas(group('mode')).getByRole('radio', { name: 'light' }));
+      await expect([root?.getAttribute('data-theme'), root?.getAttribute('data-mode')]).toEqual(['paper', 'light']);
+      await userEvent.click(canvas(group('motion')).getByRole('radio', { name: 'off' }));
+      await expect(root?.getAttribute('data-motion')).toBe('still');
+      await expect(canvas(canvasElement).queryByRole('radiogroup', { name: 'corners' })).not.toBeNull();
+      await userEvent.click(canvas(group('connectors')).getByRole('radio', { name: 'sweep' }));
+      await expect(canvas(canvasElement).queryByRole('radiogroup', { name: 'corners' })).toBeNull();
+      await expect(JSON.parse(localStorage.getItem('exercise.prefs') ?? '{}')).toMatchObject({ theme: 'paper', mode: 'light', motion: 'off', connectors: 'sweep' });
+    } finally {
+      // Whatever happened, nothing is remembered for the stories after.
+      localStorage.removeItem('exercise.prefs');
+    }
     await userEvent.keyboard('{Escape}');
     await expect(canvas(canvasElement).queryByRole('group', { name: 'settings' })).toBeNull();
   },

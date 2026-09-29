@@ -244,8 +244,11 @@ export const FollowsTheBottom: Story = {
     });
     await expect(reading).toBeDefined();
     const seen = reading?.getBoundingClientRect().top ?? 0;
+    const tall = page.scrollHeight;
     later.click();
-    await new Promise((r) => setTimeout(r, 600));
+    // The page has grown -- only then is staying put a choice, not a page that has not moved yet.
+    await waitFor(async () => expect(page.scrollHeight).toBeGreaterThan(tall));
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     await expect(atBottom(), where('scrolled away, after the page grew')).toBe(false);
     await expect(Math.abs((reading?.getBoundingClientRect().top ?? 0) - seen)).toBeLessThan(2);
     // The composer's fade is as wide as the composer: a lane passing under the strip beyond it is neither painted over nor unreachable.
@@ -439,6 +442,8 @@ const ChromeLegible: Story = {
     probe.style.color = 'var(--ink-faint)';
     const faint = getComputedStyle(probe).color;
     probe.remove();
+    // A selector that matches nothing would pass vacuously: each is on screen.
+    await expect(LEGIBLE.filter((selector) => canvasElement.querySelector(selector) === null)).toEqual([]);
     const failing = [
       ...LEGIBLE.flatMap((selector) =>
         [...canvasElement.querySelectorAll(selector)].map((el) => ({ what: `${selector.slice(-24)}`, floor: getComputedStyle(el).color === faint ? 3 : 4.5, ratio: contrast(el) })),
