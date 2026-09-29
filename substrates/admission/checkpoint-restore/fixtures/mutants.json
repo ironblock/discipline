@@ -1,0 +1,200 @@
+{
+ "mutants": [
+  {
+   "label": "the comparator ignores the log-probabilities",
+   "old": "return max((abs(A[t] - B[t]) if t in A and t in B else math.inf)",
+   "new": "return max((0.0 if t in A and t in B else math.inf)"
+  },
+  {
+   "label": "the cache_n check removed",
+   "old": "return next((a for a in m[\"attempts\"] if all(w[\"cache_n\"] > 0 for w in warms(a))), None)",
+   "new": "return next((a for a in m[\"attempts\"]), None)"
+  },
+  {
+   "label": "no retry after an attempt with no reuse",
+   "old": "if warm[\"cache_n\"] > 0 and all(w[\"cache_n\"] > 0 for w in more): break",
+   "new": "break"
+  },
+  {
+   "label": "a missing token made harmless",
+   "old": "if t in A and t in B else math.inf)",
+   "new": "if t in A and t in B else 0.0)"
+  },
+  {
+   "label": "a recurrent reference accepted",
+   "old": "if not hdr.get(\"architecture\") or recurrent:",
+   "new": "if not hdr.get(\"architecture\"):"
+  },
+  {
+   "label": "a reference on another engine accepted",
+   "old": "if ident.get(\"reference_engine\") != ident.get(\"rung_engine\"):",
+   "new": "if False:"
+  },
+  {
+   "label": "the shape match removed",
+   "old": "if any(abs(r - fn) > crit[\"shape_match\"] * fn for r in rns):",
+   "new": "if False:"
+  },
+  {
+   "label": "the reference's warm-against-cold left out of the tolerance",
+   "old": "tol = {\"cold_cold_reference\": cold_floor(ra, k), \"warm_cold_reference\": max(dist(w[\"top\"], ra[\"cold\"][0][\"top\"], k) for w in warms(ra))}",
+   "new": "tol = {\"cold_cold_reference\": cold_floor(ra, k)}"
+  },
+  {
+   "label": "the rung's cold floor left out of the tolerance",
+   "old": "    tol[\"cold_cold_rung\"] = cold_floor(fa, k)\n",
+   "new": ""
+  },
+  {
+   "label": "pass and fail swapped at the boundary",
+   "old": "\"pass\" if d <= tau else \"fail\"",
+   "new": "\"pass\" if d < tau else \"fail\""
+  },
+  {
+   "label": "the reference primed with all of P",
+   "old": "        prime = call(endpoint, prefix(drop) + X, True, slot, n_probs)",
+   "new": "        prime = call(endpoint, P + X, True, slot, n_probs)"
+  },
+  {
+   "label": "the declared attempt count unenforced",
+   "old": "if len(rung[\"attempts\"]) > need or len(ref[\"attempts\"]) > need:",
+   "new": "if False:"
+  },
+  {
+   "label": "an infinite tolerance allowed",
+   "old": "    if not math.isfinite(tau):",
+   "new": "    if False:"
+  },
+  {
+   "label": "missing engine digests accepted",
+   "old": "if not (HEX64.fullmatch(str(ident.get(\"rung_engine\", \"\"))) and HEX64.fullmatch(str(ident.get(\"reference_engine\", \"\")))):",
+   "new": "if False:"
+  },
+  {
+   "label": "the one-procedure check removed",
+   "old": "or min(rung.get(\"n_probs\", 0), ref.get(\"n_probs\", 0)) < 2 * k or (rung.get(\"role\"), ref.get(\"role\")) != (\"rung\", \"reference\"):",
+   "new": "or False:"
+  },
+  {
+   "label": "only the reference's first warm draw bounds",
+   "old": "max(dist(w[\"top\"], ra[\"cold\"][0][\"top\"], k) for w in warms(ra))",
+   "new": "dist(ra[\"warm\"][\"top\"], ra[\"cold\"][0][\"top\"], k)"
+  },
+  {
+   "label": "no reuse after too few attempts accepted",
+   "old": "if fa is None and len(rung[\"attempts\"]) < need:",
+   "new": "if False:"
+  },
+  {
+   "label": "the cold floor over the first pair only",
+   "old": "return max((dist(x[\"top\"], y[\"top\"], k) for x, y in itertools.combinations(att[\"cold\"], 2)), default=0.0)",
+   "new": "return dist(att[\"cold\"][0][\"top\"], att[\"cold\"][1][\"top\"], k)"
+  },
+  {
+   "label": "full_attention_interval not read as recurrent",
+   "old": "\"recurrent\", \"full_attention_interval\", ",
+   "new": "\"recurrent\", "
+  },
+  {
+   "label": "the attempt cap one short",
+   "old": "if len(rung[\"attempts\"]) > need or len(ref[\"attempts\"]) > need:",
+   "new": "if len(rung[\"attempts\"]) >= need or len(ref[\"attempts\"]) > need:"
+  },
+  {
+   "label": "no repeated warm draws",
+   "old": "            for _ in range(warm_draws - 1):",
+   "new": "            for _ in range(0):"
+  },
+  {
+   "label": "the reference's draw count unenforced",
+   "old": "if len(warms(ra)) < crit[\"reference_warm_draws\"]:",
+   "new": "if False:"
+  },
+  {
+   "label": "the rung judged on its largest draw, not its one warm call",
+   "old": "d = dist(fa[\"warm\"][\"top\"], fa[\"cold\"][0][\"top\"], k)",
+   "new": "d = max(dist(w[\"top\"], fa[\"cold\"][0][\"top\"], k) for w in warms(fa))"
+  },
+  {
+   "label": "an eviction on a later draw not retried",
+   "old": "if warm[\"cache_n\"] > 0 and all(w[\"cache_n\"] > 0 for w in more): break",
+   "new": "if warm[\"cache_n\"] > 0: break"
+  },
+  {
+   "label": "a reusing attempt judged by its first draw alone",
+   "old": "return next((a for a in m[\"attempts\"] if all(w[\"cache_n\"] > 0 for w in warms(a))), None)",
+   "new": "return next((a for a in m[\"attempts\"] if a[\"warm\"][\"cache_n\"] > 0), None)"
+  },
+  {
+   "label": "the comparator over the warm side's top-k only",
+   "old": "for t in set(top(A)) | set(top(B)))",
+   "new": "for t in set(top(A)))"
+  },
+  {
+   "label": "the sampler comparison dropped",
+   "old": " or rung.get(\"sampler\") != ref.get(\"sampler\") or rung.get(\"sampler\") != SAMPLER",
+   "new": ""
+  },
+  {
+   "label": "the roles comparison dropped",
+   "old": " or (rung.get(\"role\"), ref.get(\"role\")) != (\"rung\", \"reference\"):",
+   "new": ":"
+  },
+  {
+   "label": "the engine digest matched by prefix",
+   "old": "HEX64 = re.compile(r\"[0-9a-f]{64}\")",
+   "new": "HEX64 = re.compile(r\"[0-9a-f]{16}.*\")"
+  },
+  {
+   "label": "six tokens compared, not five",
+   "old": "top_k = 5 ",
+   "new": "top_k = 6 ",
+   "file": "criterion.toml"
+  },
+  {
+   "label": "the shape match on the first reference draw only",
+   "old": "    if any(abs(r - fn) > crit[\"shape_match\"] * fn for r in rns):",
+   "new": "    if abs(rn - fn) > crit[\"shape_match\"] * fn:"
+  },
+  {
+   "label": "the reference's two-cold requirement dropped",
+   "old": "if len(ra[\"cold\"]) < 2 or",
+   "new": "if len(ra[\"cold\"]) < 1 or"
+  },
+  {
+   "label": "the sampler not held to the instrument's",
+   "old": " or rung.get(\"sampler\") != SAMPLER \\",
+   "new": " \\"
+  },
+  {
+   "label": "the prompt not held to the instrument's",
+   "old": " or ref.get(\"prompts\", {}).get(\"P_sha256\") != sha(P.encode()) \\",
+   "new": " \\"
+  },
+  {
+   "label": "a recurrent architecture name not read",
+   "old": " + ([hdr[\"architecture\"]] if any(m in str(hdr.get(\"architecture\", \"\")) for m in (\"rwkv\", \"mamba\", \"lfm\")) else [])",
+   "new": ""
+  },
+  {
+   "label": "the reference's cold calls on the shortened prompt",
+   "old": "        colds = [call(endpoint, P + Y, False, slot, n_probs) for _ in range(cold)]",
+   "new": "        colds = [call(endpoint, prefix(drop) + Y, False, slot, n_probs) for _ in range(cold)]"
+  },
+  {
+   "label": "the gguf reader stopping early",
+   "old": "    for _ in range(nkv):",
+   "new": "    for _ in range(nkv // 2):"
+  },
+  {
+   "label": "the reference's cold floor left out of the tolerance",
+   "old": "tol = {\"cold_cold_reference\": cold_floor(ra, k), \"warm_cold_reference\":",
+   "new": "tol = {\"warm_cold_reference\":"
+  },
+  {
+   "label": "the reference's warm call on the shortened prompt",
+   "old": "        warm = call(endpoint, P + Y, True, slot, n_probs)",
+   "new": "        warm = call(endpoint, prefix(drop) + Y, True, slot, n_probs)"
+  }
+ ]
+}
