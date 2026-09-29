@@ -101,7 +101,7 @@ export class ReplayTransport implements DriveTransport {
   readonly #speed: number;
   readonly #emitted: LogLine[] = [];
   readonly #listeners = new Set<(line: LogLine) => void>();
-  readonly #timers = new Set<ReturnType<typeof setTimeout>>();
+  #timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(recording: Recording, { speed = 1 }: { readonly speed?: number } = {}) {
     this.#log = placed(recording);
@@ -111,7 +111,7 @@ export class ReplayTransport implements DriveTransport {
   subscribe(listener: (line: LogLine) => void): () => void {
     for (const event of this.#emitted) listener(event);
     this.#listeners.add(listener);
-    if (this.#timers.size === 0) this.#play();
+    if (this.#timer === undefined) this.#play();
     return () => this.#listeners.delete(listener);
   }
 
@@ -120,20 +120,30 @@ export class ReplayTransport implements DriveTransport {
   }
 
   close(): void {
-    for (const timer of this.#timers) clearTimeout(timer);
-    this.#timers.clear();
+    clearTimeout(this.#timer);
+    this.#timer = undefined;
   }
 
-  /** Schedule everything not yet emitted, from where the recording stopped. */
+  /**
+   * Play on from where the recording stopped: one timer at a time, which
+   * delivers every line due by then and sets the next -- timed from when play
+   * began, so the waits do not drift.
+   */
   #play(): void {
     const from = this.#emitted.at(-1)?.t ?? 0;
-    for (const event of this.#log.slice(this.#emitted.length)) {
-      const timer = setTimeout(() => {
-        this.#timers.delete(timer);
-        this.#emitted.push(event);
-        for (const listener of this.#listeners) listener(event);
-      }, (event.t - from) / this.#speed);
-      this.#timers.add(timer);
-    }
+    const began = Date.now();
+    const due = (line: LogLine) => began + (line.t - from) / this.#speed;
+    const next = () => {
+      const upcoming = this.#log[this.#emitted.length];
+      if (!upcoming) return void (this.#timer = undefined);
+      this.#timer = setTimeout(() => {
+        for (let line = this.#log[this.#emitted.length]; line && due(line) <= Date.now(); line = this.#log[this.#emitted.length]) {
+          this.#emitted.push(line);
+          for (const listener of this.#listeners) listener(line);
+        }
+        next();
+      }, Math.max(0, due(upcoming) - Date.now()));
+    };
+    next();
   }
 }

@@ -13,8 +13,9 @@
  *   read     → their first keystroke in the composer, or first click on a
  *              declare-seam control
  *   compose  → the accepted send or declare
- *   blocked  from the first send refused because work was in flight → the
- *            accepted send (the time after it is not composing)
+ *   blocked  from the first send held or refused because work was in
+ *            flight → the accepted send (the time after it is not composing);
+ *            the gap is emitted once, at that acceptance (Q4 (d), #117)
  *   away     every interval the page was hidden, taken out of whichever
  *            phase it interrupted
  */

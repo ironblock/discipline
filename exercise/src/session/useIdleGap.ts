@@ -7,10 +7,12 @@ import type { IdleGapBody } from './gap.ts';
 
 /**
  * How recently an input event must have come for the person to count as
- * already interacting when a turn settles -- notice is then zero (Q4). An
- * interpretation: Q4 says "already interacting" and gives no window.
+ * already interacting when a turn settles -- notice is then zero. Q4 (a),
+ * ruled on #117: `presence_window_ms`, a constant log v1 declares on
+ * `idle.gap`'s definition
+ * (https://github.com/ironblock/discipline/issues/117#issuecomment-5883557987).
  */
-const INTERACTING_MS = 2_000;
+const PRESENCE_WINDOW_MS = 2_000;
 
 const MODIFIERS: ReadonlySet<string> = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Tab', 'Escape']);
 
@@ -26,7 +28,7 @@ const MODIFIERS: ReadonlySet<string> = new Set(['Shift', 'Control', 'Alt', 'Meta
  *              opened: already in view when it settled is not a sign)
  *   composing  a keystroke in the composer; a click on its refill controls
  *   refused    Enter on a draft while work is in flight -- the composer holds
- *              the send for that reason
+ *              the send for that reason, and a held send emits nothing
  *   away       the page hidden
  */
 export interface IdleGapCarrier {
@@ -34,7 +36,7 @@ export interface IdleGapCarrier {
   readonly carry: (endedBy: GapEnd) => IdleGapBody | undefined;
   /** The carrying command was admitted: the gap is over. */
   readonly admitted: () => void;
-  /** A send was refused because work was in flight: the person is blocked from here. */
+  /** A send was held or refused because work was in flight: the person is blocked from here. It carries no gap (Q4 (d)). */
   readonly refused: () => void;
 }
 
@@ -51,7 +53,7 @@ export function useIdleGap(session: Session): IdleGapCarrier {
     if (seq === undefined || seq === opened.current) return;
     opened.current = seq;
     const now = performance.now();
-    meter.current = new GapMeter(seq, now, { hidden: document.visibilityState === 'hidden', interacting: now - lastInput.current < INTERACTING_MS });
+    meter.current = new GapMeter(seq, now, { hidden: document.visibilityState === 'hidden', interacting: now - lastInput.current < PRESENCE_WINDOW_MS });
     // The settled block coming into view: the last node of the trunk, once drawn.
     const block = document.querySelector('.ex-trunk .ex-trunk__node:last-child');
     if (!block || typeof IntersectionObserver === 'undefined') return;

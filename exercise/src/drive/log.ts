@@ -126,10 +126,13 @@ export type Response = V0.ResponseLine & {
   /** AHEAD (R3): llama.cpp's timings for the call. */
   readonly timings?: Timings;
   /**
-   * AHEAD (R3, the surface's ask, ruled into R3's scope on #117): where its
-   * tool calls began in what it wrote -- tokens and ms generated before the
-   * first tool-call chunk. `predicted_n` alone absent when only the time was
-   * kept (a harness's transcript that recorded when a call part began).
+   * The surface's ask, refused in R3 on #117 -- a client-derived split, not
+   * a number the server reports
+   * (https://github.com/ironblock/discipline/issues/117#issuecomment-5883589448):
+   * where its tool calls began in what it wrote -- tokens and ms generated
+   * before the first tool-call chunk. Only recordings carry it; `predicted_n`
+   * alone absent when only the time was kept (a harness's transcript that
+   * recorded when a call part began).
    */
   readonly calls_from?: { readonly predicted_n?: number; readonly predicted_ms: number };
   /** AHEAD (R2/I5r): the whole reasoning, as the deltas streamed it. */

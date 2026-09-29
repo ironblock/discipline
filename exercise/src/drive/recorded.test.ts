@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { fold } from '../session/fold.ts';
+import type { LogLine } from './log.ts';
 import { RECORDINGS, ReplayTransport, placed, recordedAt } from './recorded.ts';
 import { SPECIMEN } from './specimen.ts';
 
@@ -81,7 +82,33 @@ describe('the other recordings: where the first drive never went', () => {
   });
 });
 
+/** The kinds a recording's `migration` header says it carries under their own name, with their counts. */
+function declaredUnknown(migration: readonly string[]): [string, number][] {
+  const line = migration.find((m) => m.includes('carried under their own name'));
+  return line ? [...line.matchAll(/'([^']+)': (\d+)/g)].map(([, kind, n]) => [kind!, Number(n)]) : [];
+}
+
 describe('replaying a recording', () => {
+  it.each(Object.keys(RECORDINGS) as (keyof typeof RECORDINGS)[])('%s replays whole, in order, and folds with nothing unknown its header does not declare', (name) => {
+    vi.useFakeTimers();
+    try {
+      const recording = RECORDINGS[name];
+      const log = placed(recording);
+      const transport = new ReplayTransport(recording, { speed: 1 });
+      const seen: LogLine[] = [];
+      transport.subscribe((line) => seen.push(line));
+      vi.advanceTimersByTime(log.at(-1)!.t);
+      transport.close();
+      // Where and when each line landed, not the 600 KB of what it says: placement is tested in `place`, delivery here.
+      const at = (lines: readonly LogLine[]) => lines.map((line) => `${line.seq} ${line.kind} ${line.t}`).join('\n');
+      expect(at(seen)).toBe(at(log));
+      expect(seen.filter((line, i) => line.seq !== i)).toEqual([]);
+      expect([...fold(seen).unknown]).toEqual(declaredUnknown(recording.migration));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('survives a subscribe, close and subscribe again -- a StrictMode remount -- and carries on from where it stopped', async () => {
     vi.useFakeTimers();
     try {
