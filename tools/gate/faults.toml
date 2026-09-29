@@ -6341,6 +6341,22 @@ failure_class = "client.millis-keeps-an-integer-past-the-record"
 migrated = false
 
 [[fault]]
+id = "client.millis-writes-an-integer-as-a-decimal"
+kind = "lane-fault"
+check = "lanes"
+label = "client.millis-writes-an-integer-as-a-decimal"
+failure_class = "client.millis-writes-an-integer-as-a-decimal"
+migrated = false
+
+[[fault]]
+id = "client.millis-writes-a-decimal-as-an-integer"
+kind = "lane-fault"
+check = "lanes"
+label = "client.millis-writes-a-decimal-as-an-integer"
+failure_class = "client.millis-writes-a-decimal-as-an-integer"
+migrated = false
+
+[[fault]]
 id = "client.head-a-reasoning-change-is-unattributed"
 kind = "lane-fault"
 check = "lanes"
