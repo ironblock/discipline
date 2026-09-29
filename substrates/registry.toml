@@ -265,6 +265,23 @@ change under a stable id. Nothing here can change without the entry changing: \
 new acts are a new digest, and a new digest is a new piece of equipment, not a \
 new instance of this one."""
 
+[equipment.canned-loopback-cache-n]
+display_name = "the canned loopback server, cache count under the key a server sends"
+entry_type = "canned-server"
+hardware_fingerprint = "486ad478be67ee9ae6a22a0940d8106ee8df88c3eef9a33ece7fd6ea443d9e40"
+role = "diet-drive's own server after #156: the acts of `canned-loopback` with the reused-prefix count replayed as `timings.cache_n`, the key every committed real-server capture carries, in place of `timings.prompt_n_cached`, which none does"
+measured = "2026-09-29"
+measured_by = """
+Both values posted by track three on #156 from `5d2da54`, computed there by \
+`canned::acts_digest()` and `canned::hardware_fingerprint()`. The fingerprint \
+was recomputed by the data seat with `check-fingerprints.py`'s `digest_of` over \
+`acts_sha256` and `serves`, and agrees; the same computation over the old acts \
+gives `canned-loopback`'s `fc96af47...`, so one rule produces both."""
+serves = "diet-drive canned"
+acts_sha256 = "188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb90736979b90"
+acts_sha256_is = "`canned::acts_digest()`, as for `canned-loopback`; the acts that entry pins are kept byte for byte and still hash to its digest"
+no_instances_because = "as for `canned-loopback`: this entry exists because new acts are a new piece of equipment, not an instance of the old one (#156)"
+
 # ---------------------------------------------------------------------------
 # substrates
 # ---------------------------------------------------------------------------
@@ -530,6 +547,18 @@ weights_kind = "canned"
 weights_acts_sha256 = "8947e69543df56300d85ed571a6799d66b25a51c18c6d456193918864d7f5e9d"
 reproducible_by_config = true
 reproducible_because = "replay the acts and the same bytes play again; exact match, no band. Gate 1 compares a canned run exactly rather than re-firing it within a band meant for sampling and hardware that cannot move here."
+
+[substrate.canned-cache-n]
+equipment = "canned-loopback-cache-n"
+description = "diet-drive's canned server after #156, replaying the reused-prefix count as `timings.cache_n`; `canned` stays as it was, and every record before #156 resolves to it"
+pinned = true
+engine_name = "diet-drive canned"
+engine_identity = "188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb90736979b90"
+engine_identity_is = "the acts digest, as for `canned`"
+weights_kind = "canned"
+weights_acts_sha256 = "188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb90736979b90"
+reproducible_by_config = true
+reproducible_because = "as for `canned`: replay the acts and the same bytes play again; exact match, no band"
 
 # The sense bakeoff's four embedder cells. A substrate here is an ENCODER RUN,
 # not a served model: no server, no sampler, a pinned library on this host's
