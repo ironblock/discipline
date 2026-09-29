@@ -6253,6 +6253,54 @@ failure_class = "client.canned-plays-reasoning-as-text"
 migrated = false
 
 [[fault]]
+id = "client.stream-drops-the-timings-chunk"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-drops-the-timings-chunk"
+failure_class = "client.stream-drops-the-timings-chunk"
+migrated = false
+
+[[fault]]
+id = "client.stream-reads-an-absent-timing-as-zero"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-reads-an-absent-timing-as-zero"
+failure_class = "client.stream-reads-an-absent-timing-as-zero"
+migrated = false
+
+[[fault]]
+id = "client.stream-rounds-a-timing-through-a-float"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-rounds-a-timing-through-a-float"
+failure_class = "client.stream-rounds-a-timing-through-a-float"
+migrated = false
+
+[[fault]]
+id = "client.millis-spells-what-the-record-cannot"
+kind = "lane-fault"
+check = "lanes"
+label = "client.millis-spells-what-the-record-cannot"
+failure_class = "client.millis-spells-what-the-record-cannot"
+migrated = false
+
+[[fault]]
+id = "client.canned-drops-its-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "client.canned-drops-its-timings"
+failure_class = "client.canned-drops-its-timings"
+migrated = false
+
+[[fault]]
+id = "client.dialect-reads-an-unsent-cache-path"
+kind = "lane-fault"
+check = "lanes"
+label = "client.dialect-reads-an-unsent-cache-path"
+failure_class = "client.dialect-reads-an-unsent-cache-path"
+migrated = false
+
+[[fault]]
 id = "client.head-a-reasoning-change-is-unattributed"
 kind = "lane-fault"
 check = "lanes"
@@ -6554,6 +6602,30 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.serve-auth-is-asked-before-the-host-check"
 failure_class = "drive.serve-auth-is-asked-before-the-host-check"
+migrated = false
+
+[[fault]]
+id = "drive.canned-first-registered-acts-edited"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.canned-first-registered-acts-edited"
+failure_class = "drive.canned-first-registered-acts-edited"
+migrated = false
+
+[[fault]]
+id = "drive.canned-fingerprint-drifts-from-the-registry-rule"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.canned-fingerprint-drifts-from-the-registry-rule"
+failure_class = "drive.canned-fingerprint-drifts-from-the-registry-rule"
+migrated = false
+
+[[fault]]
+id = "drive.canned-plays-the-first-registered-acts"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.canned-plays-the-first-registered-acts"
+failure_class = "drive.canned-plays-the-first-registered-acts"
 migrated = false
 
 [[fault]]
