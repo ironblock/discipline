@@ -4,7 +4,8 @@
 # applier's selftest must pass; the applier over the committed rows, judge
 # verdicts and key must reproduce word.json byte for byte, and its word must
 # be the claim rows'; the comparison row must be comparison.json's word and counts, endpoint 2's
-# hypothesis, consuming comparison.json; the rule and applier must be the digests the
+# hypothesis, consuming comparison.json, and the README body (comments stripped) must name only that word, carry one
+# rate row with its rates and difference, and state the tallies; the rule and applier must be the digests the
 # pre-registration names; the front matter's numbers must re-derive.
 # Exit 0 when all hold, 1 when any fails, 2 when a step cannot run.
 set -uo pipefail
@@ -61,8 +62,13 @@ row_ok = len(comps) == 1 and comps[0]["result"] == cmp_["word"] and comps[0]["pr
 row_ok = row_ok and all(type(c["n"]) is int and type(c["of"]) is int for c in comps[0]["counts"])  # 72.0 is not a count
 # the README body states endpoint 2 as comparison.json and the row do: its word, the table's rates, the tallies
 body = re.split(r"\n\+\+\+\n", (here / "README.md").read_text(encoding="utf-8"), maxsplit=1)[-1]
-for need in (f"reads `{cmp_['word']}`", f"| rate | {cmp_['rate_27B']} | {cmp_['rate_S2']} |", f"{int(counts[0])} of {cmp_['shared']} and {int(counts[1])} of {cmp_['shared']}"):
-    if need not in body: print(f"recompute: the README body does not state {need!r}"); sys.exit(1)
+body = re.sub(r"<!--.*?-->", "", body, flags=re.S)  # as check-results reads a body: comments are not the record
+said = re.findall(r"`(substrate_dependent|substrate_independent|inconclusive|unadjudicated)`", body)
+rows = [l for l in body.splitlines() if l.startswith("| rate |")]
+if not said or any(w != cmp_["word"] for w in said): print(f"recompute: the README body names the comparison word as {said}, not only {cmp_['word']!r}"); sys.exit(1)
+if len(rows) != 1 or not rows[0].startswith(f"| rate | {cmp_['rate_27B']} | {cmp_['rate_S2']} | {cmp_['difference']} "):
+    print(f"recompute: the README body's endpoint 2 rate row is not comparison.json's rates and difference: {rows}"); sys.exit(1)
+if f"{int(counts[0])} of {cmp_['shared']} and {int(counts[1])} of {cmp_['shared']}" not in body: print("recompute: the README body does not state the two tallies"); sys.exit(1)
 if not row_ok:
     print(f"recompute: the comparison row is not endpoint 2's hypothesis, comparison.json's word {cmp_['word']!r} and counts {[w['n'] for w in want]} of {cmp_['shared']}, consuming comparison.json"); sys.exit(1)
 front = tomllib.loads(re.match(r"\+\+\+\n(.*?)\n\+\+\+\n", (here / "README.md").read_text(encoding="utf-8"), re.S).group(1))
@@ -81,8 +87,9 @@ import hashlib, json, pathlib, re, sys, tomllib
 #
 # FRONT MATTER, AND NOT THE PROSE. This step reads the `+++` block and nothing
 # else, so the figures in the body -- which are the ones a reader actually takes
-# away -- are bound to the product by nobody. A review demonstrated it: altering
-# a headline rate in the prose leaves every gate green. Disclosed in the
+# away -- are bound to the product by nobody here, except endpoint 2's word, rate
+# row and tallies, which the second step checks. A review demonstrated it: altering
+# a headline rate elsewhere in the prose leaves every gate green. Disclosed in the
 # directory's `known_defects` rather than papered over, because closing it needs
 # a declaration this schema does not have yet -- the directory saying which
 # product fields its prose cites -- and that is a ruling, not a patch.
