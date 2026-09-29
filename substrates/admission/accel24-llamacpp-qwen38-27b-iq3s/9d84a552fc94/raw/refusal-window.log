@@ -1,0 +1,4 @@
+2026-09-29T07:10:36Z floor before: pid=226606 vram=23684 MiB mem_avail_mib=18941
+2026-09-29T07:10:42Z candidate cpu-only up: pid=237884 exe=865044a2bf2d5685 mem_avail_mib=18376
+2026-09-29T07:10:45Z probe rc=0
+2026-09-29T07:10:46Z floor after: pid=226606 vram=23684 MiB health={"status":"ok"}

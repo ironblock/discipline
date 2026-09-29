@@ -373,6 +373,10 @@ image flags, which govern how the model is prompted."""
 # the base-checksum is what the archive has, and calling it the deployment's
 # digest without saying so would overstate what an instance pins.
 hazards = "speculation (DFlash) is not bit-exact with the spec-off path: on #161's prompt at greedy decoding, every on/off pair first differs at token 51, and spec-off is bitwise reproducible within a process and across two; spec-on is not reproducible with itself: after a restore, the server's first request (3,362 drafted) diverged from the next four (2,604-2,610 drafted) at token 67 (substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/, 2026-09-29). The margins at the divergences are unmeasured. The template does not read a reasoning_effort key: every level renders identically. Nothing may be gated on token identity"
+effort = "n/a (template has no levels)"
+effort_is = "every level tried returns HTTP 200 and renders identically: the template reads no reasoning_effort key, so every level is a silent no-op (substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/raw/refusal.json, raw/kw.json). Eligibility is on the rendered state (planning, #143, comment 5885752512): a claim that declares effort n/a is eligible here; a claim that requests a level is ineligible, because its regime would name an instruction the head never carried"
+reasoning_strength = "ignored"
+reasoning_strength_is = "the template reads no reasoning_strength key: a silent no-op"
 
 [[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
 id = "2026-07-25"
@@ -512,6 +516,10 @@ serving_context_is = "the unified pool (--kv-unified) shared by both slots, not 
 serving_flags = "-ngl 99, -t 8, -c 229376, -np 2, --kv-unified, -ctk q8_0, -ctv q8_0, -fa on, -b 1024, -ub 512, --jinja, --spec-type draft-mtp, --spec-draft-n-max 2"
 serving_flags_are = "the inference seat's recommended line (#143, comment 5883986293), as launched in the cells window of 2026-09-29"
 reasoning_state = "no reasoning, effort or budget flag on the serving line. Per request, reasoning_effort renders: absent = xhigh; low and medium render differently; high, none and max are refused (HTTP 500, the template raising 'Unexpected reasoning effort'); reasoning_strength is not read. Side by side, the floor's template reads no effort key at all. No word is chosen on this cell (substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/cells.toml)"
+effort = { accepted = ["low", "medium", "xhigh"], refused = ["high", "none", "max"], default = "xhigh" }
+effort_is = "a capability fact of the template, not a cell word (planning, #143, 2026-09-29): a request at a refused level returns HTTP 500 (the loud case; substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/raw/refusal.json); a request with no level runs at xhigh and nothing in the reply says so (the silent case: the resolved level is read from the rendered head, never from the request); a claim declaring a refused level is ineligible on this rung"
+reasoning_strength = "ignored"
+reasoning_strength_is = "the template reads no reasoning_strength key: every level renders as the default, a silent no-op"
 headroom = "1,966 MiB free with both slots prefilled to 114,122 tokens (peak 22,610 of 24,576 MiB), against the floor's 1,208 under Q9 as amended"
 hazards = "speculation (MTP) is not bit-exact with the spec-off path: on #161's prompt at greedy decoding, every on/off pair first differs at token 55; spec-off is bitwise reproducible within a process and across two, and spec-on with itself (833 drafted in every rep). The margins at the divergence are unmeasured. A hybrid recurrent model. Nothing may be gated on token identity"
 admission = "cells in substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/ (2026-09-29); not admitted: the depth probe and the parity fire have not run on this line"

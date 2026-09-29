@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Gate 0 for a cells directory (#143). Every raw file cells.toml cites must hash as it says; every
 # word derivable from a raw file is re-derived here, and a word that disagrees is refused. Words not
-# derivable from a raw file (n/a, unreported, unadjudicated) are checked for form only.
+# derivable from a raw file (n/a, unreported, unadjudicated) are checked for form only. A rung's first
+# canary draw is its baseline (Q5, planning, #143), re-derived here from the single draw's log.
 # Exit 0 when all hold, 1 when any fails, 2 when a step cannot run.
 set -uo pipefail
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,7 +20,7 @@ WORDS = ("pass", "fail", "unreported", "unadjudicated")
 raw = {}
 for name, c in cells.items():
     w = c.get("word", "")
-    if not (w in WORDS or re.fullmatch(r"n/a \(.+\)", w)): fail(f"[{name}] word {w!r} is not one of the ruled five")
+    if not (w in WORDS or re.fullmatch(r"n/a \(.+\)", w) or (w == "baseline" and name == "canary")): fail(f"[{name}] word {w!r} is not one of the ruled words")
     for key, want in (c.get("raw") or {}).items():
         hits = [p for p in (here / "raw").iterdir() if p.name.replace("-", "_").replace(".", "_") == key]
         if len(hits) != 1: fail(f"[{name}] cites {key}, which names no single raw file"); continue
@@ -34,7 +35,17 @@ want_exe = "prod_exe 980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0
 derived("identity", "pass" if want_exe in ident else "fail")
 if "kwarg_delivery" in cells:
     kw = json.loads((here / "raw/kw.json").read_text())
-    derived("kwarg_delivery", "pass" if kw["thinking_disabled"]["reasoning_chars"] == 0 and kw["thinking_enabled"]["reasoning_chars"] > 0 else "fail")
+    refused = cells["kwarg_delivery"].get("refused_levels")
+    ok_ref = True
+    if refused is not None:  # the refused-level row (planning, 2026-09-29): each refused level must return 500
+        rf = json.loads((here / "raw/refusal.json").read_text())[cells["kwarg_delivery"]["refusal_rung"]]
+        wl = (here / "raw/refusal-window.log").read_text()  # production undisturbed: the floor's pid and VRAM unchanged, health ok
+        before = re.search(r"floor before: pid=(\d+) vram=(\d+) MiB", wl); after = re.search(r"floor after: pid=(\d+) vram=(\d+) MiB health=\{\"status\":\"ok\"\}", wl)
+        if not (before and after and before.groups() == after.groups()): fail("[kwarg_delivery] raw/refusal-window.log does not show the floor undisturbed")
+        ok_ref = all(rf[l]["status"] == 500 for l in refused)
+        accepted_err = [l for l, v in rf.items() if l not in refused and v["status"] != 200]
+        if accepted_err: fail(f"[kwarg_delivery] levels not declared refused did not return 200: {accepted_err}")
+    derived("kwarg_delivery", "pass" if kw["thinking_disabled"]["reasoning_chars"] == 0 and kw["thinking_enabled"]["reasoning_chars"] > 0 and ok_ref else "fail")
     if kw["props_template_sha256"] not in cells["rendered_effort"]["reading"]: fail("[rendered_effort] the reading does not name the served template's digest")
     errs = [k for k, v in kw["rendered_effort"].items() if "error" in v]
     if "refusal_text_sha256" in cells["rendered_effort"]:
@@ -78,6 +89,7 @@ elif (here / "raw/canary.log").exists():
     h, n = draw(here / "raw/canary.log")
     st = re.match(r"(\d+)/(\d+);", cells["canary"]["reading"])
     if not st or (int(st.group(1)), int(st.group(2))) != (h, n): fail(f"[canary] the draw reads {h}/{n}, which is not what the reading states first")
+    derived("canary", "baseline")  # a rung's first draw is its baseline; the second draw is the first test (Q5)
 # headroom, where measured here: free at peak against the floor's reading cited in the criterion
 if (here / "raw/fill.json").exists():
     fl = json.loads((here / "raw/fill.json").read_text())

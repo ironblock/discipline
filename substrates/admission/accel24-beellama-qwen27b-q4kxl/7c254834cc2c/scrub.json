@@ -8,6 +8,11 @@
   "raw/window-b.log": {
    "sha256_before_scrub": "83f1163c711bba3f6b92581691fc86715bb51c714458268d2e48c32ec4b860a8",
    "home_path_substitutions": 2
+  },
+  "raw/refusal.sh": {
+   "sha256_before_scrub": "228800ee0a7aa3b34cf6e0182d5467b190813d0a3cb0006cebae0fca1cb126f2",
+   "private_name_substitutions": 1
   }
- }
+ },
+ "rule_private_names": "a private build-container name replaced by <build-container>"
 }

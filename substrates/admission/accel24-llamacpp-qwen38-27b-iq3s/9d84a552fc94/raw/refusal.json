@@ -1,0 +1,60 @@
+{
+ "candidate": {
+  "high": {
+   "endpoint": "/v1/chat/completions",
+   "status": 500,
+   "body_sha256": "8b32dab48e2dacaf46ba13ff7b7fc23bb109fd0e9f3292da6dcdf0c02c6ad8ec",
+   "error_type": "server_error",
+   "body_head": "{\"error\":{\"code\":500,\"message\":\"\\n------------\\nWhile executing CallExpression at line 49, column 28 in source:\\n...', 'low') %}\u21b5        {{- raise_exception('Unexpected reasoning effort ' ~ reason...\\n                                       "
+  },
+  "none": {
+   "endpoint": "/v1/chat/completions",
+   "status": 500,
+   "body_sha256": "53344227a6aab49c90afc330d3ace108ccc90261ecb0b88d5cab61a8c03c226b",
+   "error_type": "server_error",
+   "body_head": "{\"error\":{\"code\":500,\"message\":\"\\n------------\\nWhile executing CallExpression at line 49, column 28 in source:\\n...', 'low') %}\u21b5        {{- raise_exception('Unexpected reasoning effort ' ~ reason...\\n                                       "
+  },
+  "max": {
+   "endpoint": "/v1/chat/completions",
+   "status": 500,
+   "body_sha256": "383adf2e468e1bc1937031c7d692e9d441e31c91781555e5e39009757947fb85",
+   "error_type": "server_error",
+   "body_head": "{\"error\":{\"code\":500,\"message\":\"\\n------------\\nWhile executing CallExpression at line 49, column 28 in source:\\n...', 'low') %}\u21b5        {{- raise_exception('Unexpected reasoning effort ' ~ reason...\\n                                       "
+  },
+  "low": {
+   "endpoint": "/apply-template",
+   "status": 200,
+   "rendered_sha256": "dc214f83aa3ae44e98828af6b0ae6af3f03acbeb0b074344de33566aafcc6b3d"
+  }
+ },
+ "floor": {
+  "high": {
+   "endpoint": "/v1/chat/completions",
+   "status": 200,
+   "body_sha256": "f398b219206290e31c90be9afe831a3eed0f88837a09c11ae514ad6120011038",
+   "error_type": null,
+   "body_head": "{\"choices\":[{\"finish_reason\":\"length\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"Here\"}}],\"created\":1790665845,\"model\":\"Qwen3.6-27B\",\"system_fingerprint\":\"b0-unknown-dirty\",\"object\":\"chat.completion\",\"usage\":{"
+  },
+  "none": {
+   "endpoint": "/v1/chat/completions",
+   "status": 200,
+   "body_sha256": "c298047ddcc3d4b6410683cc74caa4cc2a8b928af39ad6a42d43edf9e5a252ad",
+   "error_type": null,
+   "body_head": "{\"choices\":[{\"finish_reason\":\"length\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"Here\"}}],\"created\":1790665845,\"model\":\"Qwen3.6-27B\",\"system_fingerprint\":\"b0-unknown-dirty\",\"object\":\"chat.completion\",\"usage\":{"
+  },
+  "max": {
+   "endpoint": "/v1/chat/completions",
+   "status": 200,
+   "body_sha256": "ccd6a9902286938c1dc2c94dc17480640bfc657172de403e130c750f38717341",
+   "error_type": null,
+   "body_head": "{\"choices\":[{\"finish_reason\":\"length\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"Here\"}}],\"created\":1790665845,\"model\":\"Qwen3.6-27B\",\"system_fingerprint\":\"b0-unknown-dirty\",\"object\":\"chat.completion\",\"usage\":{"
+  },
+  "low": {
+   "endpoint": "/v1/chat/completions",
+   "status": 200,
+   "body_sha256": "c61245b79ebbb794002a530a23b49e31606eeb6bdd4f376d17e39cc9e7e652cc",
+   "error_type": null,
+   "body_head": "{\"choices\":[{\"finish_reason\":\"length\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"Thinking\"}}],\"created\":1790665845,\"model\":\"Qwen3.6-27B\",\"system_fingerprint\":\"b0-unknown-dirty\",\"object\":\"chat.completion\",\"usag"
+  }
+ }
+}

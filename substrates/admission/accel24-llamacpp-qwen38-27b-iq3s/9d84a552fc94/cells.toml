@@ -1,5 +1,5 @@
 # Cells for this fingerprint, the #143 cells window of 2026-09-29. One table per cell; `word` is one of
-# pass, fail, n/a (reason), unreported, unadjudicated (ruled on #143). recompute.sh re-derives every word
+# pass, fail, n/a (reason), unreported, unadjudicated, or on a canary baseline (ruled on #143). recompute.sh re-derives every word
 # that is derivable from a raw file and refuses a word that disagrees.
 
 [identity]
@@ -13,21 +13,24 @@ word = "pass"
 instrument = "paired control (D5 as amended by M8), as for the floor"
 reading = "enable_thinking false: 0 reasoning characters; true: 116; default: 82"
 criterion = "negative half 0 and positive half above 0"
-raw = { kw_json = "ebded7622af92293c79c2130271ba35ad322c49f02afa202acdd1aa0ae8c5f0e" }
+raw = { kw_json = "ebded7622af92293c79c2130271ba35ad322c49f02afa202acdd1aa0ae8c5f0e", refusal_json = "4715ca0f746e311a8caa669c88f0ee109b2c4a0b55a5f73302831fe841291748", refusal_window_log = "405e194d41ab97eef42265c2e74cc7bc8537e5644dc42992e8139870342778eb", refusal_sh = "933f8f62075839a2196812561154d3aa05b902cfdd68c6c07a669d9b8110a2a7", refusal_server_log = "181dbc8747f5efcb0edc1fe961fd3dcb93c230d474e2aa5b2fcb008c63d48b37" }
+refusal_rung = "candidate"
+refused_levels = ["high", "none", "max"]
+refused_level_reading = "a chat request at each refused level returns HTTP 500 (high: 500, none: 500, max: 500); an accepted level (low) renders: 200. Taken 2026-09-29 07:10Z with production up, on the same binary and weights launched CPU-only on localhost (raw/refusal-server.log: no CUDA device visible, --gpu-layers ignored, 2 threads; each refusal a Jinja exception raised by the template); the floor's pid and VRAM were identical before and after and its health ok (raw/refusal-window.log)"
 
 [rendered_effort]
-word = "unadjudicated"
+word = "n/a (a capability fact of the template, recorded as data on the registry entry's effort fields, not a cell word: planning on #143, 2026-09-29)"
 instrument = "/apply-template with chat_template_kwargs reasoning_effort (and reasoning_strength) at none, low, medium, high, xhigh, max and absent"
 reading = "None: renders as the default; none: refused: ERROR 500; low: renders differently; medium: renders differently; high: refused: ERROR 500; xhigh: renders as the default; max: refused: ERROR 500; reasoning_strength is not read at any level; the served template's sha256 is c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041, equal to the GGUF header's"
 refusal_text_sha256 = "842846d1fb518be1853847bd4a1e9b4028d3ffb23a3e19e4601841dfe3b7d6dc"
 refusal_status = 500
-why_no_word = "no criterion is ruled for this cell; a reading is on #143 for planning (Dispatch, 2026-09-29)"
 raw = { kw_json = "ebded7622af92293c79c2130271ba35ad322c49f02afa202acdd1aa0ae8c5f0e" }
 
 [canary]
-word = "unadjudicated"
+word = "baseline"
+criterion = "Q5 (planning, #143, comment 5885752512): a rung's first canary draw is its baseline, not a test; the second draw is the first test, against the first at the declared z, and the pooled baseline grows with every draw"
 instrument = "canary e0827, k = 36, the first draw on this line"
-reading = "36/36; recorded, not judged: the first-draw criterion for a new rung (Q5) is not ruled"
+reading = "36/36; the first draw on this line, recorded as its baseline"
 raw = { canary_log = "8432e486b93611610a3ef7a44fdda27b75442430745c152a74f138cfe2d3e98b", canary_timings_jsonl = "3a7eb29fc1ce28adffa15d06afc68c6c6e4ecaaafc60b00c6bc0499824e8c28c" }
 
 [output_invariance]

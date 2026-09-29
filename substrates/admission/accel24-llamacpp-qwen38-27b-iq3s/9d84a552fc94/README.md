@@ -16,10 +16,10 @@ The #143 cells window, 2026-09-29, ratified by the maintainer. The step list was
 
 **How to read the files:**
 - `cells.toml` holds one table per cell: its word, instrument, reading, and the raw files it cites by digest.
-- The words are the five ruled on #143: `pass`, `fail`, `n/a (reason)`, `unreported`, `unadjudicated`.
-- `recompute.sh` re-derives every word that follows from a raw file and refuses one that disagrees. It was seen red on six seeded faults: a flipped word, a tampered raw byte, a misstated divergence position, a raised headroom criterion, and a misstated canary count on each directory.
+- The words are those ruled on #143: `pass`, `fail`, `n/a (reason)`, `unreported`, `unadjudicated`, and `baseline`, which is a rung's first canary draw, not a test (comment 5885752512).
+- `recompute.sh` re-derives every word that follows from a raw file and refuses one that disagrees. It was seen red on six seeded faults: a flipped word, a tampered raw byte, a misstated divergence position, a raised headroom criterion, and a misstated canary count on each directory. It was then seen red on three more: the candidate's first canary draw given a word other than `baseline`, the refusal row read against the wrong line's results, and a changed floor VRAM figure in `raw/refusal-window.log`.
 - `fingerprint.json` gives the recipe and the canonical components. The directory is named by the first 12 hex characters.
-- `scrub.json` lists every raw file in which an absolute home path was replaced by `~`, with its pre-scrub digest. This is the only edit to the raw files.
+- `scrub.json` lists every raw file in which an absolute home path was replaced by `~`, or a private build-container name by `<build-container>`, with its pre-scrub digest. These are the only edits to the raw files. `raw/refusal.json` holds both lines' results as `refusal.sh` wrote them, and each directory reads its own line (`refusal_rung`).
 
 **This is a cells directory, not an admission.** Admission also needs the depth probe and the parity fire on this fingerprint. The admission word is written by hand in `admission.toml` one level up, once those exist; until a checker exists, this README says so.
 
@@ -28,9 +28,9 @@ The #143 cells window, 2026-09-29, ratified by the maintainer. The step list was
 | cell | word | reading |
 |---|---|---|
 | identity | pass | `llama-server` `865044a2…` at mainline `4ceb171`, the build's and the container's libraries hashed (`raw/engine-manifest.txt`), weights `58fd8267…` |
-| kwarg delivery (paired) | pass | thinking off 0 reasoning characters, on 116 |
-| rendered effort | unadjudicated | absent = `xhigh`; `low` and `medium` render differently; `high`, `none` and `max` refused (HTTP 500, the template's "Unexpected reasoning effort", text by digest); `reasoning_strength` not read. No word chosen: a reading is before planning on #143 |
-| canary | unadjudicated | 36/36, the first draw; Q5's first-draw criterion is unruled |
+| kwarg delivery (paired) | pass | thinking off 0 reasoning characters, on 116; a chat request at each refused level (high, none, max) returns HTTP 500 (`raw/refusal.json`, production up; the candidate CPU-only, by `raw/refusal.sh` and its `raw/refusal-server.log`: no CUDA device visible, `--gpu-layers` ignored, 2 threads, bound to localhost; the floor's pid and VRAM unchanged across it and its health ok, `raw/refusal-window.log`) |
+| rendered effort | n/a (a capability fact on the registry) | absent = `xhigh`; `low` and `medium` render differently; `high`, `none` and `max` refused (HTTP 500, the template's "Unexpected reasoning effort", text by digest); `reasoning_strength` not read. Ruled a capability fact (#143): recorded as `effort` on the registry entry |
+| canary | baseline | 36/36, the first draw on this line: its baseline, not a test (Q5). The second draw is the first test |
 | output invariance | pass | reading (c): spec-off reproducible within a process and across two; spec-on reproducible with itself; on/off first differs at token 55 |
 | headroom | pass | 1,966 MiB free with both slots full, against the floor's 1,208 |
 | checkpoint restore | unreported | no instrument; I4b not built |
