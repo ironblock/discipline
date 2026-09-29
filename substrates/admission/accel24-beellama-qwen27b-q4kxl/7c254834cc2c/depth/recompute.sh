@@ -46,9 +46,32 @@ for r in rows:
 names = sorted(p.name for p in (here / "raw").iterdir())
 cell0 = tomllib.loads((here / "cell.toml").read_text())
 if names != sorted(cell0["raw"]): fails.append(f"raw/ holds {names}; cell.toml pins {sorted(cell0['raw'])}")
+# the whole reading, derived from the summary: application counts per cell, then retrieval and the defects
 fmt = lambda f, c: ("control" if f == "0.0" else f"{f} ({c['depth_rendered']:,} tokens)") + f" {c['application']['pass']}/{c['application']['n']}"
 want = "; ".join(fmt(f, summ[f]) for f in sorted(summ, key=float))
-if not cell0["reading"].startswith(want): fails.append(f"cell.toml's reading does not begin with the summary's counts: {want}")
+retr = {f: (c["retrieval"]["pass"], c["retrieval"]["n"]) for f, c in summ.items()}
+want += "; " + ("retrieval 1/1 at every cell" if all(v == (1, 1) for v in retr.values()) else "retrieval " + ", ".join(f"{f} {p}/{n}" for f, (p, n) in sorted(retr.items(), key=lambda x: float(x[0]))))
+tot = {k: sum(c["application"][k] for c in summ.values()) for k in ("errors", "truncated", "thinking_off")}
+want += "; " + ", ".join(("no " + w) if tot[k] == 0 else f"{tot[k]} {w}" for k, w in (("errors", "server error"), ("truncated", "truncation"), ("thinking_off", "thinking-off sample")))
+if cell0["reading"] != want: fails.append(f"cell.toml's reading is not the summary's: {want}")
+# regrade every row from its own text through the committed grader; an excerpt at its cap cannot be regraded
+sys.path.insert(0, str(probe)); import depth_probe as dp
+for r in rows:
+    tag = f"{r['fraction']} {r['stage']} {r['sample']}"
+    if r["stage"] == "application":
+        if len(r.get("code") or "") >= 1500: fails.append(f"{tag}: the code excerpt is at its cap and cannot be regraded"); continue
+        if dp.grade(meta["tier"], r.get("code") or None) != r["dims"]: fails.append(f"{tag}: the stored grade is not the code's")
+        if r["prompt_tokens"] != r["depth_rendered"]: fails.append(f"{tag}: the server counted {r['prompt_tokens']} prompt tokens against a rendered depth of {r['depth_rendered']}")
+    else:
+        if len(r.get("answer") or "") >= 600: fails.append(f"{tag}: the answer excerpt is at its cap and cannot be regraded"); continue
+        if dp.grade_retrieval(r["answer"]) != r["dims"]: fails.append(f"{tag}: the stored grade is not the answer's")
+for f in summ:
+    got = sorted(r["sample"] for r in rows if str(r["fraction"]) == f and r["stage"] == "application")
+    if got != list(range(meta["samples"])): fails.append(f"cell {f}'s application samples are numbered {got}")
+# the console log's per-sample lines are the rows'
+con = re.findall(r"cell ([0-9.]+) \((\d+) tok, (\d+) planted\) (\w+) (\d+): ALL=(\w+) err=(\S+)", (here / "raw/console.log").read_text())
+if con != [(str(r["fraction"]), str(r["depth_rendered"]), str(r["planted"]), r["stage"], str(r["sample"]), str(r["dims"]["ALL"]), str(r["error"])) for r in rows]:
+    fails.append("raw/console.log's per-sample lines are not the rows'")
 pid = re.search(r"pid=(\d+)", (here / "raw/identity-after.txt").read_text()).group(1)
 wr = (here / "raw/window-readings.txt").read_text()
 reads = {l.split(" ", 1)[0]: l for l in wr.splitlines() if l.startswith(("before ", "after "))}

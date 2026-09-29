@@ -36,8 +36,10 @@ This is the admission depth probe (`substrates/admission/depth-probe/`, #179, me
   - the identity is this fingerprint's engine and the served template is this fingerprint's (both read from `../fingerprint.json`);
   - every cell's target is its fraction of the pool, its rendered depth reached the target within 2% without exceeding it, and every deeper cell carries all four counter-examples, in the summary and in every row;
   - the pid after the window is the pid read before and after it;
-  - `cell.toml`'s word, reading and digests agree, and every file in `raw/` is pinned.
+  - every row regrades to its stored grade through the committed grader (application code and retrieval answers alike; an excerpt at its cap would be refused), every cell's samples are numbered 0 to 4 once each, and the server's prompt count equals the rendered depth on every application row;
+  - the console log's per-sample lines are the rows';
+  - `cell.toml`'s word, whole reading (retrieval and defect counts included) and digests agree, and every file in `raw/` is pinned.
 
-  It was seen red on eleven seeded faults: the word flipped to `fail`; one 0.95 sample's grade flipped, with the rows' digest re-pinned; the committed corpus manifest changed by one byte; the 0.95 cell dropped with the summary and decision regenerated and re-pinned; the temperature, `max_tokens` and template digest each changed and re-pinned; the 0.95 cell made shallow and unplanted, regenerated and re-pinned; an unpinned raw file edited; the pid changed; the reading misstated.
+  It was seen red on sixteen seeded faults: the word flipped to `fail`; one 0.95 sample's grade flipped, with the rows' digest re-pinned; the committed corpus manifest changed by one byte; the 0.95 cell dropped with the summary and decision regenerated and re-pinned; the temperature, `max_tokens` and template digest each changed and re-pinned; the 0.95 cell made shallow and unplanted, regenerated and re-pinned; an unpinned raw file edited; the pid changed; the reading misstated; a retrieval failure regenerated; a sample's code swapped with its grade kept; a duplicated sample; the prompt count changed; a console line changed.
 
 **This is one of admission's three results for this fingerprint.** The cells are in `../cells.toml`, and the parity fire is separate. The admission word is written by hand where #143 says, not here.
