@@ -17,3 +17,11 @@ C. Two files with `<picture>` (GitHub's documented approach):
   <source media="(prefers-color-scheme: dark)" srcset="dark.svg">
   <img alt="C" src="light.svg">
 </picture>
+
+D. Two files selected by GitHub's own CSS via URL fragment (deprecated syntax; may not work):
+
+![D dark](dark.svg#gh-dark-mode-only)
+![D light](light.svg#gh-light-mode-only)
+
+Mismatch test: set GitHub to light (Settings > Appearance) with the OS in dark, then reverse.
+Exactly one logo should be visible per row A-D if it follows GitHub's theme.
