@@ -126,7 +126,7 @@ fn the_drive_writes_a_record_a_second_process_accepts() {
     // with unexplained misses and a run without them in shapes a reader has
     // to compare by absence.
     //
-    // `ttl_undeclared` names `canned`, and that is the correct, intentional
+    // `ttl_undeclared` names `canned-cache-n`, and that is the correct, intentional
     // result: `dev-loop.toml` declares no `substrate_cache_ttl` because the
     // canned server plays no provider's cache policy, and this line is the
     // drive's own demonstration that an undeclared lifetime is named rather
@@ -134,7 +134,7 @@ fn the_drive_writes_a_record_a_second_process_accepts() {
     assert!(
         out.contains(
             "\"cache\":{\"hits\":6,\"misses\":{\"cold_start\":0,\"expected\":0,\
-             \"mutation\":0,\"unexplained\":0},\"ttl_undeclared\":[\"canned\"],\
+             \"mutation\":0,\"unexplained\":0},\"ttl_undeclared\":[\"canned-cache-n\"],\
              \"unmeasured\":0}"
         ),
         "the whole census line, every register: {out}"
@@ -236,7 +236,7 @@ fn a_drives_regime_crosses_from_the_regimen_without_being_paraphrased() {
         "and not as a debug rendering of the reader's own type: {start}"
     );
     assert!(
-        start.contains("\"arm\":\"dev-loop\"") && start.contains("\"id\":\"canned\""),
+        start.contains("\"arm\":\"dev-loop\"") && start.contains("\"id\":\"canned-cache-n\""),
         "and the regime is the regimen's, not one this program wrote down: {start}"
     );
 

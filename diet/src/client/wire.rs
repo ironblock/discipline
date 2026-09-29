@@ -632,13 +632,50 @@ mod tests {
         assert_eq!(normalize("1.2.3"), None);
     }
 
+    /// The `timings` object of a captured stream's last chunk: the server's
+    /// keys and digits, with the keys re-sorted by the parse.
+    fn captured_timings(capture: &str) -> String {
+        let chunk = capture
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .find(|data| data.contains("\"timings\""))
+            .expect("the capture carries timings");
+        let chunk: serde_json::Value = serde_json::from_str(chunk).expect("a JSON chunk");
+        chunk["timings"].to_string()
+    }
+
+    #[test]
+    fn the_llama_cpp_dialect_reads_the_cache_count_the_server_sends() {
+        // #156. The unstreamed reply is COMPOSED around each capture's own
+        // `timings` object: no raw unstreamed reply is committed yet (R3.0's
+        // C5 replaces this body with one).
+        for (capture, cached) in [
+            (
+                include_str!("../../client/fixtures/llama-server-4df29be-stream.http"),
+                28,
+            ),
+            (
+                include_str!("../../client/fixtures/llama-server-e7051ef-reasoning-stream.http"),
+                0,
+            ),
+        ] {
+            let body = format!(
+                "{{\"choices\":[{{\"message\":{{\"content\":\"hi\"}},\"finish_reason\":\"stop\"}}],\
+                 \"timings\":{}}}",
+                captured_timings(capture)
+            );
+            let reply = read(&Dialect::llama_cpp(), &body).expect("a readable reply");
+            assert_eq!(reply.cached_tokens, Some(cached), "{body}");
+        }
+    }
+
     #[test]
     fn a_declared_path_reads_what_is_there_and_nothing_when_it_is_not() {
         let reply = read(
             &Dialect::llama_cpp(),
             "{\"choices\":[{\"message\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}],\
              \"usage\":{\"prompt_tokens\":9,\"completion_tokens\":2},\
-             \"timings\":{\"prompt_n_cached\":7},\
+             \"timings\":{\"cache_n\":7},\
              \"generation_settings\":{\"temperature\":0.6,\"grammar\":null}}",
         )
         .expect("a readable reply");
