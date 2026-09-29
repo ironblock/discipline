@@ -13,7 +13,7 @@ pid_on () { for p in $(pgrep -x llama-server); do tr '\0' ' ' < /proc/$p/cmdline
 stop () { for p in $(pid_on 8093); do kill $p; done; }
 trap stop EXIT
 log "floor before: pid=$(pid_on 8082) vram=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader) mem_avail_mib=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)"
-( exec distrobox enter llmbuild -- bash -lc "CUDA_VISIBLE_DEVICES= exec $CBIN -m $CW -ngl 0 -t 2 -c 4096 -np 1 --jinja --no-repack --no-warmup --host 127.0.0.1 --port 8093" > $W/server.log 2>&1 < /dev/null ) &
+( exec distrobox enter <build-container> -- bash -lc "CUDA_VISIBLE_DEVICES= exec $CBIN -m $CW -ngl 0 -t 2 -c 4096 -np 1 --jinja --no-repack --no-warmup --host 127.0.0.1 --port 8093" > $W/server.log 2>&1 < /dev/null ) &
 for i in $(seq 1 120); do curl -s -m 3 localhost:8093/health | grep -q ok && break; sleep 2; done
 log "candidate cpu-only up: pid=$(pid_on 8093) exe=$(sha256sum $(readlink -f /proc/$(pid_on 8093)/exe) | cut -c1-16) mem_avail_mib=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)"
 python3 - "$W" <<'EOF'

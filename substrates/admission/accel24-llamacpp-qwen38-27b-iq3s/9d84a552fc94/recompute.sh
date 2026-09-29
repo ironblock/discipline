@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Gate 0 for a cells directory (#143). Every raw file cells.toml cites must hash as it says; every
 # word derivable from a raw file is re-derived here, and a word that disagrees is refused. Words not
-# derivable from a raw file (n/a, unreported, unadjudicated) are checked for form only.
+# derivable from a raw file (n/a, unreported, unadjudicated) are checked for form only; a cell may carry
+# no word only when its criterion is an unruled question ("Q5 unruled") and word_withheld says why.
 # Exit 0 when all hold, 1 when any fails, 2 when a step cannot run.
 set -uo pipefail
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,7 +21,7 @@ raw = {}
 for name, c in cells.items():
     w = c.get("word")
     if w is None:  # a cell that ran but whose criterion is unruled carries no word (Dispatch, 2026-09-29)
-        if not (str(c.get("criterion", "")).endswith("unruled") and c.get("word_withheld")): fail(f"[{name}] has no word and no stated unruled criterion")
+        if not (re.fullmatch(r"Q\d+ unruled", str(c.get("criterion", ""))) and c.get("word_withheld")): fail(f"[{name}] has no word and no stated unruled criterion")
     elif not (w in WORDS or re.fullmatch(r"n/a \(.+\)", w)): fail(f"[{name}] word {w!r} is not one of the ruled five")
     for key, want in (c.get("raw") or {}).items():
         hits = [p for p in (here / "raw").iterdir() if p.name.replace("-", "_").replace(".", "_") == key]
@@ -39,7 +40,10 @@ if "kwarg_delivery" in cells:
     refused = cells["kwarg_delivery"].get("refused_levels")
     ok_ref = True
     if refused is not None:  # the refused-level row (planning, 2026-09-29): each refused level must return 500
-        rf = next(iter(json.loads((here / "raw/refusal.json").read_text()).values()))
+        rf = json.loads((here / "raw/refusal.json").read_text())[cells["kwarg_delivery"]["refusal_rung"]]
+        wl = (here / "raw/refusal-window.log").read_text()  # production undisturbed: the floor's pid and VRAM unchanged, health ok
+        before = re.search(r"floor before: pid=(\d+) vram=(\d+) MiB", wl); after = re.search(r"floor after: pid=(\d+) vram=(\d+) MiB health=\{\"status\":\"ok\"\}", wl)
+        if not (before and after and before.groups() == after.groups()): fail("[kwarg_delivery] raw/refusal-window.log does not show the floor undisturbed")
         ok_ref = all(rf[l]["status"] == 500 for l in refused)
         accepted_err = [l for l, v in rf.items() if l not in refused and v["status"] != 200]
         if accepted_err: fail(f"[kwarg_delivery] levels not declared refused did not return 200: {accepted_err}")
