@@ -1,0 +1,8 @@
+HTTP/1.1 200 OK
+Server: llama.cpp
+Access-Control-Allow-Origin: 
+Content-Type: application/json; charset=utf-8
+Content-Length: 833
+Connection: close
+
+{"choices":[{"finish_reason":"stop","index":0,"message":{"role":"assistant","content":"OK","reasoning_content":"We need to respond to user: \"[89a76ce6464c65b5] Say OK.\" Need likely just output OK. Need final concise. Ensure no extra? User says Say OK. So final OK.\n"}}],"created":1790647792,"model":"qwen3.8-flash-next","system_fingerprint":"b7-e7051ef","object":"chat.completion","usage":{"completion_tokens":55,"prompt_tokens":72,"total_tokens":127,"prompt_tokens_details":{"cached_tokens":42}},"id":"chatcmpl-KHRL6M4DbMhEzNr9hyDXuQObPq6l1xRy","timings":{"cache_n":42,"prompt_n":30,"prompt_ms":196.41,"prompt_per_token_ms":6.547,"prompt_per_second":152.7417137620284,"predicted_n":55,"predicted_ms":390.261,"predicted_per_token_ms":7.227055555555556,"predicted_per_second":138.36893771091653,"draft_n":48,"draft_n_accepted":40}}
