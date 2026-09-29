@@ -12,6 +12,10 @@
   "raw/refusal.sh": {
    "sha256_before_scrub": "228800ee0a7aa3b34cf6e0182d5467b190813d0a3cb0006cebae0fca1cb126f2",
    "private_name_substitutions": 1
+  },
+  "raw/checkpoint-reference-server.log": {
+   "sha256_before_scrub": "adcc6bb788800461f930eee5d5135b2157fd19ecda224e4cc6a9c578b4d2a478",
+   "home_path_substitutions": 1
   }
  },
  "rule_private_names": "a private build-container name replaced by <build-container>"

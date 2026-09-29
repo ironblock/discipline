@@ -97,6 +97,22 @@ if (here / "raw/fill.json").exists():
     fl = json.loads((here / "raw/fill.json").read_text())
     ref = int(re.search(r"([\d,]+) MiB", cells["headroom"]["criterion"]).group(1).replace(",", ""))
     derived("headroom", "pass" if fl["vram_free_at_peak_mib"] >= ref and all("error" not in r for r in fl["requests"]) else "fail")
+# checkpoint restore (#143, I4b): the committed instrument's decide over the raw measurements, and the rung's
+# engine is this fingerprint's (the exe itself, or the llama-server of its engine manifest)
+if (here / "raw/checkpoint-rung.json").exists():
+    import subprocess, tomllib as _t
+    inst = here.parents[1] / "checkpoint-restore"
+    r = subprocess.run([sys.executable, "-B", str(inst / "checkpoint_restore.py"), "decide", str(here / "raw/checkpoint-rung.json"), str(here / "raw/checkpoint-reference.json"),
+                        str(here / "raw/checkpoint-identity.json"), str(inst / "criterion.toml")], capture_output=True, text=True)
+    if r.returncode != 0: fail(f"[checkpoint_restore] the instrument's decide exited {r.returncode}")
+    else:
+        got = json.loads(r.stdout); derived("checkpoint_restore", got["word"])
+        eng = json.loads(json.loads((here / "fingerprint.json").read_text())["canonical"])["engine"]
+        rid = json.loads((here / "raw/checkpoint-identity.json").read_text())["rung_engine"]
+        man = (here / "raw/engine-manifest.txt").read_text() if (here / "raw/engine-manifest.txt").exists() else ""
+        if not (rid == eng or f"cand_file {rid} llama-server" in man): fail("[checkpoint_restore] the measured rung's engine is not this fingerprint's")
+        hdr = json.loads((here / "raw/checkpoint-reference-header.json").read_text())
+        if json.loads((here / "raw/checkpoint-identity.json").read_text())["reference_header"] != hdr: fail("[checkpoint_restore] the identity's reference header is not the one read")
 # pass and fail are results: a cell may carry one only if this script re-derived it from a raw file (review of #185)
 for name, c in cells.items():
     if isinstance(c, dict) and c.get("word") in ("pass", "fail") and name not in DERIVED: fail(f"[{name}] says {c['word']!r}, but no raw file re-derives it")

@@ -1,0 +1,32 @@
+{
+ "rung_engine": "980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4",
+ "reference_engine": "980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4",
+ "reference_header": {
+  "architecture": "qwen3",
+  "keys": [
+   "general.architecture",
+   "general.basename",
+   "general.file_type",
+   "general.name",
+   "general.quantization_version",
+   "general.quantized_by",
+   "general.repo_url",
+   "general.size_label",
+   "general.type",
+   "quantize.imatrix.chunks_count",
+   "quantize.imatrix.dataset",
+   "quantize.imatrix.entries_count",
+   "quantize.imatrix.file",
+   "qwen3.attention.head_count",
+   "qwen3.attention.head_count_kv",
+   "qwen3.attention.key_length",
+   "qwen3.attention.layer_norm_rms_epsilon",
+   "qwen3.attention.value_length",
+   "qwen3.block_count",
+   "qwen3.context_length",
+   "qwen3.embedding_length",
+   "qwen3.feed_forward_length",
+   "qwen3.rope.freq_base"
+  ]
+ }
+}

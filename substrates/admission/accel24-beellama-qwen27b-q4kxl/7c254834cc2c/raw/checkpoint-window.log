@@ -1,0 +1,10 @@
+2026-09-29T11:09:26Z floor pid=256252 exe=980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4 vram=23450 MiB health={"status":"ok"}
+2026-09-29T11:09:27Z headers read
+2026-09-29T11:09:37Z rung measure rc=0
+2026-09-29T11:09:37Z rung warm prompt_n=515
+2026-09-29T11:09:39Z reference pid=278279 exe=980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4
+2026-09-29T11:10:45Z reference measure drop=22 rc=0 warm prompt_n=513
+2026-09-29T11:11:32Z reference unmatched rc=0
+2026-09-29T11:11:33Z reference stopped
+2026-09-29T11:11:33Z floor after: pid=256252 vram=23450 MiB health={"status":"ok"}
+2026-09-29T11:11:33Z END
