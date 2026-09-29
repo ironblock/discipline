@@ -125,6 +125,20 @@ if (here / "raw/checkpoint-rung.json").exists():
     for fig in (f"reused {committed['rung_cache_n']} tokens", f"warm against cold {committed['distance']:.4f}", f"Tolerance {committed['tolerance']:.4f}",
                 f"({committed['reference_warm_prompt_n']} tokens against the rung's {committed['rung_warm_prompt_n']})", f"reads {unmatched:.4f}" if unmatched is not None else "unmatched"):
         if fig not in rd: fail(f"[checkpoint_restore] the reading does not state {fig!r}")
+    # the reading's other claims, each from the decide output or the raw measurements
+    ra = cr.reusing(json.loads((here / "raw/checkpoint-reference.json").read_text())); fa = cr.reusing(json.loads((here / "raw/checkpoint-rung.json").read_text()))
+    k = committed["criterion"]["top_k"]; draws = [cr.dist(w["top"], ra["cold"][0]["top"], k) for w in cr.warms(ra)]
+    claims = {"; cold against cold 0. ": committed["tolerance_parts"]["cold_cold_rung"] == 0, "the same top token": committed["top1_same"],
+              "on the first attempt": committed["rung_attempts"] == 1, "its three draws are identical": len(draws) == 3 and len(set(draws)) == 1,
+              "the reference's cold against cold 0": committed["tolerance_parts"]["cold_cold_reference"] == 0}
+    for phrase, holds in claims.items():
+        if (phrase in rd) != holds: fail(f"[checkpoint_restore] the reading {'states' if phrase in rd else 'omits'} {phrase!r}, and the raw files say {holds}")
+    # the reference model: its weights are the bottom rung's registered file, and its server ran CPU-only on that file
+    reg = tomllib.loads((here.parents[2] / "registry.toml").read_text())["substrate"]["cpu-beellama-qwen3-1p7b-q4km"]
+    rw = re.search(r"reference_weights ([0-9a-f]{64})", (here / "raw/checkpoint-reference-weights.txt").read_text())
+    slog = (here / "raw/checkpoint-reference-server.log").read_text()
+    if not rw or rw.group(1) != reg["weights_main"]: fail("[checkpoint_restore] the reference's weights are not the bottom rung's registered file")
+    if "no CUDA-capable device is detected" not in slog or f"loading model '~/Models/{reg['weights_main_file']}'" not in slog: fail("[checkpoint_restore] the reference server's log does not show it CPU-only on the registered file")
     hdr = json.loads((here / "raw/checkpoint-rung-header.json").read_text())
     hybrid = any(any(m in k for m in cr.RECURRENT) for k in hdr.get("keys", []))
     if ("hybrid" in rd) != hybrid: fail(f"[checkpoint_restore] the reading's hybrid claim does not match the rung header ({hdr.get('architecture')})")

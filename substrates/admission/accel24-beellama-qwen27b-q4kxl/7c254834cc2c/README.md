@@ -33,6 +33,6 @@ The #143 cells window, 2026-09-29, ratified by the maintainer. The step list was
 | canary | pass | 36/36 before, 36/36 after, against the pool of 354/360 at z 2.576 |
 | output invariance | pass | reading (c): spec-off reproducible within a process and across two; on/off first differs at token 51; spec-on not reproducible with itself after a restore (token 67), declared on the registry's hazards line |
 | headroom | pass | the reference line, which passes Q9 by construction: 1,208 MiB, equal to itself (Dispatch, #143, comment 5889255742; #178 wrote n/a) |
-| checkpoint restore | pass | the floor reused 2247 tokens from a checkpoint; warm against cold 0.083 within a tolerance of 0.617 from the dense 1.7B on this binary at a matched continuation, CPU-derived (a GPU reference replaces it in the next window that takes the card). #186's instrument, production up, 2026-09-29 |
+| checkpoint restore | pass | the floor reused 2247 tokens, fewer than the shared prefix (consistent with a checkpoint restore); warm against cold 0.083 within a tolerance of 0.617 from the dense 1.7B on this binary at a matched continuation, CPU-derived (a GPU reference replaces it in the next window that takes the card). #186's instrument, production up, 2026-09-29 |
 
 `raw/canary-pool.json` is the pooled baseline with the 2026-09-29 pre-run draw added, which the registry's canary text points to.
