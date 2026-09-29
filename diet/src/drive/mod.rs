@@ -1421,7 +1421,7 @@ mod tests {
             substrates: vec![Substrate {
                 id: "canned".to_owned(),
                 engine: Engine {
-                    name: "diet-drive canned".to_owned(),
+                    name: canned::SERVES.to_owned(),
                     version_or_digest: canned::acts_digest(),
                 },
                 // The same identity `diet-drive` computes, from the same

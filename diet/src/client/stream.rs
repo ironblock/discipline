@@ -37,6 +37,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use crate::formats::record::Count;
 use crate::formats::record::json::Decimal;
 
 use super::shape::RequestShape;
@@ -177,7 +178,12 @@ pub struct Timings {
 impl Timings {
     /// The timings in a `timings` object, each read where the server put it.
     fn read(object: &Value) -> Self {
-        let count = |key: &str| object.get(key).and_then(Value::as_u64);
+        let count = |key: &str| {
+            object
+                .get(key)
+                .and_then(Value::as_u64)
+                .filter(|count| *count <= Count::MAX)
+        };
         let millis = |key: &str| {
             object
                 .get(key)
@@ -208,7 +214,7 @@ impl Millis {
     pub fn new(text: &str) -> Option<Self> {
         let integer = text
             .parse::<u64>()
-            .is_ok_and(|number| number.to_string() == text);
+            .is_ok_and(|number| number <= Count::MAX && number.to_string() == text);
         let decimal = !text.starts_with('-') && Decimal::new(text).is_some();
         (integer || decimal).then(|| Self(text.to_owned()))
     }
@@ -1285,6 +1291,43 @@ mod tests {
     }
 
     #[test]
+    fn the_last_timings_a_stream_carries_is_the_one_reported() {
+        let ended = ended_by(&[
+            r#"{"choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"stop"}],"timings":{"prompt_n":1}}"#,
+            r#"{"choices":[],"timings":{"prompt_n":2}}"#,
+            "[DONE]",
+        ]);
+        let Ok(Ended::Finished {
+            timings: Some(timings),
+            ..
+        }) = ended
+        else {
+            panic!("no timings: {ended:?}");
+        };
+        assert_eq!(timings.prompt_n, Some(2), "the last one wins");
+    }
+
+    #[test]
+    fn a_timings_that_is_not_an_object_reports_nothing() {
+        // Not an object with every field absent: nothing was reported.
+        assert_eq!(reported("null"), None);
+        // And it does not erase an object that came before it.
+        let ended = ended_by(&[
+            r#"{"choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"stop"}],"timings":{"prompt_n":1}}"#,
+            r#"{"choices":[],"timings":null}"#,
+            "[DONE]",
+        ]);
+        let Ok(Ended::Finished {
+            timings: Some(timings),
+            ..
+        }) = ended
+        else {
+            panic!("the earlier timings were lost: {ended:?}");
+        };
+        assert_eq!(timings.prompt_n, Some(1));
+    }
+
+    #[test]
     fn a_timing_the_server_did_not_send_is_absent_not_zero() {
         assert_eq!(
             reported(r#"{"prompt_n":5}"#),
@@ -1318,15 +1361,18 @@ mod tests {
             timings.predicted_ms.as_ref().map(Millis::as_str),
             Some("290")
         );
+        // An integral one past the record's bound is not.
+        assert_eq!(Millis::new("9223372036854775808"), None);
     }
 
     #[test]
     fn a_timing_the_record_cannot_spell_is_absent() {
-        // An exponent is a second spelling (`number.pest`), and a negative
-        // duration or count is not a measurement; each is absent rather than
-        // rewritten into something the server did not say.
+        // An exponent is a second spelling (`number.pest`), a negative
+        // duration or count is not a measurement, and a count past `i64::MAX`
+        // is past what the record can hold (`Count::MAX`); each is absent
+        // rather than rewritten into something the server did not say.
         let timings = reported(
-            r#"{"prompt_ms":2.9e2,"predicted_ms":-1.5,"prompt_n":1e2,"cache_n":-3,"predicted_n":7}"#,
+            r#"{"prompt_ms":2.9e2,"predicted_ms":-1.5,"prompt_n":1e2,"cache_n":-3,"predicted_n":7,"draft_n":9223372036854775808}"#,
         )
         .expect("timings");
         assert_eq!(
