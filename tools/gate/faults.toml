@@ -3509,6 +3509,46 @@ failure_class = "admission.rule-broken"
 legacy_signature = "FAIL  derive: an unadjudicated cell holds"
 migrated = false
 [[fault]]
+id = "admission.admission_failing_cell_admits"
+kind = "seeded-gate"
+check = "admission"
+label = "a failing cell read as admitting"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  derive: a failing cell bars, named"
+migrated = false
+[[fault]]
+id = "admission.admission_depth_cliff_admits"
+kind = "seeded-gate"
+check = "admission"
+label = "a depth cliff read as admitting"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  derive: a depth cliff bars"
+migrated = false
+[[fault]]
+id = "admission.admission_refuted_parity_admits"
+kind = "seeded-gate"
+check = "admission"
+label = "a refuted parity fire read as admitting"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  derive: a refuted parity fire bars"
+migrated = false
+[[fault]]
+id = "admission.admission_constitutional_unrequired"
+kind = "seeded-gate"
+check = "admission"
+label = "a constitutional cell not required"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  derive refuses a record missing a constitutional cell"
+migrated = false
+[[fault]]
+id = "admission.admission_record_moved"
+kind = "seeded-gate"
+check = "admission"
+label = "an admission record the glob cannot see"
+failure_class = "admission.record-not-found"
+legacy_signature = "admission.record-not-found"
+migrated = false
+[[fault]]
 id = "derive.derive_build_failure_unread"
 kind = "seeded-gate"
 check = "derive"

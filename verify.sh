@@ -2685,6 +2685,54 @@ p.write_text(s.replace(old, '        return "admitted", "held cells ignored"\n',
 EOF
 }
 
+# One seeded fault per derivation rule (#183's definition of done): each breaks a rule in the checker, and the
+# checker's own fixtures must go red.
+# A failing cell ignored.
+inject_admission_failing_cell_admits() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/admission/derive_admission.py"); s = p.read_text(encoding="utf-8")
+old = '    failing = [name for name, w in cells.items() if w == "fail"]\n'
+assert old in s, "the rule moved"
+p.write_text(s.replace(old, '    failing = []\n', 1), encoding="utf-8")
+PYEOF
+}
+# A depth cliff ignored.
+inject_admission_depth_cliff_admits() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/admission/derive_admission.py"); s = p.read_text(encoding="utf-8")
+old = '    if depth == "fail":\n'
+assert old in s, "the rule moved"
+p.write_text(s.replace(old, '    if False:\n', 1), encoding="utf-8")
+PYEOF
+}
+# A refuted or inconclusive parity fire ignored.
+inject_admission_refuted_parity_admits() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/admission/derive_admission.py"); s = p.read_text(encoding="utf-8")
+old = '    if parity in ("refuted", "inconclusive"):\n'
+assert old in s, "the rule moved"
+p.write_text(s.replace(old, '    if False:\n', 1), encoding="utf-8")
+PYEOF
+}
+# The constitutional cells not required.
+inject_admission_constitutional_unrequired() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/admission/derive_admission.py"); s = p.read_text(encoding="utf-8")
+old = '    if missing:\n        raise ValueError'
+assert old in s, "the rule moved"
+p.write_text(s.replace(old, '    if False:\n        raise ValueError', 1), encoding="utf-8")
+PYEOF
+}
+# An admission record one level deeper than the glob looks.
+inject_admission_record_moved() {
+  mkdir -p substrates/admission/accel24-beellama-qwen27b-q4kxl/deeper
+  mv substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c substrates/admission/accel24-beellama-qwen27b-q4kxl/deeper/
+}
+
 # A directory that declares no kind. It is then neither recomputed nor counted
 # as knowingly skipped, and the census that says so is the only thing standing
 # between "nothing to check here" and "nothing was checked".
@@ -6759,6 +6807,16 @@ selftest() {
     'admission.record-does-not-recompute'
   seeded_case "an unadjudicated cell read as admitting" admission inject_admission_unadjudicated_admits \
     'FAIL  derive: an unadjudicated cell holds'
+  seeded_case "a failing cell read as admitting" admission inject_admission_failing_cell_admits \
+    'FAIL  derive: a failing cell bars, named'
+  seeded_case "a depth cliff read as admitting" admission inject_admission_depth_cliff_admits \
+    'FAIL  derive: a depth cliff bars'
+  seeded_case "a refuted parity fire read as admitting" admission inject_admission_refuted_parity_admits \
+    'FAIL  derive: a refuted parity fire bars'
+  seeded_case "a constitutional cell not required" admission inject_admission_constitutional_unrequired \
+    'FAIL  derive refuses a record missing a constitutional cell'
+  seeded_case "an admission record the glob cannot see" admission inject_admission_record_moved \
+    'admission.record-not-found'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
     'front-matter .kind. is None'
   seeded_case "a recompute that cannot fail"          recompute inject_recompute_cannot_fail \

@@ -24,16 +24,21 @@ beyond the rulings: an unadjudicated depth cell or parity fire holds the word as
 when several results fail, the record names the first in the order cells, depth, parity.
 
 Usage: derive_admission.py --all [--root DIR] | --selftest
-Exit 0 every record's word is its derived word; 1 any is not, or a record fails its own recompute;
-2 the tree cannot be read. Each failure is one line `admission: FAIL <class>: <detail>`.
+Exit 0 every record's word is its derived word; 1 any is not, a record fails its own recompute, or a record cannot
+be read; 2 a usage error. Each failure is one line `admission: FAIL <class>: <detail>`.
 """
 import hashlib, json, pathlib, re, subprocess, sys, tomllib
 
-CELL_OK = re.compile(r"pass|unreported|n/a \(.+\)")
-CELL_WORDS = re.compile(r"pass|fail|unreported|unadjudicated|baseline|n/a \(.+\)")
+CELL_OK = re.compile(r"pass|unreported|n/a \(\s*\S.*\)")
+CELL_WORDS = re.compile(r"pass|fail|unreported|unadjudicated|baseline|n/a \(\s*\S.*\)")
+CONSTITUTIONAL = ("checkpoint_restore", "kwarg_delivery", "canary")  # planning, #143, comment 5882266710
+PARITY_ARM = "extraction-seat-parity-refire"  # the parity fire of extraction-acceptance-inverts
 
 def derive(cells: dict, depth: str, parity: str):
     """(word, reason): word is 'admitted', 'not admitted (<result>)', or None for a held admission."""
+    missing = [c for c in CONSTITUTIONAL if c not in cells]
+    if missing:
+        raise ValueError(f"no {', '.join(missing)} cell: a constitutional cell planning named is missing")
     for name, w in cells.items():
         if not CELL_WORDS.fullmatch(w) or (w == "baseline" and name != "canary"):
             raise ValueError(f"cell {name} reads {w!r}, not one of the ruled words")
@@ -61,7 +66,11 @@ def read_results(adm_dir: pathlib.Path, root: pathlib.Path):
     cells = {k: v["word"] for k, v in tomllib.loads((cells_dir / "cells.toml").read_text(encoding="utf-8")).items() if isinstance(v, dict)}
     depth = json.loads((depth_dir / "raw/decide.json").read_text(encoding="utf-8"))["word"]
     pp = root / adm["results"]["parity"]["path"] / "README.md"
-    parity = tomllib.loads(pp.read_text(encoding="utf-8").split("+++")[1])["result"]
+    front = tomllib.loads(pp.read_text(encoding="utf-8").split("+++")[1])
+    reg = front.get("regime", {})
+    if reg.get("arm") != PARITY_ARM or adm_dir.parent.name not in reg.get("substrates", []):
+        raise ValueError(f"the parity record is not a parity fire of extraction-acceptance-inverts ({PARITY_ARM}) naming {adm_dir.parent.name}")
+    parity = front["result"]
     return adm, cells, depth, parity
 
 def names_same(written, word) -> bool:
@@ -86,7 +95,8 @@ def verify_digests(adm_dir: pathlib.Path, root: pathlib.Path, adm: dict) -> list
     want = {"cells": rel, "depth": rel + "/depth"}
     for name, r in res.items():
         path = r.get("path", "")
-        if (name in want and path != want[name]) or (name == "parity" and not path.startswith("results/")):
+        target = (root / path).resolve()
+        if (name in want and path != want[name]) or (name == "parity" and not target.is_relative_to((root / "results").resolve())):
             out.append(f"admission.results-unreadable: {rel}'s {name} path {path!r} is not the record's own")
             continue
         got = manifest_sha(root / path, ("depth/",) if name == "cells" else (), {"admission.toml", "admission-recompute.sh"} if name == "cells" else ())
@@ -103,7 +113,7 @@ def check(adm_dir: pathlib.Path, root: pathlib.Path) -> list[str]:
         fails += verify_digests(adm_dir, root, tomllib.loads((adm_dir / "admission.toml").read_text(encoding="utf-8")))
         adm, cells, depth, parity = read_results(adm_dir, root)
         word, why = derive(cells, depth, parity)
-    except (OSError, KeyError, ValueError, IndexError, tomllib.TOMLDecodeError, json.JSONDecodeError) as e:
+    except (OSError, KeyError, ValueError, IndexError, AttributeError, TypeError, tomllib.TOMLDecodeError, json.JSONDecodeError) as e:
         return fails + [f"admission.results-unreadable: {adm_dir.relative_to(root)}: {e}"]
     written = adm.get("word")
     if word is None and (written is not None or not str(adm.get("word_held", "")).strip()):
@@ -137,6 +147,9 @@ def selftest() -> int:
         ("an n/a without its reason", {**ok_cells, "rendered_effort": "n/a"}, "pass", "supported"),
         ("a parity word no rule names", ok_cells, "pass", "passed"),
         ("a depth word no rule names", ok_cells, "no cliff", "supported"),
+        ("a record missing a constitutional cell", {k: v for k, v in ok_cells.items() if k != "checkpoint_restore"}, "pass", "supported"),
+        ("a record with no cells", {}, "pass", "supported"),
+        ("an n/a with a blank reason", {**ok_cells, "rendered_effort": "n/a ( )"}, "pass", "supported"),
     ]
     same = [("the same word", "admitted", "admitted", True), ("the failing result named with detail", "not admitted (kwarg_delivery: fails the negative half)", "not admitted (kwarg_delivery)", True),
             ("another failing result named", "not admitted (depth)", "not admitted (kwarg_delivery)", False), ("admitted for a derived not admitted", "admitted", "not admitted (depth)", False),
@@ -146,7 +159,11 @@ def selftest() -> int:
         got = names_same(w, d); good = got == want; bad += not good
         print(f"{'ok  ' if good else 'FAIL'}  the written word against the derived: {label}: {got}")
     for label, c, d, p, want in cases:
-        got = derive(c, d, p)[0]; good = got == want; bad += not good
+        try:
+            got = derive(c, d, p)[0]
+        except ValueError as e:  # a fixture that stops the rule is a failed fixture, not a skipped one
+            got = f"refused: {e}"
+        good = got == want; bad += not good
         print(f"{'ok  ' if good else 'FAIL'}  derive: {label}: {got!r}" + ("" if good else f" (expected {want!r})"))
     for label, c, d, p in refused:
         try:
@@ -162,7 +179,9 @@ def main(argv) -> int:
         return selftest()
     if not argv or argv[0] != "--all":
         print("usage: derive_admission.py --all [--root DIR] | --selftest", file=sys.stderr); return 2
-    root = pathlib.Path(argv[2]) if len(argv) == 3 and argv[1] == "--root" else pathlib.Path(__file__).resolve().parents[2]
+    if not (len(argv) == 1 or (len(argv) == 3 and argv[1] == "--root")):
+        print("usage: derive_admission.py --all [--root DIR] | --selftest", file=sys.stderr); return 2
+    root = pathlib.Path(argv[2]) if len(argv) == 3 else pathlib.Path(__file__).resolve().parents[2]
     dirs = sorted(p.parent for p in (root / "substrates/admission").glob("*/*/admission.toml"))
     stray = sorted(p for p in (root / "substrates/admission").rglob("admission.toml") if p.parent not in dirs)
     fails = [f"admission.record-not-found: {p.relative_to(root)} is not at substrates/admission/<substrate-id>/<fingerprint-prefix>/" for p in stray]
