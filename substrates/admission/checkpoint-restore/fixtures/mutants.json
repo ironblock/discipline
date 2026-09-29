@@ -37,7 +37,7 @@
   },
   {
    "label": "the reference's warm-against-cold left out of the tolerance",
-   "old": "tol = {\"cold_cold_reference\": cold_floor(ra, k), \"warm_cold_reference\": dist(ra[\"warm\"][\"top\"], ra[\"cold\"][0][\"top\"], k)}",
+   "old": "tol = {\"cold_cold_reference\": cold_floor(ra, k), \"warm_cold_reference\": max(dist(w[\"top\"], ra[\"cold\"][0][\"top\"], k) for w in warms(ra))}",
    "new": "tol = {\"cold_cold_reference\": cold_floor(ra, k)}"
   },
   {
@@ -59,6 +59,61 @@
    "label": "the declared attempt count unenforced",
    "old": "if len(rung[\"attempts\"]) > need or len(ref[\"attempts\"]) > need:",
    "new": "if False:"
+  },
+  {
+   "label": "an infinite tolerance allowed",
+   "old": "    if not math.isfinite(tau):",
+   "new": "    if False:"
+  },
+  {
+   "label": "missing engine digests accepted",
+   "old": "if not (HEX64.fullmatch(str(ident.get(\"rung_engine\", \"\"))) and HEX64.fullmatch(str(ident.get(\"reference_engine\", \"\")))):",
+   "new": "if False:"
+  },
+  {
+   "label": "the one-procedure check removed",
+   "old": "or min(rung.get(\"n_probs\", 0), ref.get(\"n_probs\", 0)) < 2 * k or (rung.get(\"role\"), ref.get(\"role\")) != (\"rung\", \"reference\"):",
+   "new": "or False:"
+  },
+  {
+   "label": "only the reference's first warm draw bounds",
+   "old": "max(dist(w[\"top\"], ra[\"cold\"][0][\"top\"], k) for w in warms(ra))",
+   "new": "dist(ra[\"warm\"][\"top\"], ra[\"cold\"][0][\"top\"], k)"
+  },
+  {
+   "label": "only the rung's first warm draw is judged",
+   "old": "ds = [dist(w[\"top\"], fa[\"cold\"][0][\"top\"], k) for w in warms(fa)]; d = max(ds)",
+   "new": "ds = [dist(fa[\"warm\"][\"top\"], fa[\"cold\"][0][\"top\"], k)]; d = max(ds)"
+  },
+  {
+   "label": "no reuse after too few attempts accepted",
+   "old": "if fa is None and len(rung[\"attempts\"]) < need:",
+   "new": "if False:"
+  },
+  {
+   "label": "a repeated warm draw without reuse accepted",
+   "old": "if any(w[\"cache_n\"] == 0 for w in warms(ra)) or (fa and any(w[\"cache_n\"] == 0 for w in warms(fa))):",
+   "new": "if False:"
+  },
+  {
+   "label": "the cold floor over the first pair only",
+   "old": "return max((dist(x[\"top\"], y[\"top\"], k) for x, y in itertools.combinations(att[\"cold\"], 2)), default=0.0)",
+   "new": "return dist(att[\"cold\"][0][\"top\"], att[\"cold\"][1][\"top\"], k)"
+  },
+  {
+   "label": "full_attention_interval not read as recurrent",
+   "old": "\"recurrent\", \"full_attention_interval\", ",
+   "new": "\"recurrent\", "
+  },
+  {
+   "label": "the attempt cap one short",
+   "old": "if len(rung[\"attempts\"]) > need or len(ref[\"attempts\"]) > need:",
+   "new": "if len(rung[\"attempts\"]) >= need or len(ref[\"attempts\"]) > need:"
+  },
+  {
+   "label": "no repeated warm draws",
+   "old": "            for _ in range(warm_draws - 1):",
+   "new": "            for _ in range(0):"
   }
  ]
 }
