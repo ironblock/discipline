@@ -1,0 +1,64 @@
+{
+ "mutants": [
+  {
+   "label": "the comparator ignores the log-probabilities",
+   "old": "return max((abs(A[t] - B[t]) if t in A and t in B else math.inf)",
+   "new": "return max((0.0 if t in A and t in B else math.inf)"
+  },
+  {
+   "label": "the cache_n check removed",
+   "old": "return next((a for a in m[\"attempts\"] if a[\"warm\"][\"cache_n\"] > 0), None)",
+   "new": "return next((a for a in m[\"attempts\"]), None)"
+  },
+  {
+   "label": "no retry after an attempt with no reuse",
+   "old": "        if warm[\"cache_n\"] > 0: break",
+   "new": "        break"
+  },
+  {
+   "label": "a missing token made harmless",
+   "old": "if t in A and t in B else math.inf)",
+   "new": "if t in A and t in B else 0.0)"
+  },
+  {
+   "label": "a recurrent reference accepted",
+   "old": "if not hdr.get(\"architecture\") or recurrent:",
+   "new": "if not hdr.get(\"architecture\"):"
+  },
+  {
+   "label": "a reference on another engine accepted",
+   "old": "if ident.get(\"reference_engine\") != ident.get(\"rung_engine\"):",
+   "new": "if False:"
+  },
+  {
+   "label": "the shape match removed",
+   "old": "if abs(rn - fn) > crit[\"shape_match\"] * fn:",
+   "new": "if False:"
+  },
+  {
+   "label": "the reference's warm-against-cold left out of the tolerance",
+   "old": "tol = {\"cold_cold_reference\": cold_floor(ra, k), \"warm_cold_reference\": dist(ra[\"warm\"][\"top\"], ra[\"cold\"][0][\"top\"], k)}",
+   "new": "tol = {\"cold_cold_reference\": cold_floor(ra, k)}"
+  },
+  {
+   "label": "the rung's cold floor left out of the tolerance",
+   "old": "    tol[\"cold_cold_rung\"] = cold_floor(fa, k)\n",
+   "new": ""
+  },
+  {
+   "label": "pass and fail swapped at the boundary",
+   "old": "\"pass\" if d <= tau else \"fail\"",
+   "new": "\"pass\" if d < tau else \"fail\""
+  },
+  {
+   "label": "the reference primed with all of P",
+   "old": "        prime = call(endpoint, prefix(drop) + X, True, slot, n_probs)",
+   "new": "        prime = call(endpoint, P + X, True, slot, n_probs)"
+  },
+  {
+   "label": "the declared attempt count unenforced",
+   "old": "if len(rung[\"attempts\"]) > need or len(ref[\"attempts\"]) > need:",
+   "new": "if False:"
+  }
+ ]
+}
