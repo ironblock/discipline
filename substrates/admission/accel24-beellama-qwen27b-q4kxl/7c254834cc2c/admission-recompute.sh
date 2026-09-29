@@ -8,7 +8,7 @@ set -uo pipefail
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd -- "$here/../../../.." && pwd)"
 python3 - "$here" "$repo" <<'PY' || exit 1
-import hashlib, json, pathlib, subprocess, sys, tomllib
+import hashlib, json, pathlib, re, subprocess, sys, tomllib
 here, repo = map(pathlib.Path, sys.argv[1:])
 adm = tomllib.loads((here / "admission.toml").read_text()); fails = []
 def manifest(root, exclude=()):
@@ -18,6 +18,18 @@ def manifest(root, exclude=()):
 EXCLUDE = {"cells": ("depth/", "admission.toml", "admission-recompute.sh")}
 # the structure is the rule's, not the record's: exactly these three results, each run through its own recompute.sh
 if sorted(adm["results"]) != ["cells", "depth", "parity"]: fails.append(f"the results are {sorted(adm['results'])}, not cells, depth and parity")
+# the record's identity and its own results are this directory's: the substrate is its parent's name, the
+# fingerprint is fingerprint.json's (and names this directory), the cells are this directory, the depth cell its
+# depth/, and the parity record declares this substrate in its regime
+fpj = json.loads((here / "fingerprint.json").read_text())["sha256"]
+if adm.get("substrate") != here.parent.name: fails.append(f"the substrate {adm.get('substrate')!r} is not this directory's {here.parent.name!r}")
+if adm.get("fingerprint") != fpj or not fpj.startswith(here.name): fails.append("the fingerprint is not this directory's fingerprint.json")
+rel = here.relative_to(repo).as_posix()
+if adm["results"].get("cells", {}).get("path") != rel: fails.append("the cells cited are not this directory")
+if adm["results"].get("depth", {}).get("path") != rel + "/depth": fails.append("the depth cell cited is not this directory's depth/")
+pp = adm["results"].get("parity", {}).get("path", "")
+if not pp.startswith("results/") or here.parent.name not in tomllib.loads((repo / pp / "README.md").read_text().split("+++")[1]).get("regime", {}).get("substrates", []):
+    fails.append("the parity record cited is not a result whose regime names this substrate")
 for name, r in adm["results"].items():
     root = repo / r["path"]
     if r["recompute"] != "recompute.sh": fails.append(f"{name}: its recompute is {r['recompute']!r}, not its own recompute.sh"); continue
@@ -36,10 +48,12 @@ if "cells" in adm["results"]:
     cells = tomllib.loads((here / "cells.toml").read_text())
     words = {k: v.get("word") for k, v in cells.items() if isinstance(v, dict)}
     if words != adm["results"]["cells"]["words"]: fails.append(f"cells: cells.toml's words {words} are not those admission.toml records")
-if ("word" in adm) == bool(adm.get("word_held")): fails.append("admission.toml must carry exactly one of a word and the reason it is held")
+if ("word" in adm) == bool(str(adm.get("word_held", "")).strip()): fails.append("admission.toml must carry exactly one of a word and the reason it is held")
+if "word" in adm and not (adm["word"] == "admitted" or re.fullmatch(r"not admitted \((cells|depth|parity)\b[^)]+\)", adm["word"])):
+    fails.append(f"the word {adm['word']!r} is not admitted, or not admitted with the failing result named")
 if adm.get("word") == "admitted":
     words = adm["results"].get("cells", {}).get("words", {})
-    unpassing = [k for k, w in words.items() if not (w == "pass" or w.startswith("n/a ("))]
+    unpassing = [k for k, w in words.items() if not (w == "pass" or re.fullmatch(r"n/a \(.+\)", w) or (k == "canary" and w == "baseline"))]
     if unpassing or adm["results"].get("depth", {}).get("word") != "pass" or adm["results"].get("parity", {}).get("word") != "supported":
         fails.append(f"admitted is written while a result is not passing: cells {unpassing}, depth {adm['results'].get('depth', {}).get('word')!r}, parity {adm['results'].get('parity', {}).get('word')!r}")
 for f in fails: print(f"admission-recompute: {f}")
