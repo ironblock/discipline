@@ -191,11 +191,20 @@ def cmd_selftest(a) -> int:
         colds = [c for c in st["calls"] if not c["cache_prompt"]]
         check(all(c["prompt"] == P + Y for c in colds) and len(colds) == 3 * case["attempts"], f"measure: {case['label']}: every cold call is P + Y uncached")
     srv, st = fake_server(fx["reference_script"]); measure(f"http://127.0.0.1:{srv.server_address[1]}", 1, 2, 0, 20, drop=23); srv.shutdown()
+    check(all(c["prompt"] == P + Y for c in st["calls"] if not c["prompt"].endswith(X)), "measure: the shortened reference's warm and cold calls are all P + Y")
     check(st.get("primes") == [prefix(23) + X] * 3 and prefix(23).count("\n") == LINES - 23 and P.startswith(prefix(23)),
           "measure: a reference primed short of 23 lines, so its warm call reprocesses them")
     for case in fx["decide"]:
         got = decide(case["rung"], case["reference"], case.get("identity", fx["identity"]), crit)
         check(got["word"] == case["word"] and case.get("reason_has", "") in got.get("reason", ""), f"decide: {case['label']}", f"got {got['word']} ({got.get('reason', got.get('distance'))})")
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        g = pathlib.Path(td) / "h.gguf"; kv = [("general.architecture", 8, "qwen35")] + [(f"qwen35.k{i}", 4, i) for i in range(20)] + [("qwen35.ssm.state_size", 4, 128)]
+        enc = lambda x: struct.pack("<Q", len(x.encode())) + x.encode()
+        body = b"".join(enc(k) + struct.pack("<I", t) + (enc(v) if t == 8 else struct.pack("<I", v)) for k, t, v in kv)
+        g.write_bytes(b"GGUF" + struct.pack("<I", 3) + struct.pack("<QQ", 0, len(kv)) + body)
+        h = gguf(str(g))
+        check(h["architecture"] == "qwen35" and "qwen35.ssm.state_size" in h["keys"], "gguf: every key read, the architecture and a late recurrent key found", f"{h}")
     check(dist([[1, -0.1], [2, -2.0]], [[1, -0.1], [3, -2.0]], 2) == math.inf, "distance: a top token missing from the other side is infinite")
     check(abs(dist([[1, -0.5], [2, -1.0]], [[1, -0.25], [2, -1.0]], 2) - 0.25) < 1e-12, "distance: the largest log-probability difference")
     print(f"checkpoint_restore selftest: {'all pass' if not bad else f'{bad} failing'}"); return 1 if bad else 0
@@ -224,7 +233,7 @@ def main(argv) -> int:
             rd = [json.loads(pathlib.Path(p).read_text()) for p in (a.rung, a.reference, a.identity)]
             crit = tomllib.loads(pathlib.Path(a.criterion).read_text())
             out = decide(*rd, crit)
-        except (OSError, ValueError, KeyError, TypeError, IndexError) as e:
+        except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError) as e:
             print(f"checkpoint_restore: malformed input: {e!r}", file=sys.stderr); return 2
         print(json.dumps(out, indent=1)); return 0
     return cmd_selftest(a)

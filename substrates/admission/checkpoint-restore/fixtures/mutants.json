@@ -175,6 +175,26 @@
    "label": "a recurrent architecture name not read",
    "old": " + ([hdr[\"architecture\"]] if any(m in str(hdr.get(\"architecture\", \"\")) for m in (\"rwkv\", \"mamba\", \"lfm\")) else [])",
    "new": ""
+  },
+  {
+   "label": "the reference's cold calls on the shortened prompt",
+   "old": "        colds = [call(endpoint, P + Y, False, slot, n_probs) for _ in range(cold)]",
+   "new": "        colds = [call(endpoint, prefix(drop) + Y, False, slot, n_probs) for _ in range(cold)]"
+  },
+  {
+   "label": "the gguf reader stopping early",
+   "old": "    for _ in range(nkv):",
+   "new": "    for _ in range(nkv // 2):"
+  },
+  {
+   "label": "the reference's cold floor left out of the tolerance",
+   "old": "tol = {\"cold_cold_reference\": cold_floor(ra, k), \"warm_cold_reference\":",
+   "new": "tol = {\"warm_cold_reference\":"
+  },
+  {
+   "label": "the reference's warm call on the shortened prompt",
+   "old": "        warm = call(endpoint, P + Y, True, slot, n_probs)",
+   "new": "        warm = call(endpoint, prefix(drop) + Y, True, slot, n_probs)"
   }
  ]
 }

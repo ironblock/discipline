@@ -53,14 +53,17 @@ There is no restart. But each call occupies the slot and writes the server's pro
 
 So a known-good restore moves the distribution by an amount set by the batch composition that computed the cache. A tolerance taken at one length does not bound another, and one warm draw does not bound the history: hence the matched length, and the reference's three warm draws, whose largest distance bounds. More reference draws can only widen the tolerance; the rung stays at the one draw the ruling names, so a healthy rung is not made likelier to fail. What the three draws do not bound: they follow one request sequence, so on a reproducible path they may repeat each other, and none varies the reference's shortened prime against the rung's full P + X. That difference in cache history is disclosed, not bounded. Each re-prime's reply is kept (`prime_more`), so what it reused is on the record.
 
+**For planning, on the pass condition.** A pass needs only `cache_n` > 0, as D12 says, so a warm call that reused almost nothing would pass without exercising a checkpoint restore. `cache_n` and the warm continuation's length are on the record for that reason; a floor on reuse would be a ruling.
+
 **For planning to ratify.** Two parts of the tolerance go beyond D12's literal text, and both can only widen it (a divergence likelier to pass, never a healthy restore likelier to fail): the reference's own cold-against-cold, and the largest of the reference's three warm draws instead of one. Both follow from the measurements above; the ruling named one known-good warm-against-cold draw. These measurements were taken by a one-off script; their committed record is the floor's cell, which runs this instrument on the same reference at two lengths. The rung's reuse stops at a checkpoint, so its warm call can reprocess hundreds of tokens. The reference is therefore primed with P short of N lines (`--prime-drops-lines N`), which makes its warm call reprocess about as many.
 
 ## Tests
 
 - **`python3 checkpoint_restore.py selftest`** covers:
   - **against a scripted server:** pass, divergent, no reuse on every attempt, no reuse then reuse on the retry, reuse only on the last attempt, and a later warm draw evicted (the attempt retried). For each, the test checks the word, the number of attempts, one token per request pinned to the slot, and every cold call being P + Y uncached;
-  - **the reference's shortened prime;**
-  - **35 `decide` cases:**
+  - **the reference's shortened prime**, with every warm and cold call still P + Y;
+  - **the GGUF reader** on a synthetic header, finding the architecture and a recurrent key past twenty others;
+  - **36 `decide` cases:**
     - references that are not references: recurrent keys, `full_attention_interval` alone, RWKV, another binary, missing digests, an unread header, no reuse, another continuation length;
     - the 10% shape boundary, on each side;
     - one cold call, too many attempts, too few attempts with no reuse, a repeated warm draw without reuse;
@@ -70,8 +73,9 @@ So a known-good restore moves the distribution by an amount set by the batch com
     - exactly at the tolerance, and just over it;
     - measurements of different prompts or samplers, or of a prompt or sampler not the instrument's own; roles not as declared; an `n_probs` list too shallow; a truncated engine digest;
     - a later reference draw of another length; a reference with one cold call; a recurrent architecture name alone;
+    - the reference's own cold floor as the largest part;
   - **2 distance checks.**
-- **`python3 mutants.py`** seeds 35 mutations, in the script and in `criterion.toml`. The selftest must exit 1 on each, and **all 35 are killed**. Among them:
+- **`python3 mutants.py`** seeds 39 mutations, in the script and in `criterion.toml`. The selftest must exit 1 on each, and **all 39 are killed**. Among them:
   - the comparator ignoring the log-probabilities (the plan's first named fault);
   - the `cache_n` check removed (the plan's second);
   - no retry after an attempt with no reuse;
