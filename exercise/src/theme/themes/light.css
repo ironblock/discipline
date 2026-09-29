@@ -1,0 +1,57 @@
+/*
+ * The light palette: the same meanings in daylight, whatever the theme.
+ * Every role derives from its lamp (tokens.css) the other way round from
+ * the dark: a fill is the lamp as a tint on white, an ink the lamp darkened
+ * until it reads on that tint. Blue is still you, violet still diet asking.
+ * The page behind the root takes it too, so an overscroll or a gap is never
+ * the dark palette showing through.
+ */
+:root:has(.ex-root[data-mode='light']),
+.ex-root[data-mode='light'] {
+  color-scheme: light;
+  --page: #f4f5f7;
+  --panel: #eceef1;
+  --rule: #d6dae0;
+  --ink: #16181c;
+  --ink-muted: #505764;
+  --ink-faint: #7c828d;
+  --chip: rgb(0 0 0 / 0.05);
+  --well: rgb(20 30 50 / 0.06);
+
+  --paper-slab: #ffffff;
+
+  --fill-user: color-mix(in oklab, var(--paper-slab) 84%, var(--lamp-you));
+  --ink-user: color-mix(in oklab, var(--lamp-you) 58%, black);
+  --fill-system: color-mix(in oklab, var(--paper-slab) 88%, var(--lamp-diet-asks));
+  --ink-system: color-mix(in oklab, var(--lamp-diet-asks) 55%, black);
+  --fill-assistant: var(--paper-slab);
+  --ink-assistant: #2a2e35;
+  --ink-reasoning: #16181c;
+  --fill-tool: #eceef1;
+  --ink-tool: color-mix(in oklab, #2f343c 88%, var(--lamp-work));
+
+  --fill-interview: color-mix(in oklab, var(--paper-slab) 90%, var(--lamp-diet-asks));
+  --ink-interview: color-mix(in oklab, var(--lamp-diet-asks) 58%, black);
+  --fill-ratify: color-mix(in oklab, var(--paper-slab) 90%, var(--lamp-diet-decides));
+  --ink-ratify: color-mix(in oklab, var(--lamp-diet-decides) 55%, black);
+  --fill-extraction: color-mix(in oklab, var(--paper-slab) 88%, var(--lamp-diet-reads));
+  --ink-extraction: color-mix(in oklab, var(--lamp-diet-reads) 45%, black);
+  --fill-lane: #eceef1;
+  --ink-lane: #505764;
+  --fill-memory: var(--paper-slab);
+
+  --ok: color-mix(in oklab, var(--lamp-work) 55%, black);
+  --warn: color-mix(in oklab, var(--lamp-attention) 60%, black);
+  --bad: color-mix(in oklab, var(--lamp-fault) 72%, black);
+  --fresh: color-mix(in oklab, var(--lamp-diet-asks) 60%, black);
+  --seam: color-mix(in oklab, var(--lamp-diet-decides) 55%, black);
+  --gap: #b8620f;
+
+  --foot-tone: 70%;
+  --foot-unit-tone: 45%;
+  --focus: var(--ink-user);
+  /* White thins a colour faster than the dark does: a cable at rest keeps more of its lamp. */
+  --cable-rest: 75%;
+  /* Grey on white weighs more than light on black: the minimap's slivers keep less of it. */
+  --minimap-ink: 0.55;
+}

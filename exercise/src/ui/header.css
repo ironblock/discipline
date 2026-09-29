@@ -1,0 +1,152 @@
+.ex-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1.1rem;
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid var(--glass-rim, var(--rule));
+  background: var(--chrome-bg, var(--page));
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+  color: var(--ink-muted);
+}
+
+.ex-header__k {
+  color: var(--ink-faint);
+}
+
+.ex-header__model {
+  color: var(--ink-faint);
+}
+
+.ex-header__slots {
+  display: inline-flex;
+  gap: 0.9rem;
+}
+
+.ex-header__slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ex-header__dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  border: 1px solid var(--ink-faint);
+}
+
+/* A busy slot is an LED lit in the colour of the lane it is serving (from the lane registry). */
+.ex-header__slot { --led: var(--lane-ink, var(--ink-lane)); }
+.ex-header__slot[data-lane='trunk'] { --led: var(--ink-assistant); }
+
+.ex-header__slot[data-busy] .ex-header__dot {
+  background: var(--led);
+  border-color: var(--led);
+  box-shadow: 0 0 var(--led-radius) var(--led), 0 0 calc(var(--led-radius) * 2.5) color-mix(in oklab, var(--led) 50%, transparent);
+}
+
+.ex-header__holder {
+  color: var(--led);
+}
+
+.ex-header__spacer {
+  flex: 1 1 auto;
+}
+
+.ex-header__state {
+  padding: 0.15em 0.5em;
+  background: var(--chip);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ex-header__state[data-state='awaiting'] { color: var(--ink-user); }
+.ex-header__state[data-state='turn'] { color: var(--ink-assistant); }
+.ex-header__state[data-state='capture'] { color: var(--lane-ink, var(--ink-interview)); }
+.ex-header__state[data-state='ratify'] { color: var(--ink-ratify); }
+
+.ex-header__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+
+.ex-header__toggle input {
+  accent-color: var(--focus, var(--ink-interview));
+}
+
+.ex-header__unknown {
+  color: var(--ink-faint);
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+}
+
+/* The connection to the drive, when it is not live: nothing reaches the log while it is down. */
+.ex-header__link {
+  padding: 0.15em 0.5em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--warn);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, currentColor 40%, transparent);
+  animation: ex-link 1.6s ease-in-out infinite;
+}
+
+.ex-header__link[data-link='lost'] {
+  color: var(--bad);
+  animation: none;
+}
+
+@keyframes ex-link {
+  50% { opacity: 0.55; }
+}
+
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-header__link { animation: none; }
+
+.ex-segments {
+  display: inline-flex;
+  padding: 1px;
+  border-radius: calc(var(--radius) / 2 + 1px);
+  box-shadow: inset 0 0 0 1px var(--control-rim, var(--rule));
+}
+
+.ex-segment {
+  position: relative;
+  padding: 0.1em 0.5em;
+  border-radius: calc(var(--radius) / 2);
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+
+.ex-segment:hover {
+  color: var(--ink-muted);
+}
+
+/* Not now: the row has no room for it (its title says so). */
+.ex-segment:has(input:disabled) {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ex-segment[data-on] {
+  background: var(--chip);
+  color: var(--ink);
+}
+
+.ex-segment:has(input:focus-visible) {
+  outline: 2px solid color-mix(in oklab, var(--focus, var(--ink-interview)) 75%, transparent);
+  outline-offset: 1px;
+}
+
+/* The radio itself is the label's job; kept for the keyboard and the accessibility tree. */
+.ex-segment input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+}

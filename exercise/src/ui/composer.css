@@ -1,0 +1,127 @@
+.ex-composer {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem 0.9rem 0.6rem;
+  --light-colour: var(--ink-user);
+  --light: var(--light-panel);
+  --glow: var(--glow-panel);
+  /* Lit from below: where you type. */
+  --light-at: 120% 90% at 50% 100%;
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+  color: var(--ink-muted);
+}
+
+.ex-composer__input {
+  width: 100%;
+  resize: vertical;
+  min-height: 3rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-user);
+  font: var(--size-prose) / var(--leading-prose) var(--font-ask);
+  outline: none;
+}
+
+.ex-composer__input::placeholder {
+  color: var(--ink-faint);
+}
+
+.ex-composer__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.9rem;
+}
+
+.ex-composer__spacer {
+  flex: 1 1 auto;
+}
+
+/* Narrow -- the trunk's column beside lanes and memory -- the bar is two rows
+   by design: what the session is doing, then the phase controls with the one
+   action at their right end. It follows the composer's own width. */
+.ex-composer {
+  container-type: inline-size;
+}
+
+@container (max-width: 44rem) {
+  .ex-composer__state {
+    flex: 1 0 100%;
+  }
+  .ex-composer__spacer {
+    display: none;
+  }
+  .ex-composer__send,
+  .ex-composer__cancel {
+    margin-left: auto;
+  }
+}
+
+.ex-composer[data-state='turn'] .ex-composer__state {
+  color: var(--ink-assistant);
+}
+
+.ex-composer[data-state='capture'] .ex-composer__state {
+  color: var(--lane-ink, var(--ink-interview));
+}
+
+.ex-composer[data-state='ratify'] .ex-composer__state {
+  color: var(--ink-ratify);
+}
+
+.ex-composer__label {
+  color: var(--ink-faint);
+}
+
+.ex-composer__seam {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ex-composer select,
+.ex-composer button {
+  padding: 0.25em 0.6em;
+  border: 1px solid var(--control-rim, var(--rule));
+  box-shadow: var(--relief-control);
+  border-radius: var(--radius);
+  background: var(--chip);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ex-composer button:disabled,
+.ex-composer select:disabled {
+  color: var(--ink-faint);
+  cursor: default;
+}
+
+.ex-composer__seam button:not(:disabled) {
+  border-color: var(--seam);
+  color: var(--seam);
+}
+
+.ex-composer__send:not(:disabled) {
+  border-color: var(--ink-user);
+  color: var(--ink-user);
+}
+
+.ex-composer__cancel:not(:disabled) {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.ex-composer__hint {
+  margin: 0;
+  color: var(--ink-faint);
+}
+
+/* The composer is lit by what the session is doing: your turn, the trunk, an interview, ratify. */
+.ex-composer[data-state='turn'] { --light-colour: var(--ink-assistant); --light: var(--light-panel-live); --glow: var(--glow-panel-live); }
+.ex-composer[data-state='capture'] { --light-colour: var(--lane-ink, var(--ink-interview)); --light: var(--light-panel-live); --glow: var(--glow-panel-live); }
+.ex-composer[data-state='ratify'] { --light-colour: var(--ink-ratify); --light: var(--light-panel-live); --glow: var(--glow-panel-live); }
+
+.ex-composer[data-link='reconnecting'] .ex-composer__state { color: var(--warn); }
+.ex-composer[data-link='lost'] .ex-composer__state { color: var(--bad); }

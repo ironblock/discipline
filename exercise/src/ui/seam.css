@@ -1,0 +1,38 @@
+.ex-seam {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 1.5rem 0 0.5rem;
+  color: var(--seam);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+  position: relative;
+}
+
+.ex-seam__rule {
+  flex: 1 1 2rem;
+  height: var(--seam-thickness, 0);
+  border-top: var(--seam-line, 1px solid);
+  border-color: color-mix(in oklab, var(--seam) 60%, transparent);
+  border-radius: 999px;
+  box-shadow: var(--seam-groove, 0 0 0 transparent), 0 0 var(--glow-radius) color-mix(in oklab, var(--seam) var(--glow-seam), transparent);
+}
+
+.ex-seam__label {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem 1rem;
+}
+
+.ex-seam__label strong {
+  font-weight: 600;
+}
+
+.ex-seam__kind {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.ex-seam__reason {
+  color: var(--ink-muted);
+}

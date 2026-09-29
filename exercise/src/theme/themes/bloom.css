@@ -1,0 +1,154 @@
+/*
+ * Bloom: frosted, matte slabs with a fine grain and a thin rim of light, and
+ * beneath each one its own colour pools on the field around it, as if the
+ * slab sat over a lamp of that colour. What is beside the prefix -- lanes,
+ * working memory, the composer, the chrome -- is glass: a blurred view of
+ * what is under it, a rim that catches the light. Light is WHAT IS HAPPENING
+ * NOW, and it comes from the things themselves, like LEDs in a rack: what
+ * generates glows in its colour, a busy slot is a lit LED, fresh memory is
+ * lit, the seam glows; idle is dark. A footer is the foot of its card, a
+ * shaded band under a hairline of the block's own ink. A cable is a patch
+ * cable in its lane's colour, jacked in at both ends.
+ */
+.ex-root[data-theme='bloom'] {
+  --radius: 14px;
+  --relief-evicted: 0 0 0 transparent;
+  --seam-thickness: 7px;
+  --seam-line: 0 solid;
+  --glass-backdrop: blur(14px) saturate(160%);
+  --glow-radius: 56px;
+  --glow-panel: 0%;
+  --led-radius: 6px;
+
+  /* The role label is a small frosted chip; the numbers after it are plain
+     low-contrast text, so a footer reads as one quiet line. */
+  --stat-chip: transparent;
+  --stat-relief: 0 0 0 transparent;
+  --foot-band: 1;
+  /* An evicted era loses its colour as well as its presence. */
+  --evicted-filter: saturate(0.3);
+
+  --cable-width: 1.5px;
+  --cable-arrow: none;
+  --cable-ports: inline;
+  --cable-glow: 3px;
+
+  /* Under the composer the strip repaints the page itself -- the same fixed
+     field and grain -- faded in at its top edge, so the pools run unbroken
+     behind the composer and the trunk slides under it. */
+  --composer-fade: var(--field), var(--texture), linear-gradient(var(--page), var(--page));
+  --composer-attachment: fixed;
+  --composer-mask: linear-gradient(to bottom, transparent, #000 1.5rem);
+}
+
+/* In the dark: slabs lit at their rims, glass that catches the light, a grain of light. */
+.ex-root[data-theme='bloom'][data-mode='dark'] {
+  --page: #17191d;
+  --panel: rgb(255 255 255 / 0.03);
+  --rule: #272b31;
+  --ink: #e4e6ea;
+  --ink-muted: #939aa5;
+  --ink-faint: #6a707b;
+  --chip: rgb(255 255 255 / 0.05);
+  --ink-reasoning: #e2e5e9;
+  /* Four roles, four steps apart in lightness as well as hue, so they scan
+     apart while scrolling: the tool's output sits below the page (a well),
+     the assistant a step above it, system and user tinted further. */
+  --fill-tool: #121417;
+  --fill-lane: rgb(255 255 255 / 0.04);
+  --fill-memory: rgb(255 255 255 / 0.025);
+  --rim-tone: 26%;
+
+  --relief-trunk: 0 10px 26px -10px rgb(0 0 0 / 0.7), inset 0 0 0 1px rgb(255 255 255 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.1);
+  --relief-trunk-live: 0 16px 34px -12px rgb(0 0 0 / 0.75), inset 0 0 0 1px rgb(255 255 255 / 0.12), inset 0 1px 0 rgb(255 255 255 / 0.14);
+  --relief-tool: inset 0 2px 10px rgb(0 0 0 / 0.6), inset 0 0 0 1px rgb(255 255 255 / 0.03);
+  --relief-lane: inset 0 1px 0 rgb(255 255 255 / 0.14), inset 0 -1px 0 rgb(0 0 0 / 0.3), 0 14px 30px -10px rgb(0 0 0 / 0.7);
+  --relief-panel: inset 0 1px 0 rgb(255 255 255 / 0.12), inset 0 -1px 0 rgb(0 0 0 / 0.3), 0 18px 40px -12px rgb(0 0 0 / 0.7);
+  --relief-well: inset 0 0 0 1px rgb(255 255 255 / 0.07);
+  --relief-control: 3px 3px 7px rgb(0 0 0 / 0.5), -2px -2px 6px rgb(255 255 255 / 0.04);
+  --control-rim: transparent;
+  --seam-groove: inset 2px 2px 4px rgb(0 0 0 / 0.6), inset -1px -1px 3px rgb(255 255 255 / 0.05);
+  --evicted-opacity: 0.62;
+
+  --glass-overlay: linear-gradient(150deg, rgb(255 255 255 / 0.1), rgb(255 255 255 / 0.025) 45%, rgb(255 255 255 / 0.05));
+  --glass-rim: rgb(255 255 255 / 0.09);
+  /* The chrome is lighter glass here, so the field shows through it. */
+  --chrome-bg: rgb(23 25 29 / 0.82);
+  --lanehead-bg: linear-gradient(to bottom, rgb(23 25 29 / 0.9) 70%, rgb(23 25 29 / 0));
+
+  --glow-trunk: 32%;
+  --glow-trunk-live: 65%;
+  --glow-lane: 10%;
+  --glow-lane-live: 60%;
+  --glow-panel-live: 30%;
+  --glow-seam: 70%;
+
+  --foot-shade: 26%;
+  --foot-rule: 14%;
+
+  --texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.09 0'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
+  /* The room is lit from two sides: you from below, where you type; diet
+     from the right, behind the curtain. The live field carries the meaning;
+     this one is only ambience. */
+  --pool-rest: 9%;
+  --pool-live: 26%;
+  --field:
+    radial-gradient(60rem 40rem at 40% 115%, color-mix(in oklab, var(--lamp-you) 7%, transparent), transparent 70%),
+    radial-gradient(40rem 34rem at 100% 10%, color-mix(in oklab, var(--lamp-diet-asks) 7%, transparent), transparent 70%);
+}
+
+/*
+ * In daylight: slabs are white and frosted, lifted by soft shadow rather
+ * than lit rims; grain is a faint dark speckle; glass is milky; each slab
+ * still sits over a pool of its own colour, and what runs still glows -- a
+ * tinted halo, since light on white reads as colour, not brightness.
+ */
+.ex-root[data-theme='bloom'][data-mode='light'] {
+  --rim-tone: 22%;
+  --relief-trunk: 0 1px 2px rgb(20 30 50 / 0.06), 0 10px 26px -14px rgb(20 30 50 / 0.28), inset 0 1px 0 rgb(255 255 255 / 0.9);
+  --relief-trunk-live: 0 2px 4px rgb(20 30 50 / 0.08), 0 16px 34px -14px rgb(20 30 50 / 0.34), inset 0 1px 0 rgb(255 255 255 / 0.9);
+  --relief-tool: inset 0 1px 4px rgb(20 30 50 / 0.1), inset 0 0 0 1px rgb(20 30 50 / 0.04);
+  --relief-well: inset 0 0 0 1px rgb(20 30 50 / 0.08);
+  --relief-lane: 0 1px 2px rgb(20 30 50 / 0.06), 0 12px 28px -14px rgb(20 30 50 / 0.3), inset 0 1px 0 rgb(255 255 255 / 0.8);
+  --relief-panel: 0 1px 2px rgb(20 30 50 / 0.06), 0 16px 38px -16px rgb(20 30 50 / 0.3), inset 0 1px 0 rgb(255 255 255 / 0.8);
+  --relief-control: 0 1px 2px rgb(20 30 50 / 0.12);
+  --control-rim: rgb(20 30 50 / 0.1);
+
+  --glass-overlay: linear-gradient(150deg, rgb(255 255 255 / 0.75), rgb(255 255 255 / 0.4) 45%, rgb(255 255 255 / 0.55));
+  --glass-rim: rgb(20 30 50 / 0.08);
+  --fill-interview: color-mix(in oklab, var(--lamp-diet-asks) 9%, rgb(255 255 255 / 0.55));
+  --fill-ratify: color-mix(in oklab, var(--lamp-diet-decides) 9%, rgb(255 255 255 / 0.55));
+  --fill-extraction: color-mix(in oklab, var(--lamp-diet-reads) 9%, rgb(255 255 255 / 0.55));
+  --fill-lane: rgb(255 255 255 / 0.55);
+  --fill-memory: rgb(255 255 255 / 0.6);
+  --panel: rgb(255 255 255 / 0.6);
+
+  --glow-trunk: 14%;
+  --glow-trunk-live: 40%;
+  --glow-lane: 10%;
+  --glow-lane-live: 40%;
+  --glow-panel-live: 24%;
+  --glow-seam: 40%;
+  --light-lane: 0%;
+  --light-lane-live: 12%;
+  --light-panel: 0%;
+  --light-panel-live: 10%;
+
+  --seam-groove: inset 0 1px 2px rgb(20 30 50 / 0.14), inset 0 -1px 0 rgb(255 255 255 / 0.8);
+  --evicted-opacity: 0.55;
+
+  --foot-shade: 5%;
+  --foot-rule: 18%;
+
+  --texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.05 0'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
+  --chrome-bg: rgb(244 245 247 / 0.85);
+  --lanehead-bg: linear-gradient(to bottom, rgb(244 245 247 / 0.92) 70%, rgb(244 245 247 / 0));
+
+  --pool-rest: 8%;
+  /* Grey on white weighs more than light on black: the minimap's slivers keep less of it. */
+  --minimap-ink: 0.55;
+  --pool-live: 20%;
+  --field:
+    radial-gradient(60rem 40rem at 40% 115%, color-mix(in oklab, var(--lamp-you) 9%, transparent), transparent 70%),
+    radial-gradient(40rem 34rem at 100% 10%, color-mix(in oklab, var(--lamp-diet-asks) 9%, transparent), transparent 70%);
+}

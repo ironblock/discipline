@@ -1,0 +1,29 @@
+/*
+ * A tool call (ToolCall.tsx): its body reads like a REPL -- the command,
+ * and under it what it printed -- in the tool's own text, on the block,
+ * not in a well.
+ */
+.ex-tool__call,
+.ex-tool__output {
+  margin: 0;
+  max-height: 22rem;
+  overflow: auto;
+  font: var(--size-tool) / 1.5 var(--font-tool);
+  color: var(--ink-tool);
+  white-space: pre;
+}
+
+.ex-tool__output {
+  margin-top: 0.35rem;
+}
+
+/* The shell's prompt, a script cut short, and a whole written as one: said, quietly. */
+.ex-tool__prompt,
+.ex-tool__clip,
+.ex-tool__both {
+  color: var(--ink-faint);
+}
+
+.ex-exit--ok { color: var(--ok); }
+.ex-truncated { color: var(--warn); }
+.ex-exit--bad { color: var(--bad); }
