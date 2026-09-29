@@ -166,6 +166,12 @@ pub struct Timings {
     pub predicted_n: Option<u64>,
     /// How long generating them took.
     pub predicted_ms: Option<Millis>,
+    /// Tokens a speculative decoder drafted, when the server decodes
+    /// speculatively: the in-band evidence of that regime (#117 R3 Q3,
+    /// ruled). A missing key says nothing about speculation either way.
+    pub draft_n: Option<u64>,
+    /// How many of the drafted tokens were accepted.
+    pub draft_n_accepted: Option<u64>,
 }
 
 impl Timings {
@@ -184,6 +190,8 @@ impl Timings {
             prompt_ms: millis("prompt_ms"),
             predicted_n: count("predicted_n"),
             predicted_ms: millis("predicted_ms"),
+            draft_n: count("draft_n"),
+            draft_n_accepted: count("draft_n_accepted"),
         }
     }
 }
@@ -1387,6 +1395,9 @@ mod tests {
             prompt_ms: Millis::new("229.366"),
             predicted_n: Some(6),
             predicted_ms: Millis::new("105.445"),
+            // `4df29be` does not decode speculatively, and sends no pair.
+            draft_n: None,
+            draft_n_accepted: None,
         }
     }
 
@@ -1399,6 +1410,8 @@ mod tests {
             prompt_ms: Millis::new("297.198"),
             predicted_n: Some(312),
             predicted_ms: Millis::new("2591.561"),
+            draft_n: Some(312),
+            draft_n_accepted: Some(207),
         }
     }
 
