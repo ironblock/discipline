@@ -265,6 +265,23 @@ change under a stable id. Nothing here can change without the entry changing: \
 new acts are a new digest, and a new digest is a new piece of equipment, not a \
 new instance of this one."""
 
+[equipment.canned-loopback-cache-n]
+display_name = "the canned loopback server, cache count under the key a server sends"
+entry_type = "canned-server"
+hardware_fingerprint = "486ad478be67ee9ae6a22a0940d8106ee8df88c3eef9a33ece7fd6ea443d9e40"
+role = "diet-drive's own server after #156: the acts of `canned-loopback` with the reused-prefix count replayed as `timings.cache_n`, the key every committed real-server capture carries, in place of `timings.prompt_n_cached`, which none does"
+measured = "2026-09-29"
+measured_by = """
+Both values posted by track three on #156 from `5d2da54`, computed there by \
+`canned::acts_digest()` and `canned::hardware_fingerprint()`. The fingerprint \
+was recomputed by the data seat with `check-fingerprints.py`'s `digest_of` over \
+`acts_sha256` and `serves`, and agrees; the same computation over the old acts \
+gives `canned-loopback`'s `fc96af47...`, so one rule produces both."""
+serves = "diet-drive canned"
+acts_sha256 = "188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb90736979b90"
+acts_sha256_is = "`canned::acts_digest()`, as for `canned-loopback`; the acts that entry pins are kept byte for byte and still hash to its digest"
+no_instances_because = "as for `canned-loopback`: this entry exists because new acts are a new piece of equipment, not an instance of the old one (#156)"
+
 # ---------------------------------------------------------------------------
 # substrates
 # ---------------------------------------------------------------------------
@@ -508,8 +525,8 @@ sampler_card = "none on the serving line; each request sets its own"
 serving_context = 262144
 serving_flags = "-ngl 99, -t 16, -ctk q8_0, -ctv q8_0, -fa on, -b 1024, -ub 512, -np 4, --kv-unified, --jinja, --spec-type draft-mtp, --spec-draft-ngl 99, --spec-draft-n-max 3, --spec-draft-p-min 0.0, --api-key set; no --reasoning-format, so reasoning streams as reasoning_content and the template preserves it"
 serving_flags_are = "read off the running process's command line on 2026-09-28 and identical to the machine's recorded launch file; model paths and the key withheld"
-hazards = "run-to-run nondeterminism of the same order exists here without speculation: with the draft off, a same-binary teacher-forced rerun disagrees on the top token at about 2.1-2.4% of positions (the inference seat's measurement); with the MTP draft on, the accept/reject trajectory varies run to run (draft_n 213-235 over identical repetitions); the speculation-specific component (spec on against spec off) is unmeasured. Nothing may be gated on token identity. A hybrid recurrent model, so warm reuse after a divergence depends on where checkpoints land"
-hazards_corrected = "an earlier text gave 'the argmax flips about 2% per step, measured by the inference seat'; that figure was another team's vLLM measurement, not this machine's, corrected by the inference seat 2026-09-28"
+hazards = "greedy output with the MTP draft is not bit-exact with the spec-off path on this hybrid architecture: on five prompts, 36 of 2,327 positions (1.5%) disagree, the first between tokens 21 and 101, and every disagreement is a flip to the spec-off path's second-ranked token at a top-2 margin of 0.007-0.320 logits; which side of a near-tie is taken depends on the verify schedule (substrates/measurements/2026-09-29-ada-invariance/ and 2026-09-29-ada-invariance-ground-truth/). Acceptance at greedy is exact equality with the verify batch's argmax by source (e7051ef common/sampling.cpp:678-706); this build fills no probs on speculated tokens, so the verify batch's logits are unmeasured. Spec-off greedy output was bitwise reproducible within and across processes, and spec-on across processes on one prompt. Separately, with the draft off a same-binary teacher-forced rerun disagrees with a prior run's logits on the top token at about 2.1-2.4% of positions (the inference seat's measurement). Concurrency is untested. Nothing may be gated on token identity. A hybrid recurrent model, so warm reuse after a divergence depends on where checkpoints land"
+hazards_corrected = "an earlier text gave 'the argmax flips about 2% per step, measured by the inference seat'; that figure was another team's vLLM measurement, not this machine's, corrected by the inference seat 2026-09-28; the 2026-09-28 text then read 'run-to-run nondeterminism of the same order exists here without speculation ... the speculation-specific component is unmeasured', replaced 2026-09-29 by the on/off/off measurement; the 2026-09-29 text first read 'speculation is not output-invariant here', re-worded the same day after the ground-truth reads showed every divergence to be a near-tie flipped to the runner-up"
 
 [[substrate.ada48-llamacpp-qwen38flashnext-q20.instance]]
 id = "2026-09-28"
@@ -530,6 +547,18 @@ weights_kind = "canned"
 weights_acts_sha256 = "8947e69543df56300d85ed571a6799d66b25a51c18c6d456193918864d7f5e9d"
 reproducible_by_config = true
 reproducible_because = "replay the acts and the same bytes play again; exact match, no band. Gate 1 compares a canned run exactly rather than re-firing it within a band meant for sampling and hardware that cannot move here."
+
+[substrate.canned-cache-n]
+equipment = "canned-loopback-cache-n"
+description = "diet-drive's canned server after #156, replaying the reused-prefix count as `timings.cache_n`; `canned` stays as it was, and every record before #156 resolves to it"
+pinned = true
+engine_name = "diet-drive canned"
+engine_identity = "188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb90736979b90"
+engine_identity_is = "the acts digest, as for `canned`"
+weights_kind = "canned"
+weights_acts_sha256 = "188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb90736979b90"
+reproducible_by_config = true
+reproducible_because = "as for `canned`: replay the acts and the same bytes play again; exact match, no band"
 
 # The sense bakeoff's four embedder cells. A substrate here is an ENCODER RUN,
 # not a served model: no server, no sampler, a pinned library on this host's

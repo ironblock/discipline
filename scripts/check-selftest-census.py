@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Add the selftest's shards back up, and refuse if they do not make a whole.
 
-`verify.sh --selftest --shard K/N` runs the faults `tools/gate/shards.tsv`
-assigns to shard K, packed by measured cost rather than by arithmetic.
+`verify.sh --selftest --shard K/N` runs the faults a hash of their id assigns
+to shard K.
 That is a division of labour, not a selection of faults -- but the difference
 between those two is invisible from inside any one shard, because a shard that
 ran nothing and a shard that ran its share both exit 0 and both say `success`.
@@ -88,6 +88,15 @@ class Census:
                 else:
                     self.touched.append((parts[1], parts[2]))
                 continue
+            # A fault the shard did not see red (#112). Its row is what the
+            # drift opener reads off a failed `main` shard; here it is simply
+            # not a whole, whatever else the census says.
+            if key == "not_red":
+                if len(parts) != 4 or not parts[1] or not parts[2]:
+                    self.errors.append(f"{self.path.name}:{number}: not `not_red<TAB>ID<TAB>CHECK<TAB>WHY`")
+                else:
+                    self.errors.append(f"{self.path.name}:{number}: {parts[1]} was not seen red: {parts[3]}")
+                continue
             if key == "inherited":
                 if len(parts) != 4 or not parts[1].isdigit() or not parts[2] or not parts[3]:
                     self.errors.append(
@@ -149,9 +158,8 @@ def manifest_total(failures: list[str]) -> int | None:
 def report_slowest(reports: list[Census]) -> None:
     """The slowest shard as MEASURED, against the budget. Printed, never graded.
 
-    What a shard plan predicted is a claim about the runner made from a
-    harvest; this is the runner's own answer, from every shard that ran, and
-    it is the number the budget is about (ruled on #108, 2026-09-24).
+    The runner's own answer, from every shard that ran, and the number the
+    budget is about (ruled on #108, 2026-09-24).
     """
     timed = [(r.scalars["elapsed"], r.scalars.get("shard", 0)) for r in reports
              if "elapsed" in r.scalars]

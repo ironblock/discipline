@@ -299,7 +299,9 @@ impl Dialect {
             name: "llama.cpp".to_owned(),
             sampler_echo: Some("generation_settings".to_owned()),
             prompt_tokens: Some("usage.prompt_tokens".to_owned()),
-            cached_tokens: Some("timings.prompt_n_cached".to_owned()),
+            // The key the server sends (#156): `cache_n`, the prompt tokens
+            // reused from the slot, in every capture and in the Q10 rows.
+            cached_tokens: Some("timings.cache_n".to_owned()),
             finish_reason: Some("choices.0.finish_reason".to_owned()),
             reasoning: Some("choices.0.message.reasoning_content".to_owned()),
         }

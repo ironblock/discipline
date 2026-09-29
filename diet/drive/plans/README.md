@@ -23,4 +23,5 @@ The prototypes and probe scripts the documents cite ran in a session scratchpad,
 
 ## Status
 
-- **R2c:** two rounds, with no critical objection left on either side. It is waiting for planning's ruling on its questions. Nothing of R2c is built until then.
+- **R2c:** ruled on #117 and built: I1 to I7, the `idle.gap` intake and the reasoning courier (#128, #136, #137, #140, #146, #148, #151, #154).
+- **R3:** two rounds; the closing critique left no critical or major finding. Ruled and routed on [#117](https://github.com/ironblock/discipline/issues/117#issuecomment-5881602023). The three files were posted there as the record and are committed here with R3.1, its first increment. Round 1's proposal was not posted, so `r3-proposal.round1.md`, which the proposal and critique cite, is not in this directory.

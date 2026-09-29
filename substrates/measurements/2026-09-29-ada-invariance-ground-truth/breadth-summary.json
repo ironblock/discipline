@@ -1,0 +1,141 @@
+{
+ "p0": {
+  "positions": 1024,
+  "disagreements": 14,
+  "first": 65,
+  "first_margin": 0.1244,
+  "all_margins": [
+   0.1244,
+   0.1364,
+   0.0133,
+   0.0268,
+   0.1547,
+   0.055,
+   0.0208,
+   0.0898,
+   0.2852,
+   0.0178,
+   0.0949,
+   0.1035,
+   0.0104,
+   0.1262
+  ],
+  "on_token_is_off_second_every_time": true,
+  "max_margin": 0.2852,
+  "share_positions_margin_lt_0.3": 0.085,
+  "prompt_n_values": [
+   1,
+   4
+  ]
+ },
+ "p1": {
+  "positions": 320,
+  "disagreements": 3,
+  "first": 95,
+  "first_margin": 0.1174,
+  "all_margins": [
+   0.1174,
+   0.0136,
+   0.0178
+  ],
+  "on_token_is_off_second_every_time": true,
+  "max_margin": 0.1174,
+  "share_positions_margin_lt_0.3": 0.087,
+  "prompt_n_values": [
+   1,
+   4
+  ],
+  "on_reps_identical": true,
+  "on_len": 320,
+  "draft_n": [
+   330,
+   321,
+   321
+  ]
+ },
+ "p2": {
+  "positions": 181,
+  "disagreements": 6,
+  "first": 21,
+  "first_margin": 0.0984,
+  "all_margins": [
+   0.0984,
+   0.0437,
+   0.034,
+   0.3203,
+   0.0568,
+   0.0554
+  ],
+  "on_token_is_off_second_every_time": true,
+  "max_margin": 0.3203,
+  "share_positions_margin_lt_0.3": 0.11,
+  "prompt_n_values": [
+   1,
+   4
+  ],
+  "on_reps_identical": true,
+  "on_len": 181,
+  "draft_n": [
+   234,
+   237,
+   237
+  ]
+ },
+ "p3": {
+  "positions": 623,
+  "disagreements": 10,
+  "first": 55,
+  "first_margin": 0.1191,
+  "all_margins": [
+   0.1191,
+   0.0481,
+   0.1556,
+   0.0068,
+   0.0787,
+   0.1222,
+   0.0316,
+   0.0125,
+   0.1555,
+   0.0552
+  ],
+  "on_token_is_off_second_every_time": true,
+  "max_margin": 0.1556,
+  "share_positions_margin_lt_0.3": 0.083,
+  "prompt_n_values": [
+   1,
+   4
+  ],
+  "on_reps_identical": true,
+  "on_len": 623,
+  "draft_n": [
+   639,
+   654,
+   654
+  ]
+ },
+ "p4": {
+  "positions": 179,
+  "disagreements": 3,
+  "first": 101,
+  "first_margin": 0.0141,
+  "all_margins": [
+   0.0141,
+   0.0468,
+   0.0704
+  ],
+  "on_token_is_off_second_every_time": true,
+  "max_margin": 0.0704,
+  "share_positions_margin_lt_0.3": 0.117,
+  "prompt_n_values": [
+   1,
+   4
+  ],
+  "on_reps_identical": true,
+  "on_len": 179,
+  "draft_n": [
+   225,
+   225,
+   225
+  ]
+ }
+}

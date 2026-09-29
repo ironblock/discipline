@@ -1,0 +1,30 @@
+{
+ "props_keys": [
+  "bos_token",
+  "build_info",
+  "chat_template",
+  "chat_template_caps",
+  "cors_proxy_enabled",
+  "default_generation_settings",
+  "endpoint_metrics",
+  "endpoint_props",
+  "endpoint_slots",
+  "eos_token",
+  "is_sleeping",
+  "media_marker",
+  "modalities",
+  "model_alias",
+  "model_ftype",
+  "model_path",
+  "total_slots",
+  "ui",
+  "ui_settings"
+ ],
+ "default_generation_settings_keys": [
+  "n_ctx",
+  "params"
+ ],
+ "total_slots": 4,
+ "n_ctx_per_slot": 262144,
+ "slots_count": 4
+}

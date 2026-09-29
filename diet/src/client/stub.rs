@@ -81,6 +81,7 @@ pub struct Stub {
     address: SocketAddr,
     stop: Arc<AtomicBool>,
     hangups: Arc<Mutex<Vec<Held>>>,
+    heads: Arc<Mutex<Vec<String>>>,
     worker: Option<JoinHandle<Vec<String>>>,
 }
 
@@ -113,11 +114,14 @@ impl Stub {
         let flag = Arc::clone(&stop);
         let hangups = Arc::new(Mutex::new(Vec::new()));
         let seen = Arc::clone(&hangups);
-        let worker = thread::spawn(move || serve(&listener, acts, &flag, &seen));
+        let heads = Arc::new(Mutex::new(Vec::new()));
+        let headed = Arc::clone(&heads);
+        let worker = thread::spawn(move || serve(&listener, acts, &flag, &seen, &headed));
         Ok(Self {
             address,
             stop,
             hangups,
+            heads,
             worker: Some(worker),
         })
     }
@@ -126,6 +130,18 @@ impl Stub {
     #[must_use]
     pub fn url(&self) -> String {
         format!("http://{}/v1/chat/completions", self.address)
+    }
+
+    /// The head of every request received so far -- request line and
+    /// headers, as sent -- in order, one per request as `asked` has one: a
+    /// request that could not be read is `<unread: ...>` in both. What a
+    /// claim about a header is checked against.
+    #[must_use]
+    pub fn heads(&self) -> Vec<String> {
+        self.heads
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// For each [`Act::StreamThenHold`] served so far, in order, what it saw
@@ -174,6 +190,7 @@ fn serve(
     acts: Vec<Act>,
     stop: &AtomicBool,
     hangups: &Mutex<Vec<Held>>,
+    heads: &Mutex<Vec<String>>,
 ) -> Vec<String> {
     let mut asked = Vec::new();
     for act in acts {
@@ -181,12 +198,25 @@ fn serve(
             break;
         };
         match read_request(&mut stream) {
-            Ok(body) => asked.push(body),
+            Ok((head, body)) => {
+                heads
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(head);
+                asked.push(body);
+            }
             // A client that timed out may have closed mid-request. That is
             // the case under test, not an error here -- but it is recorded as
             // itself rather than as an empty body, because this module's whole
             // subject is not confusing those two.
-            Err(why) => asked.push(format!("<unread: {why}>")),
+            Err(why) => {
+                let unread = format!("<unread: {why}>");
+                heads
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(unread.clone());
+                asked.push(unread);
+            }
         }
         if let Some(hung_up) = act_on(&mut stream, &act) {
             hangups
@@ -284,8 +314,8 @@ enum Closing {
     No,
 }
 
-/// Read one request and return its body.
-fn read_request(stream: &mut TcpStream) -> io::Result<String> {
+/// Read one request and return its head and its body.
+fn read_request(stream: &mut TcpStream) -> io::Result<(String, String)> {
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     let mut raw = Vec::new();
     let mut buffer = [0_u8; 8192];
@@ -304,7 +334,7 @@ fn read_request(stream: &mut TcpStream) -> io::Result<String> {
                 }
                 raw.extend_from_slice(&buffer[..count]);
             }
-            return Ok(String::from_utf8_lossy(&raw[end..]).into_owned());
+            return Ok((headers, String::from_utf8_lossy(&raw[end..]).into_owned()));
         }
         let count = stream.read(&mut buffer)?;
         if count == 0 {

@@ -44,6 +44,7 @@ Exit 0 with a plan written; 2 when the question cannot be answered.
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import re
 import subprocess
@@ -73,7 +74,7 @@ CALL = re.compile(r"\b([a-z_][a-z0-9_]*)\b")
 MACHINERY_FUNCTIONS = frozenset(
     {
         "seeded_case", "in_shard", "claim_fault", "load_scope_plan",
-        "load_shard_plan", "sandbox", "sandbox_state", "shard_cost", "now_ms",
+        "sandbox", "sandbox_state", "not_red",
         "expect_exit", "edit_in_place", "seed_commit", "strip_substrates",
         "scratch", "prove_patterns", "inject_lane_fault", "scope_args",
         "run_check",
@@ -98,6 +99,28 @@ CHECK_INPUTS = {
     "results": {"results/"},
     "recompute": {"results/"},
 }
+
+
+BUDGET = ROOT / ".github" / "gate-budget.tsv"
+
+
+def max_shards(path: pathlib.Path = BUDGET) -> int:
+    """The declared ceiling on concurrent selftest jobs."""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, _, value = line.partition("\t")
+        if key == "max_shards" and value.strip().isdigit() and int(value) > 0:
+            return int(value)
+    raise Unusable(f"{path.name} declares no positive max_shards")
+
+
+def shard_count(reproven: int, total: int, ceiling: int) -> int:
+    """How many jobs this run gets: the full run gets the ceiling, and a run
+    re-proving a fraction of the faults gets that fraction of it, rounded up
+    and never below one (ruled on #112, 2026-09-28). No timing model: the
+    budget is a printed number, and the plan that balanced by cost retired."""
+    if total <= 0:
+        raise Unusable("the manifest lists no fault to divide")
+    return max(1, -(-ceiling * max(0, reproven) // total))
 
 
 class Unusable(Exception):
@@ -297,6 +320,18 @@ def dependencies(root: pathlib.Path, text: str) -> dict[str, tuple[set[str], set
                 check_units(bodies, "results"),
             )
     return deps
+
+
+def checks_of(root: pathlib.Path, text: str) -> dict[str, str]:
+    """id -> the check verify.sh proves the fault against: the `CHECK` a
+    `not_red` row names, and so the `check:<CHECK>` label a drift issue on
+    `main` carries (#112). A fault this cannot place is named by its id's
+    first word, which is the check for every case whose id verify.sh derives."""
+    checks = {ident: case[1] for ident, case in case_lines(text).items()}
+    for manifest in sorted(root.glob("diet/*/gate.toml")):
+        for fault in tomllib.loads(manifest.read_text(encoding="utf-8")).get("fault", []):
+            checks[fault["id"]] = "lanes"
+    return checks
 
 
 # --------------------------------------------------------------------------
@@ -615,6 +650,49 @@ def _selftest_cases_only():
     return None
 
 
+@fixture("no mechanics assertion lives in a function whose change re-proves everything")
+def _mechanics_outside_machinery():
+    # A mechanics assertion runs on every selftest whatever the scope, so it is
+    # no fault's dependency. Written inside a machinery function, every edit to
+    # one re-proved all 578 faults: #147 added three to `selftest` and scoped
+    # nothing, measured on #112. The `expect_exit` DEFINITION is machinery and
+    # is the one exception.
+    bodies = functions((ROOT / "verify.sh").read_text(encoding="utf-8"))
+    inside = sorted(
+        name for name, body in bodies.items()
+        if name in MACHINERY_FUNCTIONS | {"selftest"} and name != "expect_exit"
+        and re.search(r"(?<![\w-])expect_exit\s", body)
+    )
+    if inside:
+        return f"expect_exit is called inside machinery: {inside}"
+    return None
+
+
+@fixture("the check a fault is labelled by is the check verify.sh proves it against")
+def _checks_of():
+    checks = checks_of(ROOT, (ROOT / "verify.sh").read_text(encoding="utf-8"))
+    for ident, want in (("ci.ci_trunk_run_cancelled", "ci"), ("test.log_bindings_stale", "test"),
+                        ("injections.inert_injection", "injections")):
+        if checks.get(ident) != want:
+            return f"{ident} labelled {checks.get(ident)!r}, not {want!r}"
+    lane = next((i for i, c in checks.items() if c == "lanes"), None)
+    if lane is None or lane.startswith("lanes."):
+        return f"no lane fault labelled `lanes` by its own id: {lane}"
+    return None
+
+
+@fixture("the shard count is the ceiling's share of the faults re-proven, never zero")
+def _shard_count():
+    for reproven, total, ceiling, want in ((590, 590, 20, 20), (30, 590, 20, 2), (0, 590, 20, 1),
+                                           (1, 590, 20, 1), (296, 590, 20, 11)):
+        got = shard_count(reproven, total, ceiling)
+        if got != want:
+            return f"{reproven} of {total} under {ceiling} gave {got}, not {want}"
+    if max_shards() < 1:
+        return "the checked-in budget declares no ceiling"
+    return None
+
+
 @fixture("the census gives each fault the commit it last ran red at, and what it touched")
 def _census():
     import tempfile
@@ -669,10 +747,30 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--base", help="the ref the PR targets; recorded in the plan. Each inheritance is measured from the commit its fault was last seen red at")
     parser.add_argument("--census", help="a directory of census files from main's full run")
     parser.add_argument("--out", help="where to write the plan")
+    parser.add_argument("--checks-out", help="also write the checks whose faults are re-proven, one per line, for selftest-drift.py block")
+    parser.add_argument("--matrix", action="store_true", help="print the selftest matrix, [1..N], for the run --plan describes (every fault re-proven when --plan is not given)")
+    parser.add_argument("--plan", help="with --matrix: a plan this script wrote")
     parser.add_argument("--selftest", action="store_true", help="run the fixtures and exit")
     args = parser.parse_args(argv)
     if args.selftest:
         return selftest()
+    if args.matrix:
+        try:
+            listed = set(listed_faults(ROOT))
+            total = len(listed)
+            inherited = 0
+            if args.plan:
+                # Distinct ids the manifest lists: a duplicate or stale row must
+                # not make the count of what runs look smaller than it is.
+                inherited = len({line.split("\t")[1] for line in pathlib.Path(args.plan).read_text(encoding="utf-8").splitlines()
+                                 if line.startswith("inherit\t") and len(line.split("\t")) > 1} & listed)
+            n = shard_count(total - inherited, total, max_shards())
+        except (Unusable, OSError) as err:
+            print(f"scope-selftest: {err}", file=sys.stderr)
+            return EXIT_BROKEN
+        print(json.dumps(list(range(1, n + 1))))
+        print(f"scope-selftest: {total - inherited} of {total} fault(s) re-proven -> {n} shard(s)", file=sys.stderr)
+        return 0
     if not (args.base and args.census and args.out):
         print("scope-selftest: --base, --census and --out are all required", file=sys.stderr)
         return EXIT_BROKEN
@@ -705,6 +803,10 @@ def main(argv: list[str]) -> int:
     except (Unusable, OSError) as err:
         print(f"scope-selftest: {err}", file=sys.stderr)
         return EXIT_BROKEN
+    if args.checks_out:
+        named = checks_of(ROOT, text)
+        touched = sorted({named.get(i, i.split(".", 1)[0]) for i in rerun})
+        pathlib.Path(args.checks_out).write_text("".join(f"{c}\n" for c in touched), encoding="utf-8")
     body = "".join(f"inherit\t{i}\t{s}\n" for i, s in sorted(inherit.items()))
     pathlib.Path(args.out).write_text(
         f"# scope-selftest: {len(rerun)} re-proven, {len(inherit)} inherited, against {args.base}\n" + body,

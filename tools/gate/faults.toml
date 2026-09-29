@@ -38,8 +38,8 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 125
-unseedable_guards = 3
+mechanics_assertions = 126
+unseedable_guards = 2
 migrated = 0
 
 # A guard genuinely too dangerous to seed -- covering it would re-enter
@@ -52,18 +52,6 @@ migrated = 0
 id = "selftest.empty-shard-declares-pass"
 file = "verify.sh"
 reason = "a re-entrant --selftest call would recurse into the function containing it; proved by hand instead"
-
-# The same class, and the same reason. `in_shard` and `load_shard_plan` refuse
-# three states -- a fault the assignment does not name, an assignment packed
-# for a different N than the caller passed, and no assignment at all -- and all
-# three are only reachable under `--selftest --shard`. A seeded case runs
-# `verify.sh --only CHECK`; nothing it can run gets there, and an assertion
-# that invoked `--selftest` would re-enter the function the guards sit in.
-# Proved by hand, transcript in the commit that added them.
-[[unseedable]]
-id = "selftest.shard-assignment-refusals"
-file = "verify.sh"
-reason = "the sharded selftest's refusals cannot be seeded without re-entering --selftest; proved by hand instead"
 
 # The server-side half of R2c I5r's prefix identity (#136): the client test
 # pins that reasoning goes back byte-identical; that the bytes re-render to
@@ -3512,28 +3500,20 @@ failure_class = "gate.derive-accepts-a-fast-green"
 legacy_signature = "a scope naming another target selected something"
 migrated = false
 [[fault]]
-id = "derive.derive_shards_packs_by_count"
-kind = "seeded-gate"
-check = "derive"
-label = "a shard split balanced by count"
-failure_class = "gate.shard-split-balances-the-count"
-legacy_signature = "not two equal halves"
-migrated = false
-[[fault]]
-id = "derive.derive_shards_outlier_against_the_mean"
-kind = "seeded-gate"
-check = "derive"
-label = "an outlier shard graded against the mean"
-failure_class = "gate.shard-outlier-graded-against-the-mean"
-legacy_signature = "produced 0 finding\\(s\\)"
-migrated = false
-[[fault]]
 id = "ci.ci_pr_branch_filter"
 kind = "seeded-gate"
 check = "ci"
 label = "pull requests filtered by branch"
 failure_class = "wiring.pull-request-branch-filtered"
 legacy_signature = "carries .branches: \\[main\\]. and is reached"
+migrated = false
+[[fault]]
+id = "ci.ci_trunk_run_cancelled"
+kind = "seeded-gate"
+check = "ci"
+label = "the trunk's run cancelled by a merge"
+failure_class = "wiring.trunk-run-cancelled"
+legacy_signature = "cancels a push run on the trunk"
 migrated = false
 [[fault]]
 id = "ci.ci_scoped_test"
@@ -3582,14 +3562,6 @@ check = "derive"
 label = "a scope that forgets what a fault touched"
 failure_class = "scope.touched-ignored"
 legacy_signature = "FAIL  a file the fault.s injection touched re-proves it"
-migrated = false
-[[fault]]
-id = "ci.shard_assignment_outlier"
-kind = "seeded-gate"
-check = "ci"
-label = "a shard carrying three times the median"
-failure_class = "wiring.shard-assignment-unbalanced"
-legacy_signature = "x the median shard"
 migrated = false
 [[fault]]
 id = "ci.gate_budget_undeclared"
@@ -3717,6 +3689,14 @@ kind = "mechanics"
 check = "selftest"
 label = "one fault both re-proven and declared inherited"
 failure_class = "census.inherited"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-whole-with-one-fault-not-seen-red-names-the-fault"
+kind = "mechanics"
+check = "selftest"
+label = "a whole with one fault not seen red names the fault"
+failure_class = "census.not-red"
 legacy_signature = ""
 migrated = false
 [[fault]]
@@ -6282,6 +6262,110 @@ failure_class = "client.canned-plays-reasoning-as-text"
 migrated = false
 
 [[fault]]
+id = "client.stream-drops-the-timings-chunk"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-drops-the-timings-chunk"
+failure_class = "client.stream-drops-the-timings-chunk"
+migrated = false
+
+[[fault]]
+id = "client.stream-reads-an-absent-timing-as-zero"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-reads-an-absent-timing-as-zero"
+failure_class = "client.stream-reads-an-absent-timing-as-zero"
+migrated = false
+
+[[fault]]
+id = "client.stream-rounds-a-timing-through-a-float"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-rounds-a-timing-through-a-float"
+failure_class = "client.stream-rounds-a-timing-through-a-float"
+migrated = false
+
+[[fault]]
+id = "client.millis-spells-what-the-record-cannot"
+kind = "lane-fault"
+check = "lanes"
+label = "client.millis-spells-what-the-record-cannot"
+failure_class = "client.millis-spells-what-the-record-cannot"
+migrated = false
+
+[[fault]]
+id = "client.canned-drops-its-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "client.canned-drops-its-timings"
+failure_class = "client.canned-drops-its-timings"
+migrated = false
+
+[[fault]]
+id = "client.dialect-reads-an-unsent-cache-path"
+kind = "lane-fault"
+check = "lanes"
+label = "client.dialect-reads-an-unsent-cache-path"
+failure_class = "client.dialect-reads-an-unsent-cache-path"
+migrated = false
+
+[[fault]]
+id = "client.stream-drops-the-draft-counts"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-drops-the-draft-counts"
+failure_class = "client.stream-drops-the-draft-counts"
+migrated = false
+
+[[fault]]
+id = "client.stream-the-first-timings-wins"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-the-first-timings-wins"
+failure_class = "client.stream-the-first-timings-wins"
+migrated = false
+
+[[fault]]
+id = "client.stream-reads-a-timings-that-is-not-an-object"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-reads-a-timings-that-is-not-an-object"
+failure_class = "client.stream-reads-a-timings-that-is-not-an-object"
+migrated = false
+
+[[fault]]
+id = "client.stream-keeps-a-count-past-the-record"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-keeps-a-count-past-the-record"
+failure_class = "client.stream-keeps-a-count-past-the-record"
+migrated = false
+
+[[fault]]
+id = "client.millis-keeps-an-integer-past-the-record"
+kind = "lane-fault"
+check = "lanes"
+label = "client.millis-keeps-an-integer-past-the-record"
+failure_class = "client.millis-keeps-an-integer-past-the-record"
+migrated = false
+
+[[fault]]
+id = "client.millis-writes-an-integer-as-a-decimal"
+kind = "lane-fault"
+check = "lanes"
+label = "client.millis-writes-an-integer-as-a-decimal"
+failure_class = "client.millis-writes-an-integer-as-a-decimal"
+migrated = false
+
+[[fault]]
+id = "client.millis-writes-a-decimal-as-an-integer"
+kind = "lane-fault"
+check = "lanes"
+label = "client.millis-writes-a-decimal-as-an-integer"
+failure_class = "client.millis-writes-a-decimal-as-an-integer"
+migrated = false
+
+[[fault]]
 id = "client.head-a-reasoning-change-is-unattributed"
 kind = "lane-fault"
 check = "lanes"
@@ -6295,6 +6379,30 @@ kind = "lane-fault"
 check = "lanes"
 label = "client.head-only-a-dropped-reasoning-is-named"
 failure_class = "client.head-only-a-dropped-reasoning-is-named"
+migrated = false
+
+[[fault]]
+id = "client.stream-sends-no-bearer"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-sends-no-bearer"
+failure_class = "client.stream-sends-no-bearer"
+migrated = false
+
+[[fault]]
+id = "client.bearer-debug-prints-the-key"
+kind = "lane-fault"
+check = "lanes"
+label = "client.bearer-debug-prints-the-key"
+failure_class = "client.bearer-debug-prints-the-key"
+migrated = false
+
+[[fault]]
+id = "client.bearer-accepts-a-line-break"
+kind = "lane-fault"
+check = "lanes"
+label = "client.bearer-accepts-a-line-break"
+failure_class = "client.bearer-accepts-a-line-break"
 migrated = false
 
 [[fault]]
@@ -6455,6 +6563,142 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.session-an-unwritable-duration-is-capped"
 failure_class = "drive.session-an-unwritable-duration-is-capped"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-ignores-the-key-file"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-ignores-the-key-file"
+failure_class = "drive.serve-bin-ignores-the-key-file"
+migrated = false
+
+[[fault]]
+id = "drive.serve-auth-compares-nothing"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-auth-compares-nothing"
+failure_class = "drive.serve-auth-compares-nothing"
+migrated = false
+
+[[fault]]
+id = "drive.serve-a-route-skips-auth"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-a-route-skips-auth"
+failure_class = "drive.serve-a-route-skips-auth"
+migrated = false
+
+[[fault]]
+id = "drive.serve-auth-scheme-is-case-sensitive"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-auth-scheme-is-case-sensitive"
+failure_class = "drive.serve-auth-scheme-is-case-sensitive"
+migrated = false
+
+[[fault]]
+id = "drive.serve-credential-accepts-a-control-character"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-credential-accepts-a-control-character"
+failure_class = "drive.serve-credential-accepts-a-control-character"
+migrated = false
+
+[[fault]]
+id = "drive.serve-base64-never-pads"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-base64-never-pads"
+failure_class = "drive.serve-base64-never-pads"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-listens-openly-without-a-credential"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-listens-openly-without-a-credential"
+failure_class = "drive.serve-bin-listens-openly-without-a-credential"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-accepts-a-wildcard"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-accepts-a-wildcard"
+failure_class = "drive.serve-bin-accepts-a-wildcard"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-ignores-the-auth-file"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-ignores-the-auth-file"
+failure_class = "drive.serve-bin-ignores-the-auth-file"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-accepts-a-mapped-wildcard"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-accepts-a-mapped-wildcard"
+failure_class = "drive.serve-bin-accepts-a-mapped-wildcard"
+migrated = false
+
+[[fault]]
+id = "drive.serve-credential-accepts-an-empty-user"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-credential-accepts-an-empty-user"
+failure_class = "drive.serve-credential-accepts-an-empty-user"
+migrated = false
+
+[[fault]]
+id = "drive.serve-credential-debug-prints-its-digest"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-credential-debug-prints-its-digest"
+failure_class = "drive.serve-credential-debug-prints-its-digest"
+migrated = false
+
+[[fault]]
+id = "drive.serve-auth-is-asked-before-the-host-check"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-auth-is-asked-before-the-host-check"
+failure_class = "drive.serve-auth-is-asked-before-the-host-check"
+migrated = false
+
+[[fault]]
+id = "drive.canned-first-registered-acts-edited"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.canned-first-registered-acts-edited"
+failure_class = "drive.canned-first-registered-acts-edited"
+migrated = false
+
+[[fault]]
+id = "drive.canned-fingerprint-drifts-from-the-registry-rule"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.canned-fingerprint-drifts-from-the-registry-rule"
+failure_class = "drive.canned-fingerprint-drifts-from-the-registry-rule"
+migrated = false
+
+[[fault]]
+id = "drive.canned-plays-the-first-registered-acts"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.canned-plays-the-first-registered-acts"
+failure_class = "drive.canned-plays-the-first-registered-acts"
+migrated = false
+
+[[fault]]
+id = "drive.canned-registry-scan-reads-nothing"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.canned-registry-scan-reads-nothing"
+failure_class = "drive.canned-registry-scan-reads-nothing"
 migrated = false
 
 [[fault]]

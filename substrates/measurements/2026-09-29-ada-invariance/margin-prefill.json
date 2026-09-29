@@ -1,0 +1,110 @@
+{
+ "position": 65,
+ "off_token": 13,
+ "on_token": 15572,
+ "reads": [
+  {
+   "predicted": [
+    13
+   ],
+   "prompt_n": 145,
+   "top": [
+    {
+     "id": 13,
+     "token": ".",
+     "logprob": -1.590065360069275
+    },
+    {
+     "id": 30,
+     "token": "?",
+     "logprob": -1.8776096105575562
+    },
+    {
+     "id": 15572,
+     "token": " estimate",
+     "logprob": -1.958055853843689
+    },
+    {
+     "id": 318,
+     "token": " (",
+     "logprob": -2.0746042728424072
+    },
+    {
+     "id": 11,
+     "token": ",",
+     "logprob": -2.81105637550354
+    }
+   ]
+  },
+  {
+   "predicted": [
+    13
+   ],
+   "prompt_n": 145,
+   "top": [
+    {
+     "id": 13,
+     "token": ".",
+     "logprob": -1.590065360069275
+    },
+    {
+     "id": 30,
+     "token": "?",
+     "logprob": -1.8776096105575562
+    },
+    {
+     "id": 15572,
+     "token": " estimate",
+     "logprob": -1.958055853843689
+    },
+    {
+     "id": 318,
+     "token": " (",
+     "logprob": -2.0746042728424072
+    },
+    {
+     "id": 11,
+     "token": ",",
+     "logprob": -2.81105637550354
+    }
+   ]
+  },
+  {
+   "predicted": [
+    13
+   ],
+   "prompt_n": 145,
+   "top": [
+    {
+     "id": 13,
+     "token": ".",
+     "logprob": -1.590065360069275
+    },
+    {
+     "id": 30,
+     "token": "?",
+     "logprob": -1.8776096105575562
+    },
+    {
+     "id": 15572,
+     "token": " estimate",
+     "logprob": -1.958055853843689
+    },
+    {
+     "id": 318,
+     "token": " (",
+     "logprob": -2.0746042728424072
+    },
+    {
+     "id": 11,
+     "token": ",",
+     "logprob": -2.81105637550354
+    }
+   ]
+  }
+ ],
+ "off_text": ".",
+ "on_text": " estimate",
+ "context_tail": "ed. Could provide efficient function using sieve up to upper bound",
+ "top2_logit_margin": 0.287544
+}

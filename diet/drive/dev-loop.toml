@@ -7,7 +7,7 @@
 # this regimen names a canned server, and the name is what a later reader
 # needs to know that no capability claim can be made from any result under it.
 #
-# `substrate` here is `canned`, and it is a fixture rather than a chosen
+# `substrate` here is `canned-cache-n`, and it is a fixture rather than a chosen
 # model. Choosing one is #23's own acceptance row and it cannot be done from a
 # seat with no GPU: the battery has to be run against candidates and the first
 # that passes becomes `dev-loop`. Until then this regimen exercises the
@@ -29,7 +29,13 @@ dogma_version = 0
 # which is the artifact that decides every reply -- so there is nothing left
 # for a prose model name to say, and a placeholder that reached a record as an
 # identity would say something false.
-substrate = "canned"
+#
+# `canned-cache-n`, not `canned`: the acts moved when the llama.cpp dialect's
+# cache path was corrected to the key a server sends (#156), and a pinned
+# substrate is never mutated. `canned` names the acts as first registered,
+# which `canned::acts_as_first_registered` keeps so records naming them still
+# resolve.
+substrate = "canned-cache-n"
 substrate_reasoning = "off"
 
 # CITED FROM THE REGISTRY, not invented here. `canned-loopback` was a sentinel
@@ -37,18 +43,16 @@ substrate_reasoning = "off"
 # a canned digest read through `Digest`, one field over, and ruled the same way
 # on 2026-09-11.
 #
-# This is the `hardware_fingerprint` of equipment `canned-loopback` in
+# This is the `hardware_fingerprint` of equipment `canned-loopback-cache-n` in
 # `substrates/registry.toml`: the sha256 of exactly the two fields its
-# `canned-server` entry type declares, `serves` and `acts_sha256`. Recomputed
-# here from those two published values before it was copied, and it agrees.
+# `canned-server` entry type declares, `serves` and `acts_sha256`.
 #
-# A CITATION IS NOT A DERIVATION, and this one is not checked yet. If the acts
-# change, `canned::acts_digest()` moves, the registry entry goes stale, and
-# nothing here notices -- the registry's coverage check compares a fingerprint
-# to its own declared fields, not those fields to this crate's code. The
-# consumer that resolves a record's substrate to its registry entry is where
-# that comparison belongs; it lands with the registry.
-substrate_hardware = "fc96af4713f9aaa26f2b7bda27720b497ec3d30c6edd9292da5fa8be8e0c37b0"
+# CHECKED, since #156: `canned::tests::the_regimen_names_the_substrate_that_plays_these_acts`
+# requires this value, the registry's, and `canned::hardware_fingerprint`
+# over the acts the server plays to agree, and
+# `every_registered_canned_digest_is_acts_this_crate_keeps` requires every
+# canned entry in the registry to name acts this crate still has.
+substrate_hardware = "486ad478be67ee9ae6a22a0940d8106ee8df88c3eef9a33ece7fd6ea443d9e40"
 
 # NO `substrate_cache_ttl`, and that is a declaration rather than an omission.
 # A cache lifetime is a property of the PROVIDER PATH -- first-party Anthropic
