@@ -17,20 +17,25 @@ This is the admission depth probe (`substrates/admission/depth-probe/`, #179, me
 - **Corpus:** this repository at `1833b8e` plus tokio at `tokio-1.53.1`, loaded against `corpus/manifest.json` digest by digest.
 - **Samples:** no server error, no truncation, and no sample without reasoning. The open question on how a thinking-off sample is read (#179) therefore does not touch this cell.
 
-**Identity:** the probe called the floor's serving process, the same pid as the cells window. Its exe digest, read after the window (`raw/identity-after.txt`), is this directory's `980845d6…`. The card's VRAM and the process's health were unchanged.
+**Identity:** the probe called the floor's serving process, the same pid as the cells window. Its exe digest, read after the window (`raw/identity-after.txt`), is this fingerprint's engine `980845d6…`. The card's VRAM (23,684 MiB) and the process's health were the same before and after; those two reads are transcribed from the operator's terminal in `raw/window-readings.txt`, labelled as such, not written by a script.
+
+**A first launch sent no requests.** At 08:01Z the runner tried an ssh forward to the floor's port; the forward was refused, and the runner was stopped by pid while still in its health-check loop, before the probe started. The run recorded here called the floor's port directly. `raw/run.sh` is that second runner. It reads the box's address from a local file that sits in another window's directory; the file holds this box's address, not another machine's.
 
 **Files:**
 - `cell.toml`: the word, reading, criterion, and each raw file's digest.
 - `raw/rows.jsonl`: one row per sample. Each row holds the cell, the rendered depth, the counter-examples planted, the finish, the reasoning length, each constraint's result and an excerpt of the code. A retrieval row holds its answer.
 - `raw/meta.json`: the run's configuration, the corpus manifest's digest and the served template's digest.
 - `raw/summary.json` and `raw/decide.json`: the instrument's `summarise` and `decide` output.
-- `raw/console.log` and `raw/run.sh`: the run as launched. `run.sh` reads the box address from a local file; nothing private is in it.
-- `recompute.sh`: summarises the rows and decides again through the committed instrument and criterion, requiring both outputs to match byte for byte. It also checks four things:
+- `raw/window-readings.txt`: the before and after reads, transcribed, and how `identity-after.txt` was read.
+- `raw/identity-after.txt`: the floor's pid, exe digest and start time, read after the window.
+- `raw/console.log` and `raw/run.sh`: the run as launched.
+- `recompute.sh`: summarises the rows and decides again through the committed instrument and criterion, requiring both outputs to match byte for byte. It also checks:
   - the run's corpus manifest is the committed one;
-  - the ladder and tier are admission's;
-  - the identity is this directory's exe;
+  - the tier is admission's, and the ladder is the ruled fractions of the registry's `serving_context`, with every cell present and full;
+  - the sampler is the registry's card and `max_tokens` is 4096;
+  - the identity is this fingerprint's engine and the served template is this fingerprint's (both read from `../fingerprint.json`);
   - `cell.toml`'s word and digests agree.
 
-  It was seen red on three seeded faults: the word flipped to `fail`; one 0.95 sample's grade flipped, with the rows' digest re-pinned; and the committed corpus manifest changed by one byte.
+  It was seen red on seven seeded faults: the word flipped to `fail`; one 0.95 sample's grade flipped, with the rows' digest re-pinned; the committed corpus manifest changed by one byte; the 0.95 cell dropped with the summary and decision regenerated and re-pinned; the temperature, `max_tokens` and template digest each changed and re-pinned.
 
 **This is one of admission's three results for this fingerprint.** The cells are in `../cells.toml`, and the parity fire is separate. The admission word is written by hand where #143 says, not here.

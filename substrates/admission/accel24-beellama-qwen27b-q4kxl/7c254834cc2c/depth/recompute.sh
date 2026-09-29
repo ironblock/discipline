@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Recompute the floor's depth cell (#143) from its rows through the committed instrument: summarise the
 # rows, decide under the committed criterion, and require both outputs to equal the committed ones byte for
-# byte; require the run's corpus manifest digest to be the committed manifest's, and the identity read after
-# the window to be this cells directory's exe. Exit 0 when all hold, 1 when any fails.
+# byte. Require the run's corpus manifest to be the committed one; the identity read after the window to be
+# this fingerprint's engine and the served template this fingerprint's; the ladder the ruled fractions of the
+# registry's serving_context, with every cell present and full; the sampler the registry's card and max_tokens
+# 4096; and cell.toml's word and raw digests to agree. Exit 0 when all hold, 1 when any fails.
 set -uo pipefail
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 probe="$here/../../../depth-probe"
@@ -19,10 +21,23 @@ meta = json.loads((here / "raw/meta.json").read_text()); dec = json.loads((here 
 fails = []
 if meta["corpus_manifest_sha256"] != hashlib.sha256((probe / "corpus/manifest.json").read_bytes()).hexdigest():
     fails.append("the run's corpus manifest is not the committed one")
+import re, tomllib
+fp = json.loads(json.loads((here.parent / "fingerprint.json").read_text())["canonical"])
+reg = tomllib.loads((here.parents[3] / "registry.toml").read_text())["substrate"][here.parents[1].name]
+summ = json.loads((here / "raw/summary.json").read_text())
 if not (meta["admission"] and meta["tier"] == "supported"): fails.append("the run was not the admission probe")
-if [c[0] for c in meta["cells"]] != [0.0, 0.5, 0.9, 0.95] or meta["serving_context"] != 160000: fails.append("the ladder is not the ruled fractions of the registry's 160,000 pool")
-if "exe=980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4" not in (here / "raw/identity-after.txt").read_text():
-    fails.append("the identity after the window is not this cells directory's exe")
+if [c[0] for c in meta["cells"]] != [0.0, 0.5, 0.9, 0.95] or meta["serving_context"] != reg["serving_context"]:
+    fails.append("the ladder is not the ruled fractions of the registry's serving_context")
+if sorted(summ) != sorted(str(c[0]) for c in meta["cells"]): fails.append(f"the summary's cells {sorted(summ)} are not the ladder's")
+for f, c in summ.items():
+    if c["application"]["n"] != meta["samples"] or c["application"]["n"] < 5 or c["retrieval"]["n"] != 1:
+        fails.append(f"cell {f} holds {c['application']['n']} application and {c['retrieval']['n']} retrieval samples")
+card = dict((k, float(v)) for k, v in re.findall(r"(\w+) ([0-9.]+)", reg["sampler_card"]))
+if {k: float(v) for k, v in meta["sampler"].items()} != card: fails.append(f"the sampler {meta['sampler']} is not the registry's card {card}")
+if meta["max_tokens"] != 4096: fails.append("max_tokens is not the declared 4096")
+if meta["template_sha256"] != fp["template"]: fails.append("the served template is not this fingerprint's")
+if f"exe={fp['engine']}" not in (here / "raw/identity-after.txt").read_text():
+    fails.append("the identity after the window is not this fingerprint's engine")
 import tomllib
 cell = tomllib.loads((here / "cell.toml").read_text())
 for name, want in cell["raw"].items():
