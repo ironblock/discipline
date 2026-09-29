@@ -54,6 +54,26 @@
    "label": "thinking-off never counted",
    "old": "st[\"thinking_off\"] += int(r.get(\"error\") is None and not r.get(\"reasoning_chars\"))",
    "new": "st[\"thinking_off\"] += 0"
+  },
+  {
+   "label": "counter-examples planted one turn early",
+   "old": "turns.insert(min(len(turns), round(c[\"plant_at\"] * len(turns))), (c[\"label\"], c[\"text\"]))",
+   "new": "turns.insert(min(len(turns), round(c[\"plant_at\"] * (len(turns) - 1))), (c[\"label\"], c[\"text\"]))"
+  },
+  {
+   "label": "the depth-tolerance refusal removed",
+   "old": "    if n < target * (1 - tolerance):\n",
+   "new": "    if False:\n"
+  },
+  {
+   "label": "the ladder-capacity refusal removed",
+   "old": "    if nctx and max(t for _, t in cells) + a.max_tokens > nctx:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "label": "the strict reading always met",
+   "old": "\"strict_beside\": \"pass\" if strict else \"not met\"",
+   "new": "\"strict_beside\": \"pass\""
   }
  ]
 }

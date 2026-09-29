@@ -61,7 +61,8 @@
     "min_samples": 5,
     "max_errors": 0
    },
-   "word": "pass"
+   "word": "pass",
+   "strict": "pass"
   },
   {
    "label": "one flake below the control: pass",
@@ -124,7 +125,8 @@
     "min_samples": 5,
     "max_errors": 0
    },
-   "word": "pass"
+   "word": "pass",
+   "strict": "not met"
   },
   {
    "label": "two below the control is a cliff: fail",

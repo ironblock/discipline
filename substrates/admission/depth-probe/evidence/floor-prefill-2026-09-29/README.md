@@ -9,6 +9,13 @@ Measured with production up, on `accel24-beellama-qwen27b-q4kxl`: `-np 2 --kv-un
 | 124,962 | 805.4 | 155.4 | `prefill-floor-125.json` |
 | 149,962 | 737.7 | 203.5 | `prefill-floor-150.json` |
 
+**`console.log` is three captures appended in order, not one stream:**
+- run 1's stdout: the GPU line, the 40k and 75k rows;
+- run 2's last six lines, stdout and stderr: the end of the 150k failure's traceback, then the health check;
+- run 3's stdout: the committed 125k JSON printed back, the two slot clears, the 150k row, the health check.
+
+The boundaries fall at lines 4 and 9. The glued `{"status":"ok"}[` on line 9 is run 2's health reply running into run 3's first output, with no newline between.
+
 **The sequence, and which file holds each step:**
 1. The 40k and 75k requests succeeded (`console.log`).
 2. The first 125k request, sent while the 75k prompt was resident, returned HTTP 500. Its client traceback went to stderr, which that run did not capture; the server's own line is the first "Context size has been exceeded" in `server-errors.txt`.

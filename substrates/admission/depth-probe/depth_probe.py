@@ -104,25 +104,34 @@ def grade_retrieval(content: str) -> dict:
 # ---- the corpus ----
 def sha(b: bytes) -> str: return hashlib.sha256(b).hexdigest()
 
-def load_corpus(manifest_path: pathlib.Path) -> dict:
-    """{"reads": [(label, text)], "listings": [(label, text)], "diffs": [(label, text)]}, every text
-    checked against the manifest's digest. source = git (this repository at a pinned commit) or files."""
-    m = json.loads(manifest_path.read_text())
+def load_corpus(manifest_path: pathlib.Path, repos: dict | None = None) -> dict:
+    """{"reads": [(label, text)], "listings": [...], "diffs": [...]}, every text checked against the
+    manifest's digest. source = git (named repositories at pinned commits; `self` is this repository,
+    others are mapped to local clones by `repos`) or files (the selftest's fixture corpus)."""
+    m = json.loads(manifest_path.read_text()); repos = dict(repos or {})
+    repos.setdefault("self", str(HERE.parents[2]))
     out = {"reads": [], "listings": [], "diffs": []}
-    def git(*args):
-        repo = (manifest_path.parent / m.get("repo", ".")).resolve()
-        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, check=True).stdout
-    for kind in out:
-        for e in m.get(kind, []):
-            if m["source"] == "git":
-                b = {"reads": lambda: git("show", f"{m['commit']}:{e['path']}"),
-                     "listings": lambda: git("ls-tree", "--name-only", m["commit"], e["path"] + "/"),
-                     "diffs": lambda: git("diff", e["commit"] + "^1", e["commit"], "--", e["path"])}[kind]()
-            else:
+    if m["source"] == "files":
+        for kind in out:
+            for e in m.get(kind, []):
                 b = (manifest_path.parent / e["file"]).read_bytes()
-            if sha(b) != e["sha256"]:
-                raise SystemExit(f"depth_probe: corpus {kind} entry {e.get('path') or e.get('file')} does not hash as the manifest says")
-            out[kind].append((e["label"], b.decode("utf-8", "replace")))
+                if sha(b) != e["sha256"]:
+                    raise SystemExit(f"depth_probe: corpus {kind} entry {e['file']} does not hash as the manifest says")
+                out[kind].append((e["label"], b.decode("utf-8", "replace")))
+    else:
+        for src in m["sources"]:
+            if src["name"] not in repos:
+                raise SystemExit(f"depth_probe: no local clone given for source {src['name']} ({src.get('url')}); pass --repo {src['name']}=PATH")
+            def git(*args, _r=repos[src["name"]]):
+                return subprocess.run(["git", "-C", _r, *args], capture_output=True, check=True).stdout
+            for kind in out:
+                for e in src.get(kind, []):
+                    b = {"reads": lambda: git("show", f"{src['commit']}:{e['path']}"),
+                         "listings": lambda: git("ls-tree", "--name-only", src["commit"], e["path"] + "/"),
+                         "diffs": lambda: git("diff", e["commit"] + "^1", e["commit"], "--", e["path"])}[kind]()
+                    if sha(b) != e["sha256"]:
+                        raise SystemExit(f"depth_probe: {src['name']} {kind} entry {e['path']} does not hash as the manifest says")
+                    out[kind].append((e["label"], b.decode("utf-8", "replace")))
     if not out["reads"]:
         raise SystemExit("depth_probe: the corpus manifest names no file reads")
     return out
@@ -200,7 +209,7 @@ def size_padding(srv, tier, corpus, ces, target, seed, chunk_chars, tolerance):
 
 def cmd_run(a) -> int:
     srv, mpath = Server(a.endpoint), pathlib.Path(a.corpus)
-    manifest = json.loads(mpath.read_text()); corpus = load_corpus(mpath)
+    manifest = json.loads(mpath.read_text()); corpus = load_corpus(mpath, dict(r.split("=", 1) for r in a.repo))
     ces = load_counterexamples(mpath.parent / manifest["counterexamples"], a.tier, manifest.get("counterexamples_sha256"))
     sampler = json.loads(a.sampler)
     out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
@@ -279,7 +288,9 @@ def decide(summary: dict, criterion: dict) -> dict:
         cliff = c["application"]["pass"] < ctrl["application"]["pass"] - within
         per[f] = "fail" if cliff else "pass"
         if cliff: word = "fail"
-    return {"word": word, "per_cell": per, "control_pass": ctrl["application"]["pass"], "criterion": criterion}
+    strict = all(c["application"]["n"] >= mins and c["application"]["pass"] == c["application"]["n"] and adjudicable(c) for c in summary.values())
+    return {"word": word, "per_cell": per, "control_pass": ctrl["application"]["pass"], "criterion": criterion,
+            "strict_beside": "pass" if strict else "not met", "strict_is": "every sample at every cell passed: reported beside the word, never the word (planning, #143)"}
 
 def cmd_summarise(a) -> int:
     print(json.dumps(summarise([json.loads(l) for l in open(a.rows) if l.strip()]), indent=1)); return 0
@@ -339,7 +350,7 @@ def cmd_selftest(a) -> int:
     with tempfile.TemporaryDirectory() as td:
         ns = argparse.Namespace(endpoint=f"http://127.0.0.1:{srv.server_address[1]}", corpus=str(HERE / "fixtures/corpus/manifest.json"),
                                 tier="supported", serving_context=1000, fractions=[0.0, 0.5, 0.9], samples=5, retrieval=True,
-                                max_tokens=64, seed=7, chunk_chars=120, tolerance=0.25, sampler='{"temperature": 0.6}', out=td)
+                                max_tokens=64, seed=7, chunk_chars=120, tolerance=0.25, sampler='{"temperature": 0.6}', repo=[], out=td)
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_run(ns)
         rows = [json.loads(l) for l in open(pathlib.Path(td) / "rows.jsonl")]
@@ -357,8 +368,37 @@ def cmd_selftest(a) -> int:
     check(cleared == 3 * 2, "end to end: every slot cleared before each cell", f"({cleared})")
     check(all(b.get("id_slot") == 0 for b in probe_calls), "end to end: every probe request pinned to slot 0")
     check(all(r["depth_rendered"] >= r["depth_target"] * 0.75 for r in rows), "end to end: every cell reached within tolerance")
+    # planting at declared depths: each counter-example sits at round(plant_at * n) among the corpus turns
+    corpus = load_corpus(HERE / "fixtures/corpus/manifest.json")
+    ces = json.loads((HERE / "fixtures/corpus/counterexamples.json").read_text())["tiers"]["supported"]
+    for n in (5, 10, 17):
+        pad = padding(corpus, ces, n, 3, 80); users = [m["content"] for m in pad if m["role"] == "user"]
+        at = {c["constraint"]: next(i for i, u in enumerate(users) if c["text"] in u) for c in ces}
+        want, turns = {}, n
+        for c in sorted(ces, key=lambda c: c["plant_at"], reverse=True):  # the insertion the code performs, recomputed here
+            idx = min(turns, round(c["plant_at"] * turns)); turns += 1
+            want = {k: (v + 1 if v >= idx else v) for k, v in want.items()}; want[c["constraint"]] = idx
+        check(at == want, f"padding: every counter-example planted at its declared fraction (n={n})", f"at {at}, want {want}")
+    # refusals: a padding that cannot reach its target within tolerance; a ladder the server cannot hold
+    srv2, _ = fake_server(e2e["script"], n_ctx=900)
+    try:
+        refused = False
+        try: size_padding(Server(f"http://127.0.0.1:{srv2.server_address[1]}"), "supported", corpus, ces, 300, 1, 100000, 0.02)  # one chunk overshoots 300, none falls short of it by only 2%
+        except SystemExit: refused = True
+        check(refused, "size_padding: a depth missed by more than the tolerance is refused")
+        ns2 = argparse.Namespace(**{**vars(ns), "endpoint": f"http://127.0.0.1:{srv2.server_address[1]}"})
+        refused = False
+        with tempfile.TemporaryDirectory() as td2:
+            ns2.out = td2
+            try:
+                with contextlib.redirect_stdout(io.StringIO()): cmd_run(ns2)
+            except SystemExit: refused = True
+        check(refused, "run: a ladder whose deepest cell plus max_tokens exceeds the per-slot context is refused")
+    finally:
+        srv2.shutdown()
     for c in json.loads((HERE / "fixtures/decide.json").read_text())["cases"]:
-        got = decide(c["summary"], c["criterion"])["word"]; check(got == c["word"], f"decide: {c['label']}", f"got {got}")
+        dd = decide(c["summary"], c["criterion"]); check(dd["word"] == c["word"], f"decide: {c['label']}", f"got {dd['word']}")
+        if "strict" in c: check(dd.get("strict_beside") == c["strict"], f"decide: strict beside -- {c['label']}", f"got {dd.get('strict_beside')}")
     print(f"depth_probe selftest: {'all pass' if not bad else f'{bad} failing'}"); return 1 if bad else 0
 
 def main(argv) -> int:
@@ -372,6 +412,7 @@ def main(argv) -> int:
     r.add_argument("--max-tokens", type=int, default=4096); r.add_argument("--seed", type=int, default=2000)
     r.add_argument("--chunk-chars", type=int, default=4000); r.add_argument("--tolerance", type=float, default=0.02)
     r.add_argument("--sampler", required=True, help='the rung\'s supported coding configuration, JSON, e.g. {"temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0}')
+    r.add_argument("--repo", action="append", default=[], help="NAME=PATH: a local clone for a corpus source (self defaults to this repository)")
     r.add_argument("--out", required=True); r.set_defaults(fn=cmd_run)
     s = sub.add_parser("summarise"); s.add_argument("rows"); s.set_defaults(fn=cmd_summarise)
     d = sub.add_parser("decide"); d.add_argument("summary"); d.add_argument("criterion"); d.set_defaults(fn=cmd_decide)
