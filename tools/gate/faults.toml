@@ -6309,6 +6309,38 @@ failure_class = "client.stream-drops-the-draft-counts"
 migrated = false
 
 [[fault]]
+id = "client.stream-the-first-timings-wins"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-the-first-timings-wins"
+failure_class = "client.stream-the-first-timings-wins"
+migrated = false
+
+[[fault]]
+id = "client.stream-reads-a-timings-that-is-not-an-object"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-reads-a-timings-that-is-not-an-object"
+failure_class = "client.stream-reads-a-timings-that-is-not-an-object"
+migrated = false
+
+[[fault]]
+id = "client.stream-keeps-a-count-past-the-record"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-keeps-a-count-past-the-record"
+failure_class = "client.stream-keeps-a-count-past-the-record"
+migrated = false
+
+[[fault]]
+id = "client.millis-keeps-an-integer-past-the-record"
+kind = "lane-fault"
+check = "lanes"
+label = "client.millis-keeps-an-integer-past-the-record"
+failure_class = "client.millis-keeps-an-integer-past-the-record"
+migrated = false
+
+[[fault]]
 id = "client.head-a-reasoning-change-is-unattributed"
 kind = "lane-fault"
 check = "lanes"
@@ -6634,6 +6666,14 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.canned-plays-the-first-registered-acts"
 failure_class = "drive.canned-plays-the-first-registered-acts"
+migrated = false
+
+[[fault]]
+id = "drive.canned-registry-scan-reads-nothing"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.canned-registry-scan-reads-nothing"
+failure_class = "drive.canned-registry-scan-reads-nothing"
 migrated = false
 
 [[fault]]
