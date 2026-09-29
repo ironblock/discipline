@@ -1,0 +1,19 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532\",\"id\":\"local\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]},\"source\":{\"kind\":\"live\"}}\n{\"consumes\":[{\"path\":\"run.jsonl\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"hypothesis\":\"the imperative framing is obeyed at the rung\",\"id\":\"e1\",\"record\":\"claim\",\"result\":\"supported\"}\n{\"consumes\":[{\"path\":\"comparison.json\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}],\"counts\":[{\"label\":\"first substrate\",\"n\":42,\"of\":72},{\"label\":\"second substrate\",\"n\":44,\"of\":72}],\"hypothesis\":\"the obeyed rate drops with capability\",\"id\":\"e2\",\"predicted\":\"dependent\",\"record\":\"comparison\",\"result\":\"substrate_independent\"}\n",
+  "kinds": [
+    "start",
+    "claim",
+    "comparison"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "hosted_substrates": [],
+    "substrates": [
+      "local"
+    ]
+  },
+  "source": {
+    "kind": "live"
+  }
+}

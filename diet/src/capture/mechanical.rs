@@ -831,6 +831,7 @@ impl Lane {
             | Event::Seam { .. }
             | Event::Rejected { .. }
             | Event::Claim { .. }
+            | Event::Comparison { .. }
             | Event::Summary { .. }
             // A prefix that moved and a history a harness discarded carry no
             // tool call either, so they move nothing here.

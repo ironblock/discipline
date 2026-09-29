@@ -533,6 +533,9 @@ vocabulary! {
         Rejected => "rejected",
         /// One hypothesis, one result, and what recomputing it consumes.
         Claim => "claim",
+        /// A pre-registered comparison: its prediction, its own word, and the
+        /// counts it rests on (#142).
+        Comparison => "comparison",
         /// The session's totals.
         Summary => "summary",
         /// A row this library kept without having a kind for it.
@@ -645,6 +648,47 @@ vocabulary! {
         /// without applying a rule that was pre-registered before the data.
         Unadjudicated => "unadjudicated",
     }
+}
+
+vocabulary! {
+    /// What a pre-registered COMPARISON concluded (ruled on #142).
+    ///
+    /// Its own words, never mapped onto [`Verdict`]: a comparison that found
+    /// the alternative it named has not "refuted" anything a reader can use --
+    /// the finding is the word. `inconclusive` and `unadjudicated` mean what
+    /// they mean on a claim.
+    ComparisonVerdict {
+        /// The effect depends on the substrate, as a comparison may predict.
+        SubstrateDependent => "substrate_dependent",
+        /// The effect holds across the substrates compared.
+        SubstrateIndependent => "substrate_independent",
+        /// The evidence was held against the rule and did not decide.
+        Inconclusive => "inconclusive",
+        /// No decision rule has been applied.
+        Unadjudicated => "unadjudicated",
+    }
+}
+
+vocabulary! {
+    /// What a comparison predicted before the data, in the short forms of
+    /// [`ComparisonVerdict`]'s first two words.
+    Prediction {
+        /// Predicted that the effect depends on the substrate.
+        Dependent => "dependent",
+        /// Predicted that it does not.
+        Independent => "independent",
+    }
+}
+
+/// One count a comparison row states: `n` of `of`, under a label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tally {
+    /// What was counted.
+    pub label: String,
+    /// How many.
+    pub n: Count,
+    /// Out of how many.
+    pub of: Count,
 }
 
 vocabulary! {
@@ -1255,6 +1299,23 @@ pub enum Event {
         /// The claim this one supersedes, if it is a correction.
         supersedes: Option<String>,
     },
+    /// A pre-registered comparison, beside the claim rows as a product with
+    /// its own word (ruled on #142). A directory's `result` stays its first
+    /// endpoint's claim; this row never stands in for it.
+    Comparison {
+        /// This comparison's identifier.
+        id: String,
+        /// The comparison, stated so that it could be wrong.
+        hypothesis: String,
+        /// What was predicted before the data.
+        predicted: Prediction,
+        /// What the comparison's rule said.
+        result: ComparisonVerdict,
+        /// The counts the word rests on. Never empty.
+        counts: Vec<Tally>,
+        /// What recomputing it consumes. Never empty.
+        consumes: Vec<Artifact>,
+    },
     /// What the run amounted to, in the terms its own kind is measured in.
     Summary {
         /// Which kind of run this was, and the totals that kind has.
@@ -1370,6 +1431,7 @@ impl Event {
             Self::ToolCall { .. } => Kind::ToolCall,
             Self::Rejected { .. } => Kind::Rejected,
             Self::Claim { .. } => Kind::Claim,
+            Self::Comparison { .. } => Kind::Comparison,
             Self::Summary { .. } => Kind::Summary,
             Self::Unknown { .. } => Kind::Unknown,
         }
@@ -1388,7 +1450,8 @@ impl Event {
             | Self::Seam { id, .. }
             | Self::ToolCall { id, .. }
             | Self::Rejected { id, .. }
-            | Self::Claim { id, .. } => Some(id),
+            | Self::Claim { id, .. }
+            | Self::Comparison { id, .. } => Some(id),
             Self::Start { .. }
             | Self::Turn { .. }
             | Self::Summary { .. }
@@ -1595,6 +1658,20 @@ pub enum StructureError {
     },
     /// A claim that names no artifact can produce a bound, never a number.
     ClaimConsumesNothing(String),
+    /// A comparison row states no count, so its word rests on nothing a
+    /// reader can check.
+    CountsNothing(String),
+    /// A comparison count above its own total, or out of nothing.
+    ImpossibleTally {
+        /// The comparison.
+        id: String,
+        /// The count's label.
+        label: String,
+        /// The count.
+        n: u64,
+        /// Its total.
+        of: u64,
+    },
     /// A digest that is not 64 lowercase hex characters.
     BadDigest(String),
     /// A rejection that is not a rejection: an empty lane, or one whose
@@ -1925,6 +2002,22 @@ fn indistinguishable_complaint(
     )
 }
 
+/// The two refusals a `comparison` row adds, out of [`StructureError`]'s
+/// `Display` so that match stays under the line ceiling.
+fn comparison_message(error: &StructureError, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match error {
+        StructureError::CountsNothing(id) => write!(
+            f,
+            "comparison `{id}` states no count, so its word rests on nothing a reader can check"
+        ),
+        StructureError::ImpossibleTally { id, label, n, of } => write!(
+            f,
+            "comparison `{id}` counts {n} of {of} for `{label}`, which no count can be"
+        ),
+        _ => unreachable!("comparison_message is called with a comparison refusal only"),
+    }
+}
+
 impl fmt::Display for StructureError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -1949,9 +2042,10 @@ impl fmt::Display for StructureError {
             }
             Self::ClaimConsumesNothing(id) => write!(
                 f,
-                "claim `{id}` names no artifact it consumes, so recomputing it \
+                "`{id}` names no artifact it consumes, so recomputing it \
                  could produce a bound but never a number"
             ),
+            Self::CountsNothing(_) | Self::ImpossibleTally { .. } => comparison_message(self, f),
             Self::BadDigest(text) => {
                 write!(f, "`{text}` is not 64 lowercase hex characters")
             }
@@ -2263,6 +2357,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             of: take_u64(&mut members, of, "of")?,
         },
         Kind::Claim => claim(&mut members, of)?,
+        Kind::Comparison => comparison(&mut members, of)?,
         Kind::Summary => Event::Summary {
             summary: summary(&mut members, of)?,
             // Read here rather than inside `summary`, because it belongs to
@@ -2340,6 +2435,83 @@ fn claim(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Even
         consumes: take_artifacts(members, of)?,
         supersedes: take_optional_string(members, of, "supersedes")?,
     })
+}
+
+/// A `comparison` row, from its members. Its own function for the reason
+/// [`claim`] is: it dispatches on a vocabulary of its own.
+fn comparison(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Event, ParseError> {
+    let id = take_string(members, of, "id")?;
+    let hypothesis = take_string(members, of, "hypothesis")?;
+    let written = take_string(members, of, "predicted")?;
+    let predicted = Prediction::from_tag(&written).ok_or(SchemaError::BadValue {
+        of,
+        field: "predicted",
+        found: written,
+    })?;
+    let written = take_string(members, of, "result")?;
+    let result = ComparisonVerdict::from_tag(&written).ok_or(SchemaError::BadValue {
+        of,
+        field: "result",
+        found: written,
+    })?;
+    Ok(Event::Comparison {
+        id,
+        hypothesis,
+        predicted,
+        result,
+        counts: take_tallies(members, of)?,
+        consumes: take_artifacts(members, of)?,
+    })
+}
+
+/// A `comparison` row's `counts`: a list of `{label, n, of}`.
+fn take_tallies(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Vec<Tally>, ParseError> {
+    let Some(value) = members.remove("counts") else {
+        return Err(SchemaError::MissingField {
+            of,
+            field: "counts",
+        }
+        .into());
+    };
+    let Value::Array(items) = value else {
+        return Err(SchemaError::WrongType {
+            of,
+            field: "counts".to_owned(),
+            want: "a list of counts",
+        }
+        .into());
+    };
+    let mut tallies = Vec::with_capacity(items.len());
+    for item in items {
+        let Value::Object(mut fields) = item else {
+            return Err(SchemaError::WrongType {
+                of,
+                field: "counts[]".to_owned(),
+                want: "an object",
+            }
+            .into());
+        };
+        let tally = Tally {
+            label: take_string(&mut fields, of, "label")?,
+            n: take_u64(&mut fields, of, "n")?,
+            of: take_u64(&mut fields, of, "of")?,
+        };
+        if let Some(field) = fields.keys().next() {
+            return Err(SchemaError::UnknownField {
+                of,
+                field: format!("counts[].{field}"),
+            }
+            .into());
+        }
+        tallies.push(tally);
+    }
+    Ok(tallies)
 }
 
 /// A `prefix.changed` row, from its members.
@@ -3453,6 +3625,12 @@ impl<'a> Seen<'a> {
                 supersedes,
                 ..
             } => self.admit_claim(id, consumes, supersedes.as_deref())?,
+            Event::Comparison {
+                id,
+                counts,
+                consumes,
+                ..
+            } => self.admit_comparison(id, counts, consumes)?,
             Event::Summary {
                 summary,
                 product_sha256,
@@ -3545,6 +3723,31 @@ impl<'a> Seen<'a> {
         // as a silent mutation.
         self.named_changes.insert(at_request);
         Ok(())
+    }
+
+    /// A comparison states counts a reader can check, each `n` of a nonzero
+    /// `of`, and consumes what a claim would (#142).
+    fn admit_comparison(
+        &self,
+        id: &str,
+        counts: &[Tally],
+        consumes: &[Artifact],
+    ) -> Result<(), ParseError> {
+        if counts.is_empty() {
+            return Err(StructureError::CountsNothing(id.to_owned()).into());
+        }
+        for tally in counts {
+            if tally.of.get() == 0 || tally.n > tally.of {
+                return Err(StructureError::ImpossibleTally {
+                    id: id.to_owned(),
+                    label: tally.label.clone(),
+                    n: tally.n.get(),
+                    of: tally.of.get(),
+                }
+                .into());
+            }
+        }
+        self.admit_claim(id, consumes, None)
     }
 
     fn admit_claim(
@@ -4029,6 +4232,34 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put_text("result", result.tag());
             members.put("consumes", artifacts_value(consumes));
             members.put_optional("supersedes", supersedes.clone().map(Value::String));
+        }
+        Event::Comparison {
+            hypothesis,
+            predicted,
+            result,
+            counts,
+            consumes,
+            ..
+        } => {
+            members.put_text("hypothesis", hypothesis);
+            members.put_text("predicted", predicted.tag());
+            members.put_text("result", result.tag());
+            members.put(
+                "counts",
+                Value::Array(
+                    counts
+                        .iter()
+                        .map(|tally| {
+                            Value::Object(BTreeMap::from([
+                                ("label".to_owned(), Value::String(tally.label.clone())),
+                                ("n".to_owned(), integer(tally.n)),
+                                ("of".to_owned(), integer(tally.of)),
+                            ]))
+                        })
+                        .collect(),
+                ),
+            );
+            members.put("consumes", artifacts_value(consumes));
         }
         Event::Summary {
             summary,
@@ -4545,6 +4776,90 @@ mod tests {
             Err(ParseError::Structure(StructureError::ClaimConsumesNothing(
                 _
             )))
+        ));
+    }
+
+    // A PRE-REGISTERED COMPARISON IS ITS OWN ROW, with its own four words
+    // (ruled on #142): mapping `substrate_independent` onto `refuted` would be
+    // defensible and would lose the finding, which is the word itself.
+    const COMPARISON: &str = r#"{"record":"comparison","id":"k1","hypothesis":"h","predicted":"dependent","result":"substrate_independent","counts":[{"label":"first","n":42,"of":72},{"label":"second","n":44,"of":72}],"consumes":[{"path":"comparison.json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}"#;
+
+    #[test]
+    fn a_comparison_row_parses_beside_a_claim() {
+        let parsed = parse(&record(&format!("{COMPARISON}\n"))).expect("a comparison row parses");
+        assert!(parsed.kinds().iter().any(|kind| kind.tag() == "comparison"));
+    }
+
+    #[test]
+    fn a_comparison_word_outside_its_four_does_not_parse() {
+        for word in ["supported", "refuted", "probably"] {
+            let row = COMPARISON.replace("\"substrate_independent\"", &format!("\"{word}\""));
+            let refused = parse(&record(&format!("{row}\n")));
+            let Err(ParseError::Schema(SchemaError::BadValue { of, field, .. })) = refused else {
+                panic!("`{word}` read as a comparison's result: {refused:?}");
+            };
+            assert_eq!((of, field), ("comparison", "result"));
+        }
+    }
+
+    #[test]
+    fn a_comparison_without_its_prediction_does_not_parse() {
+        let row = COMPARISON.replace("\"predicted\":\"dependent\",", "");
+        let refused = parse(&record(&format!("{row}\n")));
+        let Err(ParseError::Schema(SchemaError::MissingField { of, field })) = refused else {
+            panic!("a comparison without `predicted` was not refused for it: {refused:?}");
+        };
+        assert_eq!((of, field), ("comparison", "predicted"));
+    }
+
+    #[test]
+    fn a_comparison_count_above_its_total_does_not_parse() {
+        let row = COMPARISON.replace("\"n\":42", "\"n\":73");
+        assert!(matches!(
+            parse(&record(&format!("{row}\n"))),
+            Err(ParseError::Structure(
+                StructureError::ImpossibleTally { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn a_comparison_count_out_of_nothing_does_not_parse() {
+        let row = COMPARISON.replace("\"n\":42,\"of\":72", "\"n\":0,\"of\":0");
+        assert!(matches!(
+            parse(&record(&format!("{row}\n"))),
+            Err(ParseError::Structure(
+                StructureError::ImpossibleTally { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn a_comparison_stating_no_count_does_not_parse() {
+        let at = COMPARISON.find("\"counts\":[").expect("the row has counts");
+        let end = COMPARISON[at..].find("],").expect("the counts close") + at + 1;
+        let row = format!("{}\"counts\":[]{}", &COMPARISON[..at], &COMPARISON[end..]);
+        assert!(matches!(
+            parse(&record(&format!("{row}\n"))),
+            Err(ParseError::Structure(StructureError::CountsNothing(_)))
+        ));
+    }
+
+    // A comparison's evidence is held to a claim's rule, not re-stated here.
+    #[test]
+    fn a_comparison_consuming_nothing_or_a_bad_digest_does_not_parse() {
+        let at = COMPARISON.find("\"consumes\":[").expect("the row consumes");
+        let nothing = format!("{}\"consumes\":[]}}", &COMPARISON[..at]);
+        assert!(matches!(
+            parse(&record(&format!("{nothing}\n"))),
+            Err(ParseError::Structure(StructureError::ClaimConsumesNothing(
+                _
+            )))
+        ));
+        let bad = COMPARISON.replace(&"a".repeat(64), "nope");
+        assert!(matches!(
+            parse(&record(&format!("{bad}\n"))),
+            Err(ParseError::Structure(StructureError::BadDigest(_)))
         ));
     }
 

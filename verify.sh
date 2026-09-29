@@ -1146,6 +1146,22 @@ inject_record_depth_unbounded() {
   edit_in_place 's|^    if depth > MAX_DEPTH {$|    if false {|' diet/src/formats/record/mod.rs
 }
 
+# A comparison's word read as whatever was written (#142): an unknown word
+# falls back to `inconclusive` instead of being refused, so `refuted` -- a
+# claim's word -- would pass as a comparison's.
+inject_record_comparison_word_open() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "let result = ComparisonVerdict::from_tag(&written).ok_or("
+new = "let result = ComparisonVerdict::from_tag(&written).or(Some(ComparisonVerdict::Inconclusive)).ok_or("
+assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # The kind's own fields made advisory. `turns` is drained and thrown away on a
 # recompute summary, so the row is accepted and the number nobody can compute
 # is simply not there afterwards -- which is exactly the "tolerate the stray
@@ -6540,6 +6556,8 @@ selftest() {
     'formats::record::tests::every_event_kind_appears_in_the_committed_corpus \.\.\. FAILED' 'lib/formats::record::tests'
   seeded_case "record substrate made optional"        test     inject_record_substrate_optional \
     'record/fixtures/invalid/regime-missing-substrate\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a comparison's word left open"        test     inject_record_comparison_word_open \
+    'record/fixtures/invalid/comparison-word-outside-its-four\.jsonl' 'test:conformance/formats::record'
   seeded_case "a summary kind's fields made advisory" test     inject_record_summary_kind_fields_advisory \
     'record/fixtures/invalid/recompute-summary-carries-turns\.jsonl' 'test:conformance/formats::record'
   seeded_case "a recompute summary with no product digest" test inject_record_recompute_digest_optional \
