@@ -16,7 +16,7 @@ known_defects = [
 [results.cells]
 path = "substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c"
 recompute = "recompute.sh"
-manifest_sha256 = "798ade747710573f2190f928a1fd931ed1b5c347904d97d4a82c60585d64193a"
+manifest_sha256 = "024957f028435033a2061781dda5491616df689b0abff50a00b612e22b983bb5"
 merged_in = "#178 (cells), #180 (effort and the refusal row), this PR (checkpoint_restore's word)"
 words = { identity = "pass", kwarg_delivery = "pass", rendered_effort = "n/a (a capability fact of the template, recorded as data on the registry entry's effort fields, not a cell word: planning on #143, 2026-09-29)", canary = "pass", output_invariance = "pass", headroom = "n/a (this line is the headroom reference: Q9 as amended compares candidates against it)", checkpoint_restore = "unadjudicated" }
 
