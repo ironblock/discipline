@@ -27,7 +27,9 @@ for name, c in cells.items():
         got = hashlib.sha256(hits[0].read_bytes()).hexdigest()
         if got != want: fail(f"[{name}] {hits[0].name} hashes to {got[:12]}..., cells.toml says {want[:12]}...")
         raw[key] = hits[0]
+DERIVED = set()
 def derived(name, word):
+    DERIVED.add(name)
     if name in cells and cells[name]["word"] != word: fail(f"[{name}] says {cells[name]['word']!r}; its raw files give {word!r}")
 # identity: the running exe the window read
 ident = (here / "raw/identity-before.txt").read_text()
@@ -95,6 +97,9 @@ if (here / "raw/fill.json").exists():
     fl = json.loads((here / "raw/fill.json").read_text())
     ref = int(re.search(r"([\d,]+) MiB", cells["headroom"]["criterion"]).group(1).replace(",", ""))
     derived("headroom", "pass" if fl["vram_free_at_peak_mib"] >= ref and all("error" not in r for r in fl["requests"]) else "fail")
+# pass and fail are results: a cell may carry one only if this script re-derived it from a raw file (review of #185)
+for name, c in cells.items():
+    if isinstance(c, dict) and c.get("word") in ("pass", "fail") and name not in DERIVED: fail(f"[{name}] says {c['word']!r}, but no raw file re-derives it")
 if bad: sys.exit(1)
 print(f"recompute: {len(cells)} cell(s); every cited raw file hashes as stated and every derivable word re-derives")
 PY
