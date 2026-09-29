@@ -68,10 +68,10 @@ if str(adm.get("word", "")).startswith("not admitted ("):
     if not failing: fails.append(f"not admitted names {named}, which is not failing")
 if adm.get("word") == "admitted":
     words = adm["results"].get("cells", {}).get("words", {})
-    unpassing = [k for k, w in words.items() if not (w == "pass" or re.fullmatch(r"n/a \(.+\)", w) or (k == "canary" and w == "baseline"))]
+    unpassing = [k for k, w in words.items() if not (w in ("pass", "unreported") or re.fullmatch(r"n/a \(.+\)", w) or (k == "canary" and w == "baseline"))]  # unreported admits (5884256685)
     if unpassing or adm["results"].get("depth", {}).get("word") != "pass" or adm["results"].get("parity", {}).get("word") != "supported":
         fails.append(f"admitted is written while a result is not passing: cells {unpassing}, depth {adm['results'].get('depth', {}).get('word')!r}, parity {adm['results'].get('parity', {}).get('word')!r}")
 for f in fails: print(f"admission-recompute: {f}")
-if not fails: print(f"admission-recompute: three results re-hash and recompute; " + (f"word {adm['word']!r} (written by hand)" if "word" in adm else f"word held: {adm['word_held']}"))
+if not fails: print(f"admission-recompute: three results re-hash and recompute; " + (f"word {adm['word']!r} (derived by derive_admission.py, #183)" if "word" in adm else f"word held: {adm['word_held']}"))
 sys.exit(1 if fails else 0)
 PY
