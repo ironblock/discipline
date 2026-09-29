@@ -32,4 +32,17 @@
 # published by the forge itself. Four forges named here; the shape is one
 # alternation, so a fifth is one more name in it, not a new row.
 
-ssh-user-at-host	(git|hg)@(github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|sr\.ht):
+#
+# AND A PACKAGE LOCKFILE'S OWN KEY FORM, by the same argument. pnpm spells a
+# resolved package as `name@1.2.3:` (and `name@1.2.3(peer@4.5.6)` inside a
+# peer suffix), which the pattern reads as a login at a dotted host. A dotted
+# all-numeric "host" with exactly three parts, terminated by `:`, `(`, `)`
+# or `'`, is a semver in a lockfile and is not a hostname at all -- it is the
+# same string in every install from the same registry. The terminator is
+# part of the exception on purpose: an IPv4 has a fourth part after its third
+# dot, so a login at a private address is left exactly as it was and still
+# fires. (No literal instance of either form is written here, per the rule
+# above.)
+# Added 2026-09-20 with the first JavaScript package (`exercise/`); disclosed
+# on that PR as an edit outside its directory.
+ssh-user-at-host	(git|hg)@(github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|sr\.ht):|@[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?[:()']
