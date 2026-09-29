@@ -815,7 +815,7 @@ def check_consumed(
                     "results.provenance-escapes-the-directory",
                     f"{kind} `{claim}` consumes `{stated}`, which resolves to "
                     f"`{resolved}`, outside the run directory; evidence is "
-                    f"committed beside the claim, and a link is not evidence",
+                    f"committed beside the row, and a link is not evidence",
                 )
                 continue
             if not resolved.is_file():
