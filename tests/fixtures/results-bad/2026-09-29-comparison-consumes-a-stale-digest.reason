@@ -1,0 +1,3 @@
+A comparison row names its evidence by digest, the same as a claim does
+(#142). This one consumes product.txt at a digest the file does not have;
+check-results.py used to verify claim rows only, and passed it.

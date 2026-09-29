@@ -161,6 +161,16 @@ legacy_signature = "formats::record::tests::every_event_kind_appears_in_the_comm
 migrated = false
 
 [[fault]]
+id = "test.record_comparison_word_open"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a comparison's word left open"
+failure_class = "schema.vocabulary-not-closed"
+legacy_signature = "record/fixtures/invalid/comparison-word-outside-its-four\\.jsonl"
+migrated = false
+
+[[fault]]
 id = "test.record_summary_kind_fields_advisory"
 kind = "seeded-gate"
 check = "test"
@@ -4218,6 +4228,14 @@ kind = "results-fixture"
 check = "results"
 label = "2026-01-30-verdict-disagrees-with-record"
 failure_class = "results.verdict-disagrees-with-record"
+migrated = false
+
+[[fault]]
+id = "results.2026-09-29-comparison-consumes-a-stale-digest"
+kind = "results-fixture"
+check = "results"
+label = "2026-09-29-comparison-consumes-a-stale-digest"
+failure_class = "results.provenance-unchecked"
 migrated = false
 
 [[fault]]

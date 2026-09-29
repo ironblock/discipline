@@ -31,7 +31,8 @@ What stays here is what is not a format question. Three cross-checks:
      be bound by ``regimen.toml`` and must equal it; and the required three
      must equal what the record's ``start`` row carries.
   3. ``product_sha256`` must equal the summary row's ``product_sha256``.
-  4. Every ``consumes`` entry on every claim row must name a file in the
+  4. Every ``consumes`` entry on every claim row -- and every ``comparison``
+     row, which names its evidence the same way (#142) -- must name a file in the
      directory whose SHA-256 is the digest recorded beside it. The record
      carried those digests and nothing compared them to the bytes, so a claim
      could cite evidence it had never read -- provenance for the wrong
@@ -752,9 +753,12 @@ def check_consumed(
     A digest that is never checked is a decoration on a claim.
     """
     for row in rows:
-        if row.get("record") != "claim":
+        # A comparison row cites its evidence the same way a claim does (#142),
+        # and a digest nobody compares is a decoration on either.
+        if row.get("record") not in ("claim", "comparison"):
             continue
         claim = row.get("id", "<unnamed>")
+        kind = row.get("record")
         entries = row.get("consumes")
         if not isinstance(entries, list):
             continue  # shape is diet's question, and it has already answered
@@ -772,14 +776,14 @@ def check_consumed(
             if stated.startswith("/") or ".." in parts:
                 fail(
                     "results.provenance-unchecked",
-                    f"claim `{claim}` consumes `{stated}`, which is outside the "
-                    f"run directory; evidence is committed beside the claim"
+                    f"{kind} `{claim}` consumes `{stated}`, which is outside the "
+                    f"run directory; evidence is committed beside the row"
                 )
                 continue
             if stated == "run.jsonl":
                 fail(
                     "results.provenance-unchecked",
-                    f"claim `{claim}` consumes `run.jsonl`, whose digest it is "
+                    f"{kind} `{claim}` consumes `run.jsonl`, whose digest it is "
                     f"itself part of; a record cannot state its own hash"
                 )
                 continue
@@ -802,26 +806,26 @@ def check_consumed(
                 # half cover.
                 fail(
                     "results.provenance-unchecked",
-                    f"claim `{claim}` consumes `{stated}`, which is not a file here",
+                    f"{kind} `{claim}` consumes `{stated}`, which is not a file here",
                 )
                 continue
             here = directory.resolve()
             if not resolved.is_relative_to(here):
                 fail(
                     "results.provenance-escapes-the-directory",
-                    f"claim `{claim}` consumes `{stated}`, which resolves to "
+                    f"{kind} `{claim}` consumes `{stated}`, which resolves to "
                     f"`{resolved}`, outside the run directory; evidence is "
-                    f"committed beside the claim, and a link is not evidence",
+                    f"committed beside the row, and a link is not evidence",
                 )
                 continue
             if not resolved.is_file():
-                fail("results.provenance-unchecked", f"claim `{claim}` consumes `{stated}`, which is not a file here")
+                fail("results.provenance-unchecked", f"{kind} `{claim}` consumes `{stated}`, which is not a file here")
                 continue
             found = digest_of(artefact)
             if found != recorded:
                 fail(
                     "results.provenance-unchecked",
-                    f"claim `{claim}` consumes `{stated}` at sha256 {recorded}, "
+                    f"{kind} `{claim}` consumes `{stated}` at sha256 {recorded}, "
                     f"but the committed file hashes to {found}"
                 )
 

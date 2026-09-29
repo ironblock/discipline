@@ -1016,6 +1016,7 @@ impl Router {
             | Event::Seam { .. }
             | Event::Rejected { .. }
             | Event::Claim { .. }
+            | Event::Comparison { .. }
             // A head that moved, and a harness that discarded its history,
             // are facts about the PREFIX rather than about a call: neither
             // opens a turn, names a lane of its own, or carries a tool call
