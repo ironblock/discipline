@@ -1,0 +1,238 @@
+{
+ "cases": [
+  {
+   "label": "every sample at every depth: pass",
+   "summary": {
+    "0": {
+     "application": {
+      "n": 5,
+      "all": 5,
+      "errors": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "all": 1
+     },
+     "depth_rendered": 0
+    },
+    "150000": {
+     "application": {
+      "n": 5,
+      "all": 5,
+      "errors": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "all": 1
+     },
+     "depth_rendered": 150000
+    }
+   },
+   "criterion": {
+    "min_rate_per_depth": 1.0,
+    "max_errors": 0,
+    "min_samples": 5
+   },
+   "word": "pass"
+  },
+  {
+   "label": "one miss at the deepest cell under 5/5: fail",
+   "summary": {
+    "0": {
+     "application": {
+      "n": 5,
+      "all": 5,
+      "errors": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "all": 1
+     },
+     "depth_rendered": 0
+    },
+    "150000": {
+     "application": {
+      "n": 5,
+      "all": 4,
+      "errors": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "all": 1
+     },
+     "depth_rendered": 150000
+    }
+   },
+   "criterion": {
+    "min_rate_per_depth": 1.0,
+    "max_errors": 0,
+    "min_samples": 5
+   },
+   "word": "fail"
+  },
+  {
+   "label": "one miss under a 0.8 rate: pass",
+   "summary": {
+    "0": {
+     "application": {
+      "n": 5,
+      "all": 5,
+      "errors": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "all": 1
+     },
+     "depth_rendered": 0
+    },
+    "150000": {
+     "application": {
+      "n": 5,
+      "all": 4,
+      "errors": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "all": 1
+     },
+     "depth_rendered": 150000
+    }
+   },
+   "criterion": {
+    "min_rate_per_depth": 0.8,
+    "max_errors": 0,
+    "min_samples": 5
+   },
+   "word": "pass"
+  },
+  {
+   "label": "a server error at a depth: unadjudicated, never pass",
+   "summary": {
+    "0": {
+     "application": {
+      "n": 5,
+      "all": 5,
+      "errors": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "all": 1
+     },
+     "depth_rendered": 0
+    },
+    "150000": {
+     "application": {
+      "n": 5,
+      "all": 4,
+      "errors": 1,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "all": 1
+     },
+     "depth_rendered": 150000
+    }
+   },
+   "criterion": {
+    "min_rate_per_depth": 0.8,
+    "max_errors": 0,
+    "min_samples": 5
+   },
+   "word": "unadjudicated"
+  },
+  {
+   "label": "too few samples: unadjudicated",
+   "summary": {
+    "0": {
+     "application": {
+      "n": 3,
+      "all": 3,
+      "errors": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "all": 1
+     },
+     "depth_rendered": 0
+    }
+   },
+   "criterion": {
+    "min_rate_per_depth": 1.0,
+    "max_errors": 0,
+    "min_samples": 5
+   },
+   "word": "unadjudicated"
+  },
+  {
+   "label": "a retrieval miss fails when retrieval is required",
+   "summary": {
+    "0": {
+     "application": {
+      "n": 5,
+      "all": 5,
+      "errors": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "all": 0
+     },
+     "depth_rendered": 0
+    }
+   },
+   "criterion": {
+    "min_rate_per_depth": 1.0,
+    "max_errors": 0,
+    "min_samples": 5,
+    "require_retrieval": true
+   },
+   "word": "fail"
+  },
+  {
+   "label": "a failing depth outranks a later unadjudicated one",
+   "summary": {
+    "0": {
+     "application": {
+      "n": 5,
+      "all": 3,
+      "errors": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "all": 1
+     },
+     "depth_rendered": 0
+    },
+    "150000": {
+     "application": {
+      "n": 5,
+      "all": 5,
+      "errors": 1,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "all": 1
+     },
+     "depth_rendered": 150000
+    }
+   },
+   "criterion": {
+    "min_rate_per_depth": 1.0,
+    "max_errors": 0,
+    "min_samples": 5
+   },
+   "word": "fail"
+  }
+ ]
+}

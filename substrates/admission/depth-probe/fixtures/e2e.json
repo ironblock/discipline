@@ -1,0 +1,38 @@
+{
+ "script": {
+  "application": [
+   "```rust\nuse std::fs::File;\nuse std::io::Read;\npub const VTX_BUF_LEN: usize = 4096;\npub const VTX_MAX_ID: u16 = 1024;\npub enum VtxErr { Io, IdTooLarge }\npub fn vtx_read_packet_id(f: &mut File) -> Result<u16, VtxErr> {\n    let mut buf = [0u8; VTX_BUF_LEN];\n    f.read_exact(&mut buf[..2]).map_err(|_| VtxErr::Io)?;\n    let id = u16::from_be_bytes([buf[0], buf[1]]);\n    if id > VTX_MAX_ID { return Err(VtxErr::IdTooLarge); }\n    Ok(id)\n}\n```",
+   "```rust\nuse std::fs::File;\nuse std::io::Read;\npub const VTX_BUF_LEN: usize = 4096;\npub const VTX_MAX_ID: u32 = 1024;\npub enum VtxErr { Io, IdTooLarge }\npub fn vtx_read_packet_id(f: &mut File) -> Result<u32, VtxErr> {\n    let mut buf = [0u8; VTX_BUF_LEN];\n    f.read_exact(&mut buf[..2]).map_err(|_| VtxErr::Io)?;\n    let id = u32::from_be_bytes([buf[0], buf[1]]);\n    if id > VTX_MAX_ID { return Err(VtxErr::IdTooLarge); }\n    Ok(id)\n}\n```",
+   "```rust\nuse std::fs::File;\nuse std::io::Read;\npub const VTX_BUF_LEN: usize = 4096;\npub const VTX_MAX_ID: u16 = 1024;\npub enum VtxErr { Io, IdTooLarge }\npub fn vtx_read_packet_id(f: &mut File) -> Result<u16, VtxErr> {\n    let mut buf = [0u8; VTX_BUF_LEN];\n    f.read_exact(&mut buf[..2]).map_err(|_| VtxErr::Io)?;\n    let id = u16::from_be_bytes([buf[0], buf[1]]);\n    if id > VTX_MAX_ID { return Err(VtxErr::IdTooLarge); }\n    Ok(id)\n}\n```"
+  ],
+  "retrieval": [
+   "1. u16 ids\n2. synchronous\n3. vtx_ prefix\n4. 4096 buffer\n5. Result<T, VtxErr>\n6. big-endian from_be_bytes\n7. VTX_BUF_LEN\n8. VTX_MAX_ID 1024"
+  ]
+ },
+ "expect_summary": {
+  "0": {
+   "application": {
+    "n": 3,
+    "all": 2,
+    "errors": 0,
+    "truncated": 0
+   },
+   "retrieval": {
+    "n": 1,
+    "all": 1
+   }
+  },
+  "400": {
+   "application": {
+    "n": 3,
+    "all": 2,
+    "errors": 0,
+    "truncated": 0
+   },
+   "retrieval": {
+    "n": 1,
+    "all": 1
+   }
+  }
+ }
+}

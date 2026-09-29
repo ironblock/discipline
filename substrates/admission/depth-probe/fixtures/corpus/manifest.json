@@ -1,0 +1,21 @@
+{
+ "root": ".",
+ "files": [
+  {
+   "path": "net.rs",
+   "label": "cat net.rs",
+   "sha256": "d554d9bd5cc40871da32056b10cf03fffaf528ab3dff45d01b575b3290530a4a"
+  },
+  {
+   "path": "store.rs",
+   "label": "cat store.rs",
+   "sha256": "f3bdc8b1fd0720a787c87557e75587c3420b235798b9d0947bc5fb2a45b899da"
+  },
+  {
+   "path": "build.log",
+   "label": "cat build.log",
+   "sha256": "2e321d9a13f8f527e1f9d25a73d6c19e9606f031ec958babbb3e22374ae6a90a"
+  }
+ ],
+ "note": "synthetic fixture corpus written for the selftest; not a probe corpus"
+}

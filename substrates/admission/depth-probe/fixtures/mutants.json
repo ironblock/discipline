@@ -1,0 +1,39 @@
+{
+ "mutants": [
+  {
+   "label": "the sync check dropped",
+   "old": "not re.search(r\"\\basync\\s+fn\\b|\\.await\\b|\\btokio\\b\", code, re.I)",
+   "new": "True"
+  },
+  {
+   "label": "the first code block graded instead of the last",
+   "old": "for b in reversed(blocks):",
+   "new": "for b in blocks:"
+  },
+  {
+   "label": "slots not cleared before a depth",
+   "old": "        srv.clear_slots(slots)\n",
+   "new": ""
+  },
+  {
+   "label": "probe requests not pinned to one slot",
+   "old": "\"id_slot\": 0, \"cache_prompt\": True",
+   "new": "\"cache_prompt\": True"
+  },
+  {
+   "label": "server errors ignored by decide",
+   "old": "or a[\"errors\"] > criterion.get(\"max_errors\", 0)",
+   "new": ""
+  },
+  {
+   "label": "bufconst accepts the bare literal",
+   "old": "and bool(re.search(r\";\\s*VTX_BUF_LEN\\s*\\]\", code))",
+   "new": ""
+  },
+  {
+   "label": "a failing depth no longer outranks an unadjudicated one",
+   "old": "word = \"unadjudicated\" if word == \"pass\" else word",
+   "new": "word = \"unadjudicated\""
+  }
+ ]
+}
