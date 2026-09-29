@@ -5711,6 +5711,116 @@ legacy_signature = "a_settlement_that_does_not_leave_the_state_it_is_in_is_refus
 migrated = false
 
 [[fault]]
+id = "test.log_v1_content_read_in_a_v0_log"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "v1 content read in a log that declares v0"
+failure_class = "log.v1-content-read-in-a-v0-log"
+legacy_signature = "log/fixtures/invalid/a-v0-log-carrying-timings\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_progress_read_in_a_v0_log"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a progress line read in a log that declares v0"
+failure_class = "log.progress-read-in-a-v0-log"
+legacy_signature = "log/fixtures/invalid/a-v0-log-carrying-progress\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_context_overflow_read_in_a_v0_log"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a context_overflow read in a log that declares v0"
+failure_class = "log.context-overflow-read-in-a-v0-log"
+legacy_signature = "log/fixtures/invalid/a-v0-log-carrying-a-context-overflow\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_response_reasoning_read_in_a_v0_log"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a response's reasoning read in a log that declares v0"
+failure_class = "log.response-reasoning-read-in-a-v0-log"
+legacy_signature = "log/fixtures/invalid/a-v0-log-carrying-a-response-reasoning\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_progress_after_its_request_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a log progress line after its request ended read"
+failure_class = "log.progress-after-its-request-read"
+legacy_signature = "log/fixtures/invalid/a-progress-after-its-request-ended\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_progress_citing_a_non_request_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a log progress line citing anything read as a request"
+failure_class = "log.progress-citing-a-non-request-read"
+legacy_signature = "log/fixtures/invalid/a-progress-citing-a-line-that-is-not-a-request\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_timings_negative_count_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a negative timings count read as a count"
+failure_class = "log.timings-negative-count-read"
+legacy_signature = "log/fixtures/invalid/a-timings-count-that-is-negative\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_timings_negative_ms_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a negative timings duration read as a duration"
+failure_class = "log.timings-negative-ms-read"
+legacy_signature = "log/fixtures/invalid/a-timings-duration-that-is-negative\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_timings_ms_as_text_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a timings duration written as text read as absent"
+failure_class = "log.timings-ms-as-text-read"
+legacy_signature = "log/fixtures/invalid/a-timings-duration-written-as-text\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_timings_unknown_key_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a timings key the server does not send read"
+failure_class = "log.timings-unknown-key-read"
+legacy_signature = "log/fixtures/invalid/a-timings-key-the-server-does-not-send\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_timings_declares_a_key_nothing_writes"
+kind = "seeded-gate"
+check = "test"
+target = "lib/formats::log::tests"
+label = "a timings key declared that no line writes"
+failure_class = "log.timings-declares-a-key-nothing-writes"
+legacy_signature = "the_schema_is_what_every_kind_writes \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
 id = "test.record_prefix_change_not_a_change"
 kind = "seeded-gate"
 check = "test"

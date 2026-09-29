@@ -1,9 +1,12 @@
 // GENERATED from diet/src/formats/log.rs -- do not edit by hand.
 // Regenerate: cargo test -p discipline-diet --lib formats::log::tests::write_the_bindings -- --ignored
-// A number here is an integer in the log; the reader refuses one past
-// i64, and a JavaScript number is exact only to 2^53.
+// A count here is an integer in the log; the reader refuses one past
+// i64, and a JavaScript number is exact only to 2^53. A `timings`
+// millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 0;
+export const VERSION = 1;
+export const READS = [0, 1] as const;
+export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
   | "session.start"
@@ -18,6 +21,7 @@ export type Kind =
   | "request.failed"
   | "turn.settled"
   | "idle.gap"
+  | "progress"
 ;
 
 export type State =
@@ -51,6 +55,7 @@ export type FailReason =
   | "timeout"
   | "transport"
   | "crashed"
+  | "context_overflow"
 ;
 
 export type SettleReason =
@@ -79,11 +84,21 @@ export interface HeadMessage {
   content: string;
 }
 
+export interface Timings {
+  prompt_n?: number;
+  cache_n?: number;
+  prompt_ms?: number;
+  predicted_n?: number;
+  predicted_ms?: number;
+  draft_n?: number;
+  draft_n_accepted?: number;
+}
+
 export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0;
+  version: 0 | 1;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -143,6 +158,8 @@ export type ResponseLine = {
   to_request: number;
   text: string;
   finish_reason?: string;
+  reasoning?: string;
+  timings?: Timings;
 };
 
 export type CancelledLine = {
@@ -185,6 +202,17 @@ export type IdleGapLine = {
   ended_by: GapEnd;
 };
 
+export type ProgressLine = {
+  seq: number;
+  t: number;
+  kind: "progress";
+  request: number;
+  total: number;
+  cache: number;
+  processed: number;
+  time_ms: number;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -198,4 +226,5 @@ export type LogLine =
   | RequestFailedLine
   | TurnSettledLine
   | IdleGapLine
+  | ProgressLine
 ;
