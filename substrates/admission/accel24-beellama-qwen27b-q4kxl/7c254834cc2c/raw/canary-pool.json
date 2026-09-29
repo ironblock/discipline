@@ -1,0 +1,73 @@
+{
+ "log": "instruments/fixtures/canary-e0827.jsonl",
+ "fork": "e0827",
+ "anchor": "common_chat_templates_apply",
+ "digest": {
+  "sha": "a7d695adc2f9f666",
+  "n": 19,
+  "ver": 1
+ },
+ "substrate_label": "pinned",
+ "fingerprint_baseline": "instruments/baselines/substrate-2026-08-16-np2.json",
+ "k": 360,
+ "hits": 354,
+ "rate": 0.9833333333333333,
+ "ci": [
+  0.9552683524722988,
+  0.9939025216761094
+ ],
+ "z": 2.576,
+ "pool": [
+  {
+   "hits": 35,
+   "n": 36,
+   "source": "linux-pc 2026-09-20 instance registration, draw 1"
+  },
+  {
+   "hits": 36,
+   "n": 36,
+   "source": "linux-pc 2026-09-20 instance registration, draw 2"
+  },
+  {
+   "hits": 35,
+   "n": 36,
+   "source": "results/2026-09-25-extraction-acceptance-parity before 1"
+  },
+  {
+   "hits": 36,
+   "n": 36,
+   "source": "results/2026-09-25-extraction-acceptance-parity before 2"
+  },
+  {
+   "hits": 36,
+   "n": 36,
+   "source": "results/2026-09-25-extraction-acceptance-parity after"
+  },
+  {
+   "hits": 36,
+   "n": 36,
+   "source": "results/2026-09-27-false-nomination-edit-rate before"
+  },
+  {
+   "hits": 35,
+   "n": 36,
+   "source": "results/2026-09-27-false-nomination-edit-rate after 1"
+  },
+  {
+   "hits": 35,
+   "n": 36,
+   "source": "results/2026-09-27-false-nomination-edit-rate after 2"
+  },
+  {
+   "hits": 34,
+   "n": 36,
+   "source": "results/2026-09-27-false-nomination-edit-rate after 3"
+  },
+  {
+   "hits": 36,
+   "n": 36,
+   "source": "#143 middle-rung window 2026-09-29, pre-run draw on the floor"
+  }
+ ],
+ "test": "a draw reads DRIFT iff the pooled rate falls outside the draw's Wilson interval at z = 2.576"
+}

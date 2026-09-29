@@ -1,0 +1,79 @@
+2026-09-29T05:44:55Z identity read; prod pid=206636 argc=55
+2026-09-29T05:44:56Z production stopped vram=21 MiB
+2026-09-29T05:45:09Z floor-off up pid=216982 exe=980845d60ae7a820 spec_args=0 vram=20928 MiB
+floor-off 0 1024 26.35 None
+floor-off 1 1024 26.24 None
+floor-off 2 1024 26.15 None
+floor-off 3 1024 26.14 None
+floor-off 4 1024 26.14 None
+2026-09-29T05:47:20Z inv floor-off rc=0
+2026-09-29T05:47:29Z floor-off2 up pid=217557 exe=980845d60ae7a820 spec_args=0 vram=20928 MiB
+floor-off2 0 1024 26.35 None
+floor-off2 1 1024 26.25 None
+floor-off2 2 1024 26.14 None
+floor-off2 3 1024 26.16 None
+floor-off2 4 1024 26.2 None
+2026-09-29T05:49:40Z inv floor-off2 rc=0
+2026-09-29T05:49:46Z bottom rung up pid=218005 vram=21 MiB
+2026-09-29T05:49:52Z fill up server=218156 exe=865044a2bf2d5685 vram=22406 MiB extra: --spec-type draft-mtp --spec-draft-n-max 2
+{"vram_peak_mib": 22610, "vram_free_at_peak_mib": 1966, "passes_1gib": true}
+2026-09-29T05:56:21Z fill rc=0
+2026-09-29T05:56:27Z serve up server=220699 exe=865044a2bf2d5685 vram=22406 MiB extra: --spec-type draft-mtp --spec-draft-n-max 2
+Traceback (most recent call last):
+  File "~/w143/probe143.py", line 74, in <module>
+    p = call(port, "/apply-template", body)["prompt"]
+        ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "~/w143/probe143.py", line 14, in call
+    with urllib.request.urlopen(req, timeout=timeout) as r: return json.load(r)
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.14/urllib/request.py", line 493, in open
+    response = meth(req, response)
+  File "/usr/lib64/python3.14/urllib/request.py", line 602, in http_response
+    response = self.parent.error(
+        'http', request, response, code, msg, hdrs)
+  File "/usr/lib64/python3.14/urllib/request.py", line 531, in error
+    return self._call_chain(*args)
+           ~~~~~~~~~~~~~~~~^^^^^^^
+  File "/usr/lib64/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/usr/lib64/python3.14/urllib/request.py", line 611, in http_error_default
+    raise HTTPError(req.full_url, code, msg, hdrs, fp)
+urllib.error.HTTPError: HTTP Error 500: Internal Server Error
+2026-09-29T05:56:29Z kw candidate rc=1
+2026-09-29T05:56:29Z waiting for the Mac's canary
+2026-09-29T06:14:39Z canary wait over (done=yes)
+2026-09-29T06:14:44Z inv-cand-off up server=224411 exe=865044a2bf2d5685 vram=20298 MiB extra: 
+cand-off 0 1024 22.56 None
+cand-off 1 1024 22.67 None
+cand-off 2 1024 22.48 None
+cand-off 3 1024 22.48 None
+cand-off 4 1024 22.47 None
+2026-09-29T06:16:37Z inv cand-off rc=0
+2026-09-29T06:16:42Z inv-cand-off2 up server=225181 exe=865044a2bf2d5685 vram=20298 MiB extra: 
+cand-off2 0 1024 22.58 None
+cand-off2 1 1024 22.69 None
+cand-off2 2 1024 22.47 None
+cand-off2 3 1024 22.48 None
+cand-off2 4 1024 22.51 None
+2026-09-29T06:18:35Z inv cand-off2 rc=0
+2026-09-29T06:18:41Z inv-cand-on up server=226026 exe=865044a2bf2d5685 vram=22406 MiB extra: --spec-type draft-mtp --spec-draft-n-max 2
+cand-on 0 1024 14.98 833
+cand-on 1 1024 15.03 833
+cand-on 2 1024 14.8 833
+cand-on 3 1024 14.81 833
+cand-on 4 1024 14.8 833
+2026-09-29T06:19:55Z inv cand-on rc=0
+2026-09-29T06:19:56Z phases done
+2026-09-29T06:19:56Z restore: begin
+2026-09-29T06:20:14Z provision-diet rc=0
+2026-09-29T06:20:14Z restored: pid=226606 exe=980845d60ae7a820 cmdline_same=yes vram=23066 MiB
+floor-on 0 1024 12.77 3362
+floor-on 1 1024 10.28 2610
+floor-on 2 1024 10.22 2604
+floor-on 3 1024 10.18 2610
+floor-on 4 1024 10.17 2610
+2026-09-29T06:21:08Z inv floor-on rc=0
+2026-09-29T06:21:08Z END

@@ -1,0 +1,2 @@
+0.03.705.856 I srv    load_model: initializing, n_slots = 2, n_ctx_slot = 229376, kv_unified = 'true'
+0.03.922.252 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)

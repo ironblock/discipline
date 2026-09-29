@@ -1,0 +1,5 @@
+{
+ "recipe": "sha256 of the canonical JSON below (sorted keys, no spaces); the directory is named by its first 12 hex characters",
+ "canonical": "{\"engine\":\"980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4\",\"reasoning_state\":\"--reasoning on; preserve_thinking true on the line; no effort or budget flag\",\"serving_line\":\"--flash-attn on, --kv-unified, --cache-type-k q5_0, --cache-type-v q4_1, --spec-type dflash, --spec-dflash-cross-ctx 1024, --spec-draft-ngl all, -ngl all, -b 2048, -ub 512, --mlock, --no-mmap, --no-host, --no-mmproj-offload, --jinja, --chat-template-kwargs {\\\"preserve_thinking\\\":true}, --image-min-tokens 1024, --reasoning on\",\"template\":\"55d4931433fe502b794226ee7f4d206a6bdd436ac9f80eb7d8ebb4c639f9ea0c\",\"weights\":{\"draft\":\"08e4dffcd7893a4c15981ab2061afa128013731be60f1a6847785a3d630f7c8d\",\"main\":\"ff6941ded525b34eb159496762c29dd0ec6e71dc31b74d57e75d871a03eec259\",\"projector\":\"05353347512982ee62317b9d8c89372bc815f4b4043580e7ef3ad411ec1a1cd3\"}}",
+ "sha256": "7c254834cc2c49ac3aab43483fffdc5a7d421fc5b0bc6fcde99564b9d59b0aa9"
+}

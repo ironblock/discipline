@@ -1,0 +1,22 @@
+{
+ "gguf_version": 3,
+ "tensors": 866,
+ "alignment": 32,
+ "block_count": 65,
+ "all": {
+  "tensor_bytes": 12109021184,
+  "elements": 27320697856,
+  "bpw": 3.5457
+ },
+ "nextn_layer": {
+  "tensor_bytes": 348469248,
+  "elements": 424699392,
+  "bpw": 6.5641
+ },
+ "without_nextn": {
+  "tensor_bytes": 11760551936,
+  "elements": 26895998464,
+  "bpw": 3.4981
+ },
+ "note": "bytes include each tensor's alignment padding to the next tensor's offset"
+}

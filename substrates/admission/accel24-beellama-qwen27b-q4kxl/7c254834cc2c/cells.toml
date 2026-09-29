@@ -1,0 +1,44 @@
+# Cells for this fingerprint, the #143 cells window of 2026-09-29. One table per cell; `word` is one of
+# pass, fail, n/a (reason), unreported, unadjudicated (ruled on #143). recompute.sh re-derives every word
+# that is derivable from a raw file and refuses a word that disagrees.
+
+[identity]
+word = "pass"
+instrument = "the window script's step 0: /proc/<pid>/exe sha256 and the exact argv of the running server, read before the stop"
+reading = "exe 980845d60ae7a820..., the registry's engine_identity for this substrate; argv read and relaunched verbatim; after the restore the exe and command line read identical"
+raw = { identity_before_txt = "32f50db964cf49783df2c22f7eab493cd7869cc73e4f251408b428c28bcb9a00", window_b_log = "d1fdfd27a2acf12ad1c39b392a87e51e9cb2e4308d9ae003863e22e759d11df7" }
+
+[kwarg_delivery]
+word = "pass"
+instrument = "paired control (D5 as amended by M8): the same short question with chat_template_kwargs enable_thinking false, then true, then neither"
+reading = "enable_thinking false: 0 reasoning characters; true: 505; default: 519"
+criterion = "negative half 0 and positive half above 0"
+raw = { kw_json = "173a5b3f62bc14e539a01d44ea49456daa31c03944ce8cb36a2d133a43a729b0" }
+
+[rendered_effort]
+word = "unadjudicated"
+instrument = "/apply-template with chat_template_kwargs reasoning_effort (and reasoning_strength) at none, low, medium, high, xhigh, max and absent"
+reading = "every level of both keys renders identically to the absent case: the template does not read the effort key; the served template's sha256 is 55d4931433fe502b794226ee7f4d206a6bdd436ac9f80eb7d8ebb4c639f9ea0c"
+why_no_word = "no criterion is ruled for this cell; a reading is on #143 for planning (Dispatch, 2026-09-29)"
+raw = { kw_json = "173a5b3f62bc14e539a01d44ea49456daa31c03944ce8cb36a2d133a43a729b0" }
+
+[canary]
+word = "pass"
+instrument = "canary e0827, k = 36, under #139's declared test: DRIFT iff the pooled rate falls outside the draw's Wilson interval at z = 2.576"
+reading = "before the stop 36/36, after the restore 36/36, both PASS against the pool of 354/360"
+raw = { canary_before_log = "337a2e696b099fd3a37ac1be111604d84657433e430afcdf34748a36ebd21cd0", canary_after_log = "4f9e37fc9200e98198d9d2fba00e5d16fa30525d47320cbd3faf0da86a589a0d", canary_pool_json = "36ddb2fcd83b9bd286e2ec02284a16b1394745ccd04e447e469ed7ddad5c0aca", canary_before_timings_jsonl = "bc08e533815595528884942ec31514ed3810d7f309fe56e0d788af7b2699927f", canary_after_timings_jsonl = "56e0513a6e1b4a4870797b4f7e73aa51f538abacb54b7ef5a49bb0a8227ba181" }
+
+[output_invariance]
+word = "pass"
+instrument = "on/off/off (I4d): #161's prompt, greedy, 1,024 tokens, k = 5 per arm; off twice as separate launches of the floor's own argv without its four speculative flag/value pairs; on is the restored production line"
+reading = "spec-off bitwise reproducible within a process and across two; every on/off pair first differs at token 51; spec-on is not reproducible with itself: rep 0, the restored server's first request (3,362 drafted), differs from reps 1-4 (2,604-2,610 drafted) at token 67"
+criterion = "reading (c) as ruled on #142: the excess is measured and declared on the registry entry"
+raw = { inv_floor_off_json = "9e311983f8e9dc8fd20e1c86019abef81bfe3c9857cf0fece2fd0dce45f0887e", inv_floor_off2_json = "f7e43b4b7143493167af8fec0e537592cce095cdd798f9612dcc4c87cbcce331", inv_floor_on_json = "8b6b892ccafa6b6a437a1f1c8f39dfc461a7fbc21290c81ede8b7be452be669e" }
+
+[headroom]
+word = "n/a (this line is the headroom reference: Q9 as amended compares candidates against it)"
+reading = "1,208 MiB free with both slots prefilled to 79,442 tokens: the inference seat's reading in its window of 2026-09-29 (#143, comment 5883986293), not re-taken here"
+
+[checkpoint_restore]
+word = "unreported"
+reason = "no instrument; I4b not built"
