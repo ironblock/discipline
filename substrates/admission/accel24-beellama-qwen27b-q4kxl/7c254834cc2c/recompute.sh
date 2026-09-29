@@ -92,11 +92,71 @@ elif (here / "raw/canary.log").exists():
     st = re.match(r"(\d+)/(\d+);", cells["canary"]["reading"])
     if not st or (int(st.group(1)), int(st.group(2))) != (h, n): fail(f"[canary] the draw reads {h}/{n}, which is not what the reading states first")
     derived("canary", "baseline")  # a rung's first draw is its baseline; the second draw is the first test (Q5)
+# headroom on the reference line: it passes by construction, and the figure it states is the one the candidate's
+# criterion compares against (Dispatch, #143, comment 5889255742)
+if cells.get("headroom", {}).get("reference_line"):
+    cand = here.parents[1] / "accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/cells.toml"
+    ref_c = re.search(r"([\d,]+) MiB", tomllib.loads(cand.read_text())["headroom"]["criterion"]) if cand.exists() else None
+    own = re.search(r"([\d,]+) MiB", cells["headroom"]["reading"])
+    derived("headroom", "pass" if ref_c and own and ref_c.group(1) == own.group(1) else "fail")
 # headroom, where measured here: free at peak against the floor's reading cited in the criterion
 if (here / "raw/fill.json").exists():
     fl = json.loads((here / "raw/fill.json").read_text())
     ref = int(re.search(r"([\d,]+) MiB", cells["headroom"]["criterion"]).group(1).replace(",", ""))
     derived("headroom", "pass" if fl["vram_free_at_peak_mib"] >= ref and all("error" not in r for r in fl["requests"]) else "fail")
+# checkpoint restore (#143, I4b): the committed instrument's decide over the raw measurements must reproduce the
+# committed decide output (so the instrument and criterion it ran are pinned by what they gave); the reading's
+# figures are that output's; the rung header is the hybrid the reading names; the window log's exes are the
+# identity's and this fingerprint's, and production was undisturbed; the measured floor process is the one the
+# 09:00Z restore brought back, whose fingerprint check read SUBSTRATE IDENTICAL (#184's depth/raw)
+if (here / "raw/checkpoint-rung.json").exists():
+    import subprocess
+    inst = here.parents[1] / "checkpoint-restore"
+    r = subprocess.run([sys.executable, "-B", str(inst / "checkpoint_restore.py"), "decide", str(here / "raw/checkpoint-rung.json"), str(here / "raw/checkpoint-reference.json"),
+                        str(here / "raw/checkpoint-identity.json"), str(inst / "criterion.toml")], capture_output=True, text=True)
+    committed = json.loads((here / "raw/checkpoint-decide.json").read_text())
+    if r.returncode != 0: fail(f"[checkpoint_restore] the instrument's decide exited {r.returncode}")
+    elif json.loads(r.stdout) != committed: fail("[checkpoint_restore] the instrument now decides differently from the committed raw/checkpoint-decide.json")
+    derived("checkpoint_restore", committed["word"])
+    cp = cells.get("checkpoint_restore", {}); rd = cp.get("reading", "")
+    unm = json.loads((here / "raw/checkpoint-reference-unmatched.json").read_text())
+    sys.path.insert(0, str(inst)); import checkpoint_restore as cr
+    ua = cr.reusing(unm); unmatched = max(cr.dist(w["top"], ua["cold"][0]["top"], committed["criterion"]["top_k"]) for w in cr.warms(ua)) if ua else None
+    for fig in (f"reused {committed['rung_cache_n']} tokens", f"warm against cold {committed['distance']:.4f}", f"Tolerance {committed['tolerance']:.4f}",
+                f"({committed['reference_warm_prompt_n']} tokens against the rung's {committed['rung_warm_prompt_n']})", f"reads {unmatched:.4f}" if unmatched is not None else "unmatched"):
+        if fig not in rd: fail(f"[checkpoint_restore] the reading does not state {fig!r}")
+    # the reading's other claims, each from the decide output or the raw measurements
+    ra = cr.reusing(json.loads((here / "raw/checkpoint-reference.json").read_text())); fa = cr.reusing(json.loads((here / "raw/checkpoint-rung.json").read_text()))
+    k = committed["criterion"]["top_k"]; draws = [cr.dist(w["top"], ra["cold"][0]["top"], k) for w in cr.warms(ra)]
+    claims = {"; cold against cold 0. ": committed["tolerance_parts"]["cold_cold_rung"] == 0, "the same top token": committed["top1_same"],
+              "on the first attempt": committed["rung_attempts"] == 1, "its three draws are identical": len(draws) == 3 and len(set(draws)) == 1,
+              "the reference's cold against cold 0": committed["tolerance_parts"]["cold_cold_reference"] == 0}
+    for phrase, holds in claims.items():
+        if (phrase in rd) != holds: fail(f"[checkpoint_restore] the reading {'states' if phrase in rd else 'omits'} {phrase!r}, and the raw files say {holds}")
+    # the reference model: its weights are the bottom rung's registered file, and its server ran CPU-only on that file
+    reg = tomllib.loads((here.parents[2] / "registry.toml").read_text())["substrate"]["cpu-beellama-qwen3-1p7b-q4km"]
+    rw = re.search(r"reference_weights ([0-9a-f]{64})", (here / "raw/checkpoint-reference-weights.txt").read_text())
+    slog = (here / "raw/checkpoint-reference-server.log").read_text()
+    if not rw or rw.group(1) != reg["weights_main"]: fail("[checkpoint_restore] the reference's weights are not the bottom rung's registered file")
+    if "no CUDA-capable device is detected" not in slog or f"loading model '~/Models/{reg['weights_main_file']}'" not in slog: fail("[checkpoint_restore] the reference server's log does not show it CPU-only on the registered file")
+    hdr = json.loads((here / "raw/checkpoint-rung-header.json").read_text())
+    hybrid = any(any(m in k for m in cr.RECURRENT) for k in hdr.get("keys", []))
+    if ("hybrid" in rd) != hybrid: fail(f"[checkpoint_restore] the reading's hybrid claim does not match the rung header ({hdr.get('architecture')})")
+    ident = json.loads((here / "raw/checkpoint-identity.json").read_text())
+    if ident["reference_header"] != json.loads((here / "raw/checkpoint-reference-header.json").read_text()): fail("[checkpoint_restore] the identity's reference header is not the one read")
+    wl = (here / "raw/checkpoint-window.log").read_text()
+    bf = re.search(r"floor pid=(\d+) exe=([0-9a-f]{64}) vram=(\d+) MiB health=\{\"status\":\"ok\"\}", wl)
+    af = re.search(r"floor after: pid=(\d+) vram=(\d+) MiB health=\{\"status\":\"ok\"\}", wl)
+    rf = re.search(r"reference pid=\d+ exe=([0-9a-f]{64})", wl)
+    eng = json.loads(json.loads((here / "fingerprint.json").read_text())["canonical"])["engine"]
+    if not (bf and af and rf): fail("[checkpoint_restore] the window log does not record the floor before and after and the reference")
+    else:
+        if (bf.group(1), bf.group(3)) != af.groups(): fail("[checkpoint_restore] the floor's pid or VRAM changed across the window")
+        if not (bf.group(2) == ident["rung_engine"] == eng and rf.group(1) == ident["reference_engine"]): fail("[checkpoint_restore] the window log's exes are not the identity's and this fingerprint's")
+        rest = here.parents[1] / "accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/depth/raw"
+        tie = (rest / "window.log").exists() and re.search(rf"restored: pid={bf.group(1)} exe={eng[:16]} cmdline_same=yes", (rest / "window.log").read_text()) \
+              and "SUBSTRATE IDENTICAL" in (rest / "restore-checks.txt").read_text()
+        if not tie: fail("[checkpoint_restore] the measured floor process is not the one the recorded restore brought back with its fingerprint identical")
 # pass and fail are results: a cell may carry one only if this script re-derived it from a raw file (review of #185)
 for name, c in cells.items():
     if isinstance(c, dict) and c.get("word") in ("pass", "fail") and name not in DERIVED: fail(f"[{name}] says {c['word']!r}, but no raw file re-derives it")

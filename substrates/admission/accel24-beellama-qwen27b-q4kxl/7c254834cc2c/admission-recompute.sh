@@ -54,15 +54,17 @@ if "cells" in adm["results"]:
     words = {k: v.get("word") for k, v in cells.items() if isinstance(v, dict)}
     if words != adm["results"]["cells"]["words"]: fails.append(f"cells: cells.toml's words {words} are not those admission.toml records")
 if ("word" in adm) == bool(str(adm.get("word_held", "")).strip()): fails.append("admission.toml must carry exactly one of a word and the reason it is held")
-if "word" in adm and not (adm["word"] == "admitted" or re.fullmatch(r"not admitted \((cells|depth|parity)\b[^)]+\)", adm["word"])):
+cellnames = [k for k, v in tomllib.loads((here / "cells.toml").read_text()).items() if isinstance(v, dict)]
+named_re = r"not admitted \((cells|depth|parity|" + "|".join(map(re.escape, cellnames)) + r")\b[^)]*\)"
+if "word" in adm and not (adm["word"] == "admitted" or re.fullmatch(named_re, adm["word"])):
     fails.append(f"the word {adm['word']!r} is not admitted, or not admitted with the failing result named")
 # not admitted must name a result that is actually failing: a cell reading fail, a depth word fail, or a parity
 # word refuted or inconclusive; an unadjudicated cell alone neither admits nor bars, so the word is held (5885436821)
 if str(adm.get("word", "")).startswith("not admitted ("):
-    named = re.match(r"not admitted \((cells|depth|parity)", adm["word"]).group(1)
-    res = adm["results"].get(named, {})
-    failing = {"cells": any(w == "fail" for w in res.get("words", {}).values()), "depth": res.get("word") == "fail",
-               "parity": res.get("word") in ("refuted", "inconclusive")}[named]
+    named = re.match(named_re, adm["word"]).group(1)
+    cw = adm["results"].get("cells", {}).get("words", {})
+    failing = cw.get(named) == "fail" if named in cellnames else {"cells": any(w == "fail" for w in cw.values()), "depth": adm["results"].get("depth", {}).get("word") == "fail",
+               "parity": adm["results"].get("parity", {}).get("word") in ("refuted", "inconclusive")}[named]
     if not failing: fails.append(f"not admitted names {named}, which is not failing")
 if adm.get("word") == "admitted":
     words = adm["results"].get("cells", {}).get("words", {})
