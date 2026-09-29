@@ -1,0 +1,32 @@
+{
+ "source": "files",
+ "reads": [
+  {
+   "file": "store.rs",
+   "label": "cat src/store.rs",
+   "sha256": "143a21be2531e1b81ce6f45ed4177211474a177c5fb300902d63285fde54900a"
+  },
+  {
+   "file": "net.rs",
+   "label": "cat src/net.rs",
+   "sha256": "204e9331705bacf8514d07d0faf4ff92582e3e5318610a3ff370edc7bbe05932"
+  }
+ ],
+ "listings": [
+  {
+   "file": "listing.txt",
+   "label": "ls src",
+   "sha256": "b573d8fe9b08b10b624baa5ff977d48ef3f736090b80b4f472a5da73973b8a8d"
+  }
+ ],
+ "diffs": [
+  {
+   "file": "change.diff",
+   "label": "git show -- src",
+   "sha256": "6d2c3184463c0feba926c603a018ee1a81627dce38a9ff5ac0f33b90ea2249ce"
+  }
+ ],
+ "counterexamples": "counterexamples.json",
+ "counterexamples_sha256": "0c72888942e703aba41293ed07fd80aa8ac537183aa21430309668510413e7b6",
+ "note": "a synthetic fixture corpus for the selftest; not a probe corpus"
+}

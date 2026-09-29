@@ -1,0 +1,673 @@
+{
+ "cases": [
+  {
+   "label": "every cell equal to the control: pass",
+   "summary": {
+    "0.0": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.5": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.9": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.95": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    }
+   },
+   "criterion": {
+    "within": 1,
+    "min_samples": 5,
+    "max_errors": 0
+   },
+   "word": "pass",
+   "strict": "pass"
+  },
+  {
+   "label": "one flake below the control: pass",
+   "summary": {
+    "0.0": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.5": {
+     "application": {
+      "n": 5,
+      "pass": 4,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.9": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.95": {
+     "application": {
+      "n": 5,
+      "pass": 4,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    }
+   },
+   "criterion": {
+    "within": 1,
+    "min_samples": 5,
+    "max_errors": 0
+   },
+   "word": "pass",
+   "strict": "not met"
+  },
+  {
+   "label": "two below the control is a cliff: fail",
+   "summary": {
+    "0.0": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.5": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.9": {
+     "application": {
+      "n": 5,
+      "pass": 4,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.95": {
+     "application": {
+      "n": 5,
+      "pass": 3,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    }
+   },
+   "criterion": {
+    "within": 1,
+    "min_samples": 5,
+    "max_errors": 0
+   },
+   "word": "fail"
+  },
+  {
+   "label": "within one of a weak control: pass (the control is the ceiling)",
+   "summary": {
+    "0.0": {
+     "application": {
+      "n": 5,
+      "pass": 3,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.5": {
+     "application": {
+      "n": 5,
+      "pass": 2,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.9": {
+     "application": {
+      "n": 5,
+      "pass": 3,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.95": {
+     "application": {
+      "n": 5,
+      "pass": 2,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    }
+   },
+   "criterion": {
+    "within": 1,
+    "min_samples": 5,
+    "max_errors": 0
+   },
+   "word": "pass"
+  },
+  {
+   "label": "a server error in a cell: unadjudicated, never pass",
+   "summary": {
+    "0.0": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.5": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 1,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.9": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.95": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    }
+   },
+   "criterion": {
+    "within": 1,
+    "min_samples": 5,
+    "max_errors": 0
+   },
+   "word": "unadjudicated"
+  },
+  {
+   "label": "thinking not engaged in a sample: unadjudicated",
+   "summary": {
+    "0.0": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.5": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.9": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 1,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.95": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    }
+   },
+   "criterion": {
+    "within": 1,
+    "min_samples": 5,
+    "max_errors": 0
+   },
+   "word": "unadjudicated"
+  },
+  {
+   "label": "too few samples: unadjudicated",
+   "summary": {
+    "0.0": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.5": {
+     "application": {
+      "n": 4,
+      "pass": 4,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.9": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.95": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    }
+   },
+   "criterion": {
+    "within": 1,
+    "min_samples": 5,
+    "max_errors": 0
+   },
+   "word": "unadjudicated"
+  },
+  {
+   "label": "a cliff outranks an earlier unadjudicated cell",
+   "summary": {
+    "0.0": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.5": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 1,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.9": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.95": {
+     "application": {
+      "n": 5,
+      "pass": 2,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    }
+   },
+   "criterion": {
+    "within": 1,
+    "min_samples": 5,
+    "max_errors": 0
+   },
+   "word": "fail"
+  },
+  {
+   "label": "a cliff outranks a later unadjudicated cell",
+   "summary": {
+    "0.0": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.5": {
+     "application": {
+      "n": 5,
+      "pass": 2,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.9": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 1,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.95": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    }
+   },
+   "criterion": {
+    "within": 1,
+    "min_samples": 5,
+    "max_errors": 0
+   },
+   "word": "fail"
+  },
+  {
+   "label": "an unadjudicable control: unadjudicated",
+   "summary": {
+    "0.0": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 1,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.5": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.9": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.95": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    }
+   },
+   "criterion": {
+    "within": 1,
+    "min_samples": 5,
+    "max_errors": 0
+   },
+   "word": "unadjudicated"
+  },
+  {
+   "label": "no control cell: unadjudicated",
+   "summary": {
+    "0.5": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    },
+    "0.9": {
+     "application": {
+      "n": 5,
+      "pass": 5,
+      "errors": 0,
+      "thinking_off": 0,
+      "truncated": 0
+     },
+     "retrieval": {
+      "n": 1,
+      "pass": 1
+     }
+    }
+   },
+   "criterion": {
+    "within": 1,
+    "min_samples": 5,
+    "max_errors": 0
+   },
+   "word": "unadjudicated"
+  }
+ ]
+}

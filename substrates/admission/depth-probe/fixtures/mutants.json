@@ -1,0 +1,137 @@
+{
+ "mutants": [
+  {
+   "label": "the sync check dropped",
+   "old": "\"sync\": lambda c, nm: not re.search(r\"\\basync\\s+fn\\b|\\.await\\b|\\btokio\\b\", c, re.I),",
+   "new": "\"sync\": lambda c, nm: True,"
+  },
+  {
+   "label": "the buf check dropped",
+   "old": "\"buf\": lambda c, nm: \"4096\" in c,",
+   "new": "\"buf\": lambda c, nm: True,"
+  },
+  {
+   "label": "the first code block graded instead of the last",
+   "old": "for b in reversed(blocks):",
+   "new": "for b in blocks:"
+  },
+  {
+   "label": "counter-examples not planted",
+   "old": "        turns.insert(min(len(turns), round(c[\"plant_at\"] * len(turns))), (c[\"label\"], c[\"text\"]))\n",
+   "new": "        pass\n"
+  },
+  {
+   "label": "slots not cleared before a cell",
+   "old": "        srv.clear_slots(slots)\n",
+   "new": ""
+  },
+  {
+   "label": "probe requests not pinned to one slot",
+   "old": "\"id_slot\": 0, \"cache_prompt\": True",
+   "new": "\"cache_prompt\": True"
+  },
+  {
+   "label": "the cliff threshold off by one",
+   "old": "c[\"application\"][\"pass\"] < ctrl[\"application\"][\"pass\"] - within",
+   "new": "c[\"application\"][\"pass\"] < ctrl[\"application\"][\"pass\"] - within - 1"
+  },
+  {
+   "label": "server errors ignored",
+   "old": "a[\"errors\"] <= maxe and ",
+   "new": ""
+  },
+  {
+   "label": "thinking-off samples ignored",
+   "old": " and a[\"thinking_off\"] == 0",
+   "new": ""
+  },
+  {
+   "label": "a cliff no longer outranks an unadjudicated cell",
+   "old": "word = \"unadjudicated\" if word == \"pass\" else word",
+   "new": "word = \"unadjudicated\""
+  },
+  {
+   "label": "thinking-off never counted",
+   "old": "st[\"thinking_off\"] += int(r.get(\"error\") is None and not r.get(\"reasoning_chars\"))",
+   "new": "st[\"thinking_off\"] += 0"
+  },
+  {
+   "label": "counter-examples planted one turn early",
+   "old": "turns.insert(min(len(turns), round(c[\"plant_at\"] * len(turns))), (c[\"label\"], c[\"text\"]))",
+   "new": "turns.insert(min(len(turns), round(c[\"plant_at\"] * (len(turns) - 1))), (c[\"label\"], c[\"text\"]))"
+  },
+  {
+   "label": "the depth-tolerance refusal removed",
+   "old": "    if n < target * (1 - tolerance):\n",
+   "new": "    if False:\n"
+  },
+  {
+   "label": "the ladder-capacity refusal removed",
+   "old": "    if nctx and max(t for _, t in cells) + a.max_tokens > nctx:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "label": "the strict reading always met",
+   "old": "\"strict_beside\": \"pass\" if strict else \"not met\"",
+   "new": "\"strict_beside\": \"pass\""
+  },
+  {
+   "label": "the file-source digest check dropped",
+   "old": "                if sha(b) != e[\"sha256\"]:\n                    raise SystemExit(f\"depth_probe: corpus {kind}",
+   "new": "                if False:\n                    raise SystemExit(f\"depth_probe: corpus {kind}"
+  },
+  {
+   "label": "the git-source digest check dropped",
+   "old": "                    if sha(b) != e[\"sha256\"]:\n                        raise SystemExit(f\"depth_probe: {src['name']}",
+   "new": "                    if False:\n                        raise SystemExit(f\"depth_probe: {src['name']}"
+  },
+  {
+   "label": "the counter-examples digest check dropped",
+   "old": "    if sha(b) != want_sha:\n        raise SystemExit(\"depth_probe: counterexamples.json",
+   "new": "    if False:\n        raise SystemExit(\"depth_probe: counterexamples.json"
+  },
+  {
+   "label": "retrieval off by default",
+   "old": "action=argparse.BooleanOptionalAction, default=True,",
+   "new": "action=argparse.BooleanOptionalAction, default=False,"
+  },
+  {
+   "label": "run passes no counter-examples pin",
+   "old": "a.tier, manifest.get(\"counterexamples_sha256\"))",
+   "new": "a.tier, None)"
+  },
+  {
+   "label": "a missing counter-examples pin accepted",
+   "old": "    if not want_sha:\n        raise SystemExit",
+   "new": "    if not want_sha:\n        return json.loads(b)[\"tiers\"][tier]\n        raise SystemExit"
+  },
+  {
+   "label": "--no-retrieval ignored",
+   "old": "if a.retrieval and TIERS[a.tier][\"retrieval\"]",
+   "new": "if TIERS[a.tier][\"retrieval\"]"
+  },
+  {
+   "label": "make_corpus's outside-the-tree refusal removed",
+   "file": "make_corpus.py",
+   "old": "    if not out.parent.resolve().is_relative_to(top):",
+   "new": "    if False:"
+  },
+  {
+   "label": "run reads /props before checking the counter-examples pin",
+   "old": "    ces = load_counterexamples(mpath.parent",
+   "new": "    srv.call(\"/props\")\n    ces = load_counterexamples(mpath.parent"
+  },
+  {
+   "label": "make_corpus lists without the trailing slash",
+   "file": "make_corpus.py",
+   "old": "git(path, \"ls-tree\", \"--name-only\", commit, d + \"/\")",
+   "new": "git(path, \"ls-tree\", \"--name-only\", commit, d)"
+  },
+  {
+   "label": "make_corpus reads non-Rust files",
+   "file": "make_corpus.py",
+   "old": " if p.endswith(\".rs\")]",
+   "new": "]"
+  }
+ ]
+}

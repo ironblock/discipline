@@ -1,0 +1,117 @@
+{
+ "script": {
+  "application": [
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```"
+   },
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```"
+   },
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```"
+   },
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```"
+   },
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```"
+   },
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```"
+   },
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u32> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u32::from_be_bytes([buf[0], buf[1]]))\n}\n```"
+   },
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```"
+   },
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```"
+   },
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```"
+   },
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```"
+   },
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```"
+   },
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```"
+   },
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u32> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u32::from_be_bytes([buf[0], buf[1]]))\n}\n```"
+   },
+   {
+    "kind": "ok",
+    "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```",
+    "reasoning": ""
+   }
+  ],
+  "retrieval": [
+   {
+    "kind": "ok",
+    "content": "1. u16 ids\n2. synchronous\n3. vtx_ prefix\n4. 4096-byte buffers"
+   }
+  ]
+ },
+ "expect_summary": {
+  "0.0": {
+   "application": {
+    "n": 5,
+    "pass": 5,
+    "errors": 0,
+    "thinking_off": 0,
+    "truncated": 0
+   },
+   "retrieval": {
+    "n": 1,
+    "pass": 1
+   },
+   "planted": 0
+  },
+  "0.5": {
+   "application": {
+    "n": 5,
+    "pass": 4,
+    "errors": 0,
+    "thinking_off": 0,
+    "truncated": 0
+   },
+   "retrieval": {
+    "n": 1,
+    "pass": 1
+   },
+   "planted": 4
+  },
+  "0.9": {
+   "application": {
+    "n": 5,
+    "pass": 4,
+    "errors": 0,
+    "thinking_off": 1,
+    "truncated": 0
+   },
+   "retrieval": {
+    "n": 1,
+    "pass": 1
+   },
+   "planted": 4
+  }
+ }
+}

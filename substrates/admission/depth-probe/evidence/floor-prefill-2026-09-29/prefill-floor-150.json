@@ -1,0 +1,9 @@
+[
+ {
+  "target": 150000,
+  "prompt_n": 149962,
+  "prompt_ms": 203284.765,
+  "prompt_per_second": 737.7,
+  "wall_s": 203.5
+ }
+]

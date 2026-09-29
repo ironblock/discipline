@@ -1,0 +1,148 @@
+{
+ "cases": [
+  {
+   "label": "supported: four constraints honoured",
+   "tier": "supported",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```",
+   "expect": {
+    "ALL": true,
+    "complete": true
+   }
+  },
+  {
+   "label": "supported: u32 violates u16",
+   "tier": "supported",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u32> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u32::from_be_bytes([buf[0], buf[1]]))\n}\n```",
+   "expect": {
+    "u16": false,
+    "ALL": false
+   }
+  },
+  {
+   "label": "supported: async violates sync",
+   "tier": "supported",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub async fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```",
+   "expect": {
+    "sync": false,
+    "ALL": false
+   }
+  },
+  {
+   "label": "supported: no prefix violates vtx",
+   "tier": "supported",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```",
+   "expect": {
+    "vtx": false,
+    "ALL": false
+   }
+  },
+  {
+   "label": "supported: an 8192 buffer violates buf",
+   "tier": "supported",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 8192];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```",
+   "expect": {
+    "buf": false,
+    "ALL": false
+   }
+  },
+  {
+   "label": "supported: no code block is incomplete",
+   "tier": "supported",
+   "content": "I would read two bytes and...",
+   "expect": {
+    "complete": false,
+    "ALL": false
+   }
+  },
+  {
+   "label": "supported: the LAST code block is graded, not an earlier draft",
+   "tier": "supported",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u32> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u32::from_be_bytes([buf[0], buf[1]]))\n}\n```\nFixed:\n```rust\nuse std::fs::File;\nuse std::io::{self, Read};\npub fn vtx_read_packet_id(f: &mut File) -> io::Result<u16> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2])?;\n    Ok(u16::from_be_bytes([buf[0], buf[1]]))\n}\n```",
+   "expect": {
+    "ALL": true
+   }
+  },
+  {
+   "label": "hard: eight constraints honoured",
+   "tier": "hard",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::Read;\npub const VTX_BUF_LEN: usize = 4096;\npub const VTX_MAX_ID: u16 = 1024;\npub enum VtxErr { Io, IdTooLarge }\npub fn vtx_read_packet_id(f: &mut File) -> Result<u16, VtxErr> {\n    let mut buf = [0u8; VTX_BUF_LEN];\n    f.read_exact(&mut buf[..2]).map_err(|_| VtxErr::Io)?;\n    let id = u16::from_be_bytes([buf[0], buf[1]]);\n    if id > VTX_MAX_ID { return Err(VtxErr::IdTooLarge); }\n    Ok(id)\n}\n```",
+   "expect": {
+    "ALL": true
+   }
+  },
+  {
+   "label": "hard: u32 violates u16",
+   "tier": "hard",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::Read;\npub const VTX_BUF_LEN: usize = 4096;\npub const VTX_MAX_ID: u32 = 1024;\npub enum VtxErr { Io, IdTooLarge }\npub fn vtx_read_packet_id(f: &mut File) -> Result<u32, VtxErr> {\n    let mut buf = [0u8; VTX_BUF_LEN];\n    f.read_exact(&mut buf[..2]).map_err(|_| VtxErr::Io)?;\n    let id = u32::from_be_bytes([buf[0], buf[1]]);\n    if id > VTX_MAX_ID { return Err(VtxErr::IdTooLarge); }\n    Ok(id)\n}\n```",
+   "expect": {
+    "u16": false,
+    "ALL": false
+   }
+  },
+  {
+   "label": "hard: async violates sync",
+   "tier": "hard",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::Read;\npub const VTX_BUF_LEN: usize = 4096;\npub const VTX_MAX_ID: u16 = 1024;\npub enum VtxErr { Io, IdTooLarge }\npub async fn vtx_read_packet_id(f: &mut File) -> Result<u16, VtxErr> {\n    let mut buf = [0u8; VTX_BUF_LEN];\n    f.read_exact(&mut buf[..2]).map_err(|_| VtxErr::Io)?;\n    let id = u16::from_be_bytes([buf[0], buf[1]]);\n    if id > VTX_MAX_ID { return Err(VtxErr::IdTooLarge); }\n    Ok(id)\n}\n```",
+   "expect": {
+    "sync": false,
+    "ALL": false
+   }
+  },
+  {
+   "label": "hard: no prefix violates vtx",
+   "tier": "hard",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::Read;\npub const VTX_BUF_LEN: usize = 4096;\npub const VTX_MAX_ID: u16 = 1024;\npub enum VtxErr { Io, IdTooLarge }\npub fn read_packet_id(f: &mut File) -> Result<u16, VtxErr> {\n    let mut buf = [0u8; VTX_BUF_LEN];\n    f.read_exact(&mut buf[..2]).map_err(|_| VtxErr::Io)?;\n    let id = u16::from_be_bytes([buf[0], buf[1]]);\n    if id > VTX_MAX_ID { return Err(VtxErr::IdTooLarge); }\n    Ok(id)\n}\n```",
+   "expect": {
+    "vtx": false,
+    "ALL": false
+   }
+  },
+  {
+   "label": "hard: an 8192 const violates buf",
+   "tier": "hard",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::Read;\npub const VTX_BUF_LEN: usize = 8192;\npub const VTX_MAX_ID: u16 = 1024;\npub enum VtxErr { Io, IdTooLarge }\npub fn vtx_read_packet_id(f: &mut File) -> Result<u16, VtxErr> {\n    let mut buf = [0u8; VTX_BUF_LEN];\n    f.read_exact(&mut buf[..2]).map_err(|_| VtxErr::Io)?;\n    let id = u16::from_be_bytes([buf[0], buf[1]]);\n    if id > VTX_MAX_ID { return Err(VtxErr::IdTooLarge); }\n    Ok(id)\n}\n```",
+   "expect": {
+    "buf": false,
+    "bufconst": true,
+    "ALL": false
+   }
+  },
+  {
+   "label": "hard: an unwrap violates result",
+   "tier": "hard",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::Read;\npub const VTX_BUF_LEN: usize = 4096;\npub const VTX_MAX_ID: u16 = 1024;\npub enum VtxErr { Io, IdTooLarge }\npub fn vtx_read_packet_id(f: &mut File) -> Result<u16, VtxErr> {\n    let mut buf = [0u8; VTX_BUF_LEN];\n    f.read_exact(&mut buf[..2]).unwrap();\n    let id = u16::from_be_bytes([buf[0], buf[1]]);\n    if id > VTX_MAX_ID { return Err(VtxErr::IdTooLarge); }\n    Ok(id)\n}\n```",
+   "expect": {
+    "result": false,
+    "ALL": false
+   }
+  },
+  {
+   "label": "hard: little-endian violates be",
+   "tier": "hard",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::Read;\npub const VTX_BUF_LEN: usize = 4096;\npub const VTX_MAX_ID: u16 = 1024;\npub enum VtxErr { Io, IdTooLarge }\npub fn vtx_read_packet_id(f: &mut File) -> Result<u16, VtxErr> {\n    let mut buf = [0u8; VTX_BUF_LEN];\n    f.read_exact(&mut buf[..2]).map_err(|_| VtxErr::Io)?;\n    let id = u16::from_le_bytes([buf[0], buf[1]]);\n    if id > VTX_MAX_ID { return Err(VtxErr::IdTooLarge); }\n    Ok(id)\n}\n```",
+   "expect": {
+    "be": false,
+    "ALL": false
+   }
+  },
+  {
+   "label": "hard: the bare literal in the body violates bufconst",
+   "tier": "hard",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::Read;\npub const VTX_BUF_LEN: usize = 4096;\npub const VTX_MAX_ID: u16 = 1024;\npub enum VtxErr { Io, IdTooLarge }\npub fn vtx_read_packet_id(f: &mut File) -> Result<u16, VtxErr> {\n    let mut buf = [0u8; 4096];\n    f.read_exact(&mut buf[..2]).map_err(|_| VtxErr::Io)?;\n    let id = u16::from_be_bytes([buf[0], buf[1]]);\n    if id > VTX_MAX_ID { return Err(VtxErr::IdTooLarge); }\n    Ok(id)\n}\n```",
+   "expect": {
+    "bufconst": false,
+    "buf": true,
+    "ALL": false
+   }
+  },
+  {
+   "label": "hard: no IdTooLarge violates idvalid",
+   "tier": "hard",
+   "content": "```rust\nuse std::fs::File;\nuse std::io::Read;\npub const VTX_BUF_LEN: usize = 4096;\npub const VTX_MAX_ID: u16 = 1024;\npub enum VtxErr { Io, TooBig }\npub fn vtx_read_packet_id(f: &mut File) -> Result<u16, VtxErr> {\n    let mut buf = [0u8; VTX_BUF_LEN];\n    f.read_exact(&mut buf[..2]).map_err(|_| VtxErr::Io)?;\n    let id = u16::from_be_bytes([buf[0], buf[1]]);\n    if id > VTX_MAX_ID { return Err(VtxErr::TooBig); }\n    Ok(id)\n}\n```",
+   "expect": {
+    "idvalid": false,
+    "ALL": false
+   }
+  }
+ ]
+}

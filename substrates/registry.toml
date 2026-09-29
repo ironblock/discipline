@@ -347,6 +347,8 @@ them, and its regime records what it sent; where the two differ the fire's \
 regime is what ran. The extraction bakeoff of 2026-08-10 is one such fire."""
 
 serving_context = 160000
+serving_slots = 2
+serving_context_is = "the unified pool (--kv-unified) shared by both slots, not a per-slot figure: another slot's resident prompt counts against it (substrates/admission/depth-probe/evidence/floor-prefill-2026-09-29/); the depth probe's fractions are of this pool with the other slot cleared (planning, #143, 2026-09-29)"
 serving_flags = "--flash-attn on, --kv-unified, --cache-type-k q5_0, --cache-type-v q4_1, --spec-type dflash, --spec-dflash-cross-ctx 1024, --spec-draft-ngl all, -ngl all, -b 2048, -ub 512, --mlock, --no-mmap, --no-host, --no-mmproj-offload, --jinja, --chat-template-kwargs {\"preserve_thinking\":true}, --image-min-tokens 1024, --reasoning on"
 serving_flags_constant_across_instances = true
 serving_flags_excludes = """
@@ -505,6 +507,8 @@ chat_template_is = "the served template (/props) and the GGUF header's tokenizer
 
 sampler_card = "none on the serving line; each request sets its own"
 serving_context = 229376
+serving_slots = 2
+serving_context_is = "the unified pool (--kv-unified) shared by both slots, not a per-slot figure: another slot's resident prompt counts against it (substrates/admission/depth-probe/evidence/floor-prefill-2026-09-29/); the depth probe's fractions are of this pool with the other slot cleared (planning, #143, 2026-09-29)"
 serving_flags = "-ngl 99, -t 8, -c 229376, -np 2, --kv-unified, -ctk q8_0, -ctv q8_0, -fa on, -b 1024, -ub 512, --jinja, --spec-type draft-mtp, --spec-draft-n-max 2"
 serving_flags_are = "the inference seat's recommended line (#143, comment 5883986293), as launched in the cells window of 2026-09-29"
 reasoning_state = "no reasoning, effort or budget flag on the serving line. Per request, reasoning_effort renders: absent = xhigh; low and medium render differently; high, none and max are refused (HTTP 500, the template raising 'Unexpected reasoning effort'); reasoning_strength is not read. Side by side, the floor's template reads no effort key at all. No word is chosen on this cell (substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/cells.toml)"
@@ -570,6 +574,8 @@ weights_draft = "b646ef60eaae2a9ed849e75f15f399629ca22633555e99e809959e95f22a157
 weights_draft_file = "mtp-Qwen3.8-Flash-Next-Q4_K_M.gguf"
 sampler_card = "none on the serving line; each request sets its own"
 serving_context = 262144
+serving_slots = 4
+serving_context_is = "the unified pool (--kv-unified) shared by the four slots, not a per-slot figure, as on the two linux-pc entries; read off the serving flags, not measured on this host (no depth probe has run here)"
 serving_flags = "-ngl 99, -t 16, -ctk q8_0, -ctv q8_0, -fa on, -b 1024, -ub 512, -np 4, --kv-unified, --jinja, --spec-type draft-mtp, --spec-draft-ngl 99, --spec-draft-n-max 3, --spec-draft-p-min 0.0, --api-key set; no --reasoning-format, so reasoning streams as reasoning_content and the template preserves it"
 serving_flags_are = "read off the running process's command line on 2026-09-28 and identical to the machine's recorded launch file; model paths and the key withheld"
 hazards = "greedy output with the MTP draft is not bit-exact with the spec-off path on this hybrid architecture: on five prompts, 36 of 2,327 positions (1.5%) disagree, the first between tokens 21 and 101, and every disagreement is a flip to the spec-off path's second-ranked token at a top-2 margin of 0.007-0.320 logits; which side of a near-tie is taken depends on the verify schedule (substrates/measurements/2026-09-29-ada-invariance/ and 2026-09-29-ada-invariance-ground-truth/). Acceptance at greedy is exact equality with the verify batch's argmax by source (e7051ef common/sampling.cpp:678-706); this build fills no probs on speculated tokens, so the verify batch's logits are unmeasured. Spec-off greedy output was bitwise reproducible within and across processes, and spec-on across processes on one prompt. Separately, with the draft off a same-binary teacher-forced rerun disagrees with a prior run's logits on the top token at about 2.1-2.4% of positions (the inference seat's measurement). Concurrency is untested. Nothing may be gated on token identity. A hybrid recurrent model, so warm reuse after a divergence depends on where checkpoints land"

@@ -1,0 +1,1 @@
+The corpus reads tokio (https://github.com/tokio-rs/tokio) at tag tokio-1.53.1 (commit 75fef53d0a8590c2d1dbb63672aa7b7d1ef51155), under the MIT licence in LICENSE-tokio beside this file. No tokio source is committed here: corpus/manifest.json pins each file read by sha256, and the runner reads them from a local clone (--repo tokio=PATH).
