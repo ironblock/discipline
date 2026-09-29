@@ -137,6 +137,11 @@
    "label": "the instrument's digest not recorded",
    "old": "\"instrument_sha256\": sha(pathlib.Path(__file__).read_bytes()), ",
    "new": ""
+  },
+  {
+   "label": "the criterion's digest not recorded",
+   "old": "\"criterion_sha256\": sha((HERE / \"criterion.toml\").read_bytes()),",
+   "new": ""
   }
  ]
 }
