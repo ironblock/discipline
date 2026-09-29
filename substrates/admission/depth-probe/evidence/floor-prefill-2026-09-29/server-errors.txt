@@ -1,0 +1,4 @@
+23.12.688.226 E srv  update_slots: Context size has been exceeded. i = 1070, n_batch = 1, ret = 1
+23.12.688.230 E srv    send_error: task id = 5459, error: Context size has been exceeded.
+27.17.592.495 E srv  update_slots: Context size has been exceeded. i = 222, n_batch = 1, ret = 1
+27.17.592.496 E srv    send_error: task id = 5566, error: Context size has been exceeded.

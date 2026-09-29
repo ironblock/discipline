@@ -1,0 +1,20 @@
+0 %
+{"target": 40000, "prompt_n": 39962, "prompt_ms": 37862.652, "prompt_per_second": 1055.4, "wall_s": 38.4}
+{"target": 75000, "prompt_n": 74962, "prompt_ms": 102286.003, "prompt_per_second": 732.9, "wall_s": 103.0}
+  File "/usr/lib64/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/usr/lib64/python3.14/urllib/request.py", line 611, in http_error_default
+    raise HTTPError(req.full_url, code, msg, hdrs, fp)
+urllib.error.HTTPError: HTTP Error 500: Internal Server Error
+{"status":"ok"}[
+ {
+  "target": 125000,
+  "prompt_n": 124962,
+  "prompt_ms": 155154.322,
+  "prompt_per_second": 805.4,
+  "wall_s": 155.4
+ }
+]slot 0 cleared, prompt_n 1
+slot 1 cleared, prompt_n 1
+{"target": 150000, "prompt_n": 149962, "prompt_ms": 203284.765, "prompt_per_second": 737.7, "wall_s": 203.5}
+{"status":"ok"}

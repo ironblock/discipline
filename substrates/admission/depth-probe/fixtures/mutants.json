@@ -2,8 +2,13 @@
  "mutants": [
   {
    "label": "the sync check dropped",
-   "old": "not re.search(r\"\\basync\\s+fn\\b|\\.await\\b|\\btokio\\b\", code, re.I)",
-   "new": "True"
+   "old": "\"sync\": lambda c, nm: not re.search(r\"\\basync\\s+fn\\b|\\.await\\b|\\btokio\\b\", c, re.I),",
+   "new": "\"sync\": lambda c, nm: True,"
+  },
+  {
+   "label": "the buf check dropped",
+   "old": "\"buf\": lambda c, nm: \"4096\" in c,",
+   "new": "\"buf\": lambda c, nm: True,"
   },
   {
    "label": "the first code block graded instead of the last",
@@ -11,7 +16,12 @@
    "new": "for b in blocks:"
   },
   {
-   "label": "slots not cleared before a depth",
+   "label": "counter-examples not planted",
+   "old": "        turns.insert(min(len(turns), round(c[\"plant_at\"] * len(turns))), (c[\"label\"], c[\"text\"]))\n",
+   "new": "        pass\n"
+  },
+  {
+   "label": "slots not cleared before a cell",
    "old": "        srv.clear_slots(slots)\n",
    "new": ""
   },
@@ -21,19 +31,29 @@
    "new": "\"cache_prompt\": True"
   },
   {
-   "label": "server errors ignored by decide",
-   "old": "or a[\"errors\"] > criterion.get(\"max_errors\", 0)",
+   "label": "the cliff threshold off by one",
+   "old": "c[\"application\"][\"pass\"] < ctrl[\"application\"][\"pass\"] - within",
+   "new": "c[\"application\"][\"pass\"] < ctrl[\"application\"][\"pass\"] - within - 1"
+  },
+  {
+   "label": "server errors ignored",
+   "old": "a[\"errors\"] <= maxe and ",
    "new": ""
   },
   {
-   "label": "bufconst accepts the bare literal",
-   "old": "and bool(re.search(r\";\\s*VTX_BUF_LEN\\s*\\]\", code))",
+   "label": "thinking-off samples ignored",
+   "old": " and a[\"thinking_off\"] == 0",
    "new": ""
   },
   {
-   "label": "a failing depth no longer outranks an unadjudicated one",
+   "label": "a cliff no longer outranks an unadjudicated cell",
    "old": "word = \"unadjudicated\" if word == \"pass\" else word",
    "new": "word = \"unadjudicated\""
+  },
+  {
+   "label": "thinking-off never counted",
+   "old": "st[\"thinking_off\"] += int(r.get(\"error\") is None and not r.get(\"reasoning_chars\"))",
+   "new": "st[\"thinking_off\"] += 0"
   }
  ]
 }

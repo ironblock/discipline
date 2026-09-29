@@ -1,21 +1,32 @@
 {
- "root": ".",
- "files": [
+ "source": "files",
+ "reads": [
   {
-   "path": "net.rs",
-   "label": "cat net.rs",
-   "sha256": "d554d9bd5cc40871da32056b10cf03fffaf528ab3dff45d01b575b3290530a4a"
+   "file": "store.rs",
+   "label": "cat src/store.rs",
+   "sha256": "143a21be2531e1b81ce6f45ed4177211474a177c5fb300902d63285fde54900a"
   },
   {
-   "path": "store.rs",
-   "label": "cat store.rs",
-   "sha256": "f3bdc8b1fd0720a787c87557e75587c3420b235798b9d0947bc5fb2a45b899da"
-  },
-  {
-   "path": "build.log",
-   "label": "cat build.log",
-   "sha256": "2e321d9a13f8f527e1f9d25a73d6c19e9606f031ec958babbb3e22374ae6a90a"
+   "file": "net.rs",
+   "label": "cat src/net.rs",
+   "sha256": "204e9331705bacf8514d07d0faf4ff92582e3e5318610a3ff370edc7bbe05932"
   }
  ],
- "note": "synthetic fixture corpus written for the selftest; not a probe corpus"
+ "listings": [
+  {
+   "file": "listing.txt",
+   "label": "ls src",
+   "sha256": "b573d8fe9b08b10b624baa5ff977d48ef3f736090b80b4f472a5da73973b8a8d"
+  }
+ ],
+ "diffs": [
+  {
+   "file": "change.diff",
+   "label": "git show -- src",
+   "sha256": "6d2c3184463c0feba926c603a018ee1a81627dce38a9ff5ac0f33b90ea2249ce"
+  }
+ ],
+ "counterexamples": "counterexamples.json",
+ "counterexamples_sha256": "0c72888942e703aba41293ed07fd80aa8ac537183aa21430309668510413e7b6",
+ "note": "a synthetic fixture corpus for the selftest; not a probe corpus"
 }

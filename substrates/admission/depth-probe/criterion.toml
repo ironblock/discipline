@@ -1,0 +1,5 @@
+# The ruled word for the depth probe (#143, planning 2026-09-29): no cliff = every cell within one
+# sample of the zero-pad control; five samples a cell; no server error tolerated.
+within = 1
+min_samples = 5
+max_errors = 0
