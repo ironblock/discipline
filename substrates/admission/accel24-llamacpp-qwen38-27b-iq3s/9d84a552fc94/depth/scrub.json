@@ -1,0 +1,12 @@
+{
+ "rule": "a private build-container name replaced by <build-container>",
+ "files": {
+  "raw/d143c.sh": {
+   "sha256_before_scrub": "2038cd3f1bee149447c36109b1c11a47099c638f67c8144cb9652a516fb7666e",
+   "private_name_substitutions": 1
+  }
+ },
+ "extracted": {
+  "raw/restore-checks.txt": "the verdict lines of the three post-restore checks, extracted by grep from their logs (verify-box's final line; the fingerprint check's digest and verdict lines; the canary's rate and verdict), which stay local because the full logs name the box's devices"
+ }
+}

@@ -1,0 +1,9 @@
+2026-09-29T08:25:26Z identity read; prod pid=226606
+2026-09-29T08:25:28Z production stopped vram=21 MiB
+2026-09-29T08:25:32Z candidate up server=250575 exe=865044a2bf2d5685 vram=22406 MiB
+2026-09-29T08:25:32Z waiting for the Mac's depth probe
+2026-09-29T09:00:32Z depth wait over (done=yes)
+2026-09-29T09:00:32Z restore: begin
+2026-09-29T09:00:51Z provision-diet rc=0
+2026-09-29T09:00:52Z restored: pid=256252 exe=980845d60ae7a820 cmdline_same=yes vram=23066 MiB
+2026-09-29T09:00:52Z END
