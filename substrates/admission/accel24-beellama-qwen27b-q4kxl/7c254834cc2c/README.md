@@ -21,7 +21,7 @@ The #143 cells window, 2026-09-29, ratified by the maintainer. The step list was
 - `fingerprint.json` gives the recipe and the canonical components. The directory is named by the first 12 hex characters.
 - `scrub.json` lists every raw file in which an absolute home path was replaced by `~`, or a private build-container name by `<build-container>`, with its pre-scrub digest. These are the only edits to the raw files. `raw/refusal.json` holds both lines' results as `refusal.sh` wrote them, and each directory reads its own line (`refusal_rung`).
 
-**This is a cells directory, not an admission.** Admission also needs the depth probe and the parity fire on this fingerprint. The depth probe's cell is in `depth/`: `pass`, run 2026-09-29. The parity fire is #115's record (`results/2026-09-25-extraction-acceptance-parity`, `supported`), which planning ruled is this rung's parity fire. The admission record is `admission.toml` in this directory, with `admission-recompute.sh` beside it. It cites the cells, `depth/` and the parity fire (#115) by digest. Its word is `admitted`, written by hand: every cell passes or is `n/a` with its reason, the depth probe passes, and the parity fire is `supported`. No checker derives the word yet; that is #183.
+**This is a cells directory, not an admission.** Admission also needs the depth probe and the parity fire on this fingerprint. The depth probe's cell is in `depth/`: `pass`, run 2026-09-29. The parity fire is #115's record (`results/2026-09-25-extraction-acceptance-parity`, `supported`), which planning ruled is this rung's parity fire. The admission record is `admission.toml` in this directory, with `admission-recompute.sh` beside it. It cites the cells, `depth/` and the parity fire (#115) by digest. Its word is `admitted`, written by hand: every cell passes, or is `n/a` because its property cannot exist here, the depth probe passes, and the parity fire is `supported`. No checker derives the word yet; that is #183.
 
 ## The cells
 
@@ -32,7 +32,7 @@ The #143 cells window, 2026-09-29, ratified by the maintainer. The step list was
 | rendered effort | n/a (a capability fact on the registry) | the template reads no effort key: every level renders identically |
 | canary | pass | 36/36 before, 36/36 after, against the pool of 354/360 at z 2.576 |
 | output invariance | pass | reading (c): spec-off reproducible within a process and across two; on/off first differs at token 51; spec-on not reproducible with itself after a restore (token 67), declared on the registry's hazards line |
-| headroom | n/a (the reference line) | 1,208 MiB free: the inference seat's reading, not re-taken here |
+| headroom | pass | the reference line, which passes Q9 by construction: 1,208 MiB, equal to itself (Dispatch, #143, comment 5889255742; #178 wrote n/a) |
 | checkpoint restore | pass | the floor reused 2247 tokens from a checkpoint; warm against cold 0.083 within a tolerance of 0.617 from the dense 1.7B on this binary at a matched continuation, CPU-derived (a GPU reference replaces it in the next window that takes the card). #186's instrument, production up, 2026-09-29 |
 
 `raw/canary-pool.json` is the pooled baseline with the 2026-09-29 pre-run draw added, which the registry's canary text points to.

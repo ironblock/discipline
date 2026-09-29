@@ -16,7 +16,12 @@
   "raw/checkpoint-reference-server.log": {
    "sha256_before_scrub": "adcc6bb788800461f930eee5d5135b2157fd19ecda224e4cc6a9c578b4d2a478",
    "home_path_substitutions": 1
+  },
+  "raw/checkpoint-box.sh": {
+   "sha256_before_scrub": "cfc40b2c66206b0709a8635b0dfa0368f274cc576f75572550f5420d576673e4",
+   "engine_dir_substitutions": 1
   }
  },
- "rule_private_names": "a private build-container name replaced by <build-container>"
+ "rule_private_names": "a private build-container name replaced by <build-container>",
+ "rule_engine_dir": "the production engine's install directory replaced by <engine-dir>"
 }

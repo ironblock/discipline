@@ -3,7 +3,7 @@
 # The reference: the dense 1.7B on the floor's own binary, CPU-only, localhost. Never pkill -f.
 set -u
 W=$HOME/i4b; O=$W/out; mkdir -p $O; L=$O/window.log; CR="python3 -B $W/checkpoint_restore.py"
-BEE=$HOME/Downloads/beellama-preview-v0.3.2; BW=$HOME/Models/Qwen3-1.7B-Q4_K_M.gguf
+BEE=$HOME/<engine-dir>; BW=$HOME/Models/Qwen3-1.7B-Q4_K_M.gguf
 log () { echo "$(date -u +%FT%TZ) $*" >> $L; }
 pids_on () { for p in $(pgrep -x llama-server); do tr '\0' ' ' < /proc/$p/cmdline | grep -q -- "--port $1 " && echo $p; done; }
 stopref () { for p in $(pids_on 8186); do kill $p; done; for i in $(seq 1 20); do [ -z "$(pids_on 8186)" ] && break; sleep 1; done; }
