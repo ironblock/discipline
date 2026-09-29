@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="80" viewBox="0 0 360 80">
+  <style>
+    text { font: bold 56px monospace; fill: #000; }
+    @media (prefers-color-scheme: dark) { text { fill: #fff; } }
+  </style>
+  <text x="10" y="58">discipline</text>
+</svg>
