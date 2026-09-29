@@ -447,7 +447,12 @@ export const ChainByFocus: Story = {
   play: async ({ canvasElement }) => {
     const id = (label: string) => idAt(MOMENTS.done, label);
     const cell = q(canvasElement, `.ex-branchcell[data-branch="${id('i/1')}"]`) as HTMLElement;
-    (cell.querySelector('button, summary, [tabindex]') as HTMLElement).focus();
+    // Placed first: until then the cell is `visibility: hidden`, and nothing in it can take focus (a slow
+    // runner reached the focus before the placement, and the focus silently went nowhere).
+    await waitFor(async () => expect(cell.style.visibility).not.toBe('hidden'));
+    const target = cell.querySelector('button, summary, [tabindex]') as HTMLElement;
+    target.focus();
+    await expect(document.activeElement).toBe(target);
     await waitFor(async () => expect(cell.hasAttribute('data-hot')).toBe(true));
     await expect(q(canvasElement, '.ex-trunk__node[data-hot]')).not.toBeNull();
     (document.activeElement as HTMLElement).blur();
