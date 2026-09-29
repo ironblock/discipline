@@ -6301,6 +6301,14 @@ failure_class = "client.dialect-reads-an-unsent-cache-path"
 migrated = false
 
 [[fault]]
+id = "client.dialect-declares-an-echo-site-the-chat-reply-lacks"
+kind = "lane-fault"
+check = "lanes"
+label = "client.dialect-declares-an-echo-site-the-chat-reply-lacks"
+failure_class = "client.dialect-declares-an-echo-site-the-chat-reply-lacks"
+migrated = false
+
+[[fault]]
 id = "client.stream-drops-the-draft-counts"
 kind = "lane-fault"
 check = "lanes"

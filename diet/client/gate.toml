@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 71
+faults = 72
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -1225,4 +1225,19 @@ becomes = '''
         (integer || decimal).then(|| Self(text.split('.').next().unwrap_or(text).to_owned()))'''
 catches = [
     "client::stream::tests::a_timings_digits_survive_the_transport",
+]
+
+[[fault]]
+id = "client.dialect-declares-an-echo-site-the-chat-reply-lacks"
+failure_class = "client.dialect-declares-an-echo-site-the-chat-reply-lacks"
+target = "diet/src/client/shape.rs"
+expect_exit = 101
+anchor = '''
+            // that might add an echo to the chat reply has been tried.
+            sampler_echo: None,'''
+becomes = '''
+            // that might add an echo to the chat reply has been tried.
+            sampler_echo: Some("generation_settings".to_owned()),'''
+catches = [
+    "client::wire::tests::the_llama_cpp_chat_reply_has_no_sampler_echo_site",
 ]

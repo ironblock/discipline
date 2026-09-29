@@ -12,9 +12,11 @@
 //!
 //! * The **request shape is data** ([`shape::RequestShape`]), built once and
 //!   carried into the record beside the answer it produced.
-//! * **Sampler echo** ([`echo`]): every reply is compared against the pins the
-//!   request carried, and a contradiction is a `regime.mismatch` that refuses
-//!   to bank.
+//! * **Sampler echo** ([`echo`]): where a dialect declares an echo site,
+//!   every reply is compared against the pins the request carried, and a
+//!   contradiction is a `regime.mismatch` that refuses to bank. No shipped
+//!   dialect declares one (#159), so today every pin is unverified by echo
+//!   and a mismatch cannot arise outside the mechanism's own tests.
 //! * **Retry lineage** ([`Attempt`]): a retry is a new request naming its
 //!   predecessor, its reason is typed, and the answer names the attempt that
 //!   produced it.
@@ -880,7 +882,7 @@ mod tests {
 
     /// The common case, so every other test's setup can be trusted.
     fn honest(acts: Vec<Act>, shape: &RequestShape) -> (super::Call, Vec<String>) {
-        drive(acts, shape, Dialect::llama_cpp(), Concurrency::Declared(2))
+        drive(acts, shape, Dialect::echoing(), Concurrency::Declared(2))
     }
 
     // -----------------------------------------------------------------------
@@ -1344,7 +1346,7 @@ mod tests {
         let (llama, _) = drive(
             vec![Act::Answer(body.clone())],
             &shaped(card(), 5_000, 20_000, 0),
-            Dialect::llama_cpp(),
+            Dialect::echoing(),
             Concurrency::Declared(2),
         );
         let cache = &llama.outcome.answer().expect("answered").cache;
@@ -1385,13 +1387,13 @@ mod tests {
         let (declared, _) = drive(
             vec![Act::Answer(answered("an answer", "stop", HONEST_ECHO))],
             &shaped(card(), 5_000, 20_000, 0),
-            Dialect::llama_cpp(),
+            Dialect::echoing(),
             Concurrency::Declared(1),
         );
         let (undeclared, _) = drive(
             vec![Act::Answer(answered("an answer", "stop", HONEST_ECHO))],
             &shaped(card(), 5_000, 20_000, 0),
-            Dialect::llama_cpp(),
+            Dialect::echoing(),
             Concurrency::Undeclared,
         );
 
@@ -1596,7 +1598,7 @@ mod tests {
             Http::new(Endpoint::parse(&url).expect("an endpoint")),
             Serving {
                 concurrency: Concurrency::Declared(1),
-                dialect: Dialect::llama_cpp(),
+                dialect: Dialect::echoing(),
             },
         );
         let mut ids = IdSource::new("turn-1/main");
@@ -1677,7 +1679,7 @@ mod tests {
             Http::with_reply_cap(Endpoint::parse(&stub.url()).expect("an endpoint"), 16),
             Serving {
                 concurrency: Concurrency::Declared(1),
-                dialect: Dialect::llama_cpp(),
+                dialect: Dialect::echoing(),
             },
         );
         let mut ids = IdSource::new("turn-1/main");

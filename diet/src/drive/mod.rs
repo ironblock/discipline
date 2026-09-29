@@ -59,7 +59,8 @@
 //! one extra call before turn one: the [`CONTROL`] lane, sent
 //! `enable_thinking: false`, which must come back with no reasoning at all.
 //! It is the only check available -- a template kwarg is echoed by nothing,
-//! so its delivery cannot be confirmed the way a sampler pin's is -- and a
+//! and neither, on the drive's llama.cpp chat dialect, is a sampler pin
+//! (#159) -- and a
 //! drive whose control comes back thinking stops at
 //! [`Halt::KwargsNotDelivered`] rather than banking a level it did not set.
 //! A regime that declares no reasoning control makes no reasoning-state
