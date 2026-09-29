@@ -18,8 +18,10 @@ if hashlib.sha256(fp["canonical"].encode()).hexdigest() != fp["sha256"] or here.
 WORDS = ("pass", "fail", "unreported", "unadjudicated")
 raw = {}
 for name, c in cells.items():
-    w = c.get("word", "")
-    if not (w in WORDS or re.fullmatch(r"n/a \(.+\)", w)): fail(f"[{name}] word {w!r} is not one of the ruled five")
+    w = c.get("word")
+    if w is None:  # a cell that ran but whose criterion is unruled carries no word (Dispatch, 2026-09-29)
+        if not (str(c.get("criterion", "")).endswith("unruled") and c.get("word_withheld")): fail(f"[{name}] has no word and no stated unruled criterion")
+    elif not (w in WORDS or re.fullmatch(r"n/a \(.+\)", w)): fail(f"[{name}] word {w!r} is not one of the ruled five")
     for key, want in (c.get("raw") or {}).items():
         hits = [p for p in (here / "raw").iterdir() if p.name.replace("-", "_").replace(".", "_") == key]
         if len(hits) != 1: fail(f"[{name}] cites {key}, which names no single raw file"); continue

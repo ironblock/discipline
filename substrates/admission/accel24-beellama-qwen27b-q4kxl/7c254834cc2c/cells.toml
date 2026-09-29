@@ -13,7 +13,7 @@ word = "pass"
 instrument = "paired control (D5 as amended by M8): the same short question with chat_template_kwargs enable_thinking false, then true, then neither"
 reading = "enable_thinking false: 0 reasoning characters; true: 505; default: 519"
 criterion = "negative half 0 and positive half above 0"
-raw = { kw_json = "173a5b3f62bc14e539a01d44ea49456daa31c03944ce8cb36a2d133a43a729b0", refusal_json = "bff086347c8b1ac4ff30b733bdd24482ca80c7ecc436ec02fc3d4a819423414d" }
+raw = { kw_json = "173a5b3f62bc14e539a01d44ea49456daa31c03944ce8cb36a2d133a43a729b0", refusal_json = "bff086347c8b1ac4ff30b733bdd24482ca80c7ecc436ec02fc3d4a819423414d", refusal_sh = "228800ee0a7aa3b34cf6e0182d5467b190813d0a3cb0006cebae0fca1cb126f2" }
 refused_levels = []
 refused_level_reading = "n/a (no refused level): a chat request at every level tried returns 200 (high: 200, none: 200, max: 200, low: 200) on the production line, 2026-09-29 07:10Z; the template reads no effort key, so every level is accepted and none is implemented"
 

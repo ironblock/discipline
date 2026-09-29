@@ -1,0 +1,32 @@
+0.00.000.414 I srv  llama_server: initializing ...
+0.00.034.281 E ggml_cuda_init: failed to initialize CUDA: no CUDA-capable device is detected
+warning: no usable GPU found, --gpu-layers option will be ignored
+warning: one possible reason is that llama.cpp was compiled without GPU support
+warning: consult docs/build.md for compilation instructions
+0.00.036.193 I cmn  common_param: common_params_print_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+0.00.036.534 W srv  llama_server: security: no API key is set and CORS allows all origins (see https://github.com/ggml-org/llama.cpp/pull/25655)
+0.00.039.398 I srv    load_model: loading model '~/Models/Qwen3.8-27B-GSQ-RCO/Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf'
+0.00.841.609 W model has unused tensor blk.64.attn_norm.weight (size = 20480 bytes) -- ignoring
+0.00.841.620 W model has unused tensor blk.64.post_attention_norm.weight (size = 20480 bytes) -- ignoring
+0.00.841.629 W model has unused tensor blk.64.attn_q.weight (size = 51609600 bytes) -- ignoring
+0.00.841.632 W model has unused tensor blk.64.attn_k.weight (size = 4300800 bytes) -- ignoring
+0.00.841.634 W model has unused tensor blk.64.attn_v.weight (size = 4300800 bytes) -- ignoring
+0.00.841.645 W model has unused tensor blk.64.attn_output.weight (size = 25804800 bytes) -- ignoring
+0.00.841.648 W model has unused tensor blk.64.attn_q_norm.weight (size = 1024 bytes) -- ignoring
+0.00.841.651 W model has unused tensor blk.64.attn_k_norm.weight (size = 1024 bytes) -- ignoring
+0.00.841.654 W model has unused tensor blk.64.ffn_gate.weight (size = 73113600 bytes) -- ignoring
+0.00.841.657 W model has unused tensor blk.64.ffn_down.weight (size = 73113600 bytes) -- ignoring
+0.00.841.659 W model has unused tensor blk.64.ffn_up.weight (size = 73113600 bytes) -- ignoring
+0.00.841.664 W model has unused tensor blk.64.nextn.eh_proj.weight (size = 43008000 bytes) -- ignoring
+0.00.841.667 W model has unused tensor blk.64.nextn.enorm.weight (size = 20480 bytes) -- ignoring
+0.00.841.670 W model has unused tensor blk.64.nextn.hnorm.weight (size = 20480 bytes) -- ignoring
+0.00.841.679 W model has unused tensor blk.64.nextn.shared_head_norm.weight (size = 20480 bytes) -- ignoring
+0.03.440.133 I cmn          init: llama threadpool init, n_threads = 2
+0.05.594.347 I srv    load_model: initializing, n_slots = 1, n_ctx_slot = 4096, kv_unified = 'false'
+0.05.598.502 W srv          init: chat template supports preserving reasoning, it is enabled by default (may use more tokens, disable via --no-reasoning-preserve)
+0.05.598.540 I srv  llama_server: model loaded
+0.05.598.545 I srv  llama_server: listening on http://127.0.0.1:8093
+0.05.856.033 W srv    operator(): got exception: {"error":{"code":500,"message":"\n------------\nWhile executing CallExpression at line 49, column 28 in source:\n...', 'low') %}↵        {{- raise_exception('Unexpected reasoning effort ' ~ reason...\n                                           ^\nError: Jinja Exception: Unexpected reasoning effort high. Supported types are xhigh (default), medium, and low.","type":"server_error"}}
+0.05.856.925 W srv    operator(): got exception: {"error":{"code":500,"message":"\n------------\nWhile executing CallExpression at line 49, column 28 in source:\n...', 'low') %}↵        {{- raise_exception('Unexpected reasoning effort ' ~ reason...\n                                           ^\nError: Jinja Exception: Unexpected reasoning effort none. Supported types are xhigh (default), medium, and low.","type":"server_error"}}
+0.05.857.702 W srv    operator(): got exception: {"error":{"code":500,"message":"\n------------\nWhile executing CallExpression at line 49, column 28 in source:\n...', 'low') %}↵        {{- raise_exception('Unexpected reasoning effort ' ~ reason...\n                                           ^\nError: Jinja Exception: Unexpected reasoning effort max. Supported types are xhigh (default), medium, and low.","type":"server_error"}}
+0.08.731.580 I srv    operator(): operator(): cleaning up before exit...

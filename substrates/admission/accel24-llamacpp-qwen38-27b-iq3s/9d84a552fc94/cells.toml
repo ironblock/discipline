@@ -13,7 +13,7 @@ word = "pass"
 instrument = "paired control (D5 as amended by M8), as for the floor"
 reading = "enable_thinking false: 0 reasoning characters; true: 116; default: 82"
 criterion = "negative half 0 and positive half above 0"
-raw = { kw_json = "ebded7622af92293c79c2130271ba35ad322c49f02afa202acdd1aa0ae8c5f0e", refusal_json = "873e4713a10a09c59908690b90d7ee7dfe3f4d6a977e6eec4171cc73910c0f90" }
+raw = { kw_json = "ebded7622af92293c79c2130271ba35ad322c49f02afa202acdd1aa0ae8c5f0e", refusal_json = "873e4713a10a09c59908690b90d7ee7dfe3f4d6a977e6eec4171cc73910c0f90", refusal_sh = "228800ee0a7aa3b34cf6e0182d5467b190813d0a3cb0006cebae0fca1cb126f2", refusal_server_log = "181dbc8747f5efcb0edc1fe961fd3dcb93c230d474e2aa5b2fcb008c63d48b37" }
 refused_levels = ["high", "none", "max"]
 refused_level_reading = "a chat request at each refused level returns HTTP 500 (high: 500, none: 500, max: 500); an accepted level (low) renders: 200. Taken 2026-09-29 07:10Z with production up, on the same binary and weights launched CPU-only (GPU hidden, weights memory-mapped with no repack and no warmup, localhost), the refusal occurring in template rendering before any weight is read"
 
@@ -26,7 +26,8 @@ refusal_status = 500
 raw = { kw_json = "ebded7622af92293c79c2130271ba35ad322c49f02afa202acdd1aa0ae8c5f0e" }
 
 [canary]
-word = "unadjudicated"
+criterion = "Q5 unruled"
+word_withheld = "the draw ran to completion; unadjudicated now means a cell that did not (planning, #143), and no other word fits while Q5 is unruled"
 instrument = "canary e0827, k = 36, the first draw on this line"
 reading = "36/36; recorded, not judged: the first-draw criterion for a new rung (Q5) is not ruled"
 raw = { canary_log = "8432e486b93611610a3ef7a44fdda27b75442430745c152a74f138cfe2d3e98b", canary_timings_jsonl = "3a7eb29fc1ce28adffa15d06afc68c6c6e4ecaaafc60b00c6bc0499824e8c28c" }
