@@ -1,0 +1,38 @@
+{
+ "tier": "supported",
+ "admission": true,
+ "serving_context": 229376,
+ "cells": [
+  [
+   0.0,
+   0
+  ],
+  [
+   0.5,
+   114688
+  ],
+  [
+   0.9,
+   206438
+  ],
+  [
+   0.95,
+   217907
+  ]
+ ],
+ "samples": 5,
+ "sampler": {
+  "temperature": 0.6,
+  "top_k": 20,
+  "top_p": 1.0,
+  "min_p": 0.0
+ },
+ "max_tokens": 4096,
+ "seed": 2000,
+ "chunk_chars": 4000,
+ "corpus_manifest_sha256": "72a1e2f1937c49292b27e244d6c7ad308ef1c54bccaac291d85072527f1686ce",
+ "template_sha256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041",
+ "n_ctx_per_slot": 229376,
+ "total_slots": 2,
+ "started": "2026-09-29T08:25:54Z"
+}

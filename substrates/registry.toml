@@ -510,6 +510,8 @@ chat_template_sha256 = "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9
 chat_template_is = "the served template (/props) and the GGUF header's tokenizer.chat_template, equal, 8,952 characters"
 
 sampler_card = "none on the serving line; each request sets its own"
+sampler_card_declared = "temperature 0.6, top_k 20, top_p 1.0, min_p 0.0"
+sampler_card_declared_is = "declared, not measured: the floor's sampler card, used for this rung's depth cell so the two rungs' cells are comparable (announced by track four on #143, comment 5886492789). No sampler for this rung was measured or ruled; a ruling would re-run the cell under it"
 serving_context = 229376
 serving_slots = 2
 serving_context_is = "the unified pool (--kv-unified) shared by both slots, not a per-slot figure: another slot's resident prompt counts against it (substrates/admission/depth-probe/evidence/floor-prefill-2026-09-29/); the depth probe's fractions are of this pool with the other slot cleared (planning, #143, 2026-09-29)"

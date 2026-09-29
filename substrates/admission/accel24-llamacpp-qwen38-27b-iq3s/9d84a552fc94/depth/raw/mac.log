@@ -1,0 +1,12 @@
+2026-09-29T08:25:18Z script copied rc=0
+2026-09-29T08:25:19Z box script running
+2026-09-29T08:25:35Z depth start head=05db8f5
+2026-09-29T09:00:26Z depth run rc=0
+2026-09-29T09:00:27Z depth.done sent
+2026-09-29T09:00:57Z restored marker seen
+2026-09-29T09:01:16Z fingerprint rc=0
+2026-09-29T09:01:16Z verify-box rc=0
+2026-09-29T09:05:24Z canary after rc=0 rate: 36/36 = 1.000   95% CI [0.904, 1.000] | verdict: PASS — canary consistent with pinned substrate
+2026-09-29T09:05:24Z summarise rc=0
+2026-09-29T09:05:24Z decide rc=0
+2026-09-29T09:05:24Z MAC-END
