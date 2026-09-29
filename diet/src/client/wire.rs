@@ -632,41 +632,27 @@ mod tests {
         assert_eq!(normalize("1.2.3"), None);
     }
 
-    /// The `timings` object of a captured stream's last chunk: the server's
-    /// keys and digits, with the keys re-sorted by the parse.
-    fn captured_timings(capture: &str) -> String {
-        let chunk = capture
-            .lines()
-            .filter_map(|line| line.strip_prefix("data: "))
-            .find(|data| data.contains("\"timings\""))
-            .expect("the capture carries timings");
-        let chunk: serde_json::Value = serde_json::from_str(chunk).expect("a JSON chunk");
-        chunk["timings"].to_string()
-    }
+    /// One raw unstreamed reply from the `DoD` 1 instance (R3.0's C5,
+    /// `e7051ef`, 2026-09-29): server-to-client bytes, nothing edited.
+    const UNSTREAMED: &str =
+        include_str!("../../client/fixtures/llama-server-e7051ef-unstreamed.http");
 
     #[test]
     fn the_llama_cpp_dialect_reads_the_cache_count_the_server_sends() {
-        // #156. The unstreamed reply is COMPOSED around each capture's own
-        // `timings` object: no raw unstreamed reply is committed yet (R3.0's
-        // C5 replaces this body with one).
-        for (capture, cached) in [
-            (
-                include_str!("../../client/fixtures/llama-server-4df29be-stream.http"),
-                28,
-            ),
-            (
-                include_str!("../../client/fixtures/llama-server-e7051ef-reasoning-stream.http"),
-                0,
-            ),
-        ] {
-            let body = format!(
-                "{{\"choices\":[{{\"message\":{{\"content\":\"hi\"}},\"finish_reason\":\"stop\"}}],\
-                 \"timings\":{}}}",
-                captured_timings(capture)
-            );
-            let reply = read(&Dialect::llama_cpp(), &body).expect("a readable reply");
-            assert_eq!(reply.cached_tokens, Some(cached), "{body}");
-        }
+        // #156, on the server's own bytes: `timings.cache_n` is there and
+        // `timings.prompt_n_cached` is not.
+        assert_eq!(
+            crate::digest::sha256_hex(UNSTREAMED.as_bytes()),
+            "d9d2e92ee5c067736d60da5baf56edc71e14c3de4a5965e1e7a89eaa895b4727",
+            "the capture is the one R3.0 took, not one edited since"
+        );
+        let (_, body) = UNSTREAMED
+            .split_once("\r\n\r\n")
+            .expect("headers, then the body");
+        assert!(!body.contains("prompt_n_cached"));
+        let reply = read(&Dialect::llama_cpp(), body).expect("a readable reply");
+        assert_eq!(reply.cached_tokens, Some(42));
+        assert_eq!(reply.prompt_tokens, Some(72));
     }
 
     #[test]
