@@ -16,8 +16,11 @@ def manifest(root, exclude=()):
                    and "__pycache__" not in p.parts)
     return "".join(f"{p.relative_to(root).as_posix()}\t{hashlib.sha256(p.read_bytes()).hexdigest()}\n" for p in files)
 EXCLUDE = {"cells": ("depth/", "admission.toml", "admission-recompute.sh")}
+# the structure is the rule's, not the record's: exactly these three results, each run through its own recompute.sh
+if sorted(adm["results"]) != ["cells", "depth", "parity"]: fails.append(f"the results are {sorted(adm['results'])}, not cells, depth and parity")
 for name, r in adm["results"].items():
     root = repo / r["path"]
+    if r["recompute"] != "recompute.sh": fails.append(f"{name}: its recompute is {r['recompute']!r}, not its own recompute.sh"); continue
     got = hashlib.sha256(manifest(root, EXCLUDE.get(name, ())).encode()).hexdigest()
     if got != r["manifest_sha256"]: fails.append(f"{name}: {r['path']} hashes to {got[:16]}, not {r['manifest_sha256'][:16]}")
     rc = subprocess.run(["bash", str(root / r["recompute"])], capture_output=True).returncode
@@ -33,7 +36,12 @@ if "cells" in adm["results"]:
     cells = tomllib.loads((here / "cells.toml").read_text())
     words = {k: v.get("word") for k, v in cells.items() if isinstance(v, dict)}
     if words != adm["results"]["cells"]["words"]: fails.append(f"cells: cells.toml's words {words} are not those admission.toml records")
-if "word" not in adm and not adm.get("word_held"): fails.append("admission.toml carries neither a word nor the reason it is held")
+if ("word" in adm) == bool(adm.get("word_held")): fails.append("admission.toml must carry exactly one of a word and the reason it is held")
+if adm.get("word") == "admitted":
+    words = adm["results"].get("cells", {}).get("words", {})
+    unpassing = [k for k, w in words.items() if not (w == "pass" or w.startswith("n/a ("))]
+    if unpassing or adm["results"].get("depth", {}).get("word") != "pass" or adm["results"].get("parity", {}).get("word") != "supported":
+        fails.append(f"admitted is written while a result is not passing: cells {unpassing}, depth {adm['results'].get('depth', {}).get('word')!r}, parity {adm['results'].get('parity', {}).get('word')!r}")
 for f in fails: print(f"admission-recompute: {f}")
 if not fails: print(f"admission-recompute: three results re-hash and recompute; " + (f"word {adm['word']!r} (written by hand)" if "word" in adm else f"word held: {adm['word_held']}"))
 sys.exit(1 if fails else 0)

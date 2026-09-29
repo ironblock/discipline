@@ -5,11 +5,12 @@
 substrate = "accel24-beellama-qwen27b-q4kxl"
 fingerprint = "7c254834cc2c49ac3aab43483fffdc5a7d421fc5b0bc6fcde99564b9d59b0aa9"
 word_held = "the checkpoint_restore cell is unadjudicated: the gym has no instrument (I4b), so the cell never ran; admission waits on it (Dispatch, #143, comment 5887164395). The other two results pass"
-rule = "admitted requires the parity fire supported, the depth probe no cliff, and every constitutional cell passing or n/a with its reason; any other word is not admitted with the result named, except that an unadjudicated cell neither admits nor bars (planning, #143, comments 5885436821 and 5885752512)"
+rule = "planning, #143, comment 5882266710: admitted requires all three words passing -- supported on the parity fire, no cliff on the depth probe, every cell green; a rung with any other word is not admitted with the failing result named. Comment 5885436821 adds that an unadjudicated cell (it did not run to completion) neither admits nor bars, and admission waits on a re-run. Two readings this record takes and does not rule: an n/a cell with its reason counts as green, and a canary cell reading baseline (comment 5885752512) is a first draw, not a failure"
 known_defects = [
-  "The parity fire (#115, 2026-09-25) predates the fingerprint recipe. It ties to this fingerprint through the same engine digest (980845d6...), the same provisioning line, and fingerprint --check --hash-models IDENTICAL against the 2026-09-20 capture at the fire; its served template's digest was not read at the fire, so the template component is unconfirmed for that result.",
+  "The parity fire (#115, 2026-09-25) predates the fingerprint recipe. It ties to this fingerprint through the same engine digest (980845d6...), the same provisioning line, and a fingerprint check reading SUBSTRATE IDENTICAL before and after the fire (its window/fingerprint-*.log); whether that check hashed the models is not recorded. The capture it checked against is named by digest (6df6adc2ae5a8819), which the registry's 2026-09-20 instance does not carry, so the instance is transcribed, not derived (that record's own known defect). The served template's digest was not read at the fire.",
   "The cells' checkpoint_restore word was corrected here from unreported (as #178 wrote it) to unadjudicated, with its reason kept (Dispatch, #143, comment 5887164395).",
-  "The word is written by hand: no checker derives it yet (a filed gate item).",
+  "The word is written by hand: no checker derives it yet (a filed gate item). The recompute refuses admitted while any cited result is not passing, and refuses a word and a held reason together.",
+  "Planning (comment 5882266710) named this a derived directory with derived_from; the record cites its results under [results.*] with a manifest digest and the PR each merged in. That ruling's floor-specific defects (the probe predating the canary's re-baseline and the kwarg control) are cured: the probe was re-run in the gym on this fingerprint (#182) after both (#178, #180).",
 ]
 
 [results.cells]
