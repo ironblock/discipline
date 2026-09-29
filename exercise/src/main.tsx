@@ -9,7 +9,7 @@ import './theme/themes/index.ts';
 import { PREFS } from './ui/prefs.ts';
 import { Preferred } from './ui/Prefs.tsx';
 
-// `?drive` drives `diet`'s own session, served over HTTP; `?speed=4` plays the session four times as fast; `?session=first-drive`
+// `?speed=4` plays the session four times as fast; `?session=first-drive`
 // replays a recorded session instead of the canned one (`kitchen-sink`, an
 // authored one at a working drive's cadence). Any preference may be
 // set for one visit by name (`?theme=paper&mode=light&connectors=sweep`,

@@ -3,7 +3,7 @@
  * to the same value today, and that is deliberate -- a component binds to
  * `--font-answer`, not to "sans", so the face can change without touching it.
  *
- * A LOOK is two choices (look.ts): a THEME -- how things sit on the page:
+ * A LOOK is two choices (src/ui/prefs.ts): a THEME -- how things sit on the page:
  * bloom, paper, emboss -- and a MODE, dark or light. `:root` holds the dark
  * palette and every structural default; `themes/light.css` is the light
  * palette under `.ex-root[data-mode='light']`; a theme sets only what it

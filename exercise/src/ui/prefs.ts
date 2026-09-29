@@ -107,6 +107,6 @@ export interface Wiring {
 }
 
 /** How lines are routed and drawn: as a harness, or (undefined) as sweeps. */
-export function wiringOf(prefs: Prefs): Wiring | undefined {
+export function wiringOf(prefs: Pick<Prefs, 'connectors' | 'crossings' | 'corners'>): Wiring | undefined {
   return prefs.connectors === 'trace' ? { crossing: prefs.crossings, bend: prefs.corners } : undefined;
 }

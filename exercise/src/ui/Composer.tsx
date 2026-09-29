@@ -54,7 +54,8 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
   };
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) void send(e);
+    // Not while an input method is composing: that Enter picks a candidate.
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) void send(e);
     if (e.key === 'Escape' && running && dispatch) {
       e.preventDefault();
       run({ kind: 'cancel' });
@@ -85,9 +86,9 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
         <span className="ex-composer__phase">
           <span className="ex-composer__label">phase</span> {phase || 'not said'}
         </span>
-        <label className="ex-composer__seam">
-          <span className="ex-composer__label">move to</span>
-          <select value={to} onChange={(e) => setTo(e.target.value)} disabled={!idle}>
+        <span className="ex-composer__seam">
+          <span className="ex-composer__label" aria-hidden="true">move to</span>
+          <select aria-label="move to" value={to} onChange={(e) => setTo(e.target.value)} disabled={!idle}>
             {phases
               .filter((p) => p !== phase)
               .map((p) => (
@@ -97,7 +98,7 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
           <button type="button" disabled={!idle || !dispatch} onClick={() => run({ kind: 'seam', to })}>
             refill
           </button>
-        </label>
+        </span>
         {running ? (
           <button type="button" className="ex-composer__cancel" disabled={!dispatch} onClick={() => run({ kind: 'cancel' })}>
             cancel

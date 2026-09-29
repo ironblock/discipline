@@ -112,8 +112,9 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
       setRoom(whole <= width ? 'whole' : bars <= width ? 'bars' : 'none');
     };
     fit();
+    // The row's width, and each probe's: a probe's changes with the settings too (condensed lanes, traces, the minimap).
     const observer = new ResizeObserver(fit);
-    observer.observe(el);
+    for (const watched of [el, probe, needWhole.current, needBars.current]) if (watched) observer.observe(watched);
     return () => observer.disconnect();
   }, [lanes.length, slots.length]);
   useEffect(() => {
@@ -195,7 +196,11 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
   // The trunk's cables routed as a harness (harness.ts), when the surface asks.
   // How lines are drawn, and which: the person's preferences.
   const prefs = usePrefs();
-  const wiring = curtain ? wiringOf(prefs) : undefined;
+  // One object while the settings it reads hold: the harness below, and the lines into memory, are laid out again when it changes.
+  const wiring = useMemo(
+    () => (curtain ? wiringOf({ connectors: prefs.connectors, crossings: prefs.crossings, corners: prefs.corners }) : undefined),
+    [curtain, prefs.connectors, prefs.crossings, prefs.corners],
+  );
   const minimap = prefs.minimap === 'on';
   const cabled = useMemo<readonly Cabled[]>(() => {
     if (!wiring || !columns) return [];
@@ -337,7 +342,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
   useLayoutEffect(() => {
     if (target === undefined || wentTo.current === target) return;
     const el = document.getElementById(target);
-    if (!el || el.closest('.ex-branchcell')?.getAttribute('style')?.includes('hidden')) return;
+    if (!el || el.closest<HTMLElement>('.ex-branchcell')?.style.visibility === 'hidden') return;
     wentTo.current = target;
     locked.current = false;
     el.scrollIntoView({ block: 'center' });
@@ -515,6 +520,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
                               type="button"
                               className="ex-peek"
                               title={`${branches.length} side call${branches.length === 1 ? '' : 's'} off this message`}
+                              aria-label={`${branches.length} side call${branches.length === 1 ? '' : 's'} off this message`}
                               aria-expanded={room === 'none' ? branches.some((b) => inline.has(b.id)) : undefined}
                               onClick={() => (room === 'none' ? toggleInline(branches.map((b) => b.id)) : onSurface?.({ ...surface, curtain: true }))}
                             >

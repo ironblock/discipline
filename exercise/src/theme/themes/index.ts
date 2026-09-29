@@ -1,5 +1,5 @@
 /**
- * The themes a person chooses between (`../look.ts`): how things sit on the
+ * The themes a person chooses between (`../../ui/prefs.ts`): how things sit on the
  * page, each in a dark and a light mode. `tokens.css` is the dark palette and
  * every default; `light.css` the light palette; a theme's file sets only what
  * it treats differently, under `[data-theme]`, and by mode under
@@ -12,7 +12,6 @@ import './light.css';
 import './paper.css';
 
 export const THEMES = ['bloom', 'paper', 'emboss'] as const;
-export type ThemeName = (typeof THEMES)[number];
 
 export const MODES = ['dark', 'light'] as const;
 export type Mode = (typeof MODES)[number];

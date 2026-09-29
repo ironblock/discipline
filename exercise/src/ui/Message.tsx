@@ -21,7 +21,12 @@ export function preview(text: string, lines: number): { readonly shown: string; 
   const fences = all.slice(0, cut).filter((line) => /^\s*(```|~~~)/.test(line)).length;
   if (fences % 2 === 1) {
     const opened = all.slice(0, cut).findLastIndex((line) => /^\s*(```|~~~)/.test(line));
+    // Cut before the block; or, when the text opens with it, after it: the block whole, or the text whole if it never closes.
     if (opened > 0) cut = opened;
+    else {
+      const closed = all.findIndex((line, i) => i > cut - 1 && /^\s*(```|~~~)/.test(line));
+      cut = closed === -1 ? all.length : closed + 1;
+    }
   }
   return { shown: all.slice(0, cut).join('\n'), hidden: all.length - cut };
 }
@@ -41,7 +46,7 @@ export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
     >
       <Prose text={shown} kind="system" />
       {clipped.hidden > 0 ? (
-        <button type="button" className="ex-more" onClick={() => setOpen(!open)}>
+        <button type="button" className="ex-more" aria-expanded={open} onClick={() => setOpen(!open)}>
           {open ? 'less' : `${clipped.hidden} more lines`}
         </button>
       ) : null}
@@ -171,7 +176,7 @@ function AssistantBody({
             </div>
           )}
           {long && !(live && node.text === '') ? (
-            <button type="button" className="ex-more" onClick={() => setThinking(!thinking)}>
+            <button type="button" className="ex-more" aria-expanded={thinking} onClick={() => setThinking(!thinking)}>
               {thinking ? 'less' : 'all reasoning'}
             </button>
           ) : null}

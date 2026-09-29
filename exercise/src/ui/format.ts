@@ -1,11 +1,12 @@
 /** Numbers as the stats footers print them: short, unit last. */
 
 export function ms(value: number): string {
-  if (value < 1000) return `${Math.round(value)} ms`;
-  if (value < 60_000) return `${(value / 1000).toFixed(value < 10_000 ? 2 : 1)} s`;
-  const m = Math.floor(value / 60_000);
-  const s = Math.round((value % 60_000) / 1000);
-  return `${m}m ${s}s`;
+  // Rounded to what is printed before the unit is chosen, so 9,999 ms is `10.0 s`, never `10.00 s`, and no `60s`.
+  if (Math.round(value) < 1000) return `${Math.round(value)} ms`;
+  if (Math.round(value / 10) < 1000) return `${(value / 1000).toFixed(2)} s`;
+  if (Math.round(value / 100) < 600) return `${(value / 1000).toFixed(1)} s`;
+  const s = Math.round(value / 1000);
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 /** How long something took, or has taken so far: tenths of a second under a minute, so a live count moves. */
@@ -14,12 +15,6 @@ export function took(value: number): string {
   if (value < 60_000) return `${(value / 1000).toFixed(1)} s`;
   const s = Math.floor(value / 1000);
   return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
-}
-
-/** A running counter: whole seconds, so it ticks rather than flickers. */
-export function counter(value: number): string {
-  const s = Math.floor(value / 1000);
-  return s < 60 ? `${s} s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
 }
 
 export function tokens(value: number): string {

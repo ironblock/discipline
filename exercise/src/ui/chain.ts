@@ -31,7 +31,7 @@ export interface Chain {
   readonly lines: ReadonlySet<string>;
 }
 
-export const UNLIT: Chain = { nodes: new Set(), branches: new Set(), entries: new Set(), lines: new Set() };
+const UNLIT: Chain = { nodes: new Set(), branches: new Set(), entries: new Set(), lines: new Set() };
 
 export function lineKey(branch: string, entry: string): string {
   return `${branch}>${entry}`;

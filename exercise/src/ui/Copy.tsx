@@ -1,21 +1,28 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-/** Copy some text, and say so for a moment. */
+/** Copy some text, and say so for a moment -- or that it could not. */
 export function Copy({ text, label = 'copy' }: { readonly text: string; readonly label?: string }) {
-  const [done, setDone] = useState(false);
+  const [said, setSaid] = useState<'copied' | 'not copied' | undefined>(undefined);
+  useEffect(() => {
+    if (!said) return;
+    const id = setTimeout(() => setSaid(undefined), 1400);
+    return () => clearTimeout(id);
+  }, [said]);
   return (
     <button
       type="button"
       className="ex-action"
-      data-done={done ? '' : undefined}
+      data-done={said === 'copied' ? '' : undefined}
       onClick={() => {
-        void navigator.clipboard?.writeText(text).then(() => {
-          setDone(true);
-          setTimeout(() => setDone(false), 1400);
-        });
+        const write = navigator.clipboard?.writeText(text);
+        if (!write) return setSaid('not copied');
+        write.then(
+          () => setSaid('copied'),
+          () => setSaid('not copied'),
+        );
       }}
     >
-      {done ? 'copied' : label}
+      {said ?? label}
     </button>
   );
 }

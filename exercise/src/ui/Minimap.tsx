@@ -78,7 +78,11 @@ export function Minimap({ stage, revision, curtain }: { readonly stage: RefObjec
     if (!root) return;
     const observer = new ResizeObserver(remeasure);
     observer.observe(root);
-    const onScroll = () => requestAnimationFrame(look);
+    // One look a frame, however many scroll events the frame had.
+    const onScroll = () => {
+      cancelAnimationFrame(frame.current);
+      frame.current = requestAnimationFrame(look);
+    };
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll);
     return () => {
@@ -153,10 +157,12 @@ function measure(stage: HTMLElement): Measured {
   // A refill is a line across, at the seam itself (not the padding above it).
   for (const el of stage.querySelectorAll('.ex-era__seam .ex-seam')) marks.push({ kind: 'seam', top: span(el).top + span(el).height / 2, height: 0, live: false });
   for (const el of stage.querySelectorAll('.ex-branchcell')) {
-    const bar = el.querySelector('.ex-block');
+    // Open, a side call is a block; condensed, a bar -- which says its lane, alarm and liveness the same way, bar the class.
+    const bar = el.querySelector('.ex-block, .ex-bar');
     const lane = bar?.getAttribute('data-lane') ?? undefined;
     const alarm = bar?.getAttribute('data-alarm') ?? undefined;
-    marks.push({ kind: 'lane', ...span(el), ...(lane ? { lane } : {}), ...(alarm ? { alarm } : {}), live: bar?.classList.contains('ex-block--live') ?? false });
+    const live = bar ? bar.classList.contains('ex-block--live') || bar.hasAttribute('data-live') : false;
+    marks.push({ kind: 'lane', ...span(el), ...(lane ? { lane } : {}), ...(alarm ? { alarm } : {}), live });
   }
   return { marks, height: base.height };
 }
