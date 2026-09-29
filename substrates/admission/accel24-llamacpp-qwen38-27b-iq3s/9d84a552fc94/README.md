@@ -37,4 +37,5 @@ The #143 cells window, 2026-09-29, ratified by the maintainer. The step list was
 
 **Beside the cells:**
 - Measured bpw, by D9's method (`raw/bpw.json`): 3.4981 without the MTP layer, 3.5457 with it.
+- `raw/identity-before.txt` also records `bottom_weights`: the digest of the CPU rung's weights (`cpu-beellama-qwen3-1p7b-q4km`, the registry's `weights_main`), read because that rung was resident beside the candidate during the fill (D8's m7). No cell cites it.
 - The canary's decode speed on the same fixture, k = 36: median 76.1 tok/s here, against the floor's 60.0 before and 64.7 after. Single window, single sample per request; the timings are in the raw files.
