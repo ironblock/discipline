@@ -217,7 +217,7 @@ display_name = "ironblock's Threadripper workstation"
 display_name_is = "the owner form, the possessive meaning managed and configured by, as for the Linux PC; ruled on #117 (2026-09-28)"
 entry_type = "accelerator-host"
 hardware_fingerprint = "19d9fa21007ab8fef48b62d9d8773ac241fa177b2f8b3de670ddd4128aa10c7b"
-role = "the interactive drive's endpoint for DoD 1 (#117, Q10 as amended 2026-09-27); it admits claims whose rule never depends on token identity, as ruled on #142 (2026-09-29), the first being results/2026-09-29-false-nomination-edit-rate-second-substrate"
+role = "the interactive drive's endpoint for DoD 1 (#117, Q10 as amended 2026-09-27); one claim, #142's, whose rule never depends on token identity, was fired here by ruling (2026-09-29; results/2026-09-29-false-nomination-edit-rate-second-substrate); whether the host admits claims generally is #143's Q13"
 measured = "2026-09-28"
 shared = "a multi-user machine, reached without root; GPU windows are coordinated with its other users, and nothing here stops or restarts its server"
 accelerator = "NVIDIA RTX 6000 Ada Generation (AD102GL, PCI 10de:26b1)"
@@ -571,7 +571,7 @@ current_note = "launched for one fire and stopped after it by its recorded pid; 
 
 [substrate.ada48-llamacpp-qwen38flashnext-q20]
 equipment = "rtx6000ada-host"
-description = "Qwen3.8-Flash-Next GSQ-RCO at Q2_0 on the 48 GiB accelerator, served by llama.cpp (ironblock's fork) with a Q4_K_M MTP speculative draft; the interactive drive's endpoint, and a claim substrate for rules that never depend on token identity (#142, ruled 2026-09-29)"
+description = "Qwen3.8-Flash-Next GSQ-RCO at Q2_0 on the 48 GiB accelerator, served by llama.cpp (ironblock's fork) with a Q4_K_M MTP speculative draft; the interactive drive's endpoint, and the substrate of one claim fired by ruling, #142's, whose rule never depends on token identity (2026-09-29); admission generally is #143's Q13"
 pinned = true
 engine_name = "llama.cpp (github.com/ironblock/llama.cpp)"
 engine_identity = "41e6591d710fd4b5d81468264bb973a9f0575665dda2f27c69d5e370424d69bb"

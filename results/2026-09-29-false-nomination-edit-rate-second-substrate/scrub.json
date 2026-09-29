@@ -4,6 +4,18 @@
   "ticket_id": "the research program's ticket ids (DIE-<n>) replaced by [ticket id withheld]"
  },
  "files": {
+  "window/run.log": {
+   "sha256_before_scrub": "45a69346441273ed81c43926b856b7351bbd8c26ae49d086cf955a2b23bf05c0",
+   "substitutions": {
+    "home_path": 1894
+   }
+  },
+  "window/headroom.log": {
+   "sha256_before_scrub": "756aaf1f68d5b49da2c24990ab5054d0325bb34e2dc36f841e9fa3a5f43b2d16",
+   "substitutions": {
+    "home_path": 164
+   }
+  },
   "window/batches.log": {
    "sha256_before_scrub": "cdf67316af540efccac0171796863e384ef9cdbb576592237fd04da322ef8421",
    "substitutions": {
