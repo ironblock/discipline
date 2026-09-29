@@ -58,6 +58,11 @@ want = [{"label": "the 27B (stage 2), imperative edits at 0.6 over the shared co
         {"label": "this substrate, imperative edits at 0.6 over the shared counted forks", "n": int(counts[1]), "of": cmp_["shared"]}]
 row_ok = len(comps) == 1 and comps[0]["result"] == cmp_["word"] and comps[0]["predicted"] == "dependent" and comps[0]["counts"] == want \
     and comps[0]["hypothesis"] == pre["endpoints"]["2"] and [a["path"] for a in comps[0]["consumes"]] == ["comparison.json"]
+row_ok = row_ok and all(type(c["n"]) is int and type(c["of"]) is int for c in comps[0]["counts"])  # 72.0 is not a count
+# the README body states endpoint 2 as comparison.json and the row do: its word, the table's rates, the tallies
+body = re.split(r"\n\+\+\+\n", (here / "README.md").read_text(encoding="utf-8"), maxsplit=1)[-1]
+for need in (f"reads `{cmp_['word']}`", f"| rate | {cmp_['rate_27B']} | {cmp_['rate_S2']} |", f"{int(counts[0])} of {cmp_['shared']} and {int(counts[1])} of {cmp_['shared']}"):
+    if need not in body: print(f"recompute: the README body does not state {need!r}"); sys.exit(1)
 if not row_ok:
     print(f"recompute: the comparison row is not endpoint 2's hypothesis, comparison.json's word {cmp_['word']!r} and counts {[w['n'] for w in want]} of {cmp_['shared']}, consuming comparison.json"); sys.exit(1)
 front = tomllib.loads(re.match(r"\+\+\+\n(.*?)\n\+\+\+\n", (here / "README.md").read_text(encoding="utf-8"), re.S).group(1))
