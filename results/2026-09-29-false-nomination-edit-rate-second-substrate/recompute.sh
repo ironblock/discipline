@@ -46,6 +46,14 @@ rows = [json.loads(l) for l in (here / "run.jsonl").read_text().splitlines() if 
 claims = [r for r in rows if r.get("record") == "claim"]
 if not claims or any(c.get("result") != word for c in claims):
     print(f"recompute: the applier's word is {word!r} and the claim rows say {[c.get('result') for c in claims]}"); sys.exit(1)
+# endpoint 2's row (#181's comparison kind): its word is comparison.json's, and its counts are
+# comparison.json's rates times the shared forks, exact
+from fractions import Fraction
+cmp_ = json.loads((here / "comparison.json").read_text()); comps = [r for r in rows if r.get("record") == "comparison"]
+want_counts = [int(Fraction(cmp_[k]) * cmp_["shared"]) for k in ("rate_27B", "rate_S2")]
+if len(comps) != 1 or comps[0]["result"] != cmp_["word"] or comps[0]["predicted"] != "dependent" \
+   or [(c["n"], c["of"]) for c in comps[0]["counts"]] != [(w, cmp_["shared"]) for w in want_counts]:
+    print(f"recompute: the comparison row is not comparison.json's word {cmp_['word']!r} with counts {want_counts} of {cmp_['shared']}"); sys.exit(1)
 pre = json.loads((here / "pre-registration.json").read_text())
 front = tomllib.loads(re.match(r"\+\+\+\n(.*?)\n\+\+\+\n", (here / "README.md").read_text(encoding="utf-8"), re.S).group(1))
 if front["hypothesis"] != pre["hypothesis"]: print("recompute: the front matter's hypothesis is not the pre-registration's"); sys.exit(1)

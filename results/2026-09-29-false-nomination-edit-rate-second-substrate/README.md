@@ -7,7 +7,7 @@ pre_registration_sha256 = "b8b20faba4e5dd149b41fa59a115a5c2764bef5870c8c8bf2cfb0
 controls_run = ["true-nomination-control-fork", "shuffled-framing-null", "sham-perturbation-floor", "seeded-judge-controls", "applier-selftest-and-mutants", "comparison-selftest", "grading-order-diff", "headroom-recheck"]
 known_defects = [
   "Headroom was re-checked on this substrate over the 100 sampled forks (two no-nomination draws each, 200 requests); 28 failed it and, as comparison-rule.toml's headroom reading states, are excluded from both endpoints: their 504 grade rows are removed from grades.jsonl and kept in grades-headroom-excluded.jsonl, read by nothing. The run's gate fork, drive-08#t9s24, is one of the 28: it changed the turn under both framings, as the run requires, and its rows are excluded like the others'.",
-  "Endpoint 2 has no claim row. comparison-rule.toml's words (substrate_dependent, substrate_independent, inconclusive, unadjudicated) are mapped to the record's verdict vocabulary by no pre-registered text, so writing its word as a claim verdict would be a reading nobody ruled; the word is in comparison.json, re-derived byte for byte by recompute.sh from this record and stage 2's committed files, and the mapping is asked on #142.",
+  "Endpoint 2 has no claim row: comparison-rule.toml's words are not the claim vocabulary. It is carried by a comparison row (#181's row kind), with the rule's own word, the pre-registered prediction and the counts over the 72 shared forks, beside the claim; its word is comparison.json's, re-derived byte for byte by recompute.sh from this record and stage 2's committed files, which also checks the row against it.",
   "Served as declared, the MTP draft on (instance 2026-09-28), under reading (c) of the grading statute as ruled on #142. Speculation on this substrate is not bit-exact with the spec-off path: every measured divergence a near-tie flip to the second-ranked token, 36 of 2,327 positions over five prompts (#164, substrates/measurements/2026-09-29-ada-invariance-ground-truth/). The rule has no token-identity check.",
   "Stage 2's side of the comparison is copied under stage2-record/, each file at the bytes and digest committed in results/2026-09-27-false-nomination-edit-rate/ (grades, plan, ids, ruled key, batches, verdicts), so the comparison recomputes inside this directory.",
   "Batches 29 and 41: each first judge instance returned 40 objects whose ids were the batch's but out of order; kept as judge/malformed-29.json and judge/malformed-41.json, read by nothing, and re-judged by fresh instances (29b, 41b), accepted. All 52 instances ran claude-sonnet-5, read off each transcript; the transcripts stay in the seat's durable run directory.",
@@ -35,7 +35,7 @@ substrates = ["ada48-llamacpp-qwen38flashnext-q20"]
 dogma_version = 0
 
 [derivation]
-applier_sha256 = "5d2e1769e63f870dd0e8dd34bd92ea322c1398c38c2bf2c65610edc6ef47b40d"
+applier_sha256 = "82e32760e3ff57af900bfe5fa6c804ed9752cfff20778b2c5b9730f282cdd7fa"
 runtime = "Python 3.14.6"
 substrate_id = "mac-pro-2019"
 derived_from = "bbbcfc3061beb3524dddefac4721f8d62db3ae86bb07e663c1121a04a78f3cca"
