@@ -248,6 +248,12 @@ pub struct Dialect {
     /// Where the server reports the sampler settings it used. `None` means
     /// this dialect does not report them at all -- which is a fact about the
     /// server, and makes every pin under it [`super::Verified::Unreported`].
+    ///
+    /// No shipped dialect declares a site, as of #159: neither chat
+    /// endpoint's reply carries one. A dialect declares a site only from a
+    /// captured reply that contains it, cited by digest -- a plain-completion
+    /// dialect included, whose reply the data seat observed carrying
+    /// `generation_settings` but did not capture (#167).
     pub sampler_echo: Option<String>,
     /// Where the server reports how many prompt tokens it read.
     pub prompt_tokens: Option<String>,
@@ -387,10 +393,10 @@ pub struct RequestShape {
     /// effort level); the engine takes startup flags that apply to every
     /// request; the harness decides which of the two, if either, it actually
     /// forwards. A sampler pin lands in the request body's top level and is
-    /// echoed back by [`Dialect::sampler_echo`]; these land inside
-    /// `chat_template_kwargs` and are echoed by nothing at all -- which is
-    /// why their delivery is proved by a negative control rather than by an
-    /// echo.
+    /// echoed back where a dialect declares [`Dialect::sampler_echo`] (no
+    /// shipped one does, #159); these land inside `chat_template_kwargs` and
+    /// are echoed by nothing at all -- which is why their delivery is proved
+    /// by a negative control rather than by an echo.
     ///
     /// The record's own value space, and not a type of this module's: a
     /// kwarg that reaches the wire has to be spellable in the archive of the

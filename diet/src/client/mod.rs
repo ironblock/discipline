@@ -12,9 +12,11 @@
 //!
 //! * The **request shape is data** ([`shape::RequestShape`]), built once and
 //!   carried into the record beside the answer it produced.
-//! * **Sampler echo** ([`echo`]): every reply is compared against the pins the
-//!   request carried, and a contradiction is a `regime.mismatch` that refuses
-//!   to bank.
+//! * **Sampler echo** ([`echo`]): where a dialect declares an echo site,
+//!   every reply is compared against the pins the request carried, and a
+//!   contradiction is a `regime.mismatch` that refuses to bank. No shipped
+//!   dialect declares one (#159), so today every pin is unverified by echo
+//!   and a mismatch cannot arise outside the mechanism's own tests.
 //! * **Retry lineage** ([`Attempt`]): a retry is a new request naming its
 //!   predecessor, its reason is typed, and the answer names the attempt that
 //!   produced it.
