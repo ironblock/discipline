@@ -78,6 +78,7 @@ BRANCH_IGNORE = re.compile(r"^ {4,}branches-ignore:")
 INLINE_LIST = re.compile(r"^\[([^\]]*)\]$")
 LIST_ITEM = re.compile(r"^ {6,}-\s*(.+?)\s*$")
 ON_BLOCK = re.compile(r"^on:\s*$", re.MULTILINE)
+BUDGET = pathlib.Path(__file__).resolve().parent.parent / ".github" / "gate-budget.tsv"
 CANCEL_IN_PROGRESS = re.compile(r"^\s*cancel-in-progress:\s*(.+?)\s*$", re.MULTILINE)
 EVENT = re.compile(r"^  ([A-Za-z_][A-Za-z0-9_]*):")
 BRANCH_FILTER = re.compile(r"^ {4,}branches(-ignore)?:")
@@ -403,6 +404,28 @@ def main() -> int:
             f"trunk when the next merge lands, and the next pull request is scoped "
             f"against the census of an older commit. Cancel pull-request runs only"
         )
+
+    # 9. the budget file declares what CI is held to
+    #
+    #    `wall_clock_seconds` is what every run prints its cost against, and
+    #    `max_shards` is the ceiling scope-selftest.py --matrix divides. Both
+    #    used to be refused missing by derive-shards.py --check, which retired
+    #    with the shard plan (#112); a budget file declaring nothing would
+    #    otherwise leave every run printing "against no budget" and every
+    #    run's matrix step -- pull request, push and nightly -- failing.
+    declared: dict[str, str] = {}
+    if BUDGET.is_file():
+        for line in BUDGET.read_text(encoding="utf-8").splitlines():
+            key, _, value = line.partition("\t")
+            if key and not key.startswith("#"):
+                declared[key.strip()] = value.strip()
+    for key in ("wall_clock_seconds", "max_shards"):
+        value = declared.get(key, "")
+        if not (value.isdigit() and int(value) > 0):
+            failures.append(
+                f"{BUDGET.name} declares no {key} as a positive whole number "
+                f"(found {value!r}); it is what CI is held to, and nothing else says it"
+            )
 
     for message in failures:
         print(message, file=sys.stderr)

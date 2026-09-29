@@ -13,18 +13,13 @@
 ## `faults.toml`
 Extracted from the gate, gated in both directions (it can neither omit a proven fault nor claim an unproven one), every fault carrying a `failure_class`, relocated fixtures carrying `migrated_to` with their redness re-proven in the new home.
 
-## `shards.tsv`
-Which CI job runs which fault, and how many jobs there are. **Harvested, never edited.** An edit here is not a merge to resolve, it is a measurement to retake:
+## The selftest on a pull request, on `main`, and nightly
+A pull request re-proves only the faults its diff can reach, and `main` proves them all (#112). Nothing here is harvested or hand-kept.
 
-```
-./verify.sh --selftest --derive-shards DIR
-python3 scripts/derive-shards.py --index DIR/derive-shards.tsv --emit > tools/gate/shards.tsv
-```
-
-- A split by arithmetic divides the count, not the cost. Eight round-robin shards were right when measured and wrong two hundred faults later; the spread reached 58% and the run outlasted the shortest prompt-cache TTL a seat runs on. The budget that ceiling comes from is declared in `.github/gate-budget.tsv`.
-- The shard count is an output, not a constant: the smallest N whose slowest shard fits the budget once every shard's fixed overhead is off. `verify.sh --shard K/N` refuses an N this file was not packed for rather than reinterpreting it.
-- Adding a fault does NOT mean re-harvesting (ruled on #108): a fault the plan does not name runs in the shard a hash of its id picks, and `derive-shards.py --check` reports the drift as a warning, never a failure. The plan is load balance, not coverage: the census proves every fault runs exactly once. It retires with the shard plan under #112, where a pull request's selftest is scoped by dependency and the full set runs on `main`.
-- Its own file, not a field in `faults.toml`: an entry there is author-facing and stable, this is machine-rebalanced on every manifest edit, and folding it in would make every `faults.toml` diff touch every entry.
+- A fault's redness is a property of its injection target and its catcher, and a diff that touches neither cannot change it. `scripts/scope-selftest.py` inherits every other fault at the `main` commit where it was last seen red, and the census declares each one. Nothing is counted as passed without a run. An edit to the selftest machinery re-proves everything, so a mechanics assertion goes in `prove_mechanics` or `prove_selftest_mechanics`, never inline in `selftest`.
+- Shards divide the labour, not the list: a hash of the fault's id picks its shard, and the census proves every fault ran exactly once. N is `max_shards` (`.github/gate-budget.tsv`) scaled by the share of faults the run re-proves. The budget is printed on every run, never graded.
+- A fault not red on `main` or the nightly opens one issue per check, labelled `check:<name>`. A pull request that re-proves that check is refused until the issue is closed, including the pull request that fixes it: close the issue, re-run, and the next `main` run reopens it if the fix did not hold.
+- A running trunk run is never cancelled: its census is what the next pull request is scoped against.
 
 ## Stage 2: the successor gate
 The charter, ruled on the foundation PR and filed as #46. Keep the catch, remove the brittleness: the gate keeps proving every fault red, and the mechanism that keeps breaking -- prose signatures in a monolithic shell script -- is replaced.

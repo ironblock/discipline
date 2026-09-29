@@ -44,6 +44,7 @@ Exit 0 with a plan written; 2 when the question cannot be answered.
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import re
 import subprocess
@@ -73,7 +74,7 @@ CALL = re.compile(r"\b([a-z_][a-z0-9_]*)\b")
 MACHINERY_FUNCTIONS = frozenset(
     {
         "seeded_case", "in_shard", "claim_fault", "load_scope_plan",
-        "load_shard_plan", "sandbox", "sandbox_state", "shard_cost", "now_ms",
+        "sandbox", "sandbox_state", "not_red",
         "expect_exit", "edit_in_place", "seed_commit", "strip_substrates",
         "scratch", "prove_patterns", "inject_lane_fault", "scope_args",
         "run_check",
@@ -98,6 +99,28 @@ CHECK_INPUTS = {
     "results": {"results/"},
     "recompute": {"results/"},
 }
+
+
+BUDGET = ROOT / ".github" / "gate-budget.tsv"
+
+
+def max_shards(path: pathlib.Path = BUDGET) -> int:
+    """The declared ceiling on concurrent selftest jobs."""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, _, value = line.partition("\t")
+        if key == "max_shards" and value.strip().isdigit() and int(value) > 0:
+            return int(value)
+    raise Unusable(f"{path.name} declares no positive max_shards")
+
+
+def shard_count(reproven: int, total: int, ceiling: int) -> int:
+    """How many jobs this run gets: the full run gets the ceiling, and a run
+    re-proving a fraction of the faults gets that fraction of it, rounded up
+    and never below one (ruled on #112, 2026-09-28). No timing model: the
+    budget is a printed number, and the plan that balanced by cost retired."""
+    if total <= 0:
+        raise Unusable("the manifest lists no fault to divide")
+    return max(1, -(-ceiling * max(0, reproven) // total))
 
 
 class Unusable(Exception):
@@ -658,6 +681,18 @@ def _checks_of():
     return None
 
 
+@fixture("the shard count is the ceiling's share of the faults re-proven, never zero")
+def _shard_count():
+    for reproven, total, ceiling, want in ((590, 590, 20, 20), (30, 590, 20, 2), (0, 590, 20, 1),
+                                           (1, 590, 20, 1), (296, 590, 20, 11)):
+        got = shard_count(reproven, total, ceiling)
+        if got != want:
+            return f"{reproven} of {total} under {ceiling} gave {got}, not {want}"
+    if max_shards() < 1:
+        return "the checked-in budget declares no ceiling"
+    return None
+
+
 @fixture("the census gives each fault the commit it last ran red at, and what it touched")
 def _census():
     import tempfile
@@ -713,10 +748,29 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--census", help="a directory of census files from main's full run")
     parser.add_argument("--out", help="where to write the plan")
     parser.add_argument("--checks-out", help="also write the checks whose faults are re-proven, one per line, for selftest-drift.py block")
+    parser.add_argument("--matrix", action="store_true", help="print the selftest matrix, [1..N], for the run --plan describes (every fault re-proven when --plan is not given)")
+    parser.add_argument("--plan", help="with --matrix: a plan this script wrote")
     parser.add_argument("--selftest", action="store_true", help="run the fixtures and exit")
     args = parser.parse_args(argv)
     if args.selftest:
         return selftest()
+    if args.matrix:
+        try:
+            listed = set(listed_faults(ROOT))
+            total = len(listed)
+            inherited = 0
+            if args.plan:
+                # Distinct ids the manifest lists: a duplicate or stale row must
+                # not make the count of what runs look smaller than it is.
+                inherited = len({line.split("\t")[1] for line in pathlib.Path(args.plan).read_text(encoding="utf-8").splitlines()
+                                 if line.startswith("inherit\t") and len(line.split("\t")) > 1} & listed)
+            n = shard_count(total - inherited, total, max_shards())
+        except (Unusable, OSError) as err:
+            print(f"scope-selftest: {err}", file=sys.stderr)
+            return EXIT_BROKEN
+        print(json.dumps(list(range(1, n + 1))))
+        print(f"scope-selftest: {total - inherited} of {total} fault(s) re-proven -> {n} shard(s)", file=sys.stderr)
+        return 0
     if not (args.base and args.census and args.out):
         print("scope-selftest: --base, --census and --out are all required", file=sys.stderr)
         return EXIT_BROKEN
