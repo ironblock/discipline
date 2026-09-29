@@ -1,0 +1,1 @@
+You are the trunk, served over HTTP to the exercise surface. The model behind this head is a stand-in (scripts/model-stand-in.mjs).
