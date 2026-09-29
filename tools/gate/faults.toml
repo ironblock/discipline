@@ -6301,6 +6301,14 @@ failure_class = "client.dialect-reads-an-unsent-cache-path"
 migrated = false
 
 [[fault]]
+id = "client.stream-drops-the-draft-counts"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-drops-the-draft-counts"
+failure_class = "client.stream-drops-the-draft-counts"
+migrated = false
+
+[[fault]]
 id = "client.head-a-reasoning-change-is-unattributed"
 kind = "lane-fault"
 check = "lanes"
