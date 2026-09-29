@@ -588,7 +588,7 @@ impl Command {
     }
 }
 
-/// An `idle_gap` object: exactly the log format's shape for one (v0, Q4),
+/// An `idle_gap` object: exactly the log format's shape for one (Q4),
 /// and nothing else. Durations are non-negative integers; `ended_by` is one
 /// of its words; `opened_by` is a sequence number.
 fn idle_gap(value: &Value) -> Option<IdleGap> {
@@ -1275,7 +1275,7 @@ mod tests {
             assert_eq!(*id, format!("{}-{}", session.opened(), read.seq), "{line}");
         }
         let document = data.join("\n") + "\n";
-        crate::formats::log::parse(&document).expect("the stream is a v0 log");
+        crate::formats::log::parse(&document).expect("the stream is a log the format reads");
     }
 
     #[test]
