@@ -21,7 +21,7 @@ The #143 cells window, 2026-09-29, ratified by the maintainer. The step list was
 - `fingerprint.json` gives the recipe and the canonical components. The directory is named by the first 12 hex characters.
 - `scrub.json` lists every raw file in which an absolute home path was replaced by `~`, or a private build-container name by `<build-container>`, with its pre-scrub digest. These are the only edits to the raw files. `raw/refusal.json` holds both lines' results as `refusal.sh` wrote them, and each directory reads its own line (`refusal_rung`).
 
-**This is a cells directory, not an admission.** Admission also needs the depth probe and the parity fire on this fingerprint. The depth probe's cell is in `depth/`: `pass`, run 2026-09-29. The parity fire is still to come. The admission word is written by hand in `admission.toml` one level up, once those exist; until a checker exists, this README says so.
+**This is a cells directory, not an admission.** Admission also needs the depth probe and the parity fire on this fingerprint. The depth probe's cell is in `depth/`: `pass`, run 2026-09-29. The parity fire is still to come. The admission word will be in `admission.toml` in this directory once the parity fire exists, derived from the three results by `substrates/admission/derive_admission.py` (#183).
 
 ## The cells
 

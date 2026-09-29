@@ -94,10 +94,12 @@ MACHINERY_FILES = frozenset(
 
 # What a check READS beyond its scripts: a change there changes what the
 # check is run against, so it re-proves that check's faults. `results` and
-# `recompute` read the committed results/ tree itself.
+# `recompute` read the committed results/ tree itself; `admission` reads the
+# admission directories, its own script among them, and the parity records it cites.
 CHECK_INPUTS = {
     "results": {"results/"},
     "recompute": {"results/"},
+    "admission": {"substrates/admission/", "results/"},
 }
 
 
@@ -505,7 +507,7 @@ def _results_only():
     return None
 
 
-@fixture("a results/-only diff re-proves the results lane and no test fault")
+@fixture("a results/-only diff re-proves the lanes that read results/ and no test fault")
 def _results_lane_real_tree():
     text = (ROOT / "verify.sh").read_text(encoding="utf-8")
     faults = listed_faults(ROOT)
@@ -515,8 +517,9 @@ def _results_lane_real_tree():
     if any(i.startswith("test.") for i in rerun):
         return f"a results/ change re-proved test faults: {sorted(i for i in rerun if i.startswith('test.'))[:3]}"
     lanes = {i.split(".", 1)[0] for i in rerun}
-    if not rerun or not lanes <= {"results", "recompute"}:
-        return f"a results/ change re-proved {sorted(lanes)}, not the results lane"
+    # `admission` reads results/ too: an admission record cites a parity fire's results directory (#183)
+    if not rerun or not lanes <= {"results", "recompute", "admission"}:
+        return f"a results/ change re-proved {sorted(lanes)}, not the lanes that read results/"
     return None
 
 

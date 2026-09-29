@@ -27,7 +27,7 @@ words = { identity = "pass", kwarg_delivery = "pass", rendered_effort = "n/a (a 
 [results.depth]
 path = "substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/depth"
 recompute = "recompute.sh"
-manifest_sha256 = "5a32e12ea318eb0db48ecf4f9366262bd479dacc3d0adc98f00ff4112d6b37c8"
+manifest_sha256 = "944fdd3729424a89f78491a179f225904d110bcc7533be768bdf61d3bba69931"
 merged_in = "#182"
 word = "pass"
 

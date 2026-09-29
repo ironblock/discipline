@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Derive a rung's admission word from its admission directory (#183), instead of trusting the hand-written one.
 
-For every `substrates/admission/<substrate-id>/<fingerprint-prefix>/admission.toml` in the tree:
-  1. its own `admission-recompute.sh` must exit 0: each cited result re-hashes to the digest stated, and each
-     result's own recompute passes;
+For every `substrates/admission/<substrate-id>/<fingerprint-prefix>/admission.toml` in the tree (none found, or
+one found at any other depth, is a failure: a gate that finds nothing must not read as green):
+  1. each cited result re-hashes, here, to the manifest digest admission.toml states, from the path admission.toml
+     names, and those paths are the record's own (the cells this directory, the depth cell its depth/, the parity
+     fire a results/ record); and the record's own `admission-recompute.sh` must also exit 0 (each result's own
+     recompute passes);
   2. the word is derived from the results' words, by planning's rule (#143):
        - any cell reading `fail`, a depth cell reading `fail`, or a parity fire reading `refuted` or
          `inconclusive`: `not admitted (<the first failing result>)` (comment 5882266710);
@@ -15,14 +18,16 @@ For every `substrates/admission/<substrate-id>/<fingerprint-prefix>/admission.to
   3. the record's word must be the derived one: `word = "admitted"`, `word = "not admitted (...)"` naming the
      derived failing result, or `word_held` for a held admission.
 
-Where #183's text maps an unadjudicated cell to `not admitted`, this follows planning's later ruling
-(5885436821), which #183 did not cite: an unadjudicated cell neither admits nor bars.
+Where #183's text maps an unadjudicated cell to `not admitted`, this follows planning's ruling 5885436821 (posted
+before #183, which did not cite it): an unadjudicated cell neither admits nor bars. Two readings this checker takes
+beyond the rulings: an unadjudicated depth cell or parity fire holds the word as an unadjudicated cell does; and
+when several results fail, the record names the first in the order cells, depth, parity.
 
 Usage: derive_admission.py --all [--root DIR] | --selftest
 Exit 0 every record's word is its derived word; 1 any is not, or a record fails its own recompute;
 2 the tree cannot be read. Each failure is one line `admission: FAIL <class>: <detail>`.
 """
-import json, pathlib, re, subprocess, sys, tomllib
+import hashlib, json, pathlib, re, subprocess, sys, tomllib
 
 CELL_OK = re.compile(r"pass|unreported|n/a \(.+\)")
 CELL_WORDS = re.compile(r"pass|fail|unreported|unadjudicated|baseline|n/a \(.+\)")
@@ -52,8 +57,9 @@ def derive(cells: dict, depth: str, parity: str):
 
 def read_results(adm_dir: pathlib.Path, root: pathlib.Path):
     adm = tomllib.loads((adm_dir / "admission.toml").read_text(encoding="utf-8"))
-    cells = {k: v["word"] for k, v in tomllib.loads((adm_dir / "cells.toml").read_text(encoding="utf-8")).items() if isinstance(v, dict)}
-    depth = json.loads((adm_dir / "depth/raw/decide.json").read_text(encoding="utf-8"))["word"]
+    cells_dir, depth_dir = root / adm["results"]["cells"]["path"], root / adm["results"]["depth"]["path"]
+    cells = {k: v["word"] for k, v in tomllib.loads((cells_dir / "cells.toml").read_text(encoding="utf-8")).items() if isinstance(v, dict)}
+    depth = json.loads((depth_dir / "raw/decide.json").read_text(encoding="utf-8"))["word"]
     pp = root / adm["results"]["parity"]["path"] / "README.md"
     parity = tomllib.loads(pp.read_text(encoding="utf-8").split("+++")[1])["result"]
     return adm, cells, depth, parity
@@ -65,12 +71,36 @@ def names_same(written, word) -> bool:
     m, n = re.fullmatch(r"not admitted \((\w+)\b[^)]*\)", str(written)), re.fullmatch(r"not admitted \((\w+)\)", word)
     return bool(m and n and m.group(1) == n.group(1))
 
+def manifest_sha(where: pathlib.Path, exclude_prefix=(), exact=()) -> str:
+    """The digest of a result's file manifest, as admission.toml defines it: every file under the path, sorted,
+    one 'path<TAB>sha256' line each."""
+    files = sorted(p for p in where.rglob("*") if p.is_file() and "__pycache__" not in p.parts
+                   and not any(p.relative_to(where).as_posix().startswith(e) for e in exclude_prefix) and p.relative_to(where).as_posix() not in exact)
+    return hashlib.sha256("".join(f"{p.relative_to(where).as_posix()}\t{hashlib.sha256(p.read_bytes()).hexdigest()}\n" for p in files).encode()).hexdigest()
+
+def verify_digests(adm_dir: pathlib.Path, root: pathlib.Path, adm: dict) -> list[str]:
+    """The checker's own digest check, independent of the record's script."""
+    res, rel, out = adm.get("results", {}), adm_dir.relative_to(root).as_posix(), []
+    if sorted(res) != ["cells", "depth", "parity"]:
+        return [f"admission.results-unreadable: {rel} cites {sorted(res)}, not cells, depth and parity"]
+    want = {"cells": rel, "depth": rel + "/depth"}
+    for name, r in res.items():
+        path = r.get("path", "")
+        if (name in want and path != want[name]) or (name == "parity" and not path.startswith("results/")):
+            out.append(f"admission.results-unreadable: {rel}'s {name} path {path!r} is not the record's own")
+            continue
+        got = manifest_sha(root / path, ("depth/",) if name == "cells" else (), {"admission.toml", "admission-recompute.sh"} if name == "cells" else ())
+        if got != r.get("manifest_sha256"):
+            out.append(f"admission.record-does-not-recompute: {rel}'s {name} ({path}) hashes to {got[:16]}, not {str(r.get('manifest_sha256'))[:16]}")
+    return out
+
 def check(adm_dir: pathlib.Path, root: pathlib.Path) -> list[str]:
     fails = []
     rc = subprocess.run(["bash", str(adm_dir / "admission-recompute.sh")], capture_output=True, text=True).returncode
     if rc != 0:
         fails.append(f"admission.record-does-not-recompute: {adm_dir.relative_to(root)}'s admission-recompute.sh exited {rc}")
     try:
+        fails += verify_digests(adm_dir, root, tomllib.loads((adm_dir / "admission.toml").read_text(encoding="utf-8")))
         adm, cells, depth, parity = read_results(adm_dir, root)
         word, why = derive(cells, depth, parity)
     except (OSError, KeyError, ValueError, IndexError, tomllib.TOMLDecodeError, json.JSONDecodeError) as e:
@@ -108,7 +138,13 @@ def selftest() -> int:
         ("a parity word no rule names", ok_cells, "pass", "passed"),
         ("a depth word no rule names", ok_cells, "no cliff", "supported"),
     ]
+    same = [("the same word", "admitted", "admitted", True), ("the failing result named with detail", "not admitted (kwarg_delivery: fails the negative half)", "not admitted (kwarg_delivery)", True),
+            ("another failing result named", "not admitted (depth)", "not admitted (kwarg_delivery)", False), ("admitted for a derived not admitted", "admitted", "not admitted (depth)", False),
+            ("not admitted with nothing named", "not admitted ()", "not admitted (depth)", False), ("a name that only starts the same", "not admitted (kwarg_deliveryX)", "not admitted (kwarg_delivery)", False)]
     bad = 0
+    for label, w, d, want in same:
+        got = names_same(w, d); good = got == want; bad += not good
+        print(f"{'ok  ' if good else 'FAIL'}  the written word against the derived: {label}: {got}")
     for label, c, d, p, want in cases:
         got = derive(c, d, p)[0]; good = got == want; bad += not good
         print(f"{'ok  ' if good else 'FAIL'}  derive: {label}: {got!r}" + ("" if good else f" (expected {want!r})"))
@@ -128,7 +164,11 @@ def main(argv) -> int:
         print("usage: derive_admission.py --all [--root DIR] | --selftest", file=sys.stderr); return 2
     root = pathlib.Path(argv[2]) if len(argv) == 3 and argv[1] == "--root" else pathlib.Path(__file__).resolve().parents[2]
     dirs = sorted(p.parent for p in (root / "substrates/admission").glob("*/*/admission.toml"))
-    fails = [f for d in dirs for f in check(d, root)]
+    stray = sorted(p for p in (root / "substrates/admission").rglob("admission.toml") if p.parent not in dirs)
+    fails = [f"admission.record-not-found: {p.relative_to(root)} is not at substrates/admission/<substrate-id>/<fingerprint-prefix>/" for p in stray]
+    if not dirs:
+        fails.append("admission.record-not-found: no admission record in the tree; a check that finds nothing is not a pass")
+    fails += [f for d in dirs for f in check(d, root)]
     for f in fails: print(f"admission: FAIL {f}")
     print(f"admission: {len(dirs)} record(s); " + ("every word is its derived word" if not fails else f"{len(fails)} failure(s)"))
     return 1 if fails else 0
