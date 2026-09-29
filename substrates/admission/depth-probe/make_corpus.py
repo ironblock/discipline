@@ -23,18 +23,20 @@ def source(spec, ndiffs):
     dirs = sorted({str(pathlib.PurePosixPath(p).parent) for p in paths})
     listings = [{"path": d, "label": f"ls {d}", "sha256": sha(git(path, "ls-tree", "--name-only", commit, d + "/"))} for d in dirs]
     diffs = []
-    for c in git(path, "rev-list", "--first-parent", f"-{ndiffs}", commit, "--", root).decode().split():
+    # a root commit has no ^1, so it gives no diff
+    for c in git(path, "rev-list", "--first-parent", "--min-parents=1", f"-{ndiffs}", commit, "--", root).decode().split():
         b = git(path, "diff", f"{c}^1", c, "--", root)  # the first-parent difference: a merge's own change
         if b.strip():
             diffs.append({"commit": c, "path": root, "label": f"git diff {c[:7]}^1 {c[:7]} -- {root}", "sha256": sha(b)})
     print(f"{name}: {len(reads)} reads, {len(listings)} listings, {len(diffs)} diffs at {commit[:12]}")
     return {"name": name, "url": url, "commit": commit, "root": root, "reads": reads, "listings": listings, "diffs": diffs}
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser(); ap.add_argument("counterexamples"); ap.add_argument("out"); ap.add_argument("sources", nargs="+")
-    ap.add_argument("--diffs", type=int, default=12); a = ap.parse_args()
+    ap.add_argument("--diffs", type=int, default=12); a = ap.parse_args(argv)
     out, ce = pathlib.Path(a.out), pathlib.Path(a.counterexamples)
-    top = pathlib.Path(git(str(ce.resolve().parent), "rev-parse", "--show-toplevel").decode().strip()).resolve()
+    try: top = pathlib.Path(git(str(ce.resolve().parent), "rev-parse", "--show-toplevel").decode().strip()).resolve()
+    except subprocess.CalledProcessError: raise SystemExit(f"make_corpus: {ce} is not inside a git repository")
     if not out.parent.resolve().is_relative_to(top):  # else the relative path would climb through the local tree
         raise SystemExit(f"make_corpus: write the manifest inside the repository that holds {ce.name}, so no local path enters it")
     manifest = {"source": "git", "sources": [source(s, a.diffs) for s in a.sources],

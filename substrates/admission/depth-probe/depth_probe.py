@@ -138,7 +138,9 @@ def load_corpus(manifest_path: pathlib.Path, repos: dict | None = None) -> dict:
 
 def load_counterexamples(path: pathlib.Path, tier: str, want_sha: str | None) -> list[dict]:
     b = path.read_bytes()
-    if want_sha and sha(b) != want_sha:
+    if not want_sha:
+        raise SystemExit("depth_probe: the corpus manifest pins no counterexamples_sha256")
+    if sha(b) != want_sha:
         raise SystemExit("depth_probe: counterexamples.json does not hash as the manifest says")
     ce = json.loads(b)["tiers"][tier]
     if sorted(c["constraint"] for c in ce) != sorted(TIERS[tier]["dims"]):
@@ -422,6 +424,45 @@ def cmd_selftest(a) -> int:
         try: load_corpus(pathlib.Path(td) / "git.json", {"fx": str(g)})
         except SystemExit: refused = True
         check(refused, "load_corpus: a git-source entry that does not hash as pinned is refused")
+    # through run: a manifest whose counter-examples pin is wrong or missing is refused before any request;
+    # --no-retrieval runs no retrieval sample
+    for label, pin in (("wrong", "0" * 64), ("missing", None)):
+        with tempfile.TemporaryDirectory() as td:
+            t = pathlib.Path(td) / "corpus"; shutil.copytree(HERE / "fixtures/corpus", t)
+            m = json.loads((t / "manifest.json").read_text())
+            if pin: m["counterexamples_sha256"] = pin
+            else: del m["counterexamples_sha256"]
+            (t / "manifest.json").write_text(json.dumps(m))
+            srv3, st3 = fake_server(e2e["script"]); refused = False
+            try:
+                with contextlib.redirect_stdout(io.StringIO()): cmd_run(argparse.Namespace(**{**vars(ns), "corpus": str(t / "manifest.json"), "out": td,
+                                                                                          "endpoint": f"http://127.0.0.1:{srv3.server_address[1]}"}))
+            except SystemExit: refused = True
+            finally: srv3.shutdown()
+            check(refused and not st3["calls"], f"run: a {label} counter-examples pin is refused before any request")
+    with tempfile.TemporaryDirectory() as td:
+        srv4, _ = fake_server(e2e["script"])
+        try:
+            with contextlib.redirect_stdout(io.StringIO()): cmd_run(argparse.Namespace(**{**vars(ns), "retrieval": False, "out": td, "fractions": [0.0],
+                                                                                      "endpoint": f"http://127.0.0.1:{srv4.server_address[1]}"}))
+            rows4 = [json.loads(l) for l in open(pathlib.Path(td) / "rows.jsonl")]
+        finally: srv4.shutdown()
+        check(rows4 and not any(r.get("stage") == "retrieval" for r in rows4), "run: --no-retrieval runs no retrieval sample", f"stages {[r.get('stage') for r in rows4]}")
+    # make_corpus: a manifest outside the tree that holds the counter-examples is refused
+    sys.path.insert(0, str(HERE)); import make_corpus
+    with tempfile.TemporaryDirectory() as td:
+        g = pathlib.Path(td) / "repo"; (g / "src").mkdir(parents=True); (g / "src/a.rs").write_text("pub fn a() {}\n")
+        shutil.copy(HERE / "fixtures/corpus/counterexamples.json", g / "ce.json")
+        run = lambda *a: subprocess.run(["git", "-C", str(g), "-c", "user.name=t", "-c", "user.email=t@t", *a], capture_output=True, check=True)
+        run("init", "-q"); run("add", "."); run("commit", "-qm", "a")
+        (g / "src/a.rs").write_text("pub fn a() -> u8 { 0 }\n"); run("commit", "-qam", "b")  # a parent for the diff
+        outside = pathlib.Path(td) / "elsewhere/m.json"; outside.parent.mkdir(); refused = False
+        try:
+            with contextlib.redirect_stdout(io.StringIO()): make_corpus.main([str(g / "ce.json"), str(outside), f"fx={g}@HEAD:src"])
+        except SystemExit: refused = True
+        check(refused and not outside.exists(), "make_corpus: a manifest outside the tree that holds the counter-examples is refused")
+        with contextlib.redirect_stdout(io.StringIO()): make_corpus.main([str(g / "ce.json"), str(g / "m.json"), f"fx={g}@HEAD:src"])
+        check(json.loads((g / "m.json").read_text())["counterexamples"] == "ce.json", "make_corpus: a manifest inside the tree records a relative path")
     for c in json.loads((HERE / "fixtures/decide.json").read_text())["cases"]:
         dd = decide(c["summary"], c["criterion"]); check(dd["word"] == c["word"], f"decide: {c['label']}", f"got {dd['word']}")
         if "strict" in c: check(dd.get("strict_beside") == c["strict"], f"decide: strict beside -- {c['label']}", f"got {dd.get('strict_beside')}")

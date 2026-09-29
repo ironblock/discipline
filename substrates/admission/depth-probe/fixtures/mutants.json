@@ -87,13 +87,34 @@
   },
   {
    "label": "the counter-examples digest check dropped",
-   "old": "    if want_sha and sha(b) != want_sha:",
-   "new": "    if False:"
+   "old": "    if sha(b) != want_sha:\n        raise SystemExit(\"depth_probe: counterexamples.json",
+   "new": "    if False:\n        raise SystemExit(\"depth_probe: counterexamples.json"
   },
   {
    "label": "retrieval off by default",
    "old": "action=argparse.BooleanOptionalAction, default=True,",
    "new": "action=argparse.BooleanOptionalAction, default=False,"
+  },
+  {
+   "label": "run passes no counter-examples pin",
+   "old": "a.tier, manifest.get(\"counterexamples_sha256\"))",
+   "new": "a.tier, None)"
+  },
+  {
+   "label": "a missing counter-examples pin accepted",
+   "old": "    if not want_sha:\n        raise SystemExit",
+   "new": "    if not want_sha:\n        return json.loads(b)[\"tiers\"][tier]\n        raise SystemExit"
+  },
+  {
+   "label": "--no-retrieval ignored",
+   "old": "if a.retrieval and TIERS[a.tier][\"retrieval\"]",
+   "new": "if TIERS[a.tier][\"retrieval\"]"
+  },
+  {
+   "label": "make_corpus's outside-the-tree refusal removed",
+   "file": "make_corpus.py",
+   "old": "    if not out.parent.resolve().is_relative_to(top):",
+   "new": "    if False:"
   }
  ]
 }

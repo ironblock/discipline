@@ -6,7 +6,7 @@ This is one of the three results admission requires. It is built to planning's r
 
 | the ruling | how the probe meets it |
 |---|---|
-| **Corpus:** this repository's source plus tokio, both permissive, digest-pinned (reconciled on #143, 07:09Z) | `make_corpus.py` writes `corpus/manifest.json` from named repositories at pinned commits: every `.rs` file under each root as a file read, every directory as a listing, the root's first-parent diffs in the last 12 commits, each with the sha256 of the exact bytes read. `self` at `1833b8e` (`diet/src`: 58 reads, 15 listings, 12 diffs) and `tokio` at `tokio-1.53.1` (`tokio/src`: 377 reads, 62 listings, 12 diffs): 435 reads, 6.2 MB. The manifest records each repository's name, URL and commit, never a local path; `--repo tokio=PATH` names a local clone, and the probe refuses any mismatch. `make_corpus.py` refuses to write a manifest outside this repository, so the relative path to the counter-examples never climbs through a local tree. No tokio source is committed: `corpus/NOTICE` and `corpus/LICENSE-tokio` (MIT). |
+| **Corpus:** this repository's source plus tokio, both permissive, digest-pinned (reconciled on #143, 07:09Z) | `make_corpus.py` writes `corpus/manifest.json` from named repositories at pinned commits: every `.rs` file under each root as a file read, every directory holding one as a listing, the root's first-parent diffs in the last 12 commits, each with the sha256 of the exact bytes read. `self` at `1833b8e` (`diet/src`: 58 reads, 15 listings, 12 diffs) and `tokio` at `tokio-1.53.1` (`tokio/src`: 377 reads, 62 listings, 12 diffs): 435 reads, 6.2 MB. The manifest records each repository's name, URL and commit, never a local path; `--repo tokio=PATH` names a local clone, and the probe refuses any mismatch. `make_corpus.py` refuses to write a manifest outside this repository, so the relative path to the counter-examples never climbs through a local tree. No tokio source is committed: `corpus/NOTICE` and `corpus/LICENSE-tokio` (MIT). |
 | **Counter-examples** from a committed script, planted at declared depths, pinned by digest | `counterexamples.py` writes `counterexamples.json`: one Rust file-read turn per constraint, each asserting the constraint's opposite. The four-constraint set is planted at 0.2/0.4/0.6/0.8 of the padding. Deterministic (written twice, byte-identical). Its sha256 is in the manifest. |
 | **Ladder:** fractions of the rung's declared `serving_context`, 0.5 / 0.9 / 0.95, plus the zero-pad control; under `--kv-unified` that context is the pool every slot shares, and the fractions are of the pool with the other slot cleared and declared empty | `--serving-context` and `--fractions` (default `0 0.5 0.9 0.95`). A cell's padding is sized by bisection on the server's own token count, and refused if it misses its target by more than `--tolerance`. The run refuses a ladder whose deepest cell plus `max_tokens` exceeds the server's per-slot context. |
 | **Five samples per cell** plus one retrieval sample, the rung's supported coding configuration, thinking on | `--samples 5`; retrieval is on by default (`--no-retrieval` turns it off; the eight-constraint set has none); `--sampler` is the rung's configuration. **Thinking is checked, not assumed:** a sample with no reasoning is counted as `thinking_off`, and its cell reads `unadjudicated`. |
@@ -67,8 +67,10 @@ python3 depth_probe.py decide OUT/summary.json criterion.toml
   - the depth-tolerance refusal and the ladder-capacity refusal;
   - 11 `decide` cases, and the strict reading beside the word;
   - retrieval on by default;
-  - the digest checks: a tampered file-source entry, a git-source entry that does not hash as pinned (and one that does), a counter-examples file that does not hash as pinned, each refused.
-- **`python3 mutants.py`** seeds 19 mutations and requires the selftest to exit 1 on each. **All 19 are killed:**
+  - the digest checks: a tampered file-source entry, a git-source entry that does not hash as pinned (and one that does), a counter-examples file that does not hash as pinned, each refused;
+  - through `run`: a wrong or missing counter-examples pin refused before any request, and `--no-retrieval` running no retrieval sample;
+  - `make_corpus.py` refusing a manifest outside the tree that holds the counter-examples, and recording a relative path inside it.
+- **`python3 mutants.py`** seeds 23 mutations and requires the selftest to exit 1 on each. **All 23 are killed:**
   - two grader checks dropped;
   - the first code block graded;
   - counter-examples not planted;
@@ -83,7 +85,9 @@ python3 depth_probe.py decide OUT/summary.json criterion.toml
   - the ladder-capacity refusal removed;
   - the strict reading always met;
   - each of the three digest checks dropped;
-  - retrieval off by default.
+  - retrieval off by default, and `--no-retrieval` ignored;
+  - `run` passing no counter-examples pin, and a missing pin accepted;
+  - `make_corpus.py`'s outside-the-tree refusal removed.
 - **`fixtures/corpus/`** is a synthetic corpus for the tests, not a probe corpus.
 
 ## Window estimate (floor: a 160,000-token pool, 2 slots)
