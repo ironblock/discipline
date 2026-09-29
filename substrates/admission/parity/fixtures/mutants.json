@@ -1,0 +1,178 @@
+{
+ "mutants": [
+  {
+   "label": "decide() restored to effect <= 0 for refuted",
+   "file": "apply.py",
+   "old": "    if lo < 0 < hi or point == 0:  # strictly across zero; a band touching zero keeps its point's sign\n        return \"inconclusive\"\n    ref = 1 if point > 0 else -1\n    return \"inconclusive\" if effect * ref > 0 else \"refuted\"",
+   "new": "    if effect <= 0:\n        return \"refuted\"\n    return \"inconclusive\""
+  },
+  {
+   "label": "the fire's seat-A floor removed",
+   "file": "apply.py",
+   "old": "    if aa < SEAT_A_FLOOR:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "label": "the band's seat-A floor removed",
+   "file": "apply.py",
+   "old": "    if band[\"seat_a\"][\"accepted_deduped\"] < SEAT_A_FLOOR:\n",
+   "new": "    if False:\n"
+  },
+  {
+   "label": "a straddling band allowed to refute",
+   "file": "apply.py",
+   "old": "    if lo < 0 < hi or point == 0:  # strictly across zero; a band touching zero keeps its point's sign",
+   "new": "    if point == 0:"
+  },
+  {
+   "label": "the reference sign inverted",
+   "file": "apply.py",
+   "old": "    ref = 1 if point > 0 else -1",
+   "new": "    ref = -1 if point > 0 else 1"
+  },
+  {
+   "label": "the band's lower edge excluded",
+   "file": "apply.py",
+   "old": "    if lo <= effect <= hi:",
+   "new": "    if lo < effect <= hi:"
+  },
+  {
+   "label": "the config's floor ignored",
+   "file": "apply.py",
+   "old": "int(c[\"seat_a_floor\"])",
+   "new": "0"
+  },
+  {
+   "label": "the box check dropped",
+   "file": "apply.py",
+   "old": "    reasons = check_box(box)\n",
+   "new": "    reasons = []\n"
+  },
+  {
+   "label": "a canary DRIFT twice accepted",
+   "file": "apply.py",
+   "old": "return side in ([\"PASS\"], [\"DRIFT\", \"PASS\"])",
+   "new": "return side in ([\"PASS\"], [\"DRIFT\", \"PASS\"], [\"DRIFT\", \"DRIFT\"])"
+  },
+  {
+   "label": "the instance comparison dropped",
+   "file": "apply.py",
+   "old": "ib == ia):",
+   "new": "True):"
+  },
+  {
+   "label": "the seat-B think-block check dropped",
+   "file": "apply.py",
+   "old": "    if box[\"seatb_canary\"] != {\"think\": False, \"draft_n\": False}:",
+   "new": "    if False:"
+  },
+  {
+   "label": "the run.begin arm check dropped",
+   "file": "apply.py",
+   "old": "        elif begins[0].get(\"arm\") != ARMS[name] or begins[0].get(\"model_id\") != MODEL_ID:",
+   "new": "        elif False:"
+  },
+  {
+   "label": "the seat-B draft_n routing check dropped",
+   "file": "apply.py",
+   "old": "                if \"draft_n\" in t:\n                    n[\"seat-B extraction carrying draft_n\"] += 1",
+   "new": "                pass"
+  },
+  {
+   "label": "the extraction-fork set check dropped",
+   "file": "apply.py",
+   "old": "        if dup or set(tallies) != keys:",
+   "new": "        if False:"
+  },
+  {
+   "label": "the interview-fork check dropped",
+   "file": "apply.py",
+   "old": "        if short:",
+   "new": "        if False:"
+  },
+  {
+   "label": "the offered check dropped",
+   "file": "apply.py",
+   "old": "        if sum(v[0] for v in tallies.values()) == 0:",
+   "new": "        if False:"
+  },
+  {
+   "label": "the disclosure never attached",
+   "file": "apply.py",
+   "old": "disclosure=DISCLOSURE if word in (\"refuted\", \"inconclusive\") else None",
+   "new": "disclosure=None"
+  },
+  {
+   "label": "the band digest unchecked",
+   "file": "apply.py",
+   "old": "    if not p.is_file() or hashlib.sha256(p.read_bytes()).hexdigest() != BAND_SHA:",
+   "new": "    if not p.is_file():"
+  },
+  {
+   "label": "band.py's pin check dropped",
+   "file": "band.py",
+   "old": "    if got != want:\n        fail(",
+   "new": "    if False:\n        fail("
+  },
+  {
+   "label": "band.py's seed fixed, not the manifest's",
+   "file": "band.py",
+   "old": "rng = random.Random(SEED)",
+   "new": "rng = random.Random(20260810)"
+  },
+  {
+   "label": "band.py's stated-tally check dropped",
+   "file": "band.py",
+   "old": "    if (off, acc) != want:",
+   "new": "    if False:"
+  },
+  {
+   "label": "band.py's required pins unenforced",
+   "file": "band.py",
+   "old": "    if need not in PINNED:\n        fail(",
+   "new": "    if False:\n        fail("
+  },
+  {
+   "label": "a band touching zero read as straddling",
+   "file": "apply.py",
+   "old": "    if lo < 0 < hi or point == 0:  # strictly across zero; a band touching zero keeps its point's sign",
+   "new": "    if lo <= 0 <= hi or point == 0:"
+  },
+  {
+   "label": "the point-of-zero guard removed",
+   "file": "apply.py",
+   "old": "    if lo < 0 < hi or point == 0:  # strictly across zero; a band touching zero keeps its point's sign",
+   "new": "    if lo < 0 < hi:"
+  },
+  {
+   "label": "a report missing a seat's tallies accepted",
+   "file": "band.py",
+   "old": "if \"report.json\" in PINNED and not all(n in stated for n in (\"A\", \"B\")):",
+   "new": "if False:"
+  },
+  {
+   "label": "seat B's stated tally unchecked",
+   "file": "band.py",
+   "old": "for name, t in ((n, t) for n, t in ((\"A\", A), (\"B\", B)) if n in stated):",
+   "new": "for name, t in ((n, t) for n, t in ((\"A\", A),) if n in stated):"
+  },
+  {
+   "label": "only grade.py required of the manifest",
+   "file": "band.py",
+   "old": "for need in (\"grade.py\", \"seat-a/events.jsonl\", \"seat-b/events.jsonl\"):",
+   "new": "for need in (\"grade.py\",):"
+  },
+  {
+   "label": "the level and resamples range unchecked",
+   "file": "band.py",
+   "old": "if not (0 < LEVEL < 1 and RESAMPLES > 0):",
+   "new": "if False:"
+  },
+  {
+   "label": "the config's arms, floor and digest unchecked",
+   "file": "apply.py",
+   "old": "    if set(ARMS) != {\"A\", \"B\"} or SEAT_A_FLOOR < 0 or not re.fullmatch(r\"[0-9a-f]{64}\", BAND_SHA):",
+   "new": "    if False:"
+  }
+ ]
+}
