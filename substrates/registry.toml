@@ -347,6 +347,8 @@ them, and its regime records what it sent; where the two differ the fire's \
 regime is what ran. The extraction bakeoff of 2026-08-10 is one such fire."""
 
 serving_context = 160000
+serving_slots = 2
+serving_context_is = "the unified pool (--kv-unified) shared by both slots, not a per-slot figure: another slot's resident prompt counts against it (substrates/admission/depth-probe/evidence/floor-prefill-2026-09-29/); the depth probe's fractions are of this pool with the other slot cleared (planning, #143, 2026-09-29)"
 serving_flags = "--flash-attn on, --kv-unified, --cache-type-k q5_0, --cache-type-v q4_1, --spec-type dflash, --spec-dflash-cross-ctx 1024, --spec-draft-ngl all, -ngl all, -b 2048, -ub 512, --mlock, --no-mmap, --no-host, --no-mmproj-offload, --jinja, --chat-template-kwargs {\"preserve_thinking\":true}, --image-min-tokens 1024, --reasoning on"
 serving_flags_constant_across_instances = true
 serving_flags_excludes = """
@@ -505,6 +507,8 @@ chat_template_is = "the served template (/props) and the GGUF header's tokenizer
 
 sampler_card = "none on the serving line; each request sets its own"
 serving_context = 229376
+serving_slots = 2
+serving_context_is = "the unified pool (--kv-unified) shared by both slots, not a per-slot figure: another slot's resident prompt counts against it (substrates/admission/depth-probe/evidence/floor-prefill-2026-09-29/); the depth probe's fractions are of this pool with the other slot cleared (planning, #143, 2026-09-29)"
 serving_flags = "-ngl 99, -t 8, -c 229376, -np 2, --kv-unified, -ctk q8_0, -ctv q8_0, -fa on, -b 1024, -ub 512, --jinja, --spec-type draft-mtp, --spec-draft-n-max 2"
 serving_flags_are = "the inference seat's recommended line (#143, comment 5883986293), as launched in the cells window of 2026-09-29"
 reasoning_state = "no reasoning, effort or budget flag on the serving line. Per request, reasoning_effort renders: absent = xhigh; low and medium render differently; high, none and max are refused (HTTP 500, the template raising 'Unexpected reasoning effort'); reasoning_strength is not read. Side by side, the floor's template reads no effort key at all. No word is chosen on this cell (substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/cells.toml)"
