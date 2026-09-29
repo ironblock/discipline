@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 65
+faults = 69
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -714,6 +714,8 @@ catches = [
     "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
     "client::stream::tests::a_timing_the_server_did_not_send_is_absent_not_zero",
     "client::stream::tests::a_timings_digits_survive_the_transport",
+    "client::stream::tests::a_timings_that_is_not_an_object_reports_nothing",
+    "client::stream::tests::the_last_timings_a_stream_carries_is_the_one_reported",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
     "client::stream::tests::timings_on_the_last_chunk_with_choices_are_read_too",
@@ -788,6 +790,7 @@ catches = [
     "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
     "client::stream::tests::a_timing_the_server_did_not_send_is_absent_not_zero",
     "client::stream::tests::a_timings_digits_survive_the_transport",
+    "client::stream::tests::the_last_timings_a_stream_carries_is_the_one_reported",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
     "client::stream::tests::timings_on_the_last_chunk_with_choices_are_read_too",
@@ -1052,6 +1055,8 @@ catches = [
     "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
     "client::stream::tests::a_timing_the_server_did_not_send_is_absent_not_zero",
     "client::stream::tests::a_timings_digits_survive_the_transport",
+    "client::stream::tests::a_timings_that_is_not_an_object_reports_nothing",
+    "client::stream::tests::the_last_timings_a_stream_carries_is_the_one_reported",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
     "client::stream::tests::timings_on_the_last_chunk_with_choices_are_read_too",
@@ -1063,9 +1068,10 @@ failure_class = "client.stream-reads-an-absent-timing-as-zero"
 target = "diet/src/client/stream.rs"
 expect_exit = 101
 anchor = '''
-        let count = |key: &str| object.get(key).and_then(Value::as_u64);'''
+                .filter(|count| *count <= Count::MAX)'''
 becomes = '''
-        let count = |key: &str| object.get(key).and_then(Value::as_u64).or(Some(0));'''
+                .filter(|count| *count <= Count::MAX)
+                .or(Some(0))'''
 catches = [
     "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
     "client::stream::tests::a_timing_the_server_did_not_send_is_absent_not_zero",
@@ -1099,6 +1105,7 @@ becomes = '''
         Some(Self(text.to_owned()))'''
 catches = [
     "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
+    "client::stream::tests::a_timings_digits_survive_the_transport",
 ]
 
 [[fault]]
@@ -1140,4 +1147,56 @@ becomes = '''
             draft_n: None,'''
 catches = [
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
+]
+
+[[fault]]
+id = "client.stream-the-first-timings-wins"
+failure_class = "client.stream-the-first-timings-wins"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            self.timings = Some(Timings::read(timings));'''
+becomes = '''
+            self.timings.get_or_insert_with(|| Timings::read(timings));'''
+catches = [
+    "client::stream::tests::the_last_timings_a_stream_carries_is_the_one_reported",
+]
+
+[[fault]]
+id = "client.stream-reads-a-timings-that-is-not-an-object"
+failure_class = "client.stream-reads-a-timings-that-is-not-an-object"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        if let Some(timings) = value.get("timings").filter(|timings| timings.is_object()) {'''
+becomes = '''
+        if let Some(timings) = value.get("timings") {'''
+catches = [
+    "client::stream::tests::a_timings_that_is_not_an_object_reports_nothing",
+]
+
+[[fault]]
+id = "client.stream-keeps-a-count-past-the-record"
+failure_class = "client.stream-keeps-a-count-past-the-record"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                .filter(|count| *count <= Count::MAX)'''
+becomes = '''
+                .filter(|_| true)'''
+catches = [
+    "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
+]
+
+[[fault]]
+id = "client.millis-keeps-an-integer-past-the-record"
+failure_class = "client.millis-keeps-an-integer-past-the-record"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            .is_ok_and(|number| number <= Count::MAX && number.to_string() == text);'''
+becomes = '''
+            .is_ok_and(|number| number.to_string() == text);'''
+catches = [
+    "client::stream::tests::a_timings_digits_survive_the_transport",
 ]

@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 127
+faults = 128
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -2038,4 +2038,19 @@ catches = [
     "drive::canned::tests::every_registered_canned_digest_is_acts_this_crate_keeps",
     "drive::canned::tests::the_regimen_names_the_substrate_that_plays_these_acts",
     "drive::tests::the_cache_census_counts_every_call_and_names_the_undeclared_lifetime",
+]
+
+[[fault]]
+id = "drive.canned-registry-scan-reads-nothing"
+failure_class = "drive.canned-registry-scan-reads-nothing"
+target = "diet/src/drive/canned.rs"
+expect_exit = 101
+anchor = '''
+            let Some((key, value)) = line.split_once(" = \"") else {'''
+becomes = '''
+            let Some((key, value)) = line.split_once(" = \"\"\"") else {'''
+catches = [
+    "drive::canned::tests::every_registered_canned_digest_is_acts_this_crate_keeps",
+    "drive::canned::tests::the_first_registered_acts_still_hash_to_their_registered_digest",
+    "drive::canned::tests::the_regimen_names_the_substrate_that_plays_these_acts",
 ]
