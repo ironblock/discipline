@@ -37,6 +37,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use crate::formats::record::json::Decimal;
+
 use super::shape::RequestShape;
 use super::transport::{
     self, Dechunker, Endpoint, Framing, TransportFailure, framing, header_end, is_timeout,
@@ -127,6 +129,8 @@ pub enum Ended {
     Finished {
         /// Why it stopped, as the server spelled it, if it said.
         finish_reason: Option<String>,
+        /// What the server measured of the request, if it said.
+        timings: Option<Timings>,
     },
     /// A stop was asked for and the call stopped. What arrived before it is
     /// partial, and is the caller's to keep as partial.
@@ -141,6 +145,71 @@ pub enum Ended {
         /// What the server said, as it said it.
         body: String,
     },
+}
+
+/// A request's timings as the server reported them: llama.cpp's `timings`
+/// object, which it sends once, on a stream's last data chunk (#117 R3, D1).
+///
+/// Named as the server names them. Each is absent when the server did not
+/// send it, never zero, and absent too when it is not a number the record
+/// can spell (an exponent, a negative): a count the server did not report is
+/// not a count of none. Nothing here is computed from anything else.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Timings {
+    /// Prompt tokens the server prefilled for this request.
+    pub prompt_n: Option<u64>,
+    /// Prompt tokens it reused from the slot's cache rather than prefilling.
+    pub cache_n: Option<u64>,
+    /// How long the prefill took.
+    pub prompt_ms: Option<Millis>,
+    /// Tokens it generated.
+    pub predicted_n: Option<u64>,
+    /// How long generating them took.
+    pub predicted_ms: Option<Millis>,
+}
+
+impl Timings {
+    /// The timings in a `timings` object, each read where the server put it.
+    fn read(object: &Value) -> Self {
+        let count = |key: &str| object.get(key).and_then(Value::as_u64);
+        let millis = |key: &str| {
+            object
+                .get(key)
+                .and_then(|value| value.as_number().map(ToString::to_string))
+                .and_then(|text| Millis::new(&text))
+        };
+        Self {
+            prompt_n: count("prompt_n"),
+            cache_n: count("cache_n"),
+            prompt_ms: millis("prompt_ms"),
+            predicted_n: count("predicted_n"),
+            predicted_ms: millis("predicted_ms"),
+        }
+    }
+}
+
+/// A duration in milliseconds, as the digits the server wrote: a
+/// non-negative integer or exact decimal the record can spell. Never through
+/// a float, so `1.10` stays `1.10`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Millis(String);
+
+impl Millis {
+    /// The number `text`, or nothing when the record could not spell it.
+    #[must_use]
+    pub fn new(text: &str) -> Option<Self> {
+        let integer = text
+            .parse::<u64>()
+            .is_ok_and(|number| number.to_string() == text);
+        let decimal = !text.starts_with('-') && Decimal::new(text).is_some();
+        (integer || decimal).then(|| Self(text.to_owned()))
+    }
+
+    /// The digits, as written.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// One piece of a streamed answer: answer text, or the reasoning a thinking
@@ -459,6 +528,8 @@ struct Reading {
     /// The body of a refusal, kept whole.
     refusal: Vec<u8>,
     finish_reason: Option<String>,
+    /// The last `timings` object any chunk carried.
+    timings: Option<Timings>,
 }
 
 impl Reading {
@@ -554,6 +625,7 @@ impl Reading {
         if data == "[DONE]" {
             return Ok(Some(Ended::Finished {
                 finish_reason: self.finish_reason.take(),
+                timings: self.timings.take(),
             }));
         }
         let value: Value = serde_json::from_str(data).map_err(|why| {
@@ -564,6 +636,12 @@ impl Reading {
                 status: 200,
                 body: data.to_owned(),
             }));
+        }
+        // On whichever chunk carries it, the last one winning: the usage
+        // chunk (`choices: []`) when usage was asked for, the last chunk with
+        // choices when it was not (`wire.rs`, `streaming_body`).
+        if let Some(timings) = value.get("timings").filter(|timings| timings.is_object()) {
+            self.timings = Some(Timings::read(timings));
         }
         if let Some(choice) = value
             .get("choices")
@@ -625,6 +703,7 @@ impl Reading {
         match self.finish_reason.take() {
             Some(reason) => Ok(Ended::Finished {
                 finish_reason: Some(reason),
+                timings: self.timings.take(),
             }),
             None => Err(TransportFailure::Framing(
                 "the stream ended before the server said it was done".to_owned(),
@@ -804,6 +883,8 @@ pub enum Step {
     Fail(TransportFailure),
     /// Answer with a refusal rather than a stream.
     Reject(u16, String),
+    /// Report these timings when the call finishes.
+    Timings(Timings),
 }
 
 /// Scripted streams, one per call, in call order; and every request it was
@@ -858,6 +939,7 @@ impl Streaming for Canned {
                 "the canned transport has no reply left for this call".to_owned(),
             ));
         };
+        let mut timings = None;
         for step in steps {
             if cancel.is_asked() {
                 return Ok(Ended::Cancelled);
@@ -877,6 +959,7 @@ impl Streaming for Canned {
                 }
                 Step::Fail(failure) => return Err(failure),
                 Step::Reject(status, body) => return Ok(Ended::Rejected { status, body }),
+                Step::Timings(measured) => timings = Some(measured),
             }
         }
         if cancel.is_asked() {
@@ -884,6 +967,7 @@ impl Streaming for Canned {
         }
         Ok(Ended::Finished {
             finish_reason: Some("stop".to_owned()),
+            timings,
         })
     }
 
@@ -1116,7 +1200,8 @@ mod tests {
         assert_eq!(
             ended,
             Ok(Ended::Finished {
-                finish_reason: Some("stop".to_owned())
+                finish_reason: Some("stop".to_owned()),
+                timings: Some(cold_timings()),
             })
         );
         let reasoning: Vec<&str> = pieces
@@ -1142,6 +1227,181 @@ mod tests {
         );
     }
 
+    /// How a stream of these events' data ends, read by the transport's own
+    /// reader: a 200, the events, then the connection closing.
+    fn ended_by(events: &[&str]) -> Result<Ended, TransportFailure> {
+        let mut raw = String::from("HTTP/1.1 200 OK\r\n\r\n");
+        for event in events {
+            raw.push_str("data: ");
+            raw.push_str(event);
+            raw.push_str("\n\n");
+        }
+        let mut reading = Reading::default();
+        if let Some(ended) = reading.feed(raw.as_bytes(), usize::MAX, &mut |_| {})? {
+            return Ok(ended);
+        }
+        reading.closed(&mut |_| {})
+    }
+
+    /// The timings a stream ending in `[DONE]` reported, with `timings`
+    /// spliced into its usage chunk as written.
+    fn reported(timings: &str) -> Option<Timings> {
+        let ended = ended_by(&[
+            r#"{"choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"stop"}]}"#,
+            &format!(r#"{{"choices":[],"usage":{{"prompt_tokens":3}},"timings":{timings}}}"#),
+            "[DONE]",
+        ]);
+        match ended {
+            Ok(Ended::Finished { timings, .. }) => timings,
+            other => panic!("not a finished call: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn timings_on_the_last_chunk_with_choices_are_read_too() {
+        // Without `include_usage` there is no `choices: []` chunk, and the
+        // server puts its timings on the last chunk that still has choices.
+        let ended = ended_by(&[
+            r#"{"choices":[{"index":0,"delta":{"content":"x"},"finish_reason":null}]}"#,
+            r#"{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"timings":{"prompt_n":4,"cache_n":2}}"#,
+            "[DONE]",
+        ]);
+        let Ok(Ended::Finished {
+            timings: Some(timings),
+            ..
+        }) = ended
+        else {
+            panic!("no timings: {ended:?}");
+        };
+        assert_eq!((timings.prompt_n, timings.cache_n), (Some(4), Some(2)));
+    }
+
+    #[test]
+    fn a_timing_the_server_did_not_send_is_absent_not_zero() {
+        assert_eq!(
+            reported(r#"{"prompt_n":5}"#),
+            Some(Timings {
+                prompt_n: Some(5),
+                ..Timings::default()
+            }),
+            "only what was sent"
+        );
+        // And a stream with no timings object reports none at all.
+        assert_eq!(
+            ended_by(&[
+                r#"{"choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"stop"}]}"#,
+                "[DONE]",
+            ]),
+            Ok(Ended::Finished {
+                finish_reason: Some("stop".to_owned()),
+                timings: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_timings_digits_survive_the_transport() {
+        // Seeded, because the captures' own digits survive a round trip
+        // through a float by accident (R3 proposal, section 5); `1.10` does
+        // not. And an integer written as one stays one.
+        let timings = reported(r#"{"prompt_ms":1.10,"predicted_ms":290}"#).expect("timings");
+        assert_eq!(timings.prompt_ms.as_ref().map(Millis::as_str), Some("1.10"));
+        assert_eq!(
+            timings.predicted_ms.as_ref().map(Millis::as_str),
+            Some("290")
+        );
+    }
+
+    #[test]
+    fn a_timing_the_record_cannot_spell_is_absent() {
+        // An exponent is a second spelling (`number.pest`), and a negative
+        // duration or count is not a measurement; each is absent rather than
+        // rewritten into something the server did not say.
+        let timings = reported(
+            r#"{"prompt_ms":2.9e2,"predicted_ms":-1.5,"prompt_n":1e2,"cache_n":-3,"predicted_n":7}"#,
+        )
+        .expect("timings");
+        assert_eq!(
+            timings,
+            Timings {
+                predicted_n: Some(7),
+                ..Timings::default()
+            }
+        );
+    }
+
+    #[test]
+    fn a_timings_chunk_before_a_cancel_is_not_a_finished_call() {
+        let piece =
+            r#"data: {"choices":[{"index":0,"delta":{"content":"Hel"},"finish_reason":null}]}"#;
+        let measured = r#"data: {"choices":[],"timings":{"prompt_n":3,"cache_n":0}}"#;
+        let stub = Stub::serving(vec![Act::StreamThenHold(vec![
+            format!("{piece}\n\n"),
+            format!("{measured}\n\n"),
+        ])])
+        .expect("loopback");
+        let transport = HttpStream::new(endpoint(&stub));
+        let cancel = Cancel::new();
+        let asker = cancel.clone();
+        let (first, arrived) = std::sync::mpsc::channel();
+        let (result, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let ended = transport.stream(&shape(), deadline(), &cancel, &mut |piece| {
+                let _ = first.send(text(piece));
+            });
+            let _ = result.send(ended);
+        });
+        assert_eq!(
+            arrived.recv_timeout(Duration::from_secs(10)).as_deref(),
+            Ok("Hel")
+        );
+        cancel_and_expect(&asker, &finished);
+    }
+
+    #[test]
+    fn a_canned_stream_reports_its_timings_when_it_finishes() {
+        let measured = Timings {
+            prompt_n: Some(3),
+            cache_n: Some(0),
+            ..Timings::default()
+        };
+        let canned = Canned::new([vec![
+            Step::Delta("ok".to_owned()),
+            Step::Timings(measured.clone()),
+        ]]);
+        assert_eq!(
+            canned.stream(&shape(), deadline(), &Cancel::new(), &mut |_| {}),
+            Ok(Ended::Finished {
+                finish_reason: Some("stop".to_owned()),
+                timings: Some(measured),
+            })
+        );
+    }
+
+    /// What the reference build measured of the warm captured call
+    /// (`4df29be`, line 38 of its capture).
+    fn warm_timings() -> Timings {
+        Timings {
+            prompt_n: Some(1),
+            cache_n: Some(28),
+            prompt_ms: Millis::new("229.366"),
+            predicted_n: Some(6),
+            predicted_ms: Millis::new("105.445"),
+        }
+    }
+
+    /// What the `DoD` 1 instance measured of the cold thinking turn
+    /// (`e7051ef`, the capture's last data chunk).
+    fn cold_timings() -> Timings {
+        Timings {
+            prompt_n: Some(89),
+            cache_n: Some(0),
+            prompt_ms: Millis::new("297.198"),
+            predicted_n: Some(312),
+            predicted_ms: Millis::new("2591.561"),
+        }
+    }
+
     fn endpoint(stub: &Stub) -> Endpoint {
         Endpoint::parse(&stub.url()).expect("the stub's URL is an endpoint")
     }
@@ -1161,7 +1421,8 @@ mod tests {
         assert_eq!(
             ended,
             Ok(Ended::Finished {
-                finish_reason: Some("length".to_owned())
+                finish_reason: Some("length".to_owned()),
+                timings: Some(warm_timings()),
             })
         );
         assert_eq!(pieces, CAPTURED_PIECES);
@@ -1195,7 +1456,8 @@ mod tests {
         assert_eq!(
             ended,
             Some(Ended::Finished {
-                finish_reason: Some("length".to_owned())
+                finish_reason: Some("length".to_owned()),
+                timings: Some(warm_timings()),
             })
         );
         assert_eq!(pieces, CAPTURED_PIECES);
@@ -1310,7 +1572,8 @@ mod tests {
         assert_eq!(
             ended,
             Ok(Ended::Finished {
-                finish_reason: Some("stop".to_owned())
+                finish_reason: Some("stop".to_owned()),
+                timings: None,
             })
         );
         assert_eq!(seen, ["whole"]);
@@ -1439,7 +1702,8 @@ mod tests {
         assert_eq!(
             ended,
             Ok(Ended::Finished {
-                finish_reason: Some("stop".to_owned())
+                finish_reason: Some("stop".to_owned()),
+                timings: None,
             })
         );
         assert_eq!(seen, ["x"]);
@@ -1466,7 +1730,8 @@ mod tests {
         assert_eq!(
             ended,
             Ok(Ended::Finished {
-                finish_reason: Some("stop".to_owned())
+                finish_reason: Some("stop".to_owned()),
+                timings: None,
             })
         );
         assert_eq!(seen, ["x"]);
