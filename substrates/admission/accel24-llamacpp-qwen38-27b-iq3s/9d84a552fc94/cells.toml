@@ -1,0 +1,49 @@
+# Cells for this fingerprint, the #143 cells window of 2026-09-29. One table per cell; `word` is one of
+# pass, fail, n/a (reason), unreported, unadjudicated (ruled on #143). recompute.sh re-derives every word
+# that is derivable from a raw file and refuses a word that disagrees.
+
+[identity]
+word = "pass"
+instrument = "the window script's step 0: every build file and every library the container resolves, hashed; /proc/<pid>/exe of each candidate server"
+reading = "llama-server 865044a2bf2d5685... (mainline 4ceb171, clean tree), run inside the CUDA 13.0 container sha256:1e8ac7a5...; every candidate server's exe read 865044a2...; weights 58fd8267... (IQ3_S-mtp, MTP layer inline); the engine component of the fingerprint is the sha256 of raw/engine-manifest.txt"
+raw = { identity_before_txt = "32f50db964cf49783df2c22f7eab493cd7869cc73e4f251408b428c28bcb9a00", engine_manifest_txt = "62ab7a1cd1fbc87555a7026704a38bf9f4fc49a0ef0d52a917c2b0d11ad7c088", window_b_log = "d1fdfd27a2acf12ad1c39b392a87e51e9cb2e4308d9ae003863e22e759d11df7" }
+
+[kwarg_delivery]
+word = "pass"
+instrument = "paired control (D5 as amended by M8), as for the floor"
+reading = "enable_thinking false: 0 reasoning characters; true: 116; default: 82"
+criterion = "negative half 0 and positive half above 0"
+raw = { kw_json = "ebded7622af92293c79c2130271ba35ad322c49f02afa202acdd1aa0ae8c5f0e" }
+
+[rendered_effort]
+word = "unadjudicated"
+instrument = "/apply-template with chat_template_kwargs reasoning_effort (and reasoning_strength) at none, low, medium, high, xhigh, max and absent"
+reading = "None: renders as the default; none: refused: ERROR 500; low: renders differently; medium: renders differently; high: refused: ERROR 500; xhigh: renders as the default; max: refused: ERROR 500; reasoning_strength is not read at any level; the served template's sha256 is c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041, equal to the GGUF header's"
+refusal_text_sha256 = "842846d1fb518be1853847bd4a1e9b4028d3ffb23a3e19e4601841dfe3b7d6dc"
+refusal_status = 500
+why_no_word = "no criterion is ruled for this cell; a reading is on #143 for planning (Dispatch, 2026-09-29)"
+raw = { kw_json = "ebded7622af92293c79c2130271ba35ad322c49f02afa202acdd1aa0ae8c5f0e" }
+
+[canary]
+word = "unadjudicated"
+instrument = "canary e0827, k = 36, the first draw on this line"
+reading = "36/36; recorded, not judged: the first-draw criterion for a new rung (Q5) is not ruled"
+raw = { canary_log = "8432e486b93611610a3ef7a44fdda27b75442430745c152a74f138cfe2d3e98b", canary_timings_jsonl = "3a7eb29fc1ce28adffa15d06afc68c6c6e4ecaaafc60b00c6bc0499824e8c28c" }
+
+[output_invariance]
+word = "pass"
+instrument = "on/off/off (I4d) as for the floor: off twice as separate launches of the recommended line without its two speculative flags, on the recommended line"
+reading = "spec-off bitwise reproducible within a process and across two; spec-on reproducible with itself (833 drafted in every rep); every on/off pair first differs at token 55"
+criterion = "reading (c) as ruled on #142: the excess is measured and declared on the registry entry"
+raw = { inv_cand_off_json = "98b5e8b1019755de36e331e3d552a7c1a2c598342e747247fa8b53049ca20336", inv_cand_off2_json = "6f6e9f3cf5f7548a732f6becb8ea88a206d2ba4752c8d3cc9075c7aa230bfa07", inv_cand_on_json = "c51704d4e224a7af01ff707e28942c1edeef4937a69b93f9ed849aea26daea79" }
+
+[headroom]
+word = "pass"
+instrument = "both slots prefilled concurrently to n_ctx/2 - 512 tokens, nvidia-smi memory.used sampled every 1 s, the CPU rung resident"
+reading = "peak 22610 of 24576 MiB, 1966 MiB free, against the floor's 1,208 (Q9 as amended)"
+criterion = "free at peak no less than the floor's line measured the same way: 1,208 MiB"
+raw = { fill_json = "bf30f16d505c467cbba12f980b53996c0aae91f8fdce39722832dbe967fb0c34" }
+
+[checkpoint_restore]
+word = "unreported"
+reason = "no instrument; I4b not built"

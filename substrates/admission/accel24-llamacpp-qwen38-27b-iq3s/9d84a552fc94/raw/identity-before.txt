@@ -1,0 +1,43 @@
+prod_pid 206636
+prod_exe 980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4
+prod_cmdline_sha256 e4abe738386553ce24323bc757ff2b21f74511099612a95a3faf61844192b9e0
+smi 615.71.09, 23532 MiB, 24576 MiB
+kernel 7.2.4-ogc3.1.fc44.x86_64
+deployment False True 44.20260928 5ada02b16a652849
+deployment True False 44.20260914 d27ee45ffa3efa32
+deployment False False 44.20260908 9fccaa550ad146cc
+cand_commit 4ceb1719101f32637b841206c172f3f058ffc182 dirty=0
+cand_file 865044a2bf2d56856f843b7cf080faf519030e338d8b75d366270b5b9d2b5511 llama-server
+cand_file 33b77954e65ba5a8763664dc4d93764971151c32e90f90213ad8fa09562245d5 libllama-server-impl.so
+cand_file 27a4450b9fd5755662227509b68156e095f9953f78f623d7c41847cec4438ee0 libllama-common.so.0
+cand_file b51513377dea9e25bc33fd94bda3cea64549a589e368f02208e79a82c147c1b7 libmtmd.so.0
+cand_file 75ee69002de615f4d54b4d20ce613c7088972cc4f62819fbd9b72306f30e8c38 libllama.so.0
+cand_file 2ac057a878de41ee228d829a920086f6a8bf4b630ba146ac1a30a0f8267232c5 libggml.so.0
+cand_file 76fccaca96c6b39ef6a70b77923929501a5f54966c007f73cf253f80ddb68dcd libggml-base.so.0
+cand_file 046fa0ca6467d75ab4980fe49583f1cb88fc586e7fca0f4790195bfbffa27899 libggml-cpu.so.0
+cand_file b502c27d9c58e68ae23083ca1d9f8c8db36eb804ea97025da1a5d9389c965516 libggml-cuda.so.0
+container sha256:1e8ac7a54c184a1af8ef2167f28fa98281892a835c981ebcddb1fad04bdd452d host
+container_lib 76fccaca96c6b39ef6a70b77923929501a5f54966c007f73cf253f80ddb68dcd  ~/src/llama.cpp/build-cuda/bin/libggml-base.so.0
+container_lib 046fa0ca6467d75ab4980fe49583f1cb88fc586e7fca0f4790195bfbffa27899  ~/src/llama.cpp/build-cuda/bin/libggml-cpu.so.0
+container_lib b502c27d9c58e68ae23083ca1d9f8c8db36eb804ea97025da1a5d9389c965516  ~/src/llama.cpp/build-cuda/bin/libggml-cuda.so.0
+container_lib 2ac057a878de41ee228d829a920086f6a8bf4b630ba146ac1a30a0f8267232c5  ~/src/llama.cpp/build-cuda/bin/libggml.so.0
+container_lib 27a4450b9fd5755662227509b68156e095f9953f78f623d7c41847cec4438ee0  ~/src/llama.cpp/build-cuda/bin/libllama-common.so.0
+container_lib 33b77954e65ba5a8763664dc4d93764971151c32e90f90213ad8fa09562245d5  ~/src/llama.cpp/build-cuda/bin/libllama-server-impl.so
+container_lib 75ee69002de615f4d54b4d20ce613c7088972cc4f62819fbd9b72306f30e8c38  ~/src/llama.cpp/build-cuda/bin/libllama.so.0
+container_lib b51513377dea9e25bc33fd94bda3cea64549a589e368f02208e79a82c147c1b7  ~/src/llama.cpp/build-cuda/bin/libmtmd.so.0
+container_lib 3a15d66867d83762c7f2f1e37359cb8f6c5743edb369c65285cb0b1c4f7498bf  /lib/x86_64-linux-gnu/libc.so.6
+container_lib 85a8cc8cf00419ceb295ec62c481d05b4cdbdab10f25c5375d6d24bdbe00b4d9  /lib/x86_64-linux-gnu/libcuda.so.1
+container_lib c2994527172cc23b7fb0f7d611b71e00a37da27af12c2e5e9e0dc1a742886c96  /lib/x86_64-linux-gnu/libdl.so.2
+container_lib 02f3f192bf5f79b811f1e34a650fea443d407408703448906585232383957f60  /lib/x86_64-linux-gnu/libgcc_s.so.1
+container_lib 16c68465193c58900805106b70b26eecd6da5da42155f237ccddb922a3280ee6  /lib/x86_64-linux-gnu/libgomp.so.1
+container_lib fce00b6f25f459cf4ae0b7fae4257909a1a8a86f9149e7c029a5d617baf1ccd0  /lib/x86_64-linux-gnu/libm.so.6
+container_lib 455d7a4327e5a6b2c2f6496dbfac01b57a0bc649493452a8208dd99789e7274d  /lib/x86_64-linux-gnu/libnccl.so.2
+container_lib 90491a21ce44efcf3bd4b65ec82501c091d7ebe7f8d9b341dd01d721001d9ecd  /lib/x86_64-linux-gnu/libpthread.so.0
+container_lib 6d072187d88e092e81561a44c03a4a41397319022c6d43519757cc051c576d82  /lib/x86_64-linux-gnu/librt.so.1
+container_lib a68762c86d371e6041f03f03a33a78fa235809ae7d81c90185940c93c3535aed  /lib/x86_64-linux-gnu/libstdc++.so.6
+container_lib c92c4c24c257d638a61130f8a5f7f31eb6d6262c24f8e19816ff56b58b73a857  /usr/local/cuda/targets/x86_64-linux/lib/libcublasLt.so.13
+container_lib ea443b3d282af9c82e16be974860b5ba993020bbe98988a7be201bf0c0215e88  /usr/local/cuda/targets/x86_64-linux/lib/libcublas.so.13
+container_lib 6876f4841bdbe30b187dcf8d7a7d2d6579bf12a36eeb430c7b28484ccdeed89a  /usr/local/cuda/targets/x86_64-linux/lib/libcudart.so.13
+cand_weights 58fd826723939933dc86f45b7fe04545cbc2de1c70f6fe2cdd3858c87a98c12f 12120016960
+bottom_weights b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897
+gguf_template {"gguf_version": 3, "chat_template_sha256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041", "chars": 8952}

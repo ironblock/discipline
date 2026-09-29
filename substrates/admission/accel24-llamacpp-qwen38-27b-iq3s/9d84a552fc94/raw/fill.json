@@ -1,0 +1,26 @@
+{
+ "n_ctx": 229376,
+ "np": 2,
+ "per_slot_target": 114176,
+ "requests": [
+  {
+   "prompt_n": 114122,
+   "prompt_ms": 142532.406,
+   "wall_s": 142.6,
+   "id_slot": 0
+  },
+  {
+   "prompt_n": 114122,
+   "prompt_ms": 249164.933,
+   "wall_s": 385.5,
+   "id_slot": 1
+  }
+ ],
+ "vram_total_mib": 24576,
+ "vram_peak_mib": 22610,
+ "vram_after_mib": 22610,
+ "vram_free_at_peak_mib": 1966,
+ "samples": 379,
+ "free_m_after": "               total        used        free      shared  buff/cache   available\nMem:           31985        8075         759         528       24809       23910\nSwap:          15992         286       15706\n",
+ "passes_1gib": true
+}

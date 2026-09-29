@@ -1,0 +1,5 @@
+{
+ "recipe": "sha256 of the canonical JSON below (sorted keys, no spaces); the directory is named by its first 12 hex characters",
+ "canonical": "{\"engine\":\"62ab7a1cd1fbc87555a7026704a38bf9f4fc49a0ef0d52a917c2b0d11ad7c088\",\"reasoning_state\":\"no reasoning, effort or budget flag on the line\",\"serving_line\":\"-ngl 99, -t 8, -c 229376, -np 2, --kv-unified, -ctk q8_0, -ctv q8_0, -fa on, -b 1024, -ub 512, --jinja, --spec-type draft-mtp, --spec-draft-n-max 2\",\"template\":\"c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041\",\"weights\":{\"main\":\"58fd826723939933dc86f45b7fe04545cbc2de1c70f6fe2cdd3858c87a98c12f\"}}",
+ "sha256": "9d84a552fc940b7fc6909f9fea0f1fa420129d638b97af4fdbd38cfda3086af1"
+}

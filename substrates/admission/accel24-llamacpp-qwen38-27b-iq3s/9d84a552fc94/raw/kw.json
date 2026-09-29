@@ -1,0 +1,94 @@
+{
+ "props_template_sha256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041",
+ "props_template_chars": 8952,
+ "template_mentions": {
+  "enable_thinking": true,
+  "reasoning_effort": true,
+  "reasoning_strength": false,
+  "xhigh": true,
+  "preserve_thinking": true
+ },
+ "thinking_disabled": {
+  "reasoning_chars": 0,
+  "content": "144",
+  "completion_tokens": 4
+ },
+ "thinking_enabled": {
+  "reasoning_chars": 116,
+  "content": "144",
+  "completion_tokens": 44
+ },
+ "default": {
+  "reasoning_chars": 82,
+  "content": "144",
+  "completion_tokens": 32
+ },
+ "negative_control": true,
+ "positive_control": true,
+ "rendered_effort": {
+  "reasoning_effort=None": {
+   "sha256": "76d515b90b3f12a40ba7ba4794c46f8e6382e809cbd780d5a97b4df5a41432f4",
+   "same_as_default": true,
+   "differs_at": null
+  },
+  "reasoning_effort=none": {
+   "error": "ERROR 500: {\"error\":{\"code\":500,\"message\":\"\\n------------\\nWhile executing CallExpression at line 49, column 28 in source:\\n...', 'low') %}↵        {{- raise_exception('Unexpected reasoning effort ' ~ reason...\\n                                           ^\\nError: Jinja Exception: Unexpected reasoning effort n"
+  },
+  "reasoning_effort=low": {
+   "sha256": "2bd7be5cf6f1c976e6b78bbdd01750286875fa50a01bd4d24b347f70ad20c12f",
+   "same_as_default": false,
+   "differs_at": "tart|>system\nReasoning effort is set to low. Keep your thinking brief and focused, moving directly to the conclusion without unnecessary elaboration.<|im_end|>\n<|im_start|>user\nWhat is 12 times 12? Answer with the number.<|im_end|>\n<|im_sta"
+  },
+  "reasoning_effort=medium": {
+   "sha256": "833cda6df916f2fb4aaf190043d85ec464fc388d9019a651cc6e4113568c7f37",
+   "same_as_default": false,
+   "differs_at": "<|im_start|>user\nWhat is 12 times 12? Answer with the number.<|im_end|>\n<|im_start|>assistant\n<think>\n"
+  },
+  "reasoning_effort=high": {
+   "error": "ERROR 500: {\"error\":{\"code\":500,\"message\":\"\\n------------\\nWhile executing CallExpression at line 49, column 28 in source:\\n...', 'low') %}↵        {{- raise_exception('Unexpected reasoning effort ' ~ reason...\\n                                           ^\\nError: Jinja Exception: Unexpected reasoning effort h"
+  },
+  "reasoning_effort=xhigh": {
+   "sha256": "76d515b90b3f12a40ba7ba4794c46f8e6382e809cbd780d5a97b4df5a41432f4",
+   "same_as_default": true,
+   "differs_at": null
+  },
+  "reasoning_effort=max": {
+   "error": "ERROR 500: {\"error\":{\"code\":500,\"message\":\"\\n------------\\nWhile executing CallExpression at line 49, column 28 in source:\\n...', 'low') %}↵        {{- raise_exception('Unexpected reasoning effort ' ~ reason...\\n                                           ^\\nError: Jinja Exception: Unexpected reasoning effort m"
+  },
+  "reasoning_strength=None": {
+   "sha256": "76d515b90b3f12a40ba7ba4794c46f8e6382e809cbd780d5a97b4df5a41432f4",
+   "same_as_default": true,
+   "differs_at": null
+  },
+  "reasoning_strength=none": {
+   "sha256": "76d515b90b3f12a40ba7ba4794c46f8e6382e809cbd780d5a97b4df5a41432f4",
+   "same_as_default": true,
+   "differs_at": null
+  },
+  "reasoning_strength=low": {
+   "sha256": "76d515b90b3f12a40ba7ba4794c46f8e6382e809cbd780d5a97b4df5a41432f4",
+   "same_as_default": true,
+   "differs_at": null
+  },
+  "reasoning_strength=medium": {
+   "sha256": "76d515b90b3f12a40ba7ba4794c46f8e6382e809cbd780d5a97b4df5a41432f4",
+   "same_as_default": true,
+   "differs_at": null
+  },
+  "reasoning_strength=high": {
+   "sha256": "76d515b90b3f12a40ba7ba4794c46f8e6382e809cbd780d5a97b4df5a41432f4",
+   "same_as_default": true,
+   "differs_at": null
+  },
+  "reasoning_strength=xhigh": {
+   "sha256": "76d515b90b3f12a40ba7ba4794c46f8e6382e809cbd780d5a97b4df5a41432f4",
+   "same_as_default": true,
+   "differs_at": null
+  },
+  "reasoning_strength=max": {
+   "sha256": "76d515b90b3f12a40ba7ba4794c46f8e6382e809cbd780d5a97b4df5a41432f4",
+   "same_as_default": true,
+   "differs_at": null
+  }
+ }
+}

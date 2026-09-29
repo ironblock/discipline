@@ -370,6 +370,8 @@ image flags, which govern how the model is prompted."""
 # no capture records. The deployment checksum is the more specific identity;
 # the base-checksum is what the archive has, and calling it the deployment's
 # digest without saying so would overstate what an instance pins.
+hazards = "speculation (DFlash) is not bit-exact with the spec-off path: on #161's prompt at greedy decoding, every on/off pair first differs at token 51, and spec-off is bitwise reproducible within a process and across two; spec-on is not reproducible with itself: after a restore, the server's first request (3,362 drafted) diverged from the next four (2,604-2,610 drafted) at token 67 (substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/, 2026-09-29). The margins at the divergences are unmeasured. The template does not read a reasoning_effort key: every level renders identically. Nothing may be gated on token identity"
+
 [[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
 id = "2026-07-25"
 os_deployment_version = "44.20260721"
@@ -442,7 +444,14 @@ canary draw, and not pooled -- kept every reply (window/canary-capture.jsonl in 
 source instead of naming the anchor, 84 characters. The pooled baseline \
 file is written with the next window's pre-run draw added to the pool, by the \
 instrument's canary_pool.py; the misses of every draw from then on are recorded \
-beside the count."""
+beside the count. The pooled baseline file, with the pre-run draw of 2026-09-29 added (354/360, \
+Wilson 99% [0.955, 0.994]), is committed as substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/raw/canary-pool.json, and \
+the #143 cells window's two draws (36/36 before, 36/36 after) are in the same directory; \
+other draws of 2026-09-29 were taken in windows whose records are not committed and are not pooled."""
+successor_staged = "44.20260928"
+successor_staged_note = "read 2026-09-29 (rpm-ostree status): staged, not booted; it mints a new instance on the next reboot"
+accelerator_driver_read = "615.71.09"
+accelerator_driver_read_note = "read by nvidia-smi 2026-09-29; the equipment entry records 610.57.04 as measured 2026-09-05 and is left as its fingerprint was taken"
 current = true
 
 [[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
@@ -474,6 +483,44 @@ during that session records the same deployment digest, version and kernel as \
 this instance and no other, which is what ties the digest to this instance \
 rather than to the substrate at large."""
 current = false
+
+[substrate.accel24-llamacpp-qwen38-27b-iq3s]
+equipment = "linux-pc"
+description = "Qwen3.8 27B GSQ-RCO at IQ3_S (MTP layer inline) on the 24 GiB accelerator, served by mainline llama.cpp inside a CUDA 13.0 container with the inline MTP draft; the ladder's middle-rung candidate (#143), not yet admitted"
+pinned = true
+
+engine_name = "llama.cpp (ggml-org mainline)"
+engine_identity = "865044a2bf2d56856f843b7cf080faf519030e338d8b75d366270b5b9d2b5511"
+engine_identity_is = "sha256 of the llama-server binary, read through /proc/<pid>/exe of every candidate server on 2026-09-29; a thin launcher, so the build's shared libraries and the container's resolved libraries are hashed in substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/raw/engine-manifest.txt, whose sha256 is the fingerprint's engine component"
+engine_commit = "4ceb1719101f32637b841206c172f3f058ffc182"
+engine_commit_is = "the build checkout's HEAD, clean tree, read 2026-09-29; the binary self-reports 0.4.1-dev (build 1, commit 4ceb171)"
+engine_container_image = "sha256:1e8ac7a54c184a1af8ef2167f28fa98281892a835c981ebcddb1fad04bdd452d"
+engine_container_is = "the build container the binary runs in (it needs the container's NCCL); PID namespace shared with the host"
+
+weights_main = "58fd826723939933dc86f45b7fe04545cbc2de1c70f6fe2cdd3858c87a98c12f"
+weights_main_file = "Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf, 12,120,016,960 bytes, the MTP (nextn) layer inline; the file named IQ3_S-mtp is internally IQ3_S, and the family's file names do not match their contents"
+measured_bpw = "3.4981 without the inline MTP layer, 3.5457 with it, the MTP layer alone 6.5641: tensor bytes x 8 / summed tensor elements from the GGUF tensor table (substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/raw/bpw.json)"
+chat_template_sha256 = "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041"
+chat_template_is = "the served template (/props) and the GGUF header's tokenizer.chat_template, equal, 8,952 characters"
+
+sampler_card = "none on the serving line; each request sets its own"
+serving_context = 229376
+serving_flags = "-ngl 99, -t 8, -c 229376, -np 2, --kv-unified, -ctk q8_0, -ctv q8_0, -fa on, -b 1024, -ub 512, --jinja, --spec-type draft-mtp, --spec-draft-n-max 2"
+serving_flags_are = "the inference seat's recommended line (#143, comment 5883986293), as launched in the cells window of 2026-09-29"
+reasoning_state = "no reasoning, effort or budget flag on the serving line. Per request, reasoning_effort renders: absent = xhigh; low and medium render differently; high, none and max are refused (HTTP 500, the template raising 'Unexpected reasoning effort'); reasoning_strength is not read. Side by side, the floor's template reads no effort key at all. No word is chosen on this cell (substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/cells.toml)"
+headroom = "1,966 MiB free with both slots prefilled to 114,122 tokens (peak 22,610 of 24,576 MiB), against the floor's 1,208 under Q9 as amended"
+hazards = "speculation (MTP) is not bit-exact with the spec-off path: on #161's prompt at greedy decoding, every on/off pair first differs at token 55; spec-off is bitwise reproducible within a process and across two, and spec-on with itself (833 drafted in every rep). The margins at the divergence are unmeasured. A hybrid recurrent model. Nothing may be gated on token identity"
+admission = "cells in substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/ (2026-09-29); not admitted: the depth probe and the parity fire have not run on this line"
+
+[[substrate.accel24-llamacpp-qwen38-27b-iq3s.instance]]
+id = "2026-09-29"
+os_deployment_version = "44.20260914"
+os_deployment_digest = "d27ee45ffa3efa320b8c90a526b1105e0a8bb3bb4b4be1c796c3128d2c91e423"
+kernel = "7.2.4-ogc3.1.fc44.x86_64"
+accelerator_driver_read = "615.71.09"
+pinned_by = "the #143 cells window of 2026-09-29: identity read at step 0 (substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/raw/identity-before.txt)"
+current = false
+current_is = "not the serving line of the machine; launched per window"
 
 [substrate.cpu-beellama-qwen3-1p7b-q4km]
 equipment = "linux-pc"

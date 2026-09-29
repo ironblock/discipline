@@ -1,0 +1,13 @@
+{
+ "rule": "an absolute home path (/home/<name>, /var/home/<name>, /Users/<name>) replaced by ~",
+ "files": {
+  "raw/identity-before.txt": {
+   "sha256_before_scrub": "4085d4576e6a5a90cf0daee837cc3643c6f598feb717ec3fd2ca158671c251dc",
+   "home_path_substitutions": 8
+  },
+  "raw/window-b.log": {
+   "sha256_before_scrub": "83f1163c711bba3f6b92581691fc86715bb51c714458268d2e48c32ec4b860a8",
+   "home_path_substitutions": 2
+  }
+ }
+}
