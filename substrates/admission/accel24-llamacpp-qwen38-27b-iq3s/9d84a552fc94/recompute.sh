@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Gate 0 for a cells directory (#143). Every raw file cells.toml cites must hash as it says; every
 # word derivable from a raw file is re-derived here, and a word that disagrees is refused. Words not
-# derivable from a raw file (n/a, unreported, unadjudicated) are checked for form only; a cell may carry
-# no word only when its criterion is an unruled question ("Q5 unruled") and word_withheld says why.
+# derivable from a raw file (n/a, unreported, unadjudicated) are checked for form only. A rung's first
+# canary draw is its baseline (Q5, planning, #143), re-derived here from the single draw's log.
 # Exit 0 when all hold, 1 when any fails, 2 when a step cannot run.
 set -uo pipefail
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,13 +16,11 @@ def fail(m):
     global bad; bad += 1; print(f"recompute: {m}")
 if hashlib.sha256(fp["canonical"].encode()).hexdigest() != fp["sha256"] or here.name != fp["sha256"][:12]:
     fail("the directory is not named by its fingerprint's first 12 hex characters")
-WORDS = ("pass", "fail", "unreported", "unadjudicated")
+WORDS = ("pass", "fail", "unreported", "unadjudicated", "baseline")
 raw = {}
 for name, c in cells.items():
-    w = c.get("word")
-    if w is None:  # a cell that ran but whose criterion is unruled carries no word (Dispatch, 2026-09-29)
-        if not (re.fullmatch(r"Q\d+ unruled", str(c.get("criterion", ""))) and c.get("word_withheld")): fail(f"[{name}] has no word and no stated unruled criterion")
-    elif not (w in WORDS or re.fullmatch(r"n/a \(.+\)", w)): fail(f"[{name}] word {w!r} is not one of the ruled five")
+    w = c.get("word", "")
+    if not (w in WORDS or re.fullmatch(r"n/a \(.+\)", w)): fail(f"[{name}] word {w!r} is not one of the ruled words")
     for key, want in (c.get("raw") or {}).items():
         hits = [p for p in (here / "raw").iterdir() if p.name.replace("-", "_").replace(".", "_") == key]
         if len(hits) != 1: fail(f"[{name}] cites {key}, which names no single raw file"); continue
@@ -91,6 +89,7 @@ elif (here / "raw/canary.log").exists():
     h, n = draw(here / "raw/canary.log")
     st = re.match(r"(\d+)/(\d+);", cells["canary"]["reading"])
     if not st or (int(st.group(1)), int(st.group(2))) != (h, n): fail(f"[canary] the draw reads {h}/{n}, which is not what the reading states first")
+    derived("canary", "baseline")  # a rung's first draw is its baseline; the second draw is the first test (Q5)
 # headroom, where measured here: free at peak against the floor's reading cited in the criterion
 if (here / "raw/fill.json").exists():
     fl = json.loads((here / "raw/fill.json").read_text())

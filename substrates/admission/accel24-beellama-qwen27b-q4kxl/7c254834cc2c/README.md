@@ -16,8 +16,8 @@ The #143 cells window, 2026-09-29, ratified by the maintainer. The step list was
 
 **How to read the files:**
 - `cells.toml` holds one table per cell: its word, instrument, reading, and the raw files it cites by digest.
-- The words are the five ruled on #143: `pass`, `fail`, `n/a (reason)`, `unreported`, `unadjudicated`. A cell that ran but whose criterion is an unruled question carries no word: `criterion` names the question and `word_withheld` says why.
-- `recompute.sh` re-derives every word that follows from a raw file and refuses one that disagrees. It was seen red on six seeded faults: a flipped word, a tampered raw byte, a misstated divergence position, a raised headroom criterion, and a misstated canary count on each directory. It was then seen red on three more: a withheld word with its criterion deleted, the refusal row read against the wrong line's results, and a changed floor VRAM figure in `raw/refusal-window.log`.
+- The words are those ruled on #143: `pass`, `fail`, `n/a (reason)`, `unreported`, `unadjudicated`, and `baseline`, which is a rung's first canary draw, not a test (comment 5885752512).
+- `recompute.sh` re-derives every word that follows from a raw file and refuses one that disagrees. It was seen red on six seeded faults: a flipped word, a tampered raw byte, a misstated divergence position, a raised headroom criterion, and a misstated canary count on each directory. It was then seen red on three more: the candidate's first canary draw given a word other than `baseline`, the refusal row read against the wrong line's results, and a changed floor VRAM figure in `raw/refusal-window.log`.
 - `fingerprint.json` gives the recipe and the canonical components. The directory is named by the first 12 hex characters.
 - `scrub.json` lists every raw file in which an absolute home path was replaced by `~`, or a private build-container name by `<build-container>`, with its pre-scrub digest. These are the only edits to the raw files. `raw/refusal.json` holds both lines' results as `refusal.sh` wrote them, and each directory reads its own line (`refusal_rung`).
 
