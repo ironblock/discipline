@@ -1,0 +1,45 @@
+2026-09-29T08:02:12Z start head=10d866e
+cell 0.0 (259 tok, 0 planted) application 0: ALL=True err=None
+cell 0.0 (259 tok, 0 planted) application 1: ALL=True err=None
+cell 0.0 (259 tok, 0 planted) application 2: ALL=True err=None
+cell 0.0 (259 tok, 0 planted) application 3: ALL=True err=None
+cell 0.0 (259 tok, 0 planted) application 4: ALL=True err=None
+cell 0.0 (259 tok, 0 planted) retrieval 0: ALL=True err=None
+cell 0.5 (79848 tok, 4 planted) application 0: ALL=True err=None
+cell 0.5 (79848 tok, 4 planted) application 1: ALL=True err=None
+cell 0.5 (79848 tok, 4 planted) application 2: ALL=True err=None
+cell 0.5 (79848 tok, 4 planted) application 3: ALL=True err=None
+cell 0.5 (79848 tok, 4 planted) application 4: ALL=True err=None
+cell 0.5 (79848 tok, 4 planted) retrieval 0: ALL=True err=None
+cell 0.9 (143586 tok, 4 planted) application 0: ALL=True err=None
+cell 0.9 (143586 tok, 4 planted) application 1: ALL=True err=None
+cell 0.9 (143586 tok, 4 planted) application 2: ALL=True err=None
+cell 0.9 (143586 tok, 4 planted) application 3: ALL=True err=None
+cell 0.9 (143586 tok, 4 planted) application 4: ALL=True err=None
+cell 0.9 (143586 tok, 4 planted) retrieval 0: ALL=True err=None
+cell 0.95 (151622 tok, 4 planted) application 0: ALL=True err=None
+cell 0.95 (151622 tok, 4 planted) application 1: ALL=True err=None
+cell 0.95 (151622 tok, 4 planted) application 2: ALL=True err=None
+cell 0.95 (151622 tok, 4 planted) application 3: ALL=True err=None
+cell 0.95 (151622 tok, 4 planted) application 4: ALL=True err=None
+cell 0.95 (151622 tok, 4 planted) retrieval 0: ALL=True err=None
+2026-09-29T08:19:55Z run rc=0
+summarise rc=0
+decide rc=0
+{
+ "word": "pass",
+ "per_cell": {
+  "0.0": "control",
+  "0.5": "pass",
+  "0.9": "pass",
+  "0.95": "pass"
+ },
+ "control_pass": 5,
+ "criterion": {
+  "within": 1,
+  "min_samples": 5,
+  "max_errors": 0
+ },
+ "strict_beside": "pass",
+ "strict_is": "every sample at every cell passed: reported beside the word, never the word (planning, #143)"
+}
