@@ -28,8 +28,8 @@ The #143 cells window, 2026-09-29, ratified by the maintainer. The step list was
 | cell | word | reading |
 |---|---|---|
 | identity | pass | `llama-server` `865044a2…` at mainline `4ceb171`, the build's and the container's libraries hashed (`raw/engine-manifest.txt`), weights `58fd8267…` |
-| kwarg delivery (paired) | pass | thinking off 0 reasoning characters, on 116 |
-| rendered effort | unadjudicated | absent = `xhigh`; `low` and `medium` render differently; `high`, `none` and `max` refused (HTTP 500, the template's "Unexpected reasoning effort", text by digest); `reasoning_strength` not read. No word chosen: a reading is before planning on #143 |
+| kwarg delivery (paired) | pass | thinking off 0 reasoning characters, on 116; a chat request at each refused level (high, none, max) returns HTTP 500 (`raw/refusal.json`, production up, the candidate CPU-only) |
+| rendered effort | n/a (a capability fact on the registry) | absent = `xhigh`; `low` and `medium` render differently; `high`, `none` and `max` refused (HTTP 500, the template's "Unexpected reasoning effort", text by digest); `reasoning_strength` not read. Ruled a capability fact (#143): recorded as `effort` on the registry entry |
 | canary | unadjudicated | 36/36, the first draw; Q5's first-draw criterion is unruled |
 | output invariance | pass | reading (c): spec-off reproducible within a process and across two; spec-on reproducible with itself; on/off first differs at token 55 |
 | headroom | pass | 1,966 MiB free with both slots full, against the floor's 1,208 |

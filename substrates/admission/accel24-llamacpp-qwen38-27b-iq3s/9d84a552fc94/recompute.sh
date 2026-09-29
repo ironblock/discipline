@@ -34,7 +34,14 @@ want_exe = "prod_exe 980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0
 derived("identity", "pass" if want_exe in ident else "fail")
 if "kwarg_delivery" in cells:
     kw = json.loads((here / "raw/kw.json").read_text())
-    derived("kwarg_delivery", "pass" if kw["thinking_disabled"]["reasoning_chars"] == 0 and kw["thinking_enabled"]["reasoning_chars"] > 0 else "fail")
+    refused = cells["kwarg_delivery"].get("refused_levels")
+    ok_ref = True
+    if refused is not None:  # the refused-level row (planning, 2026-09-29): each refused level must return 500
+        rf = next(iter(json.loads((here / "raw/refusal.json").read_text()).values()))
+        ok_ref = all(rf[l]["status"] == 500 for l in refused)
+        accepted_err = [l for l, v in rf.items() if l not in refused and v["status"] != 200]
+        if accepted_err: fail(f"[kwarg_delivery] levels not declared refused did not return 200: {accepted_err}")
+    derived("kwarg_delivery", "pass" if kw["thinking_disabled"]["reasoning_chars"] == 0 and kw["thinking_enabled"]["reasoning_chars"] > 0 and ok_ref else "fail")
     if kw["props_template_sha256"] not in cells["rendered_effort"]["reading"]: fail("[rendered_effort] the reading does not name the served template's digest")
     errs = [k for k, v in kw["rendered_effort"].items() if "error" in v]
     if "refusal_text_sha256" in cells["rendered_effort"]:

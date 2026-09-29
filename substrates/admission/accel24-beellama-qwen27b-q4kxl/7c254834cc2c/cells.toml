@@ -13,13 +13,14 @@ word = "pass"
 instrument = "paired control (D5 as amended by M8): the same short question with chat_template_kwargs enable_thinking false, then true, then neither"
 reading = "enable_thinking false: 0 reasoning characters; true: 505; default: 519"
 criterion = "negative half 0 and positive half above 0"
-raw = { kw_json = "173a5b3f62bc14e539a01d44ea49456daa31c03944ce8cb36a2d133a43a729b0" }
+raw = { kw_json = "173a5b3f62bc14e539a01d44ea49456daa31c03944ce8cb36a2d133a43a729b0", refusal_json = "bff086347c8b1ac4ff30b733bdd24482ca80c7ecc436ec02fc3d4a819423414d" }
+refused_levels = []
+refused_level_reading = "n/a (no refused level): a chat request at every level tried returns 200 (high: 200, none: 200, max: 200, low: 200) on the production line, 2026-09-29 07:10Z; the template reads no effort key, so every level is accepted and none is implemented"
 
 [rendered_effort]
-word = "unadjudicated"
+word = "n/a (a capability fact of the template, recorded as data on the registry entry's effort fields, not a cell word: planning on #143, 2026-09-29)"
 instrument = "/apply-template with chat_template_kwargs reasoning_effort (and reasoning_strength) at none, low, medium, high, xhigh, max and absent"
 reading = "every level of both keys renders identically to the absent case: the template does not read the effort key; the served template's sha256 is 55d4931433fe502b794226ee7f4d206a6bdd436ac9f80eb7d8ebb4c639f9ea0c"
-why_no_word = "no criterion is ruled for this cell; a reading is on #143 for planning (Dispatch, 2026-09-29)"
 raw = { kw_json = "173a5b3f62bc14e539a01d44ea49456daa31c03944ce8cb36a2d133a43a729b0" }
 
 [canary]

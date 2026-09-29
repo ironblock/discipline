@@ -13,15 +13,16 @@ word = "pass"
 instrument = "paired control (D5 as amended by M8), as for the floor"
 reading = "enable_thinking false: 0 reasoning characters; true: 116; default: 82"
 criterion = "negative half 0 and positive half above 0"
-raw = { kw_json = "ebded7622af92293c79c2130271ba35ad322c49f02afa202acdd1aa0ae8c5f0e" }
+raw = { kw_json = "ebded7622af92293c79c2130271ba35ad322c49f02afa202acdd1aa0ae8c5f0e", refusal_json = "873e4713a10a09c59908690b90d7ee7dfe3f4d6a977e6eec4171cc73910c0f90" }
+refused_levels = ["high", "none", "max"]
+refused_level_reading = "a chat request at each refused level returns HTTP 500 (high: 500, none: 500, max: 500); an accepted level (low) renders: 200. Taken 2026-09-29 07:10Z with production up, on the same binary and weights launched CPU-only (GPU hidden, weights memory-mapped with no repack and no warmup, localhost), the refusal occurring in template rendering before any weight is read"
 
 [rendered_effort]
-word = "unadjudicated"
+word = "n/a (a capability fact of the template, recorded as data on the registry entry's effort fields, not a cell word: planning on #143, 2026-09-29)"
 instrument = "/apply-template with chat_template_kwargs reasoning_effort (and reasoning_strength) at none, low, medium, high, xhigh, max and absent"
 reading = "None: renders as the default; none: refused: ERROR 500; low: renders differently; medium: renders differently; high: refused: ERROR 500; xhigh: renders as the default; max: refused: ERROR 500; reasoning_strength is not read at any level; the served template's sha256 is c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041, equal to the GGUF header's"
 refusal_text_sha256 = "842846d1fb518be1853847bd4a1e9b4028d3ffb23a3e19e4601841dfe3b7d6dc"
 refusal_status = 500
-why_no_word = "no criterion is ruled for this cell; a reading is on #143 for planning (Dispatch, 2026-09-29)"
 raw = { kw_json = "ebded7622af92293c79c2130271ba35ad322c49f02afa202acdd1aa0ae8c5f0e" }
 
 [canary]

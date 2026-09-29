@@ -28,8 +28,8 @@ The #143 cells window, 2026-09-29, ratified by the maintainer. The step list was
 | cell | word | reading |
 |---|---|---|
 | identity | pass | exe `980845d6…` and the exact argv, read before the stop and after the restore |
-| kwarg delivery (paired) | pass | thinking off 0 reasoning characters, on 505 |
-| rendered effort | unadjudicated | the template reads no effort key: every level renders identically |
+| kwarg delivery (paired) | pass | thinking off 0 reasoning characters, on 505; refused-level row n/a: no level is refused, every level returns 200 (`raw/refusal.json`) |
+| rendered effort | n/a (a capability fact on the registry) | the template reads no effort key: every level renders identically |
 | canary | pass | 36/36 before, 36/36 after, against the pool of 354/360 at z 2.576 |
 | output invariance | pass | reading (c): spec-off reproducible within a process and across two; on/off first differs at token 51; spec-on not reproducible with itself after a restore (token 67), declared on the registry's hazards line |
 | headroom | n/a (the reference line) | 1,208 MiB free: the inference seat's reading, not re-taken here |
