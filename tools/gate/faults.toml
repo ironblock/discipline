@@ -6461,6 +6461,102 @@ failure_class = "drive.serve-bin-ignores-the-key-file"
 migrated = false
 
 [[fault]]
+id = "drive.serve-auth-compares-nothing"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-auth-compares-nothing"
+failure_class = "drive.serve-auth-compares-nothing"
+migrated = false
+
+[[fault]]
+id = "drive.serve-a-route-skips-auth"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-a-route-skips-auth"
+failure_class = "drive.serve-a-route-skips-auth"
+migrated = false
+
+[[fault]]
+id = "drive.serve-auth-scheme-is-case-sensitive"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-auth-scheme-is-case-sensitive"
+failure_class = "drive.serve-auth-scheme-is-case-sensitive"
+migrated = false
+
+[[fault]]
+id = "drive.serve-credential-accepts-a-control-character"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-credential-accepts-a-control-character"
+failure_class = "drive.serve-credential-accepts-a-control-character"
+migrated = false
+
+[[fault]]
+id = "drive.serve-base64-never-pads"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-base64-never-pads"
+failure_class = "drive.serve-base64-never-pads"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-listens-openly-without-a-credential"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-listens-openly-without-a-credential"
+failure_class = "drive.serve-bin-listens-openly-without-a-credential"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-accepts-a-wildcard"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-accepts-a-wildcard"
+failure_class = "drive.serve-bin-accepts-a-wildcard"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-ignores-the-auth-file"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-ignores-the-auth-file"
+failure_class = "drive.serve-bin-ignores-the-auth-file"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-accepts-a-mapped-wildcard"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-accepts-a-mapped-wildcard"
+failure_class = "drive.serve-bin-accepts-a-mapped-wildcard"
+migrated = false
+
+[[fault]]
+id = "drive.serve-credential-accepts-an-empty-user"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-credential-accepts-an-empty-user"
+failure_class = "drive.serve-credential-accepts-an-empty-user"
+migrated = false
+
+[[fault]]
+id = "drive.serve-credential-debug-prints-its-digest"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-credential-debug-prints-its-digest"
+failure_class = "drive.serve-credential-debug-prints-its-digest"
+migrated = false
+
+[[fault]]
+id = "drive.serve-auth-is-asked-before-the-host-check"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-auth-is-asked-before-the-host-check"
+failure_class = "drive.serve-auth-is-asked-before-the-host-check"
+migrated = false
+
+[[fault]]
 id = "adapters.compaction-read-as-a-turn"
 kind = "lane-fault"
 check = "lanes"

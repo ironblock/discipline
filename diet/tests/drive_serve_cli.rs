@@ -10,6 +10,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use diet::client::stub::{Act, Stub};
@@ -47,15 +48,7 @@ impl Drop for HeadFile {
 }
 
 fn start(endpoint: &str, extra: &[&str]) -> Served {
-    let head = HeadFile(std::env::temp_dir().join(format!(
-        "diet-drive-serve-{}-{}.txt",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|since| since.as_nanos())
-            .unwrap_or_default()
-    )));
-    std::fs::write(&head.0, HEAD).expect("the head file is written");
+    let head = file_holding("head", HEAD);
     let mut child = Command::new(DRIVE)
         .args([
             "serve",
@@ -222,7 +215,7 @@ fn a_served_drive_streams_a_real_servers_answer_over_sse() {
 }
 
 #[test]
-fn a_drive_server_binds_loopback_and_has_no_listen_flag() {
+fn a_drive_server_binds_loopback_by_default_and_listen_takes_an_ip() {
     let stub = Stub::serving(Vec::new()).expect("loopback");
     let served = start(&stub.url(), &[]);
     assert!(
@@ -231,25 +224,112 @@ fn a_drive_server_binds_loopback_and_has_no_listen_flag() {
         served.listening
     );
 
-    let refused = Command::new(DRIVE)
-        .args([
-            "serve",
-            "--endpoint",
-            &stub.url(),
-            "--model",
-            "m",
-            "--head",
-            "x",
-            "--listen",
-            "0.0.0.0:0",
-        ])
-        .output()
-        .expect("diet-drive runs");
-    assert_eq!(
-        refused.status.code(),
-        Some(2),
-        "`--listen` is I7's, with auth"
+    // An address and a port together is not an IP: the port is `--port`'s.
+    let (code, said) = run_briefly(&stub.url(), &["--listen", "127.0.0.1:0"]);
+    assert_eq!(code, Some(2), "{said}");
+}
+
+/// Run `diet-drive serve` with `extra`, and return its exit code and what it
+/// printed -- or `None` if it was still running after ten seconds, when it is
+/// killed rather than left serving.
+fn run_briefly(endpoint: &str, extra: &[&str]) -> (Option<i32>, String) {
+    let head = file_holding("head", HEAD);
+    let mut child = Command::new(DRIVE)
+        .args(["serve", "--endpoint", endpoint, "--model", "m", "--head"])
+        .arg(&head.0)
+        .args(extra)
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("diet-drive starts");
+    let give_up = Instant::now() + Duration::from_secs(10);
+    let code = loop {
+        if let Some(exited) = child.try_wait().expect("the child is waited on") {
+            break exited.code();
+        }
+        if Instant::now() >= give_up {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let mut said = String::new();
+    if let Some(mut stdout) = child.stdout.take() {
+        let _ = stdout.read_to_string(&mut said);
+    }
+    (code, said)
+}
+
+/// A file holding `text`, removed when dropped. Named by this process and a
+/// count, never a clock: tests run in parallel, and two that read the clock
+/// in the same tick would share a file, and one would remove the other's.
+fn file_holding(what: &str, text: &str) -> HeadFile {
+    static MADE: AtomicUsize = AtomicUsize::new(0);
+    let file = HeadFile(std::env::temp_dir().join(format!(
+        "diet-drive-serve-{what}-{}-{}.txt",
+        std::process::id(),
+        MADE.fetch_add(1, Ordering::Relaxed)
+    )));
+    std::fs::write(&file.0, text).expect("the file is written");
+    file
+}
+
+/// `author:s3cret`, as a browser sends it (base64).
+const AUTHOR: &str = "Authorization: Basic YXV0aG9yOnMzY3JldA==\r\n";
+
+#[test]
+fn a_drive_server_off_loopback_without_a_credential_refuses_to_start() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    // TEST-NET-1 (RFC 5737): off loopback, and never this machine's.
+    let (code, said) = run_briefly(&stub.url(), &["--listen", "192.0.2.1"]);
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.contains("needs --auth-file"), "{said}");
+
+    // With a credential it goes on to bind -- and fails only because the
+    // address is not this machine's.
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let (_, said) = run_briefly(
+        &stub.url(),
+        &["--listen", "192.0.2.1", "--auth-file", &auth_path],
     );
+    assert!(said.contains("cannot listen on 192.0.2.1"), "{said}");
+}
+
+#[test]
+fn a_drive_server_refuses_a_wildcard_listen_even_with_a_credential() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    for wildcard in ["0.0.0.0", "::", "::ffff:0.0.0.0"] {
+        let (code, said) = run_briefly(
+            &stub.url(),
+            &["--listen", wildcard, "--auth-file", &auth_path],
+        );
+        assert_eq!(code, Some(2), "{wildcard}: {said}");
+        assert!(said.contains("is a wildcard"), "{wildcard}: {said}");
+    }
+}
+
+#[test]
+fn a_drive_server_with_an_auth_file_asks_every_request_for_it() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--auth-file", &auth_path]);
+    let address = served.listening.clone();
+    let refused = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |_| false,
+    );
+    assert_eq!(status(&refused), 401, "{refused}");
+    let admitted = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n{AUTHOR}\r\n"),
+        |read| read.contains("session.start"),
+    );
+    assert_eq!(status(&admitted), 200, "{admitted}");
 }
 
 #[test]
