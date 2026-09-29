@@ -63,7 +63,7 @@ def measure(endpoint: str, attempts: int, cold: int, slot: int, n_probs: int, dr
             for _ in range(warm_draws - 1):  # re-prime and draw warm again: the cached prefix is recomputed each time
                 call(endpoint, prefix(drop) + X, True, slot, n_probs); more.append(call(endpoint, P + Y, True, slot, n_probs))
         out["attempts"].append({"prime": prime, "warm": warm, "warm_more": more, "cold": colds})
-        if warm["cache_n"] > 0: break  # a reusing attempt is the measurement; retries are only for no reuse
+        if warm["cache_n"] > 0 and all(w["cache_n"] > 0 for w in more): break  # the measurement; an eviction on a later draw is retried like no reuse
     return out
 
 def dist(a: list, b: list, k: int) -> float:
@@ -73,12 +73,14 @@ def dist(a: list, b: list, k: int) -> float:
     top = lambda m: sorted(m, key=m.get, reverse=True)[:k]
     return max((abs(A[t] - B[t]) if t in A and t in B else math.inf) for t in set(top(A)) | set(top(B)))
 
-def reusing(m: dict):
-    return next((a for a in m["attempts"] if a["warm"]["cache_n"] > 0), None)
-
 def warms(att: dict) -> list:
-    """Every warm draw of an attempt, each of which must have reused."""
+    """Every warm draw of an attempt."""
     return [att["warm"]] + att.get("warm_more", [])
+
+def reusing(m: dict):
+    """The first attempt on which every warm draw reused."""
+    return next((a for a in m["attempts"] if all(w["cache_n"] > 0 for w in warms(a))), None)
+
 
 RECURRENT = (".ssm.", "ssm_", "recurrent", "full_attention_interval", ".wkv.", "rwkv", "time_mix", ".shortconv.", "mamba")
 HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -100,7 +102,7 @@ def decide(rung: dict, ref: dict, ident: dict, crit: dict) -> dict:
     if len(rung["attempts"]) > need or len(ref["attempts"]) > need:
         return {**res, "word": "unadjudicated", "reason": f"more than the declared {need} attempts"}
     # the two measurements must be of one procedure: prompt, sampler, a list deep enough to find every compared token, roles
-    if rung.get("prompts", {}).get("P_sha256") != ref.get("prompts", {}).get("P_sha256") or rung.get("sampler") != ref.get("sampler") \
+    if rung.get("prompts", {}).get("P_sha256") != ref.get("prompts", {}).get("P_sha256") or rung.get("sampler") != ref.get("sampler") or rung.get("sampler") != SAMPLER \
        or min(rung.get("n_probs", 0), ref.get("n_probs", 0)) < 2 * k or (rung.get("role"), ref.get("role")) != ("rung", "reference"):
         return {**res, "word": "unadjudicated", "reason": "the rung's and reference's measurements are not of one procedure (prompt, sampler, n_probs of at least twice top_k, roles)"}
     ra, fa = reusing(ref), reusing(rung)
@@ -110,8 +112,8 @@ def decide(rung: dict, ref: dict, ident: dict, crit: dict) -> dict:
         return {**res, "word": "unadjudicated", "reason": f"the rung reused nothing, and stopped at {len(rung['attempts'])} of the declared {need} attempts"}
     if len(ra["cold"]) < 2 or (fa and len(fa["cold"]) < 2):
         return {**res, "word": "unadjudicated", "reason": "fewer than two cold calls: the cold path's floor is unmeasured"}
-    if any(w["cache_n"] == 0 for w in warms(ra)) or (fa and any(w["cache_n"] == 0 for w in warms(fa))):
-        return {**res, "word": "unadjudicated", "reason": "a repeated warm draw reused nothing"}
+    if len(warms(ra)) < crit["reference_warm_draws"]:
+        return {**res, "word": "unadjudicated", "reason": f"the reference drew warm {len(warms(ra))} time(s), not the declared {crit['reference_warm_draws']}"}
     tol = {"cold_cold_reference": cold_floor(ra, k), "warm_cold_reference": max(dist(w["top"], ra["cold"][0]["top"], k) for w in warms(ra))}
     if fa is None:
         return {**res, "word": "unadjudicated", "reason": f"the rung reused nothing in {len(rung['attempts'])} attempt(s)", "tolerance_parts": tol}
@@ -124,8 +126,8 @@ def decide(rung: dict, ref: dict, ident: dict, crit: dict) -> dict:
     tau = max(tol.values())
     if not math.isfinite(tau):  # a token-set wobble on a bounding path bounds nothing: never a pass (review of #186)
         return {**res, "word": "unadjudicated", "reason": "the tolerance is infinite: a compared token is missing from a bounding call's list", "tolerance_parts": tol}
-    ds = [dist(w["top"], fa["cold"][0]["top"], k) for w in warms(fa)]; d = max(ds)
-    return {**res, "word": "pass" if d <= tau else "fail", "distance": d, "distances": ds, "tolerance": tau, "tolerance_parts": tol,
+    d = dist(fa["warm"]["top"], fa["cold"][0]["top"], k)  # the rung: one warm call against cold, as ruled (D12)
+    return {**res, "word": "pass" if d <= tau else "fail", "distance": d, "tolerance": tau, "tolerance_parts": tol,
             "rung_cache_n": fa["warm"]["cache_n"], "reference_cache_n": ra["warm"]["cache_n"],
             "rung_warm_prompt_n": fn, "reference_warm_prompt_n": rn,
             "rung_attempts": len(rung["attempts"]), "reference_attempts": len(ref["attempts"]),
@@ -179,8 +181,8 @@ def cmd_selftest(a) -> int:
         nonlocal bad; bad += not ok; print(f"{'ok  ' if ok else 'FAIL'}  {label}" + ("" if ok else f" {extra}"))
     for case in fx["measure"]:  # the procedure against a scripted server: requests, retries, and the word
         srv, st = fake_server(case["script"]); url = f"http://127.0.0.1:{srv.server_address[1]}"
-        rung = {"role": "rung", **measure(url, crit["attempts"], 3, 0, 20)}; srv.shutdown()
-        srv, _ = fake_server(fx["reference_script"]); ref = {"role": "reference", **measure(f"http://127.0.0.1:{srv.server_address[1]}", crit["attempts"], 3, 0, 20)}; srv.shutdown()
+        rung = {"role": "rung", **measure(url, crit["attempts"], 3, 0, 20, warm_draws=case.get("rung_warm_draws", 1))}; srv.shutdown()
+        srv, _ = fake_server(fx["reference_script"]); ref = {"role": "reference", **measure(f"http://127.0.0.1:{srv.server_address[1]}", crit["attempts"], 3, 0, 20, warm_draws=3)}; srv.shutdown()
         got = decide(rung, ref, fx["identity"], crit)
         check(got["word"] == case["word"], f"measure+decide: {case['label']}", f"got {got['word']} ({got.get('reason', got.get('distance'))})")
         check(len(rung["attempts"]) == case["attempts"], f"measure: {case['label']} took {case['attempts']} attempt(s)", f"took {len(rung['attempts'])}")
@@ -203,14 +205,15 @@ def main(argv) -> int:
     m = sub.add_parser("measure"); m.add_argument("--endpoint", required=True); m.add_argument("--role", choices=["rung", "reference"], required=True)
     m.add_argument("--out", required=True); m.add_argument("--attempts", type=int, default=3); m.add_argument("--cold", type=int, default=3)
     m.add_argument("--id-slot", type=int, default=0); m.add_argument("--n-probs", type=int, default=20)
-    m.add_argument("--warm-draws", type=int, default=3, help="warm draws per reusing attempt, each after a fresh prime")
+    m.add_argument("--warm-draws", type=int, default=None, help="warm draws per reusing attempt, each after a fresh prime (default: 1 for the rung, 3 for the reference)")
     m.add_argument("--prime-drops-lines", type=int, default=0, help="reference only: prime with P short of this many lines, to match the rung's warm continuation")
     g = sub.add_parser("gguf"); g.add_argument("path")
     d = sub.add_parser("decide"); [d.add_argument(x) for x in ("rung", "reference", "identity", "criterion")]
     sub.add_parser("selftest")
     a = ap.parse_args(argv)
     if a.cmd == "measure":
-        r = {"role": a.role, **measure(a.endpoint, a.attempts, a.cold, a.id_slot, a.n_probs, a.prime_drops_lines, a.warm_draws)}
+        wd = a.warm_draws if a.warm_draws is not None else (1 if a.role == "rung" else 3)
+        r = {"role": a.role, **measure(a.endpoint, a.attempts, a.cold, a.id_slot, a.n_probs, a.prime_drops_lines, wd)}
         pathlib.Path(a.out).write_text(json.dumps(r, indent=1) + "\n"); return 0
     if a.cmd == "gguf":
         print(json.dumps(gguf(a.path), indent=1)); return 0

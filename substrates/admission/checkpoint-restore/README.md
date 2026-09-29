@@ -14,7 +14,7 @@ This is the constitutional cell the plan specified (D12) and planning answered (
 
 P is 120 fixed lines, and X and Y are two short questions. The prompt's digest is recorded with each measurement.
 
-An attempt whose warm call reused nothing (`cache_n` 0) is retried, up to 3 attempts. The first attempt that reuses is the measurement, and it draws warm three times, re-priming before each draw, because the warm path depends on which request computed the cache (measured, below).
+An attempt whose warm call reused nothing (`cache_n` 0) is retried, to 3 attempts in all: the first plus two retries, which is how this instrument reads Q4's "retried 3 times". The first attempt that reuses is the measurement. On the rung it is one warm call against cold, as ruled. On the reference it draws warm three times, re-priming before each draw, because the warm path depends on which request computed the cache (measured, below). If a later draw reuses nothing, the whole attempt counts as no reuse and is retried.
 
 There is no restart. But each call occupies the slot and writes the server's prompt cache (N9), so a window plan on a shared host declares that effect.
 
@@ -35,11 +35,11 @@ There is no restart. But each call occupies the slot and writes the server's pro
   - it is of one procedure with the rung: the same prompt digest and sampler, an `n_probs` list at least twice the compared top-k, and the roles as declared;
   - its warm continuation (the tokens the warm call reprocessed) is within 10% of the rung's.
 - **The word:**
-  - `pass`: the rung's warm calls reused, and every one of its three draws is within the tolerance of the cold call;
-  - `fail`: they reused, and some draw is beyond the tolerance;
+  - `pass`: the rung's warm call reused, and its distance from the cold call is within the tolerance;
+  - `fail`: it reused, and the distance is beyond the tolerance;
   - `unadjudicated`, for any of these:
     - the rung reused nothing in all 3 declared attempts (fewer attempts decide nothing);
-    - a repeated warm draw reused nothing;
+    - the reference drew warm fewer times than declared (`reference_warm_draws`, 3);
     - the tolerance is infinite (a compared token missing from a bounding call's list): an infinite bound is never a pass;
     - the reference reused nothing;
     - fewer than two cold calls;
@@ -51,23 +51,24 @@ There is no restart. But each call occupies the slot and writes the server's pro
 - **Warm depends on shape:** warm against cold reads 0.80 when the warm call reprocesses 6 tokens, and 0.31 when it reprocesses 90.
 - **Warm depends on history:** two warm calls with the same 6-token continuation differ from each other by 0.56, depending on which request computed the cached prefix.
 
-So a known-good restore moves the distribution by an amount set by the batch composition that computed the cache. A tolerance taken at one length does not bound another, and one warm draw does not bound the history: hence the matched length, and three warm draws on each side. The reference is primed with a shortened P rather than the rung's P + X, so its cache history differs from the rung's; the three draws bound that as far as three draws can, and it is disclosed. These measurements were taken by a one-off script; their committed record is the floor's cell, which runs this instrument on the same reference at two lengths. The rung's reuse stops at a checkpoint, so its warm call can reprocess hundreds of tokens. The reference is therefore primed with P short of N lines (`--prime-drops-lines N`), which makes its warm call reprocess about as many.
+So a known-good restore moves the distribution by an amount set by the batch composition that computed the cache. A tolerance taken at one length does not bound another, and one warm draw does not bound the history: hence the matched length, and the reference's three warm draws, whose largest distance bounds. More reference draws can only widen the tolerance; the rung stays at the one draw the ruling names, so a healthy rung is not made likelier to fail. What the three draws do not bound: they follow one request sequence, so on a reproducible path they may repeat each other, and none varies the reference's shortened prime against the rung's full P + X. That difference in cache history is disclosed, not bounded. These measurements were taken by a one-off script; their committed record is the floor's cell, which runs this instrument on the same reference at two lengths. The rung's reuse stops at a checkpoint, so its warm call can reprocess hundreds of tokens. The reference is therefore primed with P short of N lines (`--prime-drops-lines N`), which makes its warm call reprocess about as many.
 
 ## Tests
 
 - **`python3 checkpoint_restore.py selftest`** covers:
-  - **against a scripted server:** pass, divergent, no reuse on every attempt, no reuse then reuse on the retry, reuse only on the last attempt, and a later warm draw diverging. For each, the test checks the word, the number of attempts, one token per request pinned to the slot, and every cold call being P + Y uncached;
+  - **against a scripted server:** pass, divergent, no reuse on every attempt, no reuse then reuse on the retry, reuse only on the last attempt, and a later warm draw evicted (the attempt retried). For each, the test checks the word, the number of attempts, one token per request pinned to the slot, and every cold call being P + Y uncached;
   - **the reference's shortened prime;**
-  - **24 `decide` cases:**
+  - **30 `decide` cases:**
     - references that are not references: recurrent keys, `full_attention_interval` alone, RWKV, another binary, missing digests, an unread header, no reuse, another continuation length;
     - the 10% shape boundary, on each side;
     - one cold call, too many attempts, too few attempts with no reuse, a repeated warm draw without reuse;
     - a missing top token (fail), an infinite tolerance (never a pass);
-    - the rung's cold floor over every pair, the reference's largest warm draw, any rung draw over the tolerance;
+    - the rung's cold floor over every pair, the reference's largest warm draw, a reference with too few draws, the rung judged on its one warm call;
+    - a cold top token missing from the warm list (the union of both sides), tokens below the top 5 not compared;
     - exactly at the tolerance, and just over it;
-    - measurements of different prompts, and an `n_probs` list too shallow;
+    - measurements of different prompts or samplers, roles not as declared, an `n_probs` list too shallow, a truncated engine digest;
   - **2 distance checks.**
-- **`python3 mutants.py`** seeds 23 mutations. The selftest must exit 1 on each, and **all 23 are killed**. Among them:
+- **`python3 mutants.py`** seeds 30 mutations, in the script and in `criterion.toml`. The selftest must exit 1 on each, and **all 30 are killed**. Among them:
   - the comparator ignoring the log-probabilities (the plan's first named fault);
   - the `cache_n` check removed (the plan's second);
   - no retry after an attempt with no reuse;
@@ -80,8 +81,9 @@ So a known-good restore moves the distribution by an amount set by the batch com
   - the reference primed with all of P;
   - the attempt count unenforced, or one short;
   - an infinite tolerance allowed; missing engine digests accepted; the one-procedure check removed;
-  - only the first warm draw used, on either side; no repeated warm draws;
-  - too few attempts accepted; a repeated draw without reuse accepted;
+  - only the reference's first warm draw used; the reference's draw count unenforced; no repeated warm draws; the rung judged on its largest draw;
+  - too few attempts accepted; an eviction on a later draw not retried; a reusing attempt judged by its first draw alone;
+  - the comparator over one side's top-k only; the sampler or roles comparison dropped; the engine digest matched by prefix; six tokens compared;
   - the cold floor over the first pair only; `full_attention_interval` not read as recurrent.
 
 Wiring the selftest into `verify.sh`, and the faults into `faults.toml`, is track one's, as the plan assigns it.

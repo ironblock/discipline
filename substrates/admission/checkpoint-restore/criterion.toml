@@ -4,3 +4,4 @@
 top_k = 5            # tokens compared per side (the union of both sides' top 5)
 attempts = 3         # no reuse is unadjudicated, retried to this many attempts (Q4)
 shape_match = 0.10   # the reference's warm continuation must be within this fraction of the rung's, in tokens
+reference_warm_draws = 3  # the reference's warm path, drawn this many times after fresh primes; its largest distance bounds (the rung is one draw, as ruled)

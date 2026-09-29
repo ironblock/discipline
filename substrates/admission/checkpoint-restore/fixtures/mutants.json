@@ -7,13 +7,13 @@
   },
   {
    "label": "the cache_n check removed",
-   "old": "return next((a for a in m[\"attempts\"] if a[\"warm\"][\"cache_n\"] > 0), None)",
+   "old": "return next((a for a in m[\"attempts\"] if all(w[\"cache_n\"] > 0 for w in warms(a))), None)",
    "new": "return next((a for a in m[\"attempts\"]), None)"
   },
   {
    "label": "no retry after an attempt with no reuse",
-   "old": "        if warm[\"cache_n\"] > 0: break",
-   "new": "        break"
+   "old": "if warm[\"cache_n\"] > 0 and all(w[\"cache_n\"] > 0 for w in more): break",
+   "new": "break"
   },
   {
    "label": "a missing token made harmless",
@@ -81,18 +81,8 @@
    "new": "dist(ra[\"warm\"][\"top\"], ra[\"cold\"][0][\"top\"], k)"
   },
   {
-   "label": "only the rung's first warm draw is judged",
-   "old": "ds = [dist(w[\"top\"], fa[\"cold\"][0][\"top\"], k) for w in warms(fa)]; d = max(ds)",
-   "new": "ds = [dist(fa[\"warm\"][\"top\"], fa[\"cold\"][0][\"top\"], k)]; d = max(ds)"
-  },
-  {
    "label": "no reuse after too few attempts accepted",
    "old": "if fa is None and len(rung[\"attempts\"]) < need:",
-   "new": "if False:"
-  },
-  {
-   "label": "a repeated warm draw without reuse accepted",
-   "old": "if any(w[\"cache_n\"] == 0 for w in warms(ra)) or (fa and any(w[\"cache_n\"] == 0 for w in warms(fa))):",
    "new": "if False:"
   },
   {
@@ -114,6 +104,52 @@
    "label": "no repeated warm draws",
    "old": "            for _ in range(warm_draws - 1):",
    "new": "            for _ in range(0):"
+  },
+  {
+   "label": "the reference's draw count unenforced",
+   "old": "if len(warms(ra)) < crit[\"reference_warm_draws\"]:",
+   "new": "if False:"
+  },
+  {
+   "label": "the rung judged on its largest draw, not its one warm call",
+   "old": "d = dist(fa[\"warm\"][\"top\"], fa[\"cold\"][0][\"top\"], k)",
+   "new": "d = max(dist(w[\"top\"], fa[\"cold\"][0][\"top\"], k) for w in warms(fa))"
+  },
+  {
+   "label": "an eviction on a later draw not retried",
+   "old": "if warm[\"cache_n\"] > 0 and all(w[\"cache_n\"] > 0 for w in more): break",
+   "new": "if warm[\"cache_n\"] > 0: break"
+  },
+  {
+   "label": "a reusing attempt judged by its first draw alone",
+   "old": "return next((a for a in m[\"attempts\"] if all(w[\"cache_n\"] > 0 for w in warms(a))), None)",
+   "new": "return next((a for a in m[\"attempts\"] if a[\"warm\"][\"cache_n\"] > 0), None)"
+  },
+  {
+   "label": "the comparator over the warm side's top-k only",
+   "old": "for t in set(top(A)) | set(top(B)))",
+   "new": "for t in set(top(A)))"
+  },
+  {
+   "label": "the sampler comparison dropped",
+   "old": " or rung.get(\"sampler\") != ref.get(\"sampler\") or rung.get(\"sampler\") != SAMPLER",
+   "new": ""
+  },
+  {
+   "label": "the roles comparison dropped",
+   "old": " or (rung.get(\"role\"), ref.get(\"role\")) != (\"rung\", \"reference\"):",
+   "new": ":"
+  },
+  {
+   "label": "the engine digest matched by prefix",
+   "old": "HEX64 = re.compile(r\"[0-9a-f]{64}\")",
+   "new": "HEX64 = re.compile(r\"[0-9a-f]{16}.*\")"
+  },
+  {
+   "label": "six tokens compared, not five",
+   "old": "top_k = 5 ",
+   "new": "top_k = 6 ",
+   "file": "criterion.toml"
   }
  ]
 }
