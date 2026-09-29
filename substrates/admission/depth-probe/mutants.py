@@ -9,6 +9,7 @@ muts = json.loads((here / "fixtures/mutants.json").read_text())["mutants"]
 def run(text):
     with tempfile.TemporaryDirectory() as td:
         shutil.copytree(here / "fixtures", pathlib.Path(td) / "fixtures")
+        shutil.copy(here / "criterion.toml", pathlib.Path(td) / "criterion.toml")
         for f in ("depth_probe.py", "make_corpus.py"): (pathlib.Path(td) / f).write_text(text.get(f) or (here / f).read_text())
         return subprocess.run([sys.executable, "-B", str(pathlib.Path(td) / "depth_probe.py"), "selftest"], capture_output=True, text=True).returncode
 base = run({}); bad = int(base != 0); print(f"{'ok  ' if base == 0 else 'FAIL'}  unmutated: selftest rc={base}")
