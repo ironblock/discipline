@@ -32,7 +32,7 @@
   },
   {
    "label": "the shape match removed",
-   "old": "if abs(rn - fn) > crit[\"shape_match\"] * fn:",
+   "old": "if any(abs(r - fn) > crit[\"shape_match\"] * fn for r in rns):",
    "new": "if False:"
   },
   {
@@ -150,6 +150,31 @@
    "old": "top_k = 5 ",
    "new": "top_k = 6 ",
    "file": "criterion.toml"
+  },
+  {
+   "label": "the shape match on the first reference draw only",
+   "old": "    if any(abs(r - fn) > crit[\"shape_match\"] * fn for r in rns):",
+   "new": "    if abs(rn - fn) > crit[\"shape_match\"] * fn:"
+  },
+  {
+   "label": "the reference's two-cold requirement dropped",
+   "old": "if len(ra[\"cold\"]) < 2 or",
+   "new": "if len(ra[\"cold\"]) < 1 or"
+  },
+  {
+   "label": "the sampler not held to the instrument's",
+   "old": " or rung.get(\"sampler\") != SAMPLER \\",
+   "new": " \\"
+  },
+  {
+   "label": "the prompt not held to the instrument's",
+   "old": " or ref.get(\"prompts\", {}).get(\"P_sha256\") != sha(P.encode()) \\",
+   "new": " \\"
+  },
+  {
+   "label": "a recurrent architecture name not read",
+   "old": " + ([hdr[\"architecture\"]] if any(m in str(hdr.get(\"architecture\", \"\")) for m in (\"rwkv\", \"mamba\", \"lfm\")) else [])",
+   "new": ""
   }
  ]
 }

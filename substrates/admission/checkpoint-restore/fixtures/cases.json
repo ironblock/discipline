@@ -697,7 +697,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -853,7 +853,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -1126,7 +1126,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -1282,7 +1282,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -1555,7 +1555,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -1711,7 +1711,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -1984,7 +1984,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -2140,7 +2140,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -2414,7 +2414,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -2570,7 +2570,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -2843,7 +2843,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -2999,7 +2999,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -3267,7 +3267,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -3423,7 +3423,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -3865,7 +3865,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -4021,7 +4021,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -4284,7 +4284,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -4440,7 +4440,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -4703,7 +4703,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -4859,7 +4859,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -5122,7 +5122,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -5244,7 +5244,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -5507,7 +5507,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -6086,7 +6086,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -6349,7 +6349,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -6505,7 +6505,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -6769,7 +6769,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -6925,7 +6925,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -7188,7 +7188,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -7344,7 +7344,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -7608,7 +7608,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -7764,7 +7764,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -8027,7 +8027,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -8217,7 +8217,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -8480,7 +8480,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -8636,7 +8636,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -8865,7 +8865,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -9021,7 +9021,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -9284,7 +9284,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -9440,7 +9440,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -9703,7 +9703,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -9894,7 +9894,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -10313,7 +10313,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -10576,7 +10576,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -10732,7 +10732,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -10995,7 +10995,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -11186,7 +11186,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -11449,7 +11449,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -11605,7 +11605,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -11835,7 +11835,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -11999,7 +11999,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -12262,7 +12262,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -12418,7 +12418,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -12681,7 +12681,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 0.6
@@ -12834,7 +12834,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -13097,7 +13097,7 @@
    "rung": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -13253,7 +13253,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -13516,7 +13516,7 @@
    "rung": {
     "role": "rung",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -13672,7 +13672,7 @@
    "reference": {
     "role": "reference",
     "prompts": {
-     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
     },
     "sampler": {
      "temperature": 1.0,
@@ -13941,6 +13941,2047 @@
     }
    },
    "reason_has": "digest is missing"
+  },
+  {
+   "label": "a later reference draw of another length bounds nothing",
+   "rung": {
+    "role": "rung",
+    "prompts": {
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
+    },
+    "sampler": {
+     "temperature": 1.0,
+     "top_k": 0,
+     "top_p": 1.0,
+     "min_p": 0.0
+    },
+    "n_probs": 20,
+    "attempts": [
+     {
+      "prime": {
+       "cache_n": 0,
+       "prompt_n": 100,
+       "top": [
+        [
+         10,
+         -0.5
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm": {
+       "cache_n": 50,
+       "prompt_n": 50,
+       "top": [
+        [
+         10,
+         -0.8
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm_more": [],
+      "cold": [
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "reference": {
+    "role": "reference",
+    "prompts": {
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
+    },
+    "sampler": {
+     "temperature": 1.0,
+     "top_k": 0,
+     "top_p": 1.0,
+     "min_p": 0.0
+    },
+    "n_probs": 20,
+    "attempts": [
+     {
+      "prime": {
+       "cache_n": 0,
+       "prompt_n": 100,
+       "top": [
+        [
+         10,
+         -0.5
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm": {
+       "cache_n": 50,
+       "prompt_n": 50,
+       "top": [
+        [
+         10,
+         -0.8
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm_more": [
+       {
+        "cache_n": 5,
+        "prompt_n": 95,
+        "top": [
+         [
+          10,
+          -0.7
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 50,
+        "prompt_n": 50,
+        "top": [
+         [
+          10,
+          -0.6
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ],
+      "cold": [
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "word": "unadjudicated",
+   "reason_has": "does not match"
+  },
+  {
+   "label": "a reference with one cold call leaves its floor unmeasured",
+   "rung": {
+    "role": "rung",
+    "prompts": {
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
+    },
+    "sampler": {
+     "temperature": 1.0,
+     "top_k": 0,
+     "top_p": 1.0,
+     "min_p": 0.0
+    },
+    "n_probs": 20,
+    "attempts": [
+     {
+      "prime": {
+       "cache_n": 0,
+       "prompt_n": 100,
+       "top": [
+        [
+         10,
+         -0.5
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm": {
+       "cache_n": 50,
+       "prompt_n": 50,
+       "top": [
+        [
+         10,
+         -0.8
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm_more": [],
+      "cold": [
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "reference": {
+    "role": "reference",
+    "prompts": {
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
+    },
+    "sampler": {
+     "temperature": 1.0,
+     "top_k": 0,
+     "top_p": 1.0,
+     "min_p": 0.0
+    },
+    "n_probs": 20,
+    "attempts": [
+     {
+      "prime": {
+       "cache_n": 0,
+       "prompt_n": 100,
+       "top": [
+        [
+         10,
+         -0.5
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm": {
+       "cache_n": 50,
+       "prompt_n": 50,
+       "top": [
+        [
+         10,
+         -0.8
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm_more": [
+       {
+        "cache_n": 50,
+        "prompt_n": 50,
+        "top": [
+         [
+          10,
+          -0.7
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 50,
+        "prompt_n": 50,
+        "top": [
+         [
+          10,
+          -0.6
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ],
+      "cold": [
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "word": "unadjudicated",
+   "reason_has": "fewer than two cold"
+  },
+  {
+   "label": "both sides under a sampler not the instrument's are not the procedure",
+   "rung": {
+    "role": "rung",
+    "prompts": {
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
+    },
+    "sampler": {
+     "temperature": 0.7,
+     "top_k": 0,
+     "top_p": 1.0,
+     "min_p": 0.0
+    },
+    "n_probs": 20,
+    "attempts": [
+     {
+      "prime": {
+       "cache_n": 0,
+       "prompt_n": 100,
+       "top": [
+        [
+         10,
+         -0.5
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm": {
+       "cache_n": 50,
+       "prompt_n": 50,
+       "top": [
+        [
+         10,
+         -0.8
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm_more": [],
+      "cold": [
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "reference": {
+    "role": "reference",
+    "prompts": {
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
+    },
+    "sampler": {
+     "temperature": 0.7,
+     "top_k": 0,
+     "top_p": 1.0,
+     "min_p": 0.0
+    },
+    "n_probs": 20,
+    "attempts": [
+     {
+      "prime": {
+       "cache_n": 0,
+       "prompt_n": 100,
+       "top": [
+        [
+         10,
+         -0.5
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm": {
+       "cache_n": 50,
+       "prompt_n": 50,
+       "top": [
+        [
+         10,
+         -0.8
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm_more": [
+       {
+        "cache_n": 50,
+        "prompt_n": 50,
+        "top": [
+         [
+          10,
+          -0.7
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 50,
+        "prompt_n": 50,
+        "top": [
+         [
+          10,
+          -0.6
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ],
+      "cold": [
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "word": "unadjudicated",
+   "reason_has": "one procedure"
+  },
+  {
+   "label": "both sides on a prompt not the instrument's are not the procedure",
+   "rung": {
+    "role": "rung",
+    "prompts": {
+     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "sampler": {
+     "temperature": 1.0,
+     "top_k": 0,
+     "top_p": 1.0,
+     "min_p": 0.0
+    },
+    "n_probs": 20,
+    "attempts": [
+     {
+      "prime": {
+       "cache_n": 0,
+       "prompt_n": 100,
+       "top": [
+        [
+         10,
+         -0.5
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm": {
+       "cache_n": 50,
+       "prompt_n": 50,
+       "top": [
+        [
+         10,
+         -0.8
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm_more": [],
+      "cold": [
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "reference": {
+    "role": "reference",
+    "prompts": {
+     "P_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "sampler": {
+     "temperature": 1.0,
+     "top_k": 0,
+     "top_p": 1.0,
+     "min_p": 0.0
+    },
+    "n_probs": 20,
+    "attempts": [
+     {
+      "prime": {
+       "cache_n": 0,
+       "prompt_n": 100,
+       "top": [
+        [
+         10,
+         -0.5
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm": {
+       "cache_n": 50,
+       "prompt_n": 50,
+       "top": [
+        [
+         10,
+         -0.8
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm_more": [
+       {
+        "cache_n": 50,
+        "prompt_n": 50,
+        "top": [
+         [
+          10,
+          -0.7
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 50,
+        "prompt_n": 50,
+        "top": [
+         [
+          10,
+          -0.6
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ],
+      "cold": [
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "word": "unadjudicated",
+   "reason_has": "one procedure"
+  },
+  {
+   "label": "a recurrent architecture name alone is no reference",
+   "rung": {
+    "role": "rung",
+    "prompts": {
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
+    },
+    "sampler": {
+     "temperature": 1.0,
+     "top_k": 0,
+     "top_p": 1.0,
+     "min_p": 0.0
+    },
+    "n_probs": 20,
+    "attempts": [
+     {
+      "prime": {
+       "cache_n": 0,
+       "prompt_n": 100,
+       "top": [
+        [
+         10,
+         -0.5
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm": {
+       "cache_n": 50,
+       "prompt_n": 50,
+       "top": [
+        [
+         10,
+         -0.8
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm_more": [],
+      "cold": [
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "reference": {
+    "role": "reference",
+    "prompts": {
+     "P_sha256": "4b22df6258f1191b29c7e6726bae83c6ef1278bd8329c8da899a024bd3524683"
+    },
+    "sampler": {
+     "temperature": 1.0,
+     "top_k": 0,
+     "top_p": 1.0,
+     "min_p": 0.0
+    },
+    "n_probs": 20,
+    "attempts": [
+     {
+      "prime": {
+       "cache_n": 0,
+       "prompt_n": 100,
+       "top": [
+        [
+         10,
+         -0.5
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm": {
+       "cache_n": 50,
+       "prompt_n": 50,
+       "top": [
+        [
+         10,
+         -0.8
+        ],
+        [
+         11,
+         -1.5
+        ],
+        [
+         12,
+         -2.0
+        ],
+        [
+         13,
+         -2.5
+        ],
+        [
+         14,
+         -3.0
+        ],
+        [
+         15,
+         -3.5
+        ],
+        [
+         16,
+         -4.0
+        ]
+       ]
+      },
+      "warm_more": [
+       {
+        "cache_n": 50,
+        "prompt_n": 50,
+        "top": [
+         [
+          10,
+          -0.7
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 50,
+        "prompt_n": 50,
+        "top": [
+         [
+          10,
+          -0.6
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ],
+      "cold": [
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       },
+       {
+        "cache_n": 0,
+        "prompt_n": 100,
+        "top": [
+         [
+          10,
+          -0.5
+         ],
+         [
+          11,
+          -1.5
+         ],
+         [
+          12,
+          -2.0
+         ],
+         [
+          13,
+          -2.5
+         ],
+         [
+          14,
+          -3.0
+         ],
+         [
+          15,
+          -3.5
+         ],
+         [
+          16,
+          -4.0
+         ]
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "word": "unadjudicated",
+   "identity": {
+    "rung_engine": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "reference_engine": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "reference_header": {
+     "architecture": "mamba2",
+     "keys": [
+      "general.architecture"
+     ]
+    }
+   }
   }
  ]
 }

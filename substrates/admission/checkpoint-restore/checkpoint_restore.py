@@ -58,11 +58,11 @@ def measure(endpoint: str, attempts: int, cold: int, slot: int, n_probs: int, dr
         prime = call(endpoint, prefix(drop) + X, True, slot, n_probs)
         warm = call(endpoint, P + Y, True, slot, n_probs)
         colds = [call(endpoint, P + Y, False, slot, n_probs) for _ in range(cold)]
-        more = []
+        more, primes = [], []
         if warm["cache_n"] > 0:
-            for _ in range(warm_draws - 1):  # re-prime and draw warm again: the cached prefix is recomputed each time
-                call(endpoint, prefix(drop) + X, True, slot, n_probs); more.append(call(endpoint, P + Y, True, slot, n_probs))
-        out["attempts"].append({"prime": prime, "warm": warm, "warm_more": more, "cold": colds})
+            for _ in range(warm_draws - 1):  # re-prime and draw warm again; each re-prime's reply is kept, to show what it reused
+                primes.append(call(endpoint, prefix(drop) + X, True, slot, n_probs)); more.append(call(endpoint, P + Y, True, slot, n_probs))
+        out["attempts"].append({"prime": prime, "warm": warm, "warm_more": more, "prime_more": primes, "cold": colds})
         if warm["cache_n"] > 0 and all(w["cache_n"] > 0 for w in more): break  # the measurement; an eviction on a later draw is retried like no reuse
     return out
 
@@ -102,7 +102,8 @@ def decide(rung: dict, ref: dict, ident: dict, crit: dict) -> dict:
     if len(rung["attempts"]) > need or len(ref["attempts"]) > need:
         return {**res, "word": "unadjudicated", "reason": f"more than the declared {need} attempts"}
     # the two measurements must be of one procedure: prompt, sampler, a list deep enough to find every compared token, roles
-    if rung.get("prompts", {}).get("P_sha256") != ref.get("prompts", {}).get("P_sha256") or rung.get("sampler") != ref.get("sampler") or rung.get("sampler") != SAMPLER \
+    if rung.get("prompts", {}).get("P_sha256") != ref.get("prompts", {}).get("P_sha256") or ref.get("prompts", {}).get("P_sha256") != sha(P.encode()) \
+       or rung.get("sampler") != ref.get("sampler") or rung.get("sampler") != SAMPLER \
        or min(rung.get("n_probs", 0), ref.get("n_probs", 0)) < 2 * k or (rung.get("role"), ref.get("role")) != ("rung", "reference"):
         return {**res, "word": "unadjudicated", "reason": "the rung's and reference's measurements are not of one procedure (prompt, sampler, n_probs of at least twice top_k, roles)"}
     ra, fa = reusing(ref), reusing(rung)
@@ -118,9 +119,9 @@ def decide(rung: dict, ref: dict, ident: dict, crit: dict) -> dict:
     if fa is None:
         return {**res, "word": "unadjudicated", "reason": f"the rung reused nothing in {len(rung['attempts'])} attempt(s)", "tolerance_parts": tol}
     # the tolerance is only a bound for a warm continuation of the rung's length: the reference's must match (N3)
-    rn, fn = ra["warm"]["prompt_n"], fa["warm"]["prompt_n"]
-    if abs(rn - fn) > crit["shape_match"] * fn:
-        return {**res, "word": "unadjudicated", "reason": f"the reference's warm continuation ({rn} tokens) does not match the rung's ({fn}) within {crit['shape_match']:.0%}",
+    rns, fn = [w["prompt_n"] for w in warms(ra)], fa["warm"]["prompt_n"]; rn = rns[0]
+    if any(abs(r - fn) > crit["shape_match"] * fn for r in rns):  # every reference draw, since each one bounds
+        return {**res, "word": "unadjudicated", "reason": f"a reference warm continuation ({rns} tokens) does not match the rung's ({fn}) within {crit['shape_match']:.0%}",
                 "tolerance_parts": tol}
     tol["cold_cold_rung"] = cold_floor(fa, k)
     tau = max(tol.values())
@@ -222,9 +223,10 @@ def main(argv) -> int:
         try:
             rd = [json.loads(pathlib.Path(p).read_text()) for p in (a.rung, a.reference, a.identity)]
             crit = tomllib.loads(pathlib.Path(a.criterion).read_text())
-        except (OSError, ValueError) as e:
-            print(f"checkpoint_restore: {e}", file=sys.stderr); return 2
-        print(json.dumps(decide(*rd, crit), indent=1)); return 0
+            out = decide(*rd, crit)
+        except (OSError, ValueError, KeyError, TypeError, IndexError) as e:
+            print(f"checkpoint_restore: malformed input: {e!r}", file=sys.stderr); return 2
+        print(json.dumps(out, indent=1)); return 0
     return cmd_selftest(a)
 
 if __name__ == "__main__":
