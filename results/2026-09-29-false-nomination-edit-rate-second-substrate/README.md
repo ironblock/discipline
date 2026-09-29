@@ -7,7 +7,7 @@ pre_registration_sha256 = "b8b20faba4e5dd149b41fa59a115a5c2764bef5870c8c8bf2cfb0
 controls_run = ["true-nomination-control-fork", "shuffled-framing-null", "sham-perturbation-floor", "seeded-judge-controls", "applier-selftest-and-mutants", "comparison-selftest", "grading-order-diff", "headroom-recheck"]
 known_defects = [
   "Headroom was re-checked on this substrate over the 100 sampled forks (two no-nomination draws each, 200 requests); 28 failed it and, as comparison-rule.toml's headroom reading states, are excluded from both endpoints: their 504 grade rows are removed from grades.jsonl and kept in grades-headroom-excluded.jsonl, read by nothing. The run's gate fork, drive-08#t9s24, is one of the 28: it changed the turn under both framings, as the run requires, and its rows are excluded like the others'.",
-  "Endpoint 2 has no claim row: comparison-rule.toml's words are not the claim vocabulary. It is carried by a comparison row (#181's row kind), with the rule's own word, the pre-registered prediction and the counts over the 72 shared forks, beside the claim; its word is comparison.json's, re-derived byte for byte by recompute.sh from this record and stage 2's committed files, which also checks the row against it.",
+  "Endpoint 2 has no claim row: comparison-rule.toml's words are not the claim vocabulary. It is carried by a comparison row (#181's row kind), with the rule's own word, the pre-registered prediction and the counts over the 72 shared forks, beside the claim. That row completes the pre-registration after the data, by planning's ruling on #142 (comment 5884921414), and changes no number and no word; its word is comparison.json's, re-derived byte for byte by recompute.sh from this record and stage 2's committed files, which also checks the row against it.",
   "Served as declared, the MTP draft on (instance 2026-09-28), under reading (c) of the grading statute as ruled on #142. Speculation on this substrate is not bit-exact with the spec-off path: every measured divergence a near-tie flip to the second-ranked token, 36 of 2,327 positions over five prompts (#164, substrates/measurements/2026-09-29-ada-invariance-ground-truth/). The rule has no token-identity check.",
   "Stage 2's side of the comparison is copied under stage2-record/, each file at the bytes and digest committed in results/2026-09-27-false-nomination-edit-rate/ (grades, plan, ids, ruled key, batches, verdicts), so the comparison recomputes inside this directory.",
   "Batches 29 and 41: each first judge instance returned 40 objects whose ids were the batch's but out of order; kept as judge/malformed-29.json and judge/malformed-41.json, read by nothing, and re-judged by fresh instances (29b, 41b), accepted. All 52 instances ran claude-sonnet-5, read off each transcript; the transcripts stay in the seat's durable run directory.",
@@ -35,7 +35,7 @@ substrates = ["ada48-llamacpp-qwen38flashnext-q20"]
 dogma_version = 0
 
 [derivation]
-applier_sha256 = "82e32760e3ff57af900bfe5fa6c804ed9752cfff20778b2c5b9730f282cdd7fa"
+applier_sha256 = "166d179e640def4f821ab885a6aa01633e5838929ae68462eb9a07a431fd9833"
 runtime = "Python 3.14.6"
 substrate_id = "mac-pro-2019"
 derived_from = "bbbcfc3061beb3524dddefac4721f8d62db3ae86bb07e663c1121a04a78f3cca"
@@ -98,7 +98,10 @@ Endpoint 2, the imperative rate at 0.6 over the 72 shared counted forks:
 
 **The pre-registered comparison reads `substrate_independent`.** The predicted drop with capability does not appear: the imperative edit rate at 0.6 is within 0.05 of the 27B's over the same forks. This is the alternative the pre-registration named: imperative framing overrides capability, and the harm of a false fire does not shrink as models improve, across these two models.
 
+**At its weight** (planning's reading on #142, comment 5884921414): the counts are small, 42 of 72 and 44 of 72 imperative edits over the shared forks (7/12 and 11/18), both above the ten-fork floor. It is a two-rung finding, not yet a law; the three-rung version with the small model is #143's. Two consequences planning asks the record to carry:
+- the collector's closure (#17, #132) holds across capability, not only on the 27B;
+- every imperative the harness itself delivers (a skill's "MUST", a rule injected as a command) should be assumed obeyed regardless of the model's capability.
+
 **What is not measured:**
 - a third model;
-- the forks this substrate's headroom excluded;
-- whether the comparison word should read as a claim verdict (asked on #142).
+- the forks this substrate's headroom excluded.

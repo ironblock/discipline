@@ -3,7 +3,8 @@
 # record's claims consume must hash to the digest the record names; the ratified
 # applier's selftest must pass; the applier over the committed rows, judge
 # verdicts and key must reproduce word.json byte for byte, and its word must
-# be the claim rows'; the rule and applier must be the digests the
+# be the claim rows'; the comparison row must be comparison.json's word and counts, endpoint 2's
+# hypothesis, consuming comparison.json; the rule and applier must be the digests the
 # pre-registration names; the front matter's numbers must re-derive.
 # Exit 0 when all hold, 1 when any fails, 2 when a step cannot run.
 set -uo pipefail
@@ -46,22 +47,26 @@ rows = [json.loads(l) for l in (here / "run.jsonl").read_text().splitlines() if 
 claims = [r for r in rows if r.get("record") == "claim"]
 if not claims or any(c.get("result") != word for c in claims):
     print(f"recompute: the applier's word is {word!r} and the claim rows say {[c.get('result') for c in claims]}"); sys.exit(1)
+pre = json.loads((here / "pre-registration.json").read_text())
 # endpoint 2's row (#181's comparison kind): its word is comparison.json's, and its counts are
 # comparison.json's rates times the shared forks, exact
 from fractions import Fraction
 cmp_ = json.loads((here / "comparison.json").read_text()); comps = [r for r in rows if r.get("record") == "comparison"]
-want_counts = [int(Fraction(cmp_[k]) * cmp_["shared"]) for k in ("rate_27B", "rate_S2")]
-if len(comps) != 1 or comps[0]["result"] != cmp_["word"] or comps[0]["predicted"] != "dependent" \
-   or [(c["n"], c["of"]) for c in comps[0]["counts"]] != [(w, cmp_["shared"]) for w in want_counts]:
-    print(f"recompute: the comparison row is not comparison.json's word {cmp_['word']!r} with counts {want_counts} of {cmp_['shared']}"); sys.exit(1)
-pre = json.loads((here / "pre-registration.json").read_text())
+counts = [Fraction(cmp_[k]) * cmp_["shared"] for k in ("rate_27B", "rate_S2")]
+if any(c.denominator != 1 for c in counts): print("recompute: comparison.json's rates are not whole counts over the shared forks"); sys.exit(1)
+want = [{"label": "the 27B (stage 2), imperative edits at 0.6 over the shared counted forks", "n": int(counts[0]), "of": cmp_["shared"]},
+        {"label": "this substrate, imperative edits at 0.6 over the shared counted forks", "n": int(counts[1]), "of": cmp_["shared"]}]
+row_ok = len(comps) == 1 and comps[0]["result"] == cmp_["word"] and comps[0]["predicted"] == "dependent" and comps[0]["counts"] == want \
+    and comps[0]["hypothesis"] == pre["endpoints"]["2"] and [a["path"] for a in comps[0]["consumes"]] == ["comparison.json"]
+if not row_ok:
+    print(f"recompute: the comparison row is not endpoint 2's hypothesis, comparison.json's word {cmp_['word']!r} and counts {[w['n'] for w in want]} of {cmp_['shared']}, consuming comparison.json"); sys.exit(1)
 front = tomllib.loads(re.match(r"\+\+\+\n(.*?)\n\+\+\+\n", (here / "README.md").read_text(encoding="utf-8"), re.S).group(1))
 if front["hypothesis"] != pre["hypothesis"]: print("recompute: the front matter's hypothesis is not the pre-registration's"); sys.exit(1)
 import hashlib
 for p, want in (("decision-rule.toml", pre["rule"]["decision_rule_sha256"]), ("apply_bprime.py", pre["rule"]["applier_sha256"]), ("comparison-rule.toml", pre["rule"]["comparison_rule_sha256"]), ("compare_s2.py", pre["rule"]["comparison_applier_sha256"])):
     if hashlib.sha256((here / p).read_bytes()).hexdigest() != want: print(f"recompute: {p} is not the digest the pre-registration names"); sys.exit(1)
 if (here / "window" / "run.rc").read_text().strip() != "0": print("recompute: the run's harness exit is not 0"); sys.exit(1)
-print(f"recompute: word.json re-derives byte for byte from the committed record; the word, {word!r}, is the claim rows'; the rules and appliers are the pre-registered digests")
+print(f"recompute: word.json re-derives byte for byte from the committed record; the word, {word!r}, is the claim rows'; the comparison row is comparison.json's; the rules and appliers are the pre-registered digests")
 PY
 python3 - "$here" "word.json" <<'PY' || exit 1
 import hashlib, json, pathlib, re, sys, tomllib
