@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 58
+faults = 71
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -156,7 +156,6 @@ catches = [
     "client::tests::a_server_that_hangs_up_is_a_transport_failure_and_not_an_answer",
     "client::tests::a_stall_past_the_deadline_is_a_typed_timeout_and_never_an_empty_answer",
     "client::tests::a_timeout_that_has_a_retry_left_links_the_second_attempt_to_the_first",
-    "client::tests::an_answer_of_nothing_at_all_is_not_the_same_outcome_as_a_timeout",
     "client::tests::retries_are_bounded_by_the_limit_the_request_declares",
 ]
 
@@ -187,7 +186,7 @@ anchor = '''
             .and_then(|path| at(&root, path))
             .and_then(as_count),'''
 becomes = '''
-        cached_tokens: at(&root, "timings.prompt_n_cached")
+        cached_tokens: at(&root, "timings.cache_n")
             .or_else(|| at(&root, "usage.prompt_tokens_details.cached_tokens"))
             .and_then(as_count),'''
 catches = [
@@ -662,6 +661,7 @@ catches = [
     "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
     "client::stream::tests::a_canned_stream_held_mid_answer_is_woken_by_a_cancel_and_says_so",
     "client::stream::tests::a_stop_asked_while_a_piece_is_delivered_is_a_cancel_not_a_failure",
+    "client::stream::tests::a_timings_chunk_before_a_cancel_is_not_a_finished_call",
     "client::stream::tests::asking_runs_every_stopper_once_and_asking_again_runs_none",
 ]
 
@@ -695,6 +695,7 @@ becomes = '''
 catches = [
     "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
     "client::stream::tests::a_stop_asked_while_a_piece_is_delivered_is_a_cancel_not_a_failure",
+    "client::stream::tests::a_timings_chunk_before_a_cancel_is_not_a_finished_call",
 ]
 
 [[fault]]
@@ -710,8 +711,14 @@ catches = [
     "client::stream::tests::a_bearer_credential_is_sent_as_an_authorization_header_and_only_then",
     "client::stream::tests::a_chunk_boundary_inside_an_event_is_invisible_to_the_reader",
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
+    "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
+    "client::stream::tests::a_timing_the_server_did_not_send_is_absent_not_zero",
+    "client::stream::tests::a_timings_digits_survive_the_transport",
+    "client::stream::tests::a_timings_that_is_not_an_object_reports_nothing",
+    "client::stream::tests::the_last_timings_a_stream_carries_is_the_one_reported",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
+    "client::stream::tests::timings_on_the_last_chunk_with_choices_are_read_too",
 ]
 
 [[fault]]
@@ -729,6 +736,7 @@ catches = [
     "client::stream::tests::a_close_framed_stream_whose_last_bytes_are_a_bare_cr_is_read_when_it_closes",
     "client::stream::tests::a_stop_asked_while_a_piece_is_delivered_is_a_cancel_not_a_failure",
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
+    "client::stream::tests::a_timings_chunk_before_a_cancel_is_not_a_finished_call",
     "client::stream::tests::an_event_ended_by_a_bare_cr_as_the_last_bytes_of_the_stream_is_read",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
@@ -746,6 +754,7 @@ anchor = '''
 becomes = '''
             None => Ok(Ended::Finished {
                 finish_reason: None,
+                timings: self.timings.take(),
             }),'''
 catches = [
     "client::stream::tests::a_stream_that_ends_without_saying_it_is_done_is_a_failure_not_an_answer",
@@ -778,8 +787,13 @@ becomes = '''
 catches = [
     "client::stream::tests::a_bearer_credential_is_sent_as_an_authorization_header_and_only_then",
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
+    "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
+    "client::stream::tests::a_timing_the_server_did_not_send_is_absent_not_zero",
+    "client::stream::tests::a_timings_digits_survive_the_transport",
+    "client::stream::tests::the_last_timings_a_stream_carries_is_the_one_reported",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
+    "client::stream::tests::timings_on_the_last_chunk_with_choices_are_read_too",
 ]
 
 [[fault]]
@@ -943,6 +957,8 @@ anchor = '''
 becomes = '''
     if let Some(reasoning) = None::<&String> {'''
 catches = [
+    "client::head::tests::a_change_to_reasoning_alone_is_reasoning_not_the_residual",
+    "client::head::tests::a_reasoning_change_is_named_whether_added_rewritten_or_beside_a_text_change",
     "client::wire::tests::an_assistant_messages_reasoning_goes_on_the_wire_as_it_came",
 ]
 
@@ -1023,4 +1039,190 @@ becomes = '''
         let usable = !key.is_empty();'''
 catches = [
     "client::stream::tests::a_bearer_credential_is_never_printed_and_never_breaks_a_line",
+]
+
+[[fault]]
+id = "client.stream-drops-the-timings-chunk"
+failure_class = "client.stream-drops-the-timings-chunk"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            self.timings = Some(Timings::read(timings));'''
+becomes = '''
+            let _ = timings;'''
+catches = [
+    "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
+    "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
+    "client::stream::tests::a_timing_the_server_did_not_send_is_absent_not_zero",
+    "client::stream::tests::a_timings_digits_survive_the_transport",
+    "client::stream::tests::a_timings_that_is_not_an_object_reports_nothing",
+    "client::stream::tests::the_last_timings_a_stream_carries_is_the_one_reported",
+    "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
+    "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
+    "client::stream::tests::timings_on_the_last_chunk_with_choices_are_read_too",
+]
+
+[[fault]]
+id = "client.stream-reads-an-absent-timing-as-zero"
+failure_class = "client.stream-reads-an-absent-timing-as-zero"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                .filter(|count| *count <= Count::MAX)'''
+becomes = '''
+                .filter(|count| *count <= Count::MAX)
+                .or(Some(0))'''
+catches = [
+    "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
+    "client::stream::tests::a_timing_the_server_did_not_send_is_absent_not_zero",
+    "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
+    "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
+]
+
+[[fault]]
+id = "client.stream-rounds-a-timing-through-a-float"
+failure_class = "client.stream-rounds-a-timing-through-a-float"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                .and_then(|value| value.as_number().map(ToString::to_string))'''
+becomes = '''
+                .and_then(|value| value.as_f64().map(|ms| ms.to_string()))'''
+catches = [
+    "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
+    "client::stream::tests::a_timings_digits_survive_the_transport",
+]
+
+[[fault]]
+id = "client.millis-spells-what-the-record-cannot"
+failure_class = "client.millis-spells-what-the-record-cannot"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        (integer || decimal).then(|| Self(text.to_owned()))'''
+becomes = '''
+        let _ = (integer, decimal);
+        Some(Self(text.to_owned()))'''
+catches = [
+    "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
+    "client::stream::tests::a_timings_digits_survive_the_transport",
+]
+
+[[fault]]
+id = "client.canned-drops-its-timings"
+failure_class = "client.canned-drops-its-timings"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                Step::Timings(measured) => timings = Some(measured),'''
+becomes = '''
+                Step::Timings(_) => {}'''
+catches = [
+    "client::stream::tests::a_canned_stream_reports_its_timings_when_it_finishes",
+]
+
+[[fault]]
+id = "client.dialect-reads-an-unsent-cache-path"
+failure_class = "client.dialect-reads-an-unsent-cache-path"
+target = "diet/src/client/shape.rs"
+expect_exit = 101
+anchor = '''
+            cached_tokens: Some("timings.cache_n".to_owned()),'''
+becomes = '''
+            cached_tokens: Some("timings.prompt_n_cached".to_owned()),'''
+catches = [
+    "client::tests::cache_telemetry_is_read_from_the_path_the_dialect_declares_and_nowhere_else",
+    "client::wire::tests::a_declared_path_reads_what_is_there_and_nothing_when_it_is_not",
+    "client::wire::tests::the_llama_cpp_dialect_reads_the_cache_count_the_server_sends",
+]
+
+[[fault]]
+id = "client.stream-drops-the-draft-counts"
+failure_class = "client.stream-drops-the-draft-counts"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            draft_n: count("draft_n"),'''
+becomes = '''
+            draft_n: None,'''
+catches = [
+    "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
+]
+
+[[fault]]
+id = "client.stream-the-first-timings-wins"
+failure_class = "client.stream-the-first-timings-wins"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            self.timings = Some(Timings::read(timings));'''
+becomes = '''
+            self.timings.get_or_insert_with(|| Timings::read(timings));'''
+catches = [
+    "client::stream::tests::the_last_timings_a_stream_carries_is_the_one_reported",
+]
+
+[[fault]]
+id = "client.stream-reads-a-timings-that-is-not-an-object"
+failure_class = "client.stream-reads-a-timings-that-is-not-an-object"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        if let Some(timings) = value.get("timings").filter(|timings| timings.is_object()) {'''
+becomes = '''
+        if let Some(timings) = value.get("timings") {'''
+catches = [
+    "client::stream::tests::a_timings_that_is_not_an_object_reports_nothing",
+]
+
+[[fault]]
+id = "client.stream-keeps-a-count-past-the-record"
+failure_class = "client.stream-keeps-a-count-past-the-record"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                .filter(|count| *count <= Count::MAX)'''
+becomes = '''
+                .filter(|_| true)'''
+catches = [
+    "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
+]
+
+[[fault]]
+id = "client.millis-keeps-an-integer-past-the-record"
+failure_class = "client.millis-keeps-an-integer-past-the-record"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            .is_ok_and(|number| number <= Count::MAX && number.to_string() == text);'''
+becomes = '''
+            .is_ok_and(|number| number.to_string() == text);'''
+catches = [
+    "client::stream::tests::a_timings_digits_survive_the_transport",
+]
+
+[[fault]]
+id = "client.millis-writes-an-integer-as-a-decimal"
+failure_class = "client.millis-writes-an-integer-as-a-decimal"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        (integer || decimal).then(|| Self(text.to_owned()))'''
+becomes = '''
+        (integer || decimal).then(|| Self(if integer { format!("{text}.0") } else { text.to_owned() }))'''
+catches = [
+    "client::stream::tests::a_timings_digits_survive_the_transport",
+]
+
+[[fault]]
+id = "client.millis-writes-a-decimal-as-an-integer"
+failure_class = "client.millis-writes-a-decimal-as-an-integer"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        (integer || decimal).then(|| Self(text.to_owned()))'''
+becomes = '''
+        (integer || decimal).then(|| Self(text.split('.').next().unwrap_or(text).to_owned()))'''
+catches = [
+    "client::stream::tests::a_timings_digits_survive_the_transport",
 ]

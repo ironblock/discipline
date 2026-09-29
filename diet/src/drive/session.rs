@@ -1043,7 +1043,7 @@ fn call<S: Streaming>(
     let mut state = shared.lock();
     state.flight = None;
     match result {
-        Ok(StreamEnded::Finished { finish_reason }) => {
+        Ok(StreamEnded::Finished { finish_reason, .. }) => {
             state.trunk.push(Message::new(Role::User, ask));
             // The reasoning goes back with the answer, byte for byte and
             // untrimmed: measured on e7051ef (#117, Q10), dropping it

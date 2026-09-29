@@ -52,7 +52,7 @@ pub fn reply_counting_only_the_prompt(text: &str) -> String {
     format!(
         "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":\"{escaped}\"}},\
          \"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":{PROMPT_TOKENS}}},\
-         \"generation_settings\":{{}},\"timings\":{{\"prompt_n_cached\":512}}}}"
+         \"generation_settings\":{{}},\"timings\":{{\"cache_n\":512}}}}"
     )
 }
 
@@ -111,19 +111,58 @@ pub fn script(regime: Regime) -> Script {
 }
 
 /// The replies the canned server plays for [`script`], in call order.
+///
+/// Registered as substrate `canned-cache-n`: these bodies carry the cache
+/// count under `timings.cache_n`, the key a llama.cpp server sends (#156).
 #[must_use]
 pub fn acts() -> Vec<Act> {
-    [
-        "turn one",
-        FORK_ANSWER,
-        "turn two",
-        FORK_ANSWER,
-        "DECISION: fold them",
-        "turn three",
-    ]
-    .into_iter()
-    .map(|text| Act::Answer(reply(text)))
-    .collect()
+    SCRIPTED
+        .into_iter()
+        .map(|text| Act::Answer(reply(text)))
+        .collect()
+}
+
+/// The acts as first registered, as substrate `canned`: the same answers,
+/// with the cache count under `timings.prompt_n_cached`, a key no server
+/// sends (#156). Nothing plays them any more. They are kept, byte for byte,
+/// because records name their digest, and a digest is only an identity while
+/// the bytes it was taken over can still be hashed.
+#[must_use]
+pub fn acts_as_first_registered() -> Vec<Act> {
+    SCRIPTED
+        .into_iter()
+        .map(|text| Act::Answer(answer(text, "{\"prompt_n_cached\":512}")))
+        .collect()
+}
+
+/// What [`script`]'s calls are answered with, in call order.
+const SCRIPTED: [&str; 6] = [
+    "turn one",
+    FORK_ANSWER,
+    "turn two",
+    FORK_ANSWER,
+    "DECISION: fold them",
+    "turn three",
+];
+
+/// What the canned server is, as the registry's `canned-server` entry type
+/// names it: its `serves` field, and the engine name a record carries
+/// (`drive::regimen` writes it from here).
+pub const SERVES: &str = "diet-drive canned";
+
+/// The registry's `hardware_fingerprint` for a canned server playing acts
+/// with digest `acts_sha256`: the sha256 of exactly the entry type's two
+/// hardware fields, as canonical JSON (sorted keys, no spaces).
+///
+/// The rule's home is `substrates/check-fingerprints.py` (`digest_of`); this
+/// is a second implementation of it, so it is never checked against itself.
+/// Every test compares its result with a fingerprint that script produced
+/// and the registry committed.
+#[must_use]
+pub fn hardware_fingerprint(acts_sha256: &str) -> String {
+    crate::digest::sha256_hex(
+        format!("{{\"acts_sha256\":\"{acts_sha256}\",\"serves\":\"{SERVES}\"}}").as_bytes(),
+    )
 }
 
 /// The sha256 of the replies this server plays, as the record spells a digest.
@@ -224,12 +263,17 @@ pub fn digest_of(acts: &[Act]) -> String {
 /// step.
 #[must_use]
 pub fn reply(text: &str) -> String {
+    answer(text, "{\"cache_n\":512}")
+}
+
+/// [`reply`]'s body, with `timings` as given.
+fn answer(text: &str, timings: &str) -> String {
     let escaped = escaped(text);
     format!(
         "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":\"{escaped}\"}},\
          \"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":{PROMPT_TOKENS},\
          \"completion_tokens\":7}},\"generation_settings\":{{}},\
-         \"timings\":{{\"prompt_n_cached\":512}}}}"
+         \"timings\":{timings}}}"
     )
 }
 
@@ -250,7 +294,7 @@ pub fn reply_with_reasoning(text: &str, reasoning: &str) -> String {
         "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":\"{}\",\
          \"reasoning_content\":\"{}\"}},\"finish_reason\":\"stop\"}}],\
          \"usage\":{{\"prompt_tokens\":{PROMPT_TOKENS},\"completion_tokens\":7}},\
-         \"generation_settings\":{{}},\"timings\":{{\"prompt_n_cached\":512}}}}",
+         \"generation_settings\":{{}},\"timings\":{{\"cache_n\":512}}}}",
         escaped(text),
         escaped(reasoning),
     )
@@ -268,7 +312,7 @@ pub fn reply_exhausted_in_the_think_block(reasoning: &str) -> String {
         "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":\"\",\
          \"reasoning_content\":\"{}\"}},\"finish_reason\":\"length\"}}],\
          \"usage\":{{\"prompt_tokens\":{PROMPT_TOKENS},\"completion_tokens\":128}},\
-         \"generation_settings\":{{}},\"timings\":{{\"prompt_n_cached\":512}}}}",
+         \"generation_settings\":{{}},\"timings\":{{\"cache_n\":512}}}}",
         escaped(reasoning),
     )
 }
@@ -309,7 +353,170 @@ pub const DEV_LOOP: &str = include_str!("../../drive/dev-loop.toml");
 mod tests {
     use std::time::Duration;
 
-    use super::{Act, acts, acts_digest, digest_of};
+    use std::collections::BTreeMap;
+
+    use super::{
+        Act, DEV_LOOP, acts, acts_as_first_registered, acts_digest, digest_of, hardware_fingerprint,
+    };
+
+    const REGISTRY: &str = include_str!("../../../substrates/registry.toml");
+
+    /// Every `[kind.id]` table of a TOML document, with its one-line string
+    /// values. A scan, not a TOML reader: diet has none (the regimen is its
+    /// own format). Lines inside a `"""` string are skipped.
+    ///
+    /// BY RULE (#162), every field read here stays a one-line
+    /// `key = "value"` string in the registry and in `dev-loop.toml`:
+    /// `entry_type`, `acts_sha256`, `hardware_fingerprint`, `weights_kind`,
+    /// `weights_acts_sha256`, `engine_identity`, `equipment`, `substrate`
+    /// and `substrate_hardware`. A field written another way is not read,
+    /// and the tests fail rather than pass on nothing: `registered` panics
+    /// on a missing key, and `every_registered_canned_digest_is_acts_this_crate_keeps`
+    /// counts the canned entries it read against the raw text.
+    fn tables(document: &str) -> BTreeMap<String, BTreeMap<String, String>> {
+        let mut tables = BTreeMap::new();
+        let mut current = String::new();
+        let mut in_long_string = false;
+        for line in document.lines() {
+            if line.matches("\"\"\"").count() % 2 == 1 {
+                in_long_string = !in_long_string;
+                continue;
+            }
+            if in_long_string {
+                continue;
+            }
+            if let Some(name) = line
+                .strip_prefix('[')
+                .and_then(|rest| rest.strip_suffix(']'))
+            {
+                current = name.to_owned();
+                continue;
+            }
+            let Some((key, value)) = line.split_once(" = \"") else {
+                continue;
+            };
+            let Some(value) = value.strip_suffix('"') else {
+                continue;
+            };
+            tables
+                .entry(current.clone())
+                .or_insert_with(BTreeMap::new)
+                .insert(key.trim().to_owned(), value.to_owned());
+        }
+        tables
+    }
+
+    /// The registry's value of `key` in table `table`.
+    fn registered<'a>(
+        registry: &'a BTreeMap<String, BTreeMap<String, String>>,
+        table: &str,
+        key: &str,
+    ) -> &'a str {
+        registry
+            .get(table)
+            .and_then(|fields| fields.get(key))
+            .unwrap_or_else(|| panic!("the registry has no `{key}` in `[{table}]`"))
+    }
+
+    #[test]
+    fn the_first_registered_acts_still_hash_to_their_registered_digest() {
+        // D9 (#156): the acts records name are never mutated.
+        let registry = tables(REGISTRY);
+        let first = digest_of(&acts_as_first_registered());
+        assert_eq!(
+            registered(&registry, "substrate.canned", "weights_acts_sha256"),
+            first
+        );
+        assert_eq!(
+            registered(&registry, "equipment.canned-loopback", "acts_sha256"),
+            first
+        );
+        assert_eq!(
+            registered(
+                &registry,
+                "equipment.canned-loopback",
+                "hardware_fingerprint"
+            ),
+            hardware_fingerprint(&first)
+        );
+    }
+
+    #[test]
+    fn every_registered_canned_digest_is_acts_this_crate_keeps() {
+        let registry = tables(REGISTRY);
+        let kept = [acts_digest(), digest_of(&acts_as_first_registered())];
+        let mut current_is_registered = false;
+        let (mut servers, mut substrates) = (0, 0);
+        for (table, fields) in &registry {
+            if table.starts_with("equipment.")
+                && fields.get("entry_type").map(String::as_str) == Some("canned-server")
+            {
+                servers += 1;
+                let acts = registered(&registry, table, "acts_sha256");
+                assert!(kept.iter().any(|digest| digest == acts), "[{table}] {acts}");
+                assert_eq!(
+                    registered(&registry, table, "hardware_fingerprint"),
+                    hardware_fingerprint(acts),
+                    "[{table}]"
+                );
+            }
+            if table.starts_with("substrate.")
+                && fields.get("weights_kind").map(String::as_str) == Some("canned")
+            {
+                substrates += 1;
+                let acts = registered(&registry, table, "weights_acts_sha256");
+                assert!(kept.iter().any(|digest| digest == acts), "[{table}] {acts}");
+                assert_eq!(
+                    registered(&registry, table, "engine_identity"),
+                    acts,
+                    "[{table}]"
+                );
+                current_is_registered |= *acts == acts_digest();
+            }
+        }
+        assert!(
+            current_is_registered,
+            "no canned substrate is registered for the acts this crate plays, {}",
+            acts_digest()
+        );
+        // Every canned entry the text declares was read: a line the scan
+        // cannot parse drops its entry out of this check, and is caught here.
+        let declaring = |key: &str, value: &str| {
+            REGISTRY
+                .lines()
+                .filter(|line| line.trim_start().starts_with(key) && line.contains(value))
+                .count()
+        };
+        assert_eq!(servers, declaring("entry_type", "\"canned-server\""));
+        assert_eq!(substrates, declaring("weights_kind", "\"canned\""));
+        assert!(servers > 0 && substrates > 0, "no canned entry was read");
+    }
+
+    #[test]
+    fn the_regimen_names_the_substrate_that_plays_these_acts() {
+        // `dev-loop.toml` cites a substrate and its hardware; both are now
+        // checked against the acts, not only copied.
+        let registry = tables(REGISTRY);
+        let regimen = &tables(DEV_LOOP)[""];
+        let substrate = format!("substrate.{}", regimen["substrate"]);
+        assert_eq!(
+            registered(&registry, &substrate, "weights_acts_sha256"),
+            acts_digest(),
+            "[{substrate}]"
+        );
+        let equipment = format!(
+            "equipment.{}",
+            registered(&registry, &substrate, "equipment")
+        );
+        assert_eq!(
+            registered(&registry, &equipment, "hardware_fingerprint"),
+            regimen["substrate_hardware"]
+        );
+        assert_eq!(
+            regimen["substrate_hardware"],
+            hardware_fingerprint(&acts_digest())
+        );
+    }
 
     #[test]
     fn the_digest_the_record_carries_is_the_digest_of_the_acts_that_were_played() {

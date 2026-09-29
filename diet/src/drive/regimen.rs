@@ -136,7 +136,7 @@ pub fn regime_of(regimen: &Regimen, endpoint_given: bool) -> Result<Regime, Stri
             // engine a version of its own would be inventing a second fact to
             // fill a second field.
             engine: Engine {
-                name: "diet-drive canned".to_owned(),
+                name: crate::drive::canned::SERVES.to_owned(),
                 version_or_digest: crate::drive::canned::acts_digest(),
             },
             // Computed, not declared, and its OWN kind rather than a digest

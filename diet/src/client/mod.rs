@@ -851,7 +851,7 @@ mod tests {
             "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":\"{text}\"}},\
              \"finish_reason\":\"{finish}\"}}],\"usage\":{{\"prompt_tokens\":600,\
              \"completion_tokens\":7}},\"generation_settings\":{{{echo}}},\
-             \"timings\":{{\"prompt_n_cached\":512}}}}"
+             \"timings\":{{\"cache_n\":512}}}}"
         )
     }
 
@@ -1356,10 +1356,7 @@ mod tests {
             cache.prompt_tokens,
             Some(Count::new(600).expect("600 fits"))
         );
-        assert_eq!(
-            cache.cached_path.as_deref(),
-            Some("timings.prompt_n_cached")
-        );
+        assert_eq!(cache.cached_path.as_deref(), Some("timings.cache_n"));
 
         // The same bytes under a dialect that looks somewhere else. If the
         // client sniffed the body rather than reading its declared path, this
