@@ -1,0 +1,57 @@
+name: pkg-exercise
+
+# A reusable workflow, composed by verify.yml. It runs the checks
+# .github/check-owners.tsv says this package owns -- derived, never named
+# here, so the table and the workflow cannot drift apart.
+#
+# The toolchain comes from the package's own declarations, not from this
+# file: pnpm's version from `packageManager` in exercise/package.json, Node's
+# major from its `engines`. The check itself installs the dependencies and
+# fetches the browser; this job only adds the browser's system libraries,
+# which need the runner's package manager.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: exercise
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: exercise/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: exercise/pnpm-lock.yaml
+
+      - name: Install the browser's system libraries
+        run: |
+          set -euo pipefail
+          cd exercise
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install-deps chromium
+
+      - name: Run the checks this package owns
+        run: |
+          set -euo pipefail
+          mapfile -t checks < <(
+            awk -F'\t' -v pkg=exercise '!/^#/ && NF>=2 && $2 == pkg { print $1 }' \
+              .github/check-owners.tsv
+          )
+          if [ "${#checks[@]}" -eq 0 ]; then
+            echo "::error::no check is owned by 'exercise'; a workflow that runs nothing is not a pass"
+            exit 1
+          fi
+          args=()
+          for check in "${checks[@]}"; do args+=(--only "$check"); done
+          printf 'checks owned by exercise: %s\n' "${checks[*]}"
+          ./verify.sh "${args[@]}"
