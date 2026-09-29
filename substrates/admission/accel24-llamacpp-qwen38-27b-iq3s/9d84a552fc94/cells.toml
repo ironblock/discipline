@@ -1,5 +1,5 @@
 # Cells for this fingerprint, the #143 cells window of 2026-09-29. One table per cell; `word` is one of
-# pass, fail, n/a (reason), unreported, unadjudicated (ruled on #143). recompute.sh re-derives every word
+# pass, fail, n/a (reason), unreported, unadjudicated, or on a canary baseline (ruled on #143). recompute.sh re-derives every word
 # that is derivable from a raw file and refuses a word that disagrees.
 
 [identity]

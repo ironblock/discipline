@@ -16,11 +16,11 @@ def fail(m):
     global bad; bad += 1; print(f"recompute: {m}")
 if hashlib.sha256(fp["canonical"].encode()).hexdigest() != fp["sha256"] or here.name != fp["sha256"][:12]:
     fail("the directory is not named by its fingerprint's first 12 hex characters")
-WORDS = ("pass", "fail", "unreported", "unadjudicated", "baseline")
+WORDS = ("pass", "fail", "unreported", "unadjudicated")
 raw = {}
 for name, c in cells.items():
     w = c.get("word", "")
-    if not (w in WORDS or re.fullmatch(r"n/a \(.+\)", w)): fail(f"[{name}] word {w!r} is not one of the ruled words")
+    if not (w in WORDS or re.fullmatch(r"n/a \(.+\)", w) or (w == "baseline" and name == "canary")): fail(f"[{name}] word {w!r} is not one of the ruled words")
     for key, want in (c.get("raw") or {}).items():
         hits = [p for p in (here / "raw").iterdir() if p.name.replace("-", "_").replace(".", "_") == key]
         if len(hits) != 1: fail(f"[{name}] cites {key}, which names no single raw file"); continue
