@@ -35,6 +35,36 @@ open(p, "w").write(json.dumps(r)); m = json.load(open(c)); m["band"]["artifacts"
 PY
 python3 -B "$here/band.py" "$tmp/rep.json" "$tmp/row2" > /dev/null 2>&1; rc=$?
 [ $rc = 2 ] && say "ok    band.py refuses tallies the row's report does not state (rc 2)" || { say "FAIL  band.py with a disagreeing report exited $rc, not 2"; bad=1; }
+# more refusals: a report leaving out a seat's tallies; seat B's stated tally disagreeing; a manifest not pinning a
+# seat's log; the manifest's level out of range
+for case in drop-B b-off no-seat-a level; do
+  rm -rf "$tmp/row3"; cp -R "$R/archived" "$tmp/row3"
+  python3 - "$tmp/row3/report.json" "$C" "$tmp/m3.json" "$case" <<'PY'
+import hashlib, json, sys
+p, c, out, case = sys.argv[1:]; r = json.load(open(p)); m = json.load(open(c))
+if case == "drop-B": del r["quality"]["tallies"]["B"]
+if case == "b-off": r["quality"]["tallies"]["B"]["facts_offered"] += 1
+open(p, "w").write(json.dumps(r)); m["band"]["artifacts"]["report.json"] = hashlib.sha256(open(p, "rb").read()).hexdigest()
+if case == "no-seat-a": del m["band"]["artifacts"]["seat-a/events.jsonl"]
+if case == "level": m["band"]["level"] = 1.5
+json.dump(m, open(out, "w"))
+PY
+  python3 -B "$here/band.py" "$tmp/m3.json" "$tmp/row3" > /dev/null 2>&1; rc=$?
+  [ $rc = 2 ] && say "ok    band.py refuses: $case (rc 2)" || { say "FAIL  band.py with $case exited $rc, not 2"; bad=1; }
+done
+# the config's own checks: a negative floor, arms not A and B, a malformed band digest
+for case in floor arms digest; do
+  python3 - "$C" "$tmp/c3.json" "$case" <<'PY'
+import json, sys
+c, out, case = sys.argv[1:]; m = json.load(open(c))
+if case == "floor": m["apply"]["seat_a_floor"] = -1
+if case == "arms": m["apply"]["arms"] = {"A": "x"}
+if case == "digest": m["apply"]["band_sha256"] = "xyz"
+json.dump(m, open(out, "w"))
+PY
+  ( cd "$R" && python3 -B "$here/apply.py" "$tmp/c3.json" archived band.json . box.json ) > /dev/null 2>&1; rc=$?
+  [ $rc = 2 ] && say "ok    apply.py refuses a config with a bad $case (rc 2)" || { say "FAIL  apply.py with a bad $case exited $rc, not 2"; bad=1; }
+done
 # the applier: a band that is not the config's pinned bytes; the config's own floor
 cp "$R/band.json" "$tmp/band-x.json"; printf ' ' >> "$tmp/band-x.json"
 ( cd "$R" && python3 -B "$here/apply.py" "$C" archived "$tmp/band-x.json" . box.json ) > /dev/null 2>&1; rc=$?

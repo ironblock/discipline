@@ -17,8 +17,8 @@ Planning answered Q-P1 with the plan's D7 (a):
 - **What the manifest carries:** its `"band"` object names the artefacts, each by sha256 (`grade.py` and both seats' `events.jsonl` required; `report.json` when the row has one, whose stated tallies must then agree), plus the level, the resamples and the seed.
 - **Refusals (exit 2):**
   - a row whose bytes are not the manifest's;
-  - a manifest that pins too little;
-  - tallies the report does not state.
+  - a manifest that pins too little (either seat's log, or `grade.py`), or whose level or resamples is out of range;
+  - a pinned report that leaves out either seat's tallies, or states tallies the logs do not sum to.
 
 ## apply.py
 
@@ -35,7 +35,7 @@ Planning answered Q-P1 with the plan's D7 (a):
   - Within the band: `supported`.
   - Outside it, with the reference sign kept: `inconclusive`.
   - Outside it, with the opposite sign or zero: `refuted`.
-  - **A band straddling zero has no reference sign.** Outside it either way is `inconclusive`, and the fire cannot refute; a pre-registration using such a band must say so.
+  - **A band strictly straddling zero (`lo < 0 < hi`) has no reference sign.** Outside it either way is `inconclusive`, and the fire cannot refute; a pre-registration using such a band must say so. A band with an edge at zero keeps its point's sign, as #115's rule reads it.
   - For #115's band, which is positive, this is exactly #115's rule.
 - **The seat-A floor (N1's degenerate case).** A rung whose seat A accepts almost nothing gives a stable effect equal to seat B's rate, and would pass trivially. Seat A's accepted-and-deduped count must reach the config's floor in the fire and in the band's own fire, or the word is `unadjudicated`. The floor is the pre-registration's to state; D7 proposes 10, against #115's archived 18. #115's config sets 0, which reproduces #115.
 
@@ -50,14 +50,15 @@ Planning answered Q-P1 with the plan's D7 (a):
 
 - **`bash selftest.sh`** runs:
   - both parities and #115's fixtures;
-  - 11 fixtures on the generalised rule: a negative band five ways, a straddling band three ways, and the seat-A floor in the fire, in the band's own fire, and exactly at it;
-  - band.py's three refusals, and that it reads its seed from the manifest;
-  - apply.py's refusal of a band that is not the pinned bytes, and that it reads its floor from the config.
-- **`python3 mutants.py`** seeds 22 mutations into `band.py` and `apply.py`. The selftest must exit 1 on each, and **all 22 are killed**. Among them:
+  - 15 fixtures on the generalised rule: a negative band five ways, a straddling band three ways, a band touching zero from each side, a point of zero, and the seat-A floor in the fire, in the band's own fire, and exactly at it;
+  - band.py's seven refusals (altered tallies; a thin manifest two ways; a level out of range; a report leaving out seat B; a report disagreeing, for each seat), and that it reads its seed from the manifest;
+  - apply.py's refusals of a band that is not the pinned bytes and of a config with a negative floor, bad arms or a malformed digest, and that it reads its floor from the config.
+- **`python3 mutants.py`** seeds 29 mutations into `band.py` and `apply.py`. The selftest must exit 1 on each, and **all 29 are killed**. Among them:
   - N1's two named faults: `decide()` restored to `effect <= 0`, and the floor check removed (in the fire, and in the band's fire);
   - a straddling band allowed to refute; the reference sign inverted; the band's edge excluded; the config's floor ignored;
   - #115's checks each dropped: box, canary, instance, seat-B think block, arm, routing, forks, interviews, offered, disclosure, band digest;
-  - band.py's pin check, seed, stated-tally check and required pins.
+  - band.py's pin check, seed, stated-tally check (each seat), required pins, range check, and its refusal of a report missing a seat;
+  - a band touching zero read as straddling; the point-of-zero guard removed; the config's own checks dropped.
 
   #115's original 19 mutants were never committed (m2). These are re-derived against the generalised code, and committed.
 

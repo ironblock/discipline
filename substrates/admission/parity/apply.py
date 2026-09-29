@@ -9,7 +9,7 @@ The rule (#89 as generalised by D7 (a) and N1): the reference sign is the sign o
 (the first fire's, or the archived row's). Supported if the fire's effect lands within the band; outside it,
 inconclusive if the effect keeps the reference sign, refuted if it has the opposite sign or is zero. If the
 band straddles zero there is no reference sign: outside either way is inconclusive, and the fire cannot
-refute. A refuted or inconclusive word carries the config's disclosure. The degenerate case (N1): a declared
+refute. A band that only touches zero (an edge at 0) keeps its point's sign, as #115's rule reads it. A refuted or inconclusive word carries the config's disclosure. The degenerate case (N1): a declared
 floor on seat A's accepted-and-deduped count, in the fire and in the band's own fire; below it the word is
 unadjudicated.
 
@@ -109,11 +109,12 @@ def canary_ok(side):
 
 def decide(effect, band, point):
     """Within the band, supported. Outside it: with the reference sign (the point's) kept, inconclusive; with
-    the opposite sign or zero, refuted. A band straddling zero has no reference sign: outside it is inconclusive."""
+    the opposite sign or zero, refuted. A band strictly straddling zero (lo < 0 < hi) has no reference sign:
+    outside it is inconclusive. A band with an edge at zero keeps its point's sign."""
     lo, hi = band
     if lo <= effect <= hi:
         return "supported"
-    if lo <= 0 <= hi or point == 0:
+    if lo < 0 < hi or point == 0:  # strictly across zero; a band touching zero keeps its point's sign
         return "inconclusive"
     ref = 1 if point > 0 else -1
     return "inconclusive" if effect * ref > 0 else "refuted"
@@ -308,7 +309,11 @@ def selftest(archived, band_path):
     general = [("a negative band: within it", -0.1, neg, "supported"), ("a negative band: beyond it, sign kept", -0.25, neg, "inconclusive"),
                ("a negative band: short of it, sign kept", -0.01, neg, "inconclusive"), ("a negative band: the opposite sign", 0.05, neg, "refuted"),
                ("a negative band: zero", 0.0, neg, "refuted"), ("a straddling band: within it", 0.0, strad, "supported"),
-               ("a straddling band: below it", -0.05, strad, "inconclusive"), ("a straddling band: above it", 0.2, strad, "inconclusive")]
+               ("a straddling band: below it", -0.05, strad, "inconclusive"), ("a straddling band: above it", 0.2, strad, "inconclusive"),
+               ("a band touching zero from above: a sign reversal refutes", -0.02, ([0.0, 0.1], 0.05), "refuted"),
+               ("a band touching zero from above: zero is within it", 0.0, ([0.0, 0.1], 0.05), "supported"),
+               ("a band touching zero from below: a sign reversal refutes", 0.02, ([-0.1, 0.0], -0.05), "refuted"),
+               ("a point of zero outside a band not containing zero: no reference sign", 0.5, ([0.1, 0.2], 0.0), "inconclusive")]
     for label, e, (bd, pt), want in general:
         got = decide(e, bd, pt)
         bad += got != want

@@ -81,6 +81,8 @@ if set(A) != set(B):
 keys = sorted(A)
 
 stated = json.loads((row / "report.json").read_text(encoding="utf-8"))["quality"]["tallies"] if "report.json" in PINNED else {}
+if "report.json" in PINNED and not all(n in stated for n in ("A", "B")):
+    fail("the pinned report.json does not state both seats' tallies")
 for name, t in ((n, t) for n, t in (("A", A), ("B", B)) if n in stated):
     off, acc = sum(v[0] for v in t.values()), sum(v[1] for v in t.values())
     want = (stated[name]["facts_offered"], stated[name]["facts_accepted_deduped"])

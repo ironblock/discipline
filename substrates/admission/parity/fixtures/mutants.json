@@ -3,7 +3,7 @@
   {
    "label": "decide() restored to effect <= 0 for refuted",
    "file": "apply.py",
-   "old": "    if lo <= 0 <= hi or point == 0:\n        return \"inconclusive\"\n    ref = 1 if point > 0 else -1\n    return \"inconclusive\" if effect * ref > 0 else \"refuted\"",
+   "old": "    if lo < 0 < hi or point == 0:  # strictly across zero; a band touching zero keeps its point's sign\n        return \"inconclusive\"\n    ref = 1 if point > 0 else -1\n    return \"inconclusive\" if effect * ref > 0 else \"refuted\"",
    "new": "    if effect <= 0:\n        return \"refuted\"\n    return \"inconclusive\""
   },
   {
@@ -21,7 +21,7 @@
   {
    "label": "a straddling band allowed to refute",
    "file": "apply.py",
-   "old": "    if lo <= 0 <= hi or point == 0:",
+   "old": "    if lo < 0 < hi or point == 0:  # strictly across zero; a band touching zero keeps its point's sign",
    "new": "    if point == 0:"
   },
   {
@@ -131,6 +131,48 @@
    "file": "band.py",
    "old": "    if need not in PINNED:\n        fail(",
    "new": "    if False:\n        fail("
+  },
+  {
+   "label": "a band touching zero read as straddling",
+   "file": "apply.py",
+   "old": "    if lo < 0 < hi or point == 0:  # strictly across zero; a band touching zero keeps its point's sign",
+   "new": "    if lo <= 0 <= hi or point == 0:"
+  },
+  {
+   "label": "the point-of-zero guard removed",
+   "file": "apply.py",
+   "old": "    if lo < 0 < hi or point == 0:  # strictly across zero; a band touching zero keeps its point's sign",
+   "new": "    if lo < 0 < hi:"
+  },
+  {
+   "label": "a report missing a seat's tallies accepted",
+   "file": "band.py",
+   "old": "if \"report.json\" in PINNED and not all(n in stated for n in (\"A\", \"B\")):",
+   "new": "if False:"
+  },
+  {
+   "label": "seat B's stated tally unchecked",
+   "file": "band.py",
+   "old": "for name, t in ((n, t) for n, t in ((\"A\", A), (\"B\", B)) if n in stated):",
+   "new": "for name, t in ((n, t) for n, t in ((\"A\", A),) if n in stated):"
+  },
+  {
+   "label": "only grade.py required of the manifest",
+   "file": "band.py",
+   "old": "for need in (\"grade.py\", \"seat-a/events.jsonl\", \"seat-b/events.jsonl\"):",
+   "new": "for need in (\"grade.py\",):"
+  },
+  {
+   "label": "the level and resamples range unchecked",
+   "file": "band.py",
+   "old": "if not (0 < LEVEL < 1 and RESAMPLES > 0):",
+   "new": "if False:"
+  },
+  {
+   "label": "the config's arms, floor and digest unchecked",
+   "file": "apply.py",
+   "old": "    if set(ARMS) != {\"A\", \"B\"} or SEAT_A_FLOOR < 0 or not re.fullmatch(r\"[0-9a-f]{64}\", BAND_SHA):",
+   "new": "    if False:"
   }
  ]
 }
