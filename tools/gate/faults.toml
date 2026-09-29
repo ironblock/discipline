@@ -3485,6 +3485,30 @@ failure_class = "gate.resolver-keys-on-a-comment"
 legacy_signature = "keyed as .*inject_alpha"
 migrated = false
 [[fault]]
+id = "admission.admission_held_while_derived"
+kind = "seeded-gate"
+check = "admission"
+label = "a held word the results derive as admitted"
+failure_class = "admission.word-not-derived"
+legacy_signature = "holds a word the results derive as"
+migrated = false
+[[fault]]
+id = "admission.admission_record_not_recomputed"
+kind = "seeded-gate"
+check = "admission"
+label = "a cited result edited after the record"
+failure_class = "admission.record-does-not-recompute"
+legacy_signature = "admission.record-does-not-recompute"
+migrated = false
+[[fault]]
+id = "admission.admission_unadjudicated_admits"
+kind = "seeded-gate"
+check = "admission"
+label = "an unadjudicated cell read as admitting"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  derive: an unadjudicated cell holds"
+migrated = false
+[[fault]]
 id = "derive.derive_build_failure_unread"
 kind = "seeded-gate"
 check = "derive"

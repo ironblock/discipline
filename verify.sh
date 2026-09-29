@@ -68,7 +68,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results recompute regimen lanes metadata hygiene pages ci history injections resolver derive parity)
+readonly CHECKS=(fmt clippy test library results recompute admission regimen lanes metadata hygiene pages ci history injections resolver derive parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -309,6 +309,14 @@ check_regimen() {
 # spelled out because a seeded case below depends on this being the root the
 # check reads.
 check_recompute() { python3 scripts/check-recompute.py --root results; }
+
+# A rung's admission word, derived from its admission directory rather than trusted as written (#183): the
+# derivation's own fixtures first, then every admission.toml in the tree re-verified through its own
+# admission-recompute.sh and its word compared with the word its results derive under planning's rule (#143).
+check_admission() {
+  python3 substrates/admission/derive_admission.py --selftest &&
+    python3 substrates/admission/derive_admission.py --all
+}
 
 # Lane-declared seeded faults, applied for real. Nine lanes write their own
 # `diet/<lane>/gate.toml` beside the code that emits it -- ruling 1 on #59 --
@@ -2644,6 +2652,36 @@ old = '{"record":"summary","kind":"drive","turns":2,'
 new = '{"record":"summary","kind":"drive","turns":3,'
 assert old in source
 record.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A held admission whose results all pass. The record's own recompute accepts a held word whatever the results
+# say -- holding is always allowed there -- so only the derivation sees that nothing is left to wait on.
+inject_admission_held_while_derived() {
+  python3 - <<'EOF'
+import pathlib, re
+p = pathlib.Path("substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/admission.toml")
+s = p.read_text(encoding="utf-8")
+assert re.search(r'^word = "admitted"$', s, re.M)
+p.write_text(re.sub(r'^word = "admitted"$', 'word_held = "waiting on nothing"', s, count=1, flags=re.M), encoding="utf-8")
+EOF
+}
+
+# A cited result changed after the record was written: the cells directory's README gains a line, so its
+# manifest no longer hashes to the digest admission.toml states.
+inject_admission_record_not_recomputed() {
+  printf '\nedited after the admission was recorded\n' >> substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/README.md
+}
+
+# The rule itself broken: an unadjudicated cell read as admitting, which planning ruled holds the word.
+inject_admission_unadjudicated_admits() {
+  python3 - <<'EOF'
+import pathlib
+p = pathlib.Path("substrates/admission/derive_admission.py")
+s = p.read_text(encoding="utf-8")
+old = '        return None, f"{\', \'.join(held)} unadjudicated: the admission waits on a re-run"\n'
+assert old in s, "the held branch moved"
+p.write_text(s.replace(old, '        return "admitted", "held cells ignored"\n', 1), encoding="utf-8")
 EOF
 }
 
@@ -6715,6 +6753,12 @@ selftest() {
     'formats::regimen::tests::the_float_rule_and_the_records_decimal_rule_agree \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "a summary the rows do not carry"       recompute inject_recompute_summary_not_derived \
     'the report does not re-derive'
+  seeded_case "a held word the results derive as admitted" admission inject_admission_held_while_derived \
+    'holds a word the results derive as'
+  seeded_case "a cited result edited after the record" admission inject_admission_record_not_recomputed \
+    'admission.record-does-not-recompute'
+  seeded_case "an unadjudicated cell read as admitting" admission inject_admission_unadjudicated_admits \
+    'FAIL  derive: an unadjudicated cell holds'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
     'front-matter .kind. is None'
   seeded_case "a recompute that cannot fail"          recompute inject_recompute_cannot_fail \
