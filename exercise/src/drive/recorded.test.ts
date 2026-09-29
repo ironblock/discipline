@@ -28,12 +28,18 @@ describe('the first drive, recorded and migrated', () => {
     }
   });
 
-  it('carries no home-directory path and no internal ticket id, in any recording', () => {
+  it('carries nothing the migrations refuse on, in any recording: home paths, ticket ids, e-mail addresses, private addresses', () => {
+    // The patterns are `leaks()` in scripts/migrate-recorded.py, checked again here on what was committed.
+    const leaks = [
+      /(\/Users\/|\/home\/)[A-Za-z0-9._-]+/,
+      /(^|[^A-Za-z0-9])DIE-?[0-9]+/i,
+      /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/,
+      /\b(?:10|192\.168|172\.(?:1[6-9]|2\d|3[01]))(?:\.\d{1,3}){2,3}\b/,
+    ];
     for (const [name, rec] of Object.entries(RECORDINGS)) {
       const text = JSON.stringify(rec);
       // Report the match, not the 600 KB it was found in.
-      expect(/(\/Users\/|\/home\/)[A-Za-z0-9._-]+/.exec(text)?.[0], name).toBeUndefined();
-      expect(/(^|[^A-Za-z0-9])DIE-?[0-9]+/i.exec(text)?.[0], name).toBeUndefined();
+      for (const leak of leaks) expect(leak.exec(text)?.[0], name).toBeUndefined();
     }
   });
 
@@ -113,14 +119,23 @@ describe('replaying a recording', () => {
     vi.useFakeTimers();
     try {
       const transport = new ReplayTransport(recording, { speed: 1 });
-      const first: string[] = [];
-      transport.subscribe((e) => first.push(e.kind)).call(undefined);
+      const first: LogLine[] = [];
+      const unsubscribe = transport.subscribe((line) => first.push(line));
+      await vi.advanceTimersByTimeAsync(20_000);
+      unsubscribe();
       transport.close();
-      const seen: string[] = [];
-      transport.subscribe((e) => seen.push(e.kind));
+      expect(first.length).toBeGreaterThan(0);
+      // Closed, nothing plays.
+      await vi.advanceTimersByTimeAsync(20_000);
+      const seen: LogLine[] = [];
+      transport.subscribe((line) => seen.push(line));
+      // Again: what was played, at once, and then on from there -- not from the start, and nothing twice.
+      expect(seen.map((l) => l.seq)).toEqual(first.map((l) => l.seq));
+      // Its clock resumes at the last line played: the wait to the next is the recording's, in full.
       await vi.advanceTimersByTimeAsync(40_000);
-      expect(seen).toContain('ask');
-      expect(seen.filter((k) => k === 'ask').length).toBe(2);
+      expect(seen.length).toBeGreaterThan(first.length);
+      expect(seen.every((line, i) => line.seq === i)).toBe(true);
+      expect(seen.filter((l) => l.kind === 'ask').length).toBe(2);
       expect(await transport.dispatch()).toEqual({ ok: false, refused: 'recording' });
       transport.close();
     } finally {

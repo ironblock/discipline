@@ -110,6 +110,21 @@ describe('HttpTransport: a closed stream (finding 17)', () => {
     expect(sources).toHaveLength(1);
   });
 
+  it('keeps one stream when subscribed again while a probe is out, and does not hear the one it let go', async () => {
+    const { transport, sources, lines, last } = stand({ events: 200 });
+    last().open();
+    last().send(start);
+    last().fail(2);
+    // The probe is out: a remount subscribes, and connects.
+    transport.subscribe(() => undefined);
+    await settle();
+    expect(sources).toHaveLength(2);
+    sources[0]?.send(ask(1));
+    expect(lines).toHaveLength(1);
+    last().send(ask(1));
+    expect(lines).toHaveLength(2);
+  });
+
   it('rebuilds on 410 -- another process, a new session -- from its first line', async () => {
     const { sources, lines, last } = stand({ events: 410 });
     last().send(start);

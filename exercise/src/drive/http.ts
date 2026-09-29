@@ -161,7 +161,10 @@ export class HttpTransport implements DriveTransport {
     const source = new this.#web.EventSource(`${this.#base}/events?from=${this.#log.length}`);
     this.#source = source;
     source.onopen = () => this.#setLink('live');
-    source.onmessage = (event) => this.#receive(event);
+    // A source this transport has let go of -- closed, or replaced while a probe was out -- is not heard.
+    source.onmessage = (event) => {
+      if (source === this.#source) this.#receive(event);
+    };
     source.onerror = () => {
       if (source !== this.#source) return;
       // Still trying: the browser retries a dropped stream itself, resuming from the last id.
@@ -221,7 +224,8 @@ export class HttpTransport implements DriveTransport {
     } finally {
       abort.abort();
     }
-    if (epoch !== this.#epoch) return;
+    // Closed since, or subscribed again while the probe was out (which connected): this probe's answer is stale.
+    if (epoch !== this.#epoch || this.#source) return;
     // Another process's log: this session is gone. Start over, from the new one's first line.
     if (status === 410) return this.#restart();
     // Fine now: resume from the next line -- a few times, and then say so rather than loop.

@@ -6,11 +6,11 @@ surface's provisional event vocabulary (src/drive/script.ts; placed in the log b
     python3 scripts/migrate-opencode.py <opencode.db> <session title> <out.json> --scrub <name> --title <title>
 
 A trunk only: OpenCode runs no side calls. `scripts/stitch-sides.py` may add
-authored ones after. Like scripts/migrate-recorded.py -- whose caps and scrub
-it loads, so the privacy rules have one source -- it runs once, by hand, its
-output reviewed and committed, every rule it applies listed in the output's
-`migration` header, and it refuses to write if a scrubbed name, a
-home-directory path or an e-mail address survives.
+authored ones after. Like scripts/migrate-recorded.py -- whose caps, scrub
+and leak check it loads, so the privacy rules have one source -- it runs
+once, by hand, its output reviewed and committed, every rule it applies
+listed in the output's `migration` header, and it refuses to write if
+`leaks()` finds anything a scrub missed.
 
 OpenCode keeps, per step (an assistant message): when it began and finished,
 its tokens (input, output, reasoning, cache read), and its parts -- reasoning
@@ -23,7 +23,6 @@ import argparse
 import importlib.util
 import json
 import os
-import re
 import sqlite3
 import sys
 
@@ -31,7 +30,7 @@ here = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location('migrate_recorded', os.path.join(here, 'migrate-recorded.py'))
 recorded = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(recorded)
-cap, scrubber, MAX_GAP_MS = recorded.cap, recorded.scrubber, recorded.MAX_GAP_MS
+cap, scrubber, leaks, MAX_GAP_MS = recorded.cap, recorded.scrubber, recorded.leaks, recorded.MAX_GAP_MS
 MAX_OUTPUT_CHARS, MAX_OUTPUT_LINES = recorded.MAX_OUTPUT_CHARS, recorded.MAX_OUTPUT_LINES
 
 # A web page fetched is someone else's text: the fixture keeps its head only.
@@ -164,8 +163,7 @@ def main():
     events, counts = migrate(db, found[0][0])
     events = scrubber(args.scrub)(events)
     # A private network address is the machine's, not the session's: it becomes localhost.
-    private = re.compile(r'\b(?:10|192\.168|172\.(?:1[6-9]|2\d|3[01]))(?:\.\d{1,3}){2,3}\b')
-    events = json.loads(private.sub('localhost', json.dumps(events, ensure_ascii=False)))
+    events = json.loads(recorded.PRIVATE_ADDRESS.sub('localhost', json.dumps(events, ensure_ascii=False)))
     fixture = {
         'title': args.title,
         'migration': [
@@ -181,15 +179,9 @@ def main():
         'events': events,
     }
     text = json.dumps(fixture, ensure_ascii=False, indent=0)
-    leaks = [n for n in args.scrub if re.search(re.escape(n), text, re.IGNORECASE)]
-    if re.search(r'(/Users/|/home/)[A-Za-z0-9._-]+', text):
-        leaks.append('a home-directory path')
-    if re.search(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', text):
-        leaks.append('an e-mail address')
-    if private.search(text):
-        leaks.append('a private network address')
-    if leaks:
-        sys.exit(f'refusing to write {args.target}: {len(leaks)} leak(s) survived the scrub')
+    missed = leaks(text, args.scrub)
+    if missed:
+        sys.exit(f'refusing to write {args.target}: {len(missed)} leak(s) survived the scrub')
     with open(args.target, 'w') as f:
         f.write(text + '\n')
     print(f'{args.target}: {len(events):,} events, {len(text):,} bytes, {counts}')

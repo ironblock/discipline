@@ -13,9 +13,11 @@ fixture knows which values are the record's and which are the migration's.
 PRIVACY. Every string in the output is scrubbed: each `--scrub` name (the
 account the session ran under) and the home directory it owns become `user`
 and `/work`, the predecessor's run directories become `/tmp/session`, and its
-internal ticket ids are removed. The script then refuses to write if any
-scrubbed name, a home-directory path, or a ticket id survives anywhere in the
-output. The repository's hygiene gate checks the committed file again.
+internal ticket ids are removed. The script then refuses to write if
+`leaks()` finds anything in the output: a scrubbed name, a home-directory
+path, a ticket id, an e-mail address or a private network address -- the
+one check both migrations refuse on. The repository's hygiene gate checks the
+committed file again, and so does src/drive/recorded.test.ts.
 """
 
 import argparse
@@ -45,6 +47,24 @@ def cap(text, max_chars, max_lines=None, what='the fixture migration'):
         total = text.count('\n') + 1
         out += f'\n… [{total:,} lines, {len(text):,} characters in the record; cut here by {what}]'
     return out
+
+
+# A private network address is the machine's, not the session's.
+PRIVATE_ADDRESS = re.compile(r'\b(?:10|192\.168|172\.(?:1[6-9]|2\d|3[01]))(?:\.\d{1,3}){2,3}\b')
+
+
+def leaks(text, names):
+    """What a scrub missed, one entry per kind found: a migration refuses to write if this is not empty."""
+    found = [n for n in names if re.search(re.escape(n), text, re.IGNORECASE)]
+    if re.search(r'(/Users/|/home/)[A-Za-z0-9._-]+', text):
+        found.append('a home-directory path')
+    if re.search(r'(^|[^A-Za-z0-9])DIE-?[0-9]+', text, re.IGNORECASE):
+        found.append('an internal ticket id')
+    if re.search(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}', text):
+        found.append('an e-mail address')
+    if PRIVATE_ADDRESS.search(text):
+        found.append('a private network address')
+    return found
 
 
 def scrubber(names):
@@ -287,13 +307,9 @@ def main():
     text = json.dumps(fixture, ensure_ascii=False, indent=0)
 
     # Refuse to write anything a scrub missed.
-    leaks = [n for n in args.scrub if re.search(re.escape(n), text, re.IGNORECASE)]
-    if re.search(r'(/Users/|/home/)[A-Za-z0-9._-]+', text):
-        leaks.append('a home-directory path')
-    if re.search(r'(^|[^A-Za-z0-9])DIE-?[0-9]+', text, re.IGNORECASE):
-        leaks.append('an internal ticket id')
-    if leaks:
-        sys.exit(f'refusing to write {args.target}: {len(leaks)} leak(s) survived the scrub')
+    missed = leaks(text, args.scrub)
+    if missed:
+        sys.exit(f'refusing to write {args.target}: {len(missed)} leak(s) survived the scrub')
 
     with open(args.target, 'w') as f:
         f.write(text + '\n')

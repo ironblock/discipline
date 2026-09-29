@@ -6,14 +6,14 @@
  * the log has references by `seq`; `place.ts` turns a script into the log
  * (`log.ts`), and only the log is folded.
  *
- * Nothing reads a script but `place.ts`. A session run against `diet` never
- * passes through here.
+ * What authors or replays a session reads it -- the canned transport, the
+ * recordings, `compose.ts`, `progress.ts` -- and `place.ts` turns it into
+ * the log. A session run against `diet` never passes through here.
  */
 
 import type { Authority, FailReason, ForkLane, ForkOutcome, Lane, PatchOp, SeamReason, SettleReason, Timings, Tool } from './log.ts';
 
 export type { Authority, FailReason, ForkLane, ForkOutcome, Lane, PatchOp, SeamReason, SettleReason, Timings, Tool } from './log.ts';
-export { NEEDS, NEEDS_OF } from './log.ts';
 export type { Need, Open } from './log.ts';
 import type { Open } from './log.ts';
 

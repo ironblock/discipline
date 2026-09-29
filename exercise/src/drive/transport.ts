@@ -46,8 +46,6 @@ export type Refusal = Open<
   | 'stale'
   /** The HTTP transport's: the drive did not answer. */
   | 'unreachable'
-  /** An idle gap the drive would not log (400, #146): the command was turned away whole. */
-  | 'bad-gap'
 >;
 
 export type Ack = { readonly ok: true } | { readonly ok: false; readonly refused: Refusal };
@@ -64,8 +62,9 @@ export interface DriveTransport {
   subscribe(listener: (line: LogLine) => void): () => void;
   /**
    * One command. `idle_gap`: the idle gap it ends, as the surface measured it
-   * (Q4), which the drive logs as `idle.gap` just before the command's
-   * outcome, admitted or refused (ruled on #117, 2026-09-28).
+   * (Q4), which the drive logs as `idle.gap` just before the command's first
+   * line if it is admitted, and drops if it is refused (#146). A gap the
+   * drive cannot log never costs the command: it goes without it.
    */
   dispatch(command: Command, extras?: { readonly idle_gap?: IdleGapBody }): Promise<Ack>;
   /** The connection's state now, then each change, and why when it is not live. Absent: always `live`. */

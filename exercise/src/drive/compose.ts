@@ -9,7 +9,7 @@ import type { Authority, ForkLane, PatchOp, Timings, Unplaced } from './script.t
  * the numbers are plausible for one local model and are not measurements.
  */
 
-/** Assumed rates: prefill of new tokens, and decode on the trunk and on a side slot. */
+/** Assumed rates: prefill of new tokens, and decode on the trunk and on a side slot. scripts/stitch-sides.py assumed the same, once. */
 export const RATES = { prefill: 1400, trunkDecode: 36, sideDecode: 40 } as const;
 
 /** Roughly how many tokens a text is. */

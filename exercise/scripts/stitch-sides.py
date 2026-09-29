@@ -27,6 +27,7 @@ EXTRACT_EVERY_MS = 45_000
 # An interview asks the model, in a gap or at a plan it just wrote, what it decided.
 INTERVIEW_TOOLS = {'todowrite'}
 EXCERPT_LINES = 60
+# The assumed rates and token estimate of src/drive/compose.ts (RATES, tokensOf), copied: this ran once.
 PREFILL, DECODE = 1400, 40
 SLOTS = {'extraction': 2, 'interview': 1}
 TAGS = {'FACT': 'Facts', 'DECISION': 'Decisions', 'OPEN': 'Open', 'CONSTRAINT': 'Constraints', 'NEXT': 'Next'}

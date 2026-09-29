@@ -55,9 +55,8 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
   it('folds a reasoning delta as reasoning, not answer', () => {
     const log = logOf('a-reasoning-delta.jsonl');
     const answer = fold(log).eras[0]?.nodes.find((n) => n.kind === 'assistant');
-    const reasoned = log.filter((l) => l.kind === 'delta' && l.reasoning !== undefined).map((l) => (l.kind === 'delta' ? l.reasoning : ''));
-    expect(reasoned.length).toBeGreaterThan(0);
-    expect(answer?.kind === 'assistant' && answer.reasoning.startsWith(reasoned.join('').slice(0, 1))).toBe(true);
+    expect(answer?.kind === 'assistant' && answer.reasoning).toBe('thinking\nstill');
+    expect(answer?.kind === 'assistant' && answer.text).toBe('ok');
   });
 
   it("reads a failure by its reason, never its message: two failures differing only in message fold alike (ruled on #140)", () => {

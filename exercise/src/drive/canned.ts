@@ -142,15 +142,17 @@ export class CannedTransport implements DriveTransport {
 
   dispatch(command: Command, extras?: { readonly idle_gap?: IdleGapBody }): Promise<Ack> {
     // As `diet` does (#146, ruling (b) on #117): a command's gap rides only if the command is admitted -- logged
-    // just before the first line it pushes -- and must be the open gap, ended by this kind of command; a bad one
-    // turns the command away whole, nothing logged (serve.rs answers 400).
+    // just before the first line it pushes -- and must be the open gap, ended by this kind of command. `diet`
+    // turns a bad one away with the command (400), and `HttpTransport` sends the command again without it; here
+    // the two are one step: the command goes ahead, its gap unlogged.
     const gap = extras?.idle_gap;
-    if (gap && (gap.ended_by !== ENDS[command.kind] || gap.opened_by !== this.#openGap)) return Promise.resolve({ ok: false, refused: 'bad-gap' });
-    this.#gap = gap;
+    const opened = this.#openGap;
+    this.#gap = gap && gap.ended_by === ENDS[command.kind] && gap.opened_by === opened ? gap : undefined;
     const ack = command.kind === 'ask' ? this.#fire('send', command.text) : command.kind === 'seam' ? this.#seam(command.to) : this.#cancel();
-    // Refused, it is dropped. Admitted, whatever gap was open closes, carried or not.
+    // Refused, it is dropped. Admitted, the gap that was open closes, carried or not -- unless the command settled a
+    // turn and opened the next one itself, as a cancel does (`diet` closes it at admission, before the command runs).
     this.#gap = undefined;
-    if (ack.ok) this.#openGap = undefined;
+    if (ack.ok && this.#openGap === opened) this.#openGap = undefined;
     return Promise.resolve(ack);
   }
 
