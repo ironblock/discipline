@@ -1,0 +1,245 @@
+{
+"batch": 25,
+"items": [
+{
+"id": "9545e02c05ca",
+"entry": "Compare the beellama.cpp tools/server file list against upstream llama.cpp to identify differing files",
+"reasoning": "",
+"prose": "Now I have enough information to provide a comprehensive answer. Let me compile what I've learned from the code.\n\n---\n\n## Complete Answer: Chat Template Rendering Paths in llama.cpp Server\n\nBased on my thorough investigation of the llama.cpp source code, there are **three distinct paths** for chat template rendering, each serving different purposes:\n\n---\n\n### 1. **Primary Template Rendering: `common_chat_templates_apply()` / `common_chat_templates_apply_jinja()`**\n\n**Location:** `common/chat.cpp:2422-2540`\n\n**Purpose:** This is the **main template rendering function** used during actual inference. It's called from the completion/chat handlers to convert a list of messages into a prompt string that will be tokenized and fed to the model.\n\n**Key characteristics:**\n- Called from `handle_completions_impl()` → `tokenize_input_prompts()` → `process_single_task()`\n- Supports **two template variants** stored per model:\n  - `template_default` — standard chat template\n  - `template_tool_use` — separate template variant used when tools are present (`chat.cpp:2428-2429`)\n- The template variant is selected dynamically based on whether `!tools.empty()`\n- Handles **continuation logic** via `continue_final_message` / `COMMON_CHAT_CONTINUATION_*` enum — supports resuming generation from mid-message (important for reasoning models that need to continue from within thinking blocks)\n- Applies **role workarounds** per template:\n  - `workaround::map_developer_role_to_system` — maps \"developer\" role to \"system\" for templates that don't support it\n  - `workaround::system_message_not_supported` — omits system messages for templates lacking system role support\n- Detects `supports_tool_calls` capability — determines whether tool call messages need empty content fields\n- Generates **`message_spans`** — tracks message boundaries in the rendered prompt for checkpointing/slot reuse (`chat.cpp:2530-2536`)\n- Can auto-generate grammar parsers from templates via `autoparser::autoparser` and `peg_generator::generate_parser` for structured output enforcement (`chat.cpp:2520-2540`)\n- Uses **Jinja rendering** via `common_chat_templates_apply_jinja()` when `use_jinja` flag is set, otherwise falls back to PEG-based parsing\n- The Jinja path (`common_chat_template_direct_apply_impl()` at `chat.cpp:831-885`) injects tools as a `tools` key into the rendering context\n\n**Tool rendering specifics:**\n- Tools are converted to OpenAI-compatible JSON format via `common_chat_tools_to_json_oaicompat()` (`chat.cpp:459`) before being injected into the template\n- Incoming OAI-format tools are parsed via `common_chat_tools_parse_oaicompat()` (`chat.cpp:478`)\n- The `grammar_lazy` flag controls **deferred grammar compilation** for tool use — when `tool_choice == AUTO`, grammar constraints are deferred until a tool call prefix is detected (`chat.cpp:1030, 1191, 1357`)\n- `include_grammar` gates whether grammar constraints are included based on tools + response_format (`chat.cpp:1115, 1263, 1392`)\n- `foreach"
+},
+{
+"id": "2076d38b0b43",
+"entry": "Look at `llama_state_seq_get_data_ext` and related llama.cpp C API functions to understand what KV cache data is actually serialized",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "e6e7195425e5",
+"entry": "SSE ping mechanism (`params.sse_ping_interval`) keeps connections alive when clients timeout — matters for long-running streams",
+"reasoning": "The user wants me to update my working record entry about SSE ping mechanism. Let me first check what the actual SSE ping mechanism looks like in the beellama fork to provide a correction.",
+"prose": "Let me check the actual SSE ping implementation in beellama to determine the correction:\n\n"
+},
+{
+"id": "65b7f6cc39b6",
+"entry": "`pre_decode()` and `batch.render()` are called to prepare the llama batch before decoding — these bridge slot state to the actual llama.cpp inference engine (`server-context.cpp`, line ~2802)",
+"reasoning": "",
+"prose": "Let me continue tracing the code properly.\n\n"
+},
+{
+"id": "6272654c6da8",
+"entry": "Look at `llama_state_seq_get_data_ext` and related llama.cpp C API functions to understand what KV cache data is actually serialized",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "e92706e31b4a",
+"entry": "The `tool_choice` parameter (\"auto\", \"none\", \"required\") is NOT passed into the Jinja template context — only `messages`, `tools`, `bos_token`, `eos_token`, `enable_thinking`, and `add_generation_prompt` are. The `tool_choice` is used solely for grammar generation (controlling min/max tool call counts), not for template rendering — IMPLICATION: Jinja templates cannot conditionally render based on tool_choice; they always render tool definitions the same way regardless of whether tool use is required/auto/none.",
+"reasoning": "Let me look at the process_token function which is where tokens are processed and partial responses are sent.",
+"prose": ""
+},
+{
+"id": "8aae4c289da3",
+"entry": "The `frame-graph` module in the index — indicates a node-based/frame-graph rendering architecture, which is a significant architectural shift from Babylon.js",
+"reasoning": "",
+"prose": "Let me navigate to the Lite repo and search for the Minecraft/voxel clone.\n\n"
+},
+{
+"id": "137c6cfc2f71",
+"entry": "`adaptive_target` and `adaptive_decay` — adaptive sampling parameters for selecting tokens near a target probability (common.h, lines ~242-243)",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "9b356bc0b182",
+"entry": "The `tool_choice` parameter (\"auto\", \"none\", \"required\") is NOT passed into the Jinja template context — only `messages`, `tools`, `bos_token`, `eos_token`, `enable_thinking`, and `add_generation_prompt` are. The `tool_choice` is used solely for grammar generation (controlling min/max tool call counts), not for template rendering — IMPLICATION: Jinja templates cannot conditionally render based on tool_choice; they always render tool definitions the same way regardless of whether tool use is required/auto/none.",
+"reasoning": "Let me look at the process_token function which is where the actual sampling and stop detection happens.",
+"prose": ""
+},
+{
+"id": "b08397ac17b4",
+"entry": "The PBR features in Babylon Lite are validated by a pixel-diff against Babylon.js.",
+"reasoning": "Now I have a very good understanding of Babylon Lite. Let me also look at the porting guide and the architecture docs to get a complete picture.",
+"prose": ""
+},
+{
+"id": "2d49c2f916b9",
+"entry": "Member `int32_t dry_allowed_length = 2;` — tokens extending repetitions beyond this receive penalty (`common/common.h:241`).",
+"reasoning": "",
+"prose": "The `dry_allowed_length` note from the working record is about sampling params in `common/common.h:241`, which is unrelated to the caching/checkpointing code I'm examining in `server-context.cpp`. It should still hold.\n\nLet me check how `n_before_user` is computed and set:"
+},
+{
+"id": "c32cf5fd3327",
+"entry": "export { setKtx2DecoderUrl, loadKtx2Texture2D } from \"./texture/ktx2-loader.js\";",
+"reasoning": "There seems to be some confusion in the prompt. The user is asking me to look at Babylon Lite and tell them what's different. I've been exploring the repository and gathering information. Let me summarize what I've found so far.\n\nThe \"working record\" message at the end seems to be an artifact or error. I should ignore it and provide a summary of what I've found about Babylon Lite.\n\nLet me compile the key differences I've observed:\n\n1. **WebGPU-Exclusive**: No WebGL support, built entirely around WebGPU paradigms\n2. **Functional API**: Factory functions instead of constructors (e.g., `createEngine()` instead of `new Engine()`)\n3. **Tree-Shakable**: Designed for maximum tree-shaking, minimal bundle size\n4. **Frame Graph**: Explicit rendering tasks instead of implicit render loop\n5. **Data-Oriented**: Plain data structures instead of class instances\n6. **Smaller Package Surface**: Fewer packages, more focused\n7. **Compatibility Layer**: Separate `babylon-lite-compat` package for shims\n8. **Vite-Based**: Built on Vite instead of the standard Babylon.js tooling\n9. **Parity Testing**: Extensive pixel-diff testing against Babylon.js references\n10. **No Backward Compatibility**: Not a drop-in replacement, APIs are narrower\n\nLet me provide this summary to the user.",
+"prose": "Thank you for pointing out Babylon Lite. After exploring the repository at `~/git/reference/Babylon/Babylon-Lite/`, here are the key differences I've observed compared to standard Babylon.js:\n\n## Major Architectural Differences\n\n### 1. **WebGPU-Exclusive** 🚫 WebGL\n- Zero WebGL fallback or legacy wrappers\n- Built entirely around WebGPU paradigms: render pipelines, compute shaders, bind groups, command buffers\n- Standard Babylon.js supports both WebGL and WebGPU\n\n### 2. **Functional API (Not OOP)**\n- Factory functions instead of constructors:\n  - `createEngine(canvas)` instead of `new WebGPUEngine(canvas)`\n  - `createSceneContext(engine)` instead of `new Scene(engine)`\n  - `createSphere(engine)` instead of `MeshBuilder.CreateSphere()`\n- Plain data structures instead of class instances\n- Explicit `addToScene()` instead of auto-registration\n\n### 3. **Frame Graph Rendering**\n- Explicit ordered list of rendering tasks (`RenderTask`, `ShadowTask`, `PostProcessTask`, etc.)\n- Instead of implicit render loop, you build a frame graph with explicit control over render targets, cameras, and renderables\n- Each task records a `RenderPass` with explicit configuration\n\n### 4. **100% Tree-Shakable**\n- Designed specifically for maximum tree-shaking\n- Unused features cost zero bytes\n- Separate `babylon-lite-compat` package for compatibility shims\n- Bundle size measured in runtime bytes via Playwright network interception\n\n### 5. **Smaller Package Surface**\n- `babylon-lite`: Core engine library\n- `babylon-lite-compat`: Compatibility shims for Babylon.js APIs\n- `babylon-lite-gl`: Placeholder (empty, likely for future WebGL support)\n- Standard Babylon.js has 17+ packages (gui, inspector, loaders, materials, postProcesses, etc.)\n\n### 6. **Vite-Based Infrastructure**\n- Project built strictly on Vite for dev server and production bundling\n- Standard Babylon.js uses different build tooling\n\n### 7. **WGSL Shaders**\n- All shaders written in WGSL (WebGPU Shading Language)\n- WGSL minification in production bundles\n- Standard Babylon.js uses HLSL/ESSL\n\n### 8. **Parity Testing Strategy**\n- Extensive pixel-diff testing against Babylon.js golden references\n- Scenes validated with Mean Absolute Difference (MAD) thresholds\n- `lab/lite/` contains 130+ reference scenes for parity validation\n\n### 9. **Design Philosophy**\nFrom `philosophy.md`:\n> **Size** and **Performance** are prioritized over **Simplicity**\n> Backward compatibility is **not** a first-class goal\n> APIs may be narrower, features may be opt-in\n\n### 10. **No Drop-In Replacement**\nFrom the feature comparison doc:\n> **Babylon Lite is not a replacement for Babylon.js.** The two engines move forward side by side.\n\nThe porting guide shows significant API differences - it's a ground-up redesign optimized for WebGPU and minimal bundle size, not a compatibility layer."
+},
+{
+"id": "ea3e8e876465",
+"entry": "`launch_slot_with_task` and `launch_slots_with_parent_task` are the functions that actually bind a task to a slot — they set up the slot's state, tokens, and sampler (seen at the tail of the excerpt, e.g., `launch_slot_with_task(*slot, std::move(task))`)",
+"reasoning": "",
+"prose": "I got a lot of output but it got truncated. Let me focus on the key streaming function. I can see `res->next` is set at line 3950. Let me get the full context of that function.\n\n"
+},
+{
+"id": "b2c80b92e31b",
+"entry": "Trace how tool/function definitions are rendered into the chat template — look for `tools`, `tool_call`, `function_call` handling in template application code",
+"reasoning": "The user's message got cut off. But based on the context, they want to know about the \"working-object\" described in `docs/compaction-model.md`. I should look at that file to find the exact structure.",
+"prose": ""
+},
+{
+"id": "9a88679ff765",
+"entry": "Function calling / tool use support with `--jinja` flag (README.md, Anthropic API section)",
+"reasoning": "",
+"prose": "Correction: The entry about `--jinja` flag for function calling/tool use in the Anthropic API section was based on a misreading — the `--jinja` flag is actually for template rendering control in general, not specifically for function calling. Function calling support is a separate feature implemented through the request body's `tools` parameter, not a CLI flag. I'll update this in the working record.\n\nNow let me explore the source files available:"
+},
+{
+"id": "f6c3edd551d6",
+"entry": "`prompt_save`/`prompt_load` are per-slot methods that serialize slot prompt state to/from a disk-backed `server_prompt_cache`, not a KV cache export — IMPLICATION: \"prompt cache\" in llama.cpp server means a file-based token/prompt metadata store, NOT a KV cache snapshot. The actual KV cache save/restore for slots is a separate mechanism via `SERVER_TASK_TYPE_SLOT_SAVE`/`SERVER_TASK_TYPE_SLOT_RESTORE` that operates on the raw KV cache memory.",
+"reasoning": "",
+"prose": "Let me gather a few more details to fill in some gaps — specifically the HTTP endpoints for slot save/restore and the `llama_state_seq_*` API calls:\n\n"
+},
+{
+"id": "d91d682ec15e",
+"entry": "`adaptive_target` and `adaptive_decay` — adaptive sampling parameters for selecting tokens near a target probability (common.h, lines ~242-243)",
+"reasoning": "",
+"prose": "I'll start by listing the tools/server directory in the beellama fork.\n\n"
+},
+{
+"id": "fe5f4fdc1468",
+"entry": "`n_before_user` exists in upstream llama.cpp but is completely absent from the beellama fork — neither in `server-task.h` nor in `server-context.cpp` — IMPLICATION: beellama does not support the upstream optimization that stops prompt batching before the last user message to create a checkpoint at the assistant turn boundary, meaning checkpoint creation during prompt processing may behave differently or be less targeted in beellama",
+"reasoning": "",
+"prose": "Correction: `n_before_user` is indeed absent from beellama's `server-task.h` and `server-context.cpp`, but beellama does **not** simply lose checkpoint targeting — it replaces the `n_before_user` mechanism with a different approach using `spans.is_user_start()`. Let me examine that replacement:\n\n"
+},
+{
+"id": "37ebba911708",
+"entry": "How does the KV cache reuse actually work in `server-context.cpp` around line 2839 — need to see the full chunk-based cache reuse mechanism",
+"reasoning": "",
+"prose": "I need to find `n_before_user` and checkpoint behavior. Let me search more broadly across the entire beellama codebase, not just the server directory.\n\n"
+},
+{
+"id": "ac261a468728",
+"entry": "Cache reuse (`n_cache_reuse`) is disabled for multimodal AND also disabled when the memory backend doesn't support `llama_memory_can_shift()` — IMPLICATION: Chunk-level KV cache relocation only works with text-only models on backends that support memory shifting (not all do)",
+"reasoning": "The user is asking me to update the working record with a correction about cache reuse. The existing entry says:\n\n\"Cache reuse (`n_cache_reuse`) is disabled for multimodal AND also disabled when the memory backend doesn't support `llama_memory_can_shift()` — IMPLICATION: Chunk-level KV cache relocation only works with text-only models on backends that support memory shifting (not all do)\"\n\nBut looking at the code I just examined, the conditions are:\n1. Multimodal (mtmd) - disabled\n2. Memory backend doesn't support `llama_memory_can_shift()` - disabled\n\nLet me check the code again more carefully to see if there are additional conditions I found.\n\nFrom the code:\n- Line 1101-1103: if mmproj is loaded, cache_reuse is disabled (multimodal)\n- Line 1113-1115: if `!llama_memory_can_shift()`, cache_reuse is disabled\n- Line 2849-2854: at the slot level, `can_cache_reuse = llama_memory_can_shift() && !has_mtmd`\n\nSo the existing entry seems accurate. But wait, let me re-read the user's request. They say \"the entry... is superseded by this step.\" This means they want me to update it with new information I found.\n\nLooking at what I found in this step:\n1. `n_cache_reuse` is disabled at startup if multimodal (line 1101-1103)\n2. `n_cache_reuse` is disabled at startup if `!llama_memory_can_shift()` (line 1113-1115)  \n3. At the slot level, `can_cache_reuse = llama_memory_can_shift() && !has_mtmd` (line 2849)\n\n\n4. When `can_cache_reuse` is false but `n_cache_reuse > 0`, a warning is logged and the parameter is ignored (lines 2853-2854)\n\nSo the actual constraint is that `can_cache_reuse` requires both `llama_memory_can_shift()` returning true AND no multimodal data present. The existing entry already captures this dual requirement, so I need to determine what new information I've discovered that would supersede it.\n\nLooking at the checkpointing restrictions I identified: `ctx_shift` is disabled for multimodal models, cache reuse is disabled for multimodal, and slot save/restore operations are unsupported for multimodal. There's also a specific guard at lines 3252-3253 that prevents checkpointing after multimodal chunks. These constraints are more granular than what the current entry describes—it only mentions cache reuse being disabled, but doesn't capture the broader pattern that checkpointing operations are blocked for multimodal contexts. I need to identify which working record entry the user is referring to. Looking through the entries, I'm searching for the one about cache reuse being disabled for multimodal and memory backends that don't support `llama_memory_can_shift()`. The user provided a specific statement about chunk-level KV cache relocation requiring text-only models and memory shifting support, so I need to locate where that entry appears in the working record. I found the relevant code sections. At startup, cache_reuse gets disabled if multimodal is detected or if the memory backend doesn't support shifting. But at the slot level, the actual runtime check is `can_cache_reuse = llama_memory_can_shift() && !has_mtmd`, which means both conditions must be satisfied—the backend must support shifting AND the prompt must not have multimodal data. This reveals that even if cache_reuse wasn't disabled at startup, it could still be blocked per-request depending on whether multimodal content is present. I'm realizing the startup checks and runtime checks are essentially redundant—if cache_reuse is disabled globally at startup due to multimodal support, the runtime check would never execute. But if cache_reuse is allowed at startup, the runtime check still validates both conditions: the memory backend must support shifting and there can't be multimodal data in the prompt. The user seems to be pointing out that this dual-layer validation might be unnecessary or that I'm missing something about how these checks interact. I should verify whether there's a scenario where the startup and runtime checks could diverge, or if the user is highlighting an inconsistency in the implementation. I need to identify which entry covers cache reuse restrictions. Looking through the records, entry #113 appears to address this: \"KV cache chunk reuse (`n_cache_reuse`) requires BOTH `llama_memory_can_shift()` returning true AND no multimodal data (`!has_mtmd`) — multimodal prompts cannot use chunk shifting\". This entry captures the dual requirement for memory shifting capability and the absence of multimodal data, which means the correction should update this specific record to reflect any new findings about cache reuse behavior.",
+"prose": "I need to locate the exact working record entry about `n_cache_reuse` to correct it. Let me search for it.\n\n"
+},
+{
+"id": "32f1ee3cefdc",
+"entry": "`n_before_user` exists in upstream llama.cpp but is completely absent from the beellama fork — neither in `server-task.h` nor in `server-context.cpp` — IMPLICATION: beellama does not support the upstream optimization that stops prompt batching before the last user message to create a checkpoint at the assistant turn boundary, meaning checkpoint creation during prompt processing may behave differently or be less targeted in beellama",
+"reasoning": "",
+"prose": "Now I can see beellama has a **completely different checkpoint gating mechanism**. Let me look at that `is_user_start` and `spans.is_user_start` logic:\n\n"
+},
+{
+"id": "904d82af490b",
+"entry": "`workaround::map_developer_role_to_system(params.messages)` — role mapping workaround for templates that don't support \"developer\" role (chat.cpp, line ~2671)",
+"reasoning": "The user is asking me to update a working record entry about the developer role mapping workaround. Let me check what the current understanding is and correct it based on what I found.\n\nLooking back at my earlier findings, at `common/chat.cpp:2671` area, I saw:\n\n```cpp\nif (src.find(\"<|channel|>\") == std::string::npos) {\n    // map developer to system for all models except for GPT-OSS\n    workaround::map_developer_role_to_system(params.messages);\n}\n```\n\nSo the correction is: this workaround specifically maps \"developer\" role to \"system\" for all models EXCEPT GPT-OSS (which uses `<|channel|>` tokens). The original entry didn't mention the GPT-OSS exception.\n\nLet me state this correction clearly.",
+"prose": "Correction: The `workaround::map_developer_role_to_system(params.messages)` call at `common/chat.cpp:2671` is **conditional** — it only maps \"developer\" → \"system\" for templates that do **not** contain the `<|channel|>` token. GPT-OSS templates (which use `<|channel|>`) are explicitly excluded and keep the \"developer\" role intact. The original entry omitted this GPT-OSS exception."
+},
+{
+"id": "518ab9c851e1",
+"entry": "`common_batch_clear(batch)` at the end — the batch population phase follows, which is where tokens from all active slots get queued for actual llama.cpp decoding.",
+"reasoning": "",
+"prose": "The diff was empty — `server-common.h` is unchanged from upstream. Let me check the other files systematically.\n\n"
+},
+{
+"id": "a0939035002c",
+"entry": "The main loop processes ALL queued tasks first, THEN calls `update_slots()` for inference — tasks are not processed one-at-a-time with interleaved inference. — IMPLICATION: The server batches task assignments before running inference, enabling continuous batching across multiple concurrent requests.",
+"reasoning": "My working record note is still accurate based on what I've seen. The `start_loop` function in server-queue.cpp shows:\n\n1. First it processes ALL tasks from `queue_tasks` via `callback_new_task` (which calls `process_single_task`)\n2. THEN it calls `callback_update_slots()` (which calls `update_slots()`)\n\nSo the note is correct. Let me continue reading the rest of `launch_slot_with_task` and then look at `update_slots`.",
+"prose": "Let me now look at `update_slots`:\n\n"
+},
+{
+"id": "053d14be4b90",
+"entry": "`oaicompat_chat_params_parse` parses the OpenAI-compatible JSON body — this is where request validation and parameter extraction happens. (server-context.cpp, within `post_chat_completions` lambda)",
+"reasoning": "",
+"prose": "I need to correct that record. Let me first verify what `oaicompat_chat_params_parse` actually does, then examine the streaming flow.\n\n"
+},
+{
+"id": "7a5583b9613a",
+"entry": "Were `server-schema.cpp/h` and `server-stream.cpp/h` functionality moved inline into other files in beellama, or were they dropped entirely?",
+"reasoning": "Let me check the README-dev.md in beellama to understand what changes they document, and also look at the server.cpp differences since beellama's is smaller (15KB vs 20KB upstream).",
+"prose": ""
+},
+{
+"id": "ede5b34550b0",
+"entry": "Upstream's `server-models.h` uses a static `setup_child_server()` and `notify_router_sleeping_state()` pattern, while beellama's uses instance methods (`setup()`, `notify_to_router()`) with a more sophisticated `conv_model_tracker` for conversation-to-model routing — the beellama fork has evolved the router model management with resumable streaming awareness. — IMPLICATION: When comparing routing behavior, the key divergence is in how conversation IDs are tracked across child instances and how stream sessions are resolved.",
+"reasoning": "",
+"prose": "Here is the final summary and NO bash block."
+},
+{
+"id": "e0e443226982",
+"entry": "The `n_swa` variable tracking sliding window attention state — relevant for SWA models where checkpoint correctness has known issues per the `[TAG_CHECKPOINTS_FIX_POS_MIN]` TODO (server-context.cpp ~line 2990)",
+"reasoning": "",
+"prose": "I'll update the superseded entry now. The `n_swa` variable is indeed relevant to SWA model checkpointing, but the key detail that matters more is the known correctness bug flagged by `[TAG_CHECKPOINTS_FIX_POS_MIN]` at line ~2163, where checkpoint position ranges are incorrectly determined for SWA models. The `n_swa` variable appears in checkpoint invalidation logic (line ~3019) where checkpoints with `pos_max > pos_next` are erased when SWA state (`n_swa`) changes, but the root issue is that the `create_checkpoint` function itself records inaccurate `pos_min`/`pos_max` ranges for SWA models — meaning checkpoints may silently cover wrong position ranges. The `n_swa` tracking is a mitigation that erases invalidated checkpoints, not the primary bug.\n\n"
+},
+{
+"id": "f568464e138c",
+"entry": "`n_before_user` exists in upstream llama.cpp but is completely absent from the beellama fork — neither in `server-task.h` nor in `server-context.cpp` — IMPLICATION: beellama does not support the upstream optimization that stops prompt batching before the last user message to create a checkpoint at the assistant turn boundary, meaning checkpoint creation during prompt processing may behave differently or be less targeted in beellama",
+"reasoning": "",
+"prose": "Now let me see the key checkpoint gating logic in beellama — it uses `message_spans` instead of `n_before_user`:\n\n"
+},
+{
+"id": "93630d224193",
+"entry": "`ctx_server.start_loop()` — this is the core event loop in `server-context.cpp` that processes tasks from the queue; it's where requests get dispatched to slots (in `server-queue.cpp` / `server-context.cpp`)",
+"reasoning": "",
+"prose": "Now I have the complete picture. Let me also check the `server_tokens` struct definition to understand the data structure:\n\n"
+},
+{
+"id": "8f7af6c5e49f",
+"entry": "The `n_swa` variable tracking sliding window attention state — relevant for SWA models where checkpoint correctness has known issues per the `[TAG_CHECKPOINTS_FIX_POS_MIN]` TODO (server-context.cpp ~line 2990)",
+"reasoning": "",
+"prose": "Correction for the working record:\n\nThe `[TAG_CHECKPOINTS_FIX_POS_MIN]` TODO at `server-context.cpp:2163` is specifically about **SWA (Sliding Window Attention) models**. The checkpoint's `pos_min`/`pos_max` range is incorrectly assumed to be valid for SWA because SWA's attention window semantics mean that saved checkpoint position ranges don't map cleanly after context shifts. The `n_swa` variable (seen at `server-context.cpp:3019`) tracks the sliding window attention state size, and when checkpoints are invalidated during context shifts, SWA state (`n_swa`) is logged alongside checkpoint metadata. This means **checkpoint correctness for SWA models is a known limitation** — checkpoints may be created with incorrect position bounds, potentially leading to stale KV cache state being restored for tokens outside the valid attention window."
+},
+{
+"id": "67d822a11ce7",
+"entry": "Search for `common_params` defaults in `common.cpp` or `common.h` to find global sampling defaults",
+"reasoning": "The user wants me to update my working record. The entry about searching for `common_params` defaults in `common.cpp` or `common.h` to find global sampling defaults is superseded. I already found that sampling defaults are in `common/common.h` in the `common_params_sampling` struct (record #112). Let me update that entry and then continue investigating the chat template application.\n\nLet me look at the key function `common_chat_templates_apply` in server-common.cpp around line 1100, and also the chat formatting/rendering in server-chat.cpp.",
+"prose": "Correction: Record entry about searching for `common_params` defaults in `common.cpp` or `common.h` is superseded — I already determined that sampling defaults live as C++ member initializers in the `common_params_sampling` struct in `common/common.h` (line 222+), not in `common.cpp`. The schema file (`server-schema.cpp`) only defines validation limits and descriptions, not defaults. This was established in working record #112.\n\nNow let me look at the core chat template application path — `common_chat_templates_apply` and the rendering pipeline:\n\n"
+},
+{
+"id": "bc582b3f4150",
+"entry": "NONE — The shell environment is simply empty. There's no Babylon Lite codebase checked out here, so I can't search for or examine the Minecraft clone scene.",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "d9a111fdd5c7",
+"entry": "The `server_http_req` struct carries `params`, `headers`, `body`, `files`, and a `should_stop` callback — all relevant for tracing how request data flows into task creation. (`server-http.h`, lines 43–57)",
+"reasoning": "",
+"prose": "The working record entry about `server_http_req` is not actually superseded by this step — it was accurate. However, I'll note that the relevant files for prompt cache/slot reuse are `server-common.h`, `server-common.cpp`, `server-task.cpp`, and `server-context.cpp`. Let me first read the core `get_common_prefix` implementation.\n\n"
+},
+{
+"id": "640e75f75d3f",
+"entry": "Read `server-context.cpp` to find where `post_chat_completions` is implemented and how it dispatches to the slot/queue system",
+"reasoning": "",
+"prose": "Let me look at the `send_final_response` function and where it's called from:\n\n"
+},
+{
+"id": "020364b45744",
+"entry": "`oaicompat_chat_params_parse` parses the OpenAI-compatible JSON body — this is where request validation and parameter extraction happens. (server-context.cpp, within `post_chat_completions` lambda)",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "c9fab03fba64",
+"entry": "The `start_loop` method on `server_queue` is the main event loop that processes queued tasks and manages sleeping — it's where tasks get dispatched to slots (`server-context.cpp` / `server.cpp`)",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "853e679f2a5c",
+"entry": "`top_n_sigma` — sigma-based token selection parameter (common.h, line ~245)",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "af45997f04c7",
+"entry": "`prompt_save`/`prompt_load` are per-slot methods that serialize slot prompt state to/from a disk-backed `server_prompt_cache`, not a KV cache export — IMPLICATION: \"prompt cache\" in llama.cpp server means a file-based token/prompt metadata store, NOT a KV cache snapshot. The actual KV cache save/restore for slots is a separate mechanism via `SERVER_TASK_TYPE_SLOT_SAVE`/`SERVER_TASK_TYPE_SLOT_RESTORE` that operates on the raw KV cache memory.",
+"reasoning": "",
+"prose": "Let me re-examine the code to correct the misconception. The `server_prompt_cache` stores actual KV cache state data (serialized via `llama_state_seq_get_data_ext`), not just file-based metadata.\n\n"
+},
+{
+"id": "27ea1378d3a1",
+"entry": "Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)",
+"reasoning": "",
+"prose": "Correction: The entry \"Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)\" should be updated to reflect that `/metrics` is indeed registered in `server.cpp` at line 207 as `ctx_http.get(\"/metrics\", ex_wrapper(routes.get_metrics))`, and it's a GET endpoint for Prometheus-style monitoring. The original entry was accurate, but I'll refine it for clarity:\n\n**Updated entry:** Metrics endpoint (`GET /metrics`) for Prometheus-style monitoring, registered in `server.cpp` line 207 via `routes.get_metrics`.\n\nNow continuing with the investigation:"
+}
+]
+}

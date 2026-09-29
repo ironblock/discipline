@@ -1,0 +1,165 @@
+{
+ "model": "claude-sonnet-5 for every one of the 52 instances, launched with model: sonnet; the launch records are in the seat's durable run directory",
+ "harness": "Claude Code subagent, one fresh instance per batch instance, launched with judge/launch-prompt.md (Form 3, verbatim with this run's paths), reading only judge/prompt.md and its batch file and writing verdicts-NN.json; the key and the id map withheld",
+ "date": "2026-09-29",
+ "batches": 50,
+ "instances_per_batch": {
+  "01": [
+   "01"
+  ],
+  "02": [
+   "02"
+  ],
+  "03": [
+   "03"
+  ],
+  "04": [
+   "04"
+  ],
+  "05": [
+   "05"
+  ],
+  "06": [
+   "06"
+  ],
+  "07": [
+   "07"
+  ],
+  "08": [
+   "08"
+  ],
+  "09": [
+   "09"
+  ],
+  "10": [
+   "10"
+  ],
+  "11": [
+   "11"
+  ],
+  "12": [
+   "12"
+  ],
+  "13": [
+   "13"
+  ],
+  "14": [
+   "14"
+  ],
+  "15": [
+   "15"
+  ],
+  "16": [
+   "16"
+  ],
+  "17": [
+   "17"
+  ],
+  "18": [
+   "18"
+  ],
+  "19": [
+   "19"
+  ],
+  "20": [
+   "20"
+  ],
+  "22": [
+   "22"
+  ],
+  "24": [
+   "24"
+  ],
+  "21": [
+   "21"
+  ],
+  "23": [
+   "23"
+  ],
+  "25": [
+   "25"
+  ],
+  "26": [
+   "26"
+  ],
+  "27": [
+   "27"
+  ],
+  "28": [
+   "28"
+  ],
+  "29": [
+   "29",
+   "29b"
+  ],
+  "30": [
+   "30"
+  ],
+  "31": [
+   "31"
+  ],
+  "32": [
+   "32"
+  ],
+  "33": [
+   "33"
+  ],
+  "34": [
+   "34"
+  ],
+  "35": [
+   "35"
+  ],
+  "36": [
+   "36"
+  ],
+  "37": [
+   "37"
+  ],
+  "38": [
+   "38"
+  ],
+  "39": [
+   "39"
+  ],
+  "40": [
+   "40"
+  ],
+  "41": [
+   "41",
+   "41b"
+  ],
+  "42": [
+   "42"
+  ],
+  "43": [
+   "43"
+  ],
+  "44": [
+   "44"
+  ],
+  "45": [
+   "45"
+  ],
+  "46": [
+   "46"
+  ],
+  "47": [
+   "47"
+  ],
+  "48": [
+   "48"
+  ],
+  "49": [
+   "49"
+  ],
+  "50": [
+   "50"
+  ]
+ },
+ "malformed": {
+  "29": "first instance's ids out of order (set equal, order not); kept as judge/malformed-29.json, re-judged by a fresh instance (29b), accepted",
+  "41": "first instance's ids out of order (set equal, order not); kept as judge/malformed-41.json, re-judged by a fresh instance (41b), accepted"
+ },
+ "ruling": "ctl05's verdict key ruled ambiguous by the maintainer 2026-09-21 (A on #89): scoring keys ctl05 on the edit field only; judge/key.json is the generated key with that one control's verdict set to null, judge/key-pre-ruling.json the key as generated; every batch scores 4/4 on both keys"
+}

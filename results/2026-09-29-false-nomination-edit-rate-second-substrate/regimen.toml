@@ -1,0 +1,6 @@
+# The regimen this run applied: (b')'s rule, the false-nomination instrument's four arms
+# at six rungs over stage 2's 100 forks, re-fired on the RTX 6000 Ada substrate (#142).
+arm = "false-nomination-edit-rate-four-arms-six-rungs"
+substrates = ["ada48-llamacpp-qwen38flashnext-q20"]
+dogma_version = 0
+grading_order_is_regime_factor = true

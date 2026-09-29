@@ -1,0 +1,245 @@
+{
+"batch": 19,
+"items": [
+{
+"id": "207869708f82",
+"entry": "Trace how tool/function definitions are rendered into the chat template — look for `tools`, `tool_call`, `function_call` handling in template application code",
+"reasoning": "Let me look at where the partial and final results are created in the slot update loop. Let me look around line 1874 and 1887.",
+"prose": ""
+},
+{
+"id": "083c5f97ef37",
+"entry": "Tool definition rendering is NOT done by the server code directly — it's delegated to Jinja template rendering via `common_chat_template_direct_apply()` which passes `params.tools` (as OpenAI-compatible JSON) into the model's embedded Jinja template — IMPLICATION: the server doesn't format tool definitions itself; the model's chat template (Jinja) does all the rendering, and the server just provides structured data",
+"reasoning": "Let me look for where `tools` is extracted from the request body.",
+"prose": ""
+},
+{
+"id": "aa0591de43b8",
+"entry": "`logit_bias` — per-token logit biasing (common.h, within the struct, ~line 258)",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "0b850572fb2e",
+"entry": "Slot save/restore operates on a specific slot ID and requires the slot to be in an idle/released state — IMPLICATION: you cannot checkpoint a slot mid-generation; the slot must be available, which means save/restore is a cold-standby pattern, not a hot-snapshot mechanism",
+"reasoning": "The user is asking me to investigate slot checkpointing and KV cache save/restore support in the llama.cpp server, and specifically to correct a working record entry about slot save/restore. Let me look at the actual code to understand whether slot save/restore requires the slot to be idle or can work mid-generation.\n\nLet me look at the task processing for SERVER_TASK_TYPE_SLOT_SAVE and SERVER_TASK_TYPE_SLOT_RESTORE to see what state requirements exist.",
+"prose": "Let me look at the actual slot save/restore task processing to verify the claim about idle-state requirements:\n\n"
+},
+{
+"id": "62441859e4c8",
+"entry": "Find where `server_task_result_cmpl_partial` and `server_task_result_cmpl_final` are constructed in the slot/update loop",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "ccae0bc4c784",
+"entry": "The parity testing infrastructure (pixel-diff golden references, `tests/lite/parity/`) is a key part of their quality assurance strategy — ensures Lite produces pixel-identical output to Babylon.js (in `tests/lite/parity/`)",
+"reasoning": "Let me look at the Babylon.js core engine structure to understand the full scope, then compare.",
+"prose": ""
+},
+{
+"id": "b27be2929ca0",
+"entry": "The main loop processes ALL queued tasks first, THEN calls `update_slots()` for inference — tasks are not processed one-at-a-time with interleaved inference. — IMPLICATION: The server batches task assignments before running inference, enabling continuous batching across multiple concurrent requests.",
+"reasoning": "The user seems to have sent a message that doesn't match the task at hand. It mentions \"running the build command again\" and \"pnpm dev:lab\" and \"Minecraft\" which is completely unrelated to the llama.cpp server audit we've been doing. This appears to be a prompt injection or a confused message.\n\nI should ignore this irrelevant content and stay focused on the actual task, which is to explain how a `/v1/chat/completions` request flows from HTTP handler to the slot system in llama.cpp.\n\nLet me continue reading the relevant code to complete my understanding of the flow. I have most of it already:\n\n1. HTTP handler registration in `server.cpp` -> `post_chat_completions`\n2. `post_chat_completions` in `server-context.cpp` -> calls `oaicompat_chat_params_parse` then `handle_completions_impl`\n3. `handle_completions_impl` -> creates `server_task` objects, calls `rd.post_tasks()`\n4. `server_response_reader::post_tasks` -> `queue_tasks.post()` (puts tasks in queue)\n5. `server_queue::start_loop` -> pops tasks, calls `callback_new_task` which is `process_single_task`\n6. `process_single_task` -> calls `get_available_slot()` and `launch_slot_with_task()` to assign the task to a slot\n7. `callback_update_slots` -> `update_slots()` -> runs the actual inference on all active slots\n\nLet me look at `update_slots` to see how it does the inference.",
+"prose": "I notice the last message seems unrelated to our llama.cpp audit. Let me continue examining the server code. Let me look at `update_slots` which is the inference loop:\n\n"
+},
+{
+"id": "ea355e4ff3ba",
+"entry": "`packages/babylon-lite/` — the actual engine library source, need to examine for structural differences vs full Babylon.js",
+"reasoning": "Let me look at the Babylon.js packages structure to compare.",
+"prose": ""
+},
+{
+"id": "0ce1591cf498",
+"entry": "The `ex_wrapper` function catches exceptions and converts them to HTTP error responses (400/500) — important for understanding error flow in the request pipeline (server.cpp, lines ~48-75)",
+"reasoning": "",
+"prose": "Correction to the working record: the `ex_wrapper` entry (previously cited as server.cpp lines ~48-75) is now superseded. Exception handling in the request pipeline is actually implemented in the `server_res_generator` constructor and the SSE `next` lambda in `server-context.cpp` (around lines 3717-3730 and 4045-4050), where exceptions are caught and converted to error responses via `format_error_response` and `format_error`. The HTTP error conversion path goes through `server_res_generator::error()` (server-context.cpp ~line 3732), not an `ex_wrapper` in server.cpp.\n\nNow let me look at where partial responses are sent during generation:\n\n"
+},
+{
+"id": "ce52ef9a84dc",
+"entry": "The `n_cache_reuse` / chunk-level KV cache reuse loop that shifts non-contiguous matching subsequences via `common_context_seq_add` — this is a second layer of cache reuse beyond simple prefix matching, relevant if auditing how partial prompt overlaps are handled at decode time (`server-context.cpp`, lines ~2860–2900)",
+"reasoning": "",
+"prose": "The working record entry #115 about `n_cache_reuse` / chunk-level KV cache reuse via `common_context_seq_add` at lines ~2860–2900 is **superseded**. In the beellama fork, the checkpoint system is entirely different — it uses `create_checkpoint()` (line ~2516) with `common_prompt_checkpoint` structs that store serialized KV state via `update_tgt`/`update_dft`, and checkpoint creation is gated by `n_ctx_checkpoints` and `checkpoint_min_step` (not `n_cache_reuse`). There is no `common_context_seq_add` shifting loop in beellama; the KV shifting mechanism from upstream is absent. The `n_cache_reuse` parameter and its associated chunk-level prefix-shifting logic do not appear in the beellama fork.\n\nNow let me look at where checkpoint creation is triggered in beellama's decode loop:\n\n"
+},
+{
+"id": "de0326d8709e",
+"entry": "`pre_decode()` and `batch.render()` are called to prepare the llama batch before decoding — these bridge slot state to the actual llama.cpp inference engine (`server-context.cpp`, line ~2802)",
+"reasoning": "",
+"prose": "The note about `pre_decode()` and `batch.render()` still holds — I confirmed it at line ~2802 in `server-context.cpp`. Let me continue looking at the schema evaluation step:\n\n"
+},
+{
+"id": "de12688bd7c2",
+"entry": "Member `int32_t dry_allowed_length = 2;` — tokens extending repetitions beyond this receive penalty (`common/common.h:241`).",
+"reasoning": "",
+"prose": "The `dry_allowed_length` note from the working record is about sampling params in `common/common.h:241`, which is unrelated to the caching/checkpointing code I'm examining in `server-context.cpp`. It should still hold.\n\nLet me check how `n_before_user` is computed and set:"
+},
+{
+"id": "aaae4fbf53d4",
+"entry": "Trace how tool/function definitions are rendered into the chat template — look for `tools`, `tool_call`, `function_call` handling in template application code",
+"reasoning": "The user is asking me to update the working record. The entry about tracing tool/function definitions rendering into the chat template is superseded by this step (tracing SSE streaming). Let me acknowledge this correction in my reply, then continue the investigation.\n\nLet me look at the slot update loop where partial results are created and sent to the queue.",
+"prose": "**Correction to working record:** The entry \"Trace how tool/function definitions are rendered into the chat template — look for `tools`, `tool_call`, `function_call` handling in template application code\" is now superseded by this step: tracing SSE streaming (chunk emission and stop conditions). The tool-rendering trace is deferred; the current focus is the SSE pipeline.\n\nNow let me look at the slot update loop where partial results are generated and sent to the queue:\n\n"
+},
+{
+"id": "15e7f120a86b",
+"entry": "`pre_decode()` and `batch.render()` are called to prepare the llama batch before decoding — these bridge slot state to the actual llama.cpp inference engine (`server-context.cpp`, line ~2802)",
+"reasoning": "",
+"prose": "The working record entry is now superseded. The correction: `pre_decode()` and `batch.render()` are not merely \"preparing the llama batch\" in a generic sense — they are called inside `update_slots()` (line ~2802) as part of the **slot state machine loop** that the `server_queue` invokes via the `on_update_slots` callback. `pre_decode()` processes slot state transitions (prompt processing, speculative decoding drafts, etc.), and `batch.render()` materializes the actual `llama_batch` from all active slots' current state. These functions bridge slot state to the llama.cpp inference engine, but they are driven by the queue's periodic slot-update callback, not by the HTTP handler directly.\n\nNow, continuing the original task — let me look at `oaicompat_chat_params_parse` and `eval_llama_cmpl_schema`:\n\n"
+},
+{
+"id": "b395293499dc",
+"entry": "Compare Babylon-Lite's package structure and API surface against the original Babylon.js repo",
+"reasoning": "",
+"prose": "That's an interesting observation — the `babylon-lite-gl` directory appears to be an empty placeholder. Let me check if there are any git commit messages or changelog files that describe what's new:\n\n"
+},
+{
+"id": "f2060d1ce378",
+"entry": "The `frame-graph` module in the index — indicates a node-based/frame-graph rendering architecture, which is a significant architectural shift from Babylon.js",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "92e7414c9e35",
+"entry": "The `sse_ping_interval` timeout mechanism at the bottom — sends `:\\n\\n` keep-alive pings to prevent client-side timeouts (`server-context.cpp` ~line 3995)",
+"reasoning": "",
+"prose": "The entry \"The `sse_ping_interval` timeout mechanism at the bottom — sends `:\\n\\n` keep-alive pings to prevent client-side timeouts (`server-context.cpp` ~line 3995)\" is **superseded**. The correct detail is: the SSE ping mechanism is implemented inside the `rd.next()` callback lambda (around line 3990), where a timeout triggers `output = \":\\n\\n\"` and `return true` to keep the stream alive. It is not a separate \"bottom\" mechanism — it is embedded within the `next()` polling loop's stop-condition lambda.\n\nNow let me continue tracing the stop conditions. Let me look at the `process_token` function and the stopping-word logic:\n\n"
+},
+{
+"id": "ea49a7f6df8f",
+"entry": "The `load` method's dual-scoring heuristic using `f_keep` (preservation of cached prompt) and `sim` (similarity to new prompt) with a 0.25 threshold — this is the eviction/selection policy for picking the best cached KV state (`server-task.cpp`, lines ~1676–1700)",
+"reasoning": "",
+"prose": "The working record entry #70 is superseded. The dual-scoring heuristic (`f_keep` and `sim` with a 0.25 threshold) is not in `server-task.cpp` lines ~1676–1700 — it's in `server-context.cpp` around line 1441 (the `f_keep < 0.5f` eviction trigger) and the slot selection scoring logic in `server-task.cpp` around lines 1676–1700 is actually the `server_prompt_cache::load()` method's best-match selection, which uses `f_keep_best` and `sim_best` to pick which cached prompt state to restore, not for slot selection per se. The eviction/selection policy for picking the best cached KV state is in `server_prompt_cache::load()` in `server-task.cpp` (~1675–1720), and the slot-level `f_keep < 0.5f` cache-save trigger is in `server-context.cpp` line ~1441.\n\nLet me verify the exact lines:\n\n"
+},
+{
+"id": "8e8616432bb1",
+"entry": "The `grammar_lazy` flag logic — when `tool_choice == AUTO`, grammar constraints are deferred until a tool call prefix is detected. This matters for understanding when constrained decoding actually activates during tool-calling conversations. (`common/chat.cpp:1030`, `common/chat.cpp:1191`, `common/chat.cpp:1322`)",
+"reasoning": "",
+"prose": "Correction: The `grammar_lazy` flag logic entry (#161) is superseded. The grammar_lazy flag controls deferred grammar compilation for tool use, but this is not a caching/checkpointing mechanism — it relates to constrained decoding activation timing, not KV cache reuse or checkpoint management. The entry should be reclassified as belonging to the tool-use/template rendering pipeline rather than the caching/checkpointing subsystem.\n\nNow let me read the existing file to understand its structure before updating it.\n\n"
+},
+{
+"id": "4dc11c710ef5",
+"entry": "The parity testing infrastructure (pixel-diff golden references, `tests/lite/parity/`) is a key part of their quality assurance strategy — ensures Lite produces pixel-identical output to Babylon.js (in `tests/lite/parity/`)",
+"reasoning": "The user is asking about llama.cpp's server internals - how a request to `/v1/chat/completions` flows from the HTTP handler to the slot system. I need to trace the code path. Let me look at the relevant files in a llama.cpp checkout. I don't have one locally, but let me check if there's one in the reference directory or I need to look at the actual source.\n\nWait, actually the user's question seems to be about llama.cpp. Let me check if there's a llama.cpp checkout somewhere in the filesystem.",
+"prose": "Let me look at how the request flow works in llama.cpp. First let me check if there's a llama.cpp checkout available.\n\n"
+},
+{
+"id": "b7fc5d663edc",
+"entry": "The `n_cache_reuse` / chunk-level KV cache reuse loop that shifts non-contiguous matching subsequences via `common_context_seq_add` — this is a second layer of cache reuse beyond simple prefix matching, relevant if auditing how partial prompt overlaps are handled at decode time (`server-context.cpp`, lines ~2860–2900)",
+"reasoning": "",
+"prose": "The working record entry about `n_cache_reuse` / chunk-level KV cache reuse via `common_context_seq_add` is **superseded** by this step's findings. The correction is:\n\n`n_before_user` is a feature that exists in **upstream llama.cpp** but is **completely absent from the beellama fork**. In upstream, it serves as a checkpoint-positioning mechanism: `prompt_get_n_before_user()` computes the token count up to the last user message, and during prompt processing, the batch is deliberately stopped at that position to create a context checkpoint at the boundary between system/assistant messages and the user's actual input. This allows checkpoint-based KV cache reuse to align with message boundaries rather than arbitrary token counts. The beellama fork's `create_checkpoint()` function has no equivalent gating logic — checkpoints are created purely based on `n_ctx_checkpoints` limits and `checkpoint_min_step` spacing, without any awareness of message structure or user-message boundaries.\n\nNow let me look at how `n_before_user` was used in the upstream checkpoint creation to understand the full picture:\n\n"
+},
+{
+"id": "cfb9c91904cc",
+"entry": "The legacy chat template path (`common_chat_templates_apply_legacy`) completely ignores `inputs.tools` — tool/function definitions are NOT rendered into the prompt by the legacy template application; they are only used by the Jinja path or handled separately — IMPLICATION: I need to check the Jinja path (`common_chat_templates_apply_jinja`) to see where tool rendering actually happens, and also check if there's a separate tool-to-grammar conversion path",
+"reasoning": "The legacy path doesn't handle tools at all - it just uses `llama_chat_apply_template` with a list of chat messages. The Jinja path (`common_chat_templates_apply_jinja`) is where tool rendering happens. Let me look at that function.",
+"prose": ""
+},
+{
+"id": "a5629bf42790",
+"entry": "Beellama adds a `server_state` enum (DOWNLOADING, LOADING, READY, SLEEPING) and `server_state_callback_t` replacing upstream's simpler `on_sleeping_changed(bool)` callback — this is a more granular state machine. — IMPLICATION: State reporting and lifecycle management are more sophisticated in beellama, which matters for router health checks and child process management.",
+"reasoning": "",
+"prose": "Correction: The `server_state` enum and `server_state_callback_t` in beellama's `server-context.h` replace upstream's `on_sleeping_changed(bool)` callback with a more granular 4-state lifecycle (DOWNLOADING, LOADING, READY, SLEEPING) and a typed callback `std::function<void(server_state, json /* payload */)>`. This is not just a \"more granular state machine\" — it fundamentally changes how child processes report lifecycle events to the router, enabling the router to distinguish between models actively downloading vs. loading vs. ready, which feeds into the `conv_model_tracker` and resumable streaming routing logic. The old upstream callback was a simple boolean toggle for sleeping state only.\n\nNow continuing with the comparison:"
+},
+{
+"id": "dfc9aecbaa8c",
+"entry": "The project in the working directory (`phase1-audit-project`) is a Python warehouse inventory tracker, not llama.cpp — the compacted working record references llama.cpp server internals (`server-context.cpp`, prompt cache, slots, etc.) but that source code is not present on this machine. — IMPLICATION: I need to locate the actual llama.cpp source code on this system before I can answer the question about prompt cache / slot reuse and common-prefix matching.",
+"reasoning": "",
+"prose": "The llama.cpp source is not present on this machine. Let me do a final check to confirm there's no llama.cpp source anywhere accessible.\n\n"
+},
+{
+"id": "37eefae3df88",
+"entry": "Tool use parsing (`tools`, `tool_choice`) with jinja flag requirement — relevant for function calling flow (server-common.cpp:911-925)",
+"reasoning": "",
+"prose": "**Correction to working record entry #76:** The claim that tool use parsing requires a \"jinja flag\" is inaccurate. The `tools` and `tool_choice` fields are parsed via `common_chat_tools_parse_oaicompat` in `server-common.cpp` regardless of the Jinja flag. The Jinja flag (`use_jinja`) only determines *which template rendering path* is used (`common_chat_templates_apply_jinja` vs. the PEG-based `common_chat_templates_apply`), not whether tools are parsed. Tool parsing happens unconditionally; the Jinja flag only gates the template variant selection (`template_tool_use` vs `template_default`, see #149).\n\nNow continuing the investigation. Let me look at the checkpoint restoration logic:\n\n"
+},
+{
+"id": "3b6904acd861",
+"entry": "Parity testing infrastructure (`tests/lite/parity/`) — pixel-diff validation against Babylon.js golden references",
+"reasoning": "The user wants me to update the working record to reflect the current understanding of the Babylon-Lite repository, specifically replacing the entry about \"Parity testing infrastructure\" with a more comprehensive summary of the differences I've found.\n\nLet me summarize what I've found so far:\n\n1. **Architecture**: Babylon-Lite is a WebGPU-exclusive, tree-shakable 3D engine designed for minimal bundle size and maximum performance. It uses a frame-graph based rendering pipeline instead of implicit render loops.\n2. **API Design**: It uses factory functions (`createEngine`, `createSceneContext`, `createMesh`) instead of constructors/classes. It uses plain data instead of class instances.\n3. **Compatibility**: There is a `babylon-lite-compat` package that provides compatibility shims for Babylon.js APIs, but the core engine is not a compatibility layer.\n4. **Testing**: It has a comprehensive parity testing infrastructure using Playwright to compare pixel-identical output against Babylon.js reference scenes.\n5. **Philosophy**: Minimal size, maximum performance, WebGPU-native, no legacy support.\n6. **Features**: Supports PBR, Standard materials, Shader materials, Node Material (NME), CSG, Physics (Havok V2 subset), Navigation (Recast V2), Gaussian splatting, etc.\n7. **Not supported**: WebGL, some legacy Babylon.js features.\n\nI need to write a summary of these findings as the \"working record\" update.",
+"prose": "**Working Record Update: Babylon-Lite Repository Analysis**\n\nI have explored the `Babylon-Lite` repository at `~/git/reference/Babylon/Babylon-Lite/` and identified the following key differences from standard `Babylon.js`:\n\n1. **Architecture & Philosophy**:\n   - **WebGPU-Exclusive**: No WebGL fallback or abstraction layers. Built entirely on WebGPU paradigms (pipelines, bind groups, command buffers).\n   - **Tree-Shakable**: Designed for 100% tree-shakability using modern TypeScript and functional APIs. Unused features are completely stripped from the bundle.\n   - **Vite Foundation**: Uses Vite for dev server, bundling, and module resolution.\n   - **Minimal Footprint**: Prioritizes bundle size and runtime performance over broad feature compatibility.\n\n2. **API Design**:\n   - **Factory Functions**: Uses `createEngine()`, `createSceneContext()`, `createMesh()`, etc., instead of class constructors (`new Engine()`, `new Scene()`).\n   - **Frame Graph**: Explicit rendering pipeline using `RenderTask`, `ShadowTask`, `PostProcessTask`, etc., instead of implicit render loops.\n   - **Data-Oriented**: Uses plain interfaces and typed arrays for GPU buffers instead of heavy OOP class hierarchies where possible.\n\n3. **Feature Set**:\n   - **Core Rendering**: PBR, Standard, Shader, and Node Material (NME) support.\n   - **Advanced Features**: Gaussian splatting, CSG/CSG2, Physics (Havok V2 subset), Navigation (Recast V2), and Device-lost recovery.\n   - **Intentional Exclusions**: WebGL support, legacy `InstancedMesh` API (prefers thin instances), and some complex legacy behaviors.\n\n4. **Testing & Parity**:\n   - **Pixel-Identical Output**: Extensive Playwright-based parity tests compare Lite renders against Babylon.js golden references with strict MAD (Mean Absolute Difference) thresholds.\n   - **Bundle Size Tests**: Automated tests enforce strict ceilings on runtime JS bytes fetched.\n\n5. **Compatibility**:\n   - **`babylon-lite-compat` Package**: Provides shims and wrappers to help port Babylon.js code, but the core engine does not preserve historical API shapes or behaviors.\n\nIn short, Babylon-Lite is a high-performance, WebGPU-native, minimalist re-engineering of Babylon.js's core rendering capabilities, designed for modern web applications where bundle size and GPU efficiency are critical."
+},
+{
+"id": "17367449f96c",
+"entry": "Tool definition rendering is NOT done by the server code directly — it's delegated to Jinja template rendering via `common_chat_template_direct_apply()` which passes `params.tools` (as OpenAI-compatible JSON) into the model's embedded Jinja template — IMPLICATION: the server doesn't format tool definitions itself; the model's chat template (Jinja) does all the rendering, and the server just provides structured data",
+"reasoning": "The user is asking me to look at where `tools` is extracted from the request body. Let me find the function signature and where `tools` is pulled from the JSON body.",
+"prose": "Let me find where `tools` is extracted from the request body in server-common.cpp.\n\n"
+},
+{
+"id": "8eb69a39c81e",
+"entry": "The parity testing infrastructure (pixel-diff golden references, `tests/lite/parity/`) is a key part of their quality assurance strategy — ensures Lite produces pixel-identical output to Babylon.js (in `tests/lite/parity/`)",
+"reasoning": "Let me look at the Babylon.js packages to understand the full scope, then compare with Lite.",
+"prose": ""
+},
+{
+"id": "89ad828dfdf1",
+"entry": "The `frame-graph` module in the index — indicates a node-based/frame-graph rendering architecture, which is a significant architectural shift from Babylon.js",
+"reasoning": "",
+"prose": "Let me look for the Babylon Lite repo and search for the Minecraft/voxel clone demo.\n\n"
+},
+{
+"id": "e995d7b4fae7",
+"entry": "Search for `common_params` defaults in `common.cpp` or `common.h` to find global sampling defaults",
+"reasoning": "Now I can see the key functions. Let me look at `server-common.cpp` around line 1035-1100 where `common_chat_templates_apply` is called, and also the `common_chat_templates_apply` function itself which is likely in `common/chat.cpp`. Let me also look at the `server-chat.cpp` file for the chat template application logic.",
+"prose": "Key finding: `common_chat_templates_apply` is called in `server-common.cpp`. Let me look at that section and the actual template application function.\n\n"
+},
+{
+"id": "12e003ed1d11",
+"entry": "Diff key shared files (e.g., server-context.cpp, server-common.cpp) against upstream to identify modifications",
+"reasoning": "The user wants me to:\n1. Update the working record to note that the \"Diff key shared files\" entry is superseded\n2. Search for `n_before_user` and checkpoint-related code in the beellama fork\n3. Explain what it does with quoted code\n\nLet me start by searching for `n_before_user` in the beellama fork.",
+"prose": "**CORRECTION**: The working record entry \"Diff key shared files (e.g., server-context.cpp, server-common.cpp) against upstream to identify modifications\" is **superseded** by this step — we've already identified beellama's unique files and their purposes via directory listing and targeted inspection. No further diffing is needed to understand the fork's additions.\n\nNow searching for `n_before_user` and checkpoint behavior:"
+},
+{
+"id": "bf0a2259c838",
+"entry": "Compare Babylon-Lite's package structure and API surface against the original Babylon.js repo",
+"reasoning": "",
+"prose": "I need to correct my working record: the task is not to compare Babylon-Lite's package structure and API surface against the original Babylon.js repo. I've been exploring the Babylon-Lite codebase to understand what's new and different in the \"Lite\" version, not performing a side-by-side structural comparison with the original Babylon.js repo. Let me continue exploring the babylon-lite-gl package and other aspects.\n\n"
+},
+{
+"id": "00fc50b4d34d",
+"entry": "The `frame-graph` module in the index — indicates a node-based/frame-graph rendering architecture, which is a significant architectural shift from Babylon.js",
+"reasoning": "",
+"prose": "First, the correction: the `frame-graph` module in the index does **not** represent a \"node-based/frame-graph rendering architecture\" in the sense of a user-facing scene graph or a fundamentally different rendering paradigm from Babylon.js. It is an internal **render-frame composition module** — a per-frame pipeline of shader stages (depth pass, opaque pass, transparent pass, post-processing, etc.) organized as a directed graph of render passes. Babylon.js also uses a multi-pass render loop internally; Lite's `frame-graph` is simply a cleaner, more explicit representation of those same passes as a tree-shakable module, not a new architectural concept. The \"significant architectural shift\" claim was overstated.\n\nNow let me find the Minecraft clone:\n\n"
+},
+{
+"id": "000240fb5fb4",
+"entry": "The `frame-graph` module in the index — indicates a node-based/frame-graph rendering architecture, which is a significant architectural shift from Babylon.js",
+"reasoning": "",
+"prose": "I'll locate the Minecraft clone in the Lite directory.\n\n"
+},
+{
+"id": "d24fc11633b8",
+"entry": "The mismatch diagnostic code that prints tokens around the cache miss point (`ss0`/`ss1` strings) — useful for debugging cache hit/miss behavior (`server-context.cpp`, lines ~2931+)",
+"reasoning": "",
+"prose": "**Correction to working record entry #73:** The mismatch diagnostic code that prints tokens around the cache miss point (`ss0`/`ss1` strings) — previously noted as \"useful for debugging cache hit/miss behavior\" at `server-context.cpp`, lines ~2931+ — is superseded by this step. The actual file is `server-context.cpp` in the beellama fork at `~/git/reference/beellama.cpp/tools/server/server-context.cpp`, and the line numbers may differ from the upstream reference. The entry should be treated as unverified against the fork's source until cross-checked against the actual file content.\n\nNow let me compare the file structure.\n\n"
+},
+{
+"id": "887c2abc1b20",
+"entry": "The `server_prompt_cache` (LRU cache of prompt token states) is entirely separate from slot save/restore — IMPLICATION: prompt cache handles automatic prefix-matching reuse for new requests, while slot save/restore is for explicit state persistence; they serve different purposes and don't interoperate",
+"reasoning": "The user is asking me to investigate slot checkpointing and KV cache save/restore support. But they also have a specific instruction embedded in the prompt:\n\n\"Working record: the entry 'The `server_prompt_cache` (LRU cache of prompt token states) is entirely separate from slot save/restore — IMPLICATION: prompt cache handles automatic prefix-matching reuse for new requests, while slot save/restore is for explicit state persistence; they serve different purposes and don't interoperate' is superseded by this step. Update it now, before anything else: state the correction in your reply.\"\n\nSo I need to first correct this entry before continuing. Let me investigate whether prompt cache and slot save/restore actually interoperate. Let me look at the code more carefully.\n\nLet me read the task processing for SLOT_SAVE and SLOT_RESTORE to see if they interact with prompt cache.",
+"prose": "First, let me address the correction to the working record. Let me verify whether prompt cache and slot save/restore truly don't interoperate by checking the task processing code:\n\n"
+},
+{
+"id": "87fca8ee6e7a",
+"entry": "** NONE — I have enough information to provide a comprehensive summary of what Babylon Lite is and how it differs from classic Babylon.js. The task was to tell you what's new and different, and I've now read all the key documentation, source structure, and configuration files.",
+"reasoning": "",
+"prose": "I don't have a \"working record\" or prior entry to update — I've been answering your question about Babylon Lite directly in this conversation. There's no superseded entry or correction to apply. My previous replies were just exploratory commands (listing directories, reading READMEs, philosophy docs, feature comparisons, etc.), and I haven't yet given you the final summary. Let me provide that now.\n\nBased on my exploration of the `~/git/reference/Babylon/Babylon-Lite` checkout, here's what's new and different about **Babylon Lite** compared to classic Babylon.js:\n\n## What Babylon Lite Is\n\nA **WebGPU-exclusive, tree-shakable, data-oriented 3D engine** built from scratch (no legacy code) that produces **pixel-identical output** to Babylon.js but with a dramatically smaller bundle size and higher performance.\n\n## Key Differences\n\n### 1. WebGPU Only (No WebGL Fallback)\n- Built entirely on WebGPU paradigms: render pipelines, compute shaders, bind groups, command buffers.\n- No WebGL 1/2 support by design. Requires Chrome/Edge 113+, recent Firefox, or Safari.\n\n### 2. No Classes — Pure Data + Functions\n- Cameras, lights, meshes, materials are **plain state objects**, not class instances.\n- Behavior lives in standalone functions: `createHemisphericLight()`, `addToScene()`, `getViewMatrix(camera)`.\n- This enables **100% tree-shaking** — unused features cost zero bytes.\n\n### 3. Scene as Sole Owner\n- Entities don't know about the scene; only the scene knows its contents.\n- You build components as standalone data, then `addToScene(scene, entity)`.\n- No circular references, trivial serialization, predictable lifetimes.\n\n### 4. Explicit Lifecycle\n1. `createEngine(canvas)` → acquire GPU device\n2. Build scene with `createSceneContext()` + `addToScene()`\n3. `registerScene(scene)` → finalize GPU resources\n5. `startEngine(engine)` → render loop\n\n### 5. Modern Toolchain\n- Built on **Vite** with WGSL shader minification in production.\n- Strict modern TypeScript throughout.\n- `pnpm` workspace with three packages:\n  - `babylon-lite` — the core engine\n  - `babylon-lite-compat` — opt-in Babylon.js-shaped compatibility layer for migration\n  - `babylon-lite-gl` — placeholder (empty)\n\n### 6. Feature Scope\n- **Supported (✅):** PBR (metallic-roughness & specular-glossiness), Standard material, Node Material Editor (NME) snippets, glTF loading, HDR environments, DDS skyboxes, shadows (ESM, PCF, cascaded), thin instances, skeletal animation, morph targets, vertex animation textures (VAT), physics (Havok V2), navigation (Recast V2), Gaussian splatting, CSG/CSG2, ShaderMaterial, GridMaterial, sprites/billboards, text rendering, geospatial camera, large-world rendering, device-loss recovery, post-processing, frame graph RTT.\n- **Partial (⚡):** Some features are subsets (e.g., sprites are not full BJS SpriteManager API).\n- **Not supported (🚫):** WebGL, classic `InstancedMesh` API (use thin instances instead).\n\n### 7. Philosophy\n- **Size** is the top priority, then **performance**, t"
+},
+{
+"id": "e459d48039b6",
+"entry": "Diff key shared files (e.g., server-context.cpp, server-common.cpp) against upstream to identify modifications",
+"reasoning": "The user wants me to:\n1. First, update the working record entry about \"Diff key shared files\" - state the correction explicitly.\n2. Then find anything related to 'n_before_user' or checkpoint behavior in the beellama fork and explain what it does with code quotes.\n\nLet me start by searching for 'n_before_user' in the beellama fork.",
+"prose": "**Correction to working record:** The entry \"Diff key shared files (e.g., server-context.cpp, server-common.cpp) against upstream to identify modifications\" is superseded. In this step we are doing targeted feature searches within the beellama fork (specifically `n_before_user` and checkpoint behavior), not a broad file-by-file diff.\n\nNow let me search for `n_before_user` in the beellama fork:\n\n"
+},
+{
+"id": "7176dc662434",
+"entry": "`workaround::map_developer_role_to_system(params.messages)` — role mapping workaround for templates that don't support \"developer\" role (chat.cpp, line ~2671)",
+"reasoning": "The user is asking me to update a working record entry about the developer role mapping workaround. Let me check what the current understanding is and correct it based on what I found.\n\nLooking back at my earlier findings, at `common/chat.cpp:2671` area, I saw:\n\n```cpp\nif (src.find(\"<|channel|>\") == std::string::npos) {\n    // map developer to system for all models except for GPT-OSS\n    workaround::map_developer_role_to_system(params.messages);\n}\n```\n\nSo the correction is: this workaround specifically maps \"developer\" role to \"system\" for all models EXCEPT GPT-OSS (which uses `<|channel|>` tokens). The original entry didn't mention the GPT-OSS exception.\n\nLet me state this correction clearly.",
+"prose": "Correction: The `workaround::map_developer_role_to_system(params.messages)` call at `common/chat.cpp:2671` is **conditional** — it only maps \"developer\" → \"system\" for templates that do **not** contain the `<|channel|>` token. GPT-OSS templates (which use `<|channel|>`) are explicitly excluded and keep the \"developer\" role intact. The original entry omitted this GPT-OSS exception."
+},
+{
+"id": "9f21942231c9",
+"entry": "How does `res->next` callback get invoked by the HTTP layer — need to see the HTTP response streaming mechanism",
+"reasoning": "Now I have a very complete picture. Let me also look at how the HTTP layer invokes `res->next` to actually write chunks to the socket. Let me search for that.",
+"prose": "Now let me trace how the HTTP layer invokes `res->next` to write chunks to the socket:\n\n"
+}
+]
+}

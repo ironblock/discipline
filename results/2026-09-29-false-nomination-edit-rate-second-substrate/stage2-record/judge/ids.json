@@ -1,0 +1,9802 @@
+{
+ "000240fb5fb4": {
+  "arm": "advisory",
+  "fork": "drive-13#t4s0",
+  "rung": "1.0"
+ },
+ "000a92eb3ced": {
+  "arm": "advisory",
+  "fork": "drive-10#t7s28",
+  "rung": "0.4"
+ },
+ "001a0dd4430b": {
+  "arm": "sham",
+  "fork": "drive-06#t8s6",
+  "rung": "0.8"
+ },
+ "001b56e5d335": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s22",
+  "rung": "0.8"
+ },
+ "001cafdbf2d2": {
+  "arm": "advisory",
+  "fork": "drive-04#t9s24",
+  "rung": "0.8"
+ },
+ "0022501e910e": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s17",
+  "rung": "0.8"
+ },
+ "0071d4eb9356": {
+  "arm": "imperative",
+  "fork": "drive-03#t9s26",
+  "rung": "1.0"
+ },
+ "007a79c662df": {
+  "arm": "advisory",
+  "fork": "drive-15#t2s9",
+  "rung": "0.0556"
+ },
+ "00fc50b4d34d": {
+  "arm": "imperative",
+  "fork": "drive-13#t4s0",
+  "rung": "0.0556"
+ },
+ "01083b8b015b": {
+  "arm": "sham",
+  "fork": "drive-06#t5s23",
+  "rung": "0.4"
+ },
+ "015f5ab4124a": {
+  "arm": "advisory",
+  "fork": "drive-08#t9s24",
+  "rung": "1.0"
+ },
+ "0197dec4a94e": {
+  "arm": "sham",
+  "fork": "drive-10#t8s18",
+  "rung": "0.6"
+ },
+ "019d9d2b3755": {
+  "arm": "imperative",
+  "fork": "drive-03#t10s10",
+  "rung": "0.0556"
+ },
+ "020364b45744": {
+  "arm": "sham",
+  "fork": "drive-02#t7s29",
+  "rung": "1.0"
+ },
+ "0251f4296b7b": {
+  "arm": "advisory",
+  "fork": "drive-07#t5s27",
+  "rung": "0.6"
+ },
+ "027cd629d042": {
+  "arm": "advisory",
+  "fork": "drive-04#t9s10",
+  "rung": "0.8"
+ },
+ "02bc92dbfb8b": {
+  "arm": "advisory",
+  "fork": "drive-04#t2s2",
+  "rung": "0.6"
+ },
+ "02c55d8c9dd3": {
+  "arm": "sham",
+  "fork": "drive-15#t2s29",
+  "rung": "0.4"
+ },
+ "02dddf44cd4f": {
+  "arm": "sham",
+  "fork": "drive-08#t7s24",
+  "rung": "0.6222"
+ },
+ "02e9855b9e93": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s13",
+  "rung": "1.0"
+ },
+ "03260d2efed2": {
+  "arm": "sham",
+  "fork": "drive-02#t9s16",
+  "rung": "1.0"
+ },
+ "0330e38c2524": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s11",
+  "rung": "1.0"
+ },
+ "03474d0208cf": {
+  "arm": "sham",
+  "fork": "drive-03#t5s13",
+  "rung": "1.0"
+ },
+ "035acf934cda": {
+  "arm": "sham",
+  "fork": "drive-07#t7s26",
+  "rung": "1.0"
+ },
+ "03656c51552b": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s5",
+  "rung": "0.6222"
+ },
+ "036e81899764": {
+  "arm": "sham",
+  "fork": "drive-08#t8s14",
+  "rung": "0.0556"
+ },
+ "03728762948c": {
+  "arm": "advisory",
+  "fork": "drive-04#t8s16",
+  "rung": "0.6"
+ },
+ "03c2258205d1": {
+  "arm": "sham",
+  "fork": "drive-09#t2s27",
+  "rung": "0.6"
+ },
+ "03ff01e6b54c": {
+  "arm": "advisory",
+  "fork": "drive-08#t11s16",
+  "rung": "1.0"
+ },
+ "041e4ddc9cfa": {
+  "arm": "imperative",
+  "fork": "drive-09#t5s5",
+  "rung": "0.4"
+ },
+ "043ae2b30226": {
+  "arm": "sham",
+  "fork": "drive-14#t2s11",
+  "rung": "0.6"
+ },
+ "04479417b74d": {
+  "arm": "sham",
+  "fork": "drive-09#t2s28",
+  "rung": "0.0556"
+ },
+ "048368820e05": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s10",
+  "rung": "0.8"
+ },
+ "05389ef53c38": {
+  "arm": "imperative",
+  "fork": "drive-10#t7s18",
+  "rung": "0.4"
+ },
+ "053d14be4b90": {
+  "arm": "imperative",
+  "fork": "drive-02#t7s29",
+  "rung": "1.0"
+ },
+ "053f829984fe": {
+  "arm": "imperative",
+  "fork": "drive-05#t11s17",
+  "rung": "0.6222"
+ },
+ "05481d1be4ef": {
+  "arm": "imperative",
+  "fork": "drive-02#t7s29",
+  "rung": "0.6"
+ },
+ "0551af6e9dbb": {
+  "arm": "sham",
+  "fork": "drive-10#t8s22",
+  "rung": "1.0"
+ },
+ "05ad9fe84a88": {
+  "arm": "advisory",
+  "fork": "drive-08#t2s0",
+  "rung": "0.4"
+ },
+ "05c554e6d605": {
+  "arm": "sham",
+  "fork": "drive-05#t11s17",
+  "rung": "0.4"
+ },
+ "05ea24b22d98": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s16",
+  "rung": "0.6"
+ },
+ "06157e5958bf": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s13",
+  "rung": "0.0556"
+ },
+ "0672dfcf6ea9": {
+  "arm": "sham",
+  "fork": "drive-10#t9s14",
+  "rung": "0.6222"
+ },
+ "0676d8c65375": {
+  "arm": "imperative",
+  "fork": "drive-04#t5s24",
+  "rung": "0.0556"
+ },
+ "067cc7f4d052": {
+  "arm": "sham",
+  "fork": "drive-02#t8s5",
+  "rung": "0.8"
+ },
+ "067d1901ef23": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s15",
+  "rung": "0.8"
+ },
+ "06958b1e46e6": {
+  "arm": "imperative",
+  "fork": "drive-04#t9s24",
+  "rung": "0.6"
+ },
+ "06aef57d48ff": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s17",
+  "rung": "0.6"
+ },
+ "06de8f6705cf": {
+  "arm": "sham",
+  "fork": "drive-07#t10s13",
+  "rung": "0.4"
+ },
+ "06f28cc2bf9a": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s11",
+  "rung": "0.6222"
+ },
+ "0737e6431371": {
+  "arm": "sham",
+  "fork": "drive-10#t9s8",
+  "rung": "0.0556"
+ },
+ "07671fb3cae9": {
+  "arm": "sham",
+  "fork": "drive-05#t11s17",
+  "rung": "0.8"
+ },
+ "07914af73408": {
+  "arm": "sham",
+  "fork": "drive-09#t9s12",
+  "rung": "0.8"
+ },
+ "07c0a6646d49": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s8",
+  "rung": "0.0556"
+ },
+ "07e2d9893cfd": {
+  "arm": "imperative",
+  "fork": "drive-03#t8s15",
+  "rung": "0.6"
+ },
+ "07e818fa33c6": {
+  "arm": "imperative",
+  "fork": "drive-08#t9s24",
+  "rung": "1.0"
+ },
+ "07f0117b6fad": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s13",
+  "rung": "0.6222"
+ },
+ "08060adbea80": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s25",
+  "rung": "0.6222"
+ },
+ "080d8827c2d6": {
+  "arm": "imperative",
+  "fork": "drive-04#t9s24",
+  "rung": "1.0"
+ },
+ "083c5f97ef37": {
+  "arm": "sham",
+  "fork": "drive-09#t5s22",
+  "rung": "0.4"
+ },
+ "0884c4a813ee": {
+  "arm": "sham",
+  "fork": "drive-02#t9s11",
+  "rung": "1.0"
+ },
+ "089642d1bd53": {
+  "arm": "advisory",
+  "fork": "drive-02#t7s29",
+  "rung": "0.4"
+ },
+ "08ab7b2b7b3b": {
+  "arm": "sham",
+  "fork": "drive-10#t9s15",
+  "rung": "0.0556"
+ },
+ "08f2bcbe8cf4": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s6",
+  "rung": "0.4"
+ },
+ "09111e341f12": {
+  "batch": 15,
+  "control": "ctl13"
+ },
+ "0915443e34ef": {
+  "arm": "imperative",
+  "fork": "drive-05#t11s26",
+  "rung": "0.0556"
+ },
+ "092651e82992": {
+  "arm": "sham",
+  "fork": "drive-15#t2s9",
+  "rung": "0.8"
+ },
+ "092a050284f2": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s11",
+  "rung": "0.0556"
+ },
+ "092acc286ebf": {
+  "arm": "advisory",
+  "fork": "drive-04#t8s16",
+  "rung": "1.0"
+ },
+ "0946a12a2064": {
+  "arm": "imperative",
+  "fork": "drive-04#t5s24",
+  "rung": "1.0"
+ },
+ "0948557bb0dd": {
+  "arm": "sham",
+  "fork": "drive-03#t10s10",
+  "rung": "0.6222"
+ },
+ "09759419bb99": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s4",
+  "rung": "0.6222"
+ },
+ "097d17d4cf1a": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s17",
+  "rung": "0.0556"
+ },
+ "09d75b055592": {
+  "batch": 48,
+  "control": "ctl03"
+ },
+ "09f485f91d33": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s12",
+  "rung": "0.8"
+ },
+ "0a0bb799ab0c": {
+  "arm": "sham",
+  "fork": "drive-05#t11s26",
+  "rung": "0.6222"
+ },
+ "0a192c3378f5": {
+  "arm": "sham",
+  "fork": "drive-08#t8s9",
+  "rung": "0.6"
+ },
+ "0a489fcd3f7a": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s4",
+  "rung": "0.6222"
+ },
+ "0a9bfc5f3f79": {
+  "arm": "imperative",
+  "fork": "drive-04#t7s15",
+  "rung": "0.0556"
+ },
+ "0acb1a399a02": {
+  "arm": "sham",
+  "fork": "drive-07#t10s12",
+  "rung": "0.6222"
+ },
+ "0b4e1503c18d": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s8",
+  "rung": "0.4"
+ },
+ "0b4f394e1da5": {
+  "arm": "sham",
+  "fork": "drive-03#t5s13",
+  "rung": "0.8"
+ },
+ "0b527f1317f7": {
+  "arm": "sham",
+  "fork": "drive-03#t8s15",
+  "rung": "0.0556"
+ },
+ "0b5ef3d2def2": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s3",
+  "rung": "0.4"
+ },
+ "0b794ac662dc": {
+  "batch": 22,
+  "control": "ctl10"
+ },
+ "0b850572fb2e": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s3",
+  "rung": "0.0556"
+ },
+ "0ba7064cfffd": {
+  "arm": "advisory",
+  "fork": "drive-09#t8s23",
+  "rung": "0.0556"
+ },
+ "0bc4d56dcf6b": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s27",
+  "rung": "1.0"
+ },
+ "0bce475e9066": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s0",
+  "rung": "1.0"
+ },
+ "0bcf218992d6": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s14",
+  "rung": "0.0556"
+ },
+ "0bcfe90c61d4": {
+  "arm": "sham",
+  "fork": "drive-03#t5s13",
+  "rung": "0.6222"
+ },
+ "0becbca6ee5d": {
+  "batch": 16,
+  "control": "ctl13"
+ },
+ "0bf5601a8f2d": {
+  "arm": "imperative",
+  "fork": "drive-04#t2s2",
+  "rung": "0.4"
+ },
+ "0bf607b94f30": {
+  "arm": "sham",
+  "fork": "drive-08#t5s6",
+  "rung": "0.0556"
+ },
+ "0c073b3a142e": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s12",
+  "rung": "0.0556"
+ },
+ "0c14f3068d3c": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s12",
+  "rung": "0.6222"
+ },
+ "0c2302f767fa": {
+  "arm": "imperative",
+  "fork": "drive-07#t10s12",
+  "rung": "1.0"
+ },
+ "0c35e91a0de4": {
+  "arm": "imperative",
+  "fork": "drive-06#t5s23",
+  "rung": "0.6222"
+ },
+ "0c404648b147": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s13",
+  "rung": "1.0"
+ },
+ "0c7d71b5108d": {
+  "arm": "advisory",
+  "fork": "drive-02#t3s5",
+  "rung": "0.6"
+ },
+ "0ca349c2be41": {
+  "arm": "sham",
+  "fork": "drive-08#t2s0",
+  "rung": "0.6222"
+ },
+ "0ca65df8d54b": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s15",
+  "rung": "0.8"
+ },
+ "0ce1591cf498": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s20",
+  "rung": "1.0"
+ },
+ "0ce30c3ce902": {
+  "arm": "advisory",
+  "fork": "drive-05#t7s12",
+  "rung": "0.8"
+ },
+ "0d1ab8d6c246": {
+  "arm": "imperative",
+  "fork": "drive-07#t10s12",
+  "rung": "0.8"
+ },
+ "0d25b0bd9c00": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s10",
+  "rung": "1.0"
+ },
+ "0d31534046e8": {
+  "arm": "sham",
+  "fork": "drive-10#t9s14",
+  "rung": "0.8"
+ },
+ "0d4315364489": {
+  "arm": "imperative",
+  "fork": "drive-06#t8s6",
+  "rung": "0.6222"
+ },
+ "0d51f1f32395": {
+  "arm": "sham",
+  "fork": "drive-13#t2s21",
+  "rung": "0.8"
+ },
+ "0dcf36d06145": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s28",
+  "rung": "0.4"
+ },
+ "0de1dcb790a6": {
+  "arm": "sham",
+  "fork": "drive-08#t8s18",
+  "rung": "0.4"
+ },
+ "0de98f4505f9": {
+  "arm": "sham",
+  "fork": "drive-10#t10s2",
+  "rung": "0.6222"
+ },
+ "0e05a3448dbd": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s13",
+  "rung": "0.4"
+ },
+ "0e19005c76c8": {
+  "arm": "advisory",
+  "fork": "drive-05#t10s26",
+  "rung": "0.6"
+ },
+ "0ecaffd85f55": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s20",
+  "rung": "0.6"
+ },
+ "0ef8fa51d284": {
+  "arm": "imperative",
+  "fork": "drive-15#t2s29",
+  "rung": "0.0556"
+ },
+ "0efc283ec6dc": {
+  "arm": "sham",
+  "fork": "drive-10#t9s8",
+  "rung": "1.0"
+ },
+ "0f2b60bee6f2": {
+  "arm": "imperative",
+  "fork": "drive-03#t10s11",
+  "rung": "0.6"
+ },
+ "0f32e8ae017f": {
+  "arm": "imperative",
+  "fork": "drive-07#t5s27",
+  "rung": "0.6"
+ },
+ "0f3c872c7033": {
+  "batch": 44,
+  "control": "ctl11"
+ },
+ "0f5f34ce4b9b": {
+  "arm": "sham",
+  "fork": "drive-02#t10s9",
+  "rung": "0.8"
+ },
+ "0f8bf3a4dc9d": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s22",
+  "rung": "0.6222"
+ },
+ "1003a986f36c": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s20",
+  "rung": "0.6"
+ },
+ "10452c4ff75c": {
+  "arm": "advisory",
+  "fork": "drive-08#t9s24",
+  "rung": "0.8"
+ },
+ "107c7aa64413": {
+  "batch": 47,
+  "control": "ctl12"
+ },
+ "107f8ff39338": {
+  "arm": "imperative",
+  "fork": "drive-05#t3s28",
+  "rung": "0.6"
+ },
+ "1081999efeb7": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s25",
+  "rung": "0.8"
+ },
+ "108e450bb966": {
+  "arm": "sham",
+  "fork": "drive-02#t9s1",
+  "rung": "0.6"
+ },
+ "10ab6aa33c4b": {
+  "batch": 20,
+  "control": "ctl13"
+ },
+ "10b622dae697": {
+  "arm": "sham",
+  "fork": "drive-13#t5s1",
+  "rung": "0.6"
+ },
+ "10b888829f0e": {
+  "arm": "sham",
+  "fork": "drive-09#t2s28",
+  "rung": "0.6"
+ },
+ "10bee65c8c9a": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s28",
+  "rung": "0.6222"
+ },
+ "10c79c18b92a": {
+  "arm": "sham",
+  "fork": "drive-09#t9s14",
+  "rung": "0.6"
+ },
+ "10d38c7848c1": {
+  "arm": "sham",
+  "fork": "drive-10#t9s15",
+  "rung": "0.6"
+ },
+ "112334787c6a": {
+  "arm": "imperative",
+  "fork": "drive-09#t5s22",
+  "rung": "0.0556"
+ },
+ "112bc5c1c73e": {
+  "arm": "sham",
+  "fork": "drive-06#t7s20",
+  "rung": "0.0556"
+ },
+ "114c4dd1635c": {
+  "arm": "sham",
+  "fork": "drive-04#t8s13",
+  "rung": "0.4"
+ },
+ "118e310dc57a": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s20",
+  "rung": "1.0"
+ },
+ "1199be8b66b6": {
+  "arm": "advisory",
+  "fork": "drive-04#t9s24",
+  "rung": "0.0556"
+ },
+ "1199cfa35801": {
+  "arm": "advisory",
+  "fork": "drive-03#t5s13",
+  "rung": "1.0"
+ },
+ "11a1967beaca": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s13",
+  "rung": "0.6"
+ },
+ "11bf8eeedaae": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s13",
+  "rung": "0.8"
+ },
+ "11e64d7210c2": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s15",
+  "rung": "1.0"
+ },
+ "11f3a79f294e": {
+  "arm": "sham",
+  "fork": "drive-02#t9s11",
+  "rung": "0.6"
+ },
+ "120112c0793b": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s28",
+  "rung": "0.8"
+ },
+ "123b10a7394a": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s0",
+  "rung": "0.6222"
+ },
+ "12812bca152d": {
+  "batch": 46,
+  "control": "ctl13"
+ },
+ "12e003ed1d11": {
+  "batch": 19,
+  "control": "ctl04"
+ },
+ "1301c41779c7": {
+  "arm": "sham",
+  "fork": "drive-08#t10s4",
+  "rung": "0.6"
+ },
+ "1310d9798bdd": {
+  "arm": "advisory",
+  "fork": "drive-09#t5s22",
+  "rung": "0.0556"
+ },
+ "13155900c052": {
+  "arm": "sham",
+  "fork": "drive-02#t3s5",
+  "rung": "0.6222"
+ },
+ "132902e637af": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s14",
+  "rung": "0.0556"
+ },
+ "1340f474038f": {
+  "batch": 35,
+  "control": "ctl09"
+ },
+ "135588fb508f": {
+  "arm": "sham",
+  "fork": "drive-08#t9s24",
+  "rung": "0.6"
+ },
+ "135e2346c81f": {
+  "arm": "imperative",
+  "fork": "drive-04#t11s0",
+  "rung": "0.0556"
+ },
+ "13756cc24990": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s9",
+  "rung": "0.6"
+ },
+ "137c6cfc2f71": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s0",
+  "rung": "0.0556"
+ },
+ "13c3404da1d0": {
+  "arm": "sham",
+  "fork": "drive-04#t2s2",
+  "rung": "0.6222"
+ },
+ "13e9ed8b57c4": {
+  "arm": "advisory",
+  "fork": "drive-03#t10s11",
+  "rung": "0.6222"
+ },
+ "13ec14f7ac1a": {
+  "arm": "advisory",
+  "fork": "drive-04#t9s10",
+  "rung": "0.4"
+ },
+ "14100ee656c5": {
+  "arm": "sham",
+  "fork": "drive-06#t2s29",
+  "rung": "0.4"
+ },
+ "142173094043": {
+  "arm": "sham",
+  "fork": "drive-03#t10s11",
+  "rung": "0.4"
+ },
+ "142740c3e2c8": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s13",
+  "rung": "0.0556"
+ },
+ "14309b940e45": {
+  "arm": "sham",
+  "fork": "drive-08#t11s16",
+  "rung": "0.4"
+ },
+ "1433afa0b834": {
+  "arm": "sham",
+  "fork": "drive-10#t8s22",
+  "rung": "0.0556"
+ },
+ "144cb4ce7764": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s0",
+  "rung": "0.4"
+ },
+ "147c0a8924dd": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s14",
+  "rung": "0.6"
+ },
+ "14a66cb07226": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s2",
+  "rung": "0.8"
+ },
+ "14d1a523ad39": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s13",
+  "rung": "0.6"
+ },
+ "14e02035d136": {
+  "arm": "imperative",
+  "fork": "drive-05#t11s17",
+  "rung": "1.0"
+ },
+ "15085431e0a0": {
+  "arm": "sham",
+  "fork": "drive-03#t10s11",
+  "rung": "0.8"
+ },
+ "1509648a29f8": {
+  "batch": 41,
+  "control": "ctl13"
+ },
+ "156b3459a355": {
+  "batch": 26,
+  "control": "ctl14"
+ },
+ "1586d6963e0e": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s13",
+  "rung": "1.0"
+ },
+ "15de0c208567": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s1",
+  "rung": "0.4"
+ },
+ "15e7f120a86b": {
+  "arm": "imperative",
+  "fork": "drive-06#t2s29",
+  "rung": "0.8"
+ },
+ "15e8b446b997": {
+  "arm": "imperative",
+  "fork": "drive-10#t7s28",
+  "rung": "0.8"
+ },
+ "15eead520389": {
+  "arm": "advisory",
+  "fork": "drive-05#t3s28",
+  "rung": "0.0556"
+ },
+ "15fa6efa8b83": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s14",
+  "rung": "1.0"
+ },
+ "15fd82c6a4be": {
+  "arm": "imperative",
+  "fork": "drive-04#t2s2",
+  "rung": "0.6222"
+ },
+ "161eadec83d0": {
+  "arm": "advisory",
+  "fork": "drive-10#t7s28",
+  "rung": "0.6"
+ },
+ "1625f1a11d48": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s25",
+  "rung": "0.4"
+ },
+ "164ce1fa6637": {
+  "arm": "advisory",
+  "fork": "drive-08#t10s4",
+  "rung": "0.6222"
+ },
+ "166b4a591569": {
+  "batch": 27,
+  "control": "ctl04"
+ },
+ "166ed2512b56": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s13",
+  "rung": "1.0"
+ },
+ "16763269f0b4": {
+  "arm": "imperative",
+  "fork": "drive-07#t10s13",
+  "rung": "0.0556"
+ },
+ "168c8b1925ca": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s14",
+  "rung": "0.6"
+ },
+ "171f051a60db": {
+  "arm": "imperative",
+  "fork": "drive-09#t5s22",
+  "rung": "1.0"
+ },
+ "172dd5b0a080": {
+  "arm": "sham",
+  "fork": "drive-04#t9s10",
+  "rung": "0.6222"
+ },
+ "17367449f96c": {
+  "arm": "advisory",
+  "fork": "drive-09#t5s22",
+  "rung": "1.0"
+ },
+ "173b5b4bfcb8": {
+  "arm": "imperative",
+  "fork": "drive-05#t7s12",
+  "rung": "0.6"
+ },
+ "1754dab54559": {
+  "arm": "sham",
+  "fork": "drive-09#t5s22",
+  "rung": "1.0"
+ },
+ "1764b2509bf0": {
+  "arm": "advisory",
+  "fork": "drive-13#t2s20",
+  "rung": "0.8"
+ },
+ "17c62abf93ec": {
+  "arm": "advisory",
+  "fork": "drive-07#t10s12",
+  "rung": "0.0556"
+ },
+ "17e7d48ccf76": {
+  "arm": "imperative",
+  "fork": "drive-08#t10s4",
+  "rung": "0.0556"
+ },
+ "182389756154": {
+  "arm": "sham",
+  "fork": "drive-10#t8s2",
+  "rung": "0.4"
+ },
+ "182a06f7b6a5": {
+  "batch": 46,
+  "control": "ctl06"
+ },
+ "18314570d879": {
+  "arm": "advisory",
+  "fork": "drive-05#t11s17",
+  "rung": "0.6"
+ },
+ "1842490a0838": {
+  "arm": "sham",
+  "fork": "drive-10#t8s22",
+  "rung": "0.6"
+ },
+ "186032a77af4": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s18",
+  "rung": "0.6"
+ },
+ "1863481a269e": {
+  "arm": "advisory",
+  "fork": "drive-13#t5s1",
+  "rung": "1.0"
+ },
+ "18b6fc390932": {
+  "batch": 12,
+  "control": "ctl08"
+ },
+ "18bd00beeac0": {
+  "arm": "sham",
+  "fork": "drive-09#t5s22",
+  "rung": "0.6"
+ },
+ "18d4ca5b4721": {
+  "arm": "sham",
+  "fork": "drive-02#t10s9",
+  "rung": "1.0"
+ },
+ "18fe786e6596": {
+  "arm": "sham",
+  "fork": "drive-14#t2s13",
+  "rung": "0.6"
+ },
+ "192101bbbc78": {
+  "arm": "sham",
+  "fork": "drive-06#t7s20",
+  "rung": "0.6222"
+ },
+ "199451595ec9": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s12",
+  "rung": "0.4"
+ },
+ "19a7a249b6ef": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s28",
+  "rung": "0.8"
+ },
+ "19e7db8ec4f6": {
+  "arm": "advisory",
+  "fork": "drive-15#t2s29",
+  "rung": "1.0"
+ },
+ "19f10f92f53a": {
+  "arm": "sham",
+  "fork": "drive-10#t9s8",
+  "rung": "0.6222"
+ },
+ "1a3ac499b506": {
+  "arm": "advisory",
+  "fork": "drive-15#t2s9",
+  "rung": "0.8"
+ },
+ "1a6c1edc3070": {
+  "arm": "imperative",
+  "fork": "drive-06#t8s6",
+  "rung": "0.6"
+ },
+ "1a6df56693f0": {
+  "arm": "advisory",
+  "fork": "drive-04#t2s2",
+  "rung": "0.4"
+ },
+ "1abe0398cfd7": {
+  "batch": 15,
+  "control": "ctl10"
+ },
+ "1ae5ee0d3d4b": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s13",
+  "rung": "0.4"
+ },
+ "1b24b0b47cb4": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s11",
+  "rung": "0.6222"
+ },
+ "1b3afab7de8b": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s14",
+  "rung": "0.6222"
+ },
+ "1b4efc5129ad": {
+  "arm": "sham",
+  "fork": "drive-15#t2s29",
+  "rung": "0.6222"
+ },
+ "1b56c23b4d27": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s11",
+  "rung": "0.8"
+ },
+ "1b9138f9c2af": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s0",
+  "rung": "0.6"
+ },
+ "1c025da281bc": {
+  "arm": "sham",
+  "fork": "drive-09#t9s4",
+  "rung": "1.0"
+ },
+ "1c36188b95ed": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s2",
+  "rung": "0.0556"
+ },
+ "1c4ee9573cb2": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s0",
+  "rung": "0.0556"
+ },
+ "1c657c1f8978": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s3",
+  "rung": "1.0"
+ },
+ "1c6801a84c2d": {
+  "arm": "sham",
+  "fork": "drive-09#t2s8",
+  "rung": "1.0"
+ },
+ "1c83a87ac6bf": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s8",
+  "rung": "0.6222"
+ },
+ "1ca7af7b2371": {
+  "arm": "sham",
+  "fork": "drive-07#t8s14",
+  "rung": "0.4"
+ },
+ "1cbb9833936d": {
+  "arm": "sham",
+  "fork": "drive-04#t11s0",
+  "rung": "0.0556"
+ },
+ "1cbff5657858": {
+  "arm": "imperative",
+  "fork": "drive-08#t9s14",
+  "rung": "0.0556"
+ },
+ "1d2a2db2a9a8": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s22",
+  "rung": "0.0556"
+ },
+ "1d5f2561faa2": {
+  "arm": "sham",
+  "fork": "drive-07#t8s12",
+  "rung": "1.0"
+ },
+ "1d72548787a5": {
+  "arm": "imperative",
+  "fork": "drive-04#t11s0",
+  "rung": "0.4"
+ },
+ "1d926c2422ef": {
+  "arm": "imperative",
+  "fork": "drive-10#t5s7",
+  "rung": "1.0"
+ },
+ "1dad291db73e": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s11",
+  "rung": "0.8"
+ },
+ "1e05bf2e4b18": {
+  "arm": "sham",
+  "fork": "drive-06#t8s6",
+  "rung": "1.0"
+ },
+ "1e0d743731dd": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s4",
+  "rung": "0.6"
+ },
+ "1e19964c136d": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s5",
+  "rung": "0.6222"
+ },
+ "1e208e77c5a1": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s11",
+  "rung": "0.0556"
+ },
+ "1e586d2ba20c": {
+  "arm": "imperative",
+  "fork": "drive-06#t8s6",
+  "rung": "0.0556"
+ },
+ "1e75bf2de4a5": {
+  "arm": "sham",
+  "fork": "drive-03#t10s11",
+  "rung": "0.6"
+ },
+ "1e7d6bed60a0": {
+  "arm": "imperative",
+  "fork": "drive-10#t5s7",
+  "rung": "0.6222"
+ },
+ "1e95d2110a93": {
+  "arm": "sham",
+  "fork": "drive-09#t8s23",
+  "rung": "0.6"
+ },
+ "1ead80c5d854": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s26",
+  "rung": "0.4"
+ },
+ "1efa60589255": {
+  "batch": 17,
+  "control": "ctl12"
+ },
+ "1f00462b154a": {
+  "arm": "sham",
+  "fork": "drive-03#t9s26",
+  "rung": "0.6"
+ },
+ "1f229c79e283": {
+  "arm": "imperative",
+  "fork": "drive-02#t7s29",
+  "rung": "0.8"
+ },
+ "1fca5a0da4fe": {
+  "arm": "imperative",
+  "fork": "drive-05#t11s26",
+  "rung": "0.4"
+ },
+ "1fcc7dff73d5": {
+  "arm": "sham",
+  "fork": "drive-06#t7s13",
+  "rung": "0.6"
+ },
+ "1ff6e7911551": {
+  "arm": "advisory",
+  "fork": "drive-03#t10s11",
+  "rung": "0.6"
+ },
+ "2000531ea3ed": {
+  "arm": "imperative",
+  "fork": "drive-08#t2s0",
+  "rung": "1.0"
+ },
+ "202ef8b7ff28": {
+  "arm": "advisory",
+  "fork": "drive-05#t7s12",
+  "rung": "1.0"
+ },
+ "204bd6d537bc": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s15",
+  "rung": "0.0556"
+ },
+ "206b9541dbb6": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s12",
+  "rung": "0.0556"
+ },
+ "206d674c78e8": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s15",
+  "rung": "0.0556"
+ },
+ "2070b1ad8b13": {
+  "arm": "sham",
+  "fork": "drive-10#t5s7",
+  "rung": "0.8"
+ },
+ "2076d38b0b43": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s13",
+  "rung": "0.0556"
+ },
+ "207869708f82": {
+  "arm": "advisory",
+  "fork": "drive-10#t7s18",
+  "rung": "0.6222"
+ },
+ "20a8e23bb3b7": {
+  "arm": "imperative",
+  "fork": "drive-10#t5s7",
+  "rung": "0.0556"
+ },
+ "20c926fad3e1": {
+  "arm": "sham",
+  "fork": "drive-07#t7s26",
+  "rung": "0.6222"
+ },
+ "20e36e1f95ac": {
+  "arm": "sham",
+  "fork": "drive-08#t8s14",
+  "rung": "0.6222"
+ },
+ "20faeccb27bd": {
+  "batch": 20,
+  "control": "ctl10"
+ },
+ "211e15699ede": {
+  "arm": "sham",
+  "fork": "drive-02#t8s11",
+  "rung": "0.4"
+ },
+ "215abf482d2c": {
+  "batch": 12,
+  "control": "ctl10"
+ },
+ "2170054f9073": {
+  "arm": "advisory",
+  "fork": "drive-09#t5s5",
+  "rung": "0.8"
+ },
+ "21735a0b3bb3": {
+  "arm": "imperative",
+  "fork": "drive-04#t5s24",
+  "rung": "0.8"
+ },
+ "21988163610d": {
+  "arm": "imperative",
+  "fork": "drive-03#t5s13",
+  "rung": "0.8"
+ },
+ "2206c5f23749": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s4",
+  "rung": "0.0556"
+ },
+ "223a1e7baffb": {
+  "batch": 11,
+  "control": "ctl13"
+ },
+ "2264bac3ac43": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s16",
+  "rung": "0.4"
+ },
+ "22b102cfabe8": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s20",
+  "rung": "0.6222"
+ },
+ "22f42064c103": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s20",
+  "rung": "0.6222"
+ },
+ "23054b10a6cb": {
+  "batch": 24,
+  "control": "ctl02"
+ },
+ "237493c36777": {
+  "arm": "sham",
+  "fork": "drive-02#t7s29",
+  "rung": "0.6"
+ },
+ "237cf25249d7": {
+  "arm": "sham",
+  "fork": "drive-06#t2s29",
+  "rung": "0.0556"
+ },
+ "23b7268034b9": {
+  "batch": 28,
+  "control": "ctl07"
+ },
+ "23e5095eb599": {
+  "arm": "imperative",
+  "fork": "drive-13#t5s1",
+  "rung": "0.6222"
+ },
+ "24065f2fbb48": {
+  "arm": "imperative",
+  "fork": "drive-07#t7s26",
+  "rung": "0.0556"
+ },
+ "2422f048dcc6": {
+  "arm": "imperative",
+  "fork": "drive-06#t5s23",
+  "rung": "0.8"
+ },
+ "24422d1bf4c1": {
+  "batch": 24,
+  "control": "ctl08"
+ },
+ "244679c96a25": {
+  "arm": "advisory",
+  "fork": "drive-05#t3s28",
+  "rung": "1.0"
+ },
+ "2455a56e9795": {
+  "arm": "imperative",
+  "fork": "drive-04#t2s2",
+  "rung": "0.6"
+ },
+ "2473ede31cbc": {
+  "batch": 29,
+  "control": "ctl12"
+ },
+ "24d4d900e9f1": {
+  "arm": "advisory",
+  "fork": "drive-15#t2s29",
+  "rung": "0.6222"
+ },
+ "24d7989dc01a": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s14",
+  "rung": "1.0"
+ },
+ "24e5076db41e": {
+  "batch": 48,
+  "control": "ctl09"
+ },
+ "250e8247de48": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s14",
+  "rung": "0.4"
+ },
+ "2542fd53e815": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s15",
+  "rung": "0.6"
+ },
+ "255dddb7defb": {
+  "arm": "imperative",
+  "fork": "drive-05#t3s28",
+  "rung": "0.8"
+ },
+ "25a9a7fba260": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s26",
+  "rung": "0.6"
+ },
+ "25b4a4e376ad": {
+  "arm": "imperative",
+  "fork": "drive-08#t11s29",
+  "rung": "1.0"
+ },
+ "25b4f76850f4": {
+  "arm": "sham",
+  "fork": "drive-09#t8s23",
+  "rung": "1.0"
+ },
+ "25d77460e7bd": {
+  "arm": "imperative",
+  "fork": "drive-13#t2s21",
+  "rung": "0.6"
+ },
+ "25f53681ca70": {
+  "arm": "imperative",
+  "fork": "drive-05#t3s28",
+  "rung": "0.4"
+ },
+ "25fa5bc876a3": {
+  "arm": "sham",
+  "fork": "drive-15#t2s9",
+  "rung": "0.4"
+ },
+ "2605533ac9e8": {
+  "arm": "imperative",
+  "fork": "drive-05#t3s28",
+  "rung": "0.0556"
+ },
+ "264d68b1005c": {
+  "arm": "sham",
+  "fork": "drive-02#t9s16",
+  "rung": "0.8"
+ },
+ "2659d1270578": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s10",
+  "rung": "1.0"
+ },
+ "267120eb51e3": {
+  "arm": "sham",
+  "fork": "drive-05#t7s12",
+  "rung": "0.4"
+ },
+ "26a21d5226c7": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s13",
+  "rung": "1.0"
+ },
+ "26ae423e758f": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s5",
+  "rung": "0.4"
+ },
+ "26b7f77f7d87": {
+  "batch": 8,
+  "control": "ctl01"
+ },
+ "26c22671fce2": {
+  "arm": "imperative",
+  "fork": "drive-02#t10s9",
+  "rung": "0.4"
+ },
+ "26ecde7866f2": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s27",
+  "rung": "0.8"
+ },
+ "26f72b7e0ada": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s15",
+  "rung": "0.4"
+ },
+ "27109faa055c": {
+  "arm": "sham",
+  "fork": "drive-14#t2s17",
+  "rung": "0.6"
+ },
+ "2713efeb2e7a": {
+  "arm": "sham",
+  "fork": "drive-08#t5s15",
+  "rung": "1.0"
+ },
+ "2725265fc5cf": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s12",
+  "rung": "0.6222"
+ },
+ "272b118980e4": {
+  "batch": 9,
+  "control": "ctl01"
+ },
+ "275915eecb38": {
+  "arm": "sham",
+  "fork": "drive-10#t8s10",
+  "rung": "0.6"
+ },
+ "27a133d8b68c": {
+  "arm": "imperative",
+  "fork": "drive-02#t10s9",
+  "rung": "1.0"
+ },
+ "27def02e7a5f": {
+  "arm": "imperative",
+  "fork": "drive-04#t9s10",
+  "rung": "0.8"
+ },
+ "27ea1378d3a1": {
+  "batch": 25,
+  "control": "ctl05"
+ },
+ "2806840fff98": {
+  "arm": "sham",
+  "fork": "drive-08#t8s3",
+  "rung": "0.6"
+ },
+ "2808f01def87": {
+  "batch": 20,
+  "control": "ctl14"
+ },
+ "2828a223ae26": {
+  "arm": "imperative",
+  "fork": "drive-08#t10s4",
+  "rung": "0.6"
+ },
+ "282937becc0b": {
+  "arm": "advisory",
+  "fork": "drive-03#t3s20",
+  "rung": "1.0"
+ },
+ "28378799b37d": {
+  "batch": 31,
+  "control": "ctl14"
+ },
+ "2866b7212162": {
+  "arm": "imperative",
+  "fork": "drive-13#t5s1",
+  "rung": "0.6"
+ },
+ "289ca3ff69a9": {
+  "batch": 36,
+  "control": "ctl09"
+ },
+ "28ba93323232": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s18",
+  "rung": "1.0"
+ },
+ "28e2beb418b3": {
+  "arm": "sham",
+  "fork": "drive-08#t8s3",
+  "rung": "1.0"
+ },
+ "2921b41f986f": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s0",
+  "rung": "0.6"
+ },
+ "295993f843d2": {
+  "arm": "advisory",
+  "fork": "drive-05#t11s26",
+  "rung": "0.0556"
+ },
+ "297cfa886ed7": {
+  "arm": "imperative",
+  "fork": "drive-04#t9s10",
+  "rung": "0.6222"
+ },
+ "299cf99fbb9a": {
+  "arm": "advisory",
+  "fork": "drive-10#t7s18",
+  "rung": "1.0"
+ },
+ "29f7b5db8a74": {
+  "arm": "advisory",
+  "fork": "drive-05#t10s26",
+  "rung": "0.6222"
+ },
+ "2a1219d6a705": {
+  "arm": "sham",
+  "fork": "drive-08#t9s24",
+  "rung": "1.0"
+ },
+ "2a141bd53f91": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s4",
+  "rung": "0.6"
+ },
+ "2a630ec6e500": {
+  "arm": "sham",
+  "fork": "drive-07#t5s27",
+  "rung": "0.8"
+ },
+ "2a6e8a60a568": {
+  "arm": "sham",
+  "fork": "drive-10#t9s15",
+  "rung": "1.0"
+ },
+ "2aff2e86528a": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s18",
+  "rung": "0.0556"
+ },
+ "2b0e87a25449": {
+  "arm": "advisory",
+  "fork": "drive-06#t8s6",
+  "rung": "0.6222"
+ },
+ "2b36f58c8da1": {
+  "arm": "sham",
+  "fork": "drive-10#t7s28",
+  "rung": "0.6"
+ },
+ "2b56403e0ed2": {
+  "arm": "sham",
+  "fork": "drive-10#t8s12",
+  "rung": "0.0556"
+ },
+ "2b8604955b18": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s5",
+  "rung": "0.4"
+ },
+ "2bb3e02bcd47": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s11",
+  "rung": "0.4"
+ },
+ "2be500b12119": {
+  "arm": "sham",
+  "fork": "drive-10#t5s7",
+  "rung": "1.0"
+ },
+ "2bf2d73282b4": {
+  "arm": "imperative",
+  "fork": "drive-04#t9s10",
+  "rung": "0.0556"
+ },
+ "2c03659bfa50": {
+  "arm": "sham",
+  "fork": "drive-10#t9s8",
+  "rung": "0.6"
+ },
+ "2c06d8935b67": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s14",
+  "rung": "0.0556"
+ },
+ "2c0ea9015ab7": {
+  "arm": "sham",
+  "fork": "drive-08#t11s16",
+  "rung": "1.0"
+ },
+ "2c9ec8167085": {
+  "arm": "imperative",
+  "fork": "drive-10#t7s18",
+  "rung": "0.8"
+ },
+ "2cde25926933": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s11",
+  "rung": "0.0556"
+ },
+ "2cef656138a0": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s2",
+  "rung": "0.6222"
+ },
+ "2cfec96fbb03": {
+  "arm": "sham",
+  "fork": "drive-06#t7s13",
+  "rung": "0.8"
+ },
+ "2d1459301976": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s20",
+  "rung": "1.0"
+ },
+ "2d2441de1536": {
+  "arm": "advisory",
+  "fork": "drive-08#t7s24",
+  "rung": "1.0"
+ },
+ "2d25790fcbb7": {
+  "batch": 43,
+  "control": "ctl07"
+ },
+ "2d3595a72e2a": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s1",
+  "rung": "0.6222"
+ },
+ "2d43b9629506": {
+  "arm": "imperative",
+  "fork": "drive-07#t7s26",
+  "rung": "0.6222"
+ },
+ "2d49c2f916b9": {
+  "batch": 25,
+  "control": "ctl11"
+ },
+ "2d7c03fe1031": {
+  "arm": "sham",
+  "fork": "drive-10#t8s2",
+  "rung": "0.8"
+ },
+ "2d8a545f6d20": {
+  "arm": "sham",
+  "fork": "drive-07#t8s12",
+  "rung": "0.0556"
+ },
+ "2e13c283974e": {
+  "batch": 37,
+  "control": "ctl10"
+ },
+ "2e164e12e020": {
+  "arm": "sham",
+  "fork": "drive-02#t10s9",
+  "rung": "0.6222"
+ },
+ "2e21caaf10fb": {
+  "arm": "advisory",
+  "fork": "drive-13#t4s0",
+  "rung": "0.6222"
+ },
+ "2e5a4f54f92c": {
+  "arm": "sham",
+  "fork": "drive-04#t5s24",
+  "rung": "0.0556"
+ },
+ "2e6307ba504a": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s11",
+  "rung": "0.8"
+ },
+ "2e7ead9b5a89": {
+  "arm": "advisory",
+  "fork": "drive-10#t5s7",
+  "rung": "0.6222"
+ },
+ "2e847fbf768c": {
+  "arm": "sham",
+  "fork": "drive-05#t11s26",
+  "rung": "0.4"
+ },
+ "2ea4517b4960": {
+  "arm": "imperative",
+  "fork": "drive-07#t10s13",
+  "rung": "0.4"
+ },
+ "2eb2d72ebcbb": {
+  "arm": "advisory",
+  "fork": "drive-06#t5s23",
+  "rung": "0.4"
+ },
+ "2eec4ac19db1": {
+  "arm": "sham",
+  "fork": "drive-06#t9s1",
+  "rung": "0.6"
+ },
+ "2eeda6f08898": {
+  "arm": "imperative",
+  "fork": "drive-04#t8s16",
+  "rung": "0.8"
+ },
+ "2ef1b94c1c5b": {
+  "arm": "imperative",
+  "fork": "drive-03#t8s15",
+  "rung": "0.4"
+ },
+ "2ef27a551ffc": {
+  "batch": 7,
+  "control": "ctl01"
+ },
+ "2f2901f52202": {
+  "arm": "sham",
+  "fork": "drive-04#t7s15",
+  "rung": "1.0"
+ },
+ "2f3c1b0fa2a1": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s0",
+  "rung": "0.8"
+ },
+ "2f48b7823dd6": {
+  "arm": "imperative",
+  "fork": "drive-04#t9s24",
+  "rung": "0.8"
+ },
+ "2f4d48ab9e2c": {
+  "arm": "sham",
+  "fork": "drive-07#t5s27",
+  "rung": "1.0"
+ },
+ "2f50627cce1b": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s16",
+  "rung": "0.0556"
+ },
+ "2f68845eff55": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s11",
+  "rung": "0.8"
+ },
+ "2f8e70e39008": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s15",
+  "rung": "0.6"
+ },
+ "2fbf2a647eef": {
+  "arm": "imperative",
+  "fork": "drive-13#t5s1",
+  "rung": "0.4"
+ },
+ "3001ceaab5c7": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s20",
+  "rung": "0.4"
+ },
+ "3011f376ec53": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s18",
+  "rung": "0.6222"
+ },
+ "303dbb981ea1": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s12",
+  "rung": "0.4"
+ },
+ "30629014b758": {
+  "arm": "advisory",
+  "fork": "drive-05#t11s17",
+  "rung": "0.6222"
+ },
+ "30673ea53567": {
+  "arm": "imperative",
+  "fork": "drive-02#t3s5",
+  "rung": "0.6"
+ },
+ "3075aaa29184": {
+  "arm": "imperative",
+  "fork": "drive-15#t2s9",
+  "rung": "0.0556"
+ },
+ "30a5f0d5d051": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s15",
+  "rung": "1.0"
+ },
+ "30af12fbd83f": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s2",
+  "rung": "0.0556"
+ },
+ "30b99c579f5d": {
+  "arm": "sham",
+  "fork": "drive-08#t11s29",
+  "rung": "1.0"
+ },
+ "30c721ae47c1": {
+  "arm": "sham",
+  "fork": "drive-10#t9s15",
+  "rung": "0.8"
+ },
+ "30caf6adc2fc": {
+  "arm": "sham",
+  "fork": "drive-06#t9s20",
+  "rung": "0.6222"
+ },
+ "30cc03c1a106": {
+  "arm": "sham",
+  "fork": "drive-05#t7s12",
+  "rung": "0.8"
+ },
+ "30e71d17e679": {
+  "batch": 46,
+  "control": "ctl02"
+ },
+ "312b4913087f": {
+  "arm": "advisory",
+  "fork": "drive-06#t5s23",
+  "rung": "0.8"
+ },
+ "315bd1fd99ee": {
+  "arm": "sham",
+  "fork": "drive-06#t7s20",
+  "rung": "0.8"
+ },
+ "3183eec01ec1": {
+  "arm": "imperative",
+  "fork": "drive-04#t9s10",
+  "rung": "0.4"
+ },
+ "31c1362d675f": {
+  "arm": "sham",
+  "fork": "drive-10#t10s7",
+  "rung": "0.0556"
+ },
+ "31d1822713ff": {
+  "arm": "advisory",
+  "fork": "drive-08#t9s14",
+  "rung": "0.0556"
+ },
+ "31df2a76d53e": {
+  "arm": "advisory",
+  "fork": "drive-08#t11s29",
+  "rung": "0.0556"
+ },
+ "321caaa0688c": {
+  "arm": "sham",
+  "fork": "drive-10#t8s4",
+  "rung": "0.6"
+ },
+ "323a45a02771": {
+  "arm": "sham",
+  "fork": "drive-10#t9s11",
+  "rung": "1.0"
+ },
+ "324d29a6dfb5": {
+  "arm": "sham",
+  "fork": "drive-08#t8s3",
+  "rung": "0.6222"
+ },
+ "3281adb2493a": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s16",
+  "rung": "0.6222"
+ },
+ "32907057e5de": {
+  "arm": "sham",
+  "fork": "drive-10#t9s8",
+  "rung": "0.8"
+ },
+ "329476123112": {
+  "arm": "sham",
+  "fork": "drive-10#t10s7",
+  "rung": "0.4"
+ },
+ "32be945c56b7": {
+  "arm": "imperative",
+  "fork": "drive-02#t10s9",
+  "rung": "0.6"
+ },
+ "32f1ee3cefdc": {
+  "arm": "sham",
+  "fork": "drive-07#t10s13",
+  "rung": "0.6"
+ },
+ "32ffc3254746": {
+  "arm": "sham",
+  "fork": "drive-07#t10s12",
+  "rung": "0.0556"
+ },
+ "332d3e41a6ba": {
+  "arm": "advisory",
+  "fork": "drive-04#t7s15",
+  "rung": "0.0556"
+ },
+ "338fecb19cfd": {
+  "arm": "sham",
+  "fork": "drive-07#t5s27",
+  "rung": "0.4"
+ },
+ "33b6b6ab1c4d": {
+  "batch": 50,
+  "control": "ctl14"
+ },
+ "33d599af7e03": {
+  "arm": "advisory",
+  "fork": "drive-10#t7s18",
+  "rung": "0.8"
+ },
+ "33f57939c91f": {
+  "arm": "imperative",
+  "fork": "drive-03#t10s11",
+  "rung": "0.8"
+ },
+ "342200c52aea": {
+  "arm": "sham",
+  "fork": "drive-10#t9s15",
+  "rung": "0.6222"
+ },
+ "343c1396461a": {
+  "arm": "advisory",
+  "fork": "drive-13#t2s20",
+  "rung": "0.0556"
+ },
+ "34583b5fa0c7": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s12",
+  "rung": "0.6222"
+ },
+ "347863e807fc": {
+  "arm": "advisory",
+  "fork": "drive-15#t2s29",
+  "rung": "0.8"
+ },
+ "34b57bd975f2": {
+  "arm": "sham",
+  "fork": "drive-09#t8s23",
+  "rung": "0.0556"
+ },
+ "34e424616bda": {
+  "arm": "imperative",
+  "fork": "drive-06#t8s6",
+  "rung": "0.4"
+ },
+ "34f1414127a2": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s13",
+  "rung": "0.4"
+ },
+ "351d894349e5": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s17",
+  "rung": "1.0"
+ },
+ "354b424ce355": {
+  "arm": "sham",
+  "fork": "drive-10#t10s0",
+  "rung": "0.8"
+ },
+ "354d80947d6d": {
+  "arm": "imperative",
+  "fork": "drive-07#t10s13",
+  "rung": "0.6"
+ },
+ "35511d055678": {
+  "arm": "sham",
+  "fork": "drive-10#t10s7",
+  "rung": "1.0"
+ },
+ "355a8cf9a41b": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s2",
+  "rung": "1.0"
+ },
+ "356194b40b8c": {
+  "arm": "sham",
+  "fork": "drive-06#t9s1",
+  "rung": "0.6222"
+ },
+ "356993f251c9": {
+  "arm": "sham",
+  "fork": "drive-06#t9s1",
+  "rung": "0.8"
+ },
+ "357f12b7f65c": {
+  "arm": "sham",
+  "fork": "drive-08#t8s17",
+  "rung": "1.0"
+ },
+ "359ef4afba18": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s12",
+  "rung": "0.6"
+ },
+ "35f6f0124b6e": {
+  "arm": "imperative",
+  "fork": "drive-05#t11s26",
+  "rung": "0.6222"
+ },
+ "361243ceb670": {
+  "arm": "imperative",
+  "fork": "drive-03#t9s26",
+  "rung": "0.8"
+ },
+ "367d70696e59": {
+  "arm": "advisory",
+  "fork": "drive-04#t11s0",
+  "rung": "0.6"
+ },
+ "369dd0ef18fc": {
+  "arm": "imperative",
+  "fork": "drive-10#t7s28",
+  "rung": "0.6"
+ },
+ "36ae33a318a8": {
+  "arm": "sham",
+  "fork": "drive-08#t8s14",
+  "rung": "0.4"
+ },
+ "36b5d51a68a0": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s18",
+  "rung": "0.6"
+ },
+ "37714498915d": {
+  "batch": 1,
+  "control": "ctl02"
+ },
+ "37ebba911708": {
+  "arm": "imperative",
+  "fork": "drive-02#t10s9",
+  "rung": "0.0556"
+ },
+ "37eefae3df88": {
+  "arm": "imperative",
+  "fork": "drive-04#t8s13",
+  "rung": "0.4"
+ },
+ "386f78b45bf5": {
+  "arm": "sham",
+  "fork": "drive-13#t4s0",
+  "rung": "1.0"
+ },
+ "38892205dd87": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s14",
+  "rung": "0.8"
+ },
+ "38983050abd5": {
+  "arm": "sham",
+  "fork": "drive-08#t8s17",
+  "rung": "0.8"
+ },
+ "38a25d853363": {
+  "batch": 28,
+  "control": "ctl11"
+ },
+ "38be7bdc9cc5": {
+  "batch": 13,
+  "control": "ctl12"
+ },
+ "39018d4c7a34": {
+  "arm": "advisory",
+  "fork": "drive-10#t7s28",
+  "rung": "0.8"
+ },
+ "3909b4e91f38": {
+  "arm": "sham",
+  "fork": "drive-04#t9s10",
+  "rung": "0.0556"
+ },
+ "396faa6bedb4": {
+  "arm": "sham",
+  "fork": "drive-07#t8s12",
+  "rung": "0.6"
+ },
+ "398b93ff5898": {
+  "arm": "imperative",
+  "fork": "drive-09#t5s22",
+  "rung": "0.4"
+ },
+ "3999f0e29df1": {
+  "arm": "sham",
+  "fork": "drive-14#t2s15",
+  "rung": "0.6222"
+ },
+ "39b054932465": {
+  "arm": "advisory",
+  "fork": "drive-13#t2s20",
+  "rung": "0.6222"
+ },
+ "39d738d2da97": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s11",
+  "rung": "0.4"
+ },
+ "39e64878cc6b": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s15",
+  "rung": "0.6222"
+ },
+ "39e74a2937ba": {
+  "arm": "advisory",
+  "fork": "drive-07#t7s26",
+  "rung": "0.6"
+ },
+ "39f6a2dc68f0": {
+  "arm": "advisory",
+  "fork": "drive-02#t7s29",
+  "rung": "1.0"
+ },
+ "3a0a6ac82b49": {
+  "batch": 34,
+  "control": "ctl11"
+ },
+ "3a37f77ab9d7": {
+  "arm": "sham",
+  "fork": "drive-08#t5s15",
+  "rung": "0.4"
+ },
+ "3a3c87ee4f3a": {
+  "arm": "advisory",
+  "fork": "drive-13#t2s21",
+  "rung": "0.6222"
+ },
+ "3a4f923815e6": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s12",
+  "rung": "1.0"
+ },
+ "3a73f36e5c24": {
+  "arm": "imperative",
+  "fork": "drive-13#t2s21",
+  "rung": "0.8"
+ },
+ "3a89455dde32": {
+  "arm": "imperative",
+  "fork": "drive-04#t8s13",
+  "rung": "1.0"
+ },
+ "3a8b21b23da0": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s6",
+  "rung": "0.6222"
+ },
+ "3a92a26c22c3": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s4",
+  "rung": "0.8"
+ },
+ "3a9cc5018dd6": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s10",
+  "rung": "0.6222"
+ },
+ "3aacdb8fa666": {
+  "arm": "sham",
+  "fork": "drive-10#t7s18",
+  "rung": "0.6222"
+ },
+ "3ab54e5673cf": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s18",
+  "rung": "0.6"
+ },
+ "3af188a0e376": {
+  "arm": "sham",
+  "fork": "drive-08#t11s29",
+  "rung": "0.6222"
+ },
+ "3b360c417813": {
+  "arm": "advisory",
+  "fork": "drive-08#t2s0",
+  "rung": "0.8"
+ },
+ "3b59aa8a78be": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s0",
+  "rung": "0.6222"
+ },
+ "3b6904acd861": {
+  "arm": "imperative",
+  "fork": "drive-15#t2s29",
+  "rung": "0.6222"
+ },
+ "3bc59ebe4dbd": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s9",
+  "rung": "1.0"
+ },
+ "3bd513455f88": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s11",
+  "rung": "0.0556"
+ },
+ "3be2c10fcf78": {
+  "arm": "sham",
+  "fork": "drive-10#t10s2",
+  "rung": "0.0556"
+ },
+ "3bfbfd9ed632": {
+  "arm": "advisory",
+  "fork": "drive-13#t5s1",
+  "rung": "0.0556"
+ },
+ "3bff9c24009f": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s12",
+  "rung": "0.0556"
+ },
+ "3c4246fdecd1": {
+  "arm": "sham",
+  "fork": "drive-06#t9s0",
+  "rung": "0.8"
+ },
+ "3c9bc8cabfe8": {
+  "arm": "imperative",
+  "fork": "drive-13#t2s20",
+  "rung": "0.8"
+ },
+ "3cbb5cc56793": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s5",
+  "rung": "1.0"
+ },
+ "3cc22faf9074": {
+  "arm": "sham",
+  "fork": "drive-10#t8s2",
+  "rung": "0.6"
+ },
+ "3cceb7162ad2": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s8",
+  "rung": "0.4"
+ },
+ "3ce5ea82d5bf": {
+  "arm": "sham",
+  "fork": "drive-07#t10s13",
+  "rung": "0.8"
+ },
+ "3cfaac8cc465": {
+  "arm": "imperative",
+  "fork": "drive-15#t2s9",
+  "rung": "0.4"
+ },
+ "3d1468e383c9": {
+  "arm": "advisory",
+  "fork": "drive-07#t10s13",
+  "rung": "0.8"
+ },
+ "3d2e89261aaa": {
+  "arm": "imperative",
+  "fork": "drive-02#t7s29",
+  "rung": "0.0556"
+ },
+ "3d41512f3630": {
+  "arm": "advisory",
+  "fork": "drive-07#t7s26",
+  "rung": "0.4"
+ },
+ "3d8bdf3db3d7": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s12",
+  "rung": "0.6"
+ },
+ "3da2b640f7b2": {
+  "arm": "sham",
+  "fork": "drive-04#t8s16",
+  "rung": "0.6"
+ },
+ "3dcfb7715a1b": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s6",
+  "rung": "0.8"
+ },
+ "3e35e51c8d11": {
+  "arm": "sham",
+  "fork": "drive-03#t10s10",
+  "rung": "0.6"
+ },
+ "3e3e43a2293c": {
+  "arm": "advisory",
+  "fork": "drive-05#t11s17",
+  "rung": "0.4"
+ },
+ "3e467e96106d": {
+  "arm": "sham",
+  "fork": "drive-04#t11s0",
+  "rung": "0.6"
+ },
+ "3e91c62d55e2": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s0",
+  "rung": "1.0"
+ },
+ "3ec20ac8ed22": {
+  "arm": "sham",
+  "fork": "drive-07#t8s14",
+  "rung": "1.0"
+ },
+ "3efbde0651a1": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s4",
+  "rung": "1.0"
+ },
+ "3f2e13618d3a": {
+  "arm": "imperative",
+  "fork": "drive-10#t5s7",
+  "rung": "0.8"
+ },
+ "3f650886d4a4": {
+  "batch": 2,
+  "control": "ctl12"
+ },
+ "3f6cc6cde25f": {
+  "arm": "sham",
+  "fork": "drive-15#t2s9",
+  "rung": "1.0"
+ },
+ "3fa695df5d85": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s5",
+  "rung": "0.6"
+ },
+ "3fbe6808b770": {
+  "arm": "sham",
+  "fork": "drive-06#t7s25",
+  "rung": "0.6222"
+ },
+ "3fbfd4428b4d": {
+  "arm": "imperative",
+  "fork": "drive-06#t2s29",
+  "rung": "0.0556"
+ },
+ "3fc158d783c7": {
+  "arm": "advisory",
+  "fork": "drive-04#t9s10",
+  "rung": "1.0"
+ },
+ "401040f63f24": {
+  "arm": "imperative",
+  "fork": "drive-13#t2s21",
+  "rung": "0.6222"
+ },
+ "401b73aeb42c": {
+  "arm": "advisory",
+  "fork": "drive-09#t5s5",
+  "rung": "1.0"
+ },
+ "40511eea86aa": {
+  "arm": "advisory",
+  "fork": "drive-08#t10s4",
+  "rung": "0.0556"
+ },
+ "4083eff114e0": {
+  "arm": "imperative",
+  "fork": "drive-10#t7s28",
+  "rung": "1.0"
+ },
+ "40da387ca0c9": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s8",
+  "rung": "0.6"
+ },
+ "40fa33a5369a": {
+  "arm": "sham",
+  "fork": "drive-04#t9s10",
+  "rung": "0.8"
+ },
+ "410434047c0f": {
+  "arm": "sham",
+  "fork": "drive-02#t8s11",
+  "rung": "0.8"
+ },
+ "410e3cdd7872": {
+  "arm": "advisory",
+  "fork": "drive-03#t3s20",
+  "rung": "0.0556"
+ },
+ "413488ae54e7": {
+  "arm": "imperative",
+  "fork": "drive-15#t2s9",
+  "rung": "0.8"
+ },
+ "414b3a6a0e49": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s13",
+  "rung": "0.4"
+ },
+ "41d59991b7f4": {
+  "arm": "sham",
+  "fork": "drive-07#t5s27",
+  "rung": "0.6222"
+ },
+ "425497ee988e": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s12",
+  "rung": "0.6"
+ },
+ "4256dbaa3e08": {
+  "arm": "sham",
+  "fork": "drive-02#t10s9",
+  "rung": "0.6"
+ },
+ "4292c9e67530": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s17",
+  "rung": "0.8"
+ },
+ "42af8b247a39": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s15",
+  "rung": "0.0556"
+ },
+ "42dbc050ca96": {
+  "arm": "advisory",
+  "fork": "drive-09#t5s5",
+  "rung": "0.4"
+ },
+ "42e654697bcd": {
+  "arm": "sham",
+  "fork": "drive-08#t8s17",
+  "rung": "0.6222"
+ },
+ "42fcb02b0559": {
+  "arm": "sham",
+  "fork": "drive-14#t2s11",
+  "rung": "0.6222"
+ },
+ "430a98d2e1a5": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s14",
+  "rung": "1.0"
+ },
+ "4345e1167b16": {
+  "arm": "sham",
+  "fork": "drive-07#t8s12",
+  "rung": "0.6222"
+ },
+ "438dbe2848cc": {
+  "arm": "advisory",
+  "fork": "drive-06#t8s6",
+  "rung": "1.0"
+ },
+ "439e4def1c6d": {
+  "arm": "imperative",
+  "fork": "drive-04#t8s13",
+  "rung": "0.6222"
+ },
+ "43f250c9a28a": {
+  "arm": "sham",
+  "fork": "drive-03#t8s15",
+  "rung": "0.4"
+ },
+ "448566d22968": {
+  "arm": "sham",
+  "fork": "drive-08#t2s0",
+  "rung": "0.6"
+ },
+ "44b766ddb9c7": {
+  "batch": 32,
+  "control": "ctl06"
+ },
+ "44d6dcf7faa7": {
+  "arm": "sham",
+  "fork": "drive-06#t7s25",
+  "rung": "0.0556"
+ },
+ "44e61a9d3fd5": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s20",
+  "rung": "0.8"
+ },
+ "454c9a1aaeb0": {
+  "arm": "advisory",
+  "fork": "drive-05#t11s26",
+  "rung": "0.4"
+ },
+ "459cbe5f2a92": {
+  "arm": "sham",
+  "fork": "drive-03#t3s20",
+  "rung": "0.4"
+ },
+ "45d17816d66e": {
+  "arm": "imperative",
+  "fork": "drive-04#t9s24",
+  "rung": "0.0556"
+ },
+ "45d755bf73d4": {
+  "batch": 36,
+  "control": "ctl04"
+ },
+ "45dad617b7d6": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s13",
+  "rung": "0.0556"
+ },
+ "45eeac7c16e7": {
+  "arm": "sham",
+  "fork": "drive-02#t9s16",
+  "rung": "0.6"
+ },
+ "45fda37a67d4": {
+  "arm": "advisory",
+  "fork": "drive-03#t5s13",
+  "rung": "0.0556"
+ },
+ "4617a8d21d79": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s25",
+  "rung": "1.0"
+ },
+ "46192ccfbe7f": {
+  "batch": 1,
+  "control": "ctl10"
+ },
+ "46226fa4cc66": {
+  "arm": "sham",
+  "fork": "drive-02#t9s16",
+  "rung": "0.0556"
+ },
+ "4648845e688a": {
+  "batch": 39,
+  "control": "ctl04"
+ },
+ "4660845def07": {
+  "arm": "sham",
+  "fork": "drive-05#t10s26",
+  "rung": "0.0556"
+ },
+ "4689aa3848ff": {
+  "arm": "sham",
+  "fork": "drive-05#t10s26",
+  "rung": "1.0"
+ },
+ "468e3698ba11": {
+  "arm": "advisory",
+  "fork": "drive-06#t5s23",
+  "rung": "0.6222"
+ },
+ "472154cc0a1b": {
+  "arm": "imperative",
+  "fork": "drive-05#t3s28",
+  "rung": "0.6222"
+ },
+ "472ac04929be": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s9",
+  "rung": "0.0556"
+ },
+ "47386591869f": {
+  "arm": "sham",
+  "fork": "drive-02#t8s5",
+  "rung": "0.4"
+ },
+ "47748b45851d": {
+  "arm": "sham",
+  "fork": "drive-08#t5s6",
+  "rung": "0.6222"
+ },
+ "477c58cc0db0": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s4",
+  "rung": "0.6222"
+ },
+ "478beeace56f": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s15",
+  "rung": "0.0556"
+ },
+ "480716d70cc7": {
+  "arm": "advisory",
+  "fork": "drive-03#t9s26",
+  "rung": "1.0"
+ },
+ "48529b5afd07": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s11",
+  "rung": "0.4"
+ },
+ "485b37812dcb": {
+  "arm": "imperative",
+  "fork": "drive-07#t7s26",
+  "rung": "0.4"
+ },
+ "4862fadb539f": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s27",
+  "rung": "0.0556"
+ },
+ "48980d2648e6": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s18",
+  "rung": "0.8"
+ },
+ "48b8fbd4e5b6": {
+  "arm": "advisory",
+  "fork": "drive-06#t8s6",
+  "rung": "0.8"
+ },
+ "48c97cb3a3d0": {
+  "arm": "advisory",
+  "fork": "drive-07#t5s27",
+  "rung": "0.0556"
+ },
+ "48d8cea8f3fa": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s16",
+  "rung": "0.6222"
+ },
+ "49395e31599c": {
+  "arm": "advisory",
+  "fork": "drive-07#t7s26",
+  "rung": "0.0556"
+ },
+ "493d20a4a3db": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s14",
+  "rung": "0.0556"
+ },
+ "493f1071dc74": {
+  "arm": "imperative",
+  "fork": "drive-06#t8s6",
+  "rung": "0.8"
+ },
+ "49a8442e168d": {
+  "arm": "advisory",
+  "fork": "drive-13#t2s21",
+  "rung": "0.6"
+ },
+ "49c8de5ab040": {
+  "arm": "sham",
+  "fork": "drive-02#t10s9",
+  "rung": "0.4"
+ },
+ "49ce753e0e86": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s8",
+  "rung": "0.6222"
+ },
+ "49d63b12b9bc": {
+  "arm": "sham",
+  "fork": "drive-08#t9s14",
+  "rung": "1.0"
+ },
+ "4a1c7c7a2301": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s22",
+  "rung": "0.8"
+ },
+ "4a444155d829": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s13",
+  "rung": "0.8"
+ },
+ "4a52770d7f33": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s6",
+  "rung": "0.6"
+ },
+ "4a769c9cf700": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s2",
+  "rung": "0.6"
+ },
+ "4a903c66fd7a": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s3",
+  "rung": "0.6222"
+ },
+ "4a9559634d8a": {
+  "arm": "sham",
+  "fork": "drive-10#t10s7",
+  "rung": "0.8"
+ },
+ "4a959b4e5149": {
+  "arm": "sham",
+  "fork": "drive-13#t2s20",
+  "rung": "0.4"
+ },
+ "4aaf5bfa6e81": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s10",
+  "rung": "0.4"
+ },
+ "4acce8f31e15": {
+  "arm": "sham",
+  "fork": "drive-04#t11s0",
+  "rung": "0.8"
+ },
+ "4ad3706a3afd": {
+  "arm": "sham",
+  "fork": "drive-02#t3s5",
+  "rung": "0.6"
+ },
+ "4ae0bfd7f3ff": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s14",
+  "rung": "0.4"
+ },
+ "4ae4063bab6d": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s15",
+  "rung": "0.0556"
+ },
+ "4b16744b6c07": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s28",
+  "rung": "0.6"
+ },
+ "4b405ac8e249": {
+  "arm": "imperative",
+  "fork": "drive-15#t2s9",
+  "rung": "0.6222"
+ },
+ "4b4c32f76348": {
+  "arm": "sham",
+  "fork": "drive-09#t9s12",
+  "rung": "0.6"
+ },
+ "4b582f0fe6fe": {
+  "arm": "sham",
+  "fork": "drive-15#t2s29",
+  "rung": "0.6"
+ },
+ "4b69c8b4d95d": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s11",
+  "rung": "0.6"
+ },
+ "4b703a2c7b77": {
+  "batch": 2,
+  "control": "ctl06"
+ },
+ "4b8a90a9a085": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s0",
+  "rung": "0.4"
+ },
+ "4bd2270e674f": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s15",
+  "rung": "0.6222"
+ },
+ "4bedef99ac91": {
+  "arm": "sham",
+  "fork": "drive-06#t7s13",
+  "rung": "1.0"
+ },
+ "4bfd3a05806f": {
+  "arm": "imperative",
+  "fork": "drive-08#t11s29",
+  "rung": "0.6"
+ },
+ "4c278475e2da": {
+  "arm": "sham",
+  "fork": "drive-04#t8s16",
+  "rung": "0.6222"
+ },
+ "4c34722304f0": {
+  "arm": "imperative",
+  "fork": "drive-03#t3s20",
+  "rung": "0.6"
+ },
+ "4c3737b90a70": {
+  "arm": "imperative",
+  "fork": "drive-10#t7s18",
+  "rung": "1.0"
+ },
+ "4c39cc79c237": {
+  "arm": "advisory",
+  "fork": "drive-06#t5s23",
+  "rung": "1.0"
+ },
+ "4c4412c43b29": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s13",
+  "rung": "0.8"
+ },
+ "4c8a345f15f5": {
+  "arm": "advisory",
+  "fork": "drive-03#t10s11",
+  "rung": "0.4"
+ },
+ "4cd7e7bcc278": {
+  "arm": "sham",
+  "fork": "drive-08#t5s15",
+  "rung": "0.6"
+ },
+ "4cfbecdab18f": {
+  "arm": "sham",
+  "fork": "drive-14#t2s13",
+  "rung": "0.6222"
+ },
+ "4d36387c7bb5": {
+  "arm": "sham",
+  "fork": "drive-10#t8s18",
+  "rung": "0.0556"
+ },
+ "4d490d34955d": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s14",
+  "rung": "0.0556"
+ },
+ "4d615f17bab8": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s13",
+  "rung": "0.4"
+ },
+ "4da030858521": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s25",
+  "rung": "1.0"
+ },
+ "4dbe687405c4": {
+  "arm": "imperative",
+  "fork": "drive-07#t5s27",
+  "rung": "0.6222"
+ },
+ "4dc11c710ef5": {
+  "arm": "sham",
+  "fork": "drive-14#t2s11",
+  "rung": "0.4"
+ },
+ "4ddae0b70997": {
+  "arm": "imperative",
+  "fork": "drive-05#t11s17",
+  "rung": "0.8"
+ },
+ "4dedd97cdbd3": {
+  "arm": "imperative",
+  "fork": "drive-05#t11s26",
+  "rung": "0.8"
+ },
+ "4df0b4ffdd11": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s4",
+  "rung": "0.8"
+ },
+ "4e1c8d5eba97": {
+  "arm": "sham",
+  "fork": "drive-02#t3s5",
+  "rung": "0.4"
+ },
+ "4e458df1f8cc": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s5",
+  "rung": "0.0556"
+ },
+ "4e56675f6ccd": {
+  "arm": "imperative",
+  "fork": "drive-04#t9s10",
+  "rung": "1.0"
+ },
+ "4e7a3ef4743a": {
+  "arm": "advisory",
+  "fork": "drive-02#t7s29",
+  "rung": "0.0556"
+ },
+ "4ea744174a71": {
+  "arm": "sham",
+  "fork": "drive-09#t9s14",
+  "rung": "0.4"
+ },
+ "4eb5fdfbddc7": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s8",
+  "rung": "0.8"
+ },
+ "4eccab49a93e": {
+  "arm": "advisory",
+  "fork": "drive-08#t9s24",
+  "rung": "0.0556"
+ },
+ "4f226ceab99e": {
+  "arm": "imperative",
+  "fork": "drive-03#t10s11",
+  "rung": "1.0"
+ },
+ "4f2e98b9d44e": {
+  "batch": 26,
+  "control": "ctl01"
+ },
+ "4f40f0a6a6dd": {
+  "arm": "sham",
+  "fork": "drive-05#t11s17",
+  "rung": "0.0556"
+ },
+ "4f4fdb7cd372": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s12",
+  "rung": "0.8"
+ },
+ "4f552dcf8946": {
+  "arm": "sham",
+  "fork": "drive-08#t5s6",
+  "rung": "0.4"
+ },
+ "4f57726f51d7": {
+  "arm": "sham",
+  "fork": "drive-08#t11s16",
+  "rung": "0.6"
+ },
+ "4f5ca12a4b0d": {
+  "arm": "advisory",
+  "fork": "drive-09#t5s5",
+  "rung": "0.6222"
+ },
+ "4f610bcb88ba": {
+  "arm": "advisory",
+  "fork": "drive-10#t7s28",
+  "rung": "0.0556"
+ },
+ "4f654088d656": {
+  "batch": 4,
+  "control": "ctl13"
+ },
+ "4f6f536e8e33": {
+  "arm": "imperative",
+  "fork": "drive-04#t7s15",
+  "rung": "1.0"
+ },
+ "4f7245872aa1": {
+  "arm": "imperative",
+  "fork": "drive-03#t9s26",
+  "rung": "0.6222"
+ },
+ "4f86ddc68da1": {
+  "arm": "sham",
+  "fork": "drive-02#t8s5",
+  "rung": "0.0556"
+ },
+ "4faba929901e": {
+  "arm": "advisory",
+  "fork": "drive-08#t11s16",
+  "rung": "0.4"
+ },
+ "4fb8d5d60104": {
+  "arm": "advisory",
+  "fork": "drive-13#t2s20",
+  "rung": "1.0"
+ },
+ "500f83c972c0": {
+  "arm": "sham",
+  "fork": "drive-04#t7s15",
+  "rung": "0.6222"
+ },
+ "50110119ac38": {
+  "arm": "advisory",
+  "fork": "drive-15#t2s29",
+  "rung": "0.6"
+ },
+ "5060ed85f9b1": {
+  "arm": "sham",
+  "fork": "drive-08#t9s24",
+  "rung": "0.4"
+ },
+ "5076abddd6c3": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s12",
+  "rung": "0.4"
+ },
+ "50b63426a721": {
+  "batch": 49,
+  "control": "ctl08"
+ },
+ "50ba65dade10": {
+  "arm": "sham",
+  "fork": "drive-08#t5s13",
+  "rung": "0.8"
+ },
+ "50bf5cfd1462": {
+  "arm": "sham",
+  "fork": "drive-08#t8s9",
+  "rung": "0.0556"
+ },
+ "50d3bfb601bf": {
+  "batch": 22,
+  "control": "ctl12"
+ },
+ "50deebb27209": {
+  "arm": "sham",
+  "fork": "drive-10#t8s10",
+  "rung": "0.8"
+ },
+ "51616d4c2b0b": {
+  "arm": "sham",
+  "fork": "drive-02#t7s29",
+  "rung": "0.6222"
+ },
+ "51629c1adf8c": {
+  "arm": "sham",
+  "fork": "drive-14#t2s17",
+  "rung": "0.6222"
+ },
+ "51866a6c5c23": {
+  "arm": "imperative",
+  "fork": "drive-04#t8s16",
+  "rung": "0.6222"
+ },
+ "518ab9c851e1": {
+  "arm": "advisory",
+  "fork": "drive-04#t9s24",
+  "rung": "0.6"
+ },
+ "51908ac5471e": {
+  "arm": "advisory",
+  "fork": "drive-04#t9s10",
+  "rung": "0.6"
+ },
+ "5192b3376da6": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s5",
+  "rung": "0.8"
+ },
+ "51aae85d62ad": {
+  "arm": "advisory",
+  "fork": "drive-10#t5s7",
+  "rung": "0.4"
+ },
+ "51d4f33067ac": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s15",
+  "rung": "0.6222"
+ },
+ "51e0af2ecb60": {
+  "batch": 17,
+  "control": "ctl07"
+ },
+ "51f87c93db08": {
+  "arm": "sham",
+  "fork": "drive-10#t10s0",
+  "rung": "1.0"
+ },
+ "520102192b22": {
+  "arm": "sham",
+  "fork": "drive-08#t11s29",
+  "rung": "0.6"
+ },
+ "5202e3b53046": {
+  "arm": "imperative",
+  "fork": "drive-04#t7s15",
+  "rung": "0.4"
+ },
+ "521947895343": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s12",
+  "rung": "0.4"
+ },
+ "5244287012a0": {
+  "arm": "sham",
+  "fork": "drive-10#t8s22",
+  "rung": "0.8"
+ },
+ "5275dc06acc4": {
+  "arm": "sham",
+  "fork": "drive-08#t8s15",
+  "rung": "0.6"
+ },
+ "5281aab1169f": {
+  "batch": 3,
+  "control": "ctl05"
+ },
+ "5301339bdbdc": {
+  "arm": "sham",
+  "fork": "drive-02#t8s11",
+  "rung": "0.6222"
+ },
+ "53946a5a8ff6": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s17",
+  "rung": "0.4"
+ },
+ "53e17f45ad30": {
+  "arm": "sham",
+  "fork": "drive-10#t7s28",
+  "rung": "0.8"
+ },
+ "53ec47f1f830": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s0",
+  "rung": "0.0556"
+ },
+ "54234756f28c": {
+  "arm": "sham",
+  "fork": "drive-08#t9s14",
+  "rung": "0.4"
+ },
+ "543869e4627d": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s0",
+  "rung": "0.6"
+ },
+ "548995d4a09b": {
+  "arm": "sham",
+  "fork": "drive-07#t5s27",
+  "rung": "0.6"
+ },
+ "54b567c397aa": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s14",
+  "rung": "1.0"
+ },
+ "550a66b6cdc3": {
+  "batch": 18,
+  "control": "ctl02"
+ },
+ "550a6f2558b9": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s17",
+  "rung": "0.8"
+ },
+ "550cd6dd80b5": {
+  "batch": 18,
+  "control": "ctl10"
+ },
+ "551c1b6331b1": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s20",
+  "rung": "0.8"
+ },
+ "552ffed06e0a": {
+  "arm": "advisory",
+  "fork": "drive-04#t9s24",
+  "rung": "0.4"
+ },
+ "55470b1cf731": {
+  "arm": "sham",
+  "fork": "drive-09#t2s8",
+  "rung": "0.6"
+ },
+ "5559a2c4fb59": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s4",
+  "rung": "0.4"
+ },
+ "555c6688c38d": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s8",
+  "rung": "0.8"
+ },
+ "555d5e44911e": {
+  "batch": 22,
+  "control": "ctl14"
+ },
+ "5592eb2390bd": {
+  "arm": "sham",
+  "fork": "drive-13#t5s1",
+  "rung": "0.6222"
+ },
+ "55b977b9103b": {
+  "arm": "sham",
+  "fork": "drive-08#t5s6",
+  "rung": "0.6"
+ },
+ "55babd1b6dfc": {
+  "arm": "sham",
+  "fork": "drive-04#t2s2",
+  "rung": "0.4"
+ },
+ "55c225f65784": {
+  "arm": "sham",
+  "fork": "drive-09#t2s28",
+  "rung": "0.4"
+ },
+ "55d524b1d53a": {
+  "arm": "sham",
+  "fork": "drive-05#t11s26",
+  "rung": "1.0"
+ },
+ "55f4243f5159": {
+  "arm": "sham",
+  "fork": "drive-10#t8s13",
+  "rung": "0.6222"
+ },
+ "561d31565c51": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s26",
+  "rung": "1.0"
+ },
+ "5632d9c7f4fa": {
+  "arm": "advisory",
+  "fork": "drive-04#t2s2",
+  "rung": "0.6222"
+ },
+ "5678898d7e36": {
+  "arm": "imperative",
+  "fork": "drive-06#t2s29",
+  "rung": "0.6222"
+ },
+ "56901e317d59": {
+  "arm": "sham",
+  "fork": "drive-10#t7s28",
+  "rung": "0.0556"
+ },
+ "56c72d14961f": {
+  "arm": "imperative",
+  "fork": "drive-02#t7s29",
+  "rung": "0.6222"
+ },
+ "571a47435b65": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s14",
+  "rung": "0.6222"
+ },
+ "57310e0c15fc": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s12",
+  "rung": "1.0"
+ },
+ "577ae20a2287": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s12",
+  "rung": "1.0"
+ },
+ "577dce1713a3": {
+  "arm": "sham",
+  "fork": "drive-08#t9s14",
+  "rung": "0.0556"
+ },
+ "58078fcd17a2": {
+  "batch": 37,
+  "control": "ctl08"
+ },
+ "58222cf20b26": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s11",
+  "rung": "1.0"
+ },
+ "583640b124be": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s14",
+  "rung": "1.0"
+ },
+ "5836f74f4568": {
+  "batch": 45,
+  "control": "ctl01"
+ },
+ "5849cf73d264": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s11",
+  "rung": "0.6222"
+ },
+ "585d6773d1f0": {
+  "arm": "sham",
+  "fork": "drive-04#t9s24",
+  "rung": "0.0556"
+ },
+ "58697c484787": {
+  "arm": "sham",
+  "fork": "drive-10#t9s11",
+  "rung": "0.4"
+ },
+ "587170510d20": {
+  "batch": 12,
+  "control": "ctl14"
+ },
+ "5892f3517d29": {
+  "arm": "sham",
+  "fork": "drive-08#t8s3",
+  "rung": "0.0556"
+ },
+ "58ae24232524": {
+  "arm": "sham",
+  "fork": "drive-02#t8s11",
+  "rung": "0.6"
+ },
+ "58db84cd2679": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s1",
+  "rung": "0.0556"
+ },
+ "58fc50f8a070": {
+  "arm": "sham",
+  "fork": "drive-02#t7s29",
+  "rung": "0.4"
+ },
+ "591fc323fdcc": {
+  "arm": "imperative",
+  "fork": "drive-08#t11s29",
+  "rung": "0.6222"
+ },
+ "59316f2dc558": {
+  "arm": "sham",
+  "fork": "drive-02#t9s16",
+  "rung": "0.4"
+ },
+ "5943d773dfd5": {
+  "batch": 6,
+  "control": "ctl01"
+ },
+ "594699f3b16a": {
+  "arm": "imperative",
+  "fork": "drive-03#t10s11",
+  "rung": "0.6222"
+ },
+ "594c97f5ac31": {
+  "batch": 33,
+  "control": "ctl03"
+ },
+ "59890329fa42": {
+  "arm": "advisory",
+  "fork": "drive-08#t9s24",
+  "rung": "0.4"
+ },
+ "59b4ec926dbd": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s0",
+  "rung": "0.8"
+ },
+ "59bc658ce84d": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s18",
+  "rung": "0.6222"
+ },
+ "59f878fc0df9": {
+  "arm": "imperative",
+  "fork": "drive-08#t11s16",
+  "rung": "0.8"
+ },
+ "5a0c0489d1fb": {
+  "arm": "sham",
+  "fork": "drive-06#t7s13",
+  "rung": "0.0556"
+ },
+ "5a5c43c2db51": {
+  "arm": "imperative",
+  "fork": "drive-04#t2s2",
+  "rung": "0.8"
+ },
+ "5a67008ddd24": {
+  "arm": "sham",
+  "fork": "drive-10#t5s7",
+  "rung": "0.4"
+ },
+ "5a701bab5c80": {
+  "arm": "imperative",
+  "fork": "drive-06#t8s6",
+  "rung": "1.0"
+ },
+ "5a8f048e71c2": {
+  "arm": "imperative",
+  "fork": "drive-08#t10s4",
+  "rung": "0.8"
+ },
+ "5b079fe88725": {
+  "arm": "sham",
+  "fork": "drive-04#t5s24",
+  "rung": "0.6"
+ },
+ "5b178a38f64b": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s3",
+  "rung": "0.6"
+ },
+ "5b4c75326961": {
+  "arm": "sham",
+  "fork": "drive-04#t9s24",
+  "rung": "0.6222"
+ },
+ "5bd810463aad": {
+  "arm": "advisory",
+  "fork": "drive-07#t5s27",
+  "rung": "0.4"
+ },
+ "5c030aaec1d6": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s3",
+  "rung": "1.0"
+ },
+ "5c08ba9ad273": {
+  "arm": "sham",
+  "fork": "drive-09#t5s22",
+  "rung": "0.6222"
+ },
+ "5c31d4c38793": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s7",
+  "rung": "0.6"
+ },
+ "5c36f306655c": {
+  "arm": "imperative",
+  "fork": "drive-03#t10s11",
+  "rung": "0.0556"
+ },
+ "5c448029d0c6": {
+  "arm": "sham",
+  "fork": "drive-10#t8s18",
+  "rung": "0.6222"
+ },
+ "5c56e546aa61": {
+  "arm": "sham",
+  "fork": "drive-07#t7s26",
+  "rung": "0.8"
+ },
+ "5c854e0fb4d6": {
+  "arm": "imperative",
+  "fork": "drive-04#t5s24",
+  "rung": "0.6222"
+ },
+ "5ca29bc4c7d7": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s4",
+  "rung": "1.0"
+ },
+ "5cc4c87c6245": {
+  "arm": "advisory",
+  "fork": "drive-05#t7s12",
+  "rung": "0.6"
+ },
+ "5cdecc728405": {
+  "arm": "advisory",
+  "fork": "drive-15#t2s9",
+  "rung": "0.6"
+ },
+ "5d0725f953a9": {
+  "arm": "sham",
+  "fork": "drive-05#t10s26",
+  "rung": "0.6"
+ },
+ "5d1d123448c4": {
+  "arm": "advisory",
+  "fork": "drive-03#t10s10",
+  "rung": "0.6222"
+ },
+ "5d49ace84967": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s8",
+  "rung": "0.0556"
+ },
+ "5d66a8862be3": {
+  "arm": "sham",
+  "fork": "drive-09#t2s27",
+  "rung": "0.4"
+ },
+ "5d93ec92d568": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s28",
+  "rung": "1.0"
+ },
+ "5dc3b53e9366": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s7",
+  "rung": "0.6"
+ },
+ "5e1cf70ec30e": {
+  "batch": 40,
+  "control": "ctl14"
+ },
+ "5e1d6513be44": {
+  "arm": "sham",
+  "fork": "drive-02#t8s5",
+  "rung": "1.0"
+ },
+ "5e6ab19e9405": {
+  "arm": "sham",
+  "fork": "drive-10#t8s10",
+  "rung": "0.0556"
+ },
+ "5e7f9029fde5": {
+  "arm": "sham",
+  "fork": "drive-02#t9s11",
+  "rung": "0.4"
+ },
+ "5e9ac8de05e6": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s7",
+  "rung": "0.4"
+ },
+ "5eb9dbf7270f": {
+  "arm": "imperative",
+  "fork": "drive-13#t4s0",
+  "rung": "0.6222"
+ },
+ "5efb1d60187b": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s27",
+  "rung": "0.6"
+ },
+ "5eff6dd36566": {
+  "arm": "imperative",
+  "fork": "drive-09#t8s28",
+  "rung": "1.0"
+ },
+ "5f0fe0015490": {
+  "arm": "imperative",
+  "fork": "drive-02#t3s5",
+  "rung": "1.0"
+ },
+ "5f14f402bdb0": {
+  "batch": 14,
+  "control": "ctl03"
+ },
+ "5f25c6d75d08": {
+  "arm": "sham",
+  "fork": "drive-06#t9s20",
+  "rung": "0.4"
+ },
+ "5f3490a65664": {
+  "arm": "sham",
+  "fork": "drive-09#t5s5",
+  "rung": "0.0556"
+ },
+ "5f6b9d37516c": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s11",
+  "rung": "0.8"
+ },
+ "5f8e4317d175": {
+  "arm": "imperative",
+  "fork": "drive-07#t7s26",
+  "rung": "0.6"
+ },
+ "5fa127a06215": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s2",
+  "rung": "0.6222"
+ },
+ "5fec67e586bc": {
+  "batch": 23,
+  "control": "ctl09"
+ },
+ "5feda871558d": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s12",
+  "rung": "0.0556"
+ },
+ "5fede238606d": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s18",
+  "rung": "0.6222"
+ },
+ "5ff424b64fa0": {
+  "arm": "sham",
+  "fork": "drive-08#t5s5",
+  "rung": "0.6"
+ },
+ "600303068e90": {
+  "batch": 10,
+  "control": "ctl09"
+ },
+ "600c769e98d9": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s13",
+  "rung": "0.0556"
+ },
+ "604a4467572a": {
+  "arm": "advisory",
+  "fork": "drive-13#t2s21",
+  "rung": "1.0"
+ },
+ "606040ad82ed": {
+  "arm": "imperative",
+  "fork": "drive-04#t7s15",
+  "rung": "0.6"
+ },
+ "6089936a70de": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s6",
+  "rung": "0.4"
+ },
+ "608cc3c2002a": {
+  "arm": "sham",
+  "fork": "drive-10#t7s18",
+  "rung": "0.0556"
+ },
+ "60c470b7648a": {
+  "arm": "imperative",
+  "fork": "drive-08#t7s24",
+  "rung": "0.6"
+ },
+ "60d04e04ad86": {
+  "arm": "sham",
+  "fork": "drive-04#t11s0",
+  "rung": "0.4"
+ },
+ "60e68dc219ac": {
+  "arm": "advisory",
+  "fork": "drive-10#t7s18",
+  "rung": "0.0556"
+ },
+ "6107932e5098": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s15",
+  "rung": "0.4"
+ },
+ "610d9de309bd": {
+  "arm": "sham",
+  "fork": "drive-06#t7s20",
+  "rung": "0.6"
+ },
+ "6118f27d9cfe": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s15",
+  "rung": "0.4"
+ },
+ "6143200e2563": {
+  "arm": "imperative",
+  "fork": "drive-04#t8s13",
+  "rung": "0.8"
+ },
+ "6186f6bbc1ce": {
+  "arm": "sham",
+  "fork": "drive-13#t5s1",
+  "rung": "0.4"
+ },
+ "61e2dcef6f6f": {
+  "arm": "sham",
+  "fork": "drive-08#t8s18",
+  "rung": "0.6222"
+ },
+ "61f3c0117938": {
+  "batch": 23,
+  "control": "ctl04"
+ },
+ "61fdf3db05c4": {
+  "arm": "advisory",
+  "fork": "drive-08#t11s16",
+  "rung": "0.6"
+ },
+ "6200d5f2be85": {
+  "batch": 38,
+  "control": "ctl05"
+ },
+ "62441859e4c8": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s15",
+  "rung": "0.6222"
+ },
+ "625da014cc17": {
+  "arm": "sham",
+  "fork": "drive-03#t8s15",
+  "rung": "0.6222"
+ },
+ "626198e843bd": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s5",
+  "rung": "0.6222"
+ },
+ "6264a87f630b": {
+  "arm": "sham",
+  "fork": "drive-09#t8s28",
+  "rung": "0.8"
+ },
+ "62708999b6e5": {
+  "arm": "sham",
+  "fork": "drive-08#t5s5",
+  "rung": "1.0"
+ },
+ "6272654c6da8": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s13",
+  "rung": "0.6222"
+ },
+ "627634f2a9e4": {
+  "arm": "sham",
+  "fork": "drive-10#t5s7",
+  "rung": "0.6"
+ },
+ "6277aa08412b": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s1",
+  "rung": "0.6"
+ },
+ "629affa1ceb8": {
+  "arm": "advisory",
+  "fork": "drive-06#t5s23",
+  "rung": "0.6"
+ },
+ "62e266888dae": {
+  "arm": "sham",
+  "fork": "drive-09#t2s27",
+  "rung": "1.0"
+ },
+ "62e50f4e64fc": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s13",
+  "rung": "0.4"
+ },
+ "62ecb0f2c038": {
+  "arm": "imperative",
+  "fork": "drive-10#t7s18",
+  "rung": "0.6222"
+ },
+ "6310a3a75095": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s9",
+  "rung": "0.6222"
+ },
+ "6351c7d97006": {
+  "batch": 6,
+  "control": "ctl09"
+ },
+ "6356bc4785cc": {
+  "batch": 5,
+  "control": "ctl13"
+ },
+ "637306137e5d": {
+  "arm": "sham",
+  "fork": "drive-09#t2s8",
+  "rung": "0.4"
+ },
+ "6383690f7b7a": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s5",
+  "rung": "0.4"
+ },
+ "6390262eddca": {
+  "arm": "sham",
+  "fork": "drive-10#t8s13",
+  "rung": "0.4"
+ },
+ "6391f9540292": {
+  "arm": "sham",
+  "fork": "drive-09#t2s27",
+  "rung": "0.8"
+ },
+ "63b16d00e5c0": {
+  "arm": "sham",
+  "fork": "drive-02#t3s5",
+  "rung": "0.8"
+ },
+ "63b8128b1e8c": {
+  "arm": "sham",
+  "fork": "drive-05#t3s28",
+  "rung": "0.6"
+ },
+ "63ce1c9a1f3a": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s17",
+  "rung": "0.8"
+ },
+ "63d9e7c9bd9f": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s12",
+  "rung": "1.0"
+ },
+ "63feed29f0f0": {
+  "arm": "sham",
+  "fork": "drive-08#t10s4",
+  "rung": "0.4"
+ },
+ "63fff2762577": {
+  "arm": "advisory",
+  "fork": "drive-03#t9s26",
+  "rung": "0.6"
+ },
+ "640e75f75d3f": {
+  "arm": "advisory",
+  "fork": "drive-07#t7s26",
+  "rung": "1.0"
+ },
+ "64127741a051": {
+  "arm": "sham",
+  "fork": "drive-14#t2s11",
+  "rung": "0.8"
+ },
+ "641c60c4635f": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s12",
+  "rung": "0.0556"
+ },
+ "644ee74ba145": {
+  "arm": "sham",
+  "fork": "drive-09#t9s14",
+  "rung": "1.0"
+ },
+ "647b2368675e": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s11",
+  "rung": "1.0"
+ },
+ "64d8fcc15e13": {
+  "arm": "advisory",
+  "fork": "drive-08#t9s24",
+  "rung": "0.6"
+ },
+ "650b91b37d7b": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s11",
+  "rung": "0.4"
+ },
+ "651a7270ddd5": {
+  "batch": 39,
+  "control": "ctl14"
+ },
+ "65556c067909": {
+  "arm": "sham",
+  "fork": "drive-13#t2s21",
+  "rung": "0.0556"
+ },
+ "6563476b4688": {
+  "arm": "advisory",
+  "fork": "drive-06#t8s6",
+  "rung": "0.6"
+ },
+ "658f654c4b8f": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s11",
+  "rung": "0.6"
+ },
+ "65b7f6cc39b6": {
+  "arm": "sham",
+  "fork": "drive-06#t7s13",
+  "rung": "0.6222"
+ },
+ "65bc271c0272": {
+  "arm": "sham",
+  "fork": "drive-02#t8s26",
+  "rung": "1.0"
+ },
+ "65c52cffde46": {
+  "batch": 48,
+  "control": "ctl02"
+ },
+ "65d3d53967f9": {
+  "arm": "imperative",
+  "fork": "drive-03#t3s20",
+  "rung": "0.6222"
+ },
+ "65e103c222fa": {
+  "batch": 10,
+  "control": "ctl11"
+ },
+ "65e3baced3d0": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s15",
+  "rung": "0.6222"
+ },
+ "65ed470e3d8e": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s11",
+  "rung": "0.8"
+ },
+ "660543632f1e": {
+  "arm": "sham",
+  "fork": "drive-08#t9s24",
+  "rung": "0.8"
+ },
+ "662989ab9e63": {
+  "arm": "advisory",
+  "fork": "drive-09#t8s23",
+  "rung": "0.4"
+ },
+ "664cd499b91b": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s13",
+  "rung": "0.0556"
+ },
+ "667466852e98": {
+  "arm": "sham",
+  "fork": "drive-02#t9s11",
+  "rung": "0.0556"
+ },
+ "668174ce973f": {
+  "arm": "imperative",
+  "fork": "drive-15#t2s29",
+  "rung": "0.8"
+ },
+ "668ebaf85950": {
+  "arm": "advisory",
+  "fork": "drive-08#t2s0",
+  "rung": "0.6"
+ },
+ "66a0d366e11f": {
+  "arm": "imperative",
+  "fork": "drive-08#t2s0",
+  "rung": "0.6"
+ },
+ "66ab648f6ca4": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s18",
+  "rung": "0.6222"
+ },
+ "66d96ac687c1": {
+  "arm": "imperative",
+  "fork": "drive-08#t11s16",
+  "rung": "1.0"
+ },
+ "674381fd3bfc": {
+  "arm": "sham",
+  "fork": "drive-09#t9s14",
+  "rung": "0.0556"
+ },
+ "676737ecda61": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s8",
+  "rung": "0.6"
+ },
+ "67bea1daa2f1": {
+  "arm": "sham",
+  "fork": "drive-08#t8s3",
+  "rung": "0.4"
+ },
+ "67d0f227e6ee": {
+  "arm": "imperative",
+  "fork": "drive-07#t10s13",
+  "rung": "1.0"
+ },
+ "67d822a11ce7": {
+  "arm": "imperative",
+  "fork": "drive-09#t5s5",
+  "rung": "0.6"
+ },
+ "684c9a1e0690": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s0",
+  "rung": "1.0"
+ },
+ "6855ff9dcad3": {
+  "arm": "sham",
+  "fork": "drive-08#t11s29",
+  "rung": "0.8"
+ },
+ "686391a3cd18": {
+  "arm": "imperative",
+  "fork": "drive-08#t9s14",
+  "rung": "0.6222"
+ },
+ "687318ff2a28": {
+  "arm": "sham",
+  "fork": "drive-10#t8s12",
+  "rung": "0.4"
+ },
+ "6892d02408f9": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s11",
+  "rung": "0.0556"
+ },
+ "68a0c35781cc": {
+  "arm": "advisory",
+  "fork": "drive-15#t2s29",
+  "rung": "0.0556"
+ },
+ "68c36daf63a3": {
+  "batch": 29,
+  "control": "ctl14"
+ },
+ "68cf9be4df13": {
+  "arm": "imperative",
+  "fork": "drive-03#t5s13",
+  "rung": "1.0"
+ },
+ "68d065eecbc6": {
+  "arm": "sham",
+  "fork": "drive-06#t7s20",
+  "rung": "0.4"
+ },
+ "68d12ade2a61": {
+  "arm": "advisory",
+  "fork": "drive-04#t2s2",
+  "rung": "0.0556"
+ },
+ "68e170f11aea": {
+  "arm": "sham",
+  "fork": "drive-10#t9s8",
+  "rung": "0.4"
+ },
+ "6926ecea7f8a": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s4",
+  "rung": "0.0556"
+ },
+ "6954cdb6d661": {
+  "arm": "advisory",
+  "fork": "drive-08#t9s24",
+  "rung": "0.6222"
+ },
+ "698eef1db907": {
+  "arm": "sham",
+  "fork": "drive-09#t9s4",
+  "rung": "0.0556"
+ },
+ "69c774f9ead4": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s4",
+  "rung": "0.4"
+ },
+ "69daa22db494": {
+  "arm": "sham",
+  "fork": "drive-14#t2s13",
+  "rung": "0.8"
+ },
+ "6a085782c7e9": {
+  "arm": "sham",
+  "fork": "drive-02#t8s26",
+  "rung": "0.6"
+ },
+ "6a12c86127e8": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s27",
+  "rung": "0.0556"
+ },
+ "6a1453375624": {
+  "arm": "sham",
+  "fork": "drive-10#t10s0",
+  "rung": "0.6222"
+ },
+ "6a2456fc717f": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s13",
+  "rung": "0.8"
+ },
+ "6a9e85108380": {
+  "arm": "sham",
+  "fork": "drive-14#t2s11",
+  "rung": "0.0556"
+ },
+ "6abddd6cc462": {
+  "batch": 16,
+  "control": "ctl01"
+ },
+ "6ada95c40e29": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s16",
+  "rung": "0.4"
+ },
+ "6af4c86c9fd8": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s14",
+  "rung": "0.6222"
+ },
+ "6b186c7b6e01": {
+  "arm": "imperative",
+  "fork": "drive-04#t9s24",
+  "rung": "0.4"
+ },
+ "6b1dd11e1ece": {
+  "arm": "imperative",
+  "fork": "drive-03#t10s10",
+  "rung": "0.6222"
+ },
+ "6b21e8452fcb": {
+  "arm": "advisory",
+  "fork": "drive-03#t3s20",
+  "rung": "0.6222"
+ },
+ "6b7a374ae186": {
+  "arm": "sham",
+  "fork": "drive-08#t8s3",
+  "rung": "0.8"
+ },
+ "6b8c3e219cf0": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s18",
+  "rung": "0.8"
+ },
+ "6ba143b307a3": {
+  "arm": "sham",
+  "fork": "drive-10#t10s7",
+  "rung": "0.6222"
+ },
+ "6c83f1bf8010": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s1",
+  "rung": "1.0"
+ },
+ "6c85710e9321": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s4",
+  "rung": "0.4"
+ },
+ "6c937520f385": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s13",
+  "rung": "0.6"
+ },
+ "6c94a2995363": {
+  "arm": "sham",
+  "fork": "drive-10#t8s12",
+  "rung": "1.0"
+ },
+ "6cbf7fa1791d": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s22",
+  "rung": "0.6222"
+ },
+ "6cdbec426ce4": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s13",
+  "rung": "0.6222"
+ },
+ "6cfe3eab97c8": {
+  "arm": "advisory",
+  "fork": "drive-05#t7s12",
+  "rung": "0.4"
+ },
+ "6d18935dc00f": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s15",
+  "rung": "1.0"
+ },
+ "6d189a638da0": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s2",
+  "rung": "0.6222"
+ },
+ "6d62a5007c3f": {
+  "arm": "sham",
+  "fork": "drive-05#t11s17",
+  "rung": "0.6"
+ },
+ "6d6b705d2029": {
+  "arm": "sham",
+  "fork": "drive-08#t5s13",
+  "rung": "0.0556"
+ },
+ "6d8557c92382": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s4",
+  "rung": "0.8"
+ },
+ "6db6b38afb49": {
+  "arm": "sham",
+  "fork": "drive-05#t3s28",
+  "rung": "0.6222"
+ },
+ "6dbd5731abdf": {
+  "arm": "sham",
+  "fork": "drive-09#t2s8",
+  "rung": "0.6222"
+ },
+ "6dc4bf2bfa74": {
+  "batch": 44,
+  "control": "ctl06"
+ },
+ "6dc9b2a0be82": {
+  "arm": "imperative",
+  "fork": "drive-03#t5s13",
+  "rung": "0.4"
+ },
+ "6de20d3334ef": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s5",
+  "rung": "0.0556"
+ },
+ "6deba8d621f6": {
+  "arm": "sham",
+  "fork": "drive-07#t10s12",
+  "rung": "0.4"
+ },
+ "6dfe5f9811d6": {
+  "arm": "sham",
+  "fork": "drive-06#t5s23",
+  "rung": "0.6222"
+ },
+ "6e069cdc6a72": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s18",
+  "rung": "0.4"
+ },
+ "6e2fa38a0706": {
+  "arm": "advisory",
+  "fork": "drive-04#t8s13",
+  "rung": "0.0556"
+ },
+ "6e7123055160": {
+  "arm": "sham",
+  "fork": "drive-08#t7s24",
+  "rung": "0.8"
+ },
+ "6e99e29936bd": {
+  "arm": "sham",
+  "fork": "drive-13#t2s20",
+  "rung": "0.6222"
+ },
+ "6e9ef5e9917a": {
+  "batch": 27,
+  "control": "ctl08"
+ },
+ "6ed280526d67": {
+  "arm": "sham",
+  "fork": "drive-03#t9s26",
+  "rung": "0.0556"
+ },
+ "6edde9907dba": {
+  "batch": 26,
+  "control": "ctl05"
+ },
+ "6ef63e965a79": {
+  "arm": "advisory",
+  "fork": "drive-04#t8s16",
+  "rung": "0.0556"
+ },
+ "6f2917c84736": {
+  "batch": 34,
+  "control": "ctl10"
+ },
+ "6f2f98dfdb5d": {
+  "arm": "sham",
+  "fork": "drive-03#t3s20",
+  "rung": "0.0556"
+ },
+ "6f38e744a294": {
+  "batch": 17,
+  "control": "ctl02"
+ },
+ "6f44e48be87d": {
+  "arm": "advisory",
+  "fork": "drive-04#t7s15",
+  "rung": "0.6"
+ },
+ "6f72ae85c3c5": {
+  "arm": "sham",
+  "fork": "drive-08#t8s9",
+  "rung": "1.0"
+ },
+ "6fc00b5032b1": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s20",
+  "rung": "0.6222"
+ },
+ "700ab0567cef": {
+  "arm": "sham",
+  "fork": "drive-04#t11s0",
+  "rung": "0.6222"
+ },
+ "7019528aafd8": {
+  "arm": "advisory",
+  "fork": "drive-08#t2s0",
+  "rung": "0.0556"
+ },
+ "702adef405c9": {
+  "arm": "imperative",
+  "fork": "drive-13#t2s20",
+  "rung": "0.4"
+ },
+ "70467d3768bd": {
+  "arm": "advisory",
+  "fork": "drive-05#t10s26",
+  "rung": "0.0556"
+ },
+ "70978b60a7c4": {
+  "arm": "imperative",
+  "fork": "drive-05#t7s12",
+  "rung": "0.0556"
+ },
+ "70b040ea7d86": {
+  "arm": "sham",
+  "fork": "drive-05#t7s12",
+  "rung": "0.6222"
+ },
+ "713db4716ee2": {
+  "arm": "sham",
+  "fork": "drive-04#t8s16",
+  "rung": "1.0"
+ },
+ "71490127f3b4": {
+  "arm": "sham",
+  "fork": "drive-10#t8s13",
+  "rung": "0.6"
+ },
+ "7152999bc8e9": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s15",
+  "rung": "0.6222"
+ },
+ "7176dc662434": {
+  "batch": 19,
+  "control": "ctl02"
+ },
+ "719b5b0cb481": {
+  "arm": "sham",
+  "fork": "drive-08#t2s0",
+  "rung": "0.4"
+ },
+ "71a65f51409d": {
+  "arm": "advisory",
+  "fork": "drive-03#t10s10",
+  "rung": "1.0"
+ },
+ "71dce60259dc": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s0",
+  "rung": "0.0556"
+ },
+ "721082ff2855": {
+  "batch": 2,
+  "control": "ctl10"
+ },
+ "7220aa33c6e7": {
+  "arm": "sham",
+  "fork": "drive-13#t2s20",
+  "rung": "0.6"
+ },
+ "723bc1e2aea9": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s0",
+  "rung": "0.6222"
+ },
+ "727827727032": {
+  "arm": "advisory",
+  "fork": "drive-06#t2s29",
+  "rung": "0.6222"
+ },
+ "727dc7ed8596": {
+  "arm": "advisory",
+  "fork": "drive-07#t7s26",
+  "rung": "0.8"
+ },
+ "728ed4bcd3b6": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s14",
+  "rung": "0.6222"
+ },
+ "72b4e2a90b6d": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s11",
+  "rung": "0.4"
+ },
+ "72d83e36ee84": {
+  "batch": 33,
+  "control": "ctl06"
+ },
+ "72defe6ce215": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s17",
+  "rung": "0.0556"
+ },
+ "72ea1ce27007": {
+  "batch": 6,
+  "control": "ctl13"
+ },
+ "72f578d4bf19": {
+  "batch": 49,
+  "control": "ctl01"
+ },
+ "736516a86bd5": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s14",
+  "rung": "0.8"
+ },
+ "7373a9e2378b": {
+  "batch": 41,
+  "control": "ctl12"
+ },
+ "7374bd7570b0": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s18",
+  "rung": "1.0"
+ },
+ "73a133e7ef3a": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s7",
+  "rung": "1.0"
+ },
+ "73a84d0993b1": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s27",
+  "rung": "0.6"
+ },
+ "741af9c0cbdc": {
+  "arm": "sham",
+  "fork": "drive-04#t9s24",
+  "rung": "0.8"
+ },
+ "743c3277477c": {
+  "arm": "advisory",
+  "fork": "drive-08#t7s24",
+  "rung": "0.4"
+ },
+ "743ca1ac8c20": {
+  "arm": "sham",
+  "fork": "drive-08#t8s15",
+  "rung": "1.0"
+ },
+ "744f2a2401b9": {
+  "arm": "sham",
+  "fork": "drive-09#t2s8",
+  "rung": "0.0556"
+ },
+ "7461a1b62af5": {
+  "batch": 34,
+  "control": "ctl05"
+ },
+ "7495d711977f": {
+  "arm": "imperative",
+  "fork": "drive-04#t2s2",
+  "rung": "1.0"
+ },
+ "74e14357a09a": {
+  "arm": "imperative",
+  "fork": "drive-08#t7s24",
+  "rung": "0.6222"
+ },
+ "74ec583baa5c": {
+  "arm": "imperative",
+  "fork": "drive-03#t9s26",
+  "rung": "0.6"
+ },
+ "7509f2d3cc03": {
+  "batch": 31,
+  "control": "ctl10"
+ },
+ "755a3a6ae1bb": {
+  "arm": "sham",
+  "fork": "drive-10#t9s15",
+  "rung": "0.4"
+ },
+ "7589bf33235d": {
+  "arm": "advisory",
+  "fork": "drive-03#t3s20",
+  "rung": "0.4"
+ },
+ "75c6b07506b7": {
+  "arm": "advisory",
+  "fork": "drive-04#t11s0",
+  "rung": "0.4"
+ },
+ "75e29f543919": {
+  "batch": 15,
+  "control": "ctl01"
+ },
+ "75e3f86472a5": {
+  "arm": "sham",
+  "fork": "drive-10#t9s11",
+  "rung": "0.8"
+ },
+ "761f1077143f": {
+  "arm": "sham",
+  "fork": "drive-09#t8s28",
+  "rung": "0.6"
+ },
+ "768b1ef41fe5": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s2",
+  "rung": "0.6"
+ },
+ "768c2a0c2854": {
+  "arm": "advisory",
+  "fork": "drive-08#t9s14",
+  "rung": "1.0"
+ },
+ "769e9acb49f3": {
+  "arm": "sham",
+  "fork": "drive-06#t9s1",
+  "rung": "0.4"
+ },
+ "76b63fce55af": {
+  "arm": "sham",
+  "fork": "drive-08#t8s15",
+  "rung": "0.4"
+ },
+ "76c0175b0232": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s14",
+  "rung": "0.6"
+ },
+ "76c118154d27": {
+  "arm": "advisory",
+  "fork": "drive-10#t5s7",
+  "rung": "1.0"
+ },
+ "76d30353010f": {
+  "arm": "imperative",
+  "fork": "drive-15#t2s29",
+  "rung": "0.4"
+ },
+ "76f0a3fa0f25": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s15",
+  "rung": "0.6"
+ },
+ "773606f5768c": {
+  "arm": "imperative",
+  "fork": "drive-09#t5s5",
+  "rung": "1.0"
+ },
+ "77d78c2c291f": {
+  "arm": "sham",
+  "fork": "drive-15#t2s29",
+  "rung": "0.0556"
+ },
+ "77e633f7750e": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s6",
+  "rung": "1.0"
+ },
+ "77f2264dcea5": {
+  "arm": "sham",
+  "fork": "drive-03#t3s20",
+  "rung": "1.0"
+ },
+ "77fa399066c7": {
+  "arm": "sham",
+  "fork": "drive-02#t9s16",
+  "rung": "0.6222"
+ },
+ "7861b97d036c": {
+  "arm": "advisory",
+  "fork": "drive-05#t3s28",
+  "rung": "0.6"
+ },
+ "7882999ac594": {
+  "arm": "advisory",
+  "fork": "drive-03#t10s10",
+  "rung": "0.0556"
+ },
+ "7885f600a5da": {
+  "arm": "imperative",
+  "fork": "drive-07#t10s12",
+  "rung": "0.6222"
+ },
+ "789b8014c5e7": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s9",
+  "rung": "0.0556"
+ },
+ "78a2952b5a12": {
+  "arm": "sham",
+  "fork": "drive-10#t9s14",
+  "rung": "1.0"
+ },
+ "78f9084429f5": {
+  "batch": 35,
+  "control": "ctl14"
+ },
+ "7910deb5984b": {
+  "arm": "sham",
+  "fork": "drive-08#t8s14",
+  "rung": "0.8"
+ },
+ "7921fe855e7e": {
+  "arm": "advisory",
+  "fork": "drive-07#t10s12",
+  "rung": "0.4"
+ },
+ "79333414ded9": {
+  "arm": "sham",
+  "fork": "drive-06#t7s15",
+  "rung": "1.0"
+ },
+ "79427267b47d": {
+  "arm": "sham",
+  "fork": "drive-05#t11s26",
+  "rung": "0.6"
+ },
+ "79617ab0a2a2": {
+  "arm": "imperative",
+  "fork": "drive-09#t5s5",
+  "rung": "0.8"
+ },
+ "797d4e895712": {
+  "arm": "sham",
+  "fork": "drive-10#t10s0",
+  "rung": "0.4"
+ },
+ "7a101c0f5d25": {
+  "arm": "sham",
+  "fork": "drive-06#t7s13",
+  "rung": "0.4"
+ },
+ "7a12012bde5c": {
+  "arm": "sham",
+  "fork": "drive-10#t5s7",
+  "rung": "0.6222"
+ },
+ "7a5583b9613a": {
+  "arm": "sham",
+  "fork": "drive-08#t9s14",
+  "rung": "0.8"
+ },
+ "7a626d31d2fb": {
+  "arm": "sham",
+  "fork": "drive-08#t2s0",
+  "rung": "1.0"
+ },
+ "7a6c456a79a1": {
+  "arm": "imperative",
+  "fork": "drive-04#t8s13",
+  "rung": "0.0556"
+ },
+ "7a822aef68a1": {
+  "arm": "sham",
+  "fork": "drive-05#t10s26",
+  "rung": "0.6222"
+ },
+ "7a86a7812724": {
+  "arm": "advisory",
+  "fork": "drive-09#t8s28",
+  "rung": "0.6222"
+ },
+ "7aa3a814bf9e": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s11",
+  "rung": "0.6"
+ },
+ "7abf3bd58517": {
+  "arm": "advisory",
+  "fork": "drive-04#t5s24",
+  "rung": "0.6222"
+ },
+ "7b9f8836dc25": {
+  "arm": "sham",
+  "fork": "drive-03#t8s15",
+  "rung": "0.8"
+ },
+ "7bbe4af4f849": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s0",
+  "rung": "0.6"
+ },
+ "7bbfa8f7097e": {
+  "arm": "imperative",
+  "fork": "drive-15#t2s9",
+  "rung": "0.6"
+ },
+ "7c02d2f882fb": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s16",
+  "rung": "0.8"
+ },
+ "7c5393b5b63c": {
+  "batch": 9,
+  "control": "ctl08"
+ },
+ "7caceda758fc": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s20",
+  "rung": "0.4"
+ },
+ "7cbe60140c71": {
+  "arm": "imperative",
+  "fork": "drive-05#t11s26",
+  "rung": "0.6"
+ },
+ "7cf6b63aad44": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s27",
+  "rung": "0.4"
+ },
+ "7d32aa54fefc": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s13",
+  "rung": "0.6222"
+ },
+ "7d4869610466": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s13",
+  "rung": "0.6222"
+ },
+ "7d55cf4ca8a1": {
+  "batch": 5,
+  "control": "ctl11"
+ },
+ "7d62bd881746": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s15",
+  "rung": "0.0556"
+ },
+ "7d66e49113d7": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s15",
+  "rung": "1.0"
+ },
+ "7d914ffdec76": {
+  "arm": "sham",
+  "fork": "drive-02#t9s1",
+  "rung": "0.4"
+ },
+ "7daa7b859595": {
+  "arm": "advisory",
+  "fork": "drive-08#t9s14",
+  "rung": "0.4"
+ },
+ "7e1819b0c4a7": {
+  "arm": "sham",
+  "fork": "drive-09#t9s4",
+  "rung": "0.6222"
+ },
+ "7e1c8fa80be4": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s11",
+  "rung": "0.4"
+ },
+ "7e84b511be0c": {
+  "arm": "advisory",
+  "fork": "drive-02#t3s5",
+  "rung": "0.0556"
+ },
+ "7e89ac7d075f": {
+  "arm": "sham",
+  "fork": "drive-10#t10s7",
+  "rung": "0.6"
+ },
+ "7ebaa7c26057": {
+  "arm": "advisory",
+  "fork": "drive-09#t8s23",
+  "rung": "0.8"
+ },
+ "7ef68b3c358b": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s11",
+  "rung": "0.8"
+ },
+ "7f23150f65f9": {
+  "arm": "sham",
+  "fork": "drive-02#t3s5",
+  "rung": "1.0"
+ },
+ "7f439da3f1f5": {
+  "arm": "sham",
+  "fork": "drive-08#t8s14",
+  "rung": "0.6"
+ },
+ "800673b065f6": {
+  "arm": "advisory",
+  "fork": "drive-13#t2s20",
+  "rung": "0.6"
+ },
+ "80097cc8e545": {
+  "arm": "sham",
+  "fork": "drive-10#t9s11",
+  "rung": "0.0556"
+ },
+ "802a52363a9c": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s20",
+  "rung": "0.6"
+ },
+ "802b50ba83d1": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s14",
+  "rung": "0.0556"
+ },
+ "804744796cdd": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s15",
+  "rung": "0.4"
+ },
+ "80d5d6543d5c": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s11",
+  "rung": "0.0556"
+ },
+ "80d6a62ba54e": {
+  "arm": "sham",
+  "fork": "drive-05#t11s26",
+  "rung": "0.8"
+ },
+ "80e03a717f0f": {
+  "arm": "sham",
+  "fork": "drive-09#t2s28",
+  "rung": "0.8"
+ },
+ "810fea575350": {
+  "arm": "sham",
+  "fork": "drive-09#t2s8",
+  "rung": "0.8"
+ },
+ "813421317430": {
+  "arm": "sham",
+  "fork": "drive-02#t7s29",
+  "rung": "0.0556"
+ },
+ "813c53c48ba1": {
+  "arm": "advisory",
+  "fork": "drive-07#t10s12",
+  "rung": "0.6"
+ },
+ "8148c3d4f922": {
+  "arm": "sham",
+  "fork": "drive-10#t8s10",
+  "rung": "0.6222"
+ },
+ "814c449bc704": {
+  "arm": "sham",
+  "fork": "drive-03#t9s26",
+  "rung": "0.8"
+ },
+ "816ac99a478f": {
+  "batch": 20,
+  "control": "ctl04"
+ },
+ "81d1782b5953": {
+  "batch": 21,
+  "control": "ctl05"
+ },
+ "8207897ff135": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s11",
+  "rung": "0.6"
+ },
+ "82107e64de18": {
+  "arm": "advisory",
+  "fork": "drive-08#t11s29",
+  "rung": "0.8"
+ },
+ "823b5e459b5a": {
+  "arm": "advisory",
+  "fork": "drive-02#t3s5",
+  "rung": "1.0"
+ },
+ "823dd17cfc30": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s14",
+  "rung": "0.8"
+ },
+ "825308a7d13e": {
+  "arm": "sham",
+  "fork": "drive-09#t9s4",
+  "rung": "0.6"
+ },
+ "828d2a36ddde": {
+  "arm": "imperative",
+  "fork": "drive-08#t10s4",
+  "rung": "1.0"
+ },
+ "82b1d510a017": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s27",
+  "rung": "0.4"
+ },
+ "82b3db553980": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s16",
+  "rung": "0.0556"
+ },
+ "82d4583d01a7": {
+  "batch": 29,
+  "control": "ctl04"
+ },
+ "8311d188d78c": {
+  "arm": "sham",
+  "fork": "drive-04#t8s13",
+  "rung": "0.8"
+ },
+ "834a81ed20f1": {
+  "arm": "sham",
+  "fork": "drive-10#t9s11",
+  "rung": "0.6"
+ },
+ "83686cb51e1e": {
+  "arm": "sham",
+  "fork": "drive-14#t2s17",
+  "rung": "0.4"
+ },
+ "8375e54a62cf": {
+  "arm": "sham",
+  "fork": "drive-05#t7s12",
+  "rung": "0.0556"
+ },
+ "8382780b2d51": {
+  "arm": "advisory",
+  "fork": "drive-08#t11s29",
+  "rung": "0.6"
+ },
+ "839c665f0298": {
+  "batch": 30,
+  "control": "ctl03"
+ },
+ "839dbb891c10": {
+  "arm": "advisory",
+  "fork": "drive-02#t3s5",
+  "rung": "0.6222"
+ },
+ "83a5087f8cb4": {
+  "arm": "sham",
+  "fork": "drive-07#t8s14",
+  "rung": "0.8"
+ },
+ "83a5ea672c2b": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s7",
+  "rung": "0.0556"
+ },
+ "83fb68af1252": {
+  "arm": "advisory",
+  "fork": "drive-03#t5s13",
+  "rung": "0.6"
+ },
+ "847b2a33a1d5": {
+  "batch": 31,
+  "control": "ctl02"
+ },
+ "84a6f1af184e": {
+  "batch": 32,
+  "control": "ctl10"
+ },
+ "84e3c66d7556": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s0",
+  "rung": "0.6222"
+ },
+ "851bd06f587b": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s7",
+  "rung": "0.6222"
+ },
+ "85263336961f": {
+  "batch": 1,
+  "control": "ctl14"
+ },
+ "852e9940b622": {
+  "arm": "imperative",
+  "fork": "drive-07#t10s12",
+  "rung": "0.0556"
+ },
+ "853e679f2a5c": {
+  "arm": "sham",
+  "fork": "drive-06#t9s20",
+  "rung": "0.8"
+ },
+ "854d35daf201": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s13",
+  "rung": "0.6"
+ },
+ "857028868c7e": {
+  "arm": "sham",
+  "fork": "drive-14#t2s15",
+  "rung": "1.0"
+ },
+ "857e0dfc0a5c": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s12",
+  "rung": "0.6"
+ },
+ "858e00f32ab0": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s26",
+  "rung": "1.0"
+ },
+ "85b433e3aa4f": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s11",
+  "rung": "1.0"
+ },
+ "8629f97fc682": {
+  "arm": "advisory",
+  "fork": "drive-08#t10s4",
+  "rung": "0.6"
+ },
+ "8653ea08e5eb": {
+  "arm": "sham",
+  "fork": "drive-08#t10s4",
+  "rung": "0.0556"
+ },
+ "867efd7fd98a": {
+  "arm": "sham",
+  "fork": "drive-10#t8s4",
+  "rung": "0.4"
+ },
+ "8685cbff3fa2": {
+  "arm": "advisory",
+  "fork": "drive-08#t11s16",
+  "rung": "0.6222"
+ },
+ "869b3ab54592": {
+  "arm": "imperative",
+  "fork": "drive-13#t4s0",
+  "rung": "1.0"
+ },
+ "869eb6bf4ecf": {
+  "arm": "advisory",
+  "fork": "drive-04#t11s0",
+  "rung": "0.0556"
+ },
+ "86a71c729ea4": {
+  "arm": "sham",
+  "fork": "drive-08#t9s14",
+  "rung": "0.6222"
+ },
+ "86d38bf0265d": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s17",
+  "rung": "0.0556"
+ },
+ "86e650ccc1b9": {
+  "arm": "advisory",
+  "fork": "drive-15#t2s29",
+  "rung": "0.4"
+ },
+ "86edfb9bfcfa": {
+  "arm": "imperative",
+  "fork": "drive-05#t10s26",
+  "rung": "0.8"
+ },
+ "8705a8eb1d6b": {
+  "arm": "imperative",
+  "fork": "drive-06#t2s29",
+  "rung": "1.0"
+ },
+ "8715744e3365": {
+  "arm": "advisory",
+  "fork": "drive-03#t8s15",
+  "rung": "0.6"
+ },
+ "871ad68aafbf": {
+  "arm": "sham",
+  "fork": "drive-08#t9s14",
+  "rung": "0.6"
+ },
+ "871bd8477026": {
+  "arm": "advisory",
+  "fork": "drive-08#t11s29",
+  "rung": "0.6222"
+ },
+ "87254a7cd442": {
+  "arm": "advisory",
+  "fork": "drive-02#t10s9",
+  "rung": "0.8"
+ },
+ "877e9d3cbc24": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s2",
+  "rung": "0.4"
+ },
+ "8793b2ff933c": {
+  "batch": 43,
+  "control": "ctl04"
+ },
+ "87e0ae0908cf": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s7",
+  "rung": "0.4"
+ },
+ "87f498abeb5f": {
+  "arm": "advisory",
+  "fork": "drive-05#t11s17",
+  "rung": "1.0"
+ },
+ "87fca8ee6e7a": {
+  "arm": "imperative",
+  "fork": "drive-13#t2s21",
+  "rung": "1.0"
+ },
+ "880ea6a06886": {
+  "batch": 41,
+  "control": "ctl08"
+ },
+ "8841d3ba5195": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s28",
+  "rung": "0.0556"
+ },
+ "884b4b4491ad": {
+  "batch": 21,
+  "control": "ctl06"
+ },
+ "884cdb0fcd6f": {
+  "arm": "sham",
+  "fork": "drive-08#t8s17",
+  "rung": "0.0556"
+ },
+ "884e7e543f70": {
+  "arm": "sham",
+  "fork": "drive-06#t8s6",
+  "rung": "0.6"
+ },
+ "88761d21f4fc": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s14",
+  "rung": "0.6"
+ },
+ "887c2abc1b20": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s3",
+  "rung": "0.8"
+ },
+ "8883d7b34263": {
+  "arm": "sham",
+  "fork": "drive-13#t4s0",
+  "rung": "0.0556"
+ },
+ "8891a09aca87": {
+  "arm": "sham",
+  "fork": "drive-02#t9s11",
+  "rung": "0.6222"
+ },
+ "8892c80fbb1f": {
+  "batch": 30,
+  "control": "ctl04"
+ },
+ "889fe37863df": {
+  "arm": "sham",
+  "fork": "drive-10#t8s22",
+  "rung": "0.6222"
+ },
+ "88a333d5c0a9": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s1",
+  "rung": "0.4"
+ },
+ "88a8e63f6f8a": {
+  "arm": "advisory",
+  "fork": "drive-05#t3s28",
+  "rung": "0.6222"
+ },
+ "88aeb51d4a19": {
+  "arm": "advisory",
+  "fork": "drive-04#t5s24",
+  "rung": "0.6"
+ },
+ "88b5b365f804": {
+  "arm": "advisory",
+  "fork": "drive-04#t7s15",
+  "rung": "1.0"
+ },
+ "88cf3f6b7714": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s2",
+  "rung": "0.8"
+ },
+ "89036a4fb52c": {
+  "arm": "sham",
+  "fork": "drive-09#t5s22",
+  "rung": "0.0556"
+ },
+ "891be517e93f": {
+  "arm": "sham",
+  "fork": "drive-04#t8s16",
+  "rung": "0.0556"
+ },
+ "892b2bf48c8a": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s5",
+  "rung": "1.0"
+ },
+ "8932d9afd550": {
+  "arm": "imperative",
+  "fork": "drive-08#t7s24",
+  "rung": "0.0556"
+ },
+ "89779253f5d8": {
+  "arm": "sham",
+  "fork": "drive-08#t10s4",
+  "rung": "0.8"
+ },
+ "898a1290398d": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s4",
+  "rung": "0.6"
+ },
+ "89a2d0646a12": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s18",
+  "rung": "1.0"
+ },
+ "89ad828dfdf1": {
+  "arm": "sham",
+  "fork": "drive-13#t4s0",
+  "rung": "0.8"
+ },
+ "89c4933da3a8": {
+  "arm": "sham",
+  "fork": "drive-04#t8s13",
+  "rung": "0.6222"
+ },
+ "89cba0389819": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s10",
+  "rung": "0.6"
+ },
+ "8a201d06d0f7": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s2",
+  "rung": "1.0"
+ },
+ "8a29e6c308e7": {
+  "arm": "imperative",
+  "fork": "drive-08#t9s14",
+  "rung": "1.0"
+ },
+ "8a2a8294c218": {
+  "arm": "imperative",
+  "fork": "drive-09#t8s28",
+  "rung": "0.6222"
+ },
+ "8a5266aa37c7": {
+  "arm": "advisory",
+  "fork": "drive-09#t5s22",
+  "rung": "0.6"
+ },
+ "8a9bbd58bacf": {
+  "arm": "sham",
+  "fork": "drive-10#t8s12",
+  "rung": "0.6"
+ },
+ "8aae4c289da3": {
+  "arm": "advisory",
+  "fork": "drive-13#t4s0",
+  "rung": "0.4"
+ },
+ "8ab23c7a4c4c": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s14",
+  "rung": "0.4"
+ },
+ "8aeb25afa1fd": {
+  "arm": "sham",
+  "fork": "drive-15#t2s29",
+  "rung": "0.8"
+ },
+ "8b495951f78d": {
+  "batch": 14,
+  "control": "ctl14"
+ },
+ "8b4e703c2420": {
+  "arm": "imperative",
+  "fork": "drive-10#t5s7",
+  "rung": "0.6"
+ },
+ "8b50feeb95b7": {
+  "arm": "sham",
+  "fork": "drive-07#t8s13",
+  "rung": "0.6222"
+ },
+ "8b7e6785f535": {
+  "arm": "sham",
+  "fork": "drive-08#t7s24",
+  "rung": "0.6"
+ },
+ "8b9b02cbe9f8": {
+  "arm": "sham",
+  "fork": "drive-08#t5s15",
+  "rung": "0.0556"
+ },
+ "8ba17d8975f0": {
+  "arm": "sham",
+  "fork": "drive-10#t5s7",
+  "rung": "0.0556"
+ },
+ "8baed891fa38": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s17",
+  "rung": "0.0556"
+ },
+ "8bb42678a8e0": {
+  "arm": "sham",
+  "fork": "drive-09#t9s12",
+  "rung": "1.0"
+ },
+ "8bc450c7556e": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s13",
+  "rung": "0.8"
+ },
+ "8bd065b7f777": {
+  "arm": "sham",
+  "fork": "drive-08#t5s13",
+  "rung": "0.4"
+ },
+ "8c00f8150b74": {
+  "arm": "imperative",
+  "fork": "drive-03#t8s15",
+  "rung": "0.0556"
+ },
+ "8c0dd9999bb3": {
+  "arm": "imperative",
+  "fork": "drive-13#t4s0",
+  "rung": "0.8"
+ },
+ "8c246d9abacd": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s15",
+  "rung": "1.0"
+ },
+ "8c5c0f743d48": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s14",
+  "rung": "0.8"
+ },
+ "8c8660f6bb46": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s20",
+  "rung": "0.0556"
+ },
+ "8cbd0809a806": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s1",
+  "rung": "0.8"
+ },
+ "8cc2206bd5cb": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s1",
+  "rung": "0.6"
+ },
+ "8d42d8582d71": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s9",
+  "rung": "1.0"
+ },
+ "8d9220feab2e": {
+  "arm": "sham",
+  "fork": "drive-04#t5s24",
+  "rung": "0.4"
+ },
+ "8daf706a3011": {
+  "batch": 35,
+  "control": "ctl13"
+ },
+ "8e05180c56bb": {
+  "arm": "sham",
+  "fork": "drive-08#t7s24",
+  "rung": "0.4"
+ },
+ "8e70a8608003": {
+  "arm": "imperative",
+  "fork": "drive-05#t10s26",
+  "rung": "0.4"
+ },
+ "8e72bada3c1b": {
+  "arm": "advisory",
+  "fork": "drive-07#t10s12",
+  "rung": "0.8"
+ },
+ "8e82d0cbaa8e": {
+  "arm": "advisory",
+  "fork": "drive-04#t8s13",
+  "rung": "0.6222"
+ },
+ "8e8616432bb1": {
+  "arm": "imperative",
+  "fork": "drive-04#t11s0",
+  "rung": "0.8"
+ },
+ "8e9998056313": {
+  "arm": "imperative",
+  "fork": "drive-09#t8s23",
+  "rung": "0.6"
+ },
+ "8eb69a39c81e": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s15",
+  "rung": "0.6222"
+ },
+ "8eccb65c705c": {
+  "batch": 43,
+  "control": "ctl05"
+ },
+ "8ee2ad2a4ea4": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s15",
+  "rung": "0.6"
+ },
+ "8f38601c7f3d": {
+  "arm": "sham",
+  "fork": "drive-14#t2s15",
+  "rung": "0.8"
+ },
+ "8f5fef1e0f3e": {
+  "batch": 40,
+  "control": "ctl01"
+ },
+ "8f66cf1f44f1": {
+  "arm": "sham",
+  "fork": "drive-04#t9s10",
+  "rung": "0.4"
+ },
+ "8f6a03555082": {
+  "arm": "advisory",
+  "fork": "drive-07#t10s13",
+  "rung": "0.6"
+ },
+ "8f6f96ec397a": {
+  "arm": "sham",
+  "fork": "drive-02#t9s11",
+  "rung": "0.8"
+ },
+ "8f7748a29f1c": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s13",
+  "rung": "0.4"
+ },
+ "8f7af6c5e49f": {
+  "arm": "imperative",
+  "fork": "drive-04#t8s16",
+  "rung": "0.6"
+ },
+ "8fa2ad44b007": {
+  "arm": "imperative",
+  "fork": "drive-13#t5s1",
+  "rung": "0.8"
+ },
+ "8fa37e51a5b2": {
+  "arm": "advisory",
+  "fork": "drive-03#t10s11",
+  "rung": "0.8"
+ },
+ "8fbf4a154087": {
+  "arm": "imperative",
+  "fork": "drive-06#t5s23",
+  "rung": "0.6"
+ },
+ "8fc925bb6bb3": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s11",
+  "rung": "0.6"
+ },
+ "8fcec590f5d4": {
+  "arm": "imperative",
+  "fork": "drive-08#t9s24",
+  "rung": "0.8"
+ },
+ "90018dcdcb8a": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s13",
+  "rung": "0.6222"
+ },
+ "9002529a77fc": {
+  "arm": "sham",
+  "fork": "drive-06#t7s15",
+  "rung": "0.4"
+ },
+ "900e858d9766": {
+  "arm": "sham",
+  "fork": "drive-06#t7s20",
+  "rung": "1.0"
+ },
+ "902855531fdf": {
+  "batch": 3,
+  "control": "ctl12"
+ },
+ "9034c8f8992d": {
+  "arm": "sham",
+  "fork": "drive-08#t8s18",
+  "rung": "0.8"
+ },
+ "904d82af490b": {
+  "batch": 25,
+  "control": "ctl02"
+ },
+ "905997b595bd": {
+  "arm": "sham",
+  "fork": "drive-03#t10s10",
+  "rung": "0.4"
+ },
+ "906e10f7eacc": {
+  "arm": "sham",
+  "fork": "drive-07#t7s26",
+  "rung": "0.6"
+ },
+ "9080d71d0cc4": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s14",
+  "rung": "1.0"
+ },
+ "90c8b44ba143": {
+  "arm": "imperative",
+  "fork": "drive-10#t5s7",
+  "rung": "0.4"
+ },
+ "90ee6bd8e20c": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s4",
+  "rung": "1.0"
+ },
+ "90eec589a4a4": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s13",
+  "rung": "0.6"
+ },
+ "90f54857d74c": {
+  "arm": "imperative",
+  "fork": "drive-04#t5s24",
+  "rung": "0.4"
+ },
+ "914f73b4ca5c": {
+  "arm": "advisory",
+  "fork": "drive-02#t10s9",
+  "rung": "0.0556"
+ },
+ "9164f04b9363": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s25",
+  "rung": "0.6"
+ },
+ "916c5c296dd7": {
+  "arm": "sham",
+  "fork": "drive-10#t8s22",
+  "rung": "0.4"
+ },
+ "919cfd79a644": {
+  "arm": "imperative",
+  "fork": "drive-03#t10s10",
+  "rung": "0.6"
+ },
+ "91a23cdcfc38": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s25",
+  "rung": "0.6222"
+ },
+ "91b7c9cc32cf": {
+  "arm": "advisory",
+  "fork": "drive-13#t2s21",
+  "rung": "0.4"
+ },
+ "91ce2f6ec4d9": {
+  "arm": "sham",
+  "fork": "drive-05#t3s28",
+  "rung": "0.4"
+ },
+ "920c635b9385": {
+  "arm": "advisory",
+  "fork": "drive-07#t10s13",
+  "rung": "0.4"
+ },
+ "921327be2c89": {
+  "arm": "sham",
+  "fork": "drive-10#t8s12",
+  "rung": "0.8"
+ },
+ "922290ddac61": {
+  "arm": "advisory",
+  "fork": "drive-04#t7s15",
+  "rung": "0.4"
+ },
+ "922b54ceccd5": {
+  "arm": "sham",
+  "fork": "drive-08#t5s5",
+  "rung": "0.0556"
+ },
+ "92922fd62ba5": {
+  "arm": "advisory",
+  "fork": "drive-02#t7s29",
+  "rung": "0.6222"
+ },
+ "92964427ec7a": {
+  "arm": "sham",
+  "fork": "drive-04#t9s10",
+  "rung": "0.6"
+ },
+ "92b8628d4278": {
+  "arm": "imperative",
+  "fork": "drive-02#t10s9",
+  "rung": "0.6222"
+ },
+ "92d49dd983b9": {
+  "arm": "sham",
+  "fork": "drive-09#t8s23",
+  "rung": "0.4"
+ },
+ "92e7414c9e35": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s25",
+  "rung": "0.0556"
+ },
+ "92fb5b90acb1": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s3",
+  "rung": "0.8"
+ },
+ "93138d4a72f1": {
+  "arm": "imperative",
+  "fork": "drive-04#t2s2",
+  "rung": "0.0556"
+ },
+ "93327de63980": {
+  "arm": "sham",
+  "fork": "drive-02#t8s26",
+  "rung": "0.8"
+ },
+ "934bdf6e145a": {
+  "arm": "advisory",
+  "fork": "drive-06#t2s29",
+  "rung": "0.4"
+ },
+ "93630d224193": {
+  "arm": "sham",
+  "fork": "drive-05#t3s28",
+  "rung": "1.0"
+ },
+ "936345fda472": {
+  "arm": "advisory",
+  "fork": "drive-10#t5s7",
+  "rung": "0.0556"
+ },
+ "93717944e3b9": {
+  "arm": "imperative",
+  "fork": "drive-03#t9s26",
+  "rung": "0.4"
+ },
+ "939009f8ebc1": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s13",
+  "rung": "1.0"
+ },
+ "93b6e42f3d4c": {
+  "arm": "sham",
+  "fork": "drive-10#t8s10",
+  "rung": "0.4"
+ },
+ "93c7a4e42019": {
+  "arm": "imperative",
+  "fork": "drive-09#t8s28",
+  "rung": "0.6"
+ },
+ "9412f5a82671": {
+  "arm": "sham",
+  "fork": "drive-10#t9s14",
+  "rung": "0.0556"
+ },
+ "9413053c12cc": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s17",
+  "rung": "0.6222"
+ },
+ "946f78cf10a6": {
+  "arm": "advisory",
+  "fork": "drive-02#t3s5",
+  "rung": "0.8"
+ },
+ "949f9ec4ac69": {
+  "arm": "advisory",
+  "fork": "drive-08#t9s14",
+  "rung": "0.6"
+ },
+ "94a2bfab2e00": {
+  "arm": "sham",
+  "fork": "drive-13#t5s1",
+  "rung": "0.8"
+ },
+ "94c9b015484c": {
+  "batch": 12,
+  "control": "ctl06"
+ },
+ "94ed6e28dba0": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s12",
+  "rung": "1.0"
+ },
+ "95370c4b4454": {
+  "batch": 17,
+  "control": "ctl06"
+ },
+ "9545e02c05ca": {
+  "arm": "sham",
+  "fork": "drive-04#t9s10",
+  "rung": "1.0"
+ },
+ "954d73c5f1a8": {
+  "arm": "sham",
+  "fork": "drive-04#t9s24",
+  "rung": "1.0"
+ },
+ "9570289bb762": {
+  "arm": "imperative",
+  "fork": "drive-09#t5s22",
+  "rung": "0.8"
+ },
+ "95859e139299": {
+  "batch": 24,
+  "control": "ctl01"
+ },
+ "962c71bd1789": {
+  "arm": "advisory",
+  "fork": "drive-05#t11s26",
+  "rung": "0.6222"
+ },
+ "9631a2faab6c": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s12",
+  "rung": "0.8"
+ },
+ "965b0c2a447c": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s20",
+  "rung": "0.6"
+ },
+ "96e1ea119448": {
+  "arm": "advisory",
+  "fork": "drive-02#t10s9",
+  "rung": "1.0"
+ },
+ "97017d6d1bc4": {
+  "arm": "imperative",
+  "fork": "drive-05#t11s26",
+  "rung": "1.0"
+ },
+ "97219b83a258": {
+  "arm": "imperative",
+  "fork": "drive-09#t5s5",
+  "rung": "0.6222"
+ },
+ "973c80ff2c96": {
+  "arm": "sham",
+  "fork": "drive-10#t10s2",
+  "rung": "0.6"
+ },
+ "975918fbabb3": {
+  "arm": "advisory",
+  "fork": "drive-13#t4s0",
+  "rung": "0.6"
+ },
+ "975d434ff52d": {
+  "arm": "imperative",
+  "fork": "drive-05#t10s26",
+  "rung": "0.0556"
+ },
+ "9764a4205361": {
+  "arm": "advisory",
+  "fork": "drive-03#t8s15",
+  "rung": "0.8"
+ },
+ "9773680da4d7": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s15",
+  "rung": "0.8"
+ },
+ "977ea1bbeef6": {
+  "arm": "sham",
+  "fork": "drive-09#t2s27",
+  "rung": "0.0556"
+ },
+ "979e6a857bfc": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s13",
+  "rung": "0.4"
+ },
+ "97e8eaac7023": {
+  "arm": "advisory",
+  "fork": "drive-13#t2s21",
+  "rung": "0.0556"
+ },
+ "98005615aaaa": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s9",
+  "rung": "0.4"
+ },
+ "98225f33317a": {
+  "arm": "imperative",
+  "fork": "drive-09#t5s22",
+  "rung": "0.6"
+ },
+ "9861a45bff37": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s14",
+  "rung": "0.0556"
+ },
+ "988b1750e8b4": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s25",
+  "rung": "0.8"
+ },
+ "98c67ba902f0": {
+  "arm": "sham",
+  "fork": "drive-08#t8s18",
+  "rung": "0.6"
+ },
+ "98fcff74c46d": {
+  "batch": 22,
+  "control": "ctl06"
+ },
+ "99290cacd832": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s0",
+  "rung": "0.6"
+ },
+ "9940c9466d7d": {
+  "arm": "imperative",
+  "fork": "drive-03#t8s15",
+  "rung": "0.8"
+ },
+ "997b123be56c": {
+  "arm": "sham",
+  "fork": "drive-09#t2s28",
+  "rung": "1.0"
+ },
+ "9986be34c144": {
+  "batch": 13,
+  "control": "ctl11"
+ },
+ "9999ec9eaa79": {
+  "arm": "advisory",
+  "fork": "drive-04#t2s2",
+  "rung": "1.0"
+ },
+ "99b60f285a3a": {
+  "arm": "imperative",
+  "fork": "drive-03#t3s20",
+  "rung": "0.8"
+ },
+ "99f77675d068": {
+  "arm": "sham",
+  "fork": "drive-10#t10s2",
+  "rung": "1.0"
+ },
+ "99f7ca74a604": {
+  "arm": "imperative",
+  "fork": "drive-08#t11s16",
+  "rung": "0.0556"
+ },
+ "9a06d0d8c790": {
+  "arm": "imperative",
+  "fork": "drive-13#t2s21",
+  "rung": "0.4"
+ },
+ "9a158127646e": {
+  "batch": 5,
+  "control": "ctl06"
+ },
+ "9a38b72bc895": {
+  "arm": "advisory",
+  "fork": "drive-13#t2s21",
+  "rung": "0.8"
+ },
+ "9a68a3dbb844": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s15",
+  "rung": "0.6"
+ },
+ "9a7879315630": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s4",
+  "rung": "0.0556"
+ },
+ "9a88679ff765": {
+  "batch": 25,
+  "control": "ctl01"
+ },
+ "9aa5c9c5ec21": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s7",
+  "rung": "0.8"
+ },
+ "9ab03d6d27ee": {
+  "arm": "sham",
+  "fork": "drive-05#t10s26",
+  "rung": "0.4"
+ },
+ "9ab1b0b72f6f": {
+  "arm": "sham",
+  "fork": "drive-09#t5s22",
+  "rung": "0.8"
+ },
+ "9ab833459bfc": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s3",
+  "rung": "0.6"
+ },
+ "9adeedeee578": {
+  "arm": "sham",
+  "fork": "drive-02#t8s26",
+  "rung": "0.6222"
+ },
+ "9b16ec446837": {
+  "batch": 33,
+  "control": "ctl05"
+ },
+ "9b356bc0b182": {
+  "arm": "advisory",
+  "fork": "drive-10#t7s28",
+  "rung": "0.6222"
+ },
+ "9b5106179798": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s18",
+  "rung": "0.0556"
+ },
+ "9bb2b34a8eeb": {
+  "arm": "advisory",
+  "fork": "drive-06#t5s23",
+  "rung": "0.0556"
+ },
+ "9be3839e798c": {
+  "batch": 36,
+  "control": "ctl08"
+ },
+ "9c05d8427be8": {
+  "arm": "advisory",
+  "fork": "drive-03#t9s26",
+  "rung": "0.0556"
+ },
+ "9c224fa53438": {
+  "arm": "sham",
+  "fork": "drive-06#t5s23",
+  "rung": "0.6"
+ },
+ "9c3a67a25a23": {
+  "arm": "imperative",
+  "fork": "drive-04#t11s0",
+  "rung": "0.6"
+ },
+ "9c4c4646debc": {
+  "arm": "imperative",
+  "fork": "drive-03#t9s26",
+  "rung": "0.0556"
+ },
+ "9cb645a3321f": {
+  "arm": "advisory",
+  "fork": "drive-05#t7s12",
+  "rung": "0.0556"
+ },
+ "9cbc4ad75c20": {
+  "arm": "advisory",
+  "fork": "drive-09#t8s23",
+  "rung": "0.6"
+ },
+ "9cc2cc7ad312": {
+  "arm": "sham",
+  "fork": "drive-02#t8s26",
+  "rung": "0.0556"
+ },
+ "9ccd8091229f": {
+  "arm": "sham",
+  "fork": "drive-07#t8s13",
+  "rung": "0.8"
+ },
+ "9d1acb056d00": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s26",
+  "rung": "0.4"
+ },
+ "9d27c7251140": {
+  "arm": "advisory",
+  "fork": "drive-10#t5s7",
+  "rung": "0.8"
+ },
+ "9d8e67286669": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s15",
+  "rung": "1.0"
+ },
+ "9dd698781bd0": {
+  "arm": "sham",
+  "fork": "drive-07#t8s13",
+  "rung": "0.0556"
+ },
+ "9de3eed2e6fb": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s20",
+  "rung": "0.6222"
+ },
+ "9e2580fef190": {
+  "arm": "sham",
+  "fork": "drive-03#t9s26",
+  "rung": "0.6222"
+ },
+ "9e58df11028c": {
+  "batch": 28,
+  "control": "ctl13"
+ },
+ "9e715ae2307d": {
+  "arm": "sham",
+  "fork": "drive-09#t5s5",
+  "rung": "1.0"
+ },
+ "9e86ebd8eb25": {
+  "arm": "advisory",
+  "fork": "drive-05#t11s26",
+  "rung": "1.0"
+ },
+ "9ebad3a308ba": {
+  "arm": "sham",
+  "fork": "drive-09#t5s5",
+  "rung": "0.4"
+ },
+ "9ec4223d4f8f": {
+  "arm": "sham",
+  "fork": "drive-08#t10s4",
+  "rung": "1.0"
+ },
+ "9ee6d6eeea0a": {
+  "batch": 21,
+  "control": "ctl07"
+ },
+ "9f21942231c9": {
+  "arm": "advisory",
+  "fork": "drive-08#t7s24",
+  "rung": "0.6222"
+ },
+ "9f463b1531a5": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s8",
+  "rung": "1.0"
+ },
+ "9f6aedfff81f": {
+  "arm": "imperative",
+  "fork": "drive-08#t9s14",
+  "rung": "0.4"
+ },
+ "9f7f28815d6a": {
+  "arm": "imperative",
+  "fork": "drive-08#t11s16",
+  "rung": "0.6222"
+ },
+ "9fbd0e6cca98": {
+  "arm": "sham",
+  "fork": "drive-07#t8s12",
+  "rung": "0.8"
+ },
+ "9fc3d1d31f7e": {
+  "arm": "sham",
+  "fork": "drive-04#t9s24",
+  "rung": "0.4"
+ },
+ "9fc65fdd2ab0": {
+  "arm": "sham",
+  "fork": "drive-10#t9s14",
+  "rung": "0.4"
+ },
+ "a0027e3df72b": {
+  "arm": "advisory",
+  "fork": "drive-04#t7s15",
+  "rung": "0.8"
+ },
+ "a02b4b4f329e": {
+  "arm": "imperative",
+  "fork": "drive-15#t2s29",
+  "rung": "0.6"
+ },
+ "a0406bd0759d": {
+  "batch": 16,
+  "control": "ctl12"
+ },
+ "a05fac257916": {
+  "arm": "imperative",
+  "fork": "drive-08#t2s0",
+  "rung": "0.6222"
+ },
+ "a0784d89a6a4": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s2",
+  "rung": "0.8"
+ },
+ "a091d98b7b72": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s14",
+  "rung": "0.8"
+ },
+ "a0939035002c": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s28",
+  "rung": "0.6222"
+ },
+ "a0a06f997bf0": {
+  "arm": "sham",
+  "fork": "drive-10#t8s4",
+  "rung": "0.6222"
+ },
+ "a0ac4c452b3c": {
+  "arm": "sham",
+  "fork": "drive-02#t8s26",
+  "rung": "0.4"
+ },
+ "a0c77794b6f2": {
+  "arm": "sham",
+  "fork": "drive-14#t2s15",
+  "rung": "0.6"
+ },
+ "a0f772827510": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s26",
+  "rung": "0.6222"
+ },
+ "a1485212d912": {
+  "batch": 50,
+  "control": "ctl13"
+ },
+ "a151006ed120": {
+  "arm": "sham",
+  "fork": "drive-14#t2s13",
+  "rung": "0.0556"
+ },
+ "a183b5f36106": {
+  "arm": "sham",
+  "fork": "drive-10#t8s4",
+  "rung": "0.0556"
+ },
+ "a2343b7980b4": {
+  "arm": "sham",
+  "fork": "drive-08#t11s29",
+  "rung": "0.0556"
+ },
+ "a2c260c1f612": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s1",
+  "rung": "0.8"
+ },
+ "a2c6995dabe8": {
+  "arm": "sham",
+  "fork": "drive-13#t2s21",
+  "rung": "0.6"
+ },
+ "a2fe17a20501": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s25",
+  "rung": "0.6"
+ },
+ "a3116c2c61d1": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s28",
+  "rung": "1.0"
+ },
+ "a33158b97b94": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s2",
+  "rung": "0.6222"
+ },
+ "a334239f467e": {
+  "batch": 37,
+  "control": "ctl06"
+ },
+ "a335f4493855": {
+  "batch": 5,
+  "control": "ctl03"
+ },
+ "a3619567f026": {
+  "arm": "sham",
+  "fork": "drive-10#t10s2",
+  "rung": "0.8"
+ },
+ "a381b23fdcb1": {
+  "arm": "sham",
+  "fork": "drive-13#t5s1",
+  "rung": "1.0"
+ },
+ "a3837e03486e": {
+  "arm": "sham",
+  "fork": "drive-08#t5s6",
+  "rung": "0.8"
+ },
+ "a3aedbf1bb12": {
+  "arm": "imperative",
+  "fork": "drive-05#t11s17",
+  "rung": "0.4"
+ },
+ "a3f1bbf5f45b": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s1",
+  "rung": "0.6"
+ },
+ "a4407ffc864b": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s14",
+  "rung": "0.6"
+ },
+ "a471b4913fa5": {
+  "batch": 32,
+  "control": "ctl13"
+ },
+ "a47b0fce7af7": {
+  "batch": 24,
+  "control": "ctl12"
+ },
+ "a49db023ec6c": {
+  "arm": "sham",
+  "fork": "drive-15#t2s9",
+  "rung": "0.0556"
+ },
+ "a4b3a12972fe": {
+  "arm": "imperative",
+  "fork": "drive-08#t2s0",
+  "rung": "0.8"
+ },
+ "a506d8446857": {
+  "arm": "advisory",
+  "fork": "drive-10#t7s18",
+  "rung": "0.4"
+ },
+ "a52a3bf7428f": {
+  "arm": "sham",
+  "fork": "drive-03#t5s13",
+  "rung": "0.6"
+ },
+ "a5421caf9f22": {
+  "arm": "advisory",
+  "fork": "drive-02#t7s29",
+  "rung": "0.8"
+ },
+ "a542523ae019": {
+  "arm": "sham",
+  "fork": "drive-07#t10s12",
+  "rung": "0.6"
+ },
+ "a5629bf42790": {
+  "batch": 19,
+  "control": "ctl03"
+ },
+ "a58462d9fb66": {
+  "batch": 8,
+  "control": "ctl04"
+ },
+ "a58ea0493e69": {
+  "arm": "sham",
+  "fork": "drive-08#t8s14",
+  "rung": "1.0"
+ },
+ "a5b3780fe8f2": {
+  "batch": 34,
+  "control": "ctl04"
+ },
+ "a5e5af7833c5": {
+  "batch": 41,
+  "control": "ctl10"
+ },
+ "a60044314a76": {
+  "arm": "sham",
+  "fork": "drive-06#t2s29",
+  "rung": "0.8"
+ },
+ "a60650282037": {
+  "arm": "sham",
+  "fork": "drive-14#t2s13",
+  "rung": "0.4"
+ },
+ "a62409609a97": {
+  "arm": "advisory",
+  "fork": "drive-09#t8s28",
+  "rung": "0.0556"
+ },
+ "a625a9721f61": {
+  "arm": "imperative",
+  "fork": "drive-04#t11s0",
+  "rung": "1.0"
+ },
+ "a62d9ba30661": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s2",
+  "rung": "0.8"
+ },
+ "a643b7d8046b": {
+  "batch": 16,
+  "control": "ctl09"
+ },
+ "a65b0cb8b039": {
+  "arm": "imperative",
+  "fork": "drive-04#t11s0",
+  "rung": "0.6222"
+ },
+ "a6780cbfe0a7": {
+  "arm": "advisory",
+  "fork": "drive-02#t10s9",
+  "rung": "0.4"
+ },
+ "a6fd70829a73": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s13",
+  "rung": "0.0556"
+ },
+ "a7533daf6887": {
+  "arm": "imperative",
+  "fork": "drive-05#t11s17",
+  "rung": "0.0556"
+ },
+ "a75bdb2cd8dc": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s8",
+  "rung": "1.0"
+ },
+ "a75c87be079a": {
+  "arm": "advisory",
+  "fork": "drive-05#t11s26",
+  "rung": "0.8"
+ },
+ "a76e965cd7b8": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s20",
+  "rung": "1.0"
+ },
+ "a77b13dac3c9": {
+  "arm": "advisory",
+  "fork": "drive-08#t7s24",
+  "rung": "0.8"
+ },
+ "a78484d12bae": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s15",
+  "rung": "0.0556"
+ },
+ "a7a89d7416fd": {
+  "arm": "advisory",
+  "fork": "drive-08#t11s29",
+  "rung": "1.0"
+ },
+ "a7b039fa08df": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s10",
+  "rung": "0.6222"
+ },
+ "a7ca40be82d4": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s20",
+  "rung": "0.0556"
+ },
+ "a7d79facc270": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s1",
+  "rung": "1.0"
+ },
+ "a7f4f5696a6e": {
+  "arm": "advisory",
+  "fork": "drive-08#t11s16",
+  "rung": "0.8"
+ },
+ "a80d21f0ee9c": {
+  "batch": 29,
+  "control": "ctl01"
+ },
+ "a8319988f7e3": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s13",
+  "rung": "0.6222"
+ },
+ "a84077b62ae5": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s0",
+  "rung": "0.8"
+ },
+ "a85a89cc698c": {
+  "arm": "advisory",
+  "fork": "drive-13#t4s0",
+  "rung": "0.0556"
+ },
+ "a861af44cf29": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s3",
+  "rung": "0.4"
+ },
+ "a86b5819c907": {
+  "arm": "sham",
+  "fork": "drive-06#t9s20",
+  "rung": "1.0"
+ },
+ "a86df4cc2fa7": {
+  "arm": "advisory",
+  "fork": "drive-03#t5s13",
+  "rung": "0.6222"
+ },
+ "a89b4a222f61": {
+  "batch": 4,
+  "control": "ctl10"
+ },
+ "a8d5c12a37fa": {
+  "batch": 42,
+  "control": "ctl04"
+ },
+ "a8df7cfa2373": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s5",
+  "rung": "0.8"
+ },
+ "a8e2dcd242b3": {
+  "arm": "sham",
+  "fork": "drive-06#t7s0",
+  "rung": "0.0556"
+ },
+ "a9325529b4cf": {
+  "arm": "imperative",
+  "fork": "drive-06#t5s23",
+  "rung": "0.0556"
+ },
+ "a9430db2c529": {
+  "arm": "sham",
+  "fork": "drive-06#t7s15",
+  "rung": "0.8"
+ },
+ "a96c0b46a96b": {
+  "batch": 39,
+  "control": "ctl07"
+ },
+ "a9746fe39d06": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s0",
+  "rung": "0.4"
+ },
+ "a97a84794858": {
+  "batch": 11,
+  "control": "ctl05"
+ },
+ "a9911d8ff7af": {
+  "arm": "imperative",
+  "fork": "drive-08#t2s0",
+  "rung": "0.4"
+ },
+ "a99c71274858": {
+  "arm": "sham",
+  "fork": "drive-06#t9s20",
+  "rung": "0.6"
+ },
+ "aa0591de43b8": {
+  "arm": "sham",
+  "fork": "drive-06#t9s1",
+  "rung": "0.0556"
+ },
+ "aa07247b9fec": {
+  "arm": "sham",
+  "fork": "drive-06#t8s6",
+  "rung": "0.0556"
+ },
+ "aa2463ff5d33": {
+  "arm": "sham",
+  "fork": "drive-08#t8s17",
+  "rung": "0.6"
+ },
+ "aa490a4e743d": {
+  "arm": "advisory",
+  "fork": "drive-08#t11s29",
+  "rung": "0.4"
+ },
+ "aa55ccefa17c": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s9",
+  "rung": "0.8"
+ },
+ "aa5d5d9675fa": {
+  "batch": 30,
+  "control": "ctl14"
+ },
+ "aaaa4b401a8c": {
+  "arm": "advisory",
+  "fork": "drive-09#t5s22",
+  "rung": "0.8"
+ },
+ "aaae2d362b36": {
+  "arm": "sham",
+  "fork": "drive-02#t9s1",
+  "rung": "0.6222"
+ },
+ "aaae4fbf53d4": {
+  "arm": "imperative",
+  "fork": "drive-10#t7s18",
+  "rung": "0.0556"
+ },
+ "aad00c0deded": {
+  "arm": "advisory",
+  "fork": "drive-08#t2s0",
+  "rung": "0.6222"
+ },
+ "aad3ecf7e38c": {
+  "arm": "sham",
+  "fork": "drive-10#t7s28",
+  "rung": "0.4"
+ },
+ "aad831d67e84": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s11",
+  "rung": "1.0"
+ },
+ "aadcdee6cf71": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s8",
+  "rung": "1.0"
+ },
+ "ab162d771d4b": {
+  "arm": "sham",
+  "fork": "drive-08#t8s9",
+  "rung": "0.6222"
+ },
+ "ab2bdbf0ea85": {
+  "arm": "advisory",
+  "fork": "drive-15#t2s9",
+  "rung": "0.4"
+ },
+ "ab2fd4c27604": {
+  "arm": "imperative",
+  "fork": "drive-04#t8s16",
+  "rung": "0.0556"
+ },
+ "ab8eebbe59b3": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s1",
+  "rung": "0.6222"
+ },
+ "ab9c49c6ed04": {
+  "arm": "sham",
+  "fork": "drive-10#t8s2",
+  "rung": "0.6222"
+ },
+ "abc6e58e42b0": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s0",
+  "rung": "0.6222"
+ },
+ "abe05d750d12": {
+  "arm": "sham",
+  "fork": "drive-10#t7s28",
+  "rung": "0.6222"
+ },
+ "ac13189edc81": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s8",
+  "rung": "0.0556"
+ },
+ "ac261a468728": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s13",
+  "rung": "0.6"
+ },
+ "ac8905fab2ee": {
+  "arm": "sham",
+  "fork": "drive-03#t3s20",
+  "rung": "0.8"
+ },
+ "aceb6253e2cc": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s18",
+  "rung": "0.4"
+ },
+ "ad0c7f9c10cb": {
+  "arm": "advisory",
+  "fork": "drive-04#t11s0",
+  "rung": "0.8"
+ },
+ "ad32f32c37b8": {
+  "arm": "imperative",
+  "fork": "drive-04#t9s10",
+  "rung": "0.6"
+ },
+ "ad522f8f8b86": {
+  "arm": "sham",
+  "fork": "drive-09#t8s28",
+  "rung": "0.4"
+ },
+ "ad5fbe1e8f46": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s13",
+  "rung": "0.0556"
+ },
+ "ad6122db0ea4": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s2",
+  "rung": "0.4"
+ },
+ "ad8a1a14de1d": {
+  "arm": "sham",
+  "fork": "drive-06#t5s23",
+  "rung": "0.0556"
+ },
+ "ade49952194f": {
+  "batch": 49,
+  "control": "ctl10"
+ },
+ "ae0d2ceff411": {
+  "arm": "sham",
+  "fork": "drive-08#t8s9",
+  "rung": "0.8"
+ },
+ "ae456686bc1a": {
+  "arm": "sham",
+  "fork": "drive-03#t5s13",
+  "rung": "0.0556"
+ },
+ "ae9af7d29a38": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s15",
+  "rung": "0.6222"
+ },
+ "aebe1bb60128": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s11",
+  "rung": "0.4"
+ },
+ "aec3b54019df": {
+  "arm": "advisory",
+  "fork": "drive-05#t3s28",
+  "rung": "0.8"
+ },
+ "aee71ee55ace": {
+  "batch": 18,
+  "control": "ctl13"
+ },
+ "aeed86f74b13": {
+  "arm": "advisory",
+  "fork": "drive-03#t3s20",
+  "rung": "0.8"
+ },
+ "aef00cdf5025": {
+  "arm": "sham",
+  "fork": "drive-02#t10s9",
+  "rung": "0.0556"
+ },
+ "af1816da9756": {
+  "arm": "sham",
+  "fork": "drive-06#t7s15",
+  "rung": "0.6"
+ },
+ "af37288a86d5": {
+  "arm": "sham",
+  "fork": "drive-06#t2s29",
+  "rung": "1.0"
+ },
+ "af45997f04c7": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s14",
+  "rung": "1.0"
+ },
+ "af64e35021b4": {
+  "arm": "advisory",
+  "fork": "drive-05#t10s26",
+  "rung": "0.8"
+ },
+ "af6a172b2380": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s28",
+  "rung": "0.4"
+ },
+ "af7351912522": {
+  "arm": "imperative",
+  "fork": "drive-02#t3s5",
+  "rung": "0.0556"
+ },
+ "af9bb4d52b4d": {
+  "arm": "sham",
+  "fork": "drive-03#t10s11",
+  "rung": "0.0556"
+ },
+ "afa0b9486d86": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s15",
+  "rung": "0.8"
+ },
+ "afa7458bdcca": {
+  "arm": "advisory",
+  "fork": "drive-02#t10s9",
+  "rung": "0.6"
+ },
+ "afb027e57152": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s26",
+  "rung": "0.0556"
+ },
+ "afed390b1f87": {
+  "arm": "advisory",
+  "fork": "drive-15#t2s9",
+  "rung": "0.6222"
+ },
+ "b04c18fdd2d1": {
+  "batch": 23,
+  "control": "ctl06"
+ },
+ "b04cb9e55a7e": {
+  "arm": "imperative",
+  "fork": "drive-08#t9s24",
+  "rung": "0.4"
+ },
+ "b07f799855e1": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s15",
+  "rung": "0.8"
+ },
+ "b082ebf5cd04": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s10",
+  "rung": "0.8"
+ },
+ "b08397ac17b4": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s17",
+  "rung": "0.6222"
+ },
+ "b087d169859d": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s28",
+  "rung": "0.6"
+ },
+ "b0b1ef30f87a": {
+  "arm": "sham",
+  "fork": "drive-07#t10s13",
+  "rung": "0.0556"
+ },
+ "b0b8585af383": {
+  "arm": "advisory",
+  "fork": "drive-07#t10s13",
+  "rung": "0.0556"
+ },
+ "b0de21da9d3f": {
+  "arm": "imperative",
+  "fork": "drive-08#t9s24",
+  "rung": "0.0556"
+ },
+ "b0e97e92edb9": {
+  "arm": "advisory",
+  "fork": "drive-03#t9s26",
+  "rung": "0.4"
+ },
+ "b0ed0a8bcfe5": {
+  "arm": "sham",
+  "fork": "drive-10#t8s4",
+  "rung": "0.8"
+ },
+ "b0fa142eb62d": {
+  "arm": "sham",
+  "fork": "drive-06#t9s0",
+  "rung": "0.0556"
+ },
+ "b10f61190f85": {
+  "arm": "sham",
+  "fork": "drive-09#t9s4",
+  "rung": "0.8"
+ },
+ "b13b2694bc1f": {
+  "arm": "imperative",
+  "fork": "drive-13#t4s0",
+  "rung": "0.4"
+ },
+ "b147c81ed451": {
+  "arm": "sham",
+  "fork": "drive-06#t7s0",
+  "rung": "0.6"
+ },
+ "b18158dc35d9": {
+  "arm": "advisory",
+  "fork": "drive-09#t5s22",
+  "rung": "0.6222"
+ },
+ "b197856f6e6c": {
+  "batch": 42,
+  "control": "ctl01"
+ },
+ "b1a6599306c1": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s13",
+  "rung": "0.8"
+ },
+ "b1d90d835db4": {
+  "arm": "imperative",
+  "fork": "drive-09#t8s28",
+  "rung": "0.0556"
+ },
+ "b1ef5e69c26e": {
+  "arm": "sham",
+  "fork": "drive-15#t2s29",
+  "rung": "1.0"
+ },
+ "b218a4654893": {
+  "arm": "sham",
+  "fork": "drive-03#t8s15",
+  "rung": "0.6"
+ },
+ "b226253196b2": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s9",
+  "rung": "0.6"
+ },
+ "b25dc468985a": {
+  "arm": "imperative",
+  "fork": "drive-09#t8s23",
+  "rung": "1.0"
+ },
+ "b27566e89e6e": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s1",
+  "rung": "1.0"
+ },
+ "b27be2929ca0": {
+  "arm": "sham",
+  "fork": "drive-09#t2s28",
+  "rung": "0.6222"
+ },
+ "b2c4fff3db35": {
+  "arm": "sham",
+  "fork": "drive-06#t7s0",
+  "rung": "1.0"
+ },
+ "b2c80b92e31b": {
+  "arm": "sham",
+  "fork": "drive-10#t7s18",
+  "rung": "0.8"
+ },
+ "b2e53cf9c004": {
+  "arm": "sham",
+  "fork": "drive-08#t5s15",
+  "rung": "0.8"
+ },
+ "b2ea7b9975dc": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s7",
+  "rung": "0.6222"
+ },
+ "b2ef3928abea": {
+  "arm": "advisory",
+  "fork": "drive-03#t10s11",
+  "rung": "0.0556"
+ },
+ "b2fd1d5e21c5": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s0",
+  "rung": "0.4"
+ },
+ "b335e1b27f6b": {
+  "arm": "advisory",
+  "fork": "drive-04#t8s13",
+  "rung": "1.0"
+ },
+ "b395293499dc": {
+  "arm": "sham",
+  "fork": "drive-13#t2s20",
+  "rung": "0.0556"
+ },
+ "b3a3b472ae98": {
+  "arm": "imperative",
+  "fork": "drive-03#t8s15",
+  "rung": "0.6222"
+ },
+ "b3d40f38167f": {
+  "arm": "advisory",
+  "fork": "drive-03#t5s13",
+  "rung": "0.4"
+ },
+ "b4096e2a5ef8": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s1",
+  "rung": "0.0556"
+ },
+ "b4229dfb345f": {
+  "arm": "sham",
+  "fork": "drive-08#t8s15",
+  "rung": "0.8"
+ },
+ "b461213cfabf": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s0",
+  "rung": "0.0556"
+ },
+ "b4649fa00370": {
+  "arm": "imperative",
+  "fork": "drive-03#t3s20",
+  "rung": "1.0"
+ },
+ "b46c460de775": {
+  "batch": 1,
+  "control": "ctl06"
+ },
+ "b47e150f72fc": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s1",
+  "rung": "0.6222"
+ },
+ "b4800f8765eb": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s15",
+  "rung": "0.6"
+ },
+ "b49190c4bd83": {
+  "arm": "advisory",
+  "fork": "drive-05#t7s12",
+  "rung": "0.6222"
+ },
+ "b49502f419e4": {
+  "arm": "advisory",
+  "fork": "drive-09#t8s28",
+  "rung": "0.4"
+ },
+ "b49a1318d30e": {
+  "arm": "sham",
+  "fork": "drive-10#t9s14",
+  "rung": "0.6"
+ },
+ "b4b5f4dea82a": {
+  "arm": "sham",
+  "fork": "drive-04#t2s2",
+  "rung": "0.8"
+ },
+ "b4ca1bbaf53e": {
+  "arm": "imperative",
+  "fork": "drive-07#t5s27",
+  "rung": "1.0"
+ },
+ "b4cbebdd7399": {
+  "arm": "imperative",
+  "fork": "drive-04#t5s24",
+  "rung": "0.6"
+ },
+ "b4e7a7630c05": {
+  "arm": "imperative",
+  "fork": "drive-09#t8s28",
+  "rung": "0.8"
+ },
+ "b503bbf5b196": {
+  "arm": "sham",
+  "fork": "drive-06#t7s25",
+  "rung": "0.8"
+ },
+ "b540ada7b1c9": {
+  "arm": "imperative",
+  "fork": "drive-13#t5s1",
+  "rung": "0.0556"
+ },
+ "b555b04faa63": {
+  "arm": "sham",
+  "fork": "drive-09#t8s23",
+  "rung": "0.8"
+ },
+ "b581825b5f3d": {
+  "arm": "advisory",
+  "fork": "drive-04#t11s0",
+  "rung": "1.0"
+ },
+ "b5843a3e33ba": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s5",
+  "rung": "0.4"
+ },
+ "b58ee3a8abea": {
+  "arm": "sham",
+  "fork": "drive-06#t5s23",
+  "rung": "0.8"
+ },
+ "b58fd6c7719e": {
+  "arm": "advisory",
+  "fork": "drive-07#t5s27",
+  "rung": "0.6222"
+ },
+ "b5a6dc96f4a3": {
+  "arm": "advisory",
+  "fork": "drive-07#t10s13",
+  "rung": "0.6222"
+ },
+ "b5cbdea25248": {
+  "arm": "advisory",
+  "fork": "drive-09#t8s28",
+  "rung": "1.0"
+ },
+ "b5d63e61b8d3": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s15",
+  "rung": "0.8"
+ },
+ "b5f2df6bc473": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s12",
+  "rung": "0.4"
+ },
+ "b61ad8800eab": {
+  "arm": "imperative",
+  "fork": "drive-04#t7s15",
+  "rung": "0.6222"
+ },
+ "b637f20844c2": {
+  "arm": "advisory",
+  "fork": "drive-04#t5s24",
+  "rung": "0.4"
+ },
+ "b63fe692e1b2": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s14",
+  "rung": "0.8"
+ },
+ "b6c8e70baeca": {
+  "arm": "sham",
+  "fork": "drive-03#t3s20",
+  "rung": "0.6222"
+ },
+ "b6c980b7bff4": {
+  "arm": "advisory",
+  "fork": "drive-08#t2s0",
+  "rung": "1.0"
+ },
+ "b6d4c284eee6": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s18",
+  "rung": "0.0556"
+ },
+ "b6e49cfcda83": {
+  "arm": "sham",
+  "fork": "drive-08#t5s13",
+  "rung": "0.6222"
+ },
+ "b74f1d349541": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s18",
+  "rung": "0.4"
+ },
+ "b76f33f4183e": {
+  "batch": 48,
+  "control": "ctl13"
+ },
+ "b7b97caa4384": {
+  "batch": 28,
+  "control": "ctl06"
+ },
+ "b7ce65117244": {
+  "arm": "sham",
+  "fork": "drive-03#t5s13",
+  "rung": "0.4"
+ },
+ "b7e2226fd827": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s17",
+  "rung": "0.6"
+ },
+ "b7f6fd661c00": {
+  "arm": "imperative",
+  "fork": "drive-02#t7s29",
+  "rung": "0.4"
+ },
+ "b7fc5d663edc": {
+  "arm": "imperative",
+  "fork": "drive-07#t10s12",
+  "rung": "0.4"
+ },
+ "b81481bdd8f9": {
+  "arm": "sham",
+  "fork": "drive-10#t8s13",
+  "rung": "1.0"
+ },
+ "b85ccb97cd0a": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s1",
+  "rung": "0.6"
+ },
+ "b89b74610758": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s12",
+  "rung": "0.8"
+ },
+ "b8f35f685a0d": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s13",
+  "rung": "0.4"
+ },
+ "b90dc813eb02": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s14",
+  "rung": "0.6222"
+ },
+ "b9103765633a": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s8",
+  "rung": "0.0556"
+ },
+ "b92db1494ef0": {
+  "arm": "sham",
+  "fork": "drive-04#t2s2",
+  "rung": "1.0"
+ },
+ "b94f950d888d": {
+  "arm": "sham",
+  "fork": "drive-06#t9s1",
+  "rung": "1.0"
+ },
+ "b968adfde858": {
+  "batch": 40,
+  "control": "ctl09"
+ },
+ "b96f1b154941": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s1",
+  "rung": "0.4"
+ },
+ "b977b59a51ce": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s7",
+  "rung": "1.0"
+ },
+ "b98a20312806": {
+  "arm": "sham",
+  "fork": "drive-09#t9s4",
+  "rung": "0.4"
+ },
+ "b9adf03ede48": {
+  "arm": "sham",
+  "fork": "drive-04#t11s0",
+  "rung": "1.0"
+ },
+ "b9d4ed316864": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s27",
+  "rung": "0.6222"
+ },
+ "b9e426793f00": {
+  "arm": "advisory",
+  "fork": "drive-07#t5s27",
+  "rung": "0.8"
+ },
+ "b9f7acb4f187": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s13",
+  "rung": "0.6222"
+ },
+ "ba1385fa503c": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s5",
+  "rung": "0.8"
+ },
+ "ba591aba4436": {
+  "batch": 4,
+  "control": "ctl04"
+ },
+ "ba69a4f6599c": {
+  "arm": "imperative",
+  "fork": "drive-05#t11s17",
+  "rung": "0.6"
+ },
+ "ba829af1ce39": {
+  "arm": "imperative",
+  "fork": "drive-08#t7s24",
+  "rung": "0.4"
+ },
+ "baa31cdce844": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s22",
+  "rung": "0.4"
+ },
+ "baba51b3932b": {
+  "arm": "sham",
+  "fork": "drive-10#t8s10",
+  "rung": "1.0"
+ },
+ "baccc216ba23": {
+  "arm": "advisory",
+  "fork": "drive-03#t5s13",
+  "rung": "0.8"
+ },
+ "baf5f457464b": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s27",
+  "rung": "0.6222"
+ },
+ "bafa4a33ea71": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s4",
+  "rung": "0.8"
+ },
+ "bb3983d00175": {
+  "arm": "imperative",
+  "fork": "drive-08#t10s4",
+  "rung": "0.4"
+ },
+ "bb53913aa528": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s11",
+  "rung": "0.6222"
+ },
+ "bb58d1b3cf27": {
+  "batch": 40,
+  "control": "ctl05"
+ },
+ "bb8156e76077": {
+  "arm": "sham",
+  "fork": "drive-10#t7s18",
+  "rung": "0.6"
+ },
+ "bbc8b3222cd5": {
+  "batch": 45,
+  "control": "ctl07"
+ },
+ "bbe5e7a7c90d": {
+  "batch": 47,
+  "control": "ctl03"
+ },
+ "bc0886ea5d94": {
+  "arm": "sham",
+  "fork": "drive-07#t10s13",
+  "rung": "0.6222"
+ },
+ "bc1d07f15e74": {
+  "arm": "sham",
+  "fork": "drive-08#t7s24",
+  "rung": "1.0"
+ },
+ "bc30ff62767d": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s11",
+  "rung": "0.6"
+ },
+ "bc582b3f4150": {
+  "arm": "sham",
+  "fork": "drive-13#t5s1",
+  "rung": "0.0556"
+ },
+ "bcd077866eab": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s15",
+  "rung": "0.0556"
+ },
+ "bce7fe88dabf": {
+  "arm": "advisory",
+  "fork": "drive-04#t8s13",
+  "rung": "0.4"
+ },
+ "bcebd41789d5": {
+  "arm": "sham",
+  "fork": "drive-08#t5s15",
+  "rung": "0.6222"
+ },
+ "bd1fc053573e": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s5",
+  "rung": "1.0"
+ },
+ "bd381e89012c": {
+  "arm": "sham",
+  "fork": "drive-13#t4s0",
+  "rung": "0.4"
+ },
+ "bd43e79e6d91": {
+  "batch": 26,
+  "control": "ctl13"
+ },
+ "bd64128f693c": {
+  "arm": "advisory",
+  "fork": "drive-02#t7s29",
+  "rung": "0.6"
+ },
+ "bd9b79c88c30": {
+  "arm": "sham",
+  "fork": "drive-09#t8s28",
+  "rung": "0.6222"
+ },
+ "bdbdef214bb9": {
+  "arm": "advisory",
+  "fork": "drive-08#t10s4",
+  "rung": "0.4"
+ },
+ "bdcce6c3f964": {
+  "arm": "advisory",
+  "fork": "drive-06#t8s6",
+  "rung": "0.0556"
+ },
+ "bde601cce51d": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s16",
+  "rung": "1.0"
+ },
+ "bdedcdc3670e": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s22",
+  "rung": "1.0"
+ },
+ "be612e794926": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s2",
+  "rung": "0.0556"
+ },
+ "be65f54e46da": {
+  "batch": 47,
+  "control": "ctl01"
+ },
+ "be6fde10964d": {
+  "batch": 14,
+  "control": "ctl08"
+ },
+ "be7d5b9ad503": {
+  "arm": "sham",
+  "fork": "drive-09#t9s12",
+  "rung": "0.4"
+ },
+ "beb6ac445ada": {
+  "arm": "advisory",
+  "fork": "drive-13#t4s0",
+  "rung": "0.8"
+ },
+ "bebf383b52da": {
+  "arm": "sham",
+  "fork": "drive-06#t9s20",
+  "rung": "0.0556"
+ },
+ "bef5d947e8d7": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s13",
+  "rung": "1.0"
+ },
+ "bf05e8094ed5": {
+  "arm": "sham",
+  "fork": "drive-14#t2s17",
+  "rung": "0.8"
+ },
+ "bf0a2259c838": {
+  "arm": "imperative",
+  "fork": "drive-13#t2s20",
+  "rung": "0.6"
+ },
+ "bf0e7d612b00": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s15",
+  "rung": "0.6"
+ },
+ "bf1775d9d95f": {
+  "arm": "imperative",
+  "fork": "drive-08#t7s24",
+  "rung": "1.0"
+ },
+ "bf451197249e": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s22",
+  "rung": "0.6"
+ },
+ "bf4fb486a07c": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s7",
+  "rung": "0.8"
+ },
+ "bf81aca09ff5": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s0",
+  "rung": "1.0"
+ },
+ "bf8bb9729c4c": {
+  "arm": "imperative",
+  "fork": "drive-04#t8s13",
+  "rung": "0.6"
+ },
+ "bfd94246e9a6": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s14",
+  "rung": "0.0556"
+ },
+ "bff36b6aecb0": {
+  "arm": "sham",
+  "fork": "drive-06#t7s0",
+  "rung": "0.8"
+ },
+ "c00954310e16": {
+  "batch": 49,
+  "control": "ctl11"
+ },
+ "c01030c3cce0": {
+  "arm": "sham",
+  "fork": "drive-07#t5s27",
+  "rung": "0.0556"
+ },
+ "c03496bbb847": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s13",
+  "rung": "0.4"
+ },
+ "c03658816aed": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s13",
+  "rung": "0.6222"
+ },
+ "c03acb182ede": {
+  "arm": "sham",
+  "fork": "drive-05#t7s12",
+  "rung": "1.0"
+ },
+ "c058633a63c0": {
+  "arm": "sham",
+  "fork": "drive-10#t7s18",
+  "rung": "1.0"
+ },
+ "c0611bd599af": {
+  "batch": 27,
+  "control": "ctl06"
+ },
+ "c069b583bbf2": {
+  "arm": "sham",
+  "fork": "drive-08#t5s5",
+  "rung": "0.6222"
+ },
+ "c072d8083af3": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s3",
+  "rung": "0.6222"
+ },
+ "c07b61e32b56": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s12",
+  "rung": "0.6222"
+ },
+ "c08436979830": {
+  "arm": "sham",
+  "fork": "drive-05#t11s17",
+  "rung": "0.6222"
+ },
+ "c0870bc05a34": {
+  "batch": 2,
+  "control": "ctl09"
+ },
+ "c0c8b4883804": {
+  "arm": "imperative",
+  "fork": "drive-03#t8s15",
+  "rung": "1.0"
+ },
+ "c12a63c2590e": {
+  "batch": 50,
+  "control": "ctl07"
+ },
+ "c14703806a41": {
+  "arm": "imperative",
+  "fork": "drive-08#t11s29",
+  "rung": "0.8"
+ },
+ "c14a7389dc37": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s13",
+  "rung": "0.8"
+ },
+ "c17a82b6f030": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s5",
+  "rung": "0.0556"
+ },
+ "c1b6bab7f7db": {
+  "arm": "sham",
+  "fork": "drive-06#t2s29",
+  "rung": "0.6"
+ },
+ "c1fb254c4882": {
+  "arm": "sham",
+  "fork": "drive-15#t2s9",
+  "rung": "0.6222"
+ },
+ "c214b92a478b": {
+  "arm": "imperative",
+  "fork": "drive-05#t3s28",
+  "rung": "1.0"
+ },
+ "c22d5b97f4ac": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s0",
+  "rung": "0.8"
+ },
+ "c232fd603825": {
+  "arm": "advisory",
+  "fork": "drive-07#t10s13",
+  "rung": "1.0"
+ },
+ "c252b0bd88da": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s13",
+  "rung": "1.0"
+ },
+ "c2eec5fcce2b": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s26",
+  "rung": "0.8"
+ },
+ "c2ef2268e6cc": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s22",
+  "rung": "0.6"
+ },
+ "c3012c95bdb6": {
+  "arm": "imperative",
+  "fork": "drive-06#t5s23",
+  "rung": "1.0"
+ },
+ "c32cf5fd3327": {
+  "arm": "imperative",
+  "fork": "drive-15#t2s29",
+  "rung": "1.0"
+ },
+ "c32d0077535f": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s12",
+  "rung": "0.4"
+ },
+ "c3514649a405": {
+  "arm": "advisory",
+  "fork": "drive-02#t10s9",
+  "rung": "0.6222"
+ },
+ "c39af8fc9be8": {
+  "arm": "advisory",
+  "fork": "drive-03#t8s15",
+  "rung": "0.0556"
+ },
+ "c3baf0446690": {
+  "arm": "advisory",
+  "fork": "drive-13#t2s20",
+  "rung": "0.4"
+ },
+ "c3e67a4c8398": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s10",
+  "rung": "0.0556"
+ },
+ "c4308da004fc": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s1",
+  "rung": "0.0556"
+ },
+ "c43a3c26150f": {
+  "arm": "sham",
+  "fork": "drive-08#t5s6",
+  "rung": "1.0"
+ },
+ "c440d1592506": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s2",
+  "rung": "0.0556"
+ },
+ "c445e49eed4a": {
+  "arm": "advisory",
+  "fork": "drive-03#t10s10",
+  "rung": "0.8"
+ },
+ "c472105abf0f": {
+  "arm": "sham",
+  "fork": "drive-13#t2s20",
+  "rung": "1.0"
+ },
+ "c49f55db8d73": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s0",
+  "rung": "0.4"
+ },
+ "c4aa59f02926": {
+  "batch": 38,
+  "control": "ctl04"
+ },
+ "c4d0141e7639": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s17",
+  "rung": "1.0"
+ },
+ "c4f8b801c66b": {
+  "arm": "sham",
+  "fork": "drive-04#t5s24",
+  "rung": "0.8"
+ },
+ "c4fb43644d34": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s0",
+  "rung": "0.4"
+ },
+ "c505a5ab1e83": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s13",
+  "rung": "0.6"
+ },
+ "c549430ee50c": {
+  "arm": "sham",
+  "fork": "drive-04#t8s16",
+  "rung": "0.8"
+ },
+ "c552b3019b2b": {
+  "arm": "advisory",
+  "fork": "drive-02#t3s5",
+  "rung": "0.4"
+ },
+ "c55a7a43427c": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s15",
+  "rung": "1.0"
+ },
+ "c55d60187257": {
+  "arm": "imperative",
+  "fork": "drive-03#t10s10",
+  "rung": "1.0"
+ },
+ "c56e489f556c": {
+  "arm": "sham",
+  "fork": "drive-10#t8s13",
+  "rung": "0.8"
+ },
+ "c5aff5ee79d1": {
+  "arm": "sham",
+  "fork": "drive-02#t9s1",
+  "rung": "0.0556"
+ },
+ "c60b9ee09096": {
+  "arm": "advisory",
+  "fork": "drive-08#t10s4",
+  "rung": "1.0"
+ },
+ "c653ea5b7bc5": {
+  "arm": "advisory",
+  "fork": "drive-04#t5s24",
+  "rung": "0.0556"
+ },
+ "c65e048372a0": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s6",
+  "rung": "0.0556"
+ },
+ "c67d3bc7de20": {
+  "batch": 39,
+  "control": "ctl11"
+ },
+ "c6a64309da11": {
+  "arm": "sham",
+  "fork": "drive-06#t7s15",
+  "rung": "0.6222"
+ },
+ "c70ff2bbafbb": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s8",
+  "rung": "0.6"
+ },
+ "c751eb04904d": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s20",
+  "rung": "0.4"
+ },
+ "c787aca781c9": {
+  "batch": 44,
+  "control": "ctl04"
+ },
+ "c7d9f661a855": {
+  "batch": 23,
+  "control": "ctl10"
+ },
+ "c7e4d63206ac": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s14",
+  "rung": "0.4"
+ },
+ "c7f10c597c88": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s9",
+  "rung": "0.8"
+ },
+ "c800993a8ecb": {
+  "batch": 42,
+  "control": "ctl09"
+ },
+ "c81db4efdeaf": {
+  "batch": 46,
+  "control": "ctl01"
+ },
+ "c83861b3087a": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s1",
+  "rung": "0.0556"
+ },
+ "c84a0945b8b1": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s6",
+  "rung": "0.8"
+ },
+ "c85368c43f4e": {
+  "arm": "sham",
+  "fork": "drive-08#t8s18",
+  "rung": "1.0"
+ },
+ "c8d9513b8d38": {
+  "arm": "imperative",
+  "fork": "drive-08#t11s29",
+  "rung": "0.0556"
+ },
+ "c8dca334f24c": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s17",
+  "rung": "0.6222"
+ },
+ "c8e54a96f17e": {
+  "arm": "imperative",
+  "fork": "drive-08#t9s24",
+  "rung": "0.6"
+ },
+ "c8e8e9bd5ed9": {
+  "arm": "sham",
+  "fork": "drive-09#t2s27",
+  "rung": "0.6222"
+ },
+ "c8f909eaf68d": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s16",
+  "rung": "0.6"
+ },
+ "c937b85b82cb": {
+  "arm": "sham",
+  "fork": "drive-09#t5s5",
+  "rung": "0.6"
+ },
+ "c93febc87510": {
+  "arm": "sham",
+  "fork": "drive-02#t8s5",
+  "rung": "0.6"
+ },
+ "c9831eb43bad": {
+  "arm": "imperative",
+  "fork": "drive-02#t3s5",
+  "rung": "0.6222"
+ },
+ "c99f3f67dd1d": {
+  "arm": "sham",
+  "fork": "drive-13#t2s21",
+  "rung": "0.6222"
+ },
+ "c9b9a065e845": {
+  "arm": "sham",
+  "fork": "drive-10#t7s18",
+  "rung": "0.4"
+ },
+ "c9fab03fba64": {
+  "arm": "sham",
+  "fork": "drive-06#t8s6",
+  "rung": "0.6222"
+ },
+ "c9fec6d686b5": {
+  "arm": "imperative",
+  "fork": "drive-09#t8s23",
+  "rung": "0.8"
+ },
+ "ca457be50813": {
+  "arm": "advisory",
+  "fork": "drive-04#t9s10",
+  "rung": "0.0556"
+ },
+ "ca4702724603": {
+  "batch": 45,
+  "control": "ctl04"
+ },
+ "ca4ef9821f75": {
+  "arm": "sham",
+  "fork": "drive-03#t10s10",
+  "rung": "0.8"
+ },
+ "cb0ccd370565": {
+  "arm": "advisory",
+  "fork": "drive-08#t11s16",
+  "rung": "0.0556"
+ },
+ "cb16962d847f": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s15",
+  "rung": "0.8"
+ },
+ "cb176403d467": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s15",
+  "rung": "1.0"
+ },
+ "cb185d71ecc6": {
+  "batch": 35,
+  "control": "ctl04"
+ },
+ "cb7d86f809b5": {
+  "arm": "sham",
+  "fork": "drive-03#t3s20",
+  "rung": "0.6"
+ },
+ "cb9a8aea77fd": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s14",
+  "rung": "0.6"
+ },
+ "cbab5b265f29": {
+  "arm": "imperative",
+  "fork": "drive-02#t3s5",
+  "rung": "0.8"
+ },
+ "cbc24f916a1c": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s22",
+  "rung": "0.4"
+ },
+ "cbfdde23b0de": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s15",
+  "rung": "0.6222"
+ },
+ "cc11b81bcff9": {
+  "arm": "imperative",
+  "fork": "drive-03#t5s13",
+  "rung": "0.6"
+ },
+ "cc237603a232": {
+  "arm": "sham",
+  "fork": "drive-08#t8s17",
+  "rung": "0.4"
+ },
+ "cc4be3c9b0b5": {
+  "arm": "imperative",
+  "fork": "drive-08#t2s0",
+  "rung": "0.0556"
+ },
+ "cc54a5a2380e": {
+  "arm": "imperative",
+  "fork": "drive-09#t8s28",
+  "rung": "0.4"
+ },
+ "cc7832ad0eb4": {
+  "arm": "imperative",
+  "fork": "drive-03#t10s10",
+  "rung": "0.8"
+ },
+ "cc7cbe2feeef": {
+  "arm": "imperative",
+  "fork": "drive-09#t5s22",
+  "rung": "0.6222"
+ },
+ "cc7f3ae0505b": {
+  "arm": "imperative",
+  "fork": "drive-03#t5s13",
+  "rung": "0.6222"
+ },
+ "cca37279b1da": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s15",
+  "rung": "0.6"
+ },
+ "ccae0bc4c784": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s15",
+  "rung": "1.0"
+ },
+ "ccd1d35aa0c3": {
+  "arm": "imperative",
+  "fork": "drive-05#t10s26",
+  "rung": "0.6"
+ },
+ "ccdbb155c34a": {
+  "arm": "sham",
+  "fork": "drive-14#t2s17",
+  "rung": "0.0556"
+ },
+ "cceb72503b80": {
+  "arm": "sham",
+  "fork": "drive-07#t7s26",
+  "rung": "0.4"
+ },
+ "cd036fb9c883": {
+  "arm": "sham",
+  "fork": "drive-07#t10s12",
+  "rung": "0.8"
+ },
+ "cd284c4a9075": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s18",
+  "rung": "0.8"
+ },
+ "cd2a0bf91930": {
+  "arm": "imperative",
+  "fork": "drive-08#t7s24",
+  "rung": "0.8"
+ },
+ "cd522d723710": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s15",
+  "rung": "0.6222"
+ },
+ "cd5e1c61d633": {
+  "arm": "sham",
+  "fork": "drive-07#t8s12",
+  "rung": "0.4"
+ },
+ "cd5ebe9e8560": {
+  "batch": 13,
+  "control": "ctl01"
+ },
+ "cd7d63a10784": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s8",
+  "rung": "1.0"
+ },
+ "cde45c455b86": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s4",
+  "rung": "1.0"
+ },
+ "cdfb0c296ef6": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s8",
+  "rung": "0.8"
+ },
+ "cdfc3503bc3c": {
+  "arm": "imperative",
+  "fork": "drive-09#t8s23",
+  "rung": "0.4"
+ },
+ "ce1029eb758a": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s15",
+  "rung": "0.4"
+ },
+ "ce3f14924946": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s26",
+  "rung": "0.6"
+ },
+ "ce3f2110d034": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s13",
+  "rung": "0.6"
+ },
+ "ce52ef9a84dc": {
+  "arm": "imperative",
+  "fork": "drive-07#t10s12",
+  "rung": "0.6"
+ },
+ "ce5fc002c699": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s11",
+  "rung": "0.8"
+ },
+ "ce8cf021866c": {
+  "arm": "advisory",
+  "fork": "drive-07#t7s26",
+  "rung": "0.6222"
+ },
+ "cebfbd53f4c1": {
+  "arm": "sham",
+  "fork": "drive-07#t8s14",
+  "rung": "0.6222"
+ },
+ "cec86deb80bf": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s17",
+  "rung": "0.4"
+ },
+ "cee0bc7dd4fa": {
+  "arm": "imperative",
+  "fork": "drive-08#t9s14",
+  "rung": "0.8"
+ },
+ "cee8bd3604e4": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s12",
+  "rung": "0.8"
+ },
+ "cf1711a7556c": {
+  "arm": "sham",
+  "fork": "drive-08#t5s13",
+  "rung": "1.0"
+ },
+ "cf304d71c26d": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s15",
+  "rung": "0.0556"
+ },
+ "cf31c6d208e4": {
+  "batch": 44,
+  "control": "ctl02"
+ },
+ "cf408d951e8b": {
+  "arm": "imperative",
+  "fork": "drive-02#t10s9",
+  "rung": "0.8"
+ },
+ "cf4c1bf3b752": {
+  "arm": "sham",
+  "fork": "drive-06#t9s0",
+  "rung": "0.6"
+ },
+ "cfab620d08ee": {
+  "arm": "advisory",
+  "fork": "drive-09#t8s28",
+  "rung": "0.6"
+ },
+ "cfb6eed4e158": {
+  "batch": 7,
+  "control": "ctl04"
+ },
+ "cfb9c91904cc": {
+  "arm": "sham",
+  "fork": "drive-08#t5s5",
+  "rung": "0.8"
+ },
+ "cff38f31ed2e": {
+  "arm": "imperative",
+  "fork": "drive-06#t2s29",
+  "rung": "0.6"
+ },
+ "cffe206daa2d": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s10",
+  "rung": "0.0556"
+ },
+ "d002a2542728": {
+  "arm": "sham",
+  "fork": "drive-06#t7s0",
+  "rung": "0.6222"
+ },
+ "d012025447b0": {
+  "arm": "sham",
+  "fork": "drive-14#t2s17",
+  "rung": "1.0"
+ },
+ "d06efa30067c": {
+  "arm": "advisory",
+  "fork": "drive-08#t9s14",
+  "rung": "0.6222"
+ },
+ "d0998a20e794": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s15",
+  "rung": "0.4"
+ },
+ "d0b8b65d61ae": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s14",
+  "rung": "0.6"
+ },
+ "d110759ad5cb": {
+  "arm": "sham",
+  "fork": "drive-10#t8s18",
+  "rung": "1.0"
+ },
+ "d11406719231": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s20",
+  "rung": "0.8"
+ },
+ "d1288aca9f54": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s14",
+  "rung": "0.4"
+ },
+ "d14eda39043f": {
+  "arm": "imperative",
+  "fork": "drive-08#t11s16",
+  "rung": "0.6"
+ },
+ "d1a418a7c998": {
+  "arm": "sham",
+  "fork": "drive-13#t2s21",
+  "rung": "1.0"
+ },
+ "d1c58546f962": {
+  "arm": "sham",
+  "fork": "drive-04#t8s13",
+  "rung": "0.6"
+ },
+ "d1ce16ce8226": {
+  "arm": "imperative",
+  "fork": "drive-07#t7s26",
+  "rung": "1.0"
+ },
+ "d20616474803": {
+  "arm": "imperative",
+  "fork": "drive-03#t10s10",
+  "rung": "0.4"
+ },
+ "d2284302bc5a": {
+  "arm": "sham",
+  "fork": "drive-08#t8s18",
+  "rung": "0.0556"
+ },
+ "d22a94c21258": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s18",
+  "rung": "0.6"
+ },
+ "d24a8b8b6487": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s16",
+  "rung": "1.0"
+ },
+ "d24fc11633b8": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s1",
+  "rung": "1.0"
+ },
+ "d28b4b144e19": {
+  "batch": 37,
+  "control": "ctl14"
+ },
+ "d2afeacbcb1a": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s5",
+  "rung": "0.8"
+ },
+ "d2cf74361ab5": {
+  "arm": "imperative",
+  "fork": "drive-07#t5s27",
+  "rung": "0.8"
+ },
+ "d2e75b85ff8a": {
+  "arm": "advisory",
+  "fork": "drive-03#t10s10",
+  "rung": "0.6"
+ },
+ "d2e9c855d80c": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s8",
+  "rung": "0.4"
+ },
+ "d350143d4c20": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s11",
+  "rung": "0.6"
+ },
+ "d369869eff51": {
+  "arm": "advisory",
+  "fork": "drive-05#t10s26",
+  "rung": "1.0"
+ },
+ "d37bb7011e2d": {
+  "batch": 9,
+  "control": "ctl10"
+ },
+ "d390d1f672e5": {
+  "arm": "imperative",
+  "fork": "drive-05#t7s12",
+  "rung": "0.8"
+ },
+ "d3bb7cf95a66": {
+  "arm": "sham",
+  "fork": "drive-04#t9s24",
+  "rung": "0.6"
+ },
+ "d3d81e9b478a": {
+  "arm": "sham",
+  "fork": "drive-10#t7s28",
+  "rung": "1.0"
+ },
+ "d40666973f6a": {
+  "arm": "advisory",
+  "fork": "drive-13#t5s1",
+  "rung": "0.6"
+ },
+ "d4242bc2c6c5": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s5",
+  "rung": "0.6"
+ },
+ "d42481a576c0": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s15",
+  "rung": "1.0"
+ },
+ "d42f33d9c93c": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s18",
+  "rung": "1.0"
+ },
+ "d439e4fb45ae": {
+  "batch": 30,
+  "control": "ctl07"
+ },
+ "d493046e05a8": {
+  "arm": "sham",
+  "fork": "drive-10#t8s18",
+  "rung": "0.4"
+ },
+ "d4935fc397dd": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s14",
+  "rung": "0.4"
+ },
+ "d4aab4334265": {
+  "arm": "sham",
+  "fork": "drive-08#t11s16",
+  "rung": "0.6222"
+ },
+ "d4dbc6013d29": {
+  "arm": "sham",
+  "fork": "drive-10#t10s0",
+  "rung": "0.6"
+ },
+ "d4ec902a28ca": {
+  "arm": "sham",
+  "fork": "drive-08#t5s13",
+  "rung": "0.6"
+ },
+ "d51ac615c67d": {
+  "arm": "advisory",
+  "fork": "drive-04#t2s2",
+  "rung": "0.8"
+ },
+ "d52cc95fe8f4": {
+  "arm": "imperative",
+  "fork": "drive-13#t2s20",
+  "rung": "0.0556"
+ },
+ "d556806f164c": {
+  "arm": "imperative",
+  "fork": "drive-09#t8s23",
+  "rung": "0.0556"
+ },
+ "d59929eff841": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s14",
+  "rung": "0.6222"
+ },
+ "d5c228dbcc1b": {
+  "arm": "sham",
+  "fork": "drive-04#t5s24",
+  "rung": "0.6222"
+ },
+ "d5e22f555674": {
+  "arm": "sham",
+  "fork": "drive-03#t8s15",
+  "rung": "1.0"
+ },
+ "d5e6228738ce": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s17",
+  "rung": "0.4"
+ },
+ "d5ec57a7fc17": {
+  "batch": 11,
+  "control": "ctl06"
+ },
+ "d6526fcfbd43": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s11",
+  "rung": "1.0"
+ },
+ "d6659baee1b8": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s17",
+  "rung": "0.6"
+ },
+ "d67d5419191a": {
+  "arm": "sham",
+  "fork": "drive-05#t7s12",
+  "rung": "0.6"
+ },
+ "d68944385ce7": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s27",
+  "rung": "0.8"
+ },
+ "d68eceba6d32": {
+  "arm": "sham",
+  "fork": "drive-08#t11s16",
+  "rung": "0.8"
+ },
+ "d6c1eb140d9d": {
+  "arm": "imperative",
+  "fork": "drive-08#t11s16",
+  "rung": "0.4"
+ },
+ "d6de26018477": {
+  "arm": "advisory",
+  "fork": "drive-04#t9s10",
+  "rung": "0.6222"
+ },
+ "d700d9dd4e6e": {
+  "arm": "sham",
+  "fork": "drive-03#t10s11",
+  "rung": "0.6222"
+ },
+ "d73aac9d219f": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s13",
+  "rung": "0.8"
+ },
+ "d75ee4c8d6c2": {
+  "arm": "sham",
+  "fork": "drive-05#t3s28",
+  "rung": "0.8"
+ },
+ "d762b6f63bf2": {
+  "arm": "advisory",
+  "fork": "drive-03#t9s26",
+  "rung": "0.6222"
+ },
+ "d7a8c7e9cb0c": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s6",
+  "rung": "0.6222"
+ },
+ "d7c734c11c5f": {
+  "arm": "sham",
+  "fork": "drive-09#t5s5",
+  "rung": "0.6222"
+ },
+ "d81aca3f2c96": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s0",
+  "rung": "1.0"
+ },
+ "d824a78068ac": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s18",
+  "rung": "0.8"
+ },
+ "d8368c1e4499": {
+  "arm": "sham",
+  "fork": "drive-07#t8s14",
+  "rung": "0.0556"
+ },
+ "d84ed1180811": {
+  "arm": "imperative",
+  "fork": "drive-05#t10s26",
+  "rung": "1.0"
+ },
+ "d8d64aad71de": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s0",
+  "rung": "0.8"
+ },
+ "d8e95e4cc012": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s7",
+  "rung": "0.0556"
+ },
+ "d91d682ec15e": {
+  "arm": "sham",
+  "fork": "drive-06#t9s0",
+  "rung": "0.6222"
+ },
+ "d9216c290db9": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s17",
+  "rung": "0.6222"
+ },
+ "d955b8a4f067": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s11",
+  "rung": "0.6222"
+ },
+ "d97a3735b867": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s13",
+  "rung": "1.0"
+ },
+ "d9a111fdd5c7": {
+  "arm": "imperative",
+  "fork": "drive-02#t3s5",
+  "rung": "0.4"
+ },
+ "d9a5a4cbdc3d": {
+  "arm": "imperative",
+  "fork": "drive-03#t5s13",
+  "rung": "0.0556"
+ },
+ "d9c971400f1c": {
+  "arm": "imperative",
+  "fork": "drive-10#t7s28",
+  "rung": "0.6222"
+ },
+ "d9cd59925b39": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s6",
+  "rung": "0.0556"
+ },
+ "d9e2728cb0aa": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s15",
+  "rung": "0.4"
+ },
+ "d9e81fe0861e": {
+  "batch": 38,
+  "control": "ctl10"
+ },
+ "d9ea31e0aae2": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s9",
+  "rung": "0.6222"
+ },
+ "d9fff49ca35f": {
+  "arm": "imperative",
+  "fork": "drive-08#t11s29",
+  "rung": "0.4"
+ },
+ "da013421a8f9": {
+  "batch": 11,
+  "control": "ctl10"
+ },
+ "da3c408c5a82": {
+  "arm": "imperative",
+  "fork": "drive-04#t7s15",
+  "rung": "0.8"
+ },
+ "da3fe89141e5": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s2",
+  "rung": "0.6"
+ },
+ "da7f902a5d64": {
+  "arm": "sham",
+  "fork": "drive-08#t8s15",
+  "rung": "0.6222"
+ },
+ "daa608419fbb": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s10",
+  "rung": "0.4"
+ },
+ "dad0ef7768dd": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s15",
+  "rung": "0.4"
+ },
+ "dae756d253df": {
+  "arm": "sham",
+  "fork": "drive-05#t11s26",
+  "rung": "0.0556"
+ },
+ "db085ef62894": {
+  "arm": "imperative",
+  "fork": "drive-09#t9s14",
+  "rung": "1.0"
+ },
+ "db6fcf727a1a": {
+  "arm": "advisory",
+  "fork": "drive-09#t8s23",
+  "rung": "0.6222"
+ },
+ "dbb144e0c15f": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s5",
+  "rung": "0.0556"
+ },
+ "dbc6149947d9": {
+  "arm": "advisory",
+  "fork": "drive-03#t10s11",
+  "rung": "1.0"
+ },
+ "dbe1df9935ef": {
+  "arm": "sham",
+  "fork": "drive-08#t9s24",
+  "rung": "0.0556"
+ },
+ "dbfff6412b63": {
+  "arm": "advisory",
+  "fork": "drive-07#t8s12",
+  "rung": "0.6"
+ },
+ "dc1fe04dd5ac": {
+  "batch": 18,
+  "control": "ctl09"
+ },
+ "dc6e14302d9b": {
+  "arm": "sham",
+  "fork": "drive-08#t9s24",
+  "rung": "0.6222"
+ },
+ "dc90f0c0ae68": {
+  "arm": "sham",
+  "fork": "drive-08#t2s0",
+  "rung": "0.0556"
+ },
+ "dcc177b37fe8": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s8",
+  "rung": "0.6222"
+ },
+ "dcc9efd0705d": {
+  "batch": 21,
+  "control": "ctl03"
+ },
+ "dcd2ad44684a": {
+  "arm": "advisory",
+  "fork": "drive-06#t2s29",
+  "rung": "0.0556"
+ },
+ "dcd6c9cb1b18": {
+  "arm": "advisory",
+  "fork": "drive-06#t2s29",
+  "rung": "0.8"
+ },
+ "dd63490108c0": {
+  "arm": "sham",
+  "fork": "drive-10#t8s18",
+  "rung": "0.8"
+ },
+ "dd7dc3d5f0ad": {
+  "batch": 9,
+  "control": "ctl05"
+ },
+ "ddb350568006": {
+  "arm": "sham",
+  "fork": "drive-02#t8s11",
+  "rung": "0.0556"
+ },
+ "ddc0ad4ed274": {
+  "arm": "advisory",
+  "fork": "drive-03#t8s15",
+  "rung": "0.6222"
+ },
+ "ddc61bfffaea": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s9",
+  "rung": "0.4"
+ },
+ "de0196f15234": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s0",
+  "rung": "0.8"
+ },
+ "de0326d8709e": {
+  "arm": "advisory",
+  "fork": "drive-06#t2s29",
+  "rung": "1.0"
+ },
+ "de0cdb38a20f": {
+  "arm": "advisory",
+  "fork": "drive-09#t5s5",
+  "rung": "0.0556"
+ },
+ "de12688bd7c2": {
+  "batch": 19,
+  "control": "ctl11"
+ },
+ "de380d52e691": {
+  "arm": "advisory",
+  "fork": "drive-10#t10s2",
+  "rung": "0.4"
+ },
+ "deee595aaf8b": {
+  "arm": "sham",
+  "fork": "drive-02#t7s29",
+  "rung": "0.8"
+ },
+ "df04a2580152": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s11",
+  "rung": "1.0"
+ },
+ "df132fc8bfb0": {
+  "batch": 6,
+  "control": "ctl11"
+ },
+ "df14b4f85c79": {
+  "arm": "sham",
+  "fork": "drive-02#t9s1",
+  "rung": "1.0"
+ },
+ "df1ebe72c49a": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s5",
+  "rung": "0.6"
+ },
+ "df38ef862959": {
+  "batch": 42,
+  "control": "ctl06"
+ },
+ "df446227208d": {
+  "arm": "imperative",
+  "fork": "drive-15#t2s9",
+  "rung": "1.0"
+ },
+ "df9106d01c0d": {
+  "arm": "sham",
+  "fork": "drive-05#t3s28",
+  "rung": "0.0556"
+ },
+ "dfbb8d29635e": {
+  "arm": "sham",
+  "fork": "drive-09#t8s23",
+  "rung": "0.6222"
+ },
+ "dfc3d9a3b850": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s11",
+  "rung": "0.6222"
+ },
+ "dfc947d690a4": {
+  "arm": "sham",
+  "fork": "drive-06#t9s0",
+  "rung": "1.0"
+ },
+ "dfc9aecbaa8c": {
+  "arm": "advisory",
+  "fork": "drive-03#t3s20",
+  "rung": "0.6"
+ },
+ "e013b5077a66": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s8",
+  "rung": "0.6"
+ },
+ "e0247c609211": {
+  "arm": "imperative",
+  "fork": "drive-09#t5s5",
+  "rung": "0.0556"
+ },
+ "e07a9681acc0": {
+  "arm": "imperative",
+  "fork": "drive-09#t2s28",
+  "rung": "0.0556"
+ },
+ "e0b05e52b8f9": {
+  "arm": "imperative",
+  "fork": "drive-13#t4s0",
+  "rung": "0.6"
+ },
+ "e0cc46d16c18": {
+  "batch": 3,
+  "control": "ctl06"
+ },
+ "e0e443226982": {
+  "arm": "imperative",
+  "fork": "drive-04#t8s16",
+  "rung": "1.0"
+ },
+ "e1009b444c1f": {
+  "arm": "advisory",
+  "fork": "drive-04#t5s24",
+  "rung": "0.8"
+ },
+ "e1201e7edcb9": {
+  "arm": "sham",
+  "fork": "drive-08#t10s4",
+  "rung": "0.6222"
+ },
+ "e16c3f19afd1": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s13",
+  "rung": "0.6"
+ },
+ "e16f3e110792": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s14",
+  "rung": "0.8"
+ },
+ "e177bd1d5459": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s6",
+  "rung": "1.0"
+ },
+ "e1af56ad1488": {
+  "arm": "advisory",
+  "fork": "drive-05#t10s26",
+  "rung": "0.4"
+ },
+ "e1bf5eaf1651": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s26",
+  "rung": "0.6222"
+ },
+ "e1e52030aca0": {
+  "arm": "sham",
+  "fork": "drive-08#t8s15",
+  "rung": "0.0556"
+ },
+ "e1e6f8a7caef": {
+  "arm": "sham",
+  "fork": "drive-04#t7s15",
+  "rung": "0.0556"
+ },
+ "e1f6e3187ff5": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s25",
+  "rung": "0.0556"
+ },
+ "e1fa6abb85ca": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s2",
+  "rung": "0.6"
+ },
+ "e234ea266d4b": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s11",
+  "rung": "0.6222"
+ },
+ "e2407f716b30": {
+  "batch": 3,
+  "control": "ctl03"
+ },
+ "e2748128e59e": {
+  "arm": "sham",
+  "fork": "drive-08#t2s0",
+  "rung": "0.8"
+ },
+ "e2c8a167fa0b": {
+  "arm": "imperative",
+  "fork": "drive-03#t10s11",
+  "rung": "0.4"
+ },
+ "e31bf07f28dd": {
+  "arm": "advisory",
+  "fork": "drive-04#t8s13",
+  "rung": "0.6"
+ },
+ "e33c2e1fd4f3": {
+  "arm": "imperative",
+  "fork": "drive-08#t9s24",
+  "rung": "0.6222"
+ },
+ "e33ebdacf87d": {
+  "arm": "imperative",
+  "fork": "drive-06#t5s23",
+  "rung": "0.4"
+ },
+ "e355a0b30b2c": {
+  "arm": "imperative",
+  "fork": "drive-13#t2s20",
+  "rung": "1.0"
+ },
+ "e3571501b693": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s22",
+  "rung": "1.0"
+ },
+ "e373e59b4b3b": {
+  "arm": "advisory",
+  "fork": "drive-08#t9s14",
+  "rung": "0.8"
+ },
+ "e459d48039b6": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s0",
+  "rung": "1.0"
+ },
+ "e476d604d670": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s11",
+  "rung": "0.4"
+ },
+ "e47c96a53ac7": {
+  "batch": 13,
+  "control": "ctl06"
+ },
+ "e48dde210ba7": {
+  "arm": "sham",
+  "fork": "drive-14#t2s15",
+  "rung": "0.4"
+ },
+ "e4a2886dfd9e": {
+  "arm": "sham",
+  "fork": "drive-02#t8s11",
+  "rung": "1.0"
+ },
+ "e4d126be8dc7": {
+  "arm": "sham",
+  "fork": "drive-04#t8s16",
+  "rung": "0.4"
+ },
+ "e50878463717": {
+  "arm": "imperative",
+  "fork": "drive-07#t7s26",
+  "rung": "0.8"
+ },
+ "e56c08b753cd": {
+  "arm": "imperative",
+  "fork": "drive-03#t3s20",
+  "rung": "0.4"
+ },
+ "e58987e6a82a": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s2",
+  "rung": "1.0"
+ },
+ "e5f770de58b9": {
+  "arm": "imperative",
+  "fork": "drive-10#t7s18",
+  "rung": "0.6"
+ },
+ "e5faee1fd61d": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s15",
+  "rung": "0.6"
+ },
+ "e60f34ad6d5c": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s20",
+  "rung": "0.4"
+ },
+ "e61b8b841ef4": {
+  "arm": "sham",
+  "fork": "drive-03#t10s10",
+  "rung": "0.0556"
+ },
+ "e63b1101230c": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s14",
+  "rung": "0.4"
+ },
+ "e6485b9e52f5": {
+  "batch": 10,
+  "control": "ctl07"
+ },
+ "e6498790fd6f": {
+  "batch": 15,
+  "control": "ctl02"
+ },
+ "e6abf577c9c4": {
+  "arm": "advisory",
+  "fork": "drive-05#t11s26",
+  "rung": "0.6"
+ },
+ "e6dc7e738688": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s15",
+  "rung": "0.8"
+ },
+ "e6e7195425e5": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s8",
+  "rung": "0.8"
+ },
+ "e72cbe531f9d": {
+  "arm": "sham",
+  "fork": "drive-08#t11s16",
+  "rung": "0.0556"
+ },
+ "e745c8a19ec4": {
+  "arm": "advisory",
+  "fork": "drive-08#t7s24",
+  "rung": "0.6"
+ },
+ "e7d497dbccbf": {
+  "arm": "sham",
+  "fork": "drive-15#t2s9",
+  "rung": "0.6"
+ },
+ "e7ffa01d2024": {
+  "arm": "sham",
+  "fork": "drive-09#t9s12",
+  "rung": "0.0556"
+ },
+ "e804f7c89cd5": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s26",
+  "rung": "0.0556"
+ },
+ "e831ddff015b": {
+  "batch": 8,
+  "control": "ctl11"
+ },
+ "e83d9553dce9": {
+  "arm": "sham",
+  "fork": "drive-05#t11s17",
+  "rung": "1.0"
+ },
+ "e861c90be15c": {
+  "arm": "sham",
+  "fork": "drive-09#t8s28",
+  "rung": "0.0556"
+ },
+ "e879259f4442": {
+  "arm": "imperative",
+  "fork": "drive-09#t8s23",
+  "rung": "0.6222"
+ },
+ "e88a1dfd806c": {
+  "arm": "advisory",
+  "fork": "drive-13#t5s1",
+  "rung": "0.8"
+ },
+ "e8a263fee493": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s5",
+  "rung": "1.0"
+ },
+ "e8b5beeb6dfd": {
+  "arm": "advisory",
+  "fork": "drive-13#t5s1",
+  "rung": "0.4"
+ },
+ "e8c390cc6b62": {
+  "batch": 27,
+  "control": "ctl12"
+ },
+ "e8d2f31e1467": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s17",
+  "rung": "1.0"
+ },
+ "e8e012086fad": {
+  "arm": "sham",
+  "fork": "drive-02#t9s1",
+  "rung": "0.8"
+ },
+ "e8e318003b68": {
+  "arm": "imperative",
+  "fork": "drive-07#t5s27",
+  "rung": "0.4"
+ },
+ "e8e33c16df4b": {
+  "arm": "advisory",
+  "fork": "drive-03#t9s26",
+  "rung": "0.8"
+ },
+ "e900261cd32b": {
+  "arm": "imperative",
+  "fork": "drive-05#t10s26",
+  "rung": "0.6222"
+ },
+ "e9045198e30b": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s10",
+  "rung": "0.6"
+ },
+ "e92706e31b4a": {
+  "arm": "advisory",
+  "fork": "drive-10#t7s28",
+  "rung": "1.0"
+ },
+ "e95e9c260ed2": {
+  "arm": "advisory",
+  "fork": "drive-04#t8s13",
+  "rung": "0.8"
+ },
+ "e995d7b4fae7": {
+  "arm": "sham",
+  "fork": "drive-09#t5s5",
+  "rung": "0.8"
+ },
+ "e9a0002f2370": {
+  "batch": 45,
+  "control": "ctl02"
+ },
+ "e9ade74ba4a6": {
+  "arm": "advisory",
+  "fork": "drive-06#t8s6",
+  "rung": "0.4"
+ },
+ "e9e5a2580697": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s13",
+  "rung": "0.6"
+ },
+ "ea0b946c5ccc": {
+  "batch": 8,
+  "control": "ctl14"
+ },
+ "ea1e17892a62": {
+  "batch": 36,
+  "control": "ctl06"
+ },
+ "ea355e4ff3ba": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s13",
+  "rung": "1.0"
+ },
+ "ea3e8e876465": {
+  "arm": "advisory",
+  "fork": "drive-04#t7s15",
+  "rung": "0.6222"
+ },
+ "ea49a7f6df8f": {
+  "arm": "imperative",
+  "fork": "drive-02#t8s26",
+  "rung": "0.8"
+ },
+ "ea6dd2c9b79d": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s18",
+  "rung": "0.0556"
+ },
+ "eab4f34643ff": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s13",
+  "rung": "0.8"
+ },
+ "eac31c694932": {
+  "arm": "advisory",
+  "fork": "drive-09#t8s23",
+  "rung": "1.0"
+ },
+ "eaebcbc5aa4f": {
+  "arm": "advisory",
+  "fork": "drive-08#t10s4",
+  "rung": "0.8"
+ },
+ "eb073b6eaf48": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s20",
+  "rung": "0.8"
+ },
+ "eb3a4356fc46": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s11",
+  "rung": "0.0556"
+ },
+ "eb95adfdce4d": {
+  "arm": "sham",
+  "fork": "drive-07#t8s13",
+  "rung": "1.0"
+ },
+ "eba9b25e6106": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s20",
+  "rung": "0.0556"
+ },
+ "ebae70a7c165": {
+  "arm": "advisory",
+  "fork": "drive-02#t8s5",
+  "rung": "0.6"
+ },
+ "ebc694c3db05": {
+  "arm": "imperative",
+  "fork": "drive-10#t7s28",
+  "rung": "0.4"
+ },
+ "ec97bd97e52c": {
+  "arm": "sham",
+  "fork": "drive-04#t7s15",
+  "rung": "0.6"
+ },
+ "ece4d0f7eae3": {
+  "arm": "sham",
+  "fork": "drive-06#t7s25",
+  "rung": "1.0"
+ },
+ "ed0223eeb408": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s0",
+  "rung": "0.0556"
+ },
+ "ed0c998c7fe8": {
+  "arm": "imperative",
+  "fork": "drive-03#t3s20",
+  "rung": "0.0556"
+ },
+ "ed1a62dba8bd": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s13",
+  "rung": "0.0556"
+ },
+ "ed22ba7fd167": {
+  "arm": "sham",
+  "fork": "drive-08#t5s5",
+  "rung": "0.4"
+ },
+ "ed4a3874bfe6": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s11",
+  "rung": "0.6"
+ },
+ "ed5325958ed1": {
+  "arm": "sham",
+  "fork": "drive-10#t8s12",
+  "rung": "0.6222"
+ },
+ "ed614e78b9b0": {
+  "arm": "sham",
+  "fork": "drive-03#t9s26",
+  "rung": "0.4"
+ },
+ "ed80324822f3": {
+  "arm": "imperative",
+  "fork": "drive-07#t5s27",
+  "rung": "0.0556"
+ },
+ "ed88870f7e42": {
+  "arm": "imperative",
+  "fork": "drive-06#t9s1",
+  "rung": "0.8"
+ },
+ "ed93cd1921e1": {
+  "batch": 33,
+  "control": "ctl02"
+ },
+ "ede5b34550b0": {
+  "arm": "sham",
+  "fork": "drive-03#t9s26",
+  "rung": "1.0"
+ },
+ "edfb7e8df94e": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s22",
+  "rung": "0.0556"
+ },
+ "ee356530b196": {
+  "arm": "imperative",
+  "fork": "drive-05#t7s12",
+  "rung": "0.4"
+ },
+ "ee4a282061c5": {
+  "arm": "imperative",
+  "fork": "drive-07#t10s13",
+  "rung": "0.6222"
+ },
+ "eea42751a233": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s14",
+  "rung": "0.6222"
+ },
+ "eeaf840f4b20": {
+  "arm": "sham",
+  "fork": "drive-10#t8s2",
+  "rung": "0.0556"
+ },
+ "eeb1fdc9bd0d": {
+  "arm": "sham",
+  "fork": "drive-08#t8s9",
+  "rung": "0.4"
+ },
+ "ef149dd3ff7f": {
+  "arm": "advisory",
+  "fork": "drive-08#t8s3",
+  "rung": "0.0556"
+ },
+ "ef17614fde8e": {
+  "arm": "sham",
+  "fork": "drive-14#t2s15",
+  "rung": "0.0556"
+ },
+ "ef5dd486be57": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s12",
+  "rung": "0.8"
+ },
+ "ef689290a632": {
+  "arm": "advisory",
+  "fork": "drive-05#t11s17",
+  "rung": "0.0556"
+ },
+ "ef8fcc1402f5": {
+  "arm": "sham",
+  "fork": "drive-06#t8s6",
+  "rung": "0.4"
+ },
+ "efa05f7c1da5": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s15",
+  "rung": "0.4"
+ },
+ "efbbd1f07ba8": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s13",
+  "rung": "0.0556"
+ },
+ "efe862f6f9a1": {
+  "arm": "sham",
+  "fork": "drive-04#t2s2",
+  "rung": "0.0556"
+ },
+ "eff6cead0864": {
+  "arm": "advisory",
+  "fork": "drive-05#t3s28",
+  "rung": "0.4"
+ },
+ "f006e8ed17c9": {
+  "arm": "sham",
+  "fork": "drive-08#t11s29",
+  "rung": "0.4"
+ },
+ "f029458c42ab": {
+  "arm": "imperative",
+  "fork": "drive-02#t9s16",
+  "rung": "0.8"
+ },
+ "f058e7e30913": {
+  "arm": "imperative",
+  "fork": "drive-06#t2s29",
+  "rung": "0.4"
+ },
+ "f06653a95c37": {
+  "arm": "advisory",
+  "fork": "drive-04#t5s24",
+  "rung": "1.0"
+ },
+ "f06829159e0a": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s12",
+  "rung": "0.6"
+ },
+ "f095c53bd6d8": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s5",
+  "rung": "0.6222"
+ },
+ "f0bd212287b6": {
+  "arm": "sham",
+  "fork": "drive-07#t8s13",
+  "rung": "0.4"
+ },
+ "f0bdf2be68aa": {
+  "arm": "advisory",
+  "fork": "drive-07#t10s12",
+  "rung": "1.0"
+ },
+ "f0c7cdfb60bb": {
+  "arm": "sham",
+  "fork": "drive-14#t2s11",
+  "rung": "1.0"
+ },
+ "f0d843dfcf92": {
+  "arm": "imperative",
+  "fork": "drive-13#t2s20",
+  "rung": "0.6222"
+ },
+ "f0db89c72969": {
+  "arm": "imperative",
+  "fork": "drive-13#t5s1",
+  "rung": "1.0"
+ },
+ "f0e23cee29a6": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s17",
+  "rung": "0.4"
+ },
+ "f0e2c785c3dd": {
+  "arm": "sham",
+  "fork": "drive-06#t7s15",
+  "rung": "0.0556"
+ },
+ "f0e8a75ab6d3": {
+  "arm": "sham",
+  "fork": "drive-04#t7s15",
+  "rung": "0.8"
+ },
+ "f15365eec4e8": {
+  "arm": "sham",
+  "fork": "drive-09#t9s14",
+  "rung": "0.8"
+ },
+ "f1b52480f952": {
+  "arm": "sham",
+  "fork": "drive-03#t10s10",
+  "rung": "1.0"
+ },
+ "f1bedeedcf5a": {
+  "arm": "sham",
+  "fork": "drive-03#t10s11",
+  "rung": "1.0"
+ },
+ "f1c7ec45b8fa": {
+  "arm": "sham",
+  "fork": "drive-06#t7s25",
+  "rung": "0.6"
+ },
+ "f1e529aefc83": {
+  "arm": "advisory",
+  "fork": "drive-05#t11s17",
+  "rung": "0.8"
+ },
+ "f2060d1ce378": {
+  "arm": "sham",
+  "fork": "drive-13#t4s0",
+  "rung": "0.6222"
+ },
+ "f20b46df28fc": {
+  "arm": "advisory",
+  "fork": "drive-09#t5s22",
+  "rung": "0.4"
+ },
+ "f22d3ce4bad4": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s11",
+  "rung": "0.0556"
+ },
+ "f22f4d9edb84": {
+  "arm": "sham",
+  "fork": "drive-06#t7s25",
+  "rung": "0.4"
+ },
+ "f242b66d1c24": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s11",
+  "rung": "0.6222"
+ },
+ "f26530e08c86": {
+  "batch": 14,
+  "control": "ctl13"
+ },
+ "f267c1acccb5": {
+  "arm": "imperative",
+  "fork": "drive-05#t7s12",
+  "rung": "1.0"
+ },
+ "f282fdd6ad63": {
+  "arm": "advisory",
+  "fork": "drive-07#t10s12",
+  "rung": "0.6222"
+ },
+ "f2883ff8f19c": {
+  "arm": "sham",
+  "fork": "drive-02#t3s5",
+  "rung": "0.0556"
+ },
+ "f2a238a2b194": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s4",
+  "rung": "0.6"
+ },
+ "f2a244c0fd18": {
+  "arm": "sham",
+  "fork": "drive-10#t8s13",
+  "rung": "0.0556"
+ },
+ "f2b172fcf204": {
+  "arm": "sham",
+  "fork": "drive-13#t2s21",
+  "rung": "0.4"
+ },
+ "f2ef47cbcffd": {
+  "arm": "sham",
+  "fork": "drive-09#t9s12",
+  "rung": "0.6222"
+ },
+ "f300b5c2b36a": {
+  "arm": "sham",
+  "fork": "drive-09#t9s14",
+  "rung": "0.6222"
+ },
+ "f31e7e62418f": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s4",
+  "rung": "0.0556"
+ },
+ "f349849b2e3f": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s0",
+  "rung": "0.6"
+ },
+ "f3562b69de80": {
+  "arm": "sham",
+  "fork": "drive-06#t2s29",
+  "rung": "0.6222"
+ },
+ "f3696e0629ed": {
+  "batch": 50,
+  "control": "ctl08"
+ },
+ "f380cb6e50e8": {
+  "arm": "advisory",
+  "fork": "drive-08#t5s6",
+  "rung": "0.6"
+ },
+ "f3818cc6e229": {
+  "arm": "advisory",
+  "fork": "drive-06#t7s20",
+  "rung": "0.0556"
+ },
+ "f3a4452b06f3": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s12",
+  "rung": "0.0556"
+ },
+ "f3be353b73db": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s8",
+  "rung": "0.4"
+ },
+ "f3c562054f81": {
+  "arm": "advisory",
+  "fork": "drive-08#t7s24",
+  "rung": "0.0556"
+ },
+ "f3f88975d3ea": {
+  "arm": "advisory",
+  "fork": "drive-03#t8s15",
+  "rung": "1.0"
+ },
+ "f4455f6d606b": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s14",
+  "rung": "0.6222"
+ },
+ "f494172c1795": {
+  "batch": 7,
+  "control": "ctl02"
+ },
+ "f4b033eea177": {
+  "arm": "sham",
+  "fork": "drive-10#t8s2",
+  "rung": "1.0"
+ },
+ "f4b074e599ec": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s13",
+  "rung": "0.8"
+ },
+ "f5235fe417dd": {
+  "arm": "sham",
+  "fork": "drive-06#t9s0",
+  "rung": "0.4"
+ },
+ "f526ec167449": {
+  "batch": 38,
+  "control": "ctl07"
+ },
+ "f5287d64da1c": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s15",
+  "rung": "0.4"
+ },
+ "f534cc7a56f9": {
+  "arm": "imperative",
+  "fork": "drive-10#t10s2",
+  "rung": "0.4"
+ },
+ "f53694249124": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s11",
+  "rung": "1.0"
+ },
+ "f54a62f2fff1": {
+  "arm": "advisory",
+  "fork": "drive-10#t7s18",
+  "rung": "0.6"
+ },
+ "f54b2a2ef58e": {
+  "batch": 47,
+  "control": "ctl05"
+ },
+ "f568464e138c": {
+  "arm": "sham",
+  "fork": "drive-07#t10s13",
+  "rung": "1.0"
+ },
+ "f5d488781ac3": {
+  "arm": "advisory",
+  "fork": "drive-04#t9s24",
+  "rung": "0.6222"
+ },
+ "f6746208a76a": {
+  "arm": "sham",
+  "fork": "drive-07#t8s13",
+  "rung": "0.6"
+ },
+ "f6abb2181fa6": {
+  "batch": 7,
+  "control": "ctl12"
+ },
+ "f6ada7d29a26": {
+  "arm": "advisory",
+  "fork": "drive-04#t11s0",
+  "rung": "0.6222"
+ },
+ "f6c3edd551d6": {
+  "arm": "sham",
+  "fork": "drive-07#t8s14",
+  "rung": "0.6"
+ },
+ "f6d98c24ba86": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s1",
+  "rung": "0.8"
+ },
+ "f72a2a0b783b": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s14",
+  "rung": "0.8"
+ },
+ "f748742e1506": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s8",
+  "rung": "0.6222"
+ },
+ "f767d2049cf3": {
+  "arm": "advisory",
+  "fork": "drive-06#t9s1",
+  "rung": "0.6222"
+ },
+ "f785f1a3c071": {
+  "arm": "sham",
+  "fork": "drive-06#t5s23",
+  "rung": "1.0"
+ },
+ "f78cc2b5d427": {
+  "arm": "sham",
+  "fork": "drive-10#t10s2",
+  "rung": "0.4"
+ },
+ "f791caf18bd5": {
+  "arm": "sham",
+  "fork": "drive-13#t4s0",
+  "rung": "0.6"
+ },
+ "f7981589f83b": {
+  "arm": "sham",
+  "fork": "drive-10#t10s0",
+  "rung": "0.0556"
+ },
+ "f7a16cced03f": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s14",
+  "rung": "0.6"
+ },
+ "f800e1f30f45": {
+  "arm": "sham",
+  "fork": "drive-10#t9s11",
+  "rung": "0.6222"
+ },
+ "f8045facab65": {
+  "arm": "advisory",
+  "fork": "drive-04#t8s16",
+  "rung": "0.4"
+ },
+ "f8b5fba0a997": {
+  "arm": "sham",
+  "fork": "drive-10#t8s4",
+  "rung": "1.0"
+ },
+ "f8d92c45aad1": {
+  "arm": "sham",
+  "fork": "drive-09#t8s28",
+  "rung": "1.0"
+ },
+ "f8e3018ea0d2": {
+  "arm": "advisory",
+  "fork": "drive-09#t9s4",
+  "rung": "0.4"
+ },
+ "f8e823d4c30d": {
+  "arm": "advisory",
+  "fork": "drive-03#t8s15",
+  "rung": "0.4"
+ },
+ "f9018dc6ad01": {
+  "arm": "advisory",
+  "fork": "drive-15#t2s9",
+  "rung": "1.0"
+ },
+ "f92d84fb57e0": {
+  "arm": "imperative",
+  "fork": "drive-04#t8s16",
+  "rung": "0.4"
+ },
+ "f93c7a3ef17e": {
+  "arm": "imperative",
+  "fork": "drive-08#t5s15",
+  "rung": "0.6"
+ },
+ "f949120f138d": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s0",
+  "rung": "0.6222"
+ },
+ "f95f4db1046b": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s15",
+  "rung": "0.8"
+ },
+ "f96b9e97c5e0": {
+  "arm": "sham",
+  "fork": "drive-06#t7s0",
+  "rung": "0.4"
+ },
+ "f9b4525e9c39": {
+  "arm": "advisory",
+  "fork": "drive-02#t9s1",
+  "rung": "0.4"
+ },
+ "f9c222cc9ed3": {
+  "batch": 10,
+  "control": "ctl06"
+ },
+ "f9e5a6b1dc19": {
+  "arm": "sham",
+  "fork": "drive-04#t8s13",
+  "rung": "0.0556"
+ },
+ "fa052f1b26ad": {
+  "batch": 32,
+  "control": "ctl09"
+ },
+ "fa1de33936fb": {
+  "arm": "sham",
+  "fork": "drive-04#t8s13",
+  "rung": "1.0"
+ },
+ "fa28e5838495": {
+  "arm": "sham",
+  "fork": "drive-05#t10s26",
+  "rung": "0.8"
+ },
+ "fa86b8a76289": {
+  "arm": "sham",
+  "fork": "drive-07#t7s26",
+  "rung": "0.0556"
+ },
+ "fab117ab0402": {
+  "arm": "advisory",
+  "fork": "drive-04#t8s16",
+  "rung": "0.6222"
+ },
+ "fae0aeb55fdd": {
+  "arm": "sham",
+  "fork": "drive-04#t2s2",
+  "rung": "0.6"
+ },
+ "fafd93e2c75b": {
+  "arm": "imperative",
+  "fork": "drive-10#t9s15",
+  "rung": "0.0556"
+ },
+ "fb0c9e4ed9ef": {
+  "arm": "imperative",
+  "fork": "drive-08#t10s4",
+  "rung": "0.6222"
+ },
+ "fb0da19bdcab": {
+  "arm": "sham",
+  "fork": "drive-08#t7s24",
+  "rung": "0.0556"
+ },
+ "fb14417025a5": {
+  "arm": "imperative",
+  "fork": "drive-05#t7s12",
+  "rung": "0.6222"
+ },
+ "fb339addfa89": {
+  "arm": "sham",
+  "fork": "drive-02#t8s5",
+  "rung": "0.6222"
+ },
+ "fb42456df924": {
+  "arm": "imperative",
+  "fork": "drive-04#t9s24",
+  "rung": "0.6222"
+ },
+ "fb50e9f5299e": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s17",
+  "rung": "0.6"
+ },
+ "fb72e18a9617": {
+  "batch": 31,
+  "control": "ctl08"
+ },
+ "fb779033d8bd": {
+  "arm": "sham",
+  "fork": "drive-14#t2s13",
+  "rung": "1.0"
+ },
+ "fb9a7c7f3c77": {
+  "arm": "advisory",
+  "fork": "drive-09#t8s28",
+  "rung": "0.8"
+ },
+ "fba4174c95c9": {
+  "arm": "advisory",
+  "fork": "drive-10#t9s14",
+  "rung": "0.4"
+ },
+ "fbc36e2d6c6b": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s12",
+  "rung": "0.6222"
+ },
+ "fc0651749aa0": {
+  "batch": 4,
+  "control": "ctl12"
+ },
+ "fc8dbb8128b4": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s13",
+  "rung": "0.6222"
+ },
+ "fca558c429d4": {
+  "arm": "sham",
+  "fork": "drive-07#t10s12",
+  "rung": "1.0"
+ },
+ "fcfcf04846ba": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s12",
+  "rung": "0.6222"
+ },
+ "fd2360b468f3": {
+  "arm": "imperative",
+  "fork": "drive-07#t8s12",
+  "rung": "1.0"
+ },
+ "fd35de7a8f26": {
+  "arm": "sham",
+  "fork": "drive-04#t7s15",
+  "rung": "0.4"
+ },
+ "fd4b3658f04a": {
+  "arm": "advisory",
+  "fork": "drive-09#t2s27",
+  "rung": "1.0"
+ },
+ "fd50fb24a6e3": {
+  "arm": "advisory",
+  "fork": "drive-03#t10s10",
+  "rung": "0.4"
+ },
+ "fd92414e4480": {
+  "arm": "advisory",
+  "fork": "drive-07#t5s27",
+  "rung": "1.0"
+ },
+ "fdc6e80bed01": {
+  "arm": "advisory",
+  "fork": "drive-04#t8s16",
+  "rung": "0.8"
+ },
+ "fdcaa4905b5b": {
+  "arm": "imperative",
+  "fork": "drive-14#t2s17",
+  "rung": "1.0"
+ },
+ "fdcfcef6e0c4": {
+  "arm": "imperative",
+  "fork": "drive-08#t9s14",
+  "rung": "0.6"
+ },
+ "fdd058ac794e": {
+  "arm": "imperative",
+  "fork": "drive-10#t7s28",
+  "rung": "0.0556"
+ },
+ "fe0e2c71d778": {
+  "arm": "advisory",
+  "fork": "drive-14#t2s15",
+  "rung": "0.8"
+ },
+ "fe223b982dc0": {
+  "arm": "advisory",
+  "fork": "drive-10#t8s2",
+  "rung": "1.0"
+ },
+ "fe5f4fdc1468": {
+  "arm": "imperative",
+  "fork": "drive-07#t10s13",
+  "rung": "0.8"
+ },
+ "fed80ccda786": {
+  "arm": "imperative",
+  "fork": "drive-13#t2s21",
+  "rung": "0.0556"
+ },
+ "feeaf773b65a": {
+  "arm": "sham",
+  "fork": "drive-04#t5s24",
+  "rung": "1.0"
+ },
+ "fef7980a4617": {
+  "arm": "advisory",
+  "fork": "drive-06#t2s29",
+  "rung": "0.6"
+ },
+ "fefe9859401f": {
+  "arm": "advisory",
+  "fork": "drive-09#t5s5",
+  "rung": "0.6"
+ },
+ "ff00612387ae": {
+  "batch": 43,
+  "control": "ctl08"
+ },
+ "ff11865d605c": {
+  "arm": "advisory",
+  "fork": "drive-10#t5s7",
+  "rung": "0.6"
+ },
+ "ff1ea04ab035": {
+  "arm": "imperative",
+  "fork": "drive-10#t8s4",
+  "rung": "0.6222"
+ },
+ "ff5f998ded13": {
+  "arm": "imperative",
+  "fork": "drive-06#t7s25",
+  "rung": "0.4"
+ },
+ "ff80536520d9": {
+  "arm": "sham",
+  "fork": "drive-13#t2s20",
+  "rung": "0.8"
+ },
+ "ff942f81c82a": {
+  "arm": "advisory",
+  "fork": "drive-13#t5s1",
+  "rung": "0.6222"
+ },
+ "ffd3f9849ef3": {
+  "arm": "advisory",
+  "fork": "drive-04#t9s24",
+  "rung": "1.0"
+ },
+ "ffd8fb4b737b": {
+  "arm": "imperative",
+  "fork": "drive-08#t8s18",
+  "rung": "0.4"
+ }
+}

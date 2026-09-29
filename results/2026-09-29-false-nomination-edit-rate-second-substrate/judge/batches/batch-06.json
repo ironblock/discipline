@@ -1,0 +1,245 @@
+{
+"batch": 6,
+"items": [
+{
+"id": "7e1c8fa80be4",
+"entry": "Continue examining each potentially new/different file in beellama's tools/server directory to identify their purposes",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "df9106d01c0d",
+"entry": "`ctx_server.start_loop()` — this is the core event loop in `server-context.cpp` that processes tasks from the queue; it's where requests get dispatched to slots (in `server-queue.cpp` / `server-context.cpp`)",
+"reasoning": "",
+"prose": "I now have the full picture. Let me also check the `server_prompt` struct definition:\n\n"
+},
+{
+"id": "7374bd7570b0",
+"entry": "NONE — The core question (where common-prefix matching happens for prompt cache/slot reuse) has been fully answered with quoted code from all four key locations: `get_common_prefix()` in server-common.cpp, `get_available_slot()` in server-context.cpp, `server_prompt_cache::load()` in server-task.cpp, and the slot-level `prompt_save`/`prompt_load` in server-context.cpp.",
+"reasoning": "The user is asking about slot checkpointing and KV cache save/restore support in the llama.cpp server. Let me consolidate what I've found and also look for additional details.\n\nLet me search for more details about the checkpoint usage in prompt processing and the speculative decoding checkpoint system.",
+"prose": ""
+},
+{
+"id": "aadcdee6cf71",
+"entry": "The server has two operational modes — a **router mode** (multi-model) and a **child/single-server mode** — and the handler path differs significantly between them. In router mode, `proxy_post` forwards requests to child servers via `models.proxy_request()`. IMPLICATION: I need to find where the actual chat completion logic lives in the non-router path, which is likely in `server-task.cpp` or `server-context.cpp`.",
+"reasoning": "I found the key location. In non-router mode, `post_chat_completions` is defined in `server-context.cpp` at line 4716. Let me read that section to understand how the request flows from the HTTP handler to the slot system.",
+"prose": "The correction: in **single-server (non-router) mode**, the chat completions handler is defined in `server-context.cpp` at line 4716, not in `server-task.cpp`. Let me read that section:\n\n"
+},
+{
+"id": "357f12b7f65c",
+"entry": "The full source tree is at `~/git/reference/llama.cpp/tools/server/` — this is where I need to search for prompt cache and common-prefix matching logic",
+"reasoning": "Let me look at the launch_slot_with_task function to understand how prompt cache is used:",
+"prose": ""
+},
+{
+"id": "e6abf577c9c4",
+"entry": "Member `int32_t dry_allowed_length = 2;` — tokens extending repetitions beyond this receive penalty (`common/common.h:241`).",
+"reasoning": "",
+"prose": "Let me verify whether `dry_allowed_length` still exists in `common/common.h` in both the fork and upstream:\n\n"
+},
+{
+"id": "5d49ace84967",
+"entry": "`server-cors-proxy.h` is a NEW file not in upstream — it implements a CORS proxy that forwards requests to external URLs, enabling the server to act as a reverse proxy for cross-origin requests — IMPLICATION: Beellama adds proxy capability upstream doesn't have, which means the server can now route requests to external services and handle CORS headers on behalf of clients",
+"reasoning": "The user wants me to correct the working record entry about `server-cors-proxy.h`. Looking at the actual content of the file, it's not about CORS per se — it's a URL proxy that forwards requests to arbitrary external URLs. The name \"cors-proxy\" suggests it's used to handle CORS issues, but the implementation is a generic HTTP proxy that forwards requests to a target URL specified via a query parameter. It doesn't actually handle CORS headers; it proxies the request to another server. Let me look more carefully at the code:\n\n- It takes a `url` parameter from the request\n- It parses the target URL\n- It forwards the request body and headers (stripping `x-proxy-header-` prefix) to the target\n- It uses `server_http_proxy` to make the actual request\n\nSo it's a generic HTTP proxy endpoint, not specifically about CORS. The name \"cors-proxy\" likely means it's intended to be used by browser clients that can't directly reach other origins, but the implementation itself is just a forwarding proxy.\n\nLet me correct the working record entry.",
+"prose": "**Correction to working record entry #331:**\n\nThe entry claiming `server-cors-proxy.h` \"implements a CORS proxy that forwards requests to external URLs, enabling the server to act as a reverse proxy for cross-origin requests\" is **partially wrong**. The file does NOT handle CORS headers or cross-origin policy enforcement. It is a **generic HTTP forwarding proxy** — it accepts a `url` query parameter, parses the target URL, strips `x-proxy-header-` prefixed headers, and forwards the request body/files to the target via `server_http_proxy`. There is no CORS logic in the code at all; the name \"cors-proxy\" likely reflects its *intended use case* (helping browser clients reach other origins) rather than what the code actually does. The implementation is just a transparent request forwarder with URL validation (rejecting non-http/https schemes, passwords in URLs, and missing hosts).\n\nNow, continuing the comparison — let me check the remaining unique directories and the README-dev.md for additional context:\n\n"
+},
+{
+"id": "55f4243f5159",
+"entry": "Cache reuse (`n_cache_reuse`) also requires `llama_memory_can_shift()` to return true — not all memory backends support KV cache shifting",
+"reasoning": "The user is mentioning a build command that timed out. This seems unrelated to the current task about KV cache save/restore. Let me focus on the original question about slot checkpointing and KV cache save/restore support in the server. Let me continue investigating.\n\nActually, wait - the user message seems to be a stray comment from a different context. Let me just continue answering the original question about slot checkpointing and KV cache save/restore support.\n\nLet me look at the `llama_state_seq_save_file` and `llama_state_seq_get_data_ext` functions to understand the underlying mechanism.",
+"prose": ""
+},
+{
+"id": "946f78cf10a6",
+"entry": "The `server_http_req` struct carries `params`, `headers`, `body`, `files`, and a `should_stop` callback — all relevant for tracing how request data flows into task creation. (`server-http.h`, lines 43–57)",
+"reasoning": "",
+"prose": "I'll look at the `get_common_prefix` implementation in `server-common.cpp`:\n\n"
+},
+{
+"id": "b2fd1d5e21c5",
+"entry": "Diff key shared files (e.g., server-context.cpp, server-common.cpp) against upstream to identify modifications",
+"reasoning": "The user wants me to:\n1. First, update the working record entry about \"Diff key shared files\" - they say it's superseded by this step, so I need to state the correction.\n2. Then, find anything related to 'n_before_user' or checkpoint behavior in the beellama fork and explain what it does, quoting code.\n\nLet me start by searching for `n_before_user` in the beellama fork.",
+"prose": "**Correction to working record:** The entry \"Diff key shared files (e.g., server-context.cpp, server-common.cpp) against upstream to identify modifications\" is superseded. The beellama fork's modifications are now catalogued by file (see previous step's comparison table), so a full diff is no longer needed — the unique files and new endpoints have already been identified.\n\nNow, let me search for `n_before_user` and checkpoint behavior:\n\n"
+},
+{
+"id": "662989ab9e63",
+"entry": "Prompt cache (`--cache-ram`) and context checkpoints (`--ctx-checkpoints`) are TWO separate systems — the prompt cache stores full prompt KV states for slot reuse across requests, while context checkpoints are per-slot intermediate save points created during prompt processing for resuming — IMPLICATION: These must be configured independently and serve different purposes; disabling one doesn't affect the other",
+"reasoning": "The user wants me to investigate slot checkpointing and KV cache save/restore support in the llama.cpp server. I've already gathered substantial information. Let me now look at the cache reuse mechanism (the KV cache shifting) and any limitations. Let me also check the `n_cache_reuse` parameter and how it works.",
+"prose": "Let me look at the KV cache reuse (shifting) mechanism and its limitations.\n\n"
+},
+{
+"id": "9cb645a3321f",
+"entry": "Examine `server-task.cpp` / `server-task.h` to understand the `server_task` struct and `SERVER_TASK_TYPE_COMPLETION`",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "ef149dd3ff7f",
+"entry": "Slot save/restore operates on a specific slot ID and requires the slot to be in an idle/released state — IMPLICATION: you cannot checkpoint a slot mid-generation; the slot must be available, which means save/restore is a cold-standby pattern, not a hot-snapshot mechanism",
+"reasoning": "Let me look at the slot save/restore task processing code to understand the state requirements and limits.",
+"prose": "Let me look at the actual slot save/restore processing logic to understand state requirements:\n\n"
+},
+{
+"id": "2d1459301976",
+"entry": "Continue examining the remaining unique beellama files (server-mcp.h, server-stream.cpp, server-stream.h) to understand their purpose",
+"reasoning": "",
+"prose": "**Correction to the working record:** The entry \"Continue examining the remaining unique beellama files (server-mcp.h, server-stream.cpp, server-stream.h) to understand their purpose\" is superseded by this step. We have now examined all unique beellama files:\n\n- `server-adaptive-dm.h` (1596 lines) — adaptive draft-model speculative decoding controller with EWMA-based profit tracking\n- `server-loop-guard.cpp` / `server-loop-guard.h` — reasoning loop guard that detects degenerate repetition cycles in reasoning/visible token tails\n- `server-mcp.cpp` / `server-mcp.h` — Model Context Protocol (MCP) server integration for external tool servers\n- `server-stream.cpp` / `server-stream.h` — resumable SSE stream session management (tee-style pipe, survives client disconnects)\n\nNow let me check the remaining shared-file diffs that could reveal behavioral differences:\n\n"
+},
+{
+"id": "8ba17d8975f0",
+"entry": "NONE — The core question (where common-prefix matching happens for prompt cache/slot reuse) has been fully answered with quoted code from all four key locations: `get_common_prefix()` in server-common.cpp, `get_available_slot()` in server-context.cpp, `server_prompt_cache::load()` in server-task.cpp, and the slot-level `prompt_save`/`prompt_load` in server-context.cpp.",
+"reasoning": "The server files are in the `common/` directory or `src/` directory. Let me search for server-specific files.",
+"prose": "Reasoning: The server files are likely in `common/` or `src/`. Let me search for server-specific files with chat template and tool/function handling.\n\n"
+},
+{
+"id": "5943d773dfd5",
+"entry": "Function calling / tool use support with `--jinja` flag (README.md, Anthropic API section)",
+"reasoning": "",
+"prose": "Correction: The entry about `--jinja` flag for function calling/tool use in the Anthropic API section was based on a misreading — the `--jinja` flag is actually for template rendering control in general, not specifically for function calling. Function calling support is a separate feature implemented through the request body's `tools` parameter, not a CLI flag. I'll update this in the working record.\n\nNow let me explore the source files available:"
+},
+{
+"id": "1e208e77c5a1",
+"entry": "Whether beellama modifies any of the shared upstream files (`server-context.cpp`, `server-common.cpp`, etc.) in ways that matter beyond the new files",
+"reasoning": "The tests directory reveals several unique test files that correspond to unique features:\n- `test_reasoning_loop_guard.py` - tests the reasoning loop guard feature\n- `test_proxy.py` - tests the CORS proxy feature\n- `test_tool_call.py` - tests the server-tools feature\n- `test_compat_gcp.py` - tests GCP compatibility (not in upstream)\n- `test_kv_keep_only_active.py` - tests KV cache keep-only-active feature\n\nLet me now check the key unique features by looking at the README.md for beellama-specific features, and also check the server.cpp to see if there are modifications to the core server.",
+"prose": ""
+},
+{
+"id": "6351c7d97006",
+"entry": "The prompt cache `load()` function uses a **dual improvement criteria** — a cached prompt is only selected if BOTH `f_keep` (fraction of cached context preserved) AND `sim` (common prefix / new prompt length) are strictly better than the slot's current prompt — IMPLICATION: A cached prompt with high similarity but low `f_keep` won't be used, and vice versa; this prevents loading a tiny cache entry that barely overlaps with the new prompt even if it matches perfectly.",
+"reasoning": "The user wants me to check if the working record entry about the dual improvement criteria for prompt cache `load()` is still accurate. Let me look at the actual code in `server_prompt_cache::load()` to verify.",
+"prose": "Let me verify the dual improvement criteria in `server_prompt_cache::load()`."
+},
+{
+"id": "892b2bf48c8a",
+"entry": "`--slot-save-path` CLI flag referenced at server-context.cpp:4237 — gates whether save/restore is enabled at all",
+"reasoning": "",
+"prose": "Let me check the CLI flag definition and the gating logic more precisely:\n\n"
+},
+{
+"id": "e56c08b753cd",
+"entry": "The project in the working directory (`phase1-audit-project`) is a Python warehouse inventory tracker, not llama.cpp — the compacted working record references llama.cpp server internals (`server-context.cpp`, prompt cache, slots, etc.) but that source code is not present on this machine. — IMPLICATION: I need to locate the actual llama.cpp source code on this system before I can answer the question about prompt cache / slot reuse and common-prefix matching.",
+"reasoning": "",
+"prose": "I need to update the working record to reflect the correction: the working directory contains a Python warehouse inventory tracker (`phase1-audit-project`), not the llama.cpp source code. The compacted working record's references to `server-context.cpp`, prompt cache, slots, etc., are from a prior session and the actual llama.cpp source is not present on this machine.\n\n**Correction:** The project in the working directory (`phase1-audit-project`) is a Python warehouse inventory tracker, not llama.cpp. The compacted working record references llama.cpp server internals (`server-context.cpp`, prompt cache, slots, etc.) but that source code is not present on this machine. I cannot answer the question about prompt cache / slot reuse and common-prefix matching without access to the actual llama.cpp source.\n\nLet me confirm there's no llama.cpp source anywhere accessible:\n\n"
+},
+{
+"id": "31c1362d675f",
+"entry": "How speculative decoding checkpoints (`common_prompt_checkpoint`) interact with the in-memory `server_prompt_cache` — do checkpoints get saved/restored as part of prompt cache entries, or are they strictly per-slot ephemeral?",
+"reasoning": "Let me search for `message_spans` in the chat template code to understand where they come from.",
+"prose": ""
+},
+{
+"id": "df132fc8bfb0",
+"entry": "Member `int32_t dry_allowed_length = 2;` — tokens extending repetitions beyond this receive penalty (`common/common.h:241`).",
+"reasoning": "",
+"prose": "The `dry_allowed_length` note from the working record is about sampling params in `common/common.h:241`, which is unrelated to the caching/checkpointing code I'm examining in `server-context.cpp`. It should still hold.\n\nLet me check how `n_before_user` is computed and set:"
+},
+{
+"id": "3a89455dde32",
+"entry": "Tool use parsing (`tools`, `tool_choice`) with jinja flag requirement — relevant for function calling flow (server-common.cpp:911-925)",
+"reasoning": "",
+"prose": "The working record entry #76 states: \"Tool use parsing (`tools`, `tool_choice`) with jinja flag requirement — relevant for function calling flow (server-common.cpp:911-925)\". This is superseded: the `tools` field is parsed and populated in `common_chat_tools_parse_oaicompat` (chat.cpp:478) and passed into `common_chat_templates_apply` via `inputs.tools` in server-common.cpp around lines 1014-1071, not simply gated by a jinja flag at lines 911-925. The jinja flag only selects *which* template variant (`template_default` vs `template_tool_use`) is used for rendering (chat.cpp:2428-2429), and tool grammar/constraints are handled separately via `grammar_lazy` and `include_grammar` logic (chat.cpp:1030, 1191, 1357). The original entry conflated parsing with rendering gating.\n\nNow back to the investigation. Let me look at checkpoint restore logic:\n\n"
+},
+{
+"id": "8cc2206bd5cb",
+"entry": "`logit_bias` — per-token logit biasing (common.h, within the struct, ~line 258)",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "30af12fbd83f",
+"entry": "`tokenize_input_prompts` converts raw prompt strings to token sequences — relevant for prompt processing bugs",
+"reasoning": "Now let me get the full function `prompt_get_n_before_user` and the checkpoint logic around `n_before_user` in the context file.",
+"prose": ""
+},
+{
+"id": "9ebad3a308ba",
+"entry": "Search for `common_params` defaults in `common.cpp` or `common.h` to find global sampling defaults",
+"reasoning": "The user seems to have started a sentence but it got cut off. They're noting that `launch_slots_with_parent_task` doesn't put child tasks on separate slots, and that children run sequentially on the parent's slot. They seem to be about to say something about `n_cmpl > 1` being serialized.\n\nLet me focus on the original question: where does tool/function definition rendering happen for chat completions? I found `common_chat_templates_apply` in `server-common.cpp` line 1100, and there's also `common_chat_templates_source` with a \"tool_use\" variant in `server-context.cpp` line 4537. Let me look at these key functions to understand how tools are rendered into the chat template.\n\nLet me look at the `common_chat_templates_apply` function and the `common_chat_templates_source` function.",
+"prose": "Let me look at the key function `common_chat_templates_apply` in `server-common.cpp` which is where chat templates get applied, and then trace into the underlying `common` library functions.\n\n"
+},
+{
+"id": "08ab7b2b7b3b",
+"entry": "`server-tools.cpp/h` is entirely new — implements a server-side tool registry with subprocess execution capability (uses sheredom/subprocess.h) — IMPLICATION: beellama can execute external tools directly, not just pass tool calls back to the client; this enables server-side agentic behavior",
+"reasoning": "I have enough information now to provide a comprehensive comparison. Let me also quickly check the server-models.cpp for any new features, and look at the server-chat.h to understand the Responses API.",
+"prose": ""
+},
+{
+"id": "dbfff6412b63",
+"entry": "The speculative decoding \"restore checkpoint\" path (line ~3536) is internal to the draft-model accept/reject loop — IMPLICATION: there's a separate internal checkpoint mechanism for speculative decoding (`slot.spec_ckpt`, `slot.spec_dft`) that is unrelated to the user-facing slot save/restore API. These are two completely different checkpointing systems that share the word \"checkpoint\" but serve different purposes.",
+"reasoning": "",
+"prose": "I'll continue investigating the KV cache save/restore and slot checkpointing systems. Let me look at the two distinct checkpoint mechanisms more carefully.\n\n"
+},
+{
+"id": "041e4ddc9cfa",
+"entry": "Search for `common_params` defaults in `common.cpp` or `common.h` to find global sampling defaults",
+"reasoning": "The user wants me to first update a working record entry, then continue with the main task. Let me address both.\n\nFirst, the correction: The entry \"Search for `common_params` defaults in `common.cpp` or `common.h` to find global sampling defaults\" is superseded. From the compacted working record, we already know (entry #112) that sampling parameter defaults live in `common/common.h` as C++ member initializer defaults in the `common_params_sampling` struct (line 222+), NOT in `common.cpp`. The schema file only defines validation limits and descriptions. So the correction is: defaults are in `common/common.h`, not `common.cpp`, and the `common_params` struct is the relevant one (not just `common_params_sampling`).\n\nNow, the main task: find where chat templates are applied server-side and where tool/function definition rendering happens.\n\nFrom the grep results, the key function is `common_chat_templates_apply()` in `server-common.cpp` line 1100. Let me look at that section and the surrounding code to understand how tools are rendered.\n\nLet me look at the server-common.cpp around line 1035-1100 to see the chat template application flow.",
+"prose": "**Working record correction:** The entry \"Search for `common_params` defaults in `common.cpp` or `common.h` to find global sampling defaults\" is superseded by record #112. The actual location is `common/common.h` (not `common.cpp`), where `common_params_sampling` struct member initializers (line 222+) provide the defaults. The schema file (`server-schema.cpp`) only defines validation limits and descriptions, not defaults.\n\nNow, back to the main task. The key function is `common_chat_templates_apply()` at `server-common.cpp:1100`. Let me read the surrounding code to see how tool definitions get rendered.\n\n"
+},
+{
+"id": "02c55d8c9dd3",
+"entry": "export { setKtx2DecoderUrl, loadKtx2Texture2D } from \"./texture/ktx2-loader.js\";",
+"reasoning": "I've gathered enough information to provide a comprehensive answer about Babylon Lite and how it differs from standard Babylon.js. Let me summarize the key differences:\n\n1. **WebGPU Exclusive**: No WebGL support at all. Built entirely around WebGPU paradigms.\n2. **Functional API**: Uses factory functions (`createEngine`, `createSceneContext`, etc.) instead of class constructors.\n3. **Frame Graph Architecture**: Explicit ordered task-based rendering pipeline instead of implicit render loop.\n4. **Tree-Shakable Design**: 100% tree-shakable, unused features cost zero bytes.\n5. **Minimal Bundle Size**: Focus on minimal size and maximum performance.\n6. **Vite Foundation**: Built on Vite for dev and production bundling.\n7. **WGSL Native**: WGSL shaders are minified in production.\n8. **No Babylon.js Code Copying**: They understand the math and write minimum code.\n9. **Compatibility Package**: `babylon-lite-compat` provides shims for Babylon.js APIs.\n10. **Parity Testing**: Pixel-diff tests against Babylon.js golden references to ensure visual parity.\n11. **Physics**: Havok Physics V2 subset support.\n12. **Navigation**: Recast V2 navmesh support.\n13. **Gaussian Splatting**: Full support for .ply, .splat, .sog, .spz formats.\n14. **CSG/CSG2**: Boolean mesh operations.\n15. **Node Material**: NME snippet parser.\n16. **Device-Lost Recovery**: Opt-in WebGPU device-loss recovery.\n\nLet me present this clearly to the user.",
+"prose": "I've explored the Babylon Lite repo thoroughly. Here's what I found that's different from standard Babylon.js:\n\n## Key Architectural Differences\n\n**1. WebGPU-Exclusive**\n- Zero WebGL fallback. Built entirely around WebGPU paradigms: render pipelines, compute shaders, bind groups, command buffers.\n- There's a `babylon-lite-gl` package but it's empty (just a `.gitkeep`), so no WebGL support is planned.\n\n**2. Functional API Instead of Class-Based**\n- Instead of `new Engine()`, `new Scene()`, `new Mesh()`, it uses factory functions:\n  - `createEngine(canvas)` → `EngineContext`\n  - `createSceneContext(engine)` → `SceneContext`\n  - `createSphere(engine)` → `Mesh`\n  - `createStandardMaterial()` → `Material`\n- This is designed for **100% tree-shakability** — unused features cost zero bytes.\n\n**3. Frame Graph Rendering Architecture**\n- Instead of an implicit render loop, it uses an explicit ordered task pipeline:\n  - `RenderTask`, `ShadowTask`, `PostProcessTask`, `ImageProcessingTask`, `GeometryRendererTask`, etc.\n- Each task records a `RenderPass` with explicit control over render targets, cameras, and renderables.\n- Multiple scenes can share the swapchain in a single frame via `clr: false` (load vs clear).\n\n**4. Vite as the Foundation**\n- Project infrastructure, dev server, and production bundling built strictly on Vite.\n- WGSL shaders are minified in production bundles (comments, whitespace stripped).\n\n**5. No Babylon.js Code Copying**\n- The philosophy explicitly states: *\"We do NOT copy Babylon.js code. We understand the math, then write the minimum code that produces identical pixels.\"*\n\n**6. Compatibility Shim Package**\n- `babylon-lite-compat` provides Babylon.js-style API shims (`actions`, `behaviors`, `inspector`, etc.) for porting, but these are opt-in and not part of the core engine.\n\n**7. Strict Bundle Size Testing**\n- Playwright network interception measures actual runtime bytes fetched.\n- Bundle size ceilings are enforced in CI — regressions are blocked.\n\n**8. Visual Parity Testing**\n- Pixel-diff tests against Babylon.js golden references (MAD ≤ 0.1 for regions, ≥99% pixels within 1 byte).\n- Reference screenshots are immutable.\n\n**9. Supported Features**\n- ✅ PBR (metallic-roughness & specular-glossiness), Standard materials, Shader materials (WGSL), Node Material (NME parser)\n- ✅ Gaussian splatting (`.ply`, `.splat`, `.sog`, `.spz`)\n- ✅ CSG/CSG2 boolean mesh operations\n- ✅ Physics (Havok V2 subset), Navigation (Recast V2 navmesh)\n- ✅ Device-lost recovery, thin instance GPU culling, floating-origin large-world rendering\n- ⚡ Sprites/billboards (subset, not full SpriteManager)\n- 🚫 WebGL, classic `InstancedMesh` API, GUI, Inspector, procedural textures, Lottie, serializers\n\n**10. Y-Orientation Convention**\n- Uses Y-up UVs like Babylon.js, but handles the WebGPU Y-down sampler convention through two explicit paths: raster upload-flip and material-side V-flip via `invertY`.\n\nThe overall picture is a leaner, WebGPU-native, function-first engine that"
+},
+{
+"id": "fae0aeb55fdd",
+"entry": "Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "13c3404da1d0",
+"entry": "Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "c70ff2bbafbb",
+"entry": "`server-cors-proxy.h` is a NEW file not in upstream — it implements a CORS proxy that forwards requests to external URLs, enabling the server to act as a reverse proxy for cross-origin requests — IMPLICATION: Beellama adds proxy capability upstream doesn't have, which means the server can now route requests to external services and handle CORS headers on behalf of clients",
+"reasoning": "The user wants me to correct the working record entry about `server-cors-proxy.h`. Looking at the actual code, it's not a CORS proxy - it's a reverse proxy that forwards requests to external URLs. The name \"cors-proxy\" is misleading because it's not about CORS at all - it's about proxying requests to arbitrary URLs. Let me re-read the code:\n\nThe function `proxy_request` takes a URL parameter, parses it, and creates a `server_http_proxy` object that forwards the request to that URL. It handles header forwarding (stripping `x-proxy-header-` prefix). There's no CORS-specific handling visible in the code I saw.\n\nSo the correction is: `server-cors-proxy.h` is a reverse proxy / URL forwarding handler, not a CORS proxy. It lets the server forward HTTP requests to arbitrary external URLs, which is a general-purpose proxy capability rather than CORS-specific behavior.\n\nNow let me also look at the remaining unique files to complete the comparison. Let me check the README-dev.md and also look at the bench and tests directories more carefully.\n\nActually, the user asked me to update the working record entry first, then continue with the comparison. Let me do that.",
+"prose": "**Correction to working record #331:** `server-cors-proxy.h` is NOT a CORS proxy. Despite its name, it implements a **general-purpose reverse proxy / URL forwarding handler** (`proxy_request()`). It accepts a `url` query parameter, validates the target scheme/host, strips `x-proxy-header-` prefixes from forwarded headers, and creates a `server_http_proxy` object that forwards the request body, files, and headers to the external URL. There is no CORS-specific logic in the code. Upstream llama.cpp does not have this file. The implication is: beellama adds a built-in HTTP forwarding capability (useful for multi-model routing or external API bridging), not CORS handling.\n\nNow let me continue the comparison by examining the remaining unique files:\n\n"
+},
+{
+"id": "0f32e8ae017f",
+"entry": "Where in `server-context.cpp` or `server-schema.cpp` are tool definitions from the JSON request body converted into the format expected by the chat template engine?",
+"reasoning": "",
+"prose": "I need to correct the working record entry. The previous question about where tool definitions from the JSON request body are converted into the format expected by the chat template engine was answered by this step: the conversion happens in `common/chat.cpp` (not in `server-context.cpp` or `server-schema.cpp` directly). The server passes the raw JSON `tools` array into `common_chat_templates_init()` and `common_chat_apply_template()` in `common/chat.cpp`, which handles the tool rendering internally.\n\nNow let me continue investigating the actual tool rendering path.\n\n"
+},
+{
+"id": "448566d22968",
+"entry": "The README.md is ~97KB and the output was truncated (93,144 chars omitted) — IMPLICATION: I need to read specific sections of the README to find the API endpoint documentation rather than reading the whole file at once",
+"reasoning": "The user wants me to read the server.cpp file and explain how a /v1/chat/completions request flows from HTTP handler to the slot system, naming key functions. The last paragraph seems to be some kind of injected/compacted working record that's irrelevant to the actual task. Let me focus on the actual request.\n\nLet me read server.cpp to understand the flow.",
+"prose": ""
+},
+{
+"id": "1ae5ee0d3d4b",
+"entry": "The Jinja path selects between `template_default` and `template_tool_use` based on whether `params.tools.is_array()` — two separate chat templates can exist per model, with the tool-aware template activated only when tools are present — IMPLICATION: models need a `template_tool_use` variant in their tokenizer metadata for tool rendering to work correctly",
+"reasoning": "The user is asking me to update the working record entry. Let me look at what was found in the last step.\n\nFrom the grep results, the key finding is in `chat-auto-parser-generator.cpp` line 144:\n```\n} else if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE && jinja_caps.supports_tool_calls) {\n```\n\nThis shows that tool rendering is NOT just about selecting between `template_default` and `template_tool_use` templates. Let me look at the actual code more carefully to understand what's happening.\n\nThe original entry said: \"The Jinja path selects between `template_default` and `template_tool_use` based on whether `params.tools.is_array()` — two separate chat templates can exist per model, with the tool-aware template activated only when tools are present\"\n\nFrom the code I saw in `common_chat_templates_apply_jinja`:\n```cpp\nconst auto & tmpl =\n    params.tools.is_array() && tmpls->template_tool_use ? *tmpls->template_tool_use : *tmpls->template_default;\n```\n\nThis part IS correct about the template selection. But the new finding from `chat-auto-parser-generator.cpp:144` shows that tool rendering also involves an additional condition: `has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE && jinja_caps.supports_tool_calls`. So the implication is more nuanced - it's not just about having a `template_tool_use` variant, but also about the tool_choice and the template's capability flags.\n\nLet me look at the actual code in the generator to understand what happens there.",
+"prose": ""
+},
+{
+"id": "03c2258205d1",
+"entry": "The `process_mtmd_prompt` vs `tokenize_input_prompts` branching for multimodal vs regular prompts",
+"reasoning": "I have enough information to provide a comprehensive summary of the request flow. Let me compile what I've learned.",
+"prose": "Based on my reading of the source files, here's a clear explanation of how a `/v1/chat/completions` request flows from HTTP handler to the slot system:\n\n---\n\n## Request Flow: `/v1/chat/completions` → Slot System\n\n### 1. HTTP Handler Registration (`server.cpp`)\n\nThe route is registered in `llama_server()` via the httplib-based `ctx_http` object:\n\n"
+},
+{
+"id": "d3d81e9b478a",
+"entry": "The `tool_choice` parameter (\"auto\", \"none\", \"required\") is NOT passed into the Jinja template context — only `messages`, `tools`, `bos_token`, `eos_token`, `enable_thinking`, and `add_generation_prompt` are. The `tool_choice` is used solely for grammar generation (controlling min/max tool call counts), not for template rendering — IMPLICATION: Jinja templates cannot conditionally render based on tool_choice; they always render tool definitions the same way regardless of whether tool use is required/auto/none.",
+"reasoning": "Let me look at `process_token` which is the core function that processes each generated token and decides whether to send partial responses.",
+"prose": ""
+},
+{
+"id": "264d68b1005c",
+"entry": "The `alloc()` method's LCP-based deduplication — it removes obsolete cached prompts fully contained in the new prompt and skips saving if the prompt already exists. This matters for understanding cache bloat and eviction behavior. (server-task.cpp, lines 1620+)",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "72ea1ce27007",
+"entry": "Slot management endpoints (`/slots`) for monitoring active inference slots (`server.cpp`)",
+"reasoning": "",
+"prose": "Now let me look at `common_chat_tool` struct definition:"
+}
+]
+}
