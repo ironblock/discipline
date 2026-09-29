@@ -1,0 +1,17 @@
+{
+ "word": "pass",
+ "per_cell": {
+  "0.0": "control",
+  "0.5": "pass",
+  "0.9": "pass",
+  "0.95": "pass"
+ },
+ "control_pass": 5,
+ "criterion": {
+  "within": 1,
+  "min_samples": 5,
+  "max_errors": 0
+ },
+ "strict_beside": "pass",
+ "strict_is": "every sample at every cell passed: reported beside the word, never the word (planning, #143)"
+}

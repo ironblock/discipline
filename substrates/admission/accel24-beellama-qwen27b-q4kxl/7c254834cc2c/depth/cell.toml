@@ -1,0 +1,10 @@
+# The floor's depth cell (#143, I4c): the admission depth probe (#179, merged at 10d866e), run 2026-09-29
+# 08:02:12-08:19:55Z with production up. recompute.sh re-derives the word from raw/rows.jsonl.
+word = "pass"
+strict_beside = "pass"
+instrument = "substrates/admission/depth-probe, the four-constraint (admission) set, five application samples plus one retrieval per cell, fractions 0 / 0.5 / 0.9 / 0.95 of the registry's 160,000-token pool with the other slot cleared"
+reading = "control 5/5; 0.5 (79,848 tokens) 5/5; 0.9 (143,586) 5/5; 0.95 (151,622) 5/5; retrieval 1/1 at every cell; no server error, no truncation, no thinking-off sample"
+criterion = "substrates/admission/depth-probe/criterion.toml: every cell within one sample of the control (planning, #143, comment 5885436821); the strict reading (every sample at every cell) beside it, never the word"
+sampler = "the registry's sampler card: temperature 0.6, top_k 20, top_p 1.0, min_p 0.0; thinking on as served; max_tokens 4096"
+identity = "the floor's serving process, pid unchanged since the cells window, exe digest read after the window equal to this cells directory's (raw/identity-after.txt)"
+raw = { "console.log" = "a5cf5140825721a6609e7cd7c2b2cf6459378872dd042c14731ae8e596277580", "decide.json" = "505239cbd317140b1d18340bda28f6ed9a6f612e8ff175b816bdd1c81cbec00f", "identity-after.txt" = "77271317a3548637a5bb814f572429759a47df6f7009a784227d4cce2b73d6e0", "meta.json" = "ee8db99a7327aef4c725ab59270352ea304061918af9bbdc6bbc928de7a53edd", "rows.jsonl" = "24a4524d3a2fa4e8cf576c8f4fdfaa45dad9f7f7cc5c1a0ed45ad1ccf2cf6465", "run.sh" = "66d21f7d157fd7020d91a66fae4aad8e20968c7f19cb60baaac5d3a92f6b4c84", "summary.json" = "27882e7a7c276d6636c94be730727ad1716611ab770b80cfd71544565b924a90" }
