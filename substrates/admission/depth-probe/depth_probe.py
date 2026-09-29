@@ -221,6 +221,7 @@ def cmd_run(a) -> int:
         raise SystemExit(f"depth_probe: the deepest cell plus max_tokens exceeds the server's per-slot context {nctx}")
     meta = {"tier": a.tier, "admission": TIERS[a.tier]["admission"], "serving_context": a.serving_context, "cells": cells,
             "samples": a.samples, "sampler": sampler, "max_tokens": a.max_tokens, "seed": a.seed, "chunk_chars": a.chunk_chars,
+            "instrument_sha256": sha(pathlib.Path(__file__).read_bytes()), "criterion_sha256": sha((HERE / "criterion.toml").read_bytes()),
             "corpus_manifest_sha256": sha(mpath.read_bytes()), "template_sha256": sha((props.get("chat_template") or "").encode()),
             "n_ctx_per_slot": nctx, "total_slots": slots, "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     (out / "meta.json").write_text(json.dumps(meta, indent=1) + "\n")
@@ -356,6 +357,9 @@ def cmd_selftest(a) -> int:
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_run(ns)
         rows = [json.loads(l) for l in open(pathlib.Path(td) / "rows.jsonl")]
+        meta = json.loads((pathlib.Path(td) / "meta.json").read_text())
+    check(meta.get("instrument_sha256") == sha(pathlib.Path(__file__).read_bytes()) and meta.get("criterion_sha256") == sha((HERE / "criterion.toml").read_bytes()),
+          "end to end: meta.json records the instrument's and the criterion's digests", f"got {meta.get('instrument_sha256')}, {meta.get('criterion_sha256')}")
     srv.shutdown()
     s = summarise(rows)
     got = {f: {"application": c["application"], "retrieval": c["retrieval"], "planted": c["planted"]} for f, c in s.items()}

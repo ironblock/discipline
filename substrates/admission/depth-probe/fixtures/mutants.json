@@ -132,6 +132,11 @@
    "file": "make_corpus.py",
    "old": " if p.endswith(\".rs\")]",
    "new": "]"
+  },
+  {
+   "label": "the instrument's digest not recorded",
+   "old": "\"instrument_sha256\": sha(pathlib.Path(__file__).read_bytes()), ",
+   "new": ""
   }
  ]
 }
