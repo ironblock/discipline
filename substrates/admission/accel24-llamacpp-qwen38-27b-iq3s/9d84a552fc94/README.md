@@ -33,7 +33,7 @@ The #143 cells window, 2026-09-29, ratified by the maintainer. The step list was
 | canary | baseline | 36/36, the first draw on this line: its baseline, not a test (Q5). The second draw is the first test |
 | output invariance | pass | reading (c): spec-off reproducible within a process and across two; spec-on reproducible with itself; on/off first differs at token 55 |
 | headroom | pass | 1,966 MiB free with both slots full, against the floor's 1,208 |
-| checkpoint restore | unreported | no instrument; I4b not built |
+| checkpoint restore | unadjudicated | no gym instrument; I4b not built, so the cell never ran. The engine exposes checkpoint restore, so the word is not `unreported` (comment 5887164395; #178 had written `unreported`) |
 
 **Beside the cells:**
 - Measured bpw, by D9's method (`raw/bpw.json`): 3.4981 without the MTP layer, 3.5457 with it.

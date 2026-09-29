@@ -1,0 +1,34 @@
+# The floor's admission record (#143): the three results planning named, cited by digest. The word is written
+# by hand, and is held for now; the checker that derives it is a filed gate item (Dispatch, #143). Each result's
+# manifest_sha256 is the sha256 of its file manifest: every file under the path, sorted, one "path<TAB>sha256"
+# line each (the cells result excludes depth/ and the admission files). admission-recompute.sh re-derives all of it.
+substrate = "accel24-beellama-qwen27b-q4kxl"
+fingerprint = "7c254834cc2c49ac3aab43483fffdc5a7d421fc5b0bc6fcde99564b9d59b0aa9"
+word_held = "the checkpoint_restore cell is unadjudicated: the gym has no instrument (I4b), so the cell never ran; admission waits on it (Dispatch, #143, comment 5887164395). The other two results pass"
+rule = "admitted requires the parity fire supported, the depth probe no cliff, and every constitutional cell passing or n/a with its reason; any other word is not admitted with the result named, except that an unadjudicated cell neither admits nor bars (planning, #143, comments 5885436821 and 5885752512)"
+known_defects = [
+  "The parity fire (#115, 2026-09-25) predates the fingerprint recipe. It ties to this fingerprint through the same engine digest (980845d6...), the same provisioning line, and fingerprint --check --hash-models IDENTICAL against the 2026-09-20 capture at the fire; its served template's digest was not read at the fire, so the template component is unconfirmed for that result.",
+  "The cells' checkpoint_restore word was corrected here from unreported (as #178 wrote it) to unadjudicated, with its reason kept (Dispatch, #143, comment 5887164395).",
+  "The word is written by hand: no checker derives it yet (a filed gate item).",
+]
+
+[results.cells]
+path = "substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c"
+recompute = "recompute.sh"
+manifest_sha256 = "0a105040f59d59e6608b53cb78a5c15709362c4e3897a64d01e150a9dd297db5"
+merged_in = "#178 (cells), #180 (effort and the refusal row), this PR (checkpoint_restore's word)"
+words = { identity = "pass", kwarg_delivery = "pass", rendered_effort = "n/a (a capability fact of the template, recorded as data on the registry entry's effort fields, not a cell word: planning on #143, 2026-09-29)", canary = "pass", output_invariance = "pass", headroom = "n/a (this line is the headroom reference: Q9 as amended compares candidates against it)", checkpoint_restore = "unadjudicated" }
+
+[results.depth]
+path = "substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/depth"
+recompute = "recompute.sh"
+manifest_sha256 = "5a32e12ea318eb0db48ecf4f9366262bd479dacc3d0adc98f00ff4112d6b37c8"
+merged_in = "#182"
+word = "pass"
+
+[results.parity]
+path = "results/2026-09-25-extraction-acceptance-parity"
+recompute = "recompute.sh"
+manifest_sha256 = "780dfac7da4872d43c4f0dfcb06d757f80a1ce14ecd7073be4f0989aa4819555"
+merged_in = "#115's record"
+word = "supported"

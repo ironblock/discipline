@@ -48,5 +48,5 @@ criterion = "free at peak no less than the floor's line measured the same way: 1
 raw = { fill_json = "bf30f16d505c467cbba12f980b53996c0aae91f8fdce39722832dbe967fb0c34" }
 
 [checkpoint_restore]
-word = "unreported"
-reason = "no instrument; I4b not built"
+word = "unadjudicated"
+reason = "no gym instrument; I4b not built: the cell never ran. The engine exposes checkpoint restore, so the word is not unreported (Dispatch, #143, comment 5887164395; #178 had written unreported)"
