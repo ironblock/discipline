@@ -1,0 +1,253 @@
+.ex-branch {
+  display: grid;
+  gap: 0.35rem;
+  font: var(--size-chrome) / 1.45 var(--font-chrome);
+}
+
+.ex-branch__why {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0 0.1rem;
+  border: 0;
+  background: none;
+  color: var(--ink-muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ex-branch__why:hover {
+  color: var(--ink);
+}
+
+.ex-branch__caret {
+  color: var(--ink-faint);
+}
+
+/* An opened side call's body: what it was asked, what it answered, what landed. */
+.ex-branch__exchange {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.ex-branch__exchange > .ex-failed {
+  margin: 0;
+}
+
+.ex-branch__question {
+  margin: 0;
+  color: var(--ink-muted);
+  font: var(--size-aside) / 1.5 var(--font-system);
+}
+
+.ex-branch__waiting {
+  margin: 0;
+  color: var(--ink-faint);
+}
+
+/* How a side call ended, coloured by the registry's level, lower-case as the trunk's stops are; a name the
+   surface does not know is drawn neutrally, underlined dotted: carried, not understood. */
+.ex-branch__outcome {
+  color: var(--ink-muted);
+}
+
+.ex-branch__outcome[data-level='ok'] { color: var(--ok); }
+.ex-branch__outcome[data-level='warn'] { color: var(--warn); }
+.ex-branch__outcome[data-level='bad'] { color: var(--bad); }
+.ex-branch__outcome:not([data-known]) { text-decoration: underline dotted; text-underline-offset: 0.2em; }
+
+.ex-branch__patches {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A patch line, coloured by its op's level in the registry: what it did to memory at a glance. */
+.ex-patch {
+  --op: var(--fresh);
+  animation: ex-land 2.4s ease-out 1;
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.25rem 0.5rem;
+  border-left: 2px solid var(--op);
+  background: var(--chip);
+  position: relative;
+}
+
+.ex-patch[data-level='quiet'] { --op: var(--ink-faint); }
+.ex-patch[data-level='warn'] { --op: var(--warn); }
+.ex-patch[data-level='bad'] { --op: var(--bad); }
+.ex-patch:not([data-known]) { border-left-style: dashed; }
+
+.ex-patch__op {
+  color: var(--op);
+}
+
+.ex-patch__id {
+  color: var(--ink-muted);
+}
+
+.ex-patch__text {
+  color: var(--ink);
+  font: var(--size-aside) / 1.45 var(--font-memory);
+  /* The lane says what a patch did; working memory has the whole entry. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.ex-patch[data-op='retire'] .ex-patch__text {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+.ex-patch__note {
+  margin-left: auto;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-patch { animation: none; }
+
+/* An answer's tagged lines: one column for the tags, as wide as the longest, so every line's text starts together. */
+.ex-tagged {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.35rem 0.6rem;
+}
+
+.ex-tagged__line {
+  display: contents;
+  font: var(--size-aside) / 1.45 var(--font-answer);
+  color: var(--ink-assistant);
+}
+
+.ex-tagged__line > * {
+  margin: 0;
+}
+
+.ex-tagged__line--plain {
+  display: block;
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.ex-tagged__tag {
+  font: var(--size-chrome) / 1.9 var(--font-chrome);
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+
+/* A side call condensed to a bar (the curtain's `condensed`). */
+.ex-bar {
+  --c: var(--lane-ink, var(--ink-lane));
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  position: relative;
+  width: 100%;
+  padding: 0 0 3px;
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--c) 42%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--c) 65%, transparent);
+  cursor: pointer;
+  /* At its ceiling, the earliest ticks give way to the latest. */
+  overflow: hidden;
+  transition: height 0.3s ease, background-color 0.6s ease, box-shadow 0.6s ease;
+}
+
+.ex-bar:hover {
+  background: color-mix(in oklab, var(--c) 60%, transparent);
+}
+
+.ex-bar[data-live] {
+  background: color-mix(in oklab, var(--c) 70%, transparent);
+  box-shadow: 0 0 var(--led-radius) var(--c), 0 0 calc(var(--led-radius) * 2.5) color-mix(in oklab, var(--c) 50%, transparent);
+}
+
+/* Where the writing is: the running bar's leading edge, brightest. */
+.ex-bar[data-live]::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 8px;
+  border-radius: 0 0 4px 4px;
+  background: linear-gradient(to bottom, transparent, color-mix(in oklab, var(--c) 40%, white));
+}
+
+/* Prefill: nothing written yet, the bar breathes. */
+.ex-bar[data-progress='prefill'] {
+  animation: ex-breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes ex-breathe {
+  50% { opacity: 0.55; }
+}
+
+.ex-bar__tick {
+  flex: none;
+  height: 3px;
+  margin: 0 3px;
+  border-radius: 1px;
+  background: var(--fresh);
+}
+
+.ex-bar__tick[data-level='quiet'] { background: var(--ink-faint); }
+.ex-bar__tick[data-level='warn'] { background: var(--warn); }
+.ex-bar__tick[data-level='bad'] { background: var(--bad); }
+
+.ex-bar[data-alarm]::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: 0;
+  height: 3px;
+  border-radius: 1px;
+  background: var(--warn);
+}
+
+.ex-bar[data-alarm='bad']::before {
+  background: var(--bad);
+  box-shadow: 0 0 4px var(--bad);
+}
+
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-bar { transition: none; }
+.ex-root[data-motion='still'] .ex-bar[data-progress='prefill'] { animation: none; }
+
+/* Waiting for its slot: drawn, unlit, its edge dashed -- it has no place of its own yet. */
+.ex-branchcell[data-pending] .ex-block {
+  opacity: 0.75;
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.ex-bar[data-pending] {
+  background: transparent;
+  box-shadow: none;
+  border: 1px dashed color-mix(in oklab, var(--c) 65%, transparent);
+}
+
+/* A side call's patches, counted by op in the op's glyph and colour: `+3 ↻1 −1`. */
+.ex-patchsum {
+  display: inline-flex;
+  gap: 0.5em;
+}
+
+.ex-patchsum__op { color: var(--fresh); }
+.ex-patchsum__op[data-level='quiet'] { color: var(--ink-faint); }
+.ex-patchsum__op[data-level='warn'] { color: var(--warn); }
+.ex-patchsum__op[data-level='bad'] { color: var(--bad); }
+.ex-patchsum__op:not([data-known]) { text-decoration: underline dotted; text-underline-offset: 0.2em; }

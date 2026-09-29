@@ -1,0 +1,94 @@
+/*
+ * The cable: one stroked path, so a bend is a real curve and every edge is
+ * anti-aliased the same way. At rest it is its lane's lamp, thinned toward
+ * transparent by --cable-rest, so its hue says which lane; running, it is
+ * the lane's ink and glows by --cable-glow, and a dash of light travels
+ * its length.
+ */
+.ex-cable {
+  --c: var(--lane-ink, var(--ink-lane));
+  position: absolute;
+  /* Over the side call's edge, so the port it jacks into shows whole. */
+  z-index: 1;
+  overflow: visible;
+  pointer-events: none;
+  color: color-mix(in oklab, var(--lane-lamp, var(--c)) var(--cable-rest), transparent);
+  transition: color 0.6s ease, filter 0.6s ease;
+}
+
+.ex-cable path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--cable-width);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ex-cable__arrow {
+  display: var(--cable-arrow);
+}
+
+.ex-cable__port {
+  display: var(--cable-ports);
+  fill: currentColor;
+}
+
+.ex-cable[data-live],
+.ex-cable[data-hot] {
+  color: var(--c);
+  filter: drop-shadow(0 0 var(--cable-glow) var(--c));
+}
+
+/* Waiting for its slot: the cable is laid, dashed. */
+.ex-cable[data-pending] .ex-cable__line {
+  stroke-dasharray: 3 4;
+}
+
+/* The light: one dash, a tenth of the cable long, from the trunk to the slot, again and again. */
+.ex-cable .ex-cable__pulse {
+  display: none;
+  stroke: color-mix(in oklab, var(--c) 45%, white);
+  stroke-width: calc(var(--cable-width) + 1px);
+  stroke-dasharray: 10 90;
+}
+
+.ex-cable[data-live] .ex-cable__pulse {
+  display: var(--cable-pulse);
+  animation: ex-travel 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes ex-travel {
+  from { stroke-dashoffset: 10; }
+  to { stroke-dashoffset: -90; }
+}
+
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-cable[data-live] .ex-cable__pulse { display: none; }
+
+/*
+ * A connector can be pointed at: an invisible stroke a little wider than
+ * the line, over it, catches the pointer though the drawing it sits in does
+ * not (Cable, Wiring, Links).
+ */
+.ex-hit,
+.ex-cable .ex-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 7px;
+  pointer-events: stroke;
+}
+
+/* Routed as a harness (Wiring.tsx): one overlay over the stage, a dot where a net forks. */
+.ex-wiring {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.ex-cable__dot {
+  fill: currentColor;
+}

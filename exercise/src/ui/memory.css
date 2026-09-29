@@ -1,0 +1,116 @@
+.ex-memory {
+  display: grid;
+  gap: 0.9rem;
+  padding: 0.9rem 1rem;
+  --light-colour: var(--ink-muted);
+  --light: var(--light-panel);
+  --glow: var(--glow-panel);
+  --panel-fill: var(--fill-memory);
+  font: var(--size-chrome) / 1.45 var(--font-chrome);
+  color: var(--ink-muted);
+}
+
+/* Something landed that the person has not seen: memory lights up in the fresh colour. */
+.ex-memory:has(.ex-memory__entry[data-fresh]) {
+  --light-colour: var(--fresh);
+  --light: var(--light-panel-live);
+  --glow: var(--glow-panel-live);
+}
+
+.ex-memory__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  align-items: baseline;
+}
+
+/* Each part of the head keeps its words together; the head wraps between parts. */
+.ex-memory__head > * {
+  white-space: nowrap;
+}
+
+.ex-memory__title {
+  color: var(--ink);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ex-memory__fresh {
+  color: var(--fresh);
+}
+
+.ex-memory__empty {
+  margin: 0;
+  font: var(--size-aside) / 1.5 var(--font-system);
+}
+
+.ex-memory__category h3 {
+  margin: 0 0 0.35rem;
+  font: inherit;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ex-memory__category ul {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ex-memory__entry {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  gap: 0.4rem;
+  padding: 0.2rem 0 0.2rem 0.5rem;
+  border-left: 2px solid transparent;
+  position: relative;
+}
+
+.ex-memory__entry[data-fresh] {
+  border-left-color: var(--fresh);
+  animation: ex-land 2.4s ease-out 1;
+}
+
+.ex-memory__seen {
+  margin-left: auto;
+  padding: 0.1em 0.5em;
+  border: 1px solid color-mix(in oklab, var(--fresh) 40%, transparent);
+  border-radius: calc(var(--radius) / 2);
+  background: none;
+  color: var(--fresh);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-memory__entry[data-fresh] { animation: none; }
+
+.ex-memory__id {
+  color: var(--ink-faint);
+}
+
+.ex-memory__text {
+  color: var(--ink);
+  font: var(--size-aside) / 1.45 var(--font-memory);
+  overflow-wrap: anywhere;
+}
+
+.ex-memory__entry[data-state='superseded'] .ex-memory__text,
+.ex-memory__entry[data-state='retired'] .ex-memory__text {
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+/* An entry's last op, when it was not one that sets its state: `park`, `resolve`, or a name from a newer drive. */
+.ex-memory__op {
+  margin-left: 0.5em;
+  padding: 0 0.35em;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font: var(--size-stats) / 1.4 var(--font-stats);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}

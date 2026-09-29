@@ -1,0 +1,375 @@
+.ex-block {
+  --fill: var(--fill-assistant);
+  --tone-ink: var(--ink-assistant);
+  background-color: var(--fill);
+  background-image: var(--sweep), var(--texture);
+  color: var(--tone-ink);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem 0.6rem;
+  position: relative;
+  /* A message is an impression in the prefix; its role's light, if any, spills. */
+  --relief: var(--relief-trunk);
+  --glow: var(--glow-trunk);
+  --rim: inset 0 0 0 1px color-mix(in oklab, var(--tone-ink) var(--rim-tone), transparent);
+  box-shadow: var(--rim), var(--relief), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--tone-ink) var(--glow), transparent);
+  transition: box-shadow 0.6s ease, opacity 0.6s ease;
+}
+
+.ex-block--live {
+  --relief: var(--relief-trunk-live);
+  --glow: var(--glow-trunk-live);
+}
+
+.ex-block--system { --fill: var(--fill-system); --tone-ink: var(--ink-system); }
+.ex-block--user { --fill: var(--fill-user); --tone-ink: var(--ink-user); }
+.ex-block--assistant { --fill: var(--fill-assistant); --tone-ink: var(--ink-assistant); }
+/* A tool call is the machine speaking: it may sit apart from the messages (a well, not a slab), ruled. A
+   ring, not a border, so its header and footer bands meet its edges as every other block's do. */
+.ex-block--tool {
+  --fill: var(--fill-tool);
+  --tone-ink: var(--ink-tool);
+  --rim: inset 0 0 0 1px color-mix(in oklab, var(--tone-ink) var(--rim-tone), transparent), inset 0 0 0 1px var(--rule);
+}
+.ex-block--tool:not(.ex-block--live) { --relief: var(--relief-tool, var(--relief-trunk)); }
+/* A lane's colours come from the lane registry (`laneStyle`); an unknown lane is neutral. */
+.ex-block--lane { --fill: var(--lane-fill, var(--fill-lane)); --tone-ink: var(--lane-ink, var(--ink-lane)); }
+
+.ex-block--thin {
+  padding: 0.45rem 0.75rem;
+}
+
+/* A lane bar sits beside the prefix: it may be glass, and it may be lit from within. */
+.ex-block--lane {
+  --light: var(--light-lane);
+  --glow: var(--glow-lane);
+  background-color: var(--fill);
+  background-image:
+    var(--glass-overlay),
+    radial-gradient(130% 110% at 50% 0%, color-mix(in oklab, var(--tone-ink) var(--light), transparent), transparent 75%),
+    var(--texture);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  border: 1px solid var(--glass-rim, transparent);
+  box-shadow: var(--relief-lane), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--tone-ink) var(--glow), transparent);
+}
+
+.ex-block--lane.ex-block--live {
+  --light: var(--light-lane-live);
+  --glow: var(--glow-lane-live);
+}
+
+.ex-block__body {
+  margin-bottom: 0.75rem;
+}
+
+.ex-block__body:last-child {
+  margin-bottom: 0.4rem;
+}
+
+/* The header and the footer: who and what went in, and what came out, as
+   the harness measured them. Low contrast on purpose -- quiet, not
+   illegible -- and, by --foot-tone and --foot-unit-tone, in the block's own
+   hue, so a number on a coloured fill is not grey on colour. */
+.ex-block__head,
+.ex-block__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  font: var(--size-stats) / 1.4 var(--font-stats);
+  color: color-mix(in oklab, var(--tone-ink) var(--foot-tone), var(--ink-muted));
+}
+
+/* Each may run the block's full width as a shaded band, like the head and
+   the foot of a card: --foot-band 1 bleeds them to the edges, --foot-shade
+   darkens them, --foot-rule draws the block's ink along the side that faces
+   the body. A lane bar is one row, so it never bands. */
+.ex-block:not(.ex-block--thin) > .ex-block__head {
+  margin: calc(-1rem * var(--foot-band)) calc(-1.25rem * var(--foot-band)) 0.75rem;
+  padding: calc(0.45rem * var(--foot-band)) calc(1.25rem * var(--foot-band)) calc(0.45rem * var(--foot-band));
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: color-mix(in oklab, black var(--foot-shade), transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in oklab, var(--tone-ink) var(--foot-rule), transparent);
+}
+
+.ex-block:not(.ex-block--thin) > .ex-block__foot {
+  margin: 0 calc(-1.25rem * var(--foot-band)) calc(-0.6rem * var(--foot-band));
+  padding: calc(0.5rem * var(--foot-band)) calc(1.25rem * var(--foot-band)) calc(0.55rem * var(--foot-band));
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: color-mix(in oklab, black var(--foot-shade), transparent);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--tone-ink) var(--foot-rule), transparent);
+}
+
+/* Nothing between them (a tool call, closed): the head meets the foot, one rule between. */
+.ex-block:not(.ex-block--thin) > .ex-block__head:has(+ .ex-block__foot) {
+  margin-bottom: 0;
+}
+
+.ex-block:not(.ex-block--thin) > .ex-block__head + .ex-block__foot {
+  box-shadow: none;
+}
+
+/* Nothing after it at all (a later call of a step, which says nothing of its own): the head is the block. */
+.ex-block:not(.ex-block--thin):not(:has(> .ex-block__body, > .ex-block__foot)) > .ex-block__head {
+  margin-bottom: calc(-0.6rem * var(--foot-band));
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+
+/* What went in, or came out, in a line: plain text, not chips -- a sentence about the numbers. */
+.ex-block__flow {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The header's takes the rest of the row after its chip, and wraps there when narrow rather than dropping under it. */
+.ex-block__head > .ex-block__flow {
+  flex: 1 1 0;
+  min-width: 8rem;
+}
+
+.ex-block__head {
+  align-items: baseline;
+}
+
+.ex-block--thin .ex-block__foot {
+  color: var(--tone-ink);
+}
+
+.ex-block__label {
+  padding: 0.15em 0.5em;
+  box-shadow: var(--relief-well);
+  border-radius: calc(var(--radius) / 2);
+  background: var(--chip);
+  color: var(--tone-ink);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-family: var(--font-chrome);
+}
+
+.ex-block__inline {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ex-block__spacer {
+  flex: 1 1 auto;
+}
+
+.ex-stat {
+  padding: 0.15em 0.5em;
+  box-shadow: var(--stat-relief, var(--relief-well));
+  border-radius: calc(var(--radius) / 2);
+  background: var(--stat-chip, var(--chip));
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ex-stat__unit {
+  margin-left: 0.35em;
+  color: color-mix(in oklab, var(--tone-ink) var(--foot-unit-tone), var(--ink-faint));
+}
+
+/* The corner: what you can do with a block, and where it came from -- over
+   its header's right end, there when you look for it, on hover or focus. It
+   takes no room and has no backing of its own: shown, the header's line
+   fades out under it, over the corner's width (--corner-w, Block.tsx). */
+.ex-block__head {
+  position: relative;
+}
+
+.ex-block__corner {
+  position: absolute;
+  top: calc(0.45rem * var(--foot-band));
+  right: calc(1.25rem * var(--foot-band));
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--ink-faint);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.ex-block:hover > .ex-block__head > .ex-block__corner,
+.ex-block:focus-within > .ex-block__head > .ex-block__corner {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ex-block:is(:hover, :focus-within) > .ex-block__head > .ex-block__flow {
+  -webkit-mask-image: linear-gradient(to left, transparent calc(var(--corner-w, 0px) + 0.5rem), #000 calc(var(--corner-w, 0px) + 2rem));
+  mask-image: linear-gradient(to left, transparent calc(var(--corner-w, 0px) + 0.5rem), #000 calc(var(--corner-w, 0px) + 2rem));
+}
+
+.ex-action {
+  padding: 0.1em 0.45em;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) / 2);
+  background: var(--chip);
+  color: var(--ink-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ex-action:hover {
+  color: var(--ink);
+}
+
+.ex-action[data-done] {
+  color: var(--fresh);
+}
+
+/* A block's edges, top and bottom: the whole block masked to a 2px ring
+   along one side (its padding there), so an edge follows the corners'
+   radius rather than running past them. */
+.ex-block--live::after,
+.ex-block__edge {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+
+/* Light sweeping an edge: something is being written (the bottom) or read, with nothing known yet (the top). */
+.ex-block--live::after,
+.ex-block__edge[data-unknown] {
+  background: linear-gradient(90deg, transparent, var(--tone-ink), transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: ex-sweep 1.4s linear infinite;
+  opacity: 0.6;
+}
+
+/* Something is still generating or running in this block: light sweeps its bottom edge. */
+.ex-block--live::after {
+  content: '';
+  padding-bottom: 2px;
+}
+
+/*
+ * The intake's edge (Block's `intake`): along the block's top -- masked to a
+ * 2px ring, so it follows the corners -- the NEW part of the prompt, filling
+ * in the block's ink as it is read. Only the new part: late in a session the
+ * warm part would dominate every bar, and a cache miss shows itself anyway,
+ * as a long fill. Quiet once read; lit while reading, when the bottom edge
+ * rests: nothing is being written yet.
+ */
+.ex-block__edge {
+  padding-top: 2px;
+  background: linear-gradient(90deg, var(--tone-ink) 0 calc(var(--read) * 100%), color-mix(in oklab, var(--tone-ink) 12%, transparent) 0);
+  opacity: 0.4;
+}
+
+/* Lit while reading -- unless nothing is known yet, when it sweeps as above. */
+.ex-block__edge[data-reading]:not([data-unknown]) {
+  opacity: 0.9;
+  transition: background 0.25s linear;
+}
+
+.ex-block--live[data-reading]::after {
+  display: none;
+}
+
+@keyframes ex-sweep {
+  from { background-position: -40% 0; }
+  to { background-position: 140% 0; }
+}
+
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-block--live::after,
+.ex-root[data-motion='still'] .ex-block__edge[data-unknown] { animation: none; background-size: 100% 100%; opacity: 0.3; }
+.ex-root[data-motion='still'] .ex-block__edge[data-reading] { transition: none; }
+
+/* The gaps overlay: what `diet` cannot emit yet, outlined and named. */
+.ex-gaps [data-needs]:not([data-needs='']) {
+  outline: 1px dashed var(--gap);
+  outline-offset: 2px;
+}
+
+/* A block names it in its header (Block's `needs`); anything else drawn from such an event, above itself. */
+.ex-block__needs {
+  margin-left: auto;
+  color: var(--gap);
+  white-space: nowrap;
+}
+
+/* In a header, a row of its own: the overlay never squeezes what the header says. */
+.ex-block__head > .ex-block__needs {
+  flex-basis: 100%;
+  text-align: right;
+}
+
+.ex-gaps [data-needs]:not([data-needs='']):not(.ex-block)::before {
+  content: 'needs ' attr(data-needs);
+  position: absolute;
+  top: -0.75rem;
+  right: 0.25rem;
+  padding: 0 0.35rem;
+  background: var(--page);
+  color: var(--gap);
+  font: 10px / 1.4 var(--font-chrome);
+  letter-spacing: 0.04em;
+  z-index: 1;
+}
+
+/* Something lands -- a memory entry, a patch -- with one pulse of the fresh colour,
+   then settles to its thin edge. */
+@keyframes ex-land {
+  0% {
+    background: color-mix(in oklab, var(--fresh) 18%, transparent);
+    box-shadow: 0 0 calc(var(--led-radius) * 3) color-mix(in oklab, var(--fresh) 45%, transparent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 transparent;
+  }
+}
+
+
+/* What the server said when a generation failed, in its body -- the trunk's or a side call's; the footer names the failure. */
+.ex-failed {
+  margin: 0.75rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 2px solid var(--bad);
+  background: color-mix(in oklab, var(--bad) 8%, transparent);
+  border-radius: 0 calc(var(--radius) / 2) calc(var(--radius) / 2) 0;
+  color: var(--ink);
+  font: var(--size-tool) / 1.5 var(--font-tool);
+  overflow-wrap: anywhere;
+}
+
+/* Something still running says for how long, and colours it once that is worrying. */
+.ex-elapsed[data-level='slow'] { color: var(--warn); }
+.ex-elapsed[data-level='stalled'] { color: var(--bad); }
+
+/* Keyboard focus is always visible, on every control. */
+.ex-root :focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--focus, var(--ink-interview)) 75%, transparent);
+  outline-offset: 2px;
+}
+
+/* "N more": a quiet control for what a block holds back. Shared by every part that clips. */
+.ex-more {
+  margin-top: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-muted);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+  cursor: pointer;
+}
+
+.ex-more:hover {
+  color: var(--ink);
+}
+
+/* The node the address points at (`#<id>`): ringed in its own ink. */
+.ex-block[data-target],
+.ex-memory__entry[data-target] {
+  outline: 1.5px solid color-mix(in oklab, var(--tone-ink, var(--ink)) 80%, transparent);
+  outline-offset: 3px;
+}

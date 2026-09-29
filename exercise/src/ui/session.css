@@ -1,0 +1,436 @@
+.ex-session {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  position: relative;
+  isolation: isolate;
+}
+
+/*
+ * The live field: light pooled where the work is, brightening with what the
+ * session is doing. Colour comes from the palette, amount from the theme
+ * (--pool-rest, --pool-live; 0% everywhere but a theme that lights it).
+ * The session says where the light should be (--pool-*, set by its state);
+ * only the two layers that paint the field fade toward it (--field-*,
+ * registered, not inherited). A state change restyles the page once; the
+ * fade restyles those two layers alone, not every element under the
+ * session on every frame of it, as an inherited animated property did
+ * (scripts/perf.mjs: most of a replay's style recalculation).
+ */
+@property --field-trunk { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+@property --field-lane { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+@property --field-memory { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+@property --field-trunk-colour { syntax: '<color>'; inherits: false; initial-value: transparent; }
+@property --field-lane-colour { syntax: '<color>'; inherits: false; initial-value: transparent; }
+
+.ex-session {
+  /* Room the minimap takes on the left; the row is centred in what is left. */
+  --mm-space: 0rem;
+  /* What sits right of the trunk: the lanes (behind the curtain) and working
+     memory, unless memory is a drawer. The layout is centred at its full
+     width and, when the viewport is narrower, keeps its right-hand columns
+     and shrinks the trunk: so every pool is placed from the right edge, and
+     the trunk's from what is left of the row. */
+  --lanes-w: 0rem;
+  /* Between the lanes and working memory: wider when lines are routed through it as a harness. */
+  --memory-gap: var(--gutter);
+  --memory-col: calc(var(--memory-width) + var(--memory-gap));
+  --stage-w: calc(var(--trunk-width) + var(--lanes-w) + var(--memory-col));
+  --edge-l: max(1rem + var(--mm-space), 50% + var(--mm-space) / 2 - var(--stage-w) / 2);
+  --edge-r: min(50% + var(--mm-space) / 2 + var(--stage-w) / 2, 100% - 1rem);
+  --x-memory: calc(var(--edge-r) - var(--memory-width) / 2);
+  --x-lane: calc(var(--edge-r) - var(--memory-col) - var(--lane-width) / 2);
+  --x-trunk: calc((var(--edge-l) + var(--edge-r) - var(--memory-col) - var(--lanes-w)) / 2);
+  /* The row working memory needs beside it, trunk at its narrowest; below
+     this memory is a drawer (SessionView measures .ex-session__need). */
+  --need: calc(var(--trunk-min) + var(--lanes-w) + var(--memory-width) + var(--memory-gap) + var(--mm-space) + 2rem);
+  --pool-trunk: var(--pool-rest);
+  --pool-lane: 0%;
+  --pool-memory: var(--pool-rest);
+  --pool-trunk-colour: var(--ink-user);
+  --pool-lane-colour: var(--lane-ink, var(--ink-interview));
+}
+
+/* The two layers that paint the field: behind the page, and again under the composer. */
+.ex-session::before,
+.ex-session__composer::before {
+  --field-trunk: var(--pool-trunk);
+  --field-lane: var(--pool-lane);
+  --field-memory: var(--pool-memory);
+  --field-trunk-colour: var(--pool-trunk-colour);
+  --field-lane-colour: var(--pool-lane-colour);
+  --live-field:
+    radial-gradient(34rem 22rem at var(--x-trunk) 100%, color-mix(in oklab, var(--field-trunk-colour) var(--field-trunk), transparent), transparent 72%),
+    radial-gradient(18rem 34rem at var(--x-lane, -50%) 45%, color-mix(in oklab, var(--field-lane-colour) var(--field-lane), transparent), transparent 72%),
+    radial-gradient(16rem 22rem at var(--x-memory, 150%) 25%, color-mix(in oklab, var(--fresh) var(--field-memory), transparent), transparent 72%);
+  transition:
+    --field-trunk 1.2s ease,
+    --field-lane 1.2s ease,
+    --field-memory 1.6s ease,
+    --field-trunk-colour 1.2s ease,
+    --field-lane-colour 1.2s ease;
+}
+
+.ex-session--curtain {
+  --lanes-w: calc(var(--lanes) * (var(--lane-width) + var(--gutter)));
+  --pool-lane: var(--pool-rest);
+}
+
+.ex-session--condensed {
+  --lane-width: var(--lane-width-condensed);
+}
+
+/* Routed as a harness, the gutters hold its tracks: a little wider before each column, wider before memory. */
+.ex-session[data-wiring='harness'] {
+  --gutter: 3.5rem;
+  --memory-gap: 4.5rem;
+}
+
+.ex-session[data-drawer] {
+  --memory-col: 0rem;
+  --x-memory: calc(100% - 1rem);
+}
+
+/* What the row needs for whole side calls beside the trunk at its floor, and for bars (SessionView's
+   `room`): measured from the slots the session has, whatever the curtain draws now. */
+.ex-session {
+  --need-whole: calc(var(--trunk-floor) + var(--slots, 0) * (var(--lane-width-whole) + var(--gutter)) + var(--mm-space) + 2rem);
+  --need-bars: calc(var(--trunk-floor) + var(--slots, 0) * (var(--lane-width-condensed) + var(--gutter)) + var(--mm-space) + 2rem);
+}
+
+.ex-session__need {
+  position: absolute;
+  width: var(--need);
+  height: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.ex-session__need[data-for='whole'] { width: var(--need-whole); }
+.ex-session__need[data-for='bars'] { width: var(--need-bars); }
+
+.ex-session--minimap {
+  --mm-space: calc(var(--minimap-width) + 1.25rem);
+}
+
+.ex-session[data-state='turn'] { --pool-trunk: var(--pool-live); --pool-trunk-colour: var(--ink-assistant); }
+.ex-session[data-state='capture'] { --pool-trunk-colour: var(--lane-ink, var(--ink-interview)); }
+.ex-session--curtain[data-lanes-busy] { --pool-lane: var(--pool-live); }
+.ex-session[data-fresh] { --pool-memory: var(--pool-live); }
+.ex-session[data-state='ended'] { --pool-trunk: 0%; --pool-lane: 0%; --pool-memory: 0%; }
+
+.ex-session::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: var(--live-field);
+}
+
+.ex-session__header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.ex-session__main {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: var(--memory-gap);
+  padding: 0.5rem 1rem 1rem calc(1rem + var(--mm-space));
+  flex: 1 1 auto;
+}
+
+.ex-session__columns {
+  min-width: 0;
+}
+
+.ex-session__memory {
+  position: sticky;
+  top: 3.5rem;
+  margin-top: 2.2rem;
+  width: var(--memory-width);
+  flex: 0 0 auto;
+}
+
+/* The right rail is a list of panels: working memory, which scrolls inside
+   itself so the panel keeps its edges, then the receipt under it. */
+.ex-drawer__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: calc(100vh - 7rem);
+}
+
+.ex-drawer__body > .ex-memory {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ex-drawer__body > .ex-receipt {
+  flex: none;
+}
+
+/* Out of room: working memory slides in from the right edge, over the lanes,
+   and a tab on that edge says what it holds -- lit when something new landed. */
+.ex-session[data-drawer] .ex-session__memory {
+  position: fixed;
+  z-index: 5;
+  top: 2.6rem;
+  right: 0;
+  bottom: 0;
+  width: min(calc(var(--memory-width) + 2rem), calc(100vw - 3rem));
+  margin: 0;
+  padding: 0.75rem 1rem 1rem;
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+}
+
+.ex-session[data-drawer] .ex-session__memory[data-open] {
+  transform: none;
+}
+
+.ex-session[data-drawer] .ex-drawer__body,
+.ex-session[data-drawer] .ex-drawer__body > .ex-memory {
+  max-height: 100%;
+}
+
+.ex-session[data-drawer] .ex-drawer__body > .ex-memory {
+  box-shadow: var(--relief-panel), -18px 0 40px -18px rgb(0 0 0 / 0.5);
+}
+
+.ex-drawer__tab {
+  position: absolute;
+  /* Below the sticky slot labels, so it never covers one. */
+  top: 3rem;
+  right: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.8rem 0.35rem;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  border: 1px solid var(--glass-rim, var(--rule));
+  border-left: 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--fill-memory);
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--relief-panel);
+  color: var(--ink-muted);
+  font: var(--size-chrome) / 1 var(--font-chrome);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.ex-drawer__tab:hover {
+  color: var(--ink);
+}
+
+.ex-drawer__count {
+  color: var(--ink-faint);
+}
+
+.ex-drawer__tab[data-fresh] {
+  color: var(--fresh);
+  box-shadow: var(--relief-panel), 0 0 var(--glow-radius) calc(var(--glow-radius) / -8) color-mix(in oklab, var(--fresh) var(--glow-panel-live), transparent);
+}
+
+.ex-drawer__fresh {
+  color: var(--fresh);
+}
+
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-session[data-drawer] .ex-session__memory { transition: none; }
+
+.ex-session__composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(0, var(--composer-width));
+  padding: 1rem 0 1.25rem;
+  /* The strip spans the columns, but only the composer is its: a lane passing
+     under it beyond the composer's width is neither painted over nor
+     unreachable. */
+  pointer-events: none;
+}
+
+.ex-session__composer > * {
+  grid-column: 1;
+  grid-row: 1;
+  pointer-events: auto;
+}
+
+/* Fades what scrolls under the composer, as wide as the composer; a theme
+   with a lit field may turn it off. The live field is repainted here too,
+   fixed like the page's, so a theme that repaints its field under the
+   composer keeps the pools unbroken. */
+.ex-session__composer::before {
+  content: '';
+  grid-column: 1;
+  grid-row: 1;
+  margin: -1rem 0 -1.25rem;
+  z-index: -1;
+  background: var(--live-field), var(--composer-fade, linear-gradient(to bottom, transparent, var(--page) 1.25rem));
+  background-attachment: fixed, var(--composer-attachment, scroll);
+  -webkit-mask-image: var(--composer-mask, none);
+  mask-image: var(--composer-mask, none);
+}
+
+/* The trunk flows; each other slot is a column its branches are placed in. */
+.ex-lanehead-row,
+.ex-stage {
+  display: grid;
+  grid-template-columns: minmax(0, var(--trunk-width)) repeat(var(--lanes), var(--lane-width));
+  column-gap: var(--gutter);
+}
+
+/* The stage holds its cables' overlay when they are routed as a harness. */
+.ex-stage {
+  position: relative;
+}
+
+.ex-session:not(.ex-session--curtain) .ex-stage {
+  grid-template-columns: minmax(0, var(--trunk-width));
+}
+
+.ex-lanehead-row {
+  position: sticky;
+  /* Tucked a little under the header (which sits above it), so nothing
+     scrolling past can show in a gap between the two. */
+  top: 1.8rem;
+  z-index: 2;
+  padding: 0.95rem 0 0.6rem;
+  background: var(--lanehead-bg, var(--chrome-bg, var(--page)));
+  -webkit-backdrop-filter: var(--glass-backdrop);
+  backdrop-filter: var(--glass-backdrop);
+}
+
+.ex-lanehead {
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ex-lanehead { --led: var(--lane-ink, var(--ink-lane)); }
+
+/* Condensed, a lane's head is its slot number alone. */
+.ex-session--condensed .ex-lanehead__long {
+  display: none;
+}
+
+.ex-session--condensed .ex-lanehead:not(:first-child) {
+  text-align: center;
+}
+
+.ex-lanehead[data-busy] {
+  color: var(--led);
+  text-shadow: 0 0 var(--led-radius) var(--led);
+}
+
+/* Eras before the latest seam were evicted from the prefix: kept in the archive,
+   drawn as such -- and so are the side calls that hung off them. */
+.ex-era:not(:last-of-type) .ex-block {
+  box-shadow: var(--relief-evicted);
+  opacity: var(--evicted-opacity);
+  filter: var(--evicted-filter, none);
+}
+
+/* Reading back into evicted history brings it back to full presence while you read it. */
+.ex-era:not(:last-of-type) .ex-block:hover,
+.ex-era:not(:last-of-type) .ex-block:focus-within {
+  opacity: 1;
+  filter: none;
+}
+
+.ex-branchcell[data-evicted] {
+  opacity: var(--evicted-opacity);
+  filter: var(--evicted-filter, none);
+}
+
+.ex-trunk,
+.ex-era {
+  display: grid;
+  /* One column that never grows past the trunk: a long command or a wide
+     table scrolls or ellipsizes inside its block instead of widening the era. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.9rem;
+  align-content: start;
+  min-width: 0;
+}
+
+.ex-trunk__node {
+  position: relative;
+}
+
+/* A tool call sits close under the message that wrote it. */
+.ex-trunk__node[data-kind='tool'] {
+  margin-top: -0.5rem;
+}
+
+.ex-lane {
+  position: relative;
+}
+
+.ex-branchcell {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+/* Curtain closed: a quiet marker where a branch left the trunk. */
+.ex-peek {
+  position: absolute;
+  top: 0.4rem;
+  right: -2.25rem;
+  padding: 0.1rem 0.3rem;
+  border: 0;
+  background: none;
+  color: var(--ink-faint);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+  cursor: pointer;
+}
+
+.ex-peek:hover {
+  color: var(--ink-interview);
+}
+
+/* No room beside the trunk: the marker sits under its message, in the trunk's own column. */
+.ex-session[data-room='none'] .ex-peek {
+  position: static;
+  margin-top: 0.35rem;
+}
+
+/* A side call opened under the message it came from, where its lane has no room for it. */
+.ex-inline {
+  margin: 0.5rem 0 0 1.25rem;
+}
+
+/* A seam crosses every column: the refill changes the prefix every slot forks from. */
+.ex-session--curtain .ex-seam {
+  margin-right: calc(-1 * var(--lanes) * (var(--lane-width) + var(--gutter)));
+}
+
+@media (max-width: 72rem) {
+  .ex-session--minimap {
+    --mm-space: 0rem;
+  }
+  /* No scroll container here: one would trap the sticky slot labels and
+     composer inside it. The trunk column shrinks instead. */
+}
+
+/* The first screen, before anything is asked. */
+.ex-hint {
+  margin: 0.25rem 0 0;
+  max-width: 34rem;
+  padding: 0 1.25rem;
+  font: 14px / 1.6 var(--font-system);
+  color: var(--ink-faint);
+}

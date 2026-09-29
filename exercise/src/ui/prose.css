@@ -1,0 +1,173 @@
+.ex-prose {
+  font-size: var(--size-prose);
+  line-height: var(--leading-prose);
+  overflow-wrap: anywhere;
+}
+
+.ex-prose--ask { font-family: var(--font-ask); }
+.ex-prose--answer { font-family: var(--font-answer); }
+.ex-prose--system { font-family: var(--font-system); white-space: pre-wrap; }
+.ex-prose--reasoning {
+  font-family: var(--font-reasoning);
+  font-style: var(--style-reasoning);
+  color: var(--ink-reasoning);
+}
+
+.ex-prose > :first-child { margin-top: 0; }
+.ex-prose > :last-child { margin-bottom: 0; }
+
+.ex-prose p,
+.ex-prose ul,
+.ex-prose ol {
+  margin: 0 0 0.75em;
+  white-space: pre-wrap;
+}
+
+.ex-prose ul,
+.ex-prose ol {
+  padding-left: 1.4em;
+}
+
+.ex-prose li > ul,
+.ex-prose li > ol {
+  margin: 0.2em 0 0;
+}
+
+.ex-prose li[data-task] {
+  list-style: none;
+}
+
+.ex-prose__task {
+  margin: 0 0.45em 0 -1.3em;
+  vertical-align: -0.1em;
+  accent-color: currentColor;
+}
+
+/* A heading in an answer labels a section: the answer's own size, weighted. */
+.ex-prose__heading {
+  margin: 1.1em 0 0.4em;
+  font-weight: 650;
+  white-space: normal;
+}
+
+.ex-prose__heading[data-depth='1'] {
+  font-size: 1.08em;
+}
+
+/* Links are underlined in the text's own colour: blue is the person's. */
+.ex-prose a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, currentColor 45%, transparent);
+  text-underline-offset: 0.18em;
+}
+
+.ex-prose a:hover {
+  text-decoration-color: currentColor;
+}
+
+.ex-prose__image {
+  font-style: italic;
+}
+
+.ex-prose del {
+  opacity: 0.65;
+}
+
+.ex-prose blockquote {
+  margin: 0 0 0.75em;
+  padding-left: 0.9em;
+  border-left: 2px solid color-mix(in oklab, currentColor 30%, transparent);
+  opacity: 0.85;
+}
+
+.ex-prose hr {
+  margin: 1em 0;
+  border: 0;
+  border-top: 1px solid color-mix(in oklab, currentColor 18%, transparent);
+}
+
+/* A table scrolls sideways inside the answer rather than widening it. */
+.ex-prose__table {
+  margin: 0 0 0.75em;
+  overflow-x: auto;
+}
+
+.ex-prose table {
+  border-collapse: collapse;
+  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ex-prose th,
+.ex-prose td {
+  padding: 0.3em 0.8em;
+  border-bottom: 1px solid color-mix(in oklab, currentColor 14%, transparent);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ex-prose th {
+  font-weight: 600;
+  border-bottom-color: color-mix(in oklab, currentColor 30%, transparent);
+}
+
+.ex-prose [data-align='center'] { text-align: center; }
+.ex-prose [data-align='right'] { text-align: right; }
+
+.ex-prose code {
+  font-family: var(--font-tool);
+  font-size: 0.86em;
+  padding: 0.05em 0.3em;
+  background: var(--chip);
+  border-radius: 2px;
+}
+
+.ex-prose__code {
+  margin: 0 0 0.75em;
+  padding: 0.75em 1em;
+  background: var(--well);
+  border-radius: var(--radius);
+  font: var(--size-tool) / 1.5 var(--font-tool);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* The streaming caret is placed inside the last block, at the end of its last line. */
+.ex-caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1.05em;
+  margin-left: 0.15em;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.7;
+  animation: ex-caret 1s steps(2, jump-none) infinite;
+}
+
+@keyframes ex-caret {
+  from { opacity: 0.75; }
+  to { opacity: 0.15; }
+}
+
+/* Still, when motion is off (Prefs.tsx: the preference, or the system's reduced motion). */
+.ex-root[data-motion='still'] .ex-caret { animation: none; }
+
+.ex-prose__codebox {
+  position: relative;
+}
+
+.ex-prose__copy {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.5rem;
+  font: var(--size-stats) / 1.4 var(--font-stats);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.ex-prose__codebox:hover .ex-prose__copy,
+.ex-prose__codebox:focus-within .ex-prose__copy {
+  opacity: 1;
+}

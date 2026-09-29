@@ -1,0 +1,13 @@
+/*
+ * Paper: flat and printed. No glass, no grain, no glow, no pools: every
+ * meaning keeps its lamp's colour (the palettes), and nothing is lit. In
+ * daylight it is the palette alone; in the dark the corners soften, the
+ * role rims thin, and you (the one fill that carries text on a tint) run a
+ * little deeper, so a footer's numbers still read on it without bloom's
+ * shaded band (the footer-contrast story).
+ */
+.ex-root[data-theme='paper'][data-mode='dark'] {
+  --radius: 6px;
+  --rim-tone: 18%;
+  --fill-user: color-mix(in oklab, var(--slab) 62%, var(--lamp-you));
+}

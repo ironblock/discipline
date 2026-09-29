@@ -1,0 +1,51 @@
+/*
+ * The settings: a button in the header, and under it a small panel of the
+ * person's preferences, one segmented switch per row (Prefs.tsx).
+ */
+.ex-settings {
+  position: relative;
+}
+
+.ex-settings__button {
+  font: inherit;
+  color: var(--ink-muted);
+  background: none;
+  border: 0;
+  padding: 0.1em 0.5em;
+  border-radius: calc(var(--radius) / 2 + 1px);
+  box-shadow: inset 0 0 0 1px var(--control-rim, var(--rule));
+  cursor: pointer;
+}
+
+.ex-settings__button:hover,
+.ex-settings__button[aria-expanded='true'] {
+  color: var(--ink);
+}
+
+.ex-settings__panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  padding: 0.75rem 0.9rem;
+  border-radius: var(--radius);
+  /* Opaque: the header it hangs from already blurs what is behind it, and a
+     backdrop filter cannot reach past that. */
+  background-color: var(--page);
+  background-image: var(--glass-overlay);
+  box-shadow: var(--relief-panel), inset 0 0 0 1px var(--glass-rim, var(--rule));
+  white-space: nowrap;
+}
+
+.ex-settings__row {
+  display: contents;
+}
+
+.ex-settings__name {
+  color: var(--ink-faint);
+  justify-self: end;
+}
