@@ -1,0 +1,15 @@
+{
+ "rule_sha256": "3c5c2974eaeb1f12ed63ebdf4494dccef9193da67760067a590ec696e3bc6d4c",
+ "word": "substrate_independent",
+ "shared": 72,
+ "rate_27B": "7/12",
+ "rate_S2": "11/18",
+ "difference": "-1/36",
+ "sign": "unpredicted",
+ "sign_test": {
+  "n_discordant": 30,
+  "k_S2_only": 16,
+  "p": "759852347/1073741824",
+  "floor": "1/1073741824"
+ }
+}

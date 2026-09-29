@@ -1,0 +1,6 @@
+2026-09-29T03:43:26Z endpoint healthy through proxy; model id qwen3.8-flash-next
+2026-09-29T03:43:27Z headroom re-check start
+2026-09-29T03:57:42Z headroom re-check rc=0 headroom: 72 admitted, 28 excluded
+2026-09-29T03:57:42Z run start
+2026-09-29T05:37:39Z run rc=0
+2026-09-29T05:37:39Z tunnel and proxy stopped

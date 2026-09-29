@@ -1,0 +1,12 @@
+{
+ "polls_in_run_window": 5996,
+ "poll_errors": 0,
+ "polls_two_or_more_slots_busy": 0,
+ "polls_no_slot_busy": 584,
+ "busy_slot_ids": [
+  0,
+  1,
+  2,
+  3
+ ]
+}

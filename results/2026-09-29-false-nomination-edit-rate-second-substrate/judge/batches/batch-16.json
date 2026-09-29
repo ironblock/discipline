@@ -1,0 +1,245 @@
+{
+"batch": 16,
+"items": [
+{
+"id": "0becbca6ee5d",
+"entry": "Slot management endpoints (`/slots`) for monitoring active inference slots (`server.cpp`)",
+"reasoning": "",
+"prose": "Now let me look at `common_chat_tool` struct definition:"
+},
+{
+"id": "dd63490108c0",
+"entry": "NONE — The core question (where common-prefix matching happens for prompt cache/slot reuse) has been fully answered with quoted code from all four key locations: `get_common_prefix()` in server-common.cpp, `get_available_slot()` in server-context.cpp, `server_prompt_cache::load()` in server-task.cpp, and the slot-level `prompt_save`/`prompt_load` in server-context.cpp.",
+"reasoning": "The user is asking about slot checkpointing and KV cache save/restore support in the llama.cpp server. Let me trace through what I've found so far and look for more details about:\n\n1. Slot-level save/restore (file-based)\n2. Prompt cache (in-memory KV state caching)\n3. Speculative decoding checkpoints\n4. KV cache chunk reuse (`n_cache_reuse`)\n5. Limits and constraints\n\nLet me look at the checkpoint restore logic in the prompt processing section.",
+"prose": ""
+},
+{
+"id": "7a12012bde5c",
+"entry": "NONE — The core question (where common-prefix matching happens for prompt cache/slot reuse) has been fully answered with quoted code from all four key locations: `get_common_prefix()` in server-common.cpp, `get_available_slot()` in server-context.cpp, `server_prompt_cache::load()` in server-task.cpp, and the slot-level `prompt_save`/`prompt_load` in server-context.cpp.",
+"reasoning": "The user is asking about how chat templates are applied server-side, specifically where tool/function definition rendering happens for chat completions. Let me search for this in the server files.",
+"prose": "Reasoning: The server files are likely in the `common/` or `tools/` directories. Let me search for server-specific files and chat template application with tools.\n\n"
+},
+{
+"id": "674381fd3bfc",
+"entry": "Where did the content of `server-schema.cpp` and `server-schema.h` go in beellama — were they merged into `server-common.cpp`, `server-task.cpp`, or elsewhere?",
+"reasoning": "Let me look at how sampling parameters are handled in beellama vs upstream. In upstream, the schema file defines the fields with defaults and validation. In beellama, it seems like the parameters are just passed through directly.",
+"prose": ""
+},
+{
+"id": "73a133e7ef3a",
+"entry": "How speculative decoding checkpoints (`common_prompt_checkpoint`) interact with the in-memory `server_prompt_cache` — do checkpoints get saved/restored as part of prompt cache entries, or are they strictly per-slot ephemeral?",
+"reasoning": "The user is asking me to find anything related to 'n_before_user' or checkpoint behavior in the beellama fork and explain what it does with quoted code. I've already gathered the key code. Let me also check how message_spans are populated in the chat template rendering to understand the full pipeline.",
+"prose": ""
+},
+{
+"id": "4c278475e2da",
+"entry": "The `n_swa` variable tracking sliding window attention state — relevant for SWA models where checkpoint correctness has known issues per the `[TAG_CHECKPOINTS_FIX_POS_MIN]` TODO (server-context.cpp ~line 2990)",
+"reasoning": "",
+"prose": "Let me now look at the `server_prompt_cache` implementation to understand the disk/RAM caching:\n\n"
+},
+{
+"id": "4dbe687405c4",
+"entry": "Where in `server-context.cpp` or `server-schema.cpp` are tool definitions from the JSON request body converted into the format expected by the chat template engine?",
+"reasoning": "",
+"prose": "I'll look at the key template application code in `common/chat.cpp` to understand how tool definitions are rendered.\n\n"
+},
+{
+"id": "f8e3018ea0d2",
+"entry": "`server-task.cpp` line 88 references `grammar_triggers` — conditional grammar switching mechanism not yet explored",
+"reasoning": "Now let me check whether `grammar_triggers` still exists in the beellama fork's server-task.cpp.",
+"prose": ""
+},
+{
+"id": "4bedef99ac91",
+"entry": "`pre_decode()` and `batch.render()` are called to prepare the llama batch before decoding — these bridge slot state to the actual llama.cpp inference engine (`server-context.cpp`, line ~2802)",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "7152999bc8e9",
+"entry": "How does the legacy (non-Jinja) path handle tool definitions — it seems to pass messages to `llama_chat_apply_template` without explicit tool handling",
+"reasoning": "The user is asking me to update the working record to correct a previous entry. Let me first look at the `common_chat_template_direct_apply_impl` function to understand how tools are actually rendered in the Jinja path, and then address the correction about the legacy path.\n\nThe previous entry said: \"How does the legacy (non-Jinja) path handle tool definitions — it seems to pass messages to `llama_chat_apply_template` without explicit tool handling\"\n\nLooking at the code I've already read:\n- In `common_chat_templates_apply_legacy` (line 2761-2826), the function only passes messages to `llama_chat_apply_template` and does NOT handle tools at all. The `inputs.tools` field is completely ignored in the legacy path.\n- In the Jinja path (`common_chat_templates_apply_jinja`, line 2629), tools are converted to JSON via `common_chat_tools_to_json_oaicompat` and passed as `params.tools`, then the template is applied via the autoparser which uses `common_chat_template_direct_apply_impl`.\n\nSo the correction is: the legacy path does NOT handle tool definitions at all - it simply ignores them. Tool/function definition rendering only happens in the Jinja path.\n\nLet me look at `common_chat_template_direct_apply_impl` to see how tools are actually rendered in the Jinja template.",
+"prose": ""
+},
+{
+"id": "5c08ba9ad273",
+"entry": "Tool definition rendering is NOT done by the server code directly — it's delegated to Jinja template rendering via `common_chat_template_direct_apply()` which passes `params.tools` (as OpenAI-compatible JSON) into the model's embedded Jinja template — IMPLICATION: the server doesn't format tool definitions itself; the model's chat template (Jinja) does all the rendering, and the server just provides structured data",
+"reasoning": "Let me look at where `tools` is extracted from the HTTP request body. Let me search for where `tools` is read from the request body.",
+"prose": "Let me find where `tools` is extracted from the request body in the server.\n\n"
+},
+{
+"id": "312b4913087f",
+"entry": "`dry_base` has a custom handler that clamps values `< 1.0` back to `params_base.sampling.dry_base` — a special validation rule at line ~139 (server-schema.cpp)",
+"reasoning": "",
+"prose": "Great, the source is at `~/git/llama.cpp`. Let me search for chat template application and tool/function rendering:\n\n"
+},
+{
+"id": "500f83c972c0",
+"entry": "`launch_slot_with_task` and `launch_slots_with_parent_task` are the functions that actually bind a task to a slot — they set up the slot's state, tokens, and sampler (seen at the tail of the excerpt, e.g., `launch_slot_with_task(*slot, std::move(task))`)",
+"reasoning": "",
+"prose": "The output got truncated. Let me read the full streaming handler more carefully.\n\n"
+},
+{
+"id": "a0406bd0759d",
+"entry": "The `sse_ping_interval` timeout mechanism at the bottom — sends `:\\n\\n` keep-alive pings to prevent client-side timeouts (`server-context.cpp` ~line 3995)",
+"reasoning": "",
+"prose": "The note about `sse_ping_interval` at ~line 3995 is still accurate — I can see it at line ~3995 in the earlier output. Let me continue tracing the stop conditions and the final response path."
+},
+{
+"id": "4689aa3848ff",
+"entry": "The `near_prompt_end` override in the spacing policy at line 3903–3906 — beellama adds `near_prompt_end` as a third exception (alongside `is_last_user_message` and `empty checkpoints`) that bypasses `checkpoint_min_step` spacing, which upstream doesn't have",
+"reasoning": "",
+"prose": "Now let me also check the checkpoint restore logic and the `is_on_user`/`is_after_user` concepts:\n\n"
+},
+{
+"id": "d369869eff51",
+"entry": "The `near_prompt_end` override in the spacing policy at line 3903–3906 — beellama adds `near_prompt_end` as a third exception (alongside `is_last_user_message` and `empty checkpoints`) that bypasses `checkpoint_min_step` spacing, which upstream doesn't have",
+"reasoning": "",
+"prose": "Let me verify that claim by comparing the spacing policy between upstream and beellama:\n\n"
+},
+{
+"id": "4c8a345f15f5",
+"entry": "Beellama's checkpoint creation logic at line 3885 uses `is_user_start` and `is_last_user_message` boolean flags instead of the upstream's `n_before_user` integer comparison — IMPLICATION: The checkpoint decision logic was refactored to use message-span-derived booleans rather than a precomputed token count, which is a cleaner design but means the `message_spans` field must be populated for checkpoints to work correctly",
+"reasoning": "",
+"prose": "The working record note is confirmed. Let me now look at how `is_user_start` and `is_last_user_message` are computed in beellama:\n\n"
+},
+{
+"id": "20a8e23bb3b7",
+"entry": "NONE — The core question (where common-prefix matching happens for prompt cache/slot reuse) has been fully answered with quoted code from all four key locations: `get_common_prefix()` in server-common.cpp, `get_available_slot()` in server-context.cpp, `server_prompt_cache::load()` in server-task.cpp, and the slot-level `prompt_save`/`prompt_load` in server-context.cpp.",
+"reasoning": "The user wants me to check how chat templates are applied server-side, specifically where tool/function definition rendering happens for chat completions. I also need to update the working record entry #119 which says \"NONE\" but is now superseded.\n\nLet me first find the server files and search for chat template application and tool/function rendering.",
+"prose": "Reasoning: First, let me find the server files and search for chat template application and tool/function rendering code.\n\n"
+},
+{
+"id": "9c224fa53438",
+"entry": "`dry_base` has a custom handler that clamps values `< 1.0` back to `params_base.sampling.dry_base` — a special validation rule at line ~139 (server-schema.cpp)",
+"reasoning": "",
+"prose": "Now let me look at the server tools directory:\n\n"
+},
+{
+"id": "9c05d8427be8",
+"entry": "Beellama adds a `server_state` enum (DOWNLOADING, LOADING, READY, SLEEPING) and `server_state_callback_t` replacing upstream's simpler `on_sleeping_changed(bool)` callback — this is a more granular state machine. — IMPLICATION: State reporting and lifecycle management are more sophisticated in beellama, which matters for router health checks and child process management.",
+"reasoning": "",
+"prose": "The diff confirms the beellama `server_models.h` has a much richer state machine with `server_state` enum and `server_state_callback_t`, plus a `conv_model_tracker` for resumable streams. Let me check the remaining large-diff files:\n\n"
+},
+{
+"id": "92964427ec7a",
+"entry": "Compare the beellama.cpp tools/server file list against upstream llama.cpp to identify differing files",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "07e2d9893cfd",
+"entry": "`server_prompt_cache::load()` removes the best-matching entry from the cache after loading it (`states.erase(it_best)`) — IMPLICATION: Each cache entry is single-use; once a cached prompt state is loaded into a slot, it's consumed and gone, which fundamentally limits cache effectiveness for repeated prompts",
+"reasoning": "",
+"prose": "I need to correct a key claim from the working record before continuing.\n\nThe entry \"`server_prompt_cache::load()` removes the best-matching entry from the cache after loading it (`states.erase(it_best)`) — IMPLICATION: Each cache entry is single-use; once a cached prompt state is loaded into a slot, it's consumed and gone, which fundamentally limits cache effectiveness for repeated prompts\" is **wrong**. The `states.erase(it_best)` happens in `server_prompt_cache::alloc()`, not in `load()`. Let me verify:\n\n"
+},
+{
+"id": "daa608419fbb",
+"entry": "The cross-slot prompt cache (`server_prompt_cache`) is purely in-memory with LRU eviction — there is NO persistent disk-based prompt cache that survives server restarts — IMPLICATION: Prompt cache is lost on every server restart; the only persistent option is the slot file save/restore which doesn't work with multimodal",
+"reasoning": "The user is asking about slot checkpointing and KV cache save/restore support in the llama.cpp server. Let me trace through the code to understand:\n\n1. **Slot-level file save/restore** (`/slots/{id}?action=save|restore|erase`)\n2. **Cross-slot prompt cache** (`server_prompt_cache`) - in-memory\n3. **Speculative decoding checkpoints** (`common_prompt_checkpoint`)\n4. **KV cache chunk reuse** (`n_cache_reuse`)\n\nLet me look at the limits and constraints.\n\nFirst, let me verify the claim about the prompt cache being purely in-memory. Let me check if there's any disk-based persistence.",
+"prose": ""
+},
+{
+"id": "5d1d123448c4",
+"entry": "Upstream's `struct server_prompt` had a `data` field of type `server_prompt_data` holding the main KV state, but beellama's version has no such field — IMPLICATION: the checkpoint data lifecycle is managed externally via function callbacks (`can_restore`, `restore`, `clear`) rather than being embedded in the prompt object itself",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "cee8bd3604e4",
+"entry": "The beellama fork completely removed `server-schema.cpp` and `server-schema.h` (upstream's JSON param validation layer with `field_num`/`field_bool`/`set_limits`/`add_alias`) — the code is not just relocated, it's entirely absent, meaning parameter parsing works differently than upstream — IMPLICATION: When comparing parameter handling or tracing schema validation, the beellama fork likely uses a simpler/different approach that needs separate investigation",
+"reasoning": "The user is asking me to update the working record. The entry about `server-schema.cpp` being completely removed is actually confirmed — the schema code doesn't exist anywhere in beellama's server directory. Let me verify this more carefully.\n\nActually wait — let me re-read the observation. The grep for `make_oai_chat_schema`, `field_num`, `field_bool`, `set_limits` returned nothing in any `.cpp` file in the beellama server directory. So the schema validation layer truly doesn't exist in beellama. \n\nBut the user says the entry is \"superseded by this step.\" Let me think about what this means. The observation shows that `oaicompat_chat_params_parse` exists in `server-common.cpp:911` — so parameter parsing still happens, just without the schema layer. The implication is that beellama uses a different (simpler) parameter parsing approach that doesn't involve the schema validation framework.\n\nActually, I need to re-read the user's instruction carefully. They say the entry is \"superseded by this step\" and ask me to \"state the correction in your reply.\" So I need to correct the working record entry.\n\nLet me look more carefully. The grep showed no results for schema-related code. But let me check if the schema functionality was moved to common/ or elsewhere.",
+"prose": "Let me verify whether the schema code exists elsewhere in beellama:\n\n"
+},
+{
+"id": "668174ce973f",
+"entry": "Parity testing infrastructure (`tests/lite/parity/`) — pixel-diff validation against Babylon.js golden references",
+"reasoning": "The user wants me to update my working record before anything else. I need to state the correction in my reply.\n\nThe correction: The parity testing infrastructure is at `tests/lite/parity/scenes/` (not just `tests/lite/parity/`), and it uses Playwright tests that compare Babylon Lite renders against golden reference screenshots captured from Babylon.js, using pixel-diff analysis (MAD, exact match %, within-1-byte %, etc.). The golden references are stored in `reference/lite/`.\n\nLet me update my working record accordingly.",
+"prose": "**Working record update:**\n\nThe parity testing infrastructure is located at `tests/lite/parity/scenes/` (not just `tests/lite/parity/`). It uses Playwright-based visual parity tests that:\n- Render a Babylon Lite scene to a canvas\n- Capture a screenshot (`test-actual.png`)\n- Compare it pixel-by-pixel against immutable golden reference screenshots stored in `reference/lite/`\n- Assertions include Mean Absolute Difference (MAD), exact match %, within-1-byte %, and within-5-byte % thresholds, configured per-scene in `scene-config.json`\n\nThis is a key part of the project's validation strategy: Babylon Lite is designed to produce pixel-identical output to Babylon.js, and the parity tests enforce that guarantee."
+},
+{
+"id": "6abddd6cc462",
+"entry": "Function calling / tool use support with `--jinja` flag (README.md, Anthropic API section)",
+"reasoning": "",
+"prose": "Correction: The entry about `--jinja` flag for function calling/tool use in the Anthropic API section was based on a misreading — the `--jinja` flag is actually for template rendering control in general, not specifically for function calling. Function calling support is a separate feature implemented through the request body's `tools` parameter, not a CLI flag. I'll update this in the working record.\n\nNow let me explore the source files available:"
+},
+{
+"id": "86edfb9bfcfa",
+"entry": "The `near_prompt_end` override in the spacing policy at line 3903–3906 — beellama adds `near_prompt_end` as a third exception (alongside `is_last_user_message` and `empty checkpoints`) that bypasses `checkpoint_min_step` spacing, which upstream doesn't have",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "d9c971400f1c",
+"entry": "The `tool_choice` parameter (\"auto\", \"none\", \"required\") is NOT passed into the Jinja template context — only `messages`, `tools`, `bos_token`, `eos_token`, `enable_thinking`, and `add_generation_prompt` are. The `tool_choice` is used solely for grammar generation (controlling min/max tool call counts), not for template rendering — IMPLICATION: Jinja templates cannot conditionally render based on tool_choice; they always render tool definitions the same way regardless of whether tool use is required/auto/none.",
+"reasoning": "The user is asking me to correct a working record entry. They want me to state the correction in my reply. Let me address this first, then continue with the SSE streaming trace.\n\nThe correction: The working record entry #193 and #201 stated that `tool_choice` is NOT passed into the Jinja template context. The user is now asking me to verify/correct this. Let me look at the actual code to confirm what variables are passed to the Jinja template.\n\nActually, the user said \"is superseded by this step. Update it now, before anything else: state the correction in your reply.\" So they want me to state the correction first, then continue with the SSE streaming analysis.\n\nLet me first verify the claim by looking at the Jinja template context construction in the code.",
+"prose": "**Correction to working record #193/#201:** The claim that `tool_choice` is NOT passed into the Jinja template context needs to be re-verified. Let me check the actual template context construction code:\n\n"
+},
+{
+"id": "a643b7d8046b",
+"entry": "The prompt cache `load()` function uses a **dual improvement criteria** — a cached prompt is only selected if BOTH `f_keep` (fraction of cached context preserved) AND `sim` (common prefix / new prompt length) are strictly better than the slot's current prompt — IMPLICATION: A cached prompt with high similarity but low `f_keep` won't be used, and vice versa; this prevents loading a tiny cache entry that barely overlaps with the new prompt even if it matches perfectly.",
+"reasoning": "The user wants me to check if the working record entry about the dual improvement criteria for prompt cache `load()` is still accurate. Let me look at the actual code in `server_prompt_cache::load()` to verify.",
+"prose": "Let me verify the dual improvement criteria in `server_prompt_cache::load()`."
+},
+{
+"id": "810fea575350",
+"entry": "The server has two operational modes — a **router mode** (multi-model) and a **child/single-server mode** — and the handler path differs significantly between them. In router mode, `proxy_post` forwards requests to child servers via `models.proxy_request()`. IMPLICATION: I need to find where the actual chat completion logic lives in the non-router path, which is likely in `server-task.cpp` or `server-context.cpp`.",
+"reasoning": "Now I know the actual handler is in `server-context.cpp` at line 4716. Let me read that section to understand the flow.",
+"prose": ""
+},
+{
+"id": "7495d711977f",
+"entry": "Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)",
+"reasoning": "",
+"prose": "I need to correct the earlier summary: `/metrics` is a monitoring endpoint, but it is not specifically \"Prometheus-style.\" In llama.cpp's server, `/metrics` returns a custom text-based metrics report (slot usage, token counts, etc.) rather than a true Prometheus exposition format. The `get_metrics` route in `server.cpp` serves this custom format.\n\nNow let me continue tracing the request flow:\n\n"
+},
+{
+"id": "03656c51552b",
+"entry": "The legacy chat template path (`common_chat_templates_apply_legacy`) completely ignores `inputs.tools` — tool/function definitions are NOT rendered into the prompt by the legacy template application; they are only used by the Jinja path or handled separately — IMPLICATION: I need to check the Jinja path (`common_chat_templates_apply_jinja`) to see where tool rendering actually happens, and also check if there's a separate tool-to-grammar conversion path",
+"reasoning": "The user is asking me to verify whether the claim in the working record is correct: the legacy path ignores `inputs.tools`. Looking at the code I just read, `common_chat_templates_apply_legacy` indeed does NOT reference `inputs.tools` at all — it only iterates over `inputs.messages` and calls `llama_chat_apply_template`. So the claim is correct.\n\nNow I should check the Jinja path to see where tool rendering happens.",
+"prose": ""
+},
+{
+"id": "b10f61190f85",
+"entry": "`server-task.cpp` line 88 references `grammar_triggers` — conditional grammar switching mechanism not yet explored",
+"reasoning": "Now let me check whether the schema and stream functionality was inlined into server-context.cpp or server-task.cpp in the beellama fork. Let me grep for schema-related and stream-related functions.",
+"prose": ""
+},
+{
+"id": "a99c71274858",
+"entry": "Continue examining the remaining unique beellama files (server-mcp.h, server-stream.cpp, server-stream.h) to understand their purpose",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "8f6a03555082",
+"entry": "`n_before_user` exists in upstream llama.cpp but is completely absent from the beellama fork — neither in `server-task.h` nor in `server-context.cpp` — IMPLICATION: beellama does not support the upstream optimization that stops prompt batching before the last user message to create a checkpoint at the assistant turn boundary, meaning checkpoint creation during prompt processing may behave differently or be less targeted in beellama",
+"reasoning": "",
+"prose": "Let me see the full checkpoint gating logic in beellama's prompt processing loop:\n\n"
+},
+{
+"id": "b2ef3928abea",
+"entry": "Beellama's checkpoint creation logic at line 3885 uses `is_user_start` and `is_last_user_message` boolean flags instead of the upstream's `n_before_user` integer comparison — IMPLICATION: The checkpoint decision logic was refactored to use message-span-derived booleans rather than a precomputed token count, which is a cleaner design but means the `message_spans` field must be populated for checkpoints to work correctly",
+"reasoning": "",
+"prose": ""
+},
+{
+"id": "9cc2cc7ad312",
+"entry": "The `load` method's dual-scoring heuristic using `f_keep` (preservation of cached prompt) and `sim` (similarity to new prompt) with a 0.25 threshold — this is the eviction/selection policy for picking the best cached KV state (`server-task.cpp`, lines ~1676–1700)",
+"reasoning": "",
+"prose": "Let me check the checkpoint feature in the CLI (not just server) and see if there are any checkpoint-related params:\n\n"
+},
+{
+"id": "fd35de7a8f26",
+"entry": "`launch_slot_with_task` and `launch_slots_with_parent_task` are the functions that actually bind a task to a slot — they set up the slot's state, tokens, and sampler (seen at the tail of the excerpt, e.g., `launch_slot_with_task(*slot, std::move(task))`)",
+"reasoning": "",
+"prose": "Let me see the rest of the `next` lambda and the SSE formatting functions.\n\n"
+},
+{
+"id": "2b36f58c8da1",
+"entry": "The `tool_choice` parameter (\"auto\", \"none\", \"required\") is NOT passed into the Jinja template context — only `messages`, `tools`, `bos_token`, `eos_token`, `enable_thinking`, and `add_generation_prompt` are. The `tool_choice` is used solely for grammar generation (controlling min/max tool call counts), not for template rendering — IMPLICATION: Jinja templates cannot conditionally render based on tool_choice; they always render tool definitions the same way regardless of whether tool use is required/auto/none.",
+"reasoning": "Now let me look at `process_token` which is where stop conditions are checked.",
+"prose": ""
+}
+]
+}

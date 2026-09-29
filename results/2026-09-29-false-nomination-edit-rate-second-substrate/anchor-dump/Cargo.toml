@@ -1,0 +1,8 @@
+[package]
+name = "anchor-dump"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+diet = { package = "discipline-diet", path = "../../../git/me/discipline/main/diet" }
+serde_json = "1"

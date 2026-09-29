@@ -1,0 +1,18 @@
+{
+ "claim": "gym #142: the pre-registration in the issue body (planning's text on #114, comment 5863769667, by reference); the declarations fixed by digest before any fork fired (#142 comment 5877139712) and the host's other load (5877155769); the declaration line's parenthetical amended before any fork fired, per the ruling (5883192343), citing #164",
+ "written": "as a file after the fire, summarising the pre-registered text rather than quoting it; the operative rules are decision-rule.toml and comparison-rule.toml and the operative appliers apply_bprime.py and compare_s2.py, whose digests were posted on #142 before any fork fired",
+ "hypothesis": "When the collector's nominator fires falsely -- it presents an entry as superseded when it is not -- the consumer's reply asserts that the entry is superseded, no longer holds, or is wrong, or supplies replacement text for it, less often when the nomination is framed as advisory than when it is framed as imperative; and under the imperative framing it does so more often than when an irrelevant passage of the same length stands in the nomination's place.",
+ "rule": {
+  "decision_rule_sha256": "cee9e51342592d9ec4eca966706e2a6207294e211d67fbf08ffcf0e9bc1658d2",
+  "applier_sha256": "7a819a891237ad689515e684b8a4f51ac9f7ef243961a4a853fd1b96b1e4c32b",
+  "comparison_rule_sha256": "3c5c2974eaeb1f12ed63ebdf4494dccef9193da67760067a590ec696e3bc6d4c",
+  "comparison_applier_sha256": "06acc6e4b0625a236db7fff84148e40ae37127afce1458b926815bcbf4cf7b07"
+ },
+ "endpoints": {
+  "1": "this substrate's own word under (b')'s rule, reported beside stage 2's, never in its place (word.json)",
+  "2": "the imperative edit rate at the 0.6 rung against stage 2's, paired by fork, under comparison-rule.toml (comparison.json)"
+ },
+ "readings": "the three readings stated in comparison-rule.toml and asked on #142 were applied as written, per the ruling's 'endpoint 2 by the comparison rule as written'",
+ "sample": "stage 2's plan unchanged: seed 924, the same 100 forks and per-rung assignments from stage 2's headroom file and 38 forced forks; plan.json equals stage 2's in sample, plan, forced and headroom digest",
+ "substrate": "ada48-llamacpp-qwen38flashnext-q20, instance 2026-09-28, production line as served (MTP draft on), under reading (c) of the grading statute as ruled on #142"
+}

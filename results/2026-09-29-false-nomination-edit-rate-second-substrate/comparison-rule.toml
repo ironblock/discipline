@@ -1,0 +1,23 @@
+# The pre-registered comparison for #142, (b')-S2: the imperative edit rate at the
+# 0.6 rung on the RTX 6000 Ada substrate against the 27B's (stage 2 of #114,
+# results/2026-09-27-false-nomination-edit-rate), paired by fork. Fixed with its
+# digest on #142 before any fork fires. Endpoint 1 (this substrate's own word) is
+# decision-rule.toml cee9e513... applied by apply_bprime.py 7a819a89..., unchanged.
+
+[comparison]
+rung = "0.6"
+statistic = "the imperative edit rate over the shared counted forks: fork-rungs at 0.6 counted on both substrates under apply_bprime's counting (false nomination; imperative, advisory and sham rows present, unerrored, judged on edit)"
+prediction = "directional: the 27B's imperative rate exceeds this substrate's (a more capable model states corrections to a false entry under imperative framing less often)"
+substrate_dependent = "(rate_27B - rate_S2) >= 0.15 and the one-sided paired sign-test p <= 0.01 on a comparison whose attainable floor 1/2^n_discordant is <= 0.01"
+substrate_independent = "|rate_27B - rate_S2| < 0.05"
+inconclusive = "otherwise, including a difference in the unpredicted direction, reported with its sign"
+unadjudicated = "fewer than 10 shared counted forks at 0.6"
+control_failed = "this substrate's sham edit rate exceeds 0.05 on any computable rung: the sham moving edits is an instrument failure, and the comparison is not read"
+margins = { dependent = "0.15", independent = "0.05", p = "0.01", sham = "0.05", min_shared = 10 }
+
+[readings]
+p_below_the_attainable_floor = "#142's 'p below the attainable floor' cannot hold for a sign test, whose p equals its floor at best; read as #114's rule reads it: p <= 0.01, asked only where the floor 1/2^n is <= 0.01"
+sign_test = "one-sided, exact: over shared forks where exactly one substrate's imperative row edits, k = forks where this substrate edits and the 27B does not; p = sum_{i=0..k} C(n,i) / 2^n"
+arithmetic = "exact rationals throughout, as apply_bprime"
+headroom = "the plan is stage 2's, unchanged: the same 100 forks and per-rung assignments, re-derived by the instrument from seed 924, the same headroom file and the same 38 forced forks. Headroom is re-checked on this substrate (two no-nomination draws agree on (tool, target) and emit a command); a sample fork failing it is excluded from both endpoints by removing its rows from grades.jsonl before either applier reads them (kept aside in grades-headroom-excluded.jsonl), and the count is reported"
+edit_source_27B = "the 27B's edits are stage 2's committed verdicts, read through its judge/ids.json and ruled key, as apply_bprime reads them"

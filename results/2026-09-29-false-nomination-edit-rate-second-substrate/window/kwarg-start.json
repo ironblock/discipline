@@ -1,0 +1,44 @@
+{
+ "chat_template_sha256": "12827f24b742ea4e80cdc12dbcf9622227056b9f797252a3149263d4f9aaadce",
+ "chat_template_chars": 9993,
+ "template_mentions_enable_thinking": true,
+ "reasoning_flags_on_serving_line": {
+  "--reasoning-format": false,
+  "--reasoning-budget": false,
+  "--reasoning-effort": false,
+  "--reasoning ": false,
+  "--no-reasoning-preserve": false
+ },
+ "props_keys": [
+  "bos_token",
+  "build_info",
+  "chat_template",
+  "chat_template_caps",
+  "cors_proxy_enabled",
+  "default_generation_settings",
+  "endpoint_metrics",
+  "endpoint_props",
+  "endpoint_slots",
+  "eos_token",
+  "is_sleeping",
+  "media_marker",
+  "modalities",
+  "model_alias",
+  "model_ftype",
+  "model_path",
+  "total_slots",
+  "ui",
+  "ui_settings"
+ ],
+ "thinking_disabled": {
+  "reasoning_chars": 0,
+  "content": "144",
+  "completion_tokens": 4
+ },
+ "thinking_default": {
+  "reasoning_chars": 124,
+  "content": "144",
+  "completion_tokens": 44
+ },
+ "negative_control_passes": true
+}
