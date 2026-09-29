@@ -1,0 +1,12 @@
+2026-09-29T02:06:17Z START prod pid=551209 exe=41e6591d710fd4b5 cwd=~/src/llama-prod vram=46572 MiB load=0.55 0.31 0.12
+2026-09-29T02:06:18Z production stopped
+2026-09-29T02:06:26Z on server up pid=551533 vram=46572 MiB spec_flags=1
+on rep 0: 1024 tokens, 8.24s, draft_n=1037
+on rep 1: 1024 tokens, 8.2s, draft_n=1028
+on rep 2: 1024 tokens, 8.06s, draft_n=1028
+on rep 3: 1024 tokens, 8.08s, draft_n=1028
+on rep 4: 1024 tokens, 8.14s, draft_n=1028
+2026-09-29T02:07:07Z on inv.py rc=0
+2026-09-29T02:07:19Z RESTORED pid=551857
+2026-09-29T02:07:19Z after: pid=551857 exe=41e6591d710fd4b5 cmdline_same=yes vram=46572 MiB
+2026-09-29T02:07:19Z END
