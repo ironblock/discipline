@@ -1,0 +1,54 @@
+{
+ "nonce": "89a76ce6464c65b5",
+ "port": 8080,
+ "started": "2026-09-29T02:09:43Z",
+ "C1_prompt_tokens_rendered": 9276,
+ "C1-progress": {
+  "response_bytes": 22615,
+  "response_sha256": "a966fb3a578cd8901043098a2e2cbf3c2ae0e714f37bf9aff6c22e635d512877",
+  "status_line": "HTTP/1.1 200 OK",
+  "request_body_sha256": "ba3d8ea95ff6143985a24f318a805a4394104761e4b29cf72997fa591d92c30c",
+  "request_body_bytes": 29616
+ },
+ "C1_prompt_progress_occurrences": 13,
+ "C1_polls": 27,
+ "C1_polls_with_other_busy": 0,
+ "C2_turn1_timings": {
+  "cache_n": 0,
+  "prompt_n": 102,
+  "prompt_ms": 246.592,
+  "prompt_per_token_ms": 2.4175686274509807,
+  "prompt_per_second": 413.6387230729302,
+  "predicted_n": 59,
+  "predicted_ms": 456.037,
+  "predicted_per_token_ms": 7.862706896551724,
+  "predicted_per_second": 127.18266281025444,
+  "draft_n": 57,
+  "draft_n_accepted": 39
+ },
+ "C2-warm-turn2": {
+  "response_bytes": 17845,
+  "response_sha256": "1bdd0a94c3f419db44ac2039fa43ba4069ea1d0993a79c535d2fa389be76e2fc",
+  "status_line": "HTTP/1.1 200 OK",
+  "request_body_sha256": "b340fde8a8489b6f12efbad987959620ee9a1727fa5acc6ff591969adca45d02",
+  "request_body_bytes": 589
+ },
+ "C5-unstreamed": {
+  "response_bytes": 989,
+  "response_sha256": "d9d2e92ee5c067736d60da5baf56edc71e14c3de4a5965e1e7a89eaa895b4727",
+  "status_line": "HTTP/1.1 200 OK",
+  "request_body_sha256": "0b90eebf7454b150613afd5f44b74baafde04827b7bcf086d416ac87d6884243",
+  "request_body_bytes": 129
+ },
+ "C3_rendered_tokens": 262149,
+ "C3_limit": 262144,
+ "C3_other_slots_busy_before": [],
+ "C3-overflow": {
+  "response_bytes": 368,
+  "response_sha256": "634e1ce484f54032dd354b2c5717983426ff16f9eee136db428215ed023b6bb4",
+  "status_line": "HTTP/1.1 400 Bad Request",
+  "request_body_sha256": "180cd5e1fc0b42ec569767b2714e00fe6cb4807ce9f9552df655120b257de616",
+  "request_body_bytes": 1198243
+ },
+ "finished": "2026-09-29T02:09:59Z"
+}
