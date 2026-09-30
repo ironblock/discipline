@@ -455,6 +455,13 @@ export const ChainByFocus: Story = {
     await expect(document.activeElement).toBe(target);
     await waitFor(async () => expect(cell.hasAttribute('data-hot')).toBe(true));
     await expect(q(canvasElement, '.ex-trunk__node[data-hot]')).not.toBeNull();
+    // A pointer over nothing that points -- as Chromium reports under a mouse left still while the page moves
+    // beneath it -- does not take away what the focus lit (CI saw it do so, twice).
+    const bare = q(canvasElement, '.ex-session__need') as HTMLElement;
+    bare.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await expect(cell.hasAttribute('data-hot')).toBe(true);
+    await expect(q(canvasElement, '.ex-trunk__node[data-hot]')).not.toBeNull();
     (document.activeElement as HTMLElement).blur();
     await waitFor(async () => expect(cell.hasAttribute('data-hot')).toBe(false));
   },
