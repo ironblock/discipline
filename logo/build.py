@@ -166,8 +166,10 @@ def layout(font_path, margin=MARGIN):
     # where the beam's row enters the first letter and leaves the last: the light is cut off there
     xs_row = np.arange(region[0], region[0] + region[2], 0.25)
     hit = np.flatnonzero(lens.inside(maps["carved"]["field"], np.column_stack([xs_row, np.full_like(xs_row, beam_y)])))
+    stem_end = hit[0] + int(np.flatnonzero(np.diff(hit) > 1)[0])       # last sample of the first run: the D's stem
     return dict(d=" ".join(parts), spans=spans, width=margin + WORD_WIDTH + margin, beam_y=beam_y,
-                x_height=x_height, contours=coarse, maps=maps, enters=xs_row[hit[0]], leaves=xs_row[hit[-1]] + 0.25)
+                x_height=x_height, contours=coarse, maps=maps, enters=xs_row[hit[0]], leaves=xs_row[hit[-1]] + 0.25,
+                spine=(xs_row[hit[0]] + xs_row[stem_end] + 0.25) / 2)
 
 
 # amplitude = (1 - t**a) ** b, with t the progress along the taper. "late" is 1 - t^2 and "early" is
@@ -199,18 +201,36 @@ def harmonics(spans, mode, amplitude):
     ]
 
 
-def wave_y(comps, kind, k, x, beam_y):
+def wave_y(comps, kind, k, x, beam_y, shift=0.0):
+    """The k-th wave at x. shift slides the oscillation along x without moving the taper."""
     y = beam_y
     for h, (period, amp, fade0, fade1) in enumerate(comps):
         phase = k * 2 * math.pi / 3 * (1 + h) + 0.9 * h * k
-        y += amp * (1 - taper(kind, (x - fade0) / (fade1 - fade0))) * math.sin(2 * math.pi * x / period + phase)
+        y += amp * (1 - taper(kind, (x - fade0) / (fade1 - fade0))) * math.sin(2 * math.pi * (x + shift) / period + phase)
     return y
 
 
-def wave_paths(comps, kind, width, beam_y, step):
+def crossover_shift(comps, kind, beam_y, x):
+    """The smallest slide of the oscillation that puts the red and green waves on top of each other at x.
+    Solved numerically, because the noise harmonics move the crossing away from the pure-sine answer."""
+    period = comps[0][0]
+    gap = lambda sh: wave_y(comps, kind, 0, x, beam_y, sh) - wave_y(comps, kind, 1, x, beam_y, sh)
+    grid = np.linspace(-period / 2, period / 2, 2001)
+    vals = np.array([gap(g) for g in grid])
+    roots = []
+    for i in np.flatnonzero(vals[:-1] * vals[1:] < 0):                # sign changes: true crossings
+        lo, hi = grid[i], grid[i + 1]
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            lo, hi = (mid, hi) if gap(lo) * gap(mid) > 0 else (lo, mid)
+        roots.append((lo + hi) / 2)
+    return min(roots, key=abs)
+
+
+def wave_paths(comps, kind, width, beam_y, step, shift=0.0):
     paths = []
     for k in range(3):
-        pts = [f"{x:.0f},{wave_y(comps, kind, k, x, beam_y):.1f}" for x in np.arange(0, width + step, step)]
+        pts = [f"{x:.0f},{wave_y(comps, kind, k, x, beam_y, shift):.1f}" for x in np.arange(0, width + step, step)]
         paths.append("M" + " L".join(pts))
     return paths
 
@@ -295,7 +315,7 @@ def runs_path(pts, keep):
 REFRACT_GAIN = 1.6  # the strokes are thin, so the true shift barely reads; exaggerate it
 
 
-def refracted_paths(geo, comps, kind, field):
+def refracted_paths(geo, comps, kind, field, shift):
     """Bend each wave, and the beam, the way the displacement filter would: content inside a bezel is
     seen shifted toward the edge, so the path is moved by the field there. Points outside the
     letters stay put and are not drawn here (the outside light is drawn as usual)."""
@@ -303,7 +323,7 @@ def refracted_paths(geo, comps, kind, field):
     xs = np.arange(lo, hi, 1.5)
     paths = {}
     for k in range(3):
-        pts = np.array([[x, wave_y(comps, kind, k, x, geo["beam_y"])] for x in xs])
+        pts = np.array([[x, wave_y(comps, kind, k, x, geo["beam_y"], shift)] for x in xs])
         paths[f"r{k}"] = runs_path(lens.refract(field, pts, REFRACT_GAIN), lens.inside(field, pts))
     pts = np.array([[x, geo["beam_y"]] for x in xs])
     paths["rb"] = runs_path(lens.refract(field, pts, REFRACT_GAIN), lens.inside(field, pts))
@@ -348,7 +368,7 @@ def element_glass(t, v, geo, comps, w):
     """Glass without a displacement filter. Returns (defs, body)."""
     look = lens.LOOKS[v["look"]]
     field = geo["maps"][v["look"]]["field"]
-    paths = refracted_paths(geo, comps, v["taper"], field)
+    paths = refracted_paths(geo, comps, v["taper"], field, geo["shift"])
     bev, quant = bevel_paths(geo, field, t, look)
     b, el = t["bloom"], t["el"]
     defs = [f'<path id="{k}" d="{d}"/>' for k, d in {**paths, **bev}.items() if d]
@@ -402,9 +422,10 @@ def svg(theme, variant, geo):
     fade_in, fade_out = (110 if v['outside'] else 1) / width, 1 - (150 if v['outside'] else 1) / width
     ramp0, ramp1 = (end - 45) / width, (end + 25) / width
     comps = harmonics(spans, v["harmonics"], geo["x_height"] / 2)
+    geo = {**geo, "shift": crossover_shift(comps, v["taper"], beam_y, geo["spine"])}
     wave_defs = "\n".join(
         f'    <path id="w{k}" d="{d}"/>'
-        for k, d in enumerate(wave_paths(comps, v["taper"], width, beam_y, 3 if v["harmonics"] == "single" else 2))
+        for k, d in enumerate(wave_paths(comps, v["taper"], width, beam_y, 3 if v["harmonics"] == "single" else 2, geo["shift"]))
     )
     if v["glass"] == "elements":
         glass_defs, glass_body = element_glass(t, v, geo, comps, w)
