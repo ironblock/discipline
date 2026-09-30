@@ -145,6 +145,9 @@ pub enum Ended {
         status: u16,
         /// What the server said, as it said it.
         body: String,
+        /// What kind of refusal the server's typed field says it is, when it
+        /// says one this client names ([`Rejection::of`]).
+        class: Option<Rejection>,
     },
 }
 
@@ -226,6 +229,64 @@ impl Millis {
     }
 }
 
+/// A kind of refusal, read from the server's own typed field -- never from
+/// its message, which is prose (#117 R3, D5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rejection {
+    /// The prompt is longer than the server's context, refused before any
+    /// prefill: llama.cpp's `error.type` `exceed_context_size_error`, as
+    /// R3.0's C3 captured it.
+    ContextOverflow,
+}
+
+impl Rejection {
+    /// The typed `error.type` a llama.cpp server refuses with, for each kind.
+    const TYPES: &'static [(&'static str, Self)] =
+        &[("exceed_context_size_error", Self::ContextOverflow)];
+
+    /// The kind of refusal `body` is, by its `error.type`, if it is one this
+    /// client names. A body that is not JSON, or whose type is not named, is
+    /// no kind -- whatever its message says.
+    #[must_use]
+    pub fn of(body: &str) -> Option<Self> {
+        let value: Value = serde_json::from_str(body).ok()?;
+        let typed = value.pointer("/error/type").and_then(Value::as_str)?;
+        Self::TYPES
+            .iter()
+            .find(|(name, _)| *name == typed)
+            .map(|(_, kind)| *kind)
+    }
+}
+
+/// The server's count of a call's prompt, prefilled so far: llama.cpp's
+/// `prompt_progress` object, streamed when `return_progress` is asked for
+/// (R3.0's C1). Keys as the server names them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Progress {
+    /// Prompt tokens in all.
+    pub total: u64,
+    /// Prompt tokens reused from the slot's cache.
+    pub cache: u64,
+    /// Prompt tokens processed so far.
+    pub processed: u64,
+    /// Milliseconds of prefill so far, by the server's clock.
+    pub time_ms: u64,
+}
+
+impl Progress {
+    /// A progress frame, or nothing when any of its four counts is missing
+    /// or not a count: a partial frame is not a measurement.
+    fn read(object: &Value) -> Option<Self> {
+        let count = |key: &str| object.get(key).and_then(Value::as_u64);
+        Some(Self {
+            total: count("total")?,
+            cache: count("cache")?,
+            processed: count("processed")?,
+            time_ms: count("time_ms")?,
+        })
+    }
+}
+
 /// One piece of a streamed answer: answer text, or the reasoning a thinking
 /// model streams before it. Kept apart from the first byte, because the two
 /// go back to the server differently (`reasoning_content` beside `content`,
@@ -236,6 +297,8 @@ pub enum Piece<'a> {
     Text(&'a str),
     /// Reasoning: `delta.reasoning_content`.
     Reasoning(&'a str),
+    /// The server's prefill progress: not answer text, and never sent back.
+    Progress(Progress),
 }
 
 /// A transport that delivers an answer as it arrives.
@@ -624,9 +687,11 @@ impl Reading {
     }
 
     fn refused(&self, status: u16) -> Ended {
+        let body = String::from_utf8_lossy(&self.refusal).into_owned();
         Ended::Rejected {
             status,
-            body: String::from_utf8_lossy(&self.refusal).into_owned(),
+            class: Rejection::of(&body),
+            body,
         }
     }
 
@@ -649,7 +714,12 @@ impl Reading {
             return Ok(Some(Ended::Rejected {
                 status: 200,
                 body: data.to_owned(),
+                class: Rejection::of(data),
             }));
+        }
+        // Before the frame's delta: it counts the prefill the delta follows.
+        if let Some(progress) = value.get("prompt_progress").and_then(Progress::read) {
+            on_delta(Piece::Progress(progress));
         }
         // On whichever chunk carries it, the last one winning: the usage
         // chunk (`choices: []`) when usage was asked for, the last chunk with
@@ -899,6 +969,8 @@ pub enum Step {
     Reject(u16, String),
     /// Report these timings when the call finishes.
     Timings(Timings),
+    /// A prefill progress frame.
+    Progress(Progress),
 }
 
 /// Scripted streams, one per call, in call order; and every request it was
@@ -972,7 +1044,14 @@ impl Streaming for Canned {
                     gate.wait();
                 }
                 Step::Fail(failure) => return Err(failure),
-                Step::Reject(status, body) => return Ok(Ended::Rejected { status, body }),
+                Step::Reject(status, body) => {
+                    return Ok(Ended::Rejected {
+                        status,
+                        class: Rejection::of(&body),
+                        body,
+                    });
+                }
+                Step::Progress(progress) => on_delta(Piece::Progress(progress)),
                 Step::Timings(measured) => timings = Some(measured),
             }
         }
@@ -1118,6 +1197,7 @@ mod tests {
             pieces.push(match piece {
                 Piece::Reasoning(reasoning) => (true, reasoning.to_owned()),
                 Piece::Text(text) => (false, text.to_owned()),
+                Piece::Progress(progress) => panic!("progress where none was sent: {progress:?}"),
             });
         });
         assert!(ended.is_ok(), "{ended:?}");
@@ -1182,6 +1262,7 @@ mod tests {
             Piece::Reasoning(reasoning) => {
                 panic!("reasoning where only text was sent: {reasoning:?}")
             }
+            Piece::Progress(progress) => panic!("progress where only text was sent: {progress:?}"),
         }
     }
 
@@ -1208,6 +1289,9 @@ mod tests {
                 pieces.push(match piece {
                     Piece::Reasoning(reasoning) => (true, reasoning.to_owned()),
                     Piece::Text(text) => (false, text.to_owned()),
+                    Piece::Progress(progress) => {
+                        panic!("progress where none was sent: {progress:?}")
+                    }
                 });
             },
         );
@@ -1459,6 +1543,270 @@ mod tests {
             draft_n: Some(312),
             draft_n_accepted: Some(207),
         }
+    }
+
+    /// A cold prefill of 9,276 tokens with progress asked for, captured off
+    /// a raw socket from the drive endpoint (`e7051ef`, 2026-09-29, #117
+    /// R3.0's C1 by track four): 13 `prompt_progress` frames, then the
+    /// answer.
+    const PROGRESS_CAPTURE: &[u8] =
+        include_bytes!("../../client/fixtures/llama-server-e7051ef-prompt-progress-stream.http");
+
+    /// A prompt one past the context, refused before any prefill (R3.0's C3).
+    const OVERFLOW_CAPTURE: &[u8] =
+        include_bytes!("../../client/fixtures/llama-server-e7051ef-context-overflow.http");
+
+    /// Every progress frame, and whether an answer piece came before any.
+    fn progress_and_order(pieces: &[Piece<'_>]) -> (Vec<Progress>, bool) {
+        let mut frames = Vec::new();
+        let mut answer_seen = false;
+        let mut frame_after_answer = false;
+        for piece in pieces {
+            match piece {
+                Piece::Progress(progress) => {
+                    frame_after_answer |= answer_seen;
+                    frames.push(*progress);
+                }
+                Piece::Text(_) | Piece::Reasoning(_) => answer_seen = true,
+            }
+        }
+        (frames, frame_after_answer)
+    }
+
+    fn the_captured_progress(frames: &[Progress]) {
+        assert_eq!(frames.len(), 13, "{frames:?}");
+        assert_eq!(
+            frames.first(),
+            Some(&Progress {
+                total: 9276,
+                cache: 0,
+                processed: 0,
+                time_ms: 0
+            })
+        );
+        assert_eq!(
+            frames.last(),
+            Some(&Progress {
+                total: 9276,
+                cache: 0,
+                processed: 9276,
+                time_ms: 6086
+            })
+        );
+        assert!(
+            frames
+                .windows(2)
+                .all(|pair| pair[0].processed < pair[1].processed),
+            "processed rises frame by frame: {frames:?}"
+        );
+    }
+
+    #[test]
+    fn the_servers_prefill_progress_arrives_frame_by_frame_before_its_answer() {
+        assert_eq!(
+            crate::digest::sha256_hex(PROGRESS_CAPTURE),
+            "a966fb3a578cd8901043098a2e2cbf3c2ae0e714f37bf9aff6c22e635d512877"
+        );
+        let stub = Stub::serving(vec![Act::Raw(PROGRESS_CAPTURE.to_vec())]).expect("loopback");
+        let mut owned: Vec<(u8, String, Option<Progress>)> = Vec::new();
+        let ended = HttpStream::new(endpoint(&stub)).stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |piece| {
+                owned.push(match piece {
+                    Piece::Text(text) => (0, text.to_owned(), None),
+                    Piece::Reasoning(text) => (1, text.to_owned(), None),
+                    Piece::Progress(progress) => (2, String::new(), Some(progress)),
+                });
+            },
+        );
+        assert!(matches!(ended, Ok(Ended::Finished { .. })), "{ended:?}");
+        let pieces: Vec<Piece<'_>> = owned
+            .iter()
+            .map(|(kind, text, progress)| match (kind, progress) {
+                (_, Some(progress)) => Piece::Progress(*progress),
+                (1, None) => Piece::Reasoning(text),
+                _ => Piece::Text(text),
+            })
+            .collect();
+        let (frames, frame_after_answer) = progress_and_order(&pieces);
+        the_captured_progress(&frames);
+        assert!(
+            !frame_after_answer,
+            "a progress frame came after the answer began"
+        );
+        assert!(
+            owned.iter().any(|(kind, _, _)| *kind < 2),
+            "the answer after the prefill arrived too"
+        );
+
+        // And one byte at a time: a frame split across reads is one frame.
+        let mut reading = Reading::default();
+        let mut frames = Vec::new();
+        for byte in PROGRESS_CAPTURE {
+            if reading
+                .feed(std::slice::from_ref(byte), usize::MAX, &mut |piece| {
+                    if let Piece::Progress(progress) = piece {
+                        frames.push(progress);
+                    }
+                })
+                .expect("the captured bytes are a well-formed stream")
+                .is_some()
+            {
+                break;
+            }
+        }
+        the_captured_progress(&frames);
+    }
+
+    #[test]
+    fn a_progress_frame_missing_a_count_is_not_delivered() {
+        // Each of the four left out in turn: a frame without any one of them
+        // is not a measurement, and none of them is filled in as zero.
+        for missing in ["total", "cache", "processed", "time_ms"] {
+            let mut frame =
+                serde_json::json!({"total": 10, "cache": 0, "processed": 5, "time_ms": 3});
+            frame.as_object_mut().expect("an object").remove(missing);
+            let chunk = format!(
+                r#"{{"choices":[{{"index":0,"delta":{{"role":"assistant","content":null}}}}],"prompt_progress":{frame}}}"#
+            );
+            let pieces = pieces_of(&[
+                &chunk,
+                r#"{"choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"stop"}]}"#,
+                "[DONE]",
+            ]);
+            assert!(
+                !pieces.iter().any(|piece| piece.starts_with("progress")),
+                "a frame with no `{missing}` was delivered: {pieces:?}"
+            );
+        }
+    }
+
+    /// What a stream of these events' data delivers, in order, read by the
+    /// transport's own reader.
+    fn pieces_of(events: &[&str]) -> Vec<String> {
+        let mut raw = String::from("HTTP/1.1 200 OK\r\n\r\n");
+        for data in events {
+            raw.push_str("data: ");
+            raw.push_str(data);
+            raw.push_str("\n\n");
+        }
+        let mut pieces = Vec::new();
+        let mut reading = Reading::default();
+        let ended = reading
+            .feed(raw.as_bytes(), usize::MAX, &mut |piece| {
+                pieces.push(match piece {
+                    Piece::Progress(progress) => format!("progress {}", progress.processed),
+                    Piece::Text(text) => format!("text {text}"),
+                    Piece::Reasoning(text) => format!("reasoning {text}"),
+                });
+            })
+            .expect("a well-formed stream");
+        assert!(matches!(ended, Some(Ended::Finished { .. })), "{ended:?}");
+        pieces
+    }
+
+    #[test]
+    fn a_chunks_progress_comes_before_that_chunks_text() {
+        // C1's frames ride chunks with no text; this one carries both, and
+        // the count is of the prefill the text follows.
+        assert_eq!(
+            pieces_of(&[
+                r#"{"choices":[{"index":0,"delta":{"content":"x"}}],"prompt_progress":{"total":9,"cache":0,"processed":9,"time_ms":4}}"#,
+                r#"{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+                "[DONE]",
+            ]),
+            ["progress 9", "text x"]
+        );
+    }
+
+    #[test]
+    fn an_error_event_inside_a_stream_is_classified_from_its_typed_field() {
+        // D5's second source: an `error` event in place of the answer. No
+        // capture shows one; the body is C3's error object.
+        let event = r#"data: {"error":{"code":400,"message":"request (262149 tokens) exceeds the available context size (262144 tokens), try increasing it","type":"exceed_context_size_error"}}"#;
+        let stub =
+            Stub::serving(vec![Act::Chunked(vec![format!("{event}\n\n")])]).expect("loopback");
+        let ended = HttpStream::new(endpoint(&stub)).stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |_| panic!("a refusal delivered a piece"),
+        );
+        let Ok(Ended::Rejected { status, class, .. }) = ended else {
+            panic!("not a refusal: {ended:?}");
+        };
+        assert_eq!((status, class), (200, Some(Rejection::ContextOverflow)));
+    }
+
+    #[test]
+    fn a_canned_refusal_is_classified_as_a_served_one_is() {
+        let canned = Canned::new([vec![Step::Reject(
+            400,
+            r#"{"error":{"type":"exceed_context_size_error"}}"#.to_owned(),
+        )]]);
+        let ended = canned.stream(&shape(), deadline(), &Cancel::new(), &mut |_| {});
+        let Ok(Ended::Rejected { class, .. }) = ended else {
+            panic!("not a refusal: {ended:?}");
+        };
+        assert_eq!(class, Some(Rejection::ContextOverflow));
+    }
+
+    #[test]
+    fn a_context_overflow_is_classified_from_its_typed_field() {
+        assert_eq!(
+            crate::digest::sha256_hex(OVERFLOW_CAPTURE),
+            "634e1ce484f54032dd354b2c5717983426ff16f9eee136db428215ed023b6bb4"
+        );
+        let stub = Stub::serving(vec![Act::Raw(OVERFLOW_CAPTURE.to_vec())]).expect("loopback");
+        let ended = HttpStream::new(endpoint(&stub)).stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |_| panic!("a refusal delivered a piece"),
+        );
+        let Ok(Ended::Rejected { status, class, .. }) = ended else {
+            panic!("not a refusal: {ended:?}");
+        };
+        assert_eq!((status, class), (400, Some(Rejection::ContextOverflow)));
+    }
+
+    #[test]
+    fn a_refusal_whose_message_mentions_context_is_not_an_overflow() {
+        // The message is prose (#140's ruling); only the typed field
+        // classifies.
+        assert_eq!(
+            Rejection::of(
+                r#"{"error":{"code":400,"message":"exceeds the available context size","type":"invalid_request_error"}}"#
+            ),
+            None
+        );
+        assert_eq!(Rejection::of("exceed_context_size_error"), None, "not JSON");
+        assert_eq!(
+            Rejection::of(r#"{"error":{"type":"exceed_context_size_error"}}"#),
+            Some(Rejection::ContextOverflow)
+        );
+    }
+
+    #[test]
+    fn a_canned_stream_plays_its_progress_before_its_answer() {
+        let frame = Progress {
+            total: 10,
+            cache: 4,
+            processed: 10,
+            time_ms: 3,
+        };
+        let canned = Canned::new([vec![Step::Progress(frame), Step::Delta("ok".to_owned())]]);
+        let mut seen = Vec::new();
+        let ended = canned.stream(&shape(), deadline(), &Cancel::new(), &mut |piece| {
+            seen.push(match piece {
+                Piece::Progress(progress) => format!("{progress:?}"),
+                Piece::Text(text) | Piece::Reasoning(text) => text.to_owned(),
+            });
+        });
+        assert!(ended.is_ok(), "{ended:?}");
+        assert_eq!(seen, [format!("{frame:?}"), "ok".to_owned()]);
     }
 
     fn endpoint(stub: &Stub) -> Endpoint {
@@ -1810,7 +2158,8 @@ mod tests {
             ended,
             Ok(Ended::Rejected {
                 status: 503,
-                body: r#"{"error":"busy"}"#.to_owned()
+                body: r#"{"error":"busy"}"#.to_owned(),
+                class: None,
             })
         );
     }

@@ -6464,6 +6464,102 @@ failure_class = "client.canned-plays-reasoning-as-text"
 migrated = false
 
 [[fault]]
+id = "client.streaming-body-drops-progress"
+kind = "lane-fault"
+check = "lanes"
+label = "client.streaming-body-drops-progress"
+failure_class = "client.streaming-body-drops-progress"
+migrated = false
+
+[[fault]]
+id = "client.stream-drops-progress"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-drops-progress"
+failure_class = "client.stream-drops-progress"
+migrated = false
+
+[[fault]]
+id = "client.stream-delivers-a-partial-progress-frame"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-delivers-a-partial-progress-frame"
+failure_class = "client.stream-delivers-a-partial-progress-frame"
+migrated = false
+
+[[fault]]
+id = "client.refusal-classified-from-its-message"
+kind = "lane-fault"
+check = "lanes"
+label = "client.refusal-classified-from-its-message"
+failure_class = "client.refusal-classified-from-its-message"
+migrated = false
+
+[[fault]]
+id = "client.stream-refusal-never-classified"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-refusal-never-classified"
+failure_class = "client.stream-refusal-never-classified"
+migrated = false
+
+[[fault]]
+id = "client.canned-drops-progress"
+kind = "lane-fault"
+check = "lanes"
+label = "client.canned-drops-progress"
+failure_class = "client.canned-drops-progress"
+migrated = false
+
+[[fault]]
+id = "client.stream-an-error-events-class-dropped"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-an-error-events-class-dropped"
+failure_class = "client.stream-an-error-events-class-dropped"
+migrated = false
+
+[[fault]]
+id = "client.canned-refusal-never-classified"
+kind = "lane-fault"
+check = "lanes"
+label = "client.canned-refusal-never-classified"
+failure_class = "client.canned-refusal-never-classified"
+migrated = false
+
+[[fault]]
+id = "client.stream-delivers-a-frame-with-no-total"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-delivers-a-frame-with-no-total"
+failure_class = "client.stream-delivers-a-frame-with-no-total"
+migrated = false
+
+[[fault]]
+id = "client.stream-delivers-a-frame-with-no-cache"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-delivers-a-frame-with-no-cache"
+failure_class = "client.stream-delivers-a-frame-with-no-cache"
+migrated = false
+
+[[fault]]
+id = "client.stream-delivers-a-frame-with-no-processed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-delivers-a-frame-with-no-processed"
+failure_class = "client.stream-delivers-a-frame-with-no-processed"
+migrated = false
+
+[[fault]]
+id = "client.stream-a-chunks-progress-after-its-text"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-a-chunks-progress-after-its-text"
+failure_class = "client.stream-a-chunks-progress-after-its-text"
+migrated = false
+
+[[fault]]
 id = "client.stream-drops-the-timings-chunk"
 kind = "lane-fault"
 check = "lanes"
