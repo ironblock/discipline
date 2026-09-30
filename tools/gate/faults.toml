@@ -879,7 +879,7 @@ kind = "seeded-gate"
 check = "exercise"
 label = "a pinned pnpm the host cannot have"
 failure_class = "exercise.pnpm"
-legacy_signature = "No matching version found for pnpm@0\\.0\\.0-unpublished"
+legacy_signature = "notarget No matching version found for pnpm@0\\.0\\.0-unpublished"
 migrated = false
 
 [[fault]]
