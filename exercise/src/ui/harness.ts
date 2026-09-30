@@ -195,7 +195,11 @@ export function cabling(
       o,
     ),
   );
-  return laid.map((net) => ({ ...net, pending: nets.get(net.key)?.pending ?? false }));
+  return laid.map((net) => {
+    const made = nets.get(net.key);
+    if (!made) throw new Error(`cabling: laid a net it did not make (${net.key})`);
+    return { ...net, pending: made.pending };
+  });
 }
 
 /**

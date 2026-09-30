@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { HARNESS, cabling, draw, route } from './harness.ts';
-import type { Net, Tap } from './harness.ts';
+import type { Net, Tap, TrunkNet } from './harness.ts';
 
 // Side calls at the left, a 40px gutter, working memory's panel at the right, in viewport pixels.
 const gutter = { left: 400, right: 440 };
@@ -155,15 +155,17 @@ describe('the trunk’s cables, routed as a harness', () => {
     expect(drawn?.dots).toEqual([{ x: 334, y: 115 }]);
   });
 
-  it('says which nets wait for their slot, as a field: nothing reads it from the key', () => {
-    expect(routed.map((r) => [r.key, r.pending])).toEqual(
-      expect.arrayContaining([
-        ['1>a', false],
-        ['1>b>pending', true],
-        ['2>a', false],
-      ]),
-    );
-    expect(routed).toHaveLength(3);
+  // A net found by the side calls it carries, not by its key: what these assert holds whatever the key looks like.
+  const netOf = (nets: readonly TrunkNet[], id: string) => nets.find((r) => r.pins.some((p) => p.entries.includes(id)));
+
+  it('says of each net whether its side calls wait for their slot', () => {
+    expect(['s1', 's2', 's3', 's4'].map((id) => netOf(routed, id)?.pending)).toEqual([false, false, true, false]);
+  });
+
+  it('keeps a waiting side call apart from one that ran off the same node, in the same slot', () => {
+    const both = cabling([tap('ran', 'b', 1, 150, 150), tap('waits', 'b', 1, 150, 400, true)], 300, gutters);
+    expect(both).toHaveLength(2);
+    expect([netOf(both, 'ran')?.pending, netOf(both, 'waits')?.pending]).toEqual([false, true]);
   });
 
   it('lays a waiting side call’s cable apart, on a track of its own', () => {
