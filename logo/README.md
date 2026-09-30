@@ -16,8 +16,14 @@ into paths because GitHub renders README SVGs through `<img>`, which cannot load
 
 Three sine waves (R, G, B, a third of a turn apart) enter on the left and leave the `e` as one beam.
 Their peak-to-peak height is the font's x-height, so they stay inside the lowercase band, and the
-wavelength is long and lazy (`WAVELENGTH`). The amplitude falls to zero along the word by a quadratic
-easing (`taper` in `build.py`): ease-in stays lively and settles late (default), ease-out calms early.
+wavelength is long and lazy (`WAVELENGTH`). The amplitude falls to zero along the word as
+`(1 - t^a)^b` (`TAPERS` in `build.py`): `late` is `1 - t^2`, `early` is `(1 - t)^2`, and `mid` (the
+default) is `a = b = 1.5`. The arithmetic mean of `late` and `early` is exactly linear, so `mid`
+splits the difference in the exponents instead.
+
+Options (`build.py --options`, viewable in `options/README.md`): `elements` (default), `early`, `late`,
+`noise` (harmonics the glass strips letter by letter), `story` (light drawn only inside the letters, canvas
+cropped to the word), `filter-glass` (the displacement-filter glass, kept as a fallback).
 
 ## How the glass works
 
@@ -38,16 +44,19 @@ carved, wide as liquid.
 
 ## Safari
 
-An earlier 104-primitive glass filter painted nothing in iOS Safari (only the body tint showed).
-It reproduced in WebKitGTK 2.52 and was narrowed to a stair-shaped refraction map; padding a
-working filter to 104 primitives did not break it, so it is not a plain count and the mechanism
-is unknown. The filter glass is now ~24 primitives, and `MAX_PRIMITIVES` in `build.py` is a heuristic
-ceiling, not a known limit.
+An earlier 104-primitive glass filter painted nothing in iOS Safari (only the body tint showed). It
+reproduced in WebKitGTK 2.52 and was narrowed to a stair-shaped refraction map; padding a working
+filter to 104 primitives did not break it, so it is not a plain count and the mechanism is unknown.
+The filter glass is now ~24 primitives, and `MAX_PRIMITIVES` in `build.py` is a heuristic ceiling.
 
-Checked in WebKitGTK 2.52 (same WebCore as Safari) against Chromium at 1x, 2x and 3x: mean pixel
-difference ~3/255 in dark, ~6/255 in light. **Not verified on an iPhone or Mac Safari, and not on
-GitHub itself.** `options/README.md` has a page and a small diagnostic for exactly that. `elements` is the
-default because it uses none of what has failed or is unproven on a device.
+A screenshot from an iPhone, through GitHub in dark mode, shows both glass types rendering: the
+`feImage` one and `elements`. Not seen: light mode on a device, Mac Safari, Firefox. In WebKitGTK at 3x
+the filter glass renders blocky (filter output below device resolution) and `elements` does not; real
+Safari may differ. Against Chromium in WebKitGTK the mean pixel difference is ~1-3/255 in dark and
+~2-5/255 in light.
+
+`elements` is the default because it avoids the displacement filter and the large filter graph, and
+needs only masks, clips and plain blurs.
 
 Serve the pair with `<picture>`, not a media query inside the SVG: on GitHub the
 `<picture>` `prefers-color-scheme` source follows GitHub's theme setting, while a media

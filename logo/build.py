@@ -49,88 +49,88 @@ WAVELENGTH = 190  # px; the waves' peak-to-peak height is the font's x-height (s
 # identity primitives also painted, so this is not a plain count and the mechanism is unknown.
 # This ceiling is a heuristic: the working graphs are under 60. Re-check in WebKit if it grows.
 MAX_PRIMITIVES = 64
-CAST = (12, 14)   # px, where light spilled by the glass lands
 PAD = 16          # px around the letters covered by the baked maps
+CROP = 26         # px of canvas kept above and below the word
 
 # What each option changes. Keys not listed keep BASE_VARIANT's value.
-BASE_VARIANT = dict(harmonics="single", cast=False, look="carved", taper="in", glass="filter")
+BASE_VARIANT = dict(harmonics="single", look="carved", taper="mid", glass="elements", margin=MARGIN, outside=True)
 VARIANTS = {
-    "bloom": dict(
-        desc="Light trapped in the glass: bloom inside each letter, streaked along the direction of travel, "
-             "with chamfers that pick up the beam's colour.",
-    ),
     "elements": dict(
-        desc="The same glass with no displacement filter: the waves are bent where they cross each bezel "
-             "and drawn as ordinary paths, the glow is layered copies, the rim light is stroked along the "
-             "outline. Only plain blurs remain.",
-        glass="elements",
+        desc="The default. Glass built from elements (no displacement filter), a taper halfway between early "
+             "and late, and a stronger, blurrier, more specular look than before.",
     ),
     "early": dict(
-        desc="The other quadratic taper: the waves calm almost at once and leave a long quiet tail. Every other "
-             "option uses the ease-in taper, which stays lively through most of the word and settles into the `e`.",
-        taper="out",
+        desc="The waves calm almost at once and leave a long quiet tail (quadratic ease-out).",
+        taper="early",
     ),
-    "filter": dict(
-        desc="Noise to signal: each waveform carries harmonics that the glass strips away letter by letter, "
+    "late": dict(
+        desc="The waves stay lively through most of the word and settle into the `e` (quadratic ease-in).",
+        taper="late",
+    ),
+    "noise": dict(
+        desc="Signal from noise: each waveform carries harmonics that the glass strips away letter by letter, "
              "so the tangle on the left resolves into one line.",
         harmonics="filter",
     ),
-    "caustic": dict(
-        desc="Glass that spills light: a coloured caustic falls from the letters onto the page.",
-        cast=True,
+    "story": dict(
+        desc="The letters are a window: the light is drawn only inside them, entering the `D` and leaving the `e`. "
+             "Nothing outside the word, so the canvas is cropped to it.",
+        margin=28, outside=False,
     ),
-    "liquid": dict(
-        desc="Same light, softer glass: a wide bezel that bends more of the beam and a rim light that spreads.",
-        look="liquid",
-    ),
-    "pick": dict(
-        desc="Noise to signal, with bloom and a faint spill. The combination I would ship.",
-        harmonics="filter", cast=True,
+    "filter-glass": dict(
+        desc="The previous glass, which bends the light with a displacement filter and two baked maps. Renders on "
+             "iPhone Safari via GitHub. Kept as a fallback and a comparison.",
+        glass="filter",
     ),
 }
 DEFAULT_VARIANT = "elements"
 
 THEMES = {
     "dark": dict(
-        wave=("#ffa3b3", "#a3ffc6", "#a9c0ff"), wave_alpha=0.60,
-        beam="#ffffff", beam_width=6,
+        wave=("#ffa3b3", "#a3ffc6", "#a9c0ff"), wave_alpha=0.80,
+        beam="#ffffff", beam_width=6, pad="#000",
         glow_wide=9, glow_wide_a=1.0, glow_tight=3,
-        body="#cfd8ff", body_top=0.26, body_bottom=0.12,
-        lit="#ffffff", lit_opacity=0.75,
-        shade="#8a7dff", shade_opacity=0.50,
-        edge="#ffffff", edge_opacity=0.16,
-        rim="#ffffff", rim_opacity=0.35,
-        frost=1.8,
+        body="#cfd8ff", body_top=0.14, body_bottom=0.0,
+        lit="#ffffff", lit_opacity=1.0,
+        shade="#8a7dff", shade_opacity=0.60,
+        edge="#ffffff", edge_opacity=0.30,
+        rim="#ffffff", rim_opacity=0.70,
+        frost=3.6,
         inner=1.5,  # strokes are this much thicker inside the glass, as if focused
         beam_inner=1.5,
         # gain/alpha_gain: brighten the light before it is spread. a, b: near and far
         # blur (x, y); wider in x, along the travel direction. slopes: how much of each
-        # survives. catch: how strongly the chamfers pick up colour. cast: spill strength.
-        bloom=dict(gain=1.15, alpha_gain=1.9, a=(6, 3.5), a_slope=0.9, b=(26, 9), b_slope=2.1,
-                   catch=2.8, cast=0.55),
+        # survives. catch: how strongly the chamfers pick up colour.
+        bloom=dict(gain=1.15, alpha_gain=1.9, a=(9, 5.5), a_slope=0.9, b=(32, 12), b_slope=2.1,
+                   catch=2.8),
         # element glass: width and opacity of the layered copies that stand in for the bloom blurs
-        el=dict(a_width=2.6, a_alpha=0.9, b_width=5.0, b_alpha=1.0, bevel=1.0),
+        el=dict(a_width=2.4, a_alpha=0.7, b_width=4.5, b_alpha=0.75, bevel=1.15,
+                # (width, share of the opacity, power on the facet level); the last lit layer is the crisp specular core
+                lit_layers=((22, 0.16, 1), (11, 0.42, 1), (5.5, 0.5, 1), (2.6, 1.0, 2)),
+                shade_layers=((11, 0.6, 1), (5.5, 0.4, 1))),
     ),
     "light": dict(
-        wave=("#e0182d", "#12b84a", "#2350e0"), wave_alpha=0.33,
-        beam="#0b1020", beam_width=6,
+        wave=("#e0182d", "#12b84a", "#2350e0"), wave_alpha=0.50,
+        beam="#0b1020", beam_width=6, pad="#fff",
         glow_wide=2.5, glow_wide_a=0.22, glow_tight=0.7,
-        body="#55608a", body_top=0.10, body_bottom=0.22,
+        body="#55608a", body_top=0.18, body_bottom=0.34,
         lit="#ffffff", lit_opacity=0.95,
-        shade="#1c2340", shade_opacity=0.60,
-        edge="#1c2340", edge_opacity=0.14,
-        rim="#1c2340", rim_opacity=0.55,
-        frost=1.8,
+        shade="#1c2340", shade_opacity=0.90,
+        edge="#1c2340", edge_opacity=0.20,
+        rim="#1c2340", rim_opacity=0.90,
+        frost=3.6,
         inner=1.5,
         beam_inner=0.9,  # a black beam's bloom reads as smoke, not glow
-        bloom=dict(gain=1.0, alpha_gain=1.0, a=(5, 3), a_slope=0.6, b=(20, 7), b_slope=0.6,
-                   catch=1.0, cast=0.4),
-        el=dict(a_width=2.6, a_alpha=0.45, b_width=5.0, b_alpha=0.35, bevel=0.5),
+        bloom=dict(gain=1.0, alpha_gain=1.0, a=(9, 5.5), a_slope=0.6, b=(32, 12), b_slope=0.6,
+                   catch=1.0),
+        el=dict(a_width=2.6, a_alpha=0.55, b_width=5.0, b_alpha=0.45, bevel=1.0,
+                lit_layers=((22, 0.16, 1), (11, 0.42, 1), (5.5, 0.5, 1), (2.6, 1.0, 2)),
+                shade_layers=((11, 0.6, 1), (5.5, 0.4, 1))),
     ),
 }
 
 
-def layout(font_path):
+def layout(font_path, margin=MARGIN):
     """Positions the word once. The SVG path and the glyph contours the maps are baked
     from both come from here."""
     font = TTFont(font_path)
@@ -139,7 +139,7 @@ def layout(font_path):
     advances = [hmtx[cmap[ord(ch)]][0] / upm for ch in WORD]
     em = WORD_WIDTH / (sum(advances) + TRACKING * (len(WORD) - 1))
     scale = em / upm
-    x = MARGIN
+    x = margin
     parts, spans, contours, coarse = [], [], [], []
     for ch, adv in zip(WORD, advances):
         name = cmap[ord(ch)]
@@ -155,19 +155,20 @@ def layout(font_path):
     region = (math.floor(min(xs)) - PAD, math.floor(min(ys)) - PAD,
               math.ceil(max(xs)) - math.floor(min(xs)) + 2 * PAD, math.ceil(max(ys)) - math.floor(min(ys)) + 2 * PAD)
     x_height = font["OS/2"].sxHeight * scale
-    return dict(d=" ".join(parts), spans=spans, width=MARGIN + WORD_WIDTH + MARGIN,
+    return dict(d=" ".join(parts), spans=spans, width=margin + WORD_WIDTH + margin,
                 beam_y=BASELINE - x_height / 2, x_height=x_height, contours=coarse,
                 maps={name: lens.maps(contours, region, look) for name, look in lens.LOOKS.items()})
 
 
+# amplitude = (1 - t**a) ** b, with t the progress along the taper. "late" is 1 - t^2 and "early" is
+# (1 - t)^2; their arithmetic mean is exactly linear, so "mid" splits the difference in the exponents.
+TAPERS = {"late": (2, 1), "mid": (1.5, 1.5), "early": (1, 2)}
+
+
 def taper(kind, t):
     """How much of the amplitude is gone at progress t (0 to 1) along the taper."""
-    t = min(1.0, max(0.0, t))
-    if kind == "out":
-        return t * (2 - t)      # quadratic ease-out: calms early, long quiet tail
-    if kind == "in":
-        return t * t            # quadratic ease-in: stays lively, settles late
-    return t * t * (3 - 2 * t)  # smoothstep
+    a, b = TAPERS[kind]
+    return 1 - (1 - min(1.0, max(0.0, t)) ** a) ** b
 
 
 def convergence(spans):
@@ -260,14 +261,7 @@ def glass_filter(t, v, w, maps):
         '<feMergeNode in="edge"/><feMergeNode in="shade"/><feMergeNode in="lit"/><feMergeNode in="rim"/></feMerge>')
     add('<feComposite in="inside" in2="mask" operator="in" result="insideClip"/>')
 
-    if v["cast"]:
-        add("<!-- light spilled by the glass lands on the page, down-right of the letters -->")
-        add(f'<feOffset in="bloomB" dx="{CAST[0]}" dy="{CAST[1]}" result="castRaw"/>')
-        add('<feComposite in="castRaw" in2="mask" operator="out" result="castOut"/>')
-        add(f'<feComponentTransfer in="castOut" result="cast"><feFuncA type="linear" slope="{b["cast"]}"/></feComponentTransfer>')
-        add('<feMerge><feMergeNode in="cast"/><feMergeNode in="insideClip"/></feMerge>')
-    else:
-        add('<feMerge><feMergeNode in="insideClip"/></feMerge>')
+    add('<feMerge><feMergeNode in="insideClip"/></feMerge>')
 
     body = "\n      ".join(p)
     return (f'<filter id="glass" filterUnits="userSpaceOnUse" x="0" y="0" width="{w}" height="{H}" '
@@ -352,14 +346,15 @@ def element_glass(t, v, geo, comps, w):
                 f'stroke-linecap="round" mask="url(#beammask)"/>\n      </g>')
 
     inner, binner = t["inner"], t["beam_inner"]
-    W = 5  # visible width of each facet (strokes are twice this, half is clipped away)
     facets = []
-    for kind, colour, opacity in (("s", t["shade"], t["shade_opacity"]), ("l", t["lit"], t["lit_opacity"])):
+    for kind, colour, opacity, layers in (("s", t["shade"], t["shade_opacity"], el["shade_layers"]),
+                                          ("l", t["lit"], t["lit_opacity"], el["lit_layers"])):
         for q in range(1, quant + 1):
             if f"b{kind}{q}" in bev:
                 level = q / quant
-                for width, share in ((2 * W, 0.55), (W, 0.45)):   # a soft falloff toward the letter's middle
-                    facets.append(f'<use href="#b{kind}{q}" fill="none" stroke="{colour}" stroke-opacity="{opacity * level * share * el["bevel"]:.3f}" '
+                for width, share, power in layers:     # soft falloff toward the middle, then a crisp core
+                    facets.append(f'<use href="#b{kind}{q}" fill="none" stroke="{colour}" '
+                                  f'stroke-opacity="{opacity * level ** power * share * el["bevel"]:.3f}" '
                                   f'stroke-width="{width}" stroke-linejoin="round"/>')
     body = f"""<use href="#word" fill="url(#body)"/>
   <g clip-path="url(#wordclip)">
@@ -380,7 +375,7 @@ def svg(theme, variant, geo):
     word_d, spans, width, beam_y = geo["d"], geo["spans"], geo["width"], geo["beam_y"]
     start, end = convergence(spans)
     w = f"{width:.0f}"
-    fade_in, fade_out = 110 / width, 1 - 150 / width
+    fade_in, fade_out = (110 if v['outside'] else 1) / width, 1 - (150 if v['outside'] else 1) / width
     ramp0, ramp1 = (end - 45) / width, (end + 25) / width
     comps = harmonics(spans, v["harmonics"], geo["x_height"] / 2)
     wave_defs = "\n".join(
@@ -404,7 +399,12 @@ def svg(theme, variant, geo):
       </g>
       <use href="#beam" fill="none" stroke="{t['beam']}" stroke-width="{t['beam_width'] * beam_scale:g}" stroke-linecap="round" mask="url(#beammask)"/>"""
 
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{H}" viewBox="0 0 {w} {H}" role="img" aria-label="Discipline">
+    outside_light = ("  <!-- light travelling outside the glass -->\n"
+                     f'  <g mask="url(#outside)"><g filter="url(#glow)"><rect width="{w}" height="{H}" fill="{t["pad"]}" fill-opacity="0.004"/><use href="#light"/></g></g>\n'
+                     if v["outside"] else "")
+    rx, ry, rw, rh = geo["maps"][v["look"]]["region"]
+    top, height = ry + PAD - CROP, rh - 2 * PAD + 2 * CROP      # the word's own extent plus CROP either side
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{height}" viewBox="0 {top} {w} {height}" role="img" aria-label="Discipline">
   <title>Discipline</title>
   <defs>
     <path id="word" d="{word_d}"/>
@@ -456,9 +456,7 @@ def svg(theme, variant, geo):
     {glass_defs}
   </defs>
 
-  <!-- light travelling outside the glass -->
-  <g mask="url(#outside)"><g filter="url(#glow)"><rect width="{w}" height="{H}" fill="#000" fill-opacity="0.004"/><use href="#light"/></g></g>
-
+{outside_light}
   <!-- the glass: body tint, then the light seen through it -->
   {glass_body}
 </svg>
@@ -504,37 +502,14 @@ def write(path, theme, variant, geometry):
     print(f"wrote {path}")
 
 
-def diag_svg():
-    """Does feImage with a data: URI work here? The bar is displaced 20 units left of the red tick
-    by a constant map. If it sits on the tick, the filter did nothing."""
-    m = lens.png_constant((255, 128, 128))
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120" viewBox="0 0 240 120">
-  <defs><filter id="f" filterUnits="userSpaceOnUse" x="0" y="0" width="240" height="120" color-interpolation-filters="sRGB">
-    <feImage href="{m}" x="0" y="0" width="240" height="120" preserveAspectRatio="none" result="m"/>
-    <feDisplacementMap in="SourceGraphic" in2="m" scale="40" xChannelSelector="R" yChannelSelector="G"/>
-  </filter></defs>
-  <rect width="240" height="120" fill="#fff" fill-opacity="0.85"/>
-  <rect x="119" y="6" width="2" height="16" fill="#e0182d"/>
-  <g filter="url(#f)"><rect x="115" y="30" width="10" height="80" fill="#111"/></g>
-  <text x="120" y="118" font-family="sans-serif" font-size="9" text-anchor="middle" fill="#666">bar should sit LEFT of the red tick</text>
-</svg>
-"""
-
-
 def options_readme(names):
     rows = []
     for n in names:
         rows.append(f"### {n}\n\n{VARIANTS[n]['desc']}\n\n"
                     f'<picture>\n  <source media="(prefers-color-scheme: dark)" srcset="logo-dark-{n}.svg">\n'
                     f'  <img alt="Discipline, {n} variant" src="logo-light-{n}.svg">\n</picture>\n')
-    ab = ("\n### Does `feImage` with a `data:` URI work on your device?\n\n"
-          "`bloom`, `early`, `liquid`, `filter`, `caustic` and `pick` bake refraction into PNGs and read them with "
-          "`feImage`. `elements` uses no `feImage` and no displacement filter, only masks, clips and plain blurs. "
-          "If the others look flat and `elements` looks right, `feImage` is the problem. The small test below shows "
-          "it directly: the bar should sit visibly left of the red tick.\n\n"
-          '<img alt="feImage diagnostic" src="diag-feimage.svg">\n')
     return ("# Logo options\n\nGenerated by `../build.py --options`. Each is served as a `<picture>` "
-            "pair, so what you see follows your GitHub theme.\n\n" + "\n".join(rows) + ab)
+            "pair, so what you see follows your GitHub theme.\n\n" + "\n".join(rows))
 
 
 def main():
@@ -545,18 +520,24 @@ def main():
     ap.add_argument("--variant", default=DEFAULT_VARIANT, choices=VARIANTS)
     a = ap.parse_args()
     out = pathlib.Path(a.outdir)
-    geometry = layout(a.font)
+    layouts = {}
+
+    def geometry_for(name):
+        margin = {**BASE_VARIANT, **VARIANTS[name]}["margin"]
+        if margin not in layouts:
+            layouts[margin] = layout(a.font, margin)
+        return layouts[margin]
+
     if a.options:
         opts = out / "options"
         opts.mkdir(exist_ok=True)
         for name in VARIANTS:
             for theme in THEMES:
-                write(opts / f"logo-{theme}-{name}.svg", theme, name, geometry)
-        (opts / "diag-feimage.svg").write_text(diag_svg())
+                write(opts / f"logo-{theme}-{name}.svg", theme, name, geometry_for(name))
         (opts / "README.md").write_text(options_readme(list(VARIANTS)))
     else:
         for theme in THEMES:
-            write(out / f"logo-{theme}.svg", theme, a.variant, geometry)
+            write(out / f"logo-{theme}.svg", theme, a.variant, geometry_for(a.variant))
 
 
 if __name__ == "__main__":

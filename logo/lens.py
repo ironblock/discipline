@@ -96,11 +96,6 @@ def _downsample(a):
     return a[:h, :w].reshape(h // k, k, w // k, k, *a.shape[2:]).mean(axis=(1, 3))
 
 
-def png_constant(rgb, size=8):
-    """A flat opaque PNG as a data URI (for the feImage diagnostic)."""
-    return _png(np.full((size, size, 3), rgb, float))
-
-
 def _png(rgb):
     buf = io.BytesIO()
     Image.fromarray(np.clip(np.rint(rgb), 0, 255).astype(np.uint8), "RGB").save(buf, "PNG", optimize=True)
