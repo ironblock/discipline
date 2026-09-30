@@ -40,11 +40,20 @@ Signal from noise: each waveform carries harmonics that the glass strips away le
 
 ### story
 
-The letters are a window: the light is drawn only inside them, entering the `D` and leaving the `e`. Nothing outside the word, so the canvas is cropped to it.
+The light enters the `D` and leaves the `e`, and between them it is visible only inside the letters: the gaps and counters are dark. The incoming waves and the outgoing beam are drawn as usual.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="logo-dark-story.svg">
   <img alt="Discipline, story variant" src="logo-light-story.svg">
+</picture>
+
+### inside
+
+The letters are a window and nothing is drawn outside them, not even the ends. The canvas is cropped to the word.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logo-dark-inside.svg">
+  <img alt="Discipline, inside variant" src="logo-light-inside.svg">
 </picture>
 
 ### filter-glass

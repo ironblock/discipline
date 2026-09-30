@@ -22,8 +22,10 @@ default) is `a = b = 1.5`. The arithmetic mean of `late` and `early` is exactly 
 splits the difference in the exponents instead.
 
 Options (`build.py --options`, viewable in `options/README.md`): `elements` (default), `early`, `late`,
-`noise` (harmonics the glass strips letter by letter), `story` (light drawn only inside the letters, canvas
-cropped to the word), `filter-glass` (the displacement-filter glass, kept as a fallback).
+`noise` (harmonics the glass strips letter by letter), `story` (the incoming waves and outgoing beam are
+drawn, but between the first and last letter the light shows only inside the glass), `inside` (nothing outside
+the letters at all, canvas cropped to the word), `filter-glass` (the displacement-filter glass, kept as a
+fallback).
 
 ## How the glass works
 

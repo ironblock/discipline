@@ -51,6 +51,7 @@ WAVELENGTH = 190  # px; the waves' peak-to-peak height is the font's x-height (s
 MAX_PRIMITIVES = 64
 PAD = 16          # px around the letters covered by the baked maps
 CROP = 26         # px of canvas kept above and below the word
+ENDS_FADE = 22    # px over which the outside light fades out beside the first and last letter (about a stem)
 
 # What each option changes. Keys not listed keep BASE_VARIANT's value.
 BASE_VARIANT = dict(harmonics="single", look="carved", taper="mid", glass="elements", margin=MARGIN, outside=True)
@@ -73,8 +74,13 @@ VARIANTS = {
         harmonics="filter",
     ),
     "story": dict(
-        desc="The letters are a window: the light is drawn only inside them, entering the `D` and leaving the `e`. "
-             "Nothing outside the word, so the canvas is cropped to it.",
+        desc="The light enters the `D` and leaves the `e`, and between them it is visible only inside the letters: "
+             "the gaps and counters are dark. The incoming waves and the outgoing beam are drawn as usual.",
+        outside="ends",
+    ),
+    "inside": dict(
+        desc="The letters are a window and nothing is drawn outside them, not even the ends. The canvas is cropped "
+             "to the word.",
         margin=28, outside=False,
     ),
     "filter-glass": dict(
@@ -155,9 +161,13 @@ def layout(font_path, margin=MARGIN):
     region = (math.floor(min(xs)) - PAD, math.floor(min(ys)) - PAD,
               math.ceil(max(xs)) - math.floor(min(xs)) + 2 * PAD, math.ceil(max(ys)) - math.floor(min(ys)) + 2 * PAD)
     x_height = font["OS/2"].sxHeight * scale
-    return dict(d=" ".join(parts), spans=spans, width=margin + WORD_WIDTH + margin,
-                beam_y=BASELINE - x_height / 2, x_height=x_height, contours=coarse,
-                maps={name: lens.maps(contours, region, look) for name, look in lens.LOOKS.items()})
+    beam_y = BASELINE - x_height / 2
+    maps = {name: lens.maps(contours, region, look) for name, look in lens.LOOKS.items()}
+    # where the beam's row enters the first letter and leaves the last: the light is cut off there
+    xs_row = np.arange(region[0], region[0] + region[2], 0.25)
+    hit = np.flatnonzero(lens.inside(maps["carved"]["field"], np.column_stack([xs_row, np.full_like(xs_row, beam_y)])))
+    return dict(d=" ".join(parts), spans=spans, width=margin + WORD_WIDTH + margin, beam_y=beam_y,
+                x_height=x_height, contours=coarse, maps=maps, enters=xs_row[hit[0]], leaves=xs_row[hit[-1]] + 0.25)
 
 
 # amplitude = (1 - t**a) ** b, with t the progress along the taper. "late" is 1 - t^2 and "early" is
@@ -399,8 +409,23 @@ def svg(theme, variant, geo):
       </g>
       <use href="#beam" fill="none" stroke="{t['beam']}" stroke-width="{t['beam_width'] * beam_scale:g}" stroke-linecap="round" mask="url(#beammask)"/>"""
 
+    ends_mask = ""
+    if v["outside"] == "ends":
+        e, l = geo["enters"], geo["leaves"]
+        ends_mask = (
+            f'    <linearGradient id="endsL" gradientUnits="userSpaceOnUse" x1="{e:.2f}" y1="0" x2="{e + ENDS_FADE:.2f}" y2="0">'
+            '<stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>\n'
+            f'    <linearGradient id="endsR" gradientUnits="userSpaceOnUse" x1="{l - ENDS_FADE:.2f}" y1="0" x2="{l:.2f}" y2="0">'
+            '<stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff"/></linearGradient>\n'
+            f'    <mask id="ends" maskUnits="userSpaceOnUse" x="0" y="0" width="{w}" height="{H}">\n'
+            f'      <rect x="0" y="0" width="{e:.2f}" height="{H}" fill="#fff"/>\n'
+            f'      <rect x="{e:.2f}" y="0" width="{ENDS_FADE}" height="{H}" fill="url(#endsL)"/>\n'
+            f'      <rect x="{l - ENDS_FADE:.2f}" y="0" width="{ENDS_FADE}" height="{H}" fill="url(#endsR)"/>\n'
+            f'      <rect x="{l:.2f}" y="0" width="{width - l:.2f}" height="{H}" fill="#fff"/>\n'
+            f'      <use href="#word" fill="#000"/>\n'
+            f'    </mask>\n')
     outside_light = ("  <!-- light travelling outside the glass -->\n"
-                     f'  <g mask="url(#outside)"><g filter="url(#glow)"><rect width="{w}" height="{H}" fill="{t["pad"]}" fill-opacity="0.004"/><use href="#light"/></g></g>\n'
+                     f'  <g mask="url(#{"ends" if v["outside"] == "ends" else "outside"})"><g filter="url(#glow)"><rect width="{w}" height="{H}" fill="{t["pad"]}" fill-opacity="0.004"/><use href="#light"/></g></g>\n'
                      if v["outside"] else "")
     rx, ry, rw, rh = geo["maps"][v["look"]]["region"]
     top, height = ry + PAD - CROP, rh - 2 * PAD + 2 * CROP      # the word's own extent plus CROP either side
@@ -414,7 +439,7 @@ def svg(theme, variant, geo):
       <use href="#word" fill="#000"/>
     </mask>
 
-    <linearGradient id="body" gradientUnits="userSpaceOnUse" x1="0" y1="{BASELINE - 130}" x2="0" y2="{BASELINE + 35}">
+{ends_mask}    <linearGradient id="body" gradientUnits="userSpaceOnUse" x1="0" y1="{BASELINE - 130}" x2="0" y2="{BASELINE + 35}">
       <stop offset="0" stop-color="{t['body']}" stop-opacity="{t['body_top']}"/>
       <stop offset="1" stop-color="{t['body']}" stop-opacity="{t['body_bottom']}"/>
     </linearGradient>
