@@ -1035,6 +1035,8 @@ fn call<S: Streaming>(
                         text: text.to_owned(),
                     }
                 }
+                // Not logged yet: log v1's `progress` line is R3.4's.
+                Piece::Progress(_) => return,
             };
             shared.lock().push(event);
             shared.changed.notify_all();
@@ -1074,7 +1076,7 @@ fn call<S: Streaming>(
             });
             state.move_to(Settlement::Awaiting);
         }
-        Ok(StreamEnded::Rejected { status, body }) => {
+        Ok(StreamEnded::Rejected { status, body, .. }) => {
             state.push(Event::Rejected {
                 request,
                 status,
