@@ -348,12 +348,28 @@ check_pages() {
 
 # The web surface in exercise/: its typecheck, its lint, and every story but
 # Session/Live (driven by hand) as a browser test (Vitest runs each Storybook
-# story in Chromium, the plain unit tests in Node). It needs Node and pnpm, at
-# the versions exercise/package.json declares. The install is frozen to the lockfile; the browser is fetched only
-# when the machine does not have it yet, and only after the cheap steps pass.
+# story in Chromium, the plain unit tests in Node). It needs Node, at the
+# version exercise/package.json declares. The install is frozen to the
+# lockfile; the browser is fetched only when the machine does not have it yet,
+# and only after the cheap steps pass.
+#
+# pnpm is the one `packageManager` pins, run as the JavaScript package through
+# npx -- never whichever pnpm the host installed (#194). A host's pnpm at any
+# other version switches to the pinned one by itself, and pnpm 11's switch,
+# whichever build is running, resolves the pinned release with its native
+# build (@pnpm/exe) and refuses to run unless this platform's binary is among
+# them. pnpm has published none for macOS on Intel after 11.0.4, so on such a
+# host the check could not run at all. Through npx the pinned version runs as
+# itself and switches to nothing. A pin that cannot be had fails here, first,
+# naming the pin.
 check_exercise() {
   (
-    cd exercise &&
+    cd exercise || exit
+    local pinned
+    # A pin's `+sha512...` suffix, if it ever carries one, is dropped, not checked: npx takes a version only.
+    pinned="$(node -p "require('./package.json').packageManager.split('+')[0]")" || exit
+    pnpm() { npx --yes "$pinned" "$@"; }
+    pnpm --version &&
       pnpm install --frozen-lockfile &&
       pnpm typecheck &&
       pnpm lint &&
@@ -2672,6 +2688,15 @@ inject_metadata() {
 # clean tree, so the signature is the fault's own.
 inject_exercise_type_error() {
   printf '\nexport const seededFault: number = %s;\n' "'not a number'" >> exercise/src/ui/format.ts
+}
+
+# A pnpm the check cannot have: the class #194 was, on the hosts it was on --
+# the pinned pnpm unobtainable there -- made true on every host by pinning a
+# version that was never published. The signature is npm's own `notarget`
+# line, not pnpm's `[ERROR]`: a check that went back to the host's pnpm
+# would fail here too, but not in these words, and the case would say so.
+inject_exercise_pnpm_unobtainable() {
+  edit_in_place 's/"packageManager": "pnpm@[^"]*"/"packageManager": "pnpm@0.0.0-unpublished"/' exercise/package.json
 }
 
 inject_hygiene() {
@@ -7099,6 +7124,8 @@ selftest() {
     'hygiene: external-subresource:'
   seeded_case "a type error in the web surface"       exercise inject_exercise_type_error \
     'error TS2322'
+  seeded_case "a pinned pnpm the host cannot have"    exercise inject_exercise_pnpm_unobtainable \
+    'notarget No matching version found for pnpm@0\.0\.0-unpublished'
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
     'formats::interview::tests::no_dogma_tag_is_missing_from_the_table \.\.\. FAILED' 'lib/formats::interview'
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \

@@ -874,6 +874,15 @@ legacy_signature = "error TS2322"
 migrated = false
 
 [[fault]]
+id = "exercise.exercise_pnpm_unobtainable"
+kind = "seeded-gate"
+check = "exercise"
+label = "a pinned pnpm the host cannot have"
+failure_class = "exercise.pnpm"
+legacy_signature = "notarget No matching version found for pnpm@0\\.0\\.0-unpublished"
+migrated = false
+
+[[fault]]
 id = "ci.ci"
 kind = "seeded-gate"
 check = "ci"

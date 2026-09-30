@@ -18,6 +18,11 @@ pnpm verify           # typecheck, lint, unit tests, every story as a browser te
 pnpm perf             # a performance trace: frames, long frames, layout, style, script, a profile (--ablate, --css)
 ```
 
+pnpm is pinned in `package.json` (`packageManager`). A pnpm at another
+version switches to the pinned one by itself, and on an Intel Mac that switch
+fails (#194): run the pinned one directly instead, `npx pnpm@11.20.0 install`
+and so on. The repository's `exercise` check does exactly that.
+
 **Driving `diet`.** `?drive` drives `diet`'s own session, served over HTTP
 by `diet-drive serve` (#140; `src/drive/http.ts`). The page reaches it
 same-origin through the dev server's proxy:
