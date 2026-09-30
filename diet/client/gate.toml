@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 72
+faults = 78
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -710,6 +710,7 @@ becomes = '''
 catches = [
     "client::stream::tests::a_bearer_credential_is_sent_as_an_authorization_header_and_only_then",
     "client::stream::tests::a_chunk_boundary_inside_an_event_is_invisible_to_the_reader",
+    "client::stream::tests::a_progress_frame_missing_a_count_is_not_delivered",
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
     "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
     "client::stream::tests::a_timing_the_server_did_not_send_is_absent_not_zero",
@@ -718,6 +719,7 @@ catches = [
     "client::stream::tests::the_last_timings_a_stream_carries_is_the_one_reported",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
+    "client::stream::tests::the_servers_prefill_progress_arrives_frame_by_frame_before_its_answer",
     "client::stream::tests::timings_on_the_last_chunk_with_choices_are_read_too",
 ]
 
@@ -740,6 +742,7 @@ catches = [
     "client::stream::tests::an_event_ended_by_a_bare_cr_as_the_last_bytes_of_the_stream_is_read",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
+    "client::stream::tests::the_servers_prefill_progress_arrives_frame_by_frame_before_its_answer",
 ]
 
 [[fault]]
@@ -772,6 +775,7 @@ becomes = '''
         if status == 0 {
             self.refusal.extend_from_slice(&decoded);'''
 catches = [
+    "client::stream::tests::a_context_overflow_is_classified_from_its_typed_field",
     "client::stream::tests::a_status_other_than_200_is_a_rejection_carrying_what_the_server_said",
 ]
 
@@ -786,6 +790,7 @@ becomes = '''
             let event: Vec<u8> = std::mem::take(&mut self.pending);'''
 catches = [
     "client::stream::tests::a_bearer_credential_is_sent_as_an_authorization_header_and_only_then",
+    "client::stream::tests::a_progress_frame_missing_a_count_is_not_delivered",
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
     "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
     "client::stream::tests::a_timing_the_server_did_not_send_is_absent_not_zero",
@@ -793,6 +798,7 @@ catches = [
     "client::stream::tests::the_last_timings_a_stream_carries_is_the_one_reported",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
+    "client::stream::tests::the_servers_prefill_progress_arrives_frame_by_frame_before_its_answer",
     "client::stream::tests::timings_on_the_last_chunk_with_choices_are_read_too",
 ]
 
@@ -802,9 +808,9 @@ failure_class = "client.streaming-body-drops-usage"
 target = "diet/src/client/wire.rs"
 expect_exit = 101
 anchor = '''
-    format!("{open},\"stream\":true,\"stream_options\":{{\"include_usage\":true}}}}")'''
+        "{open},\"stream\":true,\"stream_options\":{{\"include_usage\":true}},\'''
 becomes = '''
-    format!("{open},\"stream\":true}}")'''
+        "{open},\"stream\":true,\'''
 catches = [
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::wire::tests::a_streaming_body_is_the_body_with_streaming_asked_for_and_the_same_head",
@@ -945,6 +951,7 @@ becomes = '''
                 let _ = piece;'''
 catches = [
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
+    "client::stream::tests::the_servers_prefill_progress_arrives_frame_by_frame_before_its_answer",
 ]
 
 [[fault]]
@@ -1240,4 +1247,88 @@ becomes = '''
             sampler_echo: Some("generation_settings".to_owned()),'''
 catches = [
     "client::wire::tests::the_llama_cpp_chat_reply_has_no_sampler_echo_site",
+]
+
+[[fault]]
+id = "client.streaming-body-drops-progress"
+failure_class = "client.streaming-body-drops-progress"
+target = "diet/src/client/wire.rs"
+expect_exit = 101
+anchor = '''
+         \"return_progress\":true}}"'''
+becomes = '''
+         \"return_progress\":false}}"'''
+catches = [
+    "client::wire::tests::a_streaming_body_is_the_body_with_streaming_asked_for_and_the_same_head",
+]
+
+[[fault]]
+id = "client.stream-drops-progress"
+failure_class = "client.stream-drops-progress"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        if let Some(progress) = value.get("prompt_progress").and_then(Progress::read) {'''
+becomes = '''
+        if let Some(progress) = value.get("prompt_progress").and_then(Progress::read).filter(|_| false) {'''
+catches = [
+    "client::stream::tests::the_servers_prefill_progress_arrives_frame_by_frame_before_its_answer",
+]
+
+[[fault]]
+id = "client.stream-delivers-a-partial-progress-frame"
+failure_class = "client.stream-delivers-a-partial-progress-frame"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            time_ms: count("time_ms")?,'''
+becomes = '''
+            time_ms: count("time_ms").unwrap_or(0),'''
+catches = [
+    "client::stream::tests::a_progress_frame_missing_a_count_is_not_delivered",
+]
+
+[[fault]]
+id = "client.refusal-classified-from-its-message"
+failure_class = "client.refusal-classified-from-its-message"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        let typed = value.pointer("/error/type").and_then(Value::as_str)?;'''
+becomes = '''
+        let typed = value.pointer("/error/message").map(|_| "exceed_context_size_error")?;'''
+catches = [
+    "client::stream::tests::a_refusal_whose_message_mentions_context_is_not_an_overflow",
+]
+
+[[fault]]
+id = "client.stream-refusal-never-classified"
+failure_class = "client.stream-refusal-never-classified"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            class: Rejection::of(&body),
+            body,
+        }
+    }'''
+becomes = '''
+            class: None,
+            body,
+        }
+    }'''
+catches = [
+    "client::stream::tests::a_context_overflow_is_classified_from_its_typed_field",
+]
+
+[[fault]]
+id = "client.canned-drops-progress"
+failure_class = "client.canned-drops-progress"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                Step::Progress(progress) => on_delta(Piece::Progress(progress)),'''
+becomes = '''
+                Step::Progress(_) => {}'''
+catches = [
+    "client::stream::tests::a_canned_stream_plays_its_progress_before_its_answer",
 ]
