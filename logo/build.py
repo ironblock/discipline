@@ -11,7 +11,7 @@ Safari: only long-standing filter primitives are used (feOffset, feComposite,
 feFlood, feMerge, feGaussianBlur, feMorphology, feColorMatrix,
 feComponentTransfer, feDisplacementMap). No mix-blend-mode, no feImage, no
 lighting primitives. Every filter length is in user units, so nothing depends
-on pixel density. NOT verified in WebKit; see logo/README.md.
+on pixel density. Checked in WebKitGTK 2.52, not on a device; see logo/README.md.
 
 usage: build.py [--font PATH] [outdir]            default logo-{dark,light}.svg
        build.py --options [outdir]                every variant + options/README.md
@@ -39,11 +39,17 @@ AMPLITUDE = 56
 WAVELENGTH = 120
 
 CHAMFER = 5       # px, width of the lit/shaded facets
-# Refraction across the bezel: push strength at distance k*BAND_STEP from an
-# edge, strongest at the edge (a convex bezel bends light most where it is steepest).
-BAND_STEP = 2.5
-BAND_PUSH = (1.0, 0.78, 0.5, 0.22)
-BEND = 24         # px, shift at full push
+# Refraction across the bezel: blur the letter mask, then read the edge ramp on each side
+# from one offset copy. The push is strongest at the edge and fades inward, as it does
+# for a convex bezel.
+RAMP_BLUR = 3     # px, sets how wide the bezel is
+RAMP_STEP = 3     # px, offset used to read the ramp
+BEND = 55         # px, shift at full push; the ramp peaks near 0.4, so real shifts are ~10px
+# A 104-primitive glass filter (4-band stair refraction map) painted nothing in iOS Safari and in
+# WebKitGTK 2.52. The same graph with 3 bands (88) painted, and padding a working graph to 104 with
+# identity primitives also painted, so this is not a plain count and the mechanism is unknown.
+# This ceiling is a heuristic: the working graphs are under 60. Re-check in WebKit if it grows.
+MAX_PRIMITIVES = 64
 CAST = (12, 14)   # px, where light spilled by the glass lands
 
 # What each option changes. Keys not listed keep BASE_VARIANT's value.
@@ -171,34 +177,21 @@ def wave_paths(spans, width, beam_y, mode):
 
 
 def displacement_map():
-    """Filter primitives for the refraction map. Grey 128 = no shift; each band
-    pushes toward its own edge's outside, harder the closer it is to the edge.
-    X and Y are built separately (opaque), then added into R and G."""
-    out = []
-    n = len(BAND_PUSH)
-
-    def axis(name, sides, chan):
-        # sides: (label, dx, dy, sign); the push is written into one channel.
-        out.append(f'<feFlood flood-color="rgb(128,128,128)" result="{name}0"/>')
-        layers = [f"{name}0"]
-        for label, dx, dy, sign in sides:
-            for k in range(n, 0, -1):  # widest, weakest band first
-                d = k * BAND_STEP
-                v = round(128 + sign * 127 * BAND_PUSH[k - 1])
-                rgb = (v, 128, 128) if chan == "R" else (128, v, 128)
-                out.append(f'<feOffset in="mask" dx="{dx * d}" dy="{dy * d}" result="{name}{label}{k}s"/>')
-                out.append(f'<feComposite in="mask" in2="{name}{label}{k}s" operator="out" result="{name}{label}{k}b"/>')
-                out.append(f'<feFlood flood-color="rgb{rgb}"/>')
-                out.append(f'<feComposite in2="{name}{label}{k}b" operator="in" result="{name}{label}{k}"/>')
-                layers.append(f"{name}{label}{k}")
-        nodes = "".join(f'<feMergeNode in="{l}"/>' for l in layers)
-        out.append(f'<feMerge result="{name}">{nodes}</feMerge>')
-
-    axis("mx", (("L", 1, 0, +1), ("R", -1, 0, -1)), "R")
-    axis("my", (("T", 0, 1, +1), ("B", 0, -1, -1)), "G")
-    out.append('<feColorMatrix in="mx" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0 1" result="mxR"/>')
-    out.append('<feColorMatrix in="my" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 0 1" result="myG"/>')
-    out.append('<feComposite in="mxR" in2="myG" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="rawmap"/>')
+    """Filter primitives for the refraction map. Grey 128 = no shift. Each side's edge ramp
+    is a translucent layer of that side's push colour, so laying the four over a grey base
+    gives a signed map without any subtraction."""
+    out = [f'<feGaussianBlur in="mask" stdDeviation="{RAMP_BLUR}" result="soft"/>',
+           '<feFlood flood-color="rgb(128,128,128)" result="flat"/>']
+    layers = ["flat"]
+    for label, dx, dy, rgb in (("L", 1, 0, (255, 128, 128)), ("R", -1, 0, (0, 128, 128)),
+                               ("T", 0, 1, (128, 255, 128)), ("B", 0, -1, (128, 0, 128))):
+        out.append(f'<feOffset in="soft" dx="{dx * RAMP_STEP}" dy="{dy * RAMP_STEP}" result="{label}shift"/>')
+        out.append(f'<feComposite in="soft" in2="{label}shift" operator="out" result="{label}ramp"/>')
+        out.append(f'<feFlood flood-color="rgb{rgb}"/>')
+        out.append(f'<feComposite in2="{label}ramp" operator="in" result="{label}push"/>')
+        layers.append(f"{label}push")
+    nodes = "".join(f'<feMergeNode in="{l}"/>' for l in layers)
+    out.append(f'<feMerge result="rawmap">{nodes}</feMerge>')
     return out
 
 
@@ -228,7 +221,7 @@ def glass_filter(t, v, w):
 
     add("<!-- refraction map: 0.5 grey = flat, graded pushes toward each edge -->")
     p += displacement_map()
-    add('<feGaussianBlur in="rawmap" stdDeviation="1.2" result="dmap"/>')
+    add('<feGaussianBlur in="rawmap" stdDeviation="0.8" result="dmap"/>')
     p += bend(v["prism"] if t is THEMES["dark"] else 0)
 
     add("<!-- frost, then bloom: brighten the light and spread it, further along x than y -->")
@@ -354,7 +347,7 @@ def svg(theme, variant, word_d, spans, width, beam_y):
   </defs>
 
   <!-- light travelling outside the glass -->
-  <g mask="url(#outside)"><g filter="url(#glow)"><use href="#light"/></g></g>
+  <g mask="url(#outside)"><g filter="url(#glow)"><rect width="{w}" height="{H}" fill="#000" fill-opacity="0.004"/><use href="#light"/></g></g>
 
   <!-- the glass: body tint, then the light seen through it (the carrier fill only gives the filter its shape) -->
   <use href="#word" fill="url(#body)"/>
@@ -384,6 +377,8 @@ def check(text, name):
                     problems.append(f'filter {f.get("id")}: {prim.tag.replace(ns, "")} reads "{ref}" before it is defined')
             if prim.get("result"):
                 seen.add(prim.get("result"))
+        if len(f) > MAX_PRIMITIVES:
+            problems.append(f'filter {f.get("id")} has {len(f)} primitives; more than {MAX_PRIMITIVES} risks WebKit dropping it')
     ids = {e.get("id") for e in root.iter() if e.get("id")}
     for ref in set(re.findall(r'url\(#([^)]+)\)', text)) | set(re.findall(r'href="#([^"]+)"', text)):
         if ref not in ids:

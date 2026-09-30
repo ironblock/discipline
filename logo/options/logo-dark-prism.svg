@@ -63,84 +63,32 @@
       <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 30 0" result="mask"/>
       <feComponentTransfer in="SourceGraphic" result="light"><feFuncA type="linear" slope="1.4" intercept="-0.1"/></feComponentTransfer>
       <!-- refraction map: 0.5 grey = flat, graded pushes toward each edge -->
-      <feFlood flood-color="rgb(128,128,128)" result="mx0"/>
-      <feOffset in="mask" dx="10.0" dy="0.0" result="mxL4s"/>
-      <feComposite in="mask" in2="mxL4s" operator="out" result="mxL4b"/>
-      <feFlood flood-color="rgb(156, 128, 128)"/>
-      <feComposite in2="mxL4b" operator="in" result="mxL4"/>
-      <feOffset in="mask" dx="7.5" dy="0.0" result="mxL3s"/>
-      <feComposite in="mask" in2="mxL3s" operator="out" result="mxL3b"/>
-      <feFlood flood-color="rgb(192, 128, 128)"/>
-      <feComposite in2="mxL3b" operator="in" result="mxL3"/>
-      <feOffset in="mask" dx="5.0" dy="0.0" result="mxL2s"/>
-      <feComposite in="mask" in2="mxL2s" operator="out" result="mxL2b"/>
-      <feFlood flood-color="rgb(227, 128, 128)"/>
-      <feComposite in2="mxL2b" operator="in" result="mxL2"/>
-      <feOffset in="mask" dx="2.5" dy="0.0" result="mxL1s"/>
-      <feComposite in="mask" in2="mxL1s" operator="out" result="mxL1b"/>
+      <feGaussianBlur in="mask" stdDeviation="3" result="soft"/>
+      <feFlood flood-color="rgb(128,128,128)" result="flat"/>
+      <feOffset in="soft" dx="3" dy="0" result="Lshift"/>
+      <feComposite in="soft" in2="Lshift" operator="out" result="Lramp"/>
       <feFlood flood-color="rgb(255, 128, 128)"/>
-      <feComposite in2="mxL1b" operator="in" result="mxL1"/>
-      <feOffset in="mask" dx="-10.0" dy="0.0" result="mxR4s"/>
-      <feComposite in="mask" in2="mxR4s" operator="out" result="mxR4b"/>
-      <feFlood flood-color="rgb(100, 128, 128)"/>
-      <feComposite in2="mxR4b" operator="in" result="mxR4"/>
-      <feOffset in="mask" dx="-7.5" dy="0.0" result="mxR3s"/>
-      <feComposite in="mask" in2="mxR3s" operator="out" result="mxR3b"/>
-      <feFlood flood-color="rgb(64, 128, 128)"/>
-      <feComposite in2="mxR3b" operator="in" result="mxR3"/>
-      <feOffset in="mask" dx="-5.0" dy="0.0" result="mxR2s"/>
-      <feComposite in="mask" in2="mxR2s" operator="out" result="mxR2b"/>
-      <feFlood flood-color="rgb(29, 128, 128)"/>
-      <feComposite in2="mxR2b" operator="in" result="mxR2"/>
-      <feOffset in="mask" dx="-2.5" dy="0.0" result="mxR1s"/>
-      <feComposite in="mask" in2="mxR1s" operator="out" result="mxR1b"/>
-      <feFlood flood-color="rgb(1, 128, 128)"/>
-      <feComposite in2="mxR1b" operator="in" result="mxR1"/>
-      <feMerge result="mx"><feMergeNode in="mx0"/><feMergeNode in="mxL4"/><feMergeNode in="mxL3"/><feMergeNode in="mxL2"/><feMergeNode in="mxL1"/><feMergeNode in="mxR4"/><feMergeNode in="mxR3"/><feMergeNode in="mxR2"/><feMergeNode in="mxR1"/></feMerge>
-      <feFlood flood-color="rgb(128,128,128)" result="my0"/>
-      <feOffset in="mask" dx="0.0" dy="10.0" result="myT4s"/>
-      <feComposite in="mask" in2="myT4s" operator="out" result="myT4b"/>
-      <feFlood flood-color="rgb(128, 156, 128)"/>
-      <feComposite in2="myT4b" operator="in" result="myT4"/>
-      <feOffset in="mask" dx="0.0" dy="7.5" result="myT3s"/>
-      <feComposite in="mask" in2="myT3s" operator="out" result="myT3b"/>
-      <feFlood flood-color="rgb(128, 192, 128)"/>
-      <feComposite in2="myT3b" operator="in" result="myT3"/>
-      <feOffset in="mask" dx="0.0" dy="5.0" result="myT2s"/>
-      <feComposite in="mask" in2="myT2s" operator="out" result="myT2b"/>
-      <feFlood flood-color="rgb(128, 227, 128)"/>
-      <feComposite in2="myT2b" operator="in" result="myT2"/>
-      <feOffset in="mask" dx="0.0" dy="2.5" result="myT1s"/>
-      <feComposite in="mask" in2="myT1s" operator="out" result="myT1b"/>
+      <feComposite in2="Lramp" operator="in" result="Lpush"/>
+      <feOffset in="soft" dx="-3" dy="0" result="Rshift"/>
+      <feComposite in="soft" in2="Rshift" operator="out" result="Rramp"/>
+      <feFlood flood-color="rgb(0, 128, 128)"/>
+      <feComposite in2="Rramp" operator="in" result="Rpush"/>
+      <feOffset in="soft" dx="0" dy="3" result="Tshift"/>
+      <feComposite in="soft" in2="Tshift" operator="out" result="Tramp"/>
       <feFlood flood-color="rgb(128, 255, 128)"/>
-      <feComposite in2="myT1b" operator="in" result="myT1"/>
-      <feOffset in="mask" dx="0.0" dy="-10.0" result="myB4s"/>
-      <feComposite in="mask" in2="myB4s" operator="out" result="myB4b"/>
-      <feFlood flood-color="rgb(128, 100, 128)"/>
-      <feComposite in2="myB4b" operator="in" result="myB4"/>
-      <feOffset in="mask" dx="0.0" dy="-7.5" result="myB3s"/>
-      <feComposite in="mask" in2="myB3s" operator="out" result="myB3b"/>
-      <feFlood flood-color="rgb(128, 64, 128)"/>
-      <feComposite in2="myB3b" operator="in" result="myB3"/>
-      <feOffset in="mask" dx="0.0" dy="-5.0" result="myB2s"/>
-      <feComposite in="mask" in2="myB2s" operator="out" result="myB2b"/>
-      <feFlood flood-color="rgb(128, 29, 128)"/>
-      <feComposite in2="myB2b" operator="in" result="myB2"/>
-      <feOffset in="mask" dx="0.0" dy="-2.5" result="myB1s"/>
-      <feComposite in="mask" in2="myB1s" operator="out" result="myB1b"/>
-      <feFlood flood-color="rgb(128, 1, 128)"/>
-      <feComposite in2="myB1b" operator="in" result="myB1"/>
-      <feMerge result="my"><feMergeNode in="my0"/><feMergeNode in="myT4"/><feMergeNode in="myT3"/><feMergeNode in="myT2"/><feMergeNode in="myT1"/><feMergeNode in="myB4"/><feMergeNode in="myB3"/><feMergeNode in="myB2"/><feMergeNode in="myB1"/></feMerge>
-      <feColorMatrix in="mx" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0 1" result="mxR"/>
-      <feColorMatrix in="my" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 0 1" result="myG"/>
-      <feComposite in="mxR" in2="myG" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="rawmap"/>
-      <feGaussianBlur in="rawmap" stdDeviation="1.2" result="dmap"/>
+      <feComposite in2="Tramp" operator="in" result="Tpush"/>
+      <feOffset in="soft" dx="0" dy="-3" result="Bshift"/>
+      <feComposite in="soft" in2="Bshift" operator="out" result="Bramp"/>
+      <feFlood flood-color="rgb(128, 0, 128)"/>
+      <feComposite in2="Bramp" operator="in" result="Bpush"/>
+      <feMerge result="rawmap"><feMergeNode in="flat"/><feMergeNode in="Lpush"/><feMergeNode in="Rpush"/><feMergeNode in="Tpush"/><feMergeNode in="Bpush"/></feMerge>
+      <feGaussianBlur in="rawmap" stdDeviation="0.8" result="dmap"/>
       <feColorMatrix in="light" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="cR"/>
-      <feDisplacementMap in="cR" in2="dmap" scale="20.4" xChannelSelector="R" yChannelSelector="G" result="dR"/>
+      <feDisplacementMap in="cR" in2="dmap" scale="46.8" xChannelSelector="R" yChannelSelector="G" result="dR"/>
       <feColorMatrix in="light" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="cG"/>
-      <feDisplacementMap in="cG" in2="dmap" scale="24.0" xChannelSelector="R" yChannelSelector="G" result="dG"/>
+      <feDisplacementMap in="cG" in2="dmap" scale="55.0" xChannelSelector="R" yChannelSelector="G" result="dG"/>
       <feColorMatrix in="light" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="cB"/>
-      <feDisplacementMap in="cB" in2="dmap" scale="27.6" xChannelSelector="R" yChannelSelector="G" result="dB"/>
+      <feDisplacementMap in="cB" in2="dmap" scale="63.2" xChannelSelector="R" yChannelSelector="G" result="dB"/>
       <feComposite in="dR" in2="dG" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="dRG"/>
       <feComposite in="dRG" in2="dB" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="bent"/>
       <!-- frost, then bloom: brighten the light and spread it, further along x than y -->
@@ -180,7 +128,7 @@
   </defs>
 
   <!-- light travelling outside the glass -->
-  <g mask="url(#outside)"><g filter="url(#glow)"><use href="#light"/></g></g>
+  <g mask="url(#outside)"><g filter="url(#glow)"><rect width="1200" height="290" fill="#000" fill-opacity="0.004"/><use href="#light"/></g></g>
 
   <!-- the glass: body tint, then the light seen through it (the carrier fill only gives the filter its shape) -->
   <use href="#word" fill="url(#body)"/>
