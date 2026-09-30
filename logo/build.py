@@ -96,12 +96,12 @@ THEMES = {
         wave=("#ffa3b3", "#a3ffc6", "#a9c0ff"), wave_alpha=0.80,
         beam="#ffffff", beam_width=6, pad="#000",
         glow_wide=9, glow_wide_a=1.0, glow_tight=3,
-        body="#cfd8ff", body_top=0.14, body_bottom=0.0,
-        lit="#ffffff", lit_opacity=1.0,
-        shade="#8a7dff", shade_opacity=0.60,
-        edge="#ffffff", edge_opacity=0.30,
-        rim="#ffffff", rim_opacity=0.70,
-        frost=3.6,
+        body="#f0f3ff", body_top=0.44, body_bottom=0.24,
+        lit="#ffffff", lit_opacity=0.75,
+        shade="#8a7dff", shade_opacity=0.50,
+        edge="#ffffff", edge_opacity=0.16,
+        rim="#ffffff", rim_opacity=0.35,
+        frost=6, soft=2.8,
         inner=1.5,  # strokes are this much thicker inside the glass, as if focused
         beam_inner=1.5,
         # gain/alpha_gain: brighten the light before it is spread. a, b: near and far
@@ -110,28 +110,23 @@ THEMES = {
         bloom=dict(gain=1.15, alpha_gain=1.9, a=(9, 5.5), a_slope=0.9, b=(32, 12), b_slope=2.1,
                    catch=2.8),
         # element glass: width and opacity of the layered copies that stand in for the bloom blurs
-        el=dict(a_width=2.4, a_alpha=0.7, b_width=4.5, b_alpha=0.75, bevel=1.15,
-                # (width, share of the opacity, power on the facet level); the last lit layer is the crisp specular core
-                lit_layers=((22, 0.16, 1), (11, 0.42, 1), (5.5, 0.5, 1), (2.6, 1.0, 2)),
-                shade_layers=((11, 0.6, 1), (5.5, 0.4, 1))),
+        el=dict(a_width=2.4, a_alpha=0.7, b_width=4.5, b_alpha=0.75, bevel=1.0),
     ),
     "light": dict(
         wave=("#e0182d", "#12b84a", "#2350e0"), wave_alpha=0.50,
         beam="#0b1020", beam_width=6, pad="#fff",
         glow_wide=2.5, glow_wide_a=0.22, glow_tight=0.7,
-        body="#55608a", body_top=0.18, body_bottom=0.34,
+        body="#2c3560", body_top=0.36, body_bottom=0.56,
         lit="#ffffff", lit_opacity=0.95,
-        shade="#1c2340", shade_opacity=0.90,
-        edge="#1c2340", edge_opacity=0.20,
-        rim="#1c2340", rim_opacity=0.90,
-        frost=3.6,
+        shade="#1c2340", shade_opacity=0.60,
+        edge="#1c2340", edge_opacity=0.14,
+        rim="#1c2340", rim_opacity=0.55,
+        frost=6, soft=2.8,
         inner=1.5,
         beam_inner=0.9,  # a black beam's bloom reads as smoke, not glow
         bloom=dict(gain=1.0, alpha_gain=1.0, a=(9, 5.5), a_slope=0.6, b=(32, 12), b_slope=0.6,
                    catch=1.0),
-        el=dict(a_width=2.6, a_alpha=0.55, b_width=5.0, b_alpha=0.45, bevel=1.0,
-                lit_layers=((22, 0.16, 1), (11, 0.42, 1), (5.5, 0.5, 1), (2.6, 1.0, 2)),
-                shade_layers=((11, 0.6, 1), (5.5, 0.4, 1))),
+        el=dict(a_width=2.6, a_alpha=0.55, b_width=5.0, b_alpha=0.45, bevel=0.8),
     ),
 }
 
@@ -310,6 +305,15 @@ def refracted_paths(geo, comps, kind, field):
     return paths
 
 
+def falloff_layers(reach, steps=5):
+    """(stroke width, opacity share) pairs that stack into the filter glass's rim falloff, 1 - smoothstep(0, reach, d).
+    Strokes are clipped to the letter, so a stroke of width 2r shows r of it."""
+    def smoothstep(x):
+        return x * x * (3 - 2 * x)
+    cover = [1 - smoothstep((k - 0.5) / steps) for k in range(1, steps + 1)] + [0]    # opacity where layer k is the outermost
+    return [(2 * reach * k / steps, cover[k - 1] - cover[k]) for k in range(1, steps + 1)]
+
+
 def bevel_paths(geo, field, t, look):
     """Rim light as stroked outline segments. Each segment takes its brightness from how squarely its
     outward normal faces the light (top-left) or the opposite side (bottom-right), in QUANT steps.
@@ -343,7 +347,7 @@ def element_glass(t, v, geo, comps, w):
     bev, quant = bevel_paths(geo, field, t, look)
     b, el = t["bloom"], t["el"]
     defs = [f'<path id="{k}" d="{d}"/>' for k, d in {**paths, **bev}.items() if d]
-    for name, dev in (("soft", "0.8"), ("frost", f'{t["frost"]}'), ("bloomA", f'{b["a"][0]} {b["a"][1]}'), ("bloomB", f'{b["b"][0]} {b["b"][1]}')):
+    for name, dev in (("soft", f'{t["soft"]}'), ("frost", f'{t["frost"]}'), ("bloomA", f'{b["a"][0]} {b["a"][1]}'), ("bloomB", f'{b["b"][0]} {b["b"][1]}')):
         defs.append(f'<filter id="{name}" filterUnits="userSpaceOnUse" x="0" y="0" width="{w}" height="{H}" '
                     f'color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="{dev}"/></filter>')
 
@@ -357,15 +361,20 @@ def element_glass(t, v, geo, comps, w):
 
     inner, binner = t["inner"], t["beam_inner"]
     facets = []
-    for kind, colour, opacity, layers in (("s", t["shade"], t["shade_opacity"], el["shade_layers"]),
-                                          ("l", t["lit"], t["lit_opacity"], el["lit_layers"])):
+    layers = falloff_layers(look["spec_width"])
+    if el.get("core"):                                   # optional crisp highlight on the lit side only
+        lit_layers = layers + [(el["core"], 1.0)]
+    else:
+        lit_layers = layers
+    for kind, colour, opacity, kind_layers in (("s", t["shade"], t["shade_opacity"], layers),
+                                               ("l", t["lit"], t["lit_opacity"], lit_layers)):
         for q in range(1, quant + 1):
             if f"b{kind}{q}" in bev:
                 level = q / quant
-                for width, share, power in layers:     # soft falloff toward the middle, then a crisp core
+                for width, share in kind_layers:
                     facets.append(f'<use href="#b{kind}{q}" fill="none" stroke="{colour}" '
-                                  f'stroke-opacity="{opacity * level ** power * share * el["bevel"]:.3f}" '
-                                  f'stroke-width="{width}" stroke-linejoin="round"/>')
+                                  f'stroke-opacity="{opacity * level * share * el["bevel"]:.3f}" '
+                                  f'stroke-width="{width:.2f}" stroke-linejoin="round"/>')
     body = f"""<use href="#word" fill="url(#body)"/>
   <g clip-path="url(#wordclip)">
     <use href="#word" fill="none" stroke="{t['edge']}" stroke-width="{2 * look['band_width']:g}" stroke-opacity="{t['edge_opacity']}"/>

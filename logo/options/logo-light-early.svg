@@ -9,8 +9,8 @@
     </mask>
 
     <linearGradient id="body" gradientUnits="userSpaceOnUse" x1="0" y1="88" x2="0" y2="253">
-      <stop offset="0" stop-color="#55608a" stop-opacity="0.18"/>
-      <stop offset="1" stop-color="#55608a" stop-opacity="0.34"/>
+      <stop offset="0" stop-color="#2c3560" stop-opacity="0.36"/>
+      <stop offset="1" stop-color="#2c3560" stop-opacity="0.56"/>
     </linearGradient>
 
     <!-- waves fade in from the left and hand over to the solid beam as they converge -->
@@ -87,8 +87,8 @@
     <path id="bs10" d="M288.1,214.7 L284.3,215.9 M280.4,216.8 L276.2,217.5 M253.9,127.1 L253.7,127.2 M360.1,108.5 L360.0,110.7 M359.8,216.5 L359.6,216.8 M358.7,217.7 L358.4,217.8 L358.1,217.9 L357.8,218.0 M451.7,159.5 L451.6,160.0 M450.6,161.1 L449.9,161.3 M411.6,153.4 L410.5,153.5 L409.4,153.7 L408.4,153.9 M404.4,156.7 L404.2,157.4 M430.2,217.6 L425.2,218.6 M520.7,167.4 L520.2,167.4 M495.6,169.2 L495.5,171.4 M548.7,188.9 L548.6,189.7 M548.4,190.5 L548.2,191.5 M547.9,192.6 L547.5,193.7 M520.6,217.7 L516.3,218.6 L511.8,219.2 M592.8,216.2 L592.7,216.5 M591.4,217.8 L591.1,217.9 L590.8,218.0 M695.4,182.3 L694.9,185.9 M666.5,218.6 L662.8,219.2 M640.2,211.3 L640.1,211.3 L640.0,211.3 M639.6,245.8 L639.6,246.2 L639.6,246.6 M638.2,248.2 L637.8,248.3 M640.3,167.2 L639.9,169.3 M740.2,215.8 L740.1,216.2 M786.6,108.5 L786.5,110.7 M786.3,216.5 L786.1,216.8 M785.2,217.7 L785.0,217.8 L784.6,217.9 L784.3,218.0 M883.3,216.5 L883.1,216.8 M882.3,217.7 L882.0,217.8 L881.6,217.9 L881.3,218.0 M832.7,215.5 L832.6,215.8 M982.1,178.6 L982.0,179.2 M982.0,179.7 L981.9,180.4 L981.7,181.0 M980.2,182.0 L979.4,182.1 M928.1,182.7 L928.2,183.3 M977.2,206.7 L977.1,207.0 M961.7,216.6 L958.8,217.4 L955.7,218.1 M949.4,219.0 L946.2,219.3"/>
     <path id="bs6" d="M223.7,218.0 L223.4,217.9 M223.1,217.8 L222.8,217.7 M275.5,129.1 L274.0,128.2 M253.3,190.0 L253.3,190.3 M359.6,131.5 L359.8,131.7 M330.0,217.9 L329.7,217.8 M402.7,189.0 L402.9,189.4 M403.0,190.9 L403.3,191.7 M419.1,188.6 L418.1,188.2 L416.9,187.9 M415.4,187.6 L413.7,187.2 L411.7,186.8 L409.5,186.5 M407.4,186.2 L405.4,185.9 M403.5,185.5 L401.6,185.2 L399.8,184.8 L398.1,184.4 L396.4,184.0 M450.5,150.9 L451.2,153.6 M423.9,161.3 L423.3,161.1 M417.8,154.1 L416.7,153.8 M415.5,153.6 L414.3,153.4 M453.2,185.5 L453.6,188.2 M548.9,159.4 L549.0,160.5 M519.5,167.3 L519.0,167.1 M495.5,176.0 L495.6,178.2 M495.9,180.2 L496.2,182.0 L496.7,183.8 L497.3,185.4 M498.1,218.6 L493.8,217.6 M593.0,106.2 L593.1,108.5 M592.6,131.5 L592.7,131.7 M563.0,217.9 L562.7,217.8 M609.7,248.3 L609.4,248.2 M639.6,132.1 L639.6,132.4 M691.9,151.6 L693.3,155.6 L694.1,158.4 M694.7,161.4 L695.2,164.5 L695.5,167.7 M656.3,157.5 L654.7,156.7 M640.8,183.3 L641.5,185.2 M711.0,218.0 L710.6,218.0 L710.3,217.9 M710.0,217.8 L709.7,217.7 M786.1,131.5 L786.3,131.7 M756.5,217.9 L756.2,217.8 M853.5,217.9 L853.2,217.8 M832.6,132.1 L832.6,132.4 M881.7,148.6 L882.4,151.3 M928.3,183.8 L928.5,184.4 M932.9,218.6 L928.3,217.7 M923.9,216.4 L919.8,214.8 M978.9,157.3 L980.0,160.7 M942.2,156.5 L941.1,156.3"/>
     <path id="bs1" d="M355.6,97.0 L357.0,98.6 M420.6,189.3 L420.0,188.9 M383.8,178.3 L380.2,175.3 M443.1,139.2 L445.1,141.2 M446.8,143.4 L448.3,145.8 M539.2,141.3 L541.9,144.2 M498.3,187.5 L499.6,189.2 M548.2,186.6 L548.5,187.1 M588.6,97.0 L590.0,98.6 M639.2,131.2 L639.3,131.5 M739.7,100.8 L739.9,101.1 M782.1,97.0 L783.5,98.6 M847.2,157.5 L846.1,156.9 M832.2,131.2 L832.4,131.5 M870.9,134.0 L872.9,135.5 M874.8,137.2 L876.5,139.1 L878.1,141.2 M929.5,186.3 L930.1,187.2 M976.6,204.5 L976.8,204.8 M967.2,140.0 L969.6,142.4 M973.9,147.9 L975.8,150.9 M928.4,165.4 L928.5,165.4 M945.9,158.5 L945.1,157.9"/>
-    <filter id="soft" filterUnits="userSpaceOnUse" x="0" y="0" width="1200" height="290" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="0.8"/></filter>
-    <filter id="frost" filterUnits="userSpaceOnUse" x="0" y="0" width="1200" height="290" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="3.6"/></filter>
+    <filter id="soft" filterUnits="userSpaceOnUse" x="0" y="0" width="1200" height="290" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2.8"/></filter>
+    <filter id="frost" filterUnits="userSpaceOnUse" x="0" y="0" width="1200" height="290" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="6"/></filter>
     <filter id="bloomA" filterUnits="userSpaceOnUse" x="0" y="0" width="1200" height="290" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="9 5.5"/></filter>
     <filter id="bloomB" filterUnits="userSpaceOnUse" x="0" y="0" width="1200" height="290" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="32 12"/></filter>
   </defs>
@@ -99,7 +99,7 @@
   <!-- the glass: body tint, then the light seen through it -->
   <use href="#word" fill="url(#body)"/>
   <g clip-path="url(#wordclip)">
-    <use href="#word" fill="none" stroke="#1c2340" stroke-width="14" stroke-opacity="0.2"/>
+    <use href="#word" fill="none" stroke="#1c2340" stroke-width="14" stroke-opacity="0.14"/>
     <g filter="url(#bloomB)"><g opacity="0.45">
         <g fill="none" stroke-width="37.5" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.5" mask="url(#wavemask)">
           <use href="#r0" stroke="#e0182d"/>
@@ -125,79 +125,127 @@
         <use href="#rb" fill="none" stroke="#0b1020" stroke-width="5.4" stroke-linecap="round" mask="url(#beammask)"/>
       </g></g>
     <g filter="url(#soft)">
-      <use href="#bs1" fill="none" stroke="#1c2340" stroke-opacity="0.045" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bs1" fill="none" stroke="#1c2340" stroke-opacity="0.030" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bs2" fill="none" stroke="#1c2340" stroke-opacity="0.090" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bs2" fill="none" stroke="#1c2340" stroke-opacity="0.060" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bs3" fill="none" stroke="#1c2340" stroke-opacity="0.135" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bs3" fill="none" stroke="#1c2340" stroke-opacity="0.090" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bs4" fill="none" stroke="#1c2340" stroke-opacity="0.180" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bs4" fill="none" stroke="#1c2340" stroke-opacity="0.120" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bs5" fill="none" stroke="#1c2340" stroke-opacity="0.225" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bs5" fill="none" stroke="#1c2340" stroke-opacity="0.150" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bs6" fill="none" stroke="#1c2340" stroke-opacity="0.270" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bs6" fill="none" stroke="#1c2340" stroke-opacity="0.180" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bs7" fill="none" stroke="#1c2340" stroke-opacity="0.315" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bs7" fill="none" stroke="#1c2340" stroke-opacity="0.210" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bs8" fill="none" stroke="#1c2340" stroke-opacity="0.360" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bs8" fill="none" stroke="#1c2340" stroke-opacity="0.240" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bs9" fill="none" stroke="#1c2340" stroke-opacity="0.405" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bs9" fill="none" stroke="#1c2340" stroke-opacity="0.270" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bs10" fill="none" stroke="#1c2340" stroke-opacity="0.450" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bs10" fill="none" stroke="#1c2340" stroke-opacity="0.300" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bs11" fill="none" stroke="#1c2340" stroke-opacity="0.495" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bs11" fill="none" stroke="#1c2340" stroke-opacity="0.330" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bs12" fill="none" stroke="#1c2340" stroke-opacity="0.540" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bs12" fill="none" stroke="#1c2340" stroke-opacity="0.360" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bl1" fill="none" stroke="#ffffff" stroke-opacity="0.013" stroke-width="22" stroke-linejoin="round"/>
-      <use href="#bl1" fill="none" stroke="#ffffff" stroke-opacity="0.033" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bl1" fill="none" stroke="#ffffff" stroke-opacity="0.040" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bl1" fill="none" stroke="#ffffff" stroke-opacity="0.007" stroke-width="2.6" stroke-linejoin="round"/>
-      <use href="#bl2" fill="none" stroke="#ffffff" stroke-opacity="0.025" stroke-width="22" stroke-linejoin="round"/>
-      <use href="#bl2" fill="none" stroke="#ffffff" stroke-opacity="0.066" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bl2" fill="none" stroke="#ffffff" stroke-opacity="0.079" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bl2" fill="none" stroke="#ffffff" stroke-opacity="0.026" stroke-width="2.6" stroke-linejoin="round"/>
-      <use href="#bl3" fill="none" stroke="#ffffff" stroke-opacity="0.038" stroke-width="22" stroke-linejoin="round"/>
-      <use href="#bl3" fill="none" stroke="#ffffff" stroke-opacity="0.100" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bl3" fill="none" stroke="#ffffff" stroke-opacity="0.119" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bl3" fill="none" stroke="#ffffff" stroke-opacity="0.059" stroke-width="2.6" stroke-linejoin="round"/>
-      <use href="#bl4" fill="none" stroke="#ffffff" stroke-opacity="0.051" stroke-width="22" stroke-linejoin="round"/>
-      <use href="#bl4" fill="none" stroke="#ffffff" stroke-opacity="0.133" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bl4" fill="none" stroke="#ffffff" stroke-opacity="0.158" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bl4" fill="none" stroke="#ffffff" stroke-opacity="0.106" stroke-width="2.6" stroke-linejoin="round"/>
-      <use href="#bl5" fill="none" stroke="#ffffff" stroke-opacity="0.063" stroke-width="22" stroke-linejoin="round"/>
-      <use href="#bl5" fill="none" stroke="#ffffff" stroke-opacity="0.166" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bl5" fill="none" stroke="#ffffff" stroke-opacity="0.198" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bl5" fill="none" stroke="#ffffff" stroke-opacity="0.165" stroke-width="2.6" stroke-linejoin="round"/>
-      <use href="#bl6" fill="none" stroke="#ffffff" stroke-opacity="0.076" stroke-width="22" stroke-linejoin="round"/>
-      <use href="#bl6" fill="none" stroke="#ffffff" stroke-opacity="0.199" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bl6" fill="none" stroke="#ffffff" stroke-opacity="0.237" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bl6" fill="none" stroke="#ffffff" stroke-opacity="0.237" stroke-width="2.6" stroke-linejoin="round"/>
-      <use href="#bl7" fill="none" stroke="#ffffff" stroke-opacity="0.089" stroke-width="22" stroke-linejoin="round"/>
-      <use href="#bl7" fill="none" stroke="#ffffff" stroke-opacity="0.233" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bl7" fill="none" stroke="#ffffff" stroke-opacity="0.277" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bl7" fill="none" stroke="#ffffff" stroke-opacity="0.323" stroke-width="2.6" stroke-linejoin="round"/>
-      <use href="#bl8" fill="none" stroke="#ffffff" stroke-opacity="0.101" stroke-width="22" stroke-linejoin="round"/>
-      <use href="#bl8" fill="none" stroke="#ffffff" stroke-opacity="0.266" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bl8" fill="none" stroke="#ffffff" stroke-opacity="0.317" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bl8" fill="none" stroke="#ffffff" stroke-opacity="0.422" stroke-width="2.6" stroke-linejoin="round"/>
-      <use href="#bl9" fill="none" stroke="#ffffff" stroke-opacity="0.114" stroke-width="22" stroke-linejoin="round"/>
-      <use href="#bl9" fill="none" stroke="#ffffff" stroke-opacity="0.299" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bl9" fill="none" stroke="#ffffff" stroke-opacity="0.356" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bl9" fill="none" stroke="#ffffff" stroke-opacity="0.534" stroke-width="2.6" stroke-linejoin="round"/>
-      <use href="#bl10" fill="none" stroke="#ffffff" stroke-opacity="0.127" stroke-width="22" stroke-linejoin="round"/>
-      <use href="#bl10" fill="none" stroke="#ffffff" stroke-opacity="0.332" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bl10" fill="none" stroke="#ffffff" stroke-opacity="0.396" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bl10" fill="none" stroke="#ffffff" stroke-opacity="0.660" stroke-width="2.6" stroke-linejoin="round"/>
-      <use href="#bl11" fill="none" stroke="#ffffff" stroke-opacity="0.139" stroke-width="22" stroke-linejoin="round"/>
-      <use href="#bl11" fill="none" stroke="#ffffff" stroke-opacity="0.366" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bl11" fill="none" stroke="#ffffff" stroke-opacity="0.435" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bl11" fill="none" stroke="#ffffff" stroke-opacity="0.798" stroke-width="2.6" stroke-linejoin="round"/>
-      <use href="#bl12" fill="none" stroke="#ffffff" stroke-opacity="0.152" stroke-width="22" stroke-linejoin="round"/>
-      <use href="#bl12" fill="none" stroke="#ffffff" stroke-opacity="0.399" stroke-width="11" stroke-linejoin="round"/>
-      <use href="#bl12" fill="none" stroke="#ffffff" stroke-opacity="0.475" stroke-width="5.5" stroke-linejoin="round"/>
-      <use href="#bl12" fill="none" stroke="#ffffff" stroke-opacity="0.950" stroke-width="2.6" stroke-linejoin="round"/>
+      <use href="#bs1" fill="none" stroke="#1c2340" stroke-opacity="0.008" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bs1" fill="none" stroke="#1c2340" stroke-opacity="0.011" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bs1" fill="none" stroke="#1c2340" stroke-opacity="0.011" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bs1" fill="none" stroke="#1c2340" stroke-opacity="0.008" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bs1" fill="none" stroke="#1c2340" stroke-opacity="0.001" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bs2" fill="none" stroke="#1c2340" stroke-opacity="0.015" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bs2" fill="none" stroke="#1c2340" stroke-opacity="0.023" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bs2" fill="none" stroke="#1c2340" stroke-opacity="0.023" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bs2" fill="none" stroke="#1c2340" stroke-opacity="0.015" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bs2" fill="none" stroke="#1c2340" stroke-opacity="0.002" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bs3" fill="none" stroke="#1c2340" stroke-opacity="0.023" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bs3" fill="none" stroke="#1c2340" stroke-opacity="0.034" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bs3" fill="none" stroke="#1c2340" stroke-opacity="0.034" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bs3" fill="none" stroke="#1c2340" stroke-opacity="0.023" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bs3" fill="none" stroke="#1c2340" stroke-opacity="0.003" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bs4" fill="none" stroke="#1c2340" stroke-opacity="0.030" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bs4" fill="none" stroke="#1c2340" stroke-opacity="0.045" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bs4" fill="none" stroke="#1c2340" stroke-opacity="0.045" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bs4" fill="none" stroke="#1c2340" stroke-opacity="0.030" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bs4" fill="none" stroke="#1c2340" stroke-opacity="0.004" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bs5" fill="none" stroke="#1c2340" stroke-opacity="0.038" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bs5" fill="none" stroke="#1c2340" stroke-opacity="0.057" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bs5" fill="none" stroke="#1c2340" stroke-opacity="0.057" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bs5" fill="none" stroke="#1c2340" stroke-opacity="0.038" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bs5" fill="none" stroke="#1c2340" stroke-opacity="0.006" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bs6" fill="none" stroke="#1c2340" stroke-opacity="0.045" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bs6" fill="none" stroke="#1c2340" stroke-opacity="0.068" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bs6" fill="none" stroke="#1c2340" stroke-opacity="0.068" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bs6" fill="none" stroke="#1c2340" stroke-opacity="0.045" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bs6" fill="none" stroke="#1c2340" stroke-opacity="0.007" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bs7" fill="none" stroke="#1c2340" stroke-opacity="0.053" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bs7" fill="none" stroke="#1c2340" stroke-opacity="0.080" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bs7" fill="none" stroke="#1c2340" stroke-opacity="0.080" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bs7" fill="none" stroke="#1c2340" stroke-opacity="0.053" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bs7" fill="none" stroke="#1c2340" stroke-opacity="0.008" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bs8" fill="none" stroke="#1c2340" stroke-opacity="0.060" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bs8" fill="none" stroke="#1c2340" stroke-opacity="0.091" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bs8" fill="none" stroke="#1c2340" stroke-opacity="0.091" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bs8" fill="none" stroke="#1c2340" stroke-opacity="0.060" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bs8" fill="none" stroke="#1c2340" stroke-opacity="0.009" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bs9" fill="none" stroke="#1c2340" stroke-opacity="0.068" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bs9" fill="none" stroke="#1c2340" stroke-opacity="0.102" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bs9" fill="none" stroke="#1c2340" stroke-opacity="0.102" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bs9" fill="none" stroke="#1c2340" stroke-opacity="0.068" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bs9" fill="none" stroke="#1c2340" stroke-opacity="0.010" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bs10" fill="none" stroke="#1c2340" stroke-opacity="0.075" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bs10" fill="none" stroke="#1c2340" stroke-opacity="0.114" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bs10" fill="none" stroke="#1c2340" stroke-opacity="0.114" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bs10" fill="none" stroke="#1c2340" stroke-opacity="0.075" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bs10" fill="none" stroke="#1c2340" stroke-opacity="0.011" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bs11" fill="none" stroke="#1c2340" stroke-opacity="0.083" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bs11" fill="none" stroke="#1c2340" stroke-opacity="0.125" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bs11" fill="none" stroke="#1c2340" stroke-opacity="0.125" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bs11" fill="none" stroke="#1c2340" stroke-opacity="0.083" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bs11" fill="none" stroke="#1c2340" stroke-opacity="0.012" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bs12" fill="none" stroke="#1c2340" stroke-opacity="0.090" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bs12" fill="none" stroke="#1c2340" stroke-opacity="0.136" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bs12" fill="none" stroke="#1c2340" stroke-opacity="0.136" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bs12" fill="none" stroke="#1c2340" stroke-opacity="0.090" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bs12" fill="none" stroke="#1c2340" stroke-opacity="0.013" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bl1" fill="none" stroke="#ffffff" stroke-opacity="0.012" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bl1" fill="none" stroke="#ffffff" stroke-opacity="0.018" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bl1" fill="none" stroke="#ffffff" stroke-opacity="0.018" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bl1" fill="none" stroke="#ffffff" stroke-opacity="0.012" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bl1" fill="none" stroke="#ffffff" stroke-opacity="0.002" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bl2" fill="none" stroke="#ffffff" stroke-opacity="0.024" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bl2" fill="none" stroke="#ffffff" stroke-opacity="0.036" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bl2" fill="none" stroke="#ffffff" stroke-opacity="0.036" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bl2" fill="none" stroke="#ffffff" stroke-opacity="0.024" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bl2" fill="none" stroke="#ffffff" stroke-opacity="0.004" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bl3" fill="none" stroke="#ffffff" stroke-opacity="0.036" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bl3" fill="none" stroke="#ffffff" stroke-opacity="0.054" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bl3" fill="none" stroke="#ffffff" stroke-opacity="0.054" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bl3" fill="none" stroke="#ffffff" stroke-opacity="0.036" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bl3" fill="none" stroke="#ffffff" stroke-opacity="0.005" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bl4" fill="none" stroke="#ffffff" stroke-opacity="0.048" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bl4" fill="none" stroke="#ffffff" stroke-opacity="0.072" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bl4" fill="none" stroke="#ffffff" stroke-opacity="0.072" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bl4" fill="none" stroke="#ffffff" stroke-opacity="0.048" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bl4" fill="none" stroke="#ffffff" stroke-opacity="0.007" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bl5" fill="none" stroke="#ffffff" stroke-opacity="0.060" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bl5" fill="none" stroke="#ffffff" stroke-opacity="0.090" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bl5" fill="none" stroke="#ffffff" stroke-opacity="0.090" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bl5" fill="none" stroke="#ffffff" stroke-opacity="0.060" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bl5" fill="none" stroke="#ffffff" stroke-opacity="0.009" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bl6" fill="none" stroke="#ffffff" stroke-opacity="0.071" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bl6" fill="none" stroke="#ffffff" stroke-opacity="0.108" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bl6" fill="none" stroke="#ffffff" stroke-opacity="0.108" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bl6" fill="none" stroke="#ffffff" stroke-opacity="0.071" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bl6" fill="none" stroke="#ffffff" stroke-opacity="0.011" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bl7" fill="none" stroke="#ffffff" stroke-opacity="0.083" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bl7" fill="none" stroke="#ffffff" stroke-opacity="0.126" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bl7" fill="none" stroke="#ffffff" stroke-opacity="0.126" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bl7" fill="none" stroke="#ffffff" stroke-opacity="0.083" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bl7" fill="none" stroke="#ffffff" stroke-opacity="0.012" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bl8" fill="none" stroke="#ffffff" stroke-opacity="0.095" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bl8" fill="none" stroke="#ffffff" stroke-opacity="0.144" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bl8" fill="none" stroke="#ffffff" stroke-opacity="0.144" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bl8" fill="none" stroke="#ffffff" stroke-opacity="0.095" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bl8" fill="none" stroke="#ffffff" stroke-opacity="0.014" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bl9" fill="none" stroke="#ffffff" stroke-opacity="0.107" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bl9" fill="none" stroke="#ffffff" stroke-opacity="0.162" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bl9" fill="none" stroke="#ffffff" stroke-opacity="0.162" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bl9" fill="none" stroke="#ffffff" stroke-opacity="0.107" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bl9" fill="none" stroke="#ffffff" stroke-opacity="0.016" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bl10" fill="none" stroke="#ffffff" stroke-opacity="0.119" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bl10" fill="none" stroke="#ffffff" stroke-opacity="0.180" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bl10" fill="none" stroke="#ffffff" stroke-opacity="0.180" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bl10" fill="none" stroke="#ffffff" stroke-opacity="0.119" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bl10" fill="none" stroke="#ffffff" stroke-opacity="0.018" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bl11" fill="none" stroke="#ffffff" stroke-opacity="0.131" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bl11" fill="none" stroke="#ffffff" stroke-opacity="0.198" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bl11" fill="none" stroke="#ffffff" stroke-opacity="0.198" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bl11" fill="none" stroke="#ffffff" stroke-opacity="0.131" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bl11" fill="none" stroke="#ffffff" stroke-opacity="0.020" stroke-width="10.00" stroke-linejoin="round"/>
+      <use href="#bl12" fill="none" stroke="#ffffff" stroke-opacity="0.143" stroke-width="2.00" stroke-linejoin="round"/>
+      <use href="#bl12" fill="none" stroke="#ffffff" stroke-opacity="0.216" stroke-width="4.00" stroke-linejoin="round"/>
+      <use href="#bl12" fill="none" stroke="#ffffff" stroke-opacity="0.216" stroke-width="6.00" stroke-linejoin="round"/>
+      <use href="#bl12" fill="none" stroke="#ffffff" stroke-opacity="0.143" stroke-width="8.00" stroke-linejoin="round"/>
+      <use href="#bl12" fill="none" stroke="#ffffff" stroke-opacity="0.021" stroke-width="10.00" stroke-linejoin="round"/>
     </g>
-    <use href="#word" fill="none" stroke="#1c2340" stroke-width="1.8" stroke-opacity="0.9"/>
+    <use href="#word" fill="none" stroke="#1c2340" stroke-width="1.8" stroke-opacity="0.55"/>
   </g>
 </svg>
