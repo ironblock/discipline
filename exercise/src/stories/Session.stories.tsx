@@ -126,6 +126,11 @@ export const FirstSettled: Story = {
 export const SpecSettled: Story = {
   name: '6 · the spec settled; an open question superseded',
   args: { cursor: MOMENTS.specSettled },
+  play: async ({ canvasElement }) => {
+    await expect(q(canvasElement, '.ex-session')?.getAttribute('data-state')).toBe('awaiting');
+    await expect(q(canvasElement, '[id="memory/o1"]')?.getAttribute('data-state')).toBe('superseded');
+    await expect(q(canvasElement, '[id="memory/d3"]')?.getAttribute('data-state')).toBe('live');
+  },
 };
 
 /** DoD 4: the operator declared spec → build; ratify runs first. */
@@ -147,10 +152,18 @@ export const Refilled: Story = {
   },
 };
 
-/** After the refill: a targeted read, because working memory said where to look. */
+/**
+ * After the refill: a targeted read, because working memory said where to look -- Report::print, where the
+ * first turn read the whole file. (The specimen's read is authored, 28 lines of the 49 that `sed` names.)
+ */
 export const BuildReading: Story = {
-  name: '9 · the build turn reads 49 lines, not 1,860',
+  name: '9 · the build turn reads Report::print, not all 1,860 lines',
   args: { cursor: MOMENTS.buildReading },
+  play: async ({ canvasElement }) => {
+    const said = (command: string) => [...canvasElement.querySelectorAll('.ex-block')].find((b) => b.textContent?.includes(command))?.textContent ?? '';
+    await expect(said('sed -n 40,88p src/report.rs')).toMatch(/impl Report[\s\S]*(?<!\d)28 lines · /);
+    await expect(said('cat src/report.rs')).toContain('1,860 lines');
+  },
 };
 
 /** An interview in the idle gap of a running tool call: `cargo test` leaves the trunk waiting. */
@@ -167,6 +180,14 @@ export const TestsRunning: Story = {
 export const Done: Story = {
   name: '11 · done: the definition of done, end to end',
   args: { cursor: MOMENTS.done },
+  play: async ({ canvasElement }) => {
+    // The session at rest after both phases: one refill between them, every side call settled, memory kept.
+    await expect(q(canvasElement, '.ex-session')?.getAttribute('data-state')).toBe('awaiting');
+    await expect(canvasElement.querySelectorAll('.ex-era__seam .ex-seam')).toHaveLength(1);
+    await expect(canvasElement.querySelectorAll('.ex-branch[data-outcome="running"], .ex-branch[data-outcome="pending"]')).toHaveLength(0);
+    await expect(canvasElement.querySelectorAll('.ex-branch').length).toBeGreaterThan(0);
+    await expect(canvasElement.querySelectorAll('.ex-memory__entry')).toHaveLength(11);
+  },
 };
 
 /** The same session with the curtain closed: a chat, a quiet marker where a branch left, and working memory still on the right. */
