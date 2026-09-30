@@ -33,9 +33,9 @@
 //! request arrives and a write timeout for as long as it is written to, and
 //! there is a cap on how many there are at once (D11).
 //!
-//! How a logged event is written is a parameter, [`Render`]: the log's own
-//! format (`diet/formats/log`, I1) is not built yet, and nothing here reads an
-//! event's kind.
+//! How a logged event is written is a parameter, [`Render`] -- the binary
+//! passes `session::render`, the log format's own writer (`diet/formats/log`)
+//! -- and nothing here reads an event's kind.
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
