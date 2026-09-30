@@ -24,6 +24,8 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
+import numpy as np
+
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
 import lens
@@ -40,8 +42,7 @@ TRACKING = 0.02   # em, added after each letter
 MARGIN = 215
 H = 290
 BASELINE = 218
-AMPLITUDE = 56
-WAVELENGTH = 120
+WAVELENGTH = 190  # px; the waves' peak-to-peak height is the font's x-height (see layout)
 
 # A 104-primitive glass filter (4-band stair refraction map) painted nothing in iOS Safari and in
 # WebKitGTK 2.52. The same graph with 3 bands (88) painted, and padding a working graph to 104 with
@@ -52,11 +53,22 @@ CAST = (12, 14)   # px, where light spilled by the glass lands
 PAD = 16          # px around the letters covered by the baked maps
 
 # What each option changes. Keys not listed keep BASE_VARIANT's value.
-BASE_VARIANT = dict(harmonics="single", cast=False, look="carved")
+BASE_VARIANT = dict(harmonics="single", cast=False, look="carved", taper="in", glass="filter")
 VARIANTS = {
     "bloom": dict(
         desc="Light trapped in the glass: bloom inside each letter, streaked along the direction of travel, "
              "with chamfers that pick up the beam's colour.",
+    ),
+    "elements": dict(
+        desc="The same glass with no displacement filter: the waves are bent where they cross each bezel "
+             "and drawn as ordinary paths, the glow is layered copies, the rim light is stroked along the "
+             "outline. Only plain blurs remain.",
+        glass="elements",
+    ),
+    "early": dict(
+        desc="The other quadratic taper: the waves calm almost at once and leave a long quiet tail. Every other "
+             "option uses the ease-in taper, which stays lively through most of the word and settles into the `e`.",
+        taper="out",
     ),
     "filter": dict(
         desc="Noise to signal: each waveform carries harmonics that the glass strips away letter by letter, "
@@ -76,7 +88,7 @@ VARIANTS = {
         harmonics="filter", cast=True,
     ),
 }
-DEFAULT_VARIANT = "bloom"
+DEFAULT_VARIANT = "elements"
 
 THEMES = {
     "dark": dict(
@@ -96,6 +108,8 @@ THEMES = {
         # survives. catch: how strongly the chamfers pick up colour. cast: spill strength.
         bloom=dict(gain=1.15, alpha_gain=1.9, a=(6, 3.5), a_slope=0.9, b=(26, 9), b_slope=2.1,
                    catch=2.8, cast=0.55),
+        # element glass: width and opacity of the layered copies that stand in for the bloom blurs
+        el=dict(a_width=2.6, a_alpha=0.9, b_width=5.0, b_alpha=1.0, bevel=1.0),
     ),
     "light": dict(
         wave=("#e0182d", "#12b84a", "#2350e0"), wave_alpha=0.33,
@@ -111,6 +125,7 @@ THEMES = {
         beam_inner=0.9,  # a black beam's bloom reads as smoke, not glow
         bloom=dict(gain=1.0, alpha_gain=1.0, a=(5, 3), a_slope=0.6, b=(20, 7), b_slope=0.6,
                    catch=1.0, cast=0.4),
+        el=dict(a_width=2.6, a_alpha=0.45, b_width=5.0, b_alpha=0.35, bevel=0.5),
     ),
 }
 
@@ -125,13 +140,14 @@ def layout(font_path):
     em = WORD_WIDTH / (sum(advances) + TRACKING * (len(WORD) - 1))
     scale = em / upm
     x = MARGIN
-    parts, spans, contours = [], [], []
+    parts, spans, contours, coarse = [], [], [], []
     for ch, adv in zip(WORD, advances):
         name = cmap[ord(ch)]
         pen = SVGPathPen(glyphs, ntos=lambda v: f"{v:.1f}".rstrip("0").rstrip("."))
         glyphs[name].draw(TransformPen(pen, (scale, 0, 0, -scale, x, BASELINE)))
         parts.append(pen.getCommands())
         contours += lens.glyph_contours(glyphs, name, x, BASELINE, scale)
+        coarse += lens.glyph_contours(glyphs, name, x, BASELINE, scale, steps=6)
         spans.append((x, x + adv * em))
         x += (adv + TRACKING) * em
     xs = [p[0] for c in contours for p in c]
@@ -140,13 +156,18 @@ def layout(font_path):
               math.ceil(max(xs)) - math.floor(min(xs)) + 2 * PAD, math.ceil(max(ys)) - math.floor(min(ys)) + 2 * PAD)
     x_height = font["OS/2"].sxHeight * scale
     return dict(d=" ".join(parts), spans=spans, width=MARGIN + WORD_WIDTH + MARGIN,
-                beam_y=BASELINE - x_height / 2,
+                beam_y=BASELINE - x_height / 2, x_height=x_height, contours=coarse,
                 maps={name: lens.maps(contours, region, look) for name, look in lens.LOOKS.items()})
 
 
-def smoothstep(a, b, x):
-    t = min(1.0, max(0.0, (x - a) / (b - a)))
-    return t * t * (3 - 2 * t)
+def taper(kind, t):
+    """How much of the amplitude is gone at progress t (0 to 1) along the taper."""
+    t = min(1.0, max(0.0, t))
+    if kind == "out":
+        return t * (2 - t)      # quadratic ease-out: calms early, long quiet tail
+    if kind == "in":
+        return t * t            # quadratic ease-in: stays lively, settles late
+    return t * t * (3 - 2 * t)  # smoothstep
 
 
 def convergence(spans):
@@ -154,32 +175,31 @@ def convergence(spans):
     return spans[0][0] - 10, spans[-1][0] + 0.55 * (spans[-1][1] - spans[-1][0])
 
 
-def harmonics(spans, mode):
+def harmonics(spans, mode, amplitude):
     """(period, amplitude, fade start x, fade end x) for each component of a wave.
     In "filter" mode the shorter components are stripped early, one letter at a time."""
     start, end = convergence(spans)
     if mode == "single":
-        return [(WAVELENGTH, AMPLITUDE, start, end)]
+        return [(WAVELENGTH, amplitude, start, end)]
     return [
-        (WAVELENGTH, 46, start, end),
-        (62, 17, spans[0][0], spans[3][1]),
-        (39, 8, spans[0][0], spans[1][1]),
+        (WAVELENGTH, 0.62 * amplitude, start, end),
+        (0.53 * WAVELENGTH, 0.26 * amplitude, spans[0][0], spans[3][1]),
+        (0.33 * WAVELENGTH, 0.12 * amplitude, spans[0][0], spans[1][1]),
     ]
 
 
-def wave_paths(spans, width, beam_y, mode):
-    comps = harmonics(spans, mode)
-    step = 3 if mode == "single" else 2
+def wave_y(comps, kind, k, x, beam_y):
+    y = beam_y
+    for h, (period, amp, fade0, fade1) in enumerate(comps):
+        phase = k * 2 * math.pi / 3 * (1 + h) + 0.9 * h * k
+        y += amp * (1 - taper(kind, (x - fade0) / (fade1 - fade0))) * math.sin(2 * math.pi * x / period + phase)
+    return y
+
+
+def wave_paths(comps, kind, width, beam_y, step):
     paths = []
     for k in range(3):
-        pts, x = [], 0.0
-        while x <= width + step:
-            y = beam_y
-            for h, (period, amp, fade0, fade1) in enumerate(comps):
-                phase = k * 2 * math.pi / 3 * (1 + h) + 0.9 * h * k
-                y += amp * (1 - smoothstep(fade0, fade1, x)) * math.sin(2 * math.pi * x / period + phase)
-            pts.append(f"{x:.0f},{y:.1f}")
-            x += step
+        pts = [f"{x:.0f},{wave_y(comps, kind, k, x, beam_y):.1f}" for x in np.arange(0, width + step, step)]
         paths.append("M" + " L".join(pts))
     return paths
 
@@ -254,6 +274,107 @@ def glass_filter(t, v, w, maps):
             f'color-interpolation-filters="sRGB">\n      {body}\n    </filter>')
 
 
+def runs_path(pts, keep):
+    """SVG path data for the consecutive runs of pts where keep is true."""
+    out, run = [], []
+    for p, k in zip(pts, keep):
+        if k:
+            run.append(f"{p[0]:.1f},{p[1]:.1f}")
+        elif run:
+            out.append("M" + " L".join(run))
+            run = []
+    if run:
+        out.append("M" + " L".join(run))
+    return " ".join(out)
+
+
+REFRACT_GAIN = 1.6  # the strokes are thin, so the true shift barely reads; exaggerate it
+
+
+def refracted_paths(geo, comps, kind, field):
+    """Bend each wave, and the beam, the way the displacement filter would: content inside a bezel is
+    seen shifted toward the edge, so the path is moved by the field there. Points outside the
+    letters stay put and are not drawn here (the outside light is drawn as usual)."""
+    lo, hi = geo["spans"][0][0] - 20, geo["spans"][-1][1] + 20
+    xs = np.arange(lo, hi, 1.5)
+    paths = {}
+    for k in range(3):
+        pts = np.array([[x, wave_y(comps, kind, k, x, geo["beam_y"])] for x in xs])
+        paths[f"r{k}"] = runs_path(lens.refract(field, pts, REFRACT_GAIN), lens.inside(field, pts))
+    pts = np.array([[x, geo["beam_y"]] for x in xs])
+    paths["rb"] = runs_path(lens.refract(field, pts, REFRACT_GAIN), lens.inside(field, pts))
+    return paths
+
+
+def bevel_paths(geo, field, t, look):
+    """Rim light as stroked outline segments. Each segment takes its brightness from how squarely its
+    outward normal faces the light (top-left) or the opposite side (bottom-right), in QUANT steps.
+    Returns path data by id; the strokes are clipped to the letters, so half of each shows."""
+    QUANT = 12
+    buckets = {}
+    light = np.array(lens.LIGHT)
+    for c in geo["contours"]:
+        pts = np.array(c + [c[0]])
+        mids = (pts[:-1] + pts[1:]) / 2
+        inward = np.stack([lens.sample(field, "ux", mids), lens.sample(field, "uy", mids)], 1)
+        toward = -(inward @ light)
+        for kind, amount in (("l", np.clip(toward, 0, 1)), ("s", np.clip(-toward, 0, 1))):
+            level = np.rint(amount ** look["spec_power"] * QUANT).astype(int)
+            for i, q in enumerate(level):
+                if q:
+                    key = f"b{kind}{q}"
+                    seg = buckets.setdefault(key, [])
+                    if seg and seg[-1][1] == i:      # continues the previous segment of this bucket
+                        seg[-1] = (seg[-1][0] + [tuple(pts[i + 1])], i + 1)
+                    else:
+                        seg.append(([tuple(pts[i]), tuple(pts[i + 1])], i + 1))
+    return {k: " ".join("M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in pl) for pl, _ in segs) for k, segs in buckets.items()}, QUANT
+
+
+def element_glass(t, v, geo, comps, w):
+    """Glass without a displacement filter. Returns (defs, body)."""
+    look = lens.LOOKS[v["look"]]
+    field = geo["maps"][v["look"]]["field"]
+    paths = refracted_paths(geo, comps, v["taper"], field)
+    bev, quant = bevel_paths(geo, field, t, look)
+    b, el = t["bloom"], t["el"]
+    defs = [f'<path id="{k}" d="{d}"/>' for k, d in {**paths, **bev}.items() if d]
+    for name, dev in (("soft", "0.8"), ("frost", f'{t["frost"]}'), ("bloomA", f'{b["a"][0]} {b["a"][1]}'), ("bloomB", f'{b["b"][0]} {b["b"][1]}')):
+        defs.append(f'<filter id="{name}" filterUnits="userSpaceOnUse" x="0" y="0" width="{w}" height="{H}" '
+                    f'color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="{dev}"/></filter>')
+
+    def light(scale, beam_scale, alpha):
+        strokes = "\n".join(f'          <use href="#r{k}" stroke="{c}"/>' for k, c in enumerate(t["wave"]))
+        return (f'<g opacity="{alpha:g}">\n'
+                f'        <g fill="none" stroke-width="{5 * scale:g}" stroke-linecap="round" stroke-linejoin="round" '
+                f'stroke-opacity="{t["wave_alpha"]}" mask="url(#wavemask)">\n{strokes}\n        </g>\n'
+                f'        <use href="#rb" fill="none" stroke="{t["beam"]}" stroke-width="{t["beam_width"] * beam_scale:g}" '
+                f'stroke-linecap="round" mask="url(#beammask)"/>\n      </g>')
+
+    inner, binner = t["inner"], t["beam_inner"]
+    W = 5  # visible width of each facet (strokes are twice this, half is clipped away)
+    facets = []
+    for kind, colour, opacity in (("s", t["shade"], t["shade_opacity"]), ("l", t["lit"], t["lit_opacity"])):
+        for q in range(1, quant + 1):
+            if f"b{kind}{q}" in bev:
+                level = q / quant
+                for width, share in ((2 * W, 0.55), (W, 0.45)):   # a soft falloff toward the letter's middle
+                    facets.append(f'<use href="#b{kind}{q}" fill="none" stroke="{colour}" stroke-opacity="{opacity * level * share * el["bevel"]:.3f}" '
+                                  f'stroke-width="{width}" stroke-linejoin="round"/>')
+    body = f"""<use href="#word" fill="url(#body)"/>
+  <g clip-path="url(#wordclip)">
+    <use href="#word" fill="none" stroke="{t['edge']}" stroke-width="{2 * look['band_width']:g}" stroke-opacity="{t['edge_opacity']}"/>
+    <g filter="url(#bloomB)">{light(inner * el['b_width'], binner * el['b_width'], el['b_alpha'])}</g>
+    <g filter="url(#bloomA)">{light(inner * el['a_width'], binner * el['a_width'], el['a_alpha'])}</g>
+    <g filter="url(#frost)">{light(inner, binner, 1)}</g>
+    <g filter="url(#soft)">
+      {chr(10).join("      " + f for f in facets).strip()}
+    </g>
+    <use href="#word" fill="none" stroke="{t['rim']}" stroke-width="1.8" stroke-opacity="{t['rim_opacity']}"/>
+  </g>"""
+    return "\n    ".join(defs), body
+
+
 def svg(theme, variant, geo):
     t, v = THEMES[theme], {**BASE_VARIANT, **VARIANTS[variant]}
     word_d, spans, width, beam_y = geo["d"], geo["spans"], geo["width"], geo["beam_y"]
@@ -261,9 +382,20 @@ def svg(theme, variant, geo):
     w = f"{width:.0f}"
     fade_in, fade_out = 110 / width, 1 - 150 / width
     ramp0, ramp1 = (end - 45) / width, (end + 25) / width
+    comps = harmonics(spans, v["harmonics"], geo["x_height"] / 2)
     wave_defs = "\n".join(
-        f'    <path id="w{k}" d="{d}"/>' for k, d in enumerate(wave_paths(spans, width, beam_y, v["harmonics"]))
+        f'    <path id="w{k}" d="{d}"/>'
+        for k, d in enumerate(wave_paths(comps, v["taper"], width, beam_y, 3 if v["harmonics"] == "single" else 2))
     )
+    if v["glass"] == "elements":
+        glass_defs, glass_body = element_glass(t, v, geo, comps, w)
+    else:
+        glass_defs = glass_filter(t, v, w, geo["maps"][v["look"]])
+        glass_body = f"""<use href="#word" fill="url(#body)"/>
+  <g filter="url(#glass)">
+    <use href="#word" fill="#fff" fill-opacity="0.05"/>
+    <g clip-path="url(#wordclip)"><use href="#lightin"/></g>
+  </g>"""
 
     def light(scale, beam_scale):
         strokes = "\n".join(f'        <use href="#w{k}" stroke="{c}"/>' for k, c in enumerate(t["wave"]))
@@ -321,18 +453,14 @@ def svg(theme, variant, geo):
       </feMerge>
     </filter>
 
-    {glass_filter(t, v, w, geo["maps"][v["look"]])}
+    {glass_defs}
   </defs>
 
   <!-- light travelling outside the glass -->
   <g mask="url(#outside)"><g filter="url(#glow)"><rect width="{w}" height="{H}" fill="#000" fill-opacity="0.004"/><use href="#light"/></g></g>
 
-  <!-- the glass: body tint, then the light seen through it (the carrier fill only gives the filter its shape) -->
-  <use href="#word" fill="url(#body)"/>
-  <g filter="url(#glass)">
-    <use href="#word" fill="#fff" fill-opacity="0.05"/>
-    <g clip-path="url(#wordclip)"><use href="#lightin"/></g>
-  </g>
+  <!-- the glass: body tint, then the light seen through it -->
+  {glass_body}
 </svg>
 """
 
@@ -399,16 +527,12 @@ def options_readme(names):
         rows.append(f"### {n}\n\n{VARIANTS[n]['desc']}\n\n"
                     f'<picture>\n  <source media="(prefers-color-scheme: dark)" srcset="logo-dark-{n}.svg">\n'
                     f'  <img alt="Discipline, {n} variant" src="logo-light-{n}.svg">\n</picture>\n')
-    ab = ""
-    if (HERE / "options" / "no-image" / "logo-dark.svg").exists():
-        ab = ("\n### A/B: does `feImage` with a `data:` URI work on your device?\n\n"
-              "The variants above bake refraction into PNGs and read them with `feImage`. `no-image/` is the previous "
-              "build, which uses no `feImage` (kept only for this comparison; built by an earlier `build.py`, so "
-              "not regenerated). If those render and the variants above look flat, `feImage` is the problem. "
-              "The small test below shows it directly.\n\n"
-              '<picture>\n  <source media="(prefers-color-scheme: dark)" srcset="no-image/logo-dark.svg">\n'
-              '  <img alt="previous build, no feImage" src="no-image/logo-light.svg">\n</picture>\n\n'
-              '<img alt="feImage diagnostic" src="diag-feimage.svg">\n')
+    ab = ("\n### Does `feImage` with a `data:` URI work on your device?\n\n"
+          "`bloom`, `early`, `liquid`, `filter`, `caustic` and `pick` bake refraction into PNGs and read them with "
+          "`feImage`. `elements` uses no `feImage` and no displacement filter, only masks, clips and plain blurs. "
+          "If the others look flat and `elements` looks right, `feImage` is the problem. The small test below shows "
+          "it directly: the bar should sit visibly left of the red tick.\n\n"
+          '<img alt="feImage diagnostic" src="diag-feimage.svg">\n')
     return ("# Logo options\n\nGenerated by `../build.py --options`. Each is served as a `<picture>` "
             "pair, so what you see follows your GitHub theme.\n\n" + "\n".join(rows) + ab)
 

@@ -11,6 +11,24 @@ Light trapped in the glass: bloom inside each letter, streaked along the directi
   <img alt="Discipline, bloom variant" src="logo-light-bloom.svg">
 </picture>
 
+### elements
+
+The same glass with no displacement filter: the waves are bent where they cross each bezel and drawn as ordinary paths, the glow is layered copies, the rim light is stroked along the outline. Only plain blurs remain.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logo-dark-elements.svg">
+  <img alt="Discipline, elements variant" src="logo-light-elements.svg">
+</picture>
+
+### early
+
+The other quadratic taper: the waves calm almost at once and leave a long quiet tail. Every other option uses the ease-in taper, which stays lively through most of the word and settles into the `e`.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logo-dark-early.svg">
+  <img alt="Discipline, early variant" src="logo-light-early.svg">
+</picture>
+
 ### filter
 
 Noise to signal: each waveform carries harmonics that the glass strips away letter by letter, so the tangle on the left resolves into one line.
@@ -47,13 +65,8 @@ Noise to signal, with bloom and a faint spill. The combination I would ship.
   <img alt="Discipline, pick variant" src="logo-light-pick.svg">
 </picture>
 
-### A/B: does `feImage` with a `data:` URI work on your device?
+### Does `feImage` with a `data:` URI work on your device?
 
-The variants above bake refraction into PNGs and read them with `feImage`. `no-image/` is the previous build, which uses no `feImage` (kept only for this comparison; built by an earlier `build.py`, so not regenerated). If those render and the variants above look flat, `feImage` is the problem. The small test below shows it directly.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="no-image/logo-dark.svg">
-  <img alt="previous build, no feImage" src="no-image/logo-light.svg">
-</picture>
+`bloom`, `early`, `liquid`, `filter`, `caustic` and `pick` bake refraction into PNGs and read them with `feImage`. `elements` uses no `feImage` and no displacement filter, only masks, clips and plain blurs. If the others look flat and `elements` looks right, `feImage` is the problem. The small test below shows it directly: the bar should sit visibly left of the red tick.
 
 <img alt="feImage diagnostic" src="diag-feimage.svg">

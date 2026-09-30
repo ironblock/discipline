@@ -62,9 +62,9 @@ class _Flatten(BasePen):
         pass
 
 
-def glyph_contours(glyphset, name, x, baseline, scale):
+def glyph_contours(glyphset, name, x, baseline, scale, steps=14):
     """Flattened outline of one glyph as polygons in user units (y down)."""
-    pen = _Flatten(glyphset, lambda p: (x + p[0] * scale, baseline - p[1] * scale))
+    pen = _Flatten(glyphset, lambda p: (x + p[0] * scale, baseline - p[1] * scale), steps)
     glyphset[name].draw(pen)
     return pen.contours
 
@@ -132,4 +132,24 @@ def maps(contours, region, look):
     band = (1 - smoothstep(0, look["band_width"], d)) * mask
     spec = np.stack([lit, shade, band], -1) * 255
 
-    return dict(disp=_png(_downsample(disp)), spec=_png(_downsample(spec)), scale=2 * peak, region=region)
+    field = dict(region=region, dx=shift * ux, dy=shift * uy, ux=ux, uy=uy, inside=mask.astype(float))
+    return dict(disp=_png(_downsample(disp)), spec=_png(_downsample(spec)), scale=2 * peak, region=region, field=field)
+
+
+def sample(field, name, pts):
+    """Bilinear lookup of a field array at points (N, 2) in user units."""
+    x0, y0 = field["region"][:2]
+    pts = np.asarray(pts, float)
+    coords = np.array([(pts[:, 1] - y0) * RES - 0.5, (pts[:, 0] - x0) * RES - 0.5])
+    return ndimage.map_coordinates(field[name], coords, order=1, mode="nearest")
+
+
+def refract(field, pts, gain=1.0):
+    """Where content at pts is seen through the glass. The filter shows, at each pixel, the source
+    at pixel + displacement (inward); so content appears displaced the other way, toward the edge."""
+    pts = np.asarray(pts, float)
+    return pts - gain * np.stack([sample(field, "dx", pts), sample(field, "dy", pts)], 1)
+
+
+def inside(field, pts):
+    return sample(field, "inside", pts) > 0.5
