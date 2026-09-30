@@ -5781,6 +5781,16 @@ legacy_signature = "log/fixtures/invalid/a-timings-count-that-is-negative\\.json
 migrated = false
 
 [[fault]]
+id = "test.log_timings_negative_integer_ms_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a negative whole-millisecond duration read as absent"
+failure_class = "log.timings-negative-ms-read"
+legacy_signature = "log/fixtures/invalid/a-timings-duration-that-is-a-negative-integer\\.jsonl"
+migrated = false
+
+[[fault]]
 id = "test.log_timings_negative_ms_read"
 kind = "seeded-gate"
 check = "test"

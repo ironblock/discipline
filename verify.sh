@@ -1646,6 +1646,23 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The integer arm of the same rule: a negative whole millisecond falls through
+# to `Millis::new`, whose refusal reads as "absent" -- the value is dropped, not
+# refused. Found by #192's review; the decimal fixture never reached this arm.
+inject_log_timings_negative_integer_ms_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Some(Value::Integer(n)) if *n < 0 => {"
+new = "            Some(Value::Integer(n)) if false && *n < 0 => {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_log_timings_ms_as_text_read() {
   python3 - <<'EOF'
 import pathlib
@@ -6842,6 +6859,8 @@ selftest() {
     'log/fixtures/invalid/a-timings-count-that-is-negative\.jsonl' 'test:conformance/formats::log'
   seeded_case "a negative timings duration read as a duration" test inject_log_timings_negative_ms_read \
     'log/fixtures/invalid/a-timings-duration-that-is-negative\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a negative whole-millisecond duration read as absent" test inject_log_timings_negative_integer_ms_read \
+    'log/fixtures/invalid/a-timings-duration-that-is-a-negative-integer\.jsonl' 'test:conformance/formats::log'
   seeded_case "a timings duration written as text read as absent" test inject_log_timings_ms_as_text_read \
     'log/fixtures/invalid/a-timings-duration-written-as-text\.jsonl' 'test:conformance/formats::log'
   seeded_case "a timings key the server does not send read" test inject_log_timings_unknown_key_read \

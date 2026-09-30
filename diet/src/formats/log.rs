@@ -327,7 +327,9 @@ pub enum Event {
     /// A refused command ends no gap: the person is still in it, about to
     /// retry. The gap continues, the refusal's span is added to `blocked`,
     /// and the gap is logged once, at the command finally admitted. The gap
-    /// measures the person, not the server.
+    /// measures the person, not the server. The surface's *expectation* of
+    /// admission decides only whether an attempt is made; it never decides
+    /// whether a gap ends.
     IdleGap {
         /// The `seq` of the `turn.settled` that opened the gap.
         opened_by: u64,
@@ -1570,7 +1572,9 @@ impl Fields<'_> {
         };
         let millis = |field: &str| match object.get(field) {
             None => Ok(None),
-            Some(Value::Integer(n)) if *n < 0 => Err(format!("`{key}.{field}` is negative")),
+            Some(Value::Integer(n)) if *n < 0 => {
+                Err(format!("`{key}.{field}` is a negative whole number"))
+            }
             Some(Value::Decimal(d)) if d.as_str().starts_with('-') => {
                 Err(format!("`{key}.{field}` is negative"))
             }
