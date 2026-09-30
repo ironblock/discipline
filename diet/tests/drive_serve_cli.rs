@@ -163,7 +163,7 @@ fn a_served_drive_streams_a_real_servers_answer_over_sse() {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    log::parse(&document).expect("what the binary streams is a v0 log");
+    log::parse(&document).expect("what the binary streams is a log the format reads");
 
     let log::Event::SessionStart { opened, head, .. } = &lines[0].event else {
         panic!("the stream does not begin with the session: {stream}");

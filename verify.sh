@@ -1524,8 +1524,8 @@ import pathlib
 
 path = pathlib.Path("diet/src/formats/log.rs")
 source = path.read_text(encoding="utf-8")
-old = "if !requests.contains(request) =>"
-new = "if false && !requests.contains(request) =>"
+old = "if !requests.contains(&request) {"
+new = "if false && !requests.contains(&request) {"
 if source.count(old) != 1:
     raise SystemExit(f"the rule appears {source.count(old)} times")
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
@@ -1540,6 +1540,181 @@ path = pathlib.Path("diet/src/formats/log.rs")
 source = path.read_text(encoding="utf-8")
 old = "if *from != state {"
 new = "if false && *from != state {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Log v1 (#117 R3.2, the courier patch from track three): what arrived in v1
+# is scoped by the version a log declares, and each new rule is disabled in
+# turn. Measured by track three before the courier; wired here.
+
+inject_log_v1_content_read_in_a_v0_log() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if let Some(why) = beyond(line, declared) {'
+new = '        if let Some(why) = beyond(line, declared).filter(|_| false) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_progress_read_in_a_v0_log() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        Kind::Progress => 1,'
+new = '        Kind::Progress => 0,'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_context_overflow_read_in_a_v0_log() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    i64::from(context_overflow)'
+new = '    i64::from(false && context_overflow)'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_response_reasoning_read_in_a_v0_log() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '                may_v1("reasoning", Text),'
+new = '                may("reasoning", Text),'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_progress_after_its_request_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '            if ended.contains(&request) {'
+new = '            if matches!(event, Event::Delta { .. }) && ended.contains(&request) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_progress_citing_a_non_request_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if !requests.contains(&request) {'
+new = '    if !matches!(event, Event::Progress { .. }) && !requests.contains(&request) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_timings_negative_count_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '                .map_err(|_| format!("`{key}.{field}` is negative")),'
+new = '                .or(Ok::<_, String>(Some(0))),'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_timings_negative_ms_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Some(Value::Decimal(d)) if d.as_str().starts_with('-') => {"
+new = "            Some(Value::Decimal(d)) if false && d.as_str().starts_with('-') => {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The integer arm of the same rule: a negative whole millisecond falls through
+# to `Millis::new`, whose refusal reads as "absent" -- the value is dropped, not
+# refused. Found by #192's review; the decimal fixture never reached this arm.
+inject_log_timings_negative_integer_ms_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Some(Value::Integer(n)) if *n < 0 => {"
+new = "            Some(Value::Integer(n)) if false && *n < 0 => {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_timings_ms_as_text_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Some(_) => Err(format!("`{key}.{field}` is not a number")),'
+new = '            Some(_) => Ok(None),'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_timings_unknown_key_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '            .find(|field| !TIMINGS.iter().any(|f| f.key == field.as_str()))'
+new = '            .find(|_| false)'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_timings_declares_a_key_nothing_writes() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    may_v1("draft_n_accepted", Holds::Count),\n];'
+new = '    may_v1("draft_n_accepted", Holds::Count),\n    may_v1("prompt_per_token_ms", Holds::Millis),\n];'
 if source.count(old) != 1:
     raise SystemExit(f"the rule appears {source.count(old)} times")
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
@@ -6691,6 +6866,30 @@ selftest() {
     'a_reference_to_anything_but_an_earlier_request_is_refused \.\.\. FAILED' 'lib/formats::log::tests'
   seeded_case "a log settlement that leaves a state it is not in" test inject_log_settlement_chain_unchecked \
     'a_settlement_that_does_not_leave_the_state_it_is_in_is_refused \.\.\. FAILED' 'lib/formats::log::tests'
+  seeded_case "v1 content read in a log that declares v0" test inject_log_v1_content_read_in_a_v0_log \
+    'log/fixtures/invalid/a-v0-log-carrying-timings\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a progress line read in a log that declares v0" test inject_log_progress_read_in_a_v0_log \
+    'log/fixtures/invalid/a-v0-log-carrying-progress\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a context_overflow read in a log that declares v0" test inject_log_context_overflow_read_in_a_v0_log \
+    'log/fixtures/invalid/a-v0-log-carrying-a-context-overflow\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a response's reasoning read in a log that declares v0" test inject_log_response_reasoning_read_in_a_v0_log \
+    'log/fixtures/invalid/a-v0-log-carrying-a-response-reasoning\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a log progress line after its request ended read" test inject_log_progress_after_its_request_read \
+    'log/fixtures/invalid/a-progress-after-its-request-ended\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a log progress line citing anything read as a request" test inject_log_progress_citing_a_non_request_read \
+    'log/fixtures/invalid/a-progress-citing-a-line-that-is-not-a-request\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a negative timings count read as a count" test inject_log_timings_negative_count_read \
+    'log/fixtures/invalid/a-timings-count-that-is-negative\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a negative timings duration read as a duration" test inject_log_timings_negative_ms_read \
+    'log/fixtures/invalid/a-timings-duration-that-is-negative\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a negative whole-millisecond duration read as absent" test inject_log_timings_negative_integer_ms_read \
+    'log/fixtures/invalid/a-timings-duration-that-is-a-negative-integer\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a timings duration written as text read as absent" test inject_log_timings_ms_as_text_read \
+    'log/fixtures/invalid/a-timings-duration-written-as-text\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a timings key the server does not send read" test inject_log_timings_unknown_key_read \
+    'log/fixtures/invalid/a-timings-key-the-server-does-not-send\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a timings key declared that no line writes" test inject_log_timings_declares_a_key_nothing_writes \
+    'the_schema_is_what_every_kind_writes \.\.\. FAILED' 'lib/formats::log::tests'
   seeded_case "a head change that is not a change"    test     inject_record_prefix_change_not_a_change \
     'record/fixtures/invalid/prefix-change-that-is-not-a-change\.jsonl' 'test:conformance/formats::record'
   seeded_case "the miss classes reordered"           test     inject_record_prefix_precedence_reordered \

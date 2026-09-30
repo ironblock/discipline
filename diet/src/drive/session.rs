@@ -806,10 +806,11 @@ fn from(log: &[Logged], first: u64) -> Vec<Logged> {
     log[start..].to_vec()
 }
 
-/// A logged event as a line of the session log format, `diet/formats/log`
-/// v0 (#117, R2c I3). One exhaustive match, so an event with no line fails
+/// A logged event as a line of the session log format, `diet/formats/log`,
+/// at its current [`log::VERSION`] (#117, R2c I3). One exhaustive match, so an event with no line fails
 /// to compile, and every word goes through the format's own vocabulary.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn line_of(logged: &Logged) -> log::Line {
     let event = match &logged.event {
         Event::Started {
@@ -817,6 +818,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             model,
             head,
         } => log::Event::SessionStart {
+            version: log::VERSION,
             opened: *opened,
             model: model.clone(),
             head: head
@@ -867,6 +869,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             to_request: *request,
             text: text.clone(),
             finish_reason: finish_reason.clone(),
+            // R3.4 carries these; log v1 only makes room for them.
+            reasoning: None,
+            timings: None,
         },
         Event::Cancelled { request, partial } => log::Event::Cancelled {
             request: *request,
@@ -2121,6 +2126,7 @@ pub(in crate::drive) mod tests {
     fn the_lines_of_every_event() -> Vec<log::Event> {
         vec![
             log::Event::SessionStart {
+                version: log::VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
                 head: vec![log::HeadMessage {
@@ -2158,6 +2164,8 @@ pub(in crate::drive) mod tests {
                 to_request: 3,
                 text: "Hello".to_owned(),
                 finish_reason: Some("stop".to_owned()),
+                reasoning: None,
+                timings: None,
             },
             log::Event::Cancelled {
                 request: 3,
@@ -2273,7 +2281,7 @@ pub(in crate::drive) mod tests {
             .iter()
             .map(|logged| render(logged) + "\n")
             .collect();
-        let read = log::parse(&document).expect("the session's log is a v0 log");
+        let read = log::parse(&document).expect("the session's log is a log the format reads");
         assert_eq!(read.len(), session.events_from(0).len());
     }
 
@@ -2346,7 +2354,7 @@ pub(in crate::drive) mod tests {
             Event::Asked { turn: 2, .. }
         ));
         let document: String = log.iter().map(|logged| render(logged) + "\n").collect();
-        log::parse(&document).expect("a log carrying a gap is a v0 log");
+        log::parse(&document).expect("a log carrying a gap is a log the format reads");
     }
 
     #[test]
