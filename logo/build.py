@@ -7,11 +7,12 @@ as they pass through glass letter blocks, and leave the final "e" as one beam.
 GitHub loads README SVGs through <img>: no web fonts, no external files, so the
 word is outlined from the font and every effect is a self-contained SVG filter.
 
-Safari: only long-standing filter primitives are used (feOffset, feComposite,
-feFlood, feMerge, feGaussianBlur, feMorphology, feColorMatrix,
-feComponentTransfer, feDisplacementMap). No mix-blend-mode, no feImage, no
-lighting primitives. Every filter length is in user units, so nothing depends
-on pixel density. Checked in WebKitGTK 2.52, not on a device; see logo/README.md.
+Safari: only long-standing filter primitives are used (feImage, feDisplacementMap,
+feColorMatrix, feComposite, feGaussianBlur, feMorphology, feComponentTransfer, feFlood,
+feMerge, feOffset). No mix-blend-mode, no lighting primitives. The refraction and rim
+light are baked into two PNGs (lens.py) that the filter reads with feImage, as
+kube.io's write-up does; every length is in user units. Checked in WebKitGTK 2.52, not
+on a device; see logo/README.md.
 
 usage: build.py [--font PATH] [outdir]            default logo-{dark,light}.svg
        build.py --options [outdir]                every variant + options/README.md
@@ -20,8 +21,12 @@ import argparse
 import math
 import pathlib
 import re
+import sys
 import xml.etree.ElementTree as ET
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+
+import lens
 from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
@@ -38,22 +43,16 @@ BASELINE = 218
 AMPLITUDE = 56
 WAVELENGTH = 120
 
-CHAMFER = 5       # px, width of the lit/shaded facets
-# Refraction across the bezel: blur the letter mask, then read the edge ramp on each side
-# from one offset copy. The push is strongest at the edge and fades inward, as it does
-# for a convex bezel.
-RAMP_BLUR = 3     # px, sets how wide the bezel is
-RAMP_STEP = 3     # px, offset used to read the ramp
-BEND = 55         # px, shift at full push; the ramp peaks near 0.4, so real shifts are ~10px
 # A 104-primitive glass filter (4-band stair refraction map) painted nothing in iOS Safari and in
 # WebKitGTK 2.52. The same graph with 3 bands (88) painted, and padding a working graph to 104 with
 # identity primitives also painted, so this is not a plain count and the mechanism is unknown.
 # This ceiling is a heuristic: the working graphs are under 60. Re-check in WebKit if it grows.
 MAX_PRIMITIVES = 64
 CAST = (12, 14)   # px, where light spilled by the glass lands
+PAD = 16          # px around the letters covered by the baked maps
 
 # What each option changes. Keys not listed keep BASE_VARIANT's value.
-BASE_VARIANT = dict(harmonics="single", prism=0.0, cast=False)
+BASE_VARIANT = dict(harmonics="single", cast=False, look="carved")
 VARIANTS = {
     "bloom": dict(
         desc="Light trapped in the glass: bloom inside each letter, streaked along the direction of travel, "
@@ -64,14 +63,13 @@ VARIANTS = {
              "so the tangle on the left resolves into one line.",
         harmonics="filter",
     ),
-    "prism": dict(
-        desc="Dispersion: red, green and blue bend by different amounts, so the beam fringes at every chamfer. "
-             "Dark only; the light pair shows the plain bloom version.",
-        prism=0.15,
-    ),
     "caustic": dict(
         desc="Glass that spills light: a coloured caustic falls from the letters onto the page.",
         cast=True,
+    ),
+    "liquid": dict(
+        desc="Same light, softer glass: a wide bezel that bends more of the beam and a rim light that spreads.",
+        look="liquid",
     ),
     "pick": dict(
         desc="Noise to signal, with bloom and a faint spill. The combination I would ship.",
@@ -117,7 +115,9 @@ THEMES = {
 }
 
 
-def outline_word(font_path):
+def layout(font_path):
+    """Positions the word once. The SVG path and the glyph contours the maps are baked
+    from both come from here."""
     font = TTFont(font_path)
     cmap, glyphs, hmtx = font.getBestCmap(), font.getGlyphSet(), font["hmtx"]
     upm = font["head"].unitsPerEm
@@ -125,15 +125,23 @@ def outline_word(font_path):
     em = WORD_WIDTH / (sum(advances) + TRACKING * (len(WORD) - 1))
     scale = em / upm
     x = MARGIN
-    parts, spans = [], []
+    parts, spans, contours = [], [], []
     for ch, adv in zip(WORD, advances):
+        name = cmap[ord(ch)]
         pen = SVGPathPen(glyphs, ntos=lambda v: f"{v:.1f}".rstrip("0").rstrip("."))
-        glyphs[cmap[ord(ch)]].draw(TransformPen(pen, (scale, 0, 0, -scale, x, BASELINE)))
+        glyphs[name].draw(TransformPen(pen, (scale, 0, 0, -scale, x, BASELINE)))
         parts.append(pen.getCommands())
+        contours += lens.glyph_contours(glyphs, name, x, BASELINE, scale)
         spans.append((x, x + adv * em))
         x += (adv + TRACKING) * em
+    xs = [p[0] for c in contours for p in c]
+    ys = [p[1] for c in contours for p in c]
+    region = (math.floor(min(xs)) - PAD, math.floor(min(ys)) - PAD,
+              math.ceil(max(xs)) - math.floor(min(xs)) + 2 * PAD, math.ceil(max(ys)) - math.floor(min(ys)) + 2 * PAD)
     x_height = font["OS/2"].sxHeight * scale
-    return " ".join(parts), spans, MARGIN + WORD_WIDTH + MARGIN, BASELINE - x_height / 2
+    return dict(d=" ".join(parts), spans=spans, width=MARGIN + WORD_WIDTH + MARGIN,
+                beam_y=BASELINE - x_height / 2,
+                maps={name: lens.maps(contours, region, look) for name, look in lens.LOOKS.items()})
 
 
 def smoothstep(a, b, x):
@@ -176,53 +184,32 @@ def wave_paths(spans, width, beam_y, mode):
     return paths
 
 
-def displacement_map():
-    """Filter primitives for the refraction map. Grey 128 = no shift. Each side's edge ramp
-    is a translucent layer of that side's push colour, so laying the four over a grey base
-    gives a signed map without any subtraction."""
-    out = [f'<feGaussianBlur in="mask" stdDeviation="{RAMP_BLUR}" result="soft"/>',
-           '<feFlood flood-color="rgb(128,128,128)" result="flat"/>']
-    layers = ["flat"]
-    for label, dx, dy, rgb in (("L", 1, 0, (255, 128, 128)), ("R", -1, 0, (0, 128, 128)),
-                               ("T", 0, 1, (128, 255, 128)), ("B", 0, -1, (128, 0, 128))):
-        out.append(f'<feOffset in="soft" dx="{dx * RAMP_STEP}" dy="{dy * RAMP_STEP}" result="{label}shift"/>')
-        out.append(f'<feComposite in="soft" in2="{label}shift" operator="out" result="{label}ramp"/>')
-        out.append(f'<feFlood flood-color="rgb{rgb}"/>')
-        out.append(f'<feComposite in2="{label}ramp" operator="in" result="{label}push"/>')
-        layers.append(f"{label}push")
-    nodes = "".join(f'<feMergeNode in="{l}"/>' for l in layers)
-    out.append(f'<feMerge result="rawmap">{nodes}</feMerge>')
-    return out
+def rgb01(hexcolor):
+    return [int(hexcolor[i:i + 2], 16) / 255 for i in (1, 3, 5)]
 
 
-def bend(spread):
-    """Refract the light. With spread, each colour channel bends by a different amount."""
-    disp = 'xChannelSelector="R" yChannelSelector="G"'
-    if not spread:
-        return [f'<feDisplacementMap in="light" in2="dmap" scale="{BEND}" {disp} result="bent"/>']
-    out = []
-    for ch, row, mult in (("R", "1 0 0 0 0  0 0 0 0 0  0 0 0 0 0", 1 - spread),
-                          ("G", "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0", 1.0),
-                          ("B", "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0", 1 + spread)):
-        out.append(f'<feColorMatrix in="light" type="matrix" values="{row}  0 0 0 1 0" result="c{ch}"/>')
-        out.append(f'<feDisplacementMap in="c{ch}" in2="dmap" scale="{BEND * mult:.1f}" {disp} result="d{ch}"/>')
-    out.append('<feComposite in="dR" in2="dG" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="dRG"/>')
-    out.append('<feComposite in="dRG" in2="dB" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="bent"/>')
-    return out
+def from_channel(src, channel, color, opacity, result):
+    """A layer of one solid colour whose alpha is one channel of a baked map, times opacity."""
+    r, g, b = rgb01(color)
+    alpha = ["0", "0", "0"]
+    alpha["RGB".index(channel)] = f"{opacity:g}"
+    return (f'<feColorMatrix in="{src}" type="matrix" '
+            f'values="0 0 0 0 {r:.3f}  0 0 0 0 {g:.3f}  0 0 0 0 {b:.3f}  {alpha[0]} {alpha[1]} {alpha[2]} 0 0" result="{result}"/>')
 
 
-def glass_filter(t, v, w):
+def glass_filter(t, v, w, maps):
     b = t["bloom"]
+    rx, ry, rw, rh = maps["region"]
+    image = f'x="{rx}" y="{ry}" width="{rw}" height="{rh}" preserveAspectRatio="none"'
     p = []
     add = p.append
     add('<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 30 0" result="mask"/>')
     # The letter-shaped carrier fill that gives this filter its shape is far fainter than any light.
     add('<feComponentTransfer in="SourceGraphic" result="light"><feFuncA type="linear" slope="1.4" intercept="-0.1"/></feComponentTransfer>')
 
-    add("<!-- refraction map: 0.5 grey = flat, graded pushes toward each edge -->")
-    p += displacement_map()
-    add('<feGaussianBlur in="rawmap" stdDeviation="0.8" result="dmap"/>')
-    p += bend(v["prism"] if t is THEMES["dark"] else 0)
+    add("<!-- refraction: baked from each letter's distance field and Snell's law (lens.py) -->")
+    add(f'<feImage href="{maps["disp"]}" {image} result="dmap"/>')
+    add(f'<feDisplacementMap in="light" in2="dmap" scale="{maps["scale"]:.2f}" xChannelSelector="R" yChannelSelector="G" result="bent"/>')
 
     add("<!-- frost, then bloom: brighten the light and spread it, further along x than y -->")
     add(f'<feGaussianBlur in="bent" stdDeviation="{t["frost"]}" result="frost"/>')
@@ -232,24 +219,14 @@ def glass_filter(t, v, w):
         add(f'<feGaussianBlur in="hot" stdDeviation="{b[name][0]} {b[name][1]}" result="bloom{name.upper()}0"/>')
         add(f'<feComponentTransfer in="bloom{name.upper()}0" result="bloom{name.upper()}"><feFuncA type="linear" slope="{b[name + "_slope"]}"/></feComponentTransfer>')
 
-    add("<!-- facets: top-left edges catch light, bottom-right edges take the tint -->")
-    add(f'<feOffset in="mask" dx="{CHAMFER}" dy="{CHAMFER}" result="sTL"/>')
-    add('<feComposite in="mask" in2="sTL" operator="out" result="litRaw"/>')
-    add('<feGaussianBlur in="litRaw" stdDeviation="0.6" result="litShape"/>')
-    add(f'<feFlood flood-color="{t["lit"]}" flood-opacity="{t["lit_opacity"]}"/>')
-    add('<feComposite in2="litShape" operator="in" result="lit"/>')
-    add(f'<feOffset in="mask" dx="-{CHAMFER}" dy="-{CHAMFER}" result="sBR"/>')
-    add('<feComposite in="mask" in2="sBR" operator="out" result="shadeRaw"/>')
-    add('<feGaussianBlur in="shadeRaw" stdDeviation="0.6" result="shadeShape"/>')
-    add(f'<feFlood flood-color="{t["shade"]}" flood-opacity="{t["shade_opacity"]}"/>')
-    add('<feComposite in2="shadeShape" operator="in" result="shade"/>')
-
-    add("<!-- every side is chamfered; near a beam, the chamfer takes its colour -->")
-    add(f'<feMorphology in="mask" operator="erode" radius="{CHAMFER}" result="core"/>')
-    add('<feComposite in="mask" in2="core" operator="out" result="edgeShape"/>')
-    add(f'<feFlood flood-color="{t["edge"]}" flood-opacity="{t["edge_opacity"]}"/>')
-    add('<feComposite in2="edgeShape" operator="in" result="edge"/>')
-    add('<feComposite in="bloomA" in2="edgeShape" operator="in" result="catchRaw"/>')
+    add("<!-- rim light from the baked map: R lit from the top-left, G from the bottom-right, B edge band -->")
+    add(f'<feImage href="{maps["spec"]}" {image} result="spec"/>')
+    add(from_channel("spec", "R", t["lit"], t["lit_opacity"], "lit"))
+    add(from_channel("spec", "G", t["shade"], t["shade_opacity"], "shade"))
+    add(from_channel("spec", "B", t["edge"], t["edge_opacity"], "edge"))
+    add('<feColorMatrix in="spec" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 1 0 0" result="band"/>')
+    add("<!-- near a beam, the edge takes its colour -->")
+    add('<feComposite in="bloomA" in2="band" operator="in" result="catchRaw"/>')
     add(f'<feComponentTransfer in="catchRaw" result="catch"><feFuncA type="linear" slope="{b["catch"]}"/></feComponentTransfer>')
 
     add("<!-- hairline rim -->")
@@ -277,8 +254,9 @@ def glass_filter(t, v, w):
             f'color-interpolation-filters="sRGB">\n      {body}\n    </filter>')
 
 
-def svg(theme, variant, word_d, spans, width, beam_y):
+def svg(theme, variant, geo):
     t, v = THEMES[theme], {**BASE_VARIANT, **VARIANTS[variant]}
+    word_d, spans, width, beam_y = geo["d"], geo["spans"], geo["width"], geo["beam_y"]
     start, end = convergence(spans)
     w = f"{width:.0f}"
     fade_in, fade_out = 110 / width, 1 - 150 / width
@@ -343,7 +321,7 @@ def svg(theme, variant, word_d, spans, width, beam_y):
       </feMerge>
     </filter>
 
-    {glass_filter(t, v, w)}
+    {glass_filter(t, v, w, geo["maps"][v["look"]])}
   </defs>
 
   <!-- light travelling outside the glass -->
@@ -379,6 +357,10 @@ def check(text, name):
                 seen.add(prim.get("result"))
         if len(f) > MAX_PRIMITIVES:
             problems.append(f'filter {f.get("id")} has {len(f)} primitives; more than {MAX_PRIMITIVES} risks WebKit dropping it')
+    for e in root.iter():
+        href = e.get("href") or e.get("{http://www.w3.org/1999/xlink}href")
+        if href and not href.startswith(("#", "data:")):
+            problems.append(f"{e.tag.replace(ns, '')} loads {href[:40]!r}; GitHub renders README SVGs without external resources")
     ids = {e.get("id") for e in root.iter() if e.get("id")}
     for ref in set(re.findall(r'url\(#([^)]+)\)', text)) | set(re.findall(r'href="#([^"]+)"', text)):
         if ref not in ids:
@@ -388,10 +370,27 @@ def check(text, name):
 
 
 def write(path, theme, variant, geometry):
-    text = svg(theme, variant, *geometry)
+    text = svg(theme, variant, geometry)
     check(text, path.name)
     path.write_text(text)
     print(f"wrote {path}")
+
+
+def diag_svg():
+    """Does feImage with a data: URI work here? The bar is displaced 20 units left of the red tick
+    by a constant map. If it sits on the tick, the filter did nothing."""
+    m = lens.png_constant((255, 128, 128))
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="240" height="120" viewBox="0 0 240 120">
+  <defs><filter id="f" filterUnits="userSpaceOnUse" x="0" y="0" width="240" height="120" color-interpolation-filters="sRGB">
+    <feImage href="{m}" x="0" y="0" width="240" height="120" preserveAspectRatio="none" result="m"/>
+    <feDisplacementMap in="SourceGraphic" in2="m" scale="40" xChannelSelector="R" yChannelSelector="G"/>
+  </filter></defs>
+  <rect width="240" height="120" fill="#fff" fill-opacity="0.85"/>
+  <rect x="119" y="6" width="2" height="16" fill="#e0182d"/>
+  <g filter="url(#f)"><rect x="115" y="30" width="10" height="80" fill="#111"/></g>
+  <text x="120" y="118" font-family="sans-serif" font-size="9" text-anchor="middle" fill="#666">bar should sit LEFT of the red tick</text>
+</svg>
+"""
 
 
 def options_readme(names):
@@ -400,8 +399,18 @@ def options_readme(names):
         rows.append(f"### {n}\n\n{VARIANTS[n]['desc']}\n\n"
                     f'<picture>\n  <source media="(prefers-color-scheme: dark)" srcset="logo-dark-{n}.svg">\n'
                     f'  <img alt="Discipline, {n} variant" src="logo-light-{n}.svg">\n</picture>\n')
+    ab = ""
+    if (HERE / "options" / "no-image" / "logo-dark.svg").exists():
+        ab = ("\n### A/B: does `feImage` with a `data:` URI work on your device?\n\n"
+              "The variants above bake refraction into PNGs and read them with `feImage`. `no-image/` is the previous "
+              "build, which uses no `feImage` (kept only for this comparison; built by an earlier `build.py`, so "
+              "not regenerated). If those render and the variants above look flat, `feImage` is the problem. "
+              "The small test below shows it directly.\n\n"
+              '<picture>\n  <source media="(prefers-color-scheme: dark)" srcset="no-image/logo-dark.svg">\n'
+              '  <img alt="previous build, no feImage" src="no-image/logo-light.svg">\n</picture>\n\n'
+              '<img alt="feImage diagnostic" src="diag-feimage.svg">\n')
     return ("# Logo options\n\nGenerated by `../build.py --options`. Each is served as a `<picture>` "
-            "pair, so what you see follows your GitHub theme.\n\n" + "\n".join(rows))
+            "pair, so what you see follows your GitHub theme.\n\n" + "\n".join(rows) + ab)
 
 
 def main():
@@ -412,13 +421,14 @@ def main():
     ap.add_argument("--variant", default=DEFAULT_VARIANT, choices=VARIANTS)
     a = ap.parse_args()
     out = pathlib.Path(a.outdir)
-    geometry = outline_word(a.font)
+    geometry = layout(a.font)
     if a.options:
         opts = out / "options"
         opts.mkdir(exist_ok=True)
         for name in VARIANTS:
             for theme in THEMES:
                 write(opts / f"logo-{theme}-{name}.svg", theme, name, geometry)
+        (opts / "diag-feimage.svg").write_text(diag_svg())
         (opts / "README.md").write_text(options_readme(list(VARIANTS)))
     else:
         for theme in THEMES:

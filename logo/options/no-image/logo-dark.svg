@@ -83,14 +83,7 @@
       <feComposite in2="Bramp" operator="in" result="Bpush"/>
       <feMerge result="rawmap"><feMergeNode in="flat"/><feMergeNode in="Lpush"/><feMergeNode in="Rpush"/><feMergeNode in="Tpush"/><feMergeNode in="Bpush"/></feMerge>
       <feGaussianBlur in="rawmap" stdDeviation="0.8" result="dmap"/>
-      <feColorMatrix in="light" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="cR"/>
-      <feDisplacementMap in="cR" in2="dmap" scale="46.8" xChannelSelector="R" yChannelSelector="G" result="dR"/>
-      <feColorMatrix in="light" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="cG"/>
-      <feDisplacementMap in="cG" in2="dmap" scale="55.0" xChannelSelector="R" yChannelSelector="G" result="dG"/>
-      <feColorMatrix in="light" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="cB"/>
-      <feDisplacementMap in="cB" in2="dmap" scale="63.2" xChannelSelector="R" yChannelSelector="G" result="dB"/>
-      <feComposite in="dR" in2="dG" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="dRG"/>
-      <feComposite in="dRG" in2="dB" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="bent"/>
+      <feDisplacementMap in="light" in2="dmap" scale="55" xChannelSelector="R" yChannelSelector="G" result="bent"/>
       <!-- frost, then bloom: brighten the light and spread it, further along x than y -->
       <feGaussianBlur in="bent" stdDeviation="1.8" result="frost"/>
       <feColorMatrix in="bent" type="matrix" values="1.15 0 0 0 0  0 1.15 0 0 0  0 0 1.15 0 0  0 0 0 1.9 0" result="hot"/>

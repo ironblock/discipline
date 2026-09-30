@@ -20,15 +20,6 @@ Noise to signal: each waveform carries harmonics that the glass strips away lett
   <img alt="Discipline, filter variant" src="logo-light-filter.svg">
 </picture>
 
-### prism
-
-Dispersion: red, green and blue bend by different amounts, so the beam fringes at every chamfer. Dark only; the light pair shows the plain bloom version.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="logo-dark-prism.svg">
-  <img alt="Discipline, prism variant" src="logo-light-prism.svg">
-</picture>
-
 ### caustic
 
 Glass that spills light: a coloured caustic falls from the letters onto the page.
@@ -36,6 +27,15 @@ Glass that spills light: a coloured caustic falls from the letters onto the page
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="logo-dark-caustic.svg">
   <img alt="Discipline, caustic variant" src="logo-light-caustic.svg">
+</picture>
+
+### liquid
+
+Same light, softer glass: a wide bezel that bends more of the beam and a rim light that spreads.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logo-dark-liquid.svg">
+  <img alt="Discipline, liquid variant" src="logo-light-liquid.svg">
 </picture>
 
 ### pick
@@ -46,3 +46,14 @@ Noise to signal, with bloom and a faint spill. The combination I would ship.
   <source media="(prefers-color-scheme: dark)" srcset="logo-dark-pick.svg">
   <img alt="Discipline, pick variant" src="logo-light-pick.svg">
 </picture>
+
+### A/B: does `feImage` with a `data:` URI work on your device?
+
+The variants above bake refraction into PNGs and read them with `feImage`. `no-image/` is the previous build, which uses no `feImage` (kept only for this comparison; built by an earlier `build.py`, so not regenerated). If those render and the variants above look flat, `feImage` is the problem. The small test below shows it directly.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="no-image/logo-dark.svg">
+  <img alt="previous build, no feImage" src="no-image/logo-light.svg">
+</picture>
+
+<img alt="feImage diagnostic" src="diag-feimage.svg">
