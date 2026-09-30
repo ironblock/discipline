@@ -51,6 +51,7 @@ WAVELENGTH = 190  # px; the waves' peak-to-peak height is the font's x-height (s
 MAX_PRIMITIVES = 64
 PAD = 16          # px around the letters covered by the baked maps
 CROP = 26         # px of canvas kept above and below the word
+CROSS_OUTSIDE = 6  # px outside the D's left edge where red and green cross; 0 would put the crossing on the edge and the glass hides half of it
 ENDS_FADE = 22    # px over which the outside light fades out beside the first and last letter (about a stem)
 
 # What each option changes. Keys not listed keep BASE_VARIANT's value.
@@ -422,7 +423,7 @@ def svg(theme, variant, geo):
     fade_in, fade_out = (110 if v['outside'] else 1) / width, 1 - (150 if v['outside'] else 1) / width
     ramp0, ramp1 = (end - 45) / width, (end + 25) / width
     comps = harmonics(spans, v["harmonics"], geo["x_height"] / 2)
-    geo = {**geo, "shift": crossover_shift(comps, v["taper"], beam_y, geo["spine"])}
+    geo = {**geo, "shift": crossover_shift(comps, v["taper"], beam_y, geo["enters"] - CROSS_OUTSIDE)}
     wave_defs = "\n".join(
         f'    <path id="w{k}" d="{d}"/>'
         for k, d in enumerate(wave_paths(comps, v["taper"], width, beam_y, 3 if v["harmonics"] == "single" else 2, geo["shift"]))
