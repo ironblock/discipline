@@ -47,6 +47,15 @@ The light enters the `D` and leaves the `e`, and between them it is visible only
   <img alt="Discipline, story variant" src="logo-light-story.svg">
 </picture>
 
+### story-noise
+
+Both ideas: a tangle of harmonics enters the `D`, the glass strips them letter by letter, and between the first and last letter the light is visible only inside the glass. One clean beam leaves the `e`.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logo-dark-story-noise.svg">
+  <img alt="Discipline, story-noise variant" src="logo-light-story-noise.svg">
+</picture>
+
 ### inside
 
 The letters are a window and nothing is drawn outside them, not even the ends. The canvas is cropped to the word.

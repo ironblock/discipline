@@ -23,7 +23,7 @@ splits the difference in the exponents instead.
 
 Options (`build.py --options`, viewable in `options/README.md`): `elements` (default), `early`, `late`,
 `noise` (harmonics the glass strips letter by letter), `story` (the incoming waves and outgoing beam are
-drawn, but between the first and last letter the light shows only inside the glass), `inside` (nothing outside
+drawn, but between the first and last letter the light shows only inside the glass), `story-noise` (story's clipping with noise's tangle), `inside` (nothing outside
 the letters at all, canvas cropped to the word), `filter-glass` (the displacement-filter glass, kept as a
 fallback).
 

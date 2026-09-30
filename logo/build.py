@@ -78,6 +78,11 @@ VARIANTS = {
              "the gaps and counters are dark. The incoming waves and the outgoing beam are drawn as usual.",
         outside="ends",
     ),
+    "story-noise": dict(
+        desc="Both ideas: a tangle of harmonics enters the `D`, the glass strips them letter by letter, and between "
+             "the first and last letter the light is visible only inside the glass. One clean beam leaves the `e`.",
+        harmonics="filter", outside="ends",
+    ),
     "inside": dict(
         desc="The letters are a window and nothing is drawn outside them, not even the ends. The canvas is cropped "
              "to the word.",
