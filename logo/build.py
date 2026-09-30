@@ -3,78 +3,90 @@
 
 Three phase-shifted sine waves (R, G, B) enter the left of the word, converge
 as they pass through glass letter blocks, and leave the final "e" as one beam.
-Dark: light adds (screen) toward white. Light: ink multiplies toward black.
 
 GitHub loads README SVGs through <img>: no web fonts, no external files, so the
-word is outlined from font/d-din-700.ttf (D-DIN Exp Bold, SIL OFL 1.1) and
-every effect is a self-contained SVG filter.
+word is outlined from the font and every effect is a self-contained SVG filter.
 
-usage: build.py [outdir]
+Safari: only long-standing filter primitives are used (feOffset, feComposite,
+feFlood, feMerge, feGaussianBlur, feMorphology, feColorMatrix,
+feDisplacementMap). No mix-blend-mode, no feImage, no lighting primitives.
+The chamfer is built from offsets in user units, so it does not vary with
+pixel density. NOT verified in WebKit; see logo/README.md.
+
+usage: build.py [--font PATH] [outdir]
 """
-import math
+import argparse
 import pathlib
-import sys
 
 from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
 
+import math
+
 HERE = pathlib.Path(__file__).parent
 WORD = "Discipline"
+DEFAULT_FONT = HERE / "font" / "barlow-latin-900-normal.woff"
 
-FONT_SIZE = 170
-TRACKING = 0.02  # em, added after each letter
+WORD_WIDTH = 770  # px; font size follows from this
+TRACKING = 0.02   # em, added after each letter
 MARGIN = 215
-BASELINE = 218
 H = 290
-# Beam centreline: middle of the x-height band, where the lowercase letters sit.
-BEAM_Y = BASELINE - 0.52 * FONT_SIZE / 2
+BASELINE = 218
 AMPLITUDE = 56
 WAVELENGTH = 120
-STEP = 3  # px between polyline samples
+STEP = 3          # px between polyline samples
+
+CHAMFER = 5       # px, width of the lit/shaded facets
+# Refraction across the bezel: push strength at distance k*BAND_STEP from an
+# edge, strongest at the edge (a convex bezel bends light most where it is steepest).
+BAND_STEP = 2.5
+BAND_PUSH = (1.0, 0.78, 0.5, 0.22)
+BEND = 24         # px, shift at full push
 
 THEMES = {
     "dark": dict(
-        blend="screen",
-        rgb=("#ff3040", "#22ff70", "#3f6bff"),
-        body="#c6d0ff", body_top=0.13, body_bottom=0.03,
-        lit="#ffffff", lit_opacity=0.80,
-        shade="#8a7dff", shade_opacity=0.55,
-        rim="#ffffff", rim_opacity=0.35,
-        scatter=0.9, glow_wide=9, glow_wide_a=1.0, glow_tight=3,
+        wave=("#ffa3b3", "#a3ffc6", "#a9c0ff"), wave_alpha=0.60,
+        beam="#ffffff", beam_width=6,
+        glow_wide=9, glow_wide_a=1.0, glow_tight=3,
+        body="#cfd8ff", body_top=0.26, body_bottom=0.12,
+        lit="#ffffff", lit_opacity=0.75,
+        shade="#8a7dff", shade_opacity=0.50,
         edge="#ffffff", edge_opacity=0.16,
+        rim="#ffffff", rim_opacity=0.35,
+        frost=1.8, scatter=9, scatter_a=0.6,
     ),
     "light": dict(
-        blend="multiply",
-        rgb=("#e0182d", "#12b84a", "#2350e0"),
-        body="#5b6690", body_top=0.05, body_bottom=0.16,
+        wave=("#e0182d", "#12b84a", "#2350e0"), wave_alpha=0.33,
+        beam="#0b1020", beam_width=6,
+        glow_wide=2.5, glow_wide_a=0.22, glow_tight=0.7,
+        body="#55608a", body_top=0.10, body_bottom=0.22,
         lit="#ffffff", lit_opacity=0.95,
         shade="#1c2340", shade_opacity=0.60,
-        rim="#1c2340", rim_opacity=0.55,
-        scatter=0.5, glow_wide=2.5, glow_wide_a=0.22, glow_tight=0.7,
         edge="#1c2340", edge_opacity=0.14,
+        rim="#1c2340", rim_opacity=0.55,
+        frost=1.8, scatter=7, scatter_a=0.4,
     ),
 }
 
-CHAMFER = 5  # px, width of the chamfer bands
-BEND = 30    # px, peak refraction shift across a chamfer band
 
-
-def outline_word():
-    font = TTFont(HERE / "font" / "d-din-700.ttf")
+def outline_word(font_path):
+    font = TTFont(font_path)
     cmap, glyphs, hmtx = font.getBestCmap(), font.getGlyphSet(), font["hmtx"]
-    scale = FONT_SIZE / font["head"].unitsPerEm
+    upm = font["head"].unitsPerEm
+    advances = [hmtx[cmap[ord(ch)]][0] / upm for ch in WORD]
+    em = WORD_WIDTH / (sum(advances) + TRACKING * (len(WORD) - 1))
+    scale = em / upm
     x = MARGIN
     parts, spans = [], []
-    for ch in WORD:
-        name = cmap[ord(ch)]
+    for ch, adv in zip(WORD, advances):
         pen = SVGPathPen(glyphs, ntos=lambda v: f"{v:.1f}".rstrip("0").rstrip("."))
-        glyphs[name].draw(TransformPen(pen, (scale, 0, 0, -scale, x, BASELINE)))
+        glyphs[cmap[ord(ch)]].draw(TransformPen(pen, (scale, 0, 0, -scale, x, BASELINE)))
         parts.append(pen.getCommands())
-        adv = hmtx[name][0] * scale
-        spans.append((x, x + adv))
-        x += adv + TRACKING * FONT_SIZE
-    return " ".join(parts), spans, x - TRACKING * FONT_SIZE + MARGIN
+        spans.append((x, x + adv * em))
+        x += (adv + TRACKING) * em
+    x_height = font["OS/2"].sxHeight * scale
+    return " ".join(parts), spans, MARGIN + WORD_WIDTH + MARGIN, BASELINE - x_height / 2
 
 
 def smoothstep(a, b, x):
@@ -82,38 +94,75 @@ def smoothstep(a, b, x):
     return t * t * (3 - 2 * t)
 
 
-def waves(spans, width):
-    """Return the three wave paths. Amplitude falls to zero across the word."""
-    start = spans[0][0]
-    end = spans[-1][0] + 0.35 * (spans[-1][1] - spans[-1][0])
+def convergence(spans):
+    """x where amplitude starts to fall, and x where it has reached zero."""
+    return spans[0][0] - 10, spans[-1][0] + 0.55 * (spans[-1][1] - spans[-1][0])
+
+
+def wave_paths(spans, width, beam_y):
+    start, end = convergence(spans)
     paths = []
     for k in range(3):
         phase = k * 2 * math.pi / 3
-        pts = []
-        x = 0.0
+        pts, x = [], 0.0
         while x <= width + STEP:
-            amp = AMPLITUDE * (1 - smoothstep(start - 10, end, x))
-            y = BEAM_Y + amp * math.sin(2 * math.pi * x / WAVELENGTH + phase)
+            amp = AMPLITUDE * (1 - smoothstep(start, end, x))
+            y = beam_y + amp * math.sin(2 * math.pi * x / WAVELENGTH + phase)
             pts.append(f"{x:.0f},{y:.1f}")
             x += STEP
         paths.append("M" + " L".join(pts))
     return paths
 
 
-def svg(theme, word_d, spans, width):
+def displacement_map():
+    """Filter primitives for the refraction map. Grey 128 = no shift; each band
+    pushes toward its own edge's outside, harder the closer it is to the edge.
+    X and Y are built separately (opaque), then added into R and G."""
+    out = []
+    n = len(BAND_PUSH)
+
+    def axis(name, sides, chan):
+        # sides: (label, dx, dy, sign); the push is written into one channel.
+        out.append(f'<feFlood flood-color="rgb(128,128,128)" result="{name}0"/>')
+        layers = [f"{name}0"]
+        for label, dx, dy, sign in sides:
+            for k in range(n, 0, -1):  # widest, weakest band first
+                d = k * BAND_STEP
+                v = round(128 + sign * 127 * BAND_PUSH[k - 1])
+                rgb = (v, 128, 128) if chan == "R" else (128, v, 128)
+                out.append(f'<feOffset in="mask" dx="{dx * d}" dy="{dy * d}" result="{name}{label}{k}s"/>')
+                out.append(f'<feComposite in="mask" in2="{name}{label}{k}s" operator="out" result="{name}{label}{k}b"/>')
+                out.append(f'<feFlood flood-color="rgb{rgb}"/>')
+                out.append(f'<feComposite in2="{name}{label}{k}b" operator="in" result="{name}{label}{k}"/>')
+                layers.append(f"{name}{label}{k}")
+        nodes = "".join(f'<feMergeNode in="{l}"/>' for l in layers)
+        out.append(f'<feMerge result="{name}">{nodes}</feMerge>')
+
+    axis("mx", (("L", 1, 0, +1), ("R", -1, 0, -1)), "R")
+    axis("my", (("T", 0, 1, +1), ("B", 0, -1, -1)), "G")
+    out.append('<feColorMatrix in="mx" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0 1" result="mxR"/>')
+    out.append('<feColorMatrix in="my" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 0 1" result="myG"/>')
+    out.append('<feComposite in="mxR" in2="myG" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="rawmap"/>')
+    return "\n      ".join(out)
+
+
+def svg(theme, word_d, spans, width, beam_y):
     t = THEMES[theme]
-    wpaths = waves(spans, width)
+    start, end = convergence(spans)
+    w = f"{width:.0f}"
+    fade_in, fade_out = 110 / width, 1 - 150 / width
+    ramp0, ramp1 = (end - 45) / width, (end + 25) / width
     strokes = "\n".join(
-        f'    <path d="{d}" stroke="{c}" style="mix-blend-mode:{t["blend"]}"/>'
-        for d, c in zip(wpaths, t["rgb"])
+        f'      <path d="{d}" stroke="{c}"/>'
+        for d, c in zip(wave_paths(spans, width, beam_y), t["wave"])
     )
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width:.0f}" height="{H}" viewBox="0 0 {width:.0f} {H}" role="img" aria-label="Discipline">
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{H}" viewBox="0 0 {w} {H}" role="img" aria-label="Discipline">
   <title>Discipline</title>
   <defs>
     <path id="word" d="{word_d}"/>
     <clipPath id="wordclip"><use href="#word"/></clipPath>
-    <mask id="outside" maskUnits="userSpaceOnUse" x="0" y="0" width="{width:.0f}" height="{H}">
-      <rect width="{width:.0f}" height="{H}" fill="#fff"/>
+    <mask id="outside" maskUnits="userSpaceOnUse" x="0" y="0" width="{w}" height="{H}">
+      <rect width="{w}" height="{H}" fill="#fff"/>
       <use href="#word" fill="#000"/>
     </mask>
 
@@ -121,21 +170,31 @@ def svg(theme, word_d, spans, width):
       <stop offset="0" stop-color="{t['body']}" stop-opacity="{t['body_top']}"/>
       <stop offset="1" stop-color="{t['body']}" stop-opacity="{t['body_bottom']}"/>
     </linearGradient>
-    <linearGradient id="fadeg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="{width:.0f}" y2="0">
+
+    <!-- waves fade in from the left and hand over to the solid beam as they converge -->
+    <linearGradient id="wavefade" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="{w}" y2="0">
       <stop offset="0" stop-color="#fff" stop-opacity="0"/>
-      <stop offset="{110/width:.4f}" stop-color="#fff"/>
-      <stop offset="{1 - 150/width:.4f}" stop-color="#fff"/>
+      <stop offset="{fade_in:.4f}" stop-color="#fff"/>
+      <stop offset="{ramp0:.4f}" stop-color="#fff"/>
+      <stop offset="{ramp1:.4f}" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="beamfade" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="{w}" y2="0">
+      <stop offset="{ramp0:.4f}" stop-color="#fff" stop-opacity="0"/>
+      <stop offset="{ramp1:.4f}" stop-color="#fff"/>
+      <stop offset="{fade_out:.4f}" stop-color="#fff"/>
       <stop offset="1" stop-color="#fff" stop-opacity="0"/>
     </linearGradient>
-    <mask id="fade" maskUnits="userSpaceOnUse" x="0" y="0" width="{width:.0f}" height="{H}">
-      <rect width="{width:.0f}" height="{H}" fill="url(#fadeg)"/>
-    </mask>
+    <mask id="wavemask" maskUnits="userSpaceOnUse" x="0" y="0" width="{w}" height="{H}"><rect width="{w}" height="{H}" fill="url(#wavefade)"/></mask>
+    <mask id="beammask" maskUnits="userSpaceOnUse" x="0" y="0" width="{w}" height="{H}"><rect width="{w}" height="{H}" fill="url(#beamfade)"/></mask>
 
-    <g id="beams" fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" style="isolation:isolate">
+    <g id="light">
+      <g fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="{t['wave_alpha']}" mask="url(#wavemask)">
 {strokes}
+      </g>
+      <path d="M0,{beam_y:.1f} H{w}" stroke="{t['beam']}" stroke-width="{t['beam_width']}" stroke-linecap="round" mask="url(#beammask)"/>
     </g>
 
-    <filter id="glow" filterUnits="userSpaceOnUse" x="0" y="0" width="{width:.0f}" height="{H}" color-interpolation-filters="sRGB">
+    <filter id="glow" filterUnits="userSpaceOnUse" x="0" y="0" width="{w}" height="{H}" color-interpolation-filters="sRGB">
       <feGaussianBlur in="SourceGraphic" stdDeviation="{t['glow_wide']}" result="wideRaw"/>
       <feComponentTransfer in="wideRaw" result="wide"><feFuncA type="linear" slope="{t['glow_wide_a']}"/></feComponentTransfer>
       <feGaussianBlur in="SourceGraphic" stdDeviation="{t['glow_tight']}" result="tight"/>
@@ -144,30 +203,18 @@ def svg(theme, word_d, spans, width):
       </feMerge>
     </filter>
 
-    <filter id="glass" filterUnits="userSpaceOnUse" x="0" y="0" width="{width:.0f}" height="{H}" color-interpolation-filters="sRGB">
-      <!-- The chamfer is built from offsets in user units, so it looks the same at any pixel density. -->
+    <filter id="glass" filterUnits="userSpaceOnUse" x="0" y="0" width="{w}" height="{H}" color-interpolation-filters="sRGB">
       <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 30 0" result="mask"/>
 
-      <!-- refraction map: 0.5 grey = flat; each chamfer band pushes toward its own side -->
-      <feOffset in="mask" dx="{CHAMFER}" dy="0" result="sR"/><feComposite in="mask" in2="sR" operator="out" result="bandL"/>
-      <feOffset in="mask" dx="-{CHAMFER}" dy="0" result="sL"/><feComposite in="mask" in2="sL" operator="out" result="bandR"/>
-      <feOffset in="mask" dx="0" dy="{CHAMFER}" result="sD"/><feComposite in="mask" in2="sD" operator="out" result="bandT"/>
-      <feOffset in="mask" dx="0" dy="-{CHAMFER}" result="sU"/><feComposite in="mask" in2="sU" operator="out" result="bandB"/>
-      <feFlood flood-color="rgb(128,128,128)" result="flat"/>
-      <feFlood flood-color="rgb(255,128,128)"/><feComposite in2="bandL" operator="in" result="pushL"/>
-      <feFlood flood-color="rgb(0,128,128)"/><feComposite in2="bandR" operator="in" result="pushR"/>
-      <feFlood flood-color="rgb(128,255,128)"/><feComposite in2="bandT" operator="in" result="pushT"/>
-      <feFlood flood-color="rgb(128,0,128)"/><feComposite in2="bandB" operator="in" result="pushB"/>
-      <feMerge result="rawmap">
-        <feMergeNode in="flat"/><feMergeNode in="pushL"/><feMergeNode in="pushR"/><feMergeNode in="pushT"/><feMergeNode in="pushB"/>
-      </feMerge>
-      <feGaussianBlur in="rawmap" stdDeviation="1.6" result="dmap"/>
+      <!-- refraction map: 0.5 grey = flat, graded pushes toward each edge -->
+      {displacement_map()}
+      <feGaussianBlur in="rawmap" stdDeviation="1.2" result="dmap"/>
       <feDisplacementMap in="SourceGraphic" in2="dmap" scale="{BEND}" xChannelSelector="R" yChannelSelector="G" result="bent"/>
 
       <!-- frost: light scatters inside the block -->
-      <feGaussianBlur in="bent" stdDeviation="1.1" result="frost"/>
-      <feGaussianBlur in="bent" stdDeviation="8" result="scatterRaw"/>
-      <feComponentTransfer in="scatterRaw" result="scatter"><feFuncA type="linear" slope="{t['scatter']}"/></feComponentTransfer>
+      <feGaussianBlur in="bent" stdDeviation="{t['frost']}" result="frost"/>
+      <feGaussianBlur in="bent" stdDeviation="{t['scatter']}" result="scatterRaw"/>
+      <feComponentTransfer in="scatterRaw" result="scatter"><feFuncA type="linear" slope="{t['scatter_a']}"/></feComponentTransfer>
 
       <!-- facets: top-left edges catch light, bottom-right edges take the tint -->
       <feOffset in="mask" dx="{CHAMFER}" dy="{CHAMFER}" result="sTL"/>
@@ -202,23 +249,29 @@ def svg(theme, word_d, spans, width):
   </defs>
 
   <!-- light travelling outside the glass -->
-  <g mask="url(#outside)"><g filter="url(#glow)"><g mask="url(#fade)"><use href="#beams"/></g></g></g>
+  <g mask="url(#outside)"><g filter="url(#glow)"><use href="#light"/></g></g>
 
   <!-- the glass: body tint, plus the same light seen through it -->
   <g filter="url(#glass)">
     <use href="#word" fill="url(#body)"/>
-    <g clip-path="url(#wordclip)"><g filter="url(#glow)"><g mask="url(#fade)"><use href="#beams"/></g></g></g>
+    <g clip-path="url(#wordclip)"><g filter="url(#glow)"><use href="#light"/></g></g>
   </g>
 </svg>
 """
 
 
 def main():
-    out = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else HERE
-    word_d, spans, width = outline_word()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("outdir", nargs="?", default=str(HERE))
+    ap.add_argument("--font", default=str(DEFAULT_FONT))
+    ap.add_argument("--suffix", default="")
+    a = ap.parse_args()
+    out = pathlib.Path(a.outdir)
+    word_d, spans, width, beam_y = outline_word(a.font)
     for theme in THEMES:
-        (out / f"logo-{theme}.svg").write_text(svg(theme, word_d, spans, width))
-        print(f"wrote {out / f'logo-{theme}.svg'}")
+        p = out / f"logo-{theme}{a.suffix}.svg"
+        p.write_text(svg(theme, word_d, spans, width, beam_y))
+        print(f"wrote {p}")
 
 
 if __name__ == "__main__":
