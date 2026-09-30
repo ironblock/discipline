@@ -153,25 +153,32 @@ export interface Tap {
   readonly pending: boolean;
 }
 
+/** A net of the trunk's cables, routed; `pending` when its side calls wait for their slot. */
+export interface TrunkNet extends Routed {
+  readonly pending: boolean;
+}
+
 /**
  * The cables from the trunk as a harness: in the gutter before each slot's
  * column, one net per trunk node, forking to each side call off it in that
- * slot. A net leaves the trunk where its highest cable would have.
+ * slot. A net leaves the trunk where its highest cable would have. Side calls
+ * waiting for their slot make a net of their own, and it says so.
  */
 export function cabling(
   taps: readonly Tap[],
   trunkRight: number,
   gutters: ReadonlyMap<number, { readonly left: number; readonly right: number }>,
   o: Options = HARNESS,
-): Routed[] {
-  const nets = new Map<string, { slot: number; taps: Tap[] }>();
+): TrunkNet[] {
+  const nets = new Map<string, { slot: number; pending: boolean; taps: Tap[] }>();
   for (const tap of taps) {
+    // Its own key, so that a waiting net and one that ran off the same node are two; nothing reads it back.
     const key = `${tap.slot}>${tap.anchor}${tap.pending ? '>pending' : ''}`;
-    const net = nets.get(key) ?? { slot: tap.slot, taps: [] };
+    const net = nets.get(key) ?? { slot: tap.slot, pending: tap.pending, taps: [] };
     net.taps.push(tap);
     nets.set(key, net);
   }
-  return [...gutters].flatMap(([slot, gutter]) =>
+  const laid = [...gutters].flatMap(([slot, gutter]) =>
     lay(
       [...nets].flatMap(([key, net]) =>
         net.slot === slot
@@ -188,6 +195,7 @@ export function cabling(
       o,
     ),
   );
+  return laid.map((net) => ({ ...net, pending: nets.get(net.key)?.pending ?? false }));
 }
 
 /**

@@ -155,6 +155,17 @@ describe('the trunk’s cables, routed as a harness', () => {
     expect(drawn?.dots).toEqual([{ x: 334, y: 115 }]);
   });
 
+  it('says which nets wait for their slot, as a field: nothing reads it from the key', () => {
+    expect(routed.map((r) => [r.key, r.pending])).toEqual(
+      expect.arrayContaining([
+        ['1>a', false],
+        ['1>b>pending', true],
+        ['2>a', false],
+      ]),
+    );
+    expect(routed).toHaveLength(3);
+  });
+
   it('lays a waiting side call’s cable apart, on a track of its own', () => {
     expect(net('1>b>pending')?.x).toBe(326);
   });
