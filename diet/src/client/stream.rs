@@ -1662,29 +1662,95 @@ mod tests {
 
     #[test]
     fn a_progress_frame_missing_a_count_is_not_delivered() {
-        let mut frames = 0;
-        let ended = {
-            let mut raw = String::from("HTTP/1.1 200 OK\r\n\r\n");
-            for data in [
-                r#"{"choices":[{"index":0,"delta":{"role":"assistant","content":null}}],"prompt_progress":{"total":10,"cache":0,"processed":5}}"#,
+        // Each of the four left out in turn: a frame without any one of them
+        // is not a measurement, and none of them is filled in as zero.
+        for missing in ["total", "cache", "processed", "time_ms"] {
+            let mut frame =
+                serde_json::json!({"total": 10, "cache": 0, "processed": 5, "time_ms": 3});
+            frame.as_object_mut().expect("an object").remove(missing);
+            let chunk = format!(
+                r#"{{"choices":[{{"index":0,"delta":{{"role":"assistant","content":null}}}}],"prompt_progress":{frame}}}"#
+            );
+            let pieces = pieces_of(&[
+                &chunk,
                 r#"{"choices":[{"index":0,"delta":{"content":"x"},"finish_reason":"stop"}]}"#,
                 "[DONE]",
-            ] {
-                raw.push_str("data: ");
-                raw.push_str(data);
-                raw.push_str("\n\n");
-            }
-            let mut reading = Reading::default();
-            reading
-                .feed(raw.as_bytes(), usize::MAX, &mut |piece| {
-                    if matches!(piece, Piece::Progress(_)) {
-                        frames += 1;
-                    }
-                })
-                .expect("a well-formed stream")
-        };
+            ]);
+            assert!(
+                !pieces.iter().any(|piece| piece.starts_with("progress")),
+                "a frame with no `{missing}` was delivered: {pieces:?}"
+            );
+        }
+    }
+
+    /// What a stream of these events' data delivers, in order, read by the
+    /// transport's own reader.
+    fn pieces_of(events: &[&str]) -> Vec<String> {
+        let mut raw = String::from("HTTP/1.1 200 OK\r\n\r\n");
+        for data in events {
+            raw.push_str("data: ");
+            raw.push_str(data);
+            raw.push_str("\n\n");
+        }
+        let mut pieces = Vec::new();
+        let mut reading = Reading::default();
+        let ended = reading
+            .feed(raw.as_bytes(), usize::MAX, &mut |piece| {
+                pieces.push(match piece {
+                    Piece::Progress(progress) => format!("progress {}", progress.processed),
+                    Piece::Text(text) => format!("text {text}"),
+                    Piece::Reasoning(text) => format!("reasoning {text}"),
+                });
+            })
+            .expect("a well-formed stream");
         assert!(matches!(ended, Some(Ended::Finished { .. })), "{ended:?}");
-        assert_eq!(frames, 0, "a frame with no `time_ms` is not a measurement");
+        pieces
+    }
+
+    #[test]
+    fn a_chunks_progress_comes_before_that_chunks_text() {
+        // C1's frames ride chunks with no text; this one carries both, and
+        // the count is of the prefill the text follows.
+        assert_eq!(
+            pieces_of(&[
+                r#"{"choices":[{"index":0,"delta":{"content":"x"}}],"prompt_progress":{"total":9,"cache":0,"processed":9,"time_ms":4}}"#,
+                r#"{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#,
+                "[DONE]",
+            ]),
+            ["progress 9", "text x"]
+        );
+    }
+
+    #[test]
+    fn an_error_event_inside_a_stream_is_classified_from_its_typed_field() {
+        // D5's second source: an `error` event in place of the answer. No
+        // capture shows one; the body is C3's error object.
+        let event = r#"data: {"error":{"code":400,"message":"request (262149 tokens) exceeds the available context size (262144 tokens), try increasing it","type":"exceed_context_size_error"}}"#;
+        let stub =
+            Stub::serving(vec![Act::Chunked(vec![format!("{event}\n\n")])]).expect("loopback");
+        let ended = HttpStream::new(endpoint(&stub)).stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |_| panic!("a refusal delivered a piece"),
+        );
+        let Ok(Ended::Rejected { status, class, .. }) = ended else {
+            panic!("not a refusal: {ended:?}");
+        };
+        assert_eq!((status, class), (200, Some(Rejection::ContextOverflow)));
+    }
+
+    #[test]
+    fn a_canned_refusal_is_classified_as_a_served_one_is() {
+        let canned = Canned::new([vec![Step::Reject(
+            400,
+            r#"{"error":{"type":"exceed_context_size_error"}}"#.to_owned(),
+        )]]);
+        let ended = canned.stream(&shape(), deadline(), &Cancel::new(), &mut |_| {});
+        let Ok(Ended::Rejected { class, .. }) = ended else {
+            panic!("not a refusal: {ended:?}");
+        };
+        assert_eq!(class, Some(Rejection::ContextOverflow));
     }
 
     #[test]
