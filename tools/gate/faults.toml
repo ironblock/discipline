@@ -6344,6 +6344,54 @@ failure_class = "client.canned-plays-reasoning-as-text"
 migrated = false
 
 [[fault]]
+id = "client.streaming-body-drops-progress"
+kind = "lane-fault"
+check = "lanes"
+label = "client.streaming-body-drops-progress"
+failure_class = "client.streaming-body-drops-progress"
+migrated = false
+
+[[fault]]
+id = "client.stream-drops-progress"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-drops-progress"
+failure_class = "client.stream-drops-progress"
+migrated = false
+
+[[fault]]
+id = "client.stream-delivers-a-partial-progress-frame"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-delivers-a-partial-progress-frame"
+failure_class = "client.stream-delivers-a-partial-progress-frame"
+migrated = false
+
+[[fault]]
+id = "client.refusal-classified-from-its-message"
+kind = "lane-fault"
+check = "lanes"
+label = "client.refusal-classified-from-its-message"
+failure_class = "client.refusal-classified-from-its-message"
+migrated = false
+
+[[fault]]
+id = "client.stream-refusal-never-classified"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-refusal-never-classified"
+failure_class = "client.stream-refusal-never-classified"
+migrated = false
+
+[[fault]]
+id = "client.canned-drops-progress"
+kind = "lane-fault"
+check = "lanes"
+label = "client.canned-drops-progress"
+failure_class = "client.canned-drops-progress"
+migrated = false
+
+[[fault]]
 id = "client.stream-drops-the-timings-chunk"
 kind = "lane-fault"
 check = "lanes"
