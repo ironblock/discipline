@@ -9,8 +9,8 @@
     </mask>
 
     <linearGradient id="body" gradientUnits="userSpaceOnUse" x1="0" y1="88" x2="0" y2="253">
-      <stop offset="0" stop-color="#cfd8ff" stop-opacity="0.26"/>
-      <stop offset="1" stop-color="#cfd8ff" stop-opacity="0.12"/>
+      <stop offset="0" stop-color="#55608a" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#55608a" stop-opacity="0.22"/>
     </linearGradient>
 
     <!-- waves fade in from the left and hand over to the solid beam as they converge -->
@@ -34,26 +34,26 @@
     <path id="w2" d="M0,125.6 L3,121.9 L6,119.4 L9,118.2 L12,118.4 L15,120.0 L18,123.0 L21,127.2 L24,132.5 L27,138.9 L30,146.1 L33,154.1 L36,162.5 L39,171.2 L42,180.0 L45,188.6 L48,196.9 L51,204.6 L54,211.6 L57,217.7 L60,222.6 L63,226.4 L66,228.9 L69,230.1 L72,229.8 L75,228.2 L78,225.3 L81,221.1 L84,215.8 L87,209.4 L90,202.1 L93,194.2 L96,185.8 L99,177.1 L102,168.3 L105,159.6 L108,151.4 L111,143.6 L114,136.7 L117,130.6 L120,125.6 L123,121.9 L126,119.4 L129,118.2 L132,118.4 L135,120.0 L138,123.0 L141,127.2 L144,132.5 L147,138.9 L150,146.1 L153,154.1 L156,162.5 L159,171.2 L162,180.0 L165,188.6 L168,196.9 L171,204.6 L174,211.6 L177,217.7 L180,222.6 L183,226.4 L186,228.9 L189,230.1 L192,229.8 L195,228.2 L198,225.3 L201,221.1 L204,215.8 L207,209.4 L210,202.1 L213,194.2 L216,185.8 L219,177.1 L222,168.3 L225,159.7 L228,151.4 L231,143.7 L234,136.8 L237,130.9 L240,126.0 L243,122.3 L246,119.8 L249,118.8 L252,119.1 L255,120.8 L258,123.7 L261,127.9 L264,133.3 L267,139.6 L270,146.7 L273,154.5 L276,162.8 L279,171.3 L282,179.8 L285,188.2 L288,196.1 L291,203.5 L294,210.1 L297,215.8 L300,220.4 L303,223.9 L306,226.1 L309,227.0 L312,226.7 L315,225.0 L318,222.1 L321,218.0 L324,212.9 L327,206.8 L330,200.0 L333,192.6 L336,184.8 L339,176.8 L342,168.8 L345,161.0 L348,153.6 L351,146.7 L354,140.6 L357,135.4 L360,131.2 L363,128.0 L366,126.0 L369,125.3 L372,125.7 L375,127.3 L378,130.1 L381,133.9 L384,138.7 L387,144.3 L390,150.5 L393,157.3 L396,164.4 L399,171.7 L402,179.0 L405,186.0 L408,192.7 L411,198.8 L414,204.3 L417,208.9 L420,212.7 L423,215.4 L426,217.1 L429,217.7 L432,217.3 L435,215.7 L438,213.2 L441,209.8 L444,205.5 L447,200.5 L450,194.9 L453,188.9 L456,182.7 L459,176.3 L462,169.9 L465,163.8 L468,158.0 L471,152.7 L474,148.0 L477,144.0 L480,140.8 L483,138.5 L486,137.1 L489,136.7 L492,137.2 L495,138.5 L498,140.8 L501,143.8 L504,147.5 L507,151.8 L510,156.5 L513,161.6 L516,167.0 L519,172.3 L522,177.7 L525,182.8 L528,187.6 L531,192.0 L534,195.9 L537,199.2 L540,201.7 L543,203.6 L546,204.6 L549,204.9 L552,204.5 L555,203.3 L558,201.4 L561,198.9 L564,195.8 L567,192.3 L570,188.4 L573,184.2 L576,179.9 L579,175.6 L582,171.3 L585,167.2 L588,163.4 L591,159.9 L594,156.9 L597,154.4 L600,152.4 L603,151.1 L606,150.3 L609,150.1 L612,150.6 L615,151.6 L618,153.1 L621,155.1 L624,157.5 L627,160.3 L630,163.3 L633,166.5 L636,169.8 L639,173.1 L642,176.3 L645,179.3 L648,182.1 L651,184.7 L654,186.9 L657,188.7 L660,190.1 L663,191.0 L666,191.5 L669,191.5 L672,191.2 L675,190.4 L678,189.2 L681,187.7 L684,185.9 L687,183.9 L690,181.8 L693,179.5 L696,177.2 L699,174.9 L702,172.7 L705,170.6 L708,168.7 L711,167.0 L714,165.5 L717,164.4 L720,163.5 L723,163.0 L726,162.7 L729,162.7 L732,163.1 L735,163.7 L738,164.5 L741,165.5 L744,166.7 L747,168.0 L750,169.4 L753,170.8 L756,172.3 L759,173.7 L762,175.0 L765,176.3 L768,177.4 L771,178.3 L774,179.1 L777,179.8 L780,180.2 L783,180.4 L786,180.5 L789,180.4 L792,180.2 L795,179.8 L798,179.3 L801,178.7 L804,178.0 L807,177.3 L810,176.5 L813,175.8 L816,175.1 L819,174.4 L822,173.7 L825,173.1 L828,172.6 L831,172.2 L834,171.9 L837,171.7 L840,171.6 L843,171.5 L846,171.5 L849,171.6 L852,171.8 L855,172.0 L858,172.3 L861,172.5 L864,172.8 L867,173.1 L870,173.4 L873,173.6 L876,173.9 L879,174.1 L882,174.2 L885,174.4 L888,174.5 L891,174.6 L894,174.6 L897,174.6 L900,174.6 L903,174.6 L906,174.5 L909,174.5 L912,174.4 L915,174.4 L918,174.3 L921,174.3 L924,174.2 L927,174.2 L930,174.2 L933,174.1 L936,174.1 L939,174.1 L942,174.1 L945,174.1 L948,174.1 L951,174.1 L954,174.1 L957,174.1 L960,174.1 L963,174.1 L966,174.1 L969,174.1 L972,174.1 L975,174.1 L978,174.1 L981,174.1 L984,174.1 L987,174.1 L990,174.1 L993,174.1 L996,174.1 L999,174.1 L1002,174.1 L1005,174.1 L1008,174.1 L1011,174.1 L1014,174.1 L1017,174.1 L1020,174.1 L1023,174.1 L1026,174.1 L1029,174.1 L1032,174.1 L1035,174.1 L1038,174.1 L1041,174.1 L1044,174.1 L1047,174.1 L1050,174.1 L1053,174.1 L1056,174.1 L1059,174.1 L1062,174.1 L1065,174.1 L1068,174.1 L1071,174.1 L1074,174.1 L1077,174.1 L1080,174.1 L1083,174.1 L1086,174.1 L1089,174.1 L1092,174.1 L1095,174.1 L1098,174.1 L1101,174.1 L1104,174.1 L1107,174.1 L1110,174.1 L1113,174.1 L1116,174.1 L1119,174.1 L1122,174.1 L1125,174.1 L1128,174.1 L1131,174.1 L1134,174.1 L1137,174.1 L1140,174.1 L1143,174.1 L1146,174.1 L1149,174.1 L1152,174.1 L1155,174.1 L1158,174.1 L1161,174.1 L1164,174.1 L1167,174.1 L1170,174.1 L1173,174.1 L1176,174.1 L1179,174.1 L1182,174.1 L1185,174.1 L1188,174.1 L1191,174.1 L1194,174.1 L1197,174.1 L1200,174.1 L1203,174.1"/>
     <path id="beam" d="M0,174.1 H1200"/>
     <g id="light">
-      <g fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.6" mask="url(#wavemask)">
-        <use href="#w0" stroke="#ffa3b3"/>
-        <use href="#w1" stroke="#a3ffc6"/>
-        <use href="#w2" stroke="#a9c0ff"/>
+      <g fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.33" mask="url(#wavemask)">
+        <use href="#w0" stroke="#e0182d"/>
+        <use href="#w1" stroke="#12b84a"/>
+        <use href="#w2" stroke="#2350e0"/>
       </g>
-      <use href="#beam" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" mask="url(#beammask)"/>
+      <use href="#beam" fill="none" stroke="#0b1020" stroke-width="6" stroke-linecap="round" mask="url(#beammask)"/>
     </g>
     <g id="lightin">
-      <g fill="none" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.6" mask="url(#wavemask)">
-        <use href="#w0" stroke="#ffa3b3"/>
-        <use href="#w1" stroke="#a3ffc6"/>
-        <use href="#w2" stroke="#a9c0ff"/>
+      <g fill="none" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.33" mask="url(#wavemask)">
+        <use href="#w0" stroke="#e0182d"/>
+        <use href="#w1" stroke="#12b84a"/>
+        <use href="#w2" stroke="#2350e0"/>
       </g>
-      <use href="#beam" fill="none" stroke="#ffffff" stroke-width="9" stroke-linecap="round" mask="url(#beammask)"/>
+      <use href="#beam" fill="none" stroke="#0b1020" stroke-width="5.4" stroke-linecap="round" mask="url(#beammask)"/>
     </g>
 
     <filter id="glow" filterUnits="userSpaceOnUse" x="0" y="0" width="1200" height="290" color-interpolation-filters="sRGB">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="9" result="wideRaw"/>
-      <feComponentTransfer in="wideRaw" result="wide"><feFuncA type="linear" slope="1.0"/></feComponentTransfer>
-      <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="tight"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="wideRaw"/>
+      <feComponentTransfer in="wideRaw" result="wide"><feFuncA type="linear" slope="0.22"/></feComponentTransfer>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="0.7" result="tight"/>
       <feMerge>
         <feMergeNode in="wide"/><feMergeNode in="tight"/><feMergeNode in="SourceGraphic"/>
       </feMerge>
@@ -138,37 +138,41 @@
       <feDisplacementMap in="light" in2="dmap" scale="24" xChannelSelector="R" yChannelSelector="G" result="bent"/>
       <!-- frost, then bloom: brighten the light and spread it, further along x than y -->
       <feGaussianBlur in="bent" stdDeviation="1.8" result="frost"/>
-      <feColorMatrix in="bent" type="matrix" values="1.15 0 0 0 0  0 1.15 0 0 0  0 0 1.15 0 0  0 0 0 1.9 0" result="hot"/>
-      <feGaussianBlur in="hot" stdDeviation="6 3.5" result="bloomA0"/>
-      <feComponentTransfer in="bloomA0" result="bloomA"><feFuncA type="linear" slope="0.9"/></feComponentTransfer>
-      <feGaussianBlur in="hot" stdDeviation="26 9" result="bloomB0"/>
-      <feComponentTransfer in="bloomB0" result="bloomB"><feFuncA type="linear" slope="2.1"/></feComponentTransfer>
+      <feColorMatrix in="bent" type="matrix" values="1.0 0 0 0 0  0 1.0 0 0 0  0 0 1.0 0 0  0 0 0 1.0 0" result="hot"/>
+      <feGaussianBlur in="hot" stdDeviation="5 3" result="bloomA0"/>
+      <feComponentTransfer in="bloomA0" result="bloomA"><feFuncA type="linear" slope="0.6"/></feComponentTransfer>
+      <feGaussianBlur in="hot" stdDeviation="20 7" result="bloomB0"/>
+      <feComponentTransfer in="bloomB0" result="bloomB"><feFuncA type="linear" slope="0.6"/></feComponentTransfer>
       <!-- facets: top-left edges catch light, bottom-right edges take the tint -->
       <feOffset in="mask" dx="5" dy="5" result="sTL"/>
       <feComposite in="mask" in2="sTL" operator="out" result="litRaw"/>
       <feGaussianBlur in="litRaw" stdDeviation="0.6" result="litShape"/>
-      <feFlood flood-color="#ffffff" flood-opacity="0.75"/>
+      <feFlood flood-color="#ffffff" flood-opacity="0.95"/>
       <feComposite in2="litShape" operator="in" result="lit"/>
       <feOffset in="mask" dx="-5" dy="-5" result="sBR"/>
       <feComposite in="mask" in2="sBR" operator="out" result="shadeRaw"/>
       <feGaussianBlur in="shadeRaw" stdDeviation="0.6" result="shadeShape"/>
-      <feFlood flood-color="#8a7dff" flood-opacity="0.5"/>
+      <feFlood flood-color="#1c2340" flood-opacity="0.6"/>
       <feComposite in2="shadeShape" operator="in" result="shade"/>
       <!-- every side is chamfered; near a beam, the chamfer takes its colour -->
       <feMorphology in="mask" operator="erode" radius="5" result="core"/>
       <feComposite in="mask" in2="core" operator="out" result="edgeShape"/>
-      <feFlood flood-color="#ffffff" flood-opacity="0.16"/>
+      <feFlood flood-color="#1c2340" flood-opacity="0.14"/>
       <feComposite in2="edgeShape" operator="in" result="edge"/>
       <feComposite in="bloomA" in2="edgeShape" operator="in" result="catchRaw"/>
-      <feComponentTransfer in="catchRaw" result="catch"><feFuncA type="linear" slope="2.8"/></feComponentTransfer>
+      <feComponentTransfer in="catchRaw" result="catch"><feFuncA type="linear" slope="1.0"/></feComponentTransfer>
       <!-- hairline rim -->
       <feMorphology in="mask" operator="erode" radius="0.9" result="inner"/>
       <feComposite in="mask" in2="inner" operator="out" result="rimShape"/>
-      <feFlood flood-color="#ffffff" flood-opacity="0.35"/>
+      <feFlood flood-color="#1c2340" flood-opacity="0.55"/>
       <feComposite in2="rimShape" operator="in" result="rim"/>
       <feMerge result="inside"><feMergeNode in="bloomB"/><feMergeNode in="frost"/><feMergeNode in="bloomA"/><feMergeNode in="catch"/><feMergeNode in="edge"/><feMergeNode in="shade"/><feMergeNode in="lit"/><feMergeNode in="rim"/></feMerge>
       <feComposite in="inside" in2="mask" operator="in" result="insideClip"/>
-      <feMerge><feMergeNode in="insideClip"/></feMerge>
+      <!-- light spilled by the glass lands on the page, down-right of the letters -->
+      <feOffset in="bloomB" dx="12" dy="14" result="castRaw"/>
+      <feComposite in="castRaw" in2="mask" operator="out" result="castOut"/>
+      <feComponentTransfer in="castOut" result="cast"><feFuncA type="linear" slope="0.4"/></feComponentTransfer>
+      <feMerge><feMergeNode in="cast"/><feMergeNode in="insideClip"/></feMerge>
     </filter>
   </defs>
 

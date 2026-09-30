@@ -168,7 +168,11 @@
       <feComposite in2="rimShape" operator="in" result="rim"/>
       <feMerge result="inside"><feMergeNode in="bloomB"/><feMergeNode in="frost"/><feMergeNode in="bloomA"/><feMergeNode in="catch"/><feMergeNode in="edge"/><feMergeNode in="shade"/><feMergeNode in="lit"/><feMergeNode in="rim"/></feMerge>
       <feComposite in="inside" in2="mask" operator="in" result="insideClip"/>
-      <feMerge><feMergeNode in="insideClip"/></feMerge>
+      <!-- light spilled by the glass lands on the page, down-right of the letters -->
+      <feOffset in="bloomB" dx="12" dy="14" result="castRaw"/>
+      <feComposite in="castRaw" in2="mask" operator="out" result="castOut"/>
+      <feComponentTransfer in="castOut" result="cast"><feFuncA type="linear" slope="0.55"/></feComponentTransfer>
+      <feMerge><feMergeNode in="cast"/><feMergeNode in="insideClip"/></feMerge>
     </filter>
   </defs>
 

@@ -3,7 +3,11 @@
 `logo-dark.svg` and `logo-light.svg` are generated. Edit `build.py`, not the SVGs:
 
     pip install fonttools brotli   # brotli only needed for woff2 fonts
-    python3 logo/build.py
+    python3 logo/build.py            # the default variant -> logo/logo-{dark,light}.svg
+    python3 logo/build.py --options  # every variant -> logo/options/ (with a README to view them)
+
+The build fails if a filter input or `url(#id)` refers to something that does not exist;
+browsers silently ignore those, so they would otherwise show up only as a visual glitch.
 
 Typeface: Barlow Black (`font/`, SIL OFL 1.1, license text alongside). The word is
 outlined into paths because GitHub renders README SVGs through `<img>`, which cannot
