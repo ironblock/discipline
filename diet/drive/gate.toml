@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 128
+faults = 133
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -972,6 +972,7 @@ catches = [
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_failed_call_is_typed_and_leaves_the_trunk_alone",
+    "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
     "drive::session::tests::a_real_sessions_whole_log_is_a_v0_log",
     "drive::session::tests::a_refused_commands_gap_is_neither_logged_nor_closed_and_the_admitted_one_carries_it",
     "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
@@ -979,6 +980,8 @@ catches = [
     "drive::session::tests::a_turn_the_server_refused_is_logged_as_refused_and_leaves_the_trunk_alone",
     "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
     "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
+    "drive::session::tests::an_overflow_is_request_failed_context_overflow_and_the_turn_failed",
+    "drive::session::tests::progress_is_logged_before_the_first_delta_and_never_after_the_end",
     "drive::session::tests::the_log_is_numbered_by_position_and_a_reader_can_resume_from_any_point",
 ]
 
@@ -988,14 +991,23 @@ failure_class = "drive.session-a-rejected-ask-joins-the-trunk"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-        Ok(StreamEnded::Rejected { status, body, .. }) => {
+        Ok(StreamEnded::Rejected {
+            status,
+            body,
+            class,
+        }) => {
             state.push(Event::Rejected {'''
 becomes = '''
-        Ok(StreamEnded::Rejected { status, body, .. }) => {
+        Ok(StreamEnded::Rejected {
+            status,
+            body,
+            class,
+        }) => {
             state.trunk.push(Message::new(Role::User, ask));
             state.push(Event::Rejected {'''
 catches = [
     "drive::session::tests::a_turn_the_server_refused_is_logged_as_refused_and_leaves_the_trunk_alone",
+    "drive::session::tests::an_overflow_is_request_failed_context_overflow_and_the_turn_failed",
 ]
 
 [[fault]]
@@ -1085,12 +1097,14 @@ becomes = '''
                         text: text.to_owned(),'''
 catches = [
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
+    "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
     "drive::session::tests::a_real_sessions_whole_log_is_a_v0_log",
     "drive::session::tests::a_refused_commands_gap_is_neither_logged_nor_closed_and_the_admitted_one_carries_it",
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
     "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
     "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
     "drive::session::tests::every_call_is_a_request_and_what_it_produced_names_it",
+    "drive::session::tests::progress_is_logged_before_the_first_delta_and_never_after_the_end",
 ]
 
 [[fault]]
@@ -1507,11 +1521,12 @@ failure_class = "drive.session-reasoning-left-off-the-trunk"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-            answer.reasoning = (!reasoning.is_empty()).then_some(reasoning);'''
+            answer.reasoning.clone_from(&reasoning);'''
 becomes = '''
-            let _ = reasoning;'''
+            let _ = &reasoning;'''
 catches = [
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
+    "drive::session::tests::the_responses_reasoning_is_its_deltas_byte_for_byte",
 ]
 
 [[fault]]
@@ -1520,11 +1535,12 @@ failure_class = "drive.session-reasoning-trimmed"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-            answer.reasoning = (!reasoning.is_empty()).then_some(reasoning);'''
+            let reasoning = (!reasoning.is_empty()).then_some(reasoning);'''
 becomes = '''
-            answer.reasoning = (!reasoning.is_empty()).then(|| reasoning.trim_end().to_owned());'''
+            let reasoning = (!reasoning.is_empty()).then(|| reasoning.trim_end().to_owned());'''
 catches = [
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
+    "drive::session::tests::the_responses_reasoning_is_its_deltas_byte_for_byte",
 ]
 
 [[fault]]
@@ -2053,4 +2069,81 @@ catches = [
     "drive::canned::tests::every_registered_canned_digest_is_acts_this_crate_keeps",
     "drive::canned::tests::the_first_registered_acts_still_hash_to_their_registered_digest",
     "drive::canned::tests::the_regimen_names_the_substrate_that_plays_these_acts",
+]
+
+[[fault]]
+id = "drive.session-drops-timings"
+failure_class = "drive.session-drops-timings"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+                reasoning,
+                timings,
+            });'''
+becomes = '''
+                reasoning,
+                timings: None,
+            });'''
+catches = [
+    "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
+]
+
+[[fault]]
+id = "drive.session-response-reasoning-dropped"
+failure_class = "drive.session-response-reasoning-dropped"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+                finish_reason,
+                reasoning,
+                timings,
+            });'''
+becomes = '''
+                finish_reason,
+                reasoning: None,
+                timings,
+            });'''
+catches = [
+    "drive::session::tests::the_responses_reasoning_is_its_deltas_byte_for_byte",
+]
+
+[[fault]]
+id = "drive.session-drops-progress"
+failure_class = "drive.session-drops-progress"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+                Piece::Progress(progress) => Event::Progress { request, progress },'''
+becomes = '''
+                Piece::Progress(_) => return,'''
+catches = [
+    "drive::session::tests::progress_is_logged_before_the_first_delta_and_never_after_the_end",
+]
+
+[[fault]]
+id = "drive.session-overflow-logged-as-server"
+failure_class = "drive.session-overflow-logged-as-server"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+                Some(Rejection::ContextOverflow) => log::FailReason::ContextOverflow,'''
+becomes = '''
+                Some(Rejection::ContextOverflow) => log::FailReason::Server,'''
+catches = [
+    "drive::session::tests::an_overflow_is_request_failed_context_overflow_and_the_turn_failed",
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
+]
+
+[[fault]]
+id = "drive.session-a-timings-line-drops-the-cache-count"
+failure_class = "drive.session-a-timings-line-drops-the-cache-count"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        cache_n: timings.cache_n,'''
+becomes = '''
+        cache_n: None,'''
+catches = [
+    "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
 ]
