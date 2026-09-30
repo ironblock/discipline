@@ -964,7 +964,6 @@ export const CopySaysSo: Story = {
   render: () => <Copy text="cargo test --all" />,
   play: async ({ canvasElement }) => {
     const clipboard = navigator.clipboard;
-    const writeText = clipboard.writeText.bind(clipboard);
     const button = canvasElement.querySelector('button') as HTMLButtonElement;
     let written: string | undefined;
     try {
@@ -977,7 +976,8 @@ export const CopySaysSo: Story = {
       await userEvent.click(button);
       await waitFor(async () => expect(button.textContent).toBe('not copied'));
     } finally {
-      clipboard.writeText = writeText;
+      // The stand-in was an own property over the prototype's method: removing it restores the real one.
+      delete (clipboard as { writeText?: unknown }).writeText;
     }
   },
 };

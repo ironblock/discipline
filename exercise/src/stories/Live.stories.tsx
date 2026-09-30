@@ -42,7 +42,8 @@ export const Driven: Story = {
     const before = blocks();
     await userEvent.type(canvasElement.querySelector('textarea') as HTMLTextAreaElement, 'Where is the output format decided?{Enter}');
     await waitFor(async () => expect(says(canvasElement)).not.toBe('your turn'));
-    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'), { timeout: 20_000 });
+    // Under the browser project's 15 s test timeout, so a turn that never settles fails here, saying so.
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'), { timeout: 10_000 });
     await expect(blocks()).toBeGreaterThan(before + 1);
     await expect(canvasElement.querySelector('.ex-trunk [data-tone="assistant"]')).not.toBeNull();
   },

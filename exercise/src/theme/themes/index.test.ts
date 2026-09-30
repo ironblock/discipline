@@ -13,14 +13,18 @@ describe('the themes a person chooses between', () => {
   it('has, for every theme it names, a stylesheet that styles that theme and is imported here', () => {
     const index = read('index.ts');
     for (const theme of THEMES) {
-      expect(read(`${theme}.css`), theme).toContain(`[data-theme='${theme}']`);
+      expect(read(`${theme}.css`), theme).toMatch(new RegExp(`\\[data-theme=(['"])${theme}\\1\\]`));
       expect(index, theme).toContain(`import './${theme}.css';`);
     }
   });
 
-  it('has a palette for every mode: dark is the default (tokens.css), light its own file', () => {
+  it('has a palette for every mode: dark is the default (tokens.css), light its own file, and they differ', () => {
     expect(MODES).toEqual(['dark', 'light']);
-    expect(read('light.css')).toContain(`[data-mode='light']`);
-    expect(read('../tokens.css')).toMatch(/:root\s*\{/);
+    const page = (css: string) => /--page:\s*([^;]+);/.exec(css)?.[1];
+    const light = read('light.css');
+    expect(light).toMatch(/\[data-mode=(['"])light\1\]/);
+    expect(page(read('../tokens.css'))).toBeDefined();
+    expect(page(light)).toBeDefined();
+    expect(page(light)).not.toBe(page(read('../tokens.css')));
   });
 });

@@ -19,12 +19,12 @@ describe('a duration, as the stats print it', () => {
 });
 
 describe('the other numbers the surface prints', () => {
-  it('took: milliseconds, then tenths of a second, then minutes with padded seconds', () => {
-    expect([took(999), took(1_000), took(59_950), took(60_000), took(125_000)]).toEqual(['999 ms', '1.0 s', '60.0 s', '1m 00s', '2m 05s']);
+  it('took: milliseconds, then tenths of a second, then minutes with padded seconds -- never a unit’s upper bound', () => {
+    expect([took(999), took(1_000), took(59_940), took(59_950), took(60_000), took(125_000)]).toEqual(['999 ms', '1.0 s', '59.9 s', '1m 00s', '1m 00s', '2m 05s']);
   });
 
   it('tokens: whole under a thousand, one decimal under ten thousand, then tenths of a thousand', () => {
-    expect([tokens(999), tokens(1_512), tokens(18_009), tokens(123_456)]).toEqual(['999', '1.5k', '18k', '123.5k']);
+    expect([tokens(999), tokens(1_512), tokens(9_949), tokens(9_999), tokens(18_009), tokens(123_456)]).toEqual(['999', '1.5k', '9.9k', '10k', '18k', '123.5k']);
   });
 
   it('count: grouped by thousands', () => {
@@ -39,7 +39,7 @@ describe('the other numbers the surface prints', () => {
     expect([bytes(''), bytes('é'), bytes('x'.repeat(2_048)), bytes('x'.repeat(3 * 1024 * 1024))]).toEqual(['0 B', '2 B', '2.0 KB', '3.0 MB']);
   });
 
-  it('lines: none in nothing, one more than there are newlines otherwise', () => {
-    expect([lines(''), lines('a'), lines('a\nb'), lines('a\n')]).toEqual([0, 1, 2, 2]);
+  it('lines: as `wc -l` would count a file that ends its last line -- a trailing newline ends a line, it does not start one', () => {
+    expect([lines(''), lines('a'), lines('a\nb'), lines('a\n'), lines('a\nb\n'), lines('\n')]).toEqual([0, 1, 2, 1, 2, 1]);
   });
 });
