@@ -11,13 +11,19 @@ workflow requirements this application expresses, not the other way round.
 ## What is here: R1, the surface
 
 ```
-pnpm install
-pnpm dev              # the harness on the canned transport, http://localhost:5173 (?speed=4 to hurry it)
-pnpm storybook        # the surface at every moment of the specimen, http://localhost:6006
-pnpm verify           # typecheck, lint, unit tests, every story as a browser test
-pnpm perf             # a performance trace: frames, long frames, layout, style, script, a profile (--ablate, --css)
-pnpm build:replay     # the replay page for Pages (#32), into ../_site/replay/
+npx pnpm@11.20.0 -C exercise install
+npx pnpm@11.20.0 -C exercise dev           # the harness on the canned transport, http://localhost:5173 (?speed=4 to hurry it)
+npx pnpm@11.20.0 -C exercise storybook     # the surface at every moment of the specimen, http://localhost:6006
+npx pnpm@11.20.0 -C exercise verify        # typecheck, lint, unit tests, every story as a browser test
+npx pnpm@11.20.0 -C exercise perf          # a performance trace: frames, long frames, layout, style, script, a profile (--ablate, --css)
+npx pnpm@11.20.0 -C exercise build:replay  # the replay page for Pages (#32), into _site/replay/
 ```
+
+Every line here runs from the repository root. pnpm is pinned in
+`package.json` (`packageManager`), and the lines run that version through
+`npx`: a pnpm at another version switches to the pinned one by itself, and on
+an Intel Mac that switch fails (#194). The repository's `exercise` check runs
+it the same way.
 
 **The replay page** (#32, `replay.html`, `src/replay.tsx`) is the surface
 built for GitHub Pages: a recorded session replayed from this origin, with
@@ -28,7 +34,7 @@ since its side calls were written after the session, and the page says so.
 Each published recording is a file of its own beside the page,
 `data/<name>.js`, and carries its **admission** beside it in the tree:
 `src/drive/recorded/<name>.admission.json`, written by
-`python3 scripts/admission.py admit <name>`. The admission names the table
+`python3 exercise/scripts/admission.py admit <name>`. The admission names the table
 it was admitted under -- a snapshot of the genesis table, written once into
 `scripts/` as `hygiene-admitted-<id>-patterns.tsv` and its siblings -- with
 the snapshot's digests, the recording's own digest, and its scrub. A recording
@@ -41,27 +47,22 @@ each against its admission. `scripts/replay-smoke.mjs` opens the built
 page under a path, as Pages serves it, and loads a recording through its real
 path.
 
-pnpm is pinned in `package.json` (`packageManager`). A pnpm at another
-version switches to the pinned one by itself, and on an Intel Mac that switch
-fails (#194): run the pinned one directly instead, `npx pnpm@11.20.0 install`
-and so on. The repository's `exercise` check does exactly that.
-
 **Driving `diet`.** `?drive` drives `diet`'s own session, served over HTTP
 by `diet-drive serve` (#140; `src/drive/http.ts`). The page reaches it
 same-origin through the dev server's proxy:
 
 ```
-cargo build --bin diet-drive                                   # from diet/
+cargo build -p discipline-diet --bin diet-drive
 target/debug/diet-drive serve --endpoint <llama-server>/v1/chat/completions \
     --model <name> --head <file> --port 7801 --allow-origin http://localhost:5173
-DIET_DRIVE=http://127.0.0.1:7801 pnpm dev                      # then open /?drive
+DIET_DRIVE=http://127.0.0.1:7801 npx pnpm@11.20.0 -C exercise dev   # then open /?drive
 ```
 
-With no model at hand, `node scripts/model-stand-in.mjs` is one: every
+With no model at hand, `node exercise/scripts/model-stand-in.mjs` is one: every
 request answered with `diet`'s own captured llama-server reply, byte for
 byte (a random-weight model, so the words are noise), at
 `http://127.0.0.1:7901/v1/chat/completions`, with
-`scripts/model-stand-in.head.txt` as the head.
+`exercise/scripts/model-stand-in.head.txt` as the head.
 
 `pnpm perf` (`scripts/perf.mjs`) drives a production build in headless
 Chromium through three sessions -- the kitchen sink, `first-drive` and
