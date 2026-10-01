@@ -25,6 +25,7 @@ These are captures C0–C5 of R3's plan (on #117), taken 2026-09-29 from 02:09:4
 | C3, overflow | `diet/client/fixtures/llama-server-e7051ef-context-overflow.http` | `634e1ce4…` |
 | C4 | not taken: its condition, no progress frames in C1, did not hold | — |
 | C5, unstreamed | `diet/client/fixtures/llama-server-e7051ef-unstreamed.http` | `d9d2e92e…` |
+| C0b, build id (2026-10-01) | `build-info.json`, `build-info.raw` (one GET `/props`, occupying no slot) | `18033075…` |
 
 ## C0: the limits
 
@@ -73,3 +74,18 @@ What the reply does not carry, or carries twice:
 - **`prompt_n_cached` is absent**, as #156 found from the earlier captures.
 - **There is no `generation_settings`** in the chat reply, so the dialect's `sampler_echo` has nothing to read here.
 - `usage.prompt_tokens_details.cached_tokens` (42) duplicates `cache_n`.
+
+## C0b: the build id, taken later (2026-10-01)
+
+One read-only GET `/props` was made at 2026-10-01T03:06:11Z by `capture_c0b.py` against the production server of the same substrate. It relaunched nothing and changed nothing.
+
+- **What is kept.**
+  - `build_info`'s JSON token as received is in `build-info.raw`: `"b8-e486f80"`, 12 bytes, sha256 `cdee465ac3cfba84e14389b7d8eb9c22c8707449b9517dd7c7c7b4e70661e366`.
+  - Its decoded value `b8-e486f80` is 10 bytes, sha256 `f8a339722b87d1c1e1c77107ed73bfd74da8cbbbea252d6e965f58a5af6a3d17`.
+  - The full response is not kept, because it carries the model path. Only its digest and size are recorded in `build-info.json`.
+- **No other key carries a build or commit id.** At any depth of `/props`, no key name contains `build` or `commit`, and no string value is commit-shaped.
+- **This is not the engine of C0-C5.**
+  - C0-C5 ran on instance `2026-09-28`, engine `e7051ef`, which reports itself as `b7-e7051ef`.
+  - At C0b, production reports `b8-e486f80`. That commit is one commit on top of `e7051ef`: a fix to QSA bias indexing when a unified cache holds several sequences, 1 file changed.
+  - The running binary's sha256 is `f316bc7f…`, not the registry's `41e6591d…`. Production was rebuilt and relaunched on 2026-09-30.
+  - C0b is therefore a receipt for the engine running on 2026-10-01. It is not evidence about C0-C5. The registry row is not changed here.
