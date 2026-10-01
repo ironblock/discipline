@@ -1,0 +1,18 @@
+{
+ "captured": "2026-10-01T03:06:11Z",
+ "request": "GET /props",
+ "http_status": 200,
+ "response_bytes": 12164,
+ "response_sha256": "180330750756307e5bb890bb8710dd2c539a4e74da686f65857e2d4b07e4cc0c",
+ "build_info": {
+  "present": true,
+  "type": "str",
+  "json_token_raw": "\"b8-e486f80\"",
+  "json_token_bytes": 12,
+  "json_token_sha256": "cdee465ac3cfba84e14389b7d8eb9c22c8707449b9517dd7c7c7b4e70661e366",
+  "value_utf8_bytes": 10,
+  "value_utf8_sha256": "f8a339722b87d1c1e1c77107ed73bfd74da8cbbbea252d6e965f58a5af6a3d17",
+  "value": "b8-e486f80"
+ },
+ "other_build_or_commit_keys": []
+}
