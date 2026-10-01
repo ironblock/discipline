@@ -14,7 +14,7 @@
 //! diet has no TOML reader (the regimen is its own format), and this reads
 //! the registry the way #162's registry tests do. By rule, every field read
 //! here stays a one-line `key = "value"` string -- `equipment`,
-//! `engine_name`, `engine_identity`, `engine_commit`, `weights_kind`,
+//! `engine_name`, `engine_identity`, `engine_commit`, `engine_build_info`, `weights_kind`,
 //! `weights_acts_sha256`, `weights_main` and `hardware_fingerprint` -- and a
 //! field written another way is not read. A one-line LIST is recorded as a
 //! list, never mistaken for an absent key, because a list is exactly what a
@@ -114,6 +114,10 @@ pub struct Identity {
     /// The serving checkout's commit, when the registry records one: what an
     /// endpoint's own report of its build is compared against.
     pub engine_commit: Option<String>,
+    /// The `build_info` the server reports, exactly, when it names no commit
+    /// (a prebuilt release reports `b0-unknown-dirty`): declared so the
+    /// engine check can compare the literal (#157, amended 2026-10-01).
+    pub engine_build_info: Option<String>,
     /// The chat template's digest, when the registry declares one.
     pub chat_template_sha256: Option<String>,
 }
@@ -172,6 +176,7 @@ pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
         weights,
         hardware_fingerprint,
         engine_commit: table.strings.get("engine_commit").cloned(),
+        engine_build_info: table.strings.get("engine_build_info").cloned(),
         chat_template_sha256: table.strings.get("chat_template_sha256").cloned(),
     })
 }

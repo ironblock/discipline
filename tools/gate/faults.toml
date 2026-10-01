@@ -934,12 +934,84 @@ legacy_signature = "error TS2322"
 migrated = false
 
 [[fault]]
-id = "exercise.exercise_story_assertion"
+id = "exercise.exercise_published_list_carries_authored_session"
 kind = "seeded-gate"
 check = "exercise"
-label = "a story's assertion broken in place"
-failure_class = "exercise.story"
-legacy_signature = "expected '2\\.0' to be '2\\.1'"
+label = "an authored session on the published list"
+failure_class = "exercise.replay-published"
+legacy_signature = "FAIL.*published\\.test\\.ts.*publishes the three recorded whole, and never an authored session"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_recording_corrupt_event"
+kind = "seeded-gate"
+check = "exercise"
+label = "a published recording's event with no kind"
+failure_class = "exercise.replay-recording"
+legacy_signature = "exercise/src/drive/recorded/step-limit\\.json: not a recording: event 0 has no kind or time"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_shell_carries_network_call"
+kind = "seeded-gate"
+check = "exercise"
+label = "a network call in the replay page's shell"
+failure_class = "exercise.replay-shell"
+legacy_signature = "hygiene: network-call: _site/replay/assets/"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_modulepreload_polyfill_on"
+kind = "seeded-gate"
+check = "exercise"
+label = "the modulepreload polyfill back on"
+failure_class = "exercise.replay-shell"
+legacy_signature = "hygiene: network-call: _site/replay/assets/"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_payload_carries_credential"
+kind = "seeded-gate"
+check = "exercise"
+label = "a credential shape in a published recording"
+failure_class = "exercise.replay-payload"
+legacy_signature = "hygiene: github-token: _site/replay/data/step-limit\\.js"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_recording_edited_after_admission"
+kind = "seeded-gate"
+check = "exercise"
+label = "a published recording edited after admission"
+failure_class = "exercise.replay-admission"
+legacy_signature = "admission: exercise/src/drive/recorded/step-limit\\.json: edited since it was admitted"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_replay_loads_beside_its_bundle"
+kind = "seeded-gate"
+check = "exercise"
+label = "the recording loaded beside the bundle"
+failure_class = "exercise.replay-load"
+legacy_signature = "replay-smoke: step-limit did not load"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_admitted_table_edited"
+kind = "seeded-gate"
+check = "exercise"
+label = "a published recording's admitted table edited"
+failure_class = "exercise.replay-admission"
+legacy_signature = "admission: exercise/src/drive/recorded/[a-z-]+\\.json: its admitted table scripts/hygiene-admitted-[0-9a-f]{12}-patterns\\.tsv is not the one admitted"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_published_without_admission"
+kind = "seeded-gate"
+check = "exercise"
+label = "a published recording with no admission"
+failure_class = "exercise.replay-admission"
+legacy_signature = "expected \\[ 'step-limit' \\] to deeply equal \\[\\]"
 migrated = false
 
 [[fault]]
@@ -7254,6 +7326,174 @@ failure_class = "drive.serve-bin-announces-no-registry-digest"
 migrated = false
 
 [[fault]]
+id = "client.props-asked-under-the-endpoints-path"
+kind = "lane-fault"
+check = "lanes"
+label = "client.props-asked-under-the-endpoints-path"
+failure_class = "client.props-asked-under-the-endpoints-path"
+migrated = false
+
+[[fault]]
+id = "drive.engine-passes-a-dirty-build"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-passes-a-dirty-build"
+failure_class = "drive.engine-passes-a-dirty-build"
+migrated = false
+
+[[fault]]
+id = "drive.engine-takes-a-short-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-takes-a-short-commit"
+failure_class = "drive.engine-takes-a-short-commit"
+migrated = false
+
+[[fault]]
+id = "drive.engine-passes-another-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-passes-another-commit"
+failure_class = "drive.engine-passes-another-commit"
+migrated = false
+
+[[fault]]
+id = "drive.engine-accepts-a-malformed-registered-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-accepts-a-malformed-registered-commit"
+failure_class = "drive.engine-accepts-a-malformed-registered-commit"
+migrated = false
+
+[[fault]]
+id = "drive.engine-asks-before-the-registry-refuses"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-asks-before-the-registry-refuses"
+failure_class = "drive.engine-asks-before-the-registry-refuses"
+migrated = false
+
+[[fault]]
+id = "drive.engine-reads-a-refused-props"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-reads-a-refused-props"
+failure_class = "drive.engine-reads-a-refused-props"
+migrated = false
+
+[[fault]]
+id = "drive.engine-checks-a-canned-substrate"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-checks-a-canned-substrate"
+failure_class = "drive.engine-checks-a-canned-substrate"
+migrated = false
+
+[[fault]]
+id = "drive.engine-compares-the-commit-before-the-literal"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-compares-the-commit-before-the-literal"
+failure_class = "drive.engine-compares-the-commit-before-the-literal"
+migrated = false
+
+[[fault]]
+id = "drive.engine-passes-another-literal"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-passes-another-literal"
+failure_class = "drive.engine-passes-another-literal"
+migrated = false
+
+[[fault]]
+id = "drive.engine-accepts-an-empty-literal"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-accepts-an-empty-literal"
+failure_class = "drive.engine-accepts-an-empty-literal"
+migrated = false
+
+[[fault]]
+id = "drive.engine-names-both-paths-alike"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-names-both-paths-alike"
+failure_class = "drive.engine-names-both-paths-alike"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-skips-the-engine-check"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-skips-the-engine-check"
+failure_class = "drive.serve-bin-skips-the-engine-check"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-binds-before-the-engine-check"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-binds-before-the-engine-check"
+failure_class = "drive.serve-bin-binds-before-the-engine-check"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-no-engine-build"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-no-engine-build"
+failure_class = "drive.serve-bin-announces-no-engine-build"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-no-engine-identity"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-no-engine-identity"
+failure_class = "drive.serve-bin-announces-no-engine-identity"
+migrated = false
+
+[[fault]]
+id = "drive.engine-accepts-a-non-hex-registered-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-accepts-a-non-hex-registered-commit"
+failure_class = "drive.engine-accepts-a-non-hex-registered-commit"
+migrated = false
+
+[[fault]]
+id = "drive.engine-echoes-the-whole-body"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-echoes-the-whole-body"
+failure_class = "drive.engine-echoes-the-whole-body"
+migrated = false
+
+[[fault]]
+id = "drive.engine-refusal-omits-what-was-expected"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-refusal-omits-what-was-expected"
+failure_class = "drive.engine-refusal-omits-what-was-expected"
+migrated = false
+
+[[fault]]
+id = "drive.engine-calls-no-commit-a-suffix"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-calls-no-commit-a-suffix"
+failure_class = "drive.engine-calls-no-commit-a-suffix"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+failure_class = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+migrated = false
+
+[[fault]]
 id = "drive.session-drops-timings"
 kind = "lane-fault"
 check = "lanes"
@@ -7316,3 +7556,12 @@ check = "lanes"
 label = "adapters.compaction-read-as-a-turn"
 failure_class = "adapters.compaction-read-as-a-turn"
 migrated = false
+[[fault]]
+id = "exercise.exercise_story_assertion"
+kind = "seeded-gate"
+check = "exercise"
+label = "a story's assertion broken in place"
+failure_class = "exercise.story"
+legacy_signature = "expected '2\\.0' to be '2\\.1'"
+migrated = false
+
