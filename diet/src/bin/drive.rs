@@ -317,6 +317,12 @@ fn announcement(listening: &str, opened: u64, substrate: Option<&str>) -> String
     ]);
     if let Some(substrate) = substrate {
         fields.insert("substrate".to_owned(), Value::String(substrate.to_owned()));
+        // Which registry answered (#204): its text's digest, for a reader
+        // who has this line and not the binary.
+        fields.insert(
+            "registry_sha256".to_owned(),
+            Value::String(diet::drive::registry::registry_sha256()),
+        );
     }
     let mut out = String::new();
     json::render(&Value::Object(fields), &mut out);

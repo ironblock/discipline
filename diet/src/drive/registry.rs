@@ -28,6 +28,13 @@ use crate::formats::record::{Engine, Weights};
 /// so a binary and the registry it resolves against cannot be two files.
 pub const REGISTRY: &str = include_str!("../../../substrates/registry.toml");
 
+/// The sha256 of [`REGISTRY`]'s text: which registry answered, for a reader
+/// who has the record and not the binary (ruled on #204).
+#[must_use]
+pub fn registry_sha256() -> String {
+    crate::digest::sha256_hex(REGISTRY.as_bytes())
+}
+
 /// One `[kind.id]` table, as the scan reads it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Table {
@@ -52,11 +59,24 @@ pub fn tables(document: &str) -> BTreeMap<String, Table> {
         if in_long_string {
             continue;
         }
-        if let Some(name) = line
-            .strip_prefix('[')
-            .and_then(|rest| rest.strip_suffix(']'))
-        {
-            name.clone_into(&mut current);
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            // A header, read strictly: a trailing comment and surrounding
+            // space are allowed, and quotes around an id are dropped
+            // (`[substrate."bge-small-en-v1.5"]`). One it cannot read gets a
+            // table of its own, so the keys under it are never filed under
+            // the table before it.
+            let header = trimmed
+                .split_once('#')
+                .map_or(trimmed, |(header, _)| header)
+                .trim();
+            current = header
+                .strip_prefix('[')
+                .and_then(|rest| rest.strip_suffix(']'))
+                .map_or_else(
+                    || format!("<unreadable header: {trimmed}>"),
+                    |name| name.replace('"', ""),
+                );
             continue;
         }
         if let Some((key, _)) = line.split_once(" = [") {
@@ -94,6 +114,8 @@ pub struct Identity {
     /// The serving checkout's commit, when the registry records one: what an
     /// endpoint's own report of its build is compared against.
     pub engine_commit: Option<String>,
+    /// The chat template's digest, when the registry declares one.
+    pub chat_template_sha256: Option<String>,
 }
 
 /// The identity the registry in `document` gives substrate `id`.
@@ -150,6 +172,7 @@ pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
         weights,
         hardware_fingerprint,
         engine_commit: table.strings.get("engine_commit").cloned(),
+        chat_template_sha256: table.strings.get("chat_template_sha256").cloned(),
     })
 }
 
@@ -205,6 +228,58 @@ mod tests {
         assert!(
             refused.contains("list of shards") && refused.contains("#92"),
             "{refused}"
+        );
+    }
+
+    #[test]
+    fn a_registered_substrates_commit_and_chat_template_are_read() {
+        let id = "accel24-llamacpp-qwen38-27b-iq3s";
+        let table = &tables(REGISTRY)[&format!("substrate.{id}")];
+        let found = identity(REGISTRY, id).expect("registered, one main file");
+        assert_eq!(
+            found.engine_commit.as_deref(),
+            Some(table.strings["engine_commit"].as_str())
+        );
+        assert_eq!(
+            found.chat_template_sha256.as_deref(),
+            Some(table.strings["chat_template_sha256"].as_str())
+        );
+    }
+
+    #[test]
+    fn a_header_is_read_strictly_and_never_files_keys_under_the_table_before_it() {
+        let scanned = tables(
+            "[substrate.a]\nweights_main = \"AAA\"\n\
+             [substrate.b] # a comment\nweights_main = \"BBB\"\n\
+               [substrate.\"c.d\"]\nweights_main = \"CCC\"\n\
+             [substrate.e\nweights_main = \"EEE\"\n",
+        );
+        assert_eq!(scanned["substrate.a"].strings["weights_main"], "AAA");
+        assert_eq!(scanned["substrate.b"].strings["weights_main"], "BBB");
+        assert_eq!(scanned["substrate.c.d"].strings["weights_main"], "CCC");
+        assert!(
+            scanned
+                .iter()
+                .any(|(name, table)| name.starts_with("<unreadable header")
+                    && table.strings["weights_main"] == "EEE"),
+            "an unreadable header's keys are kept apart: {scanned:?}"
+        );
+        // The registry's own quoted ids resolve by their names.
+        assert!(tables(REGISTRY).contains_key("substrate.bge-small-en-v1.5"));
+    }
+
+    #[test]
+    fn the_registry_digest_is_the_included_texts() {
+        assert_eq!(
+            registry_sha256(),
+            crate::digest::sha256_hex(
+                std::fs::read(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../substrates/registry.toml"
+                ))
+                .expect("the registry")
+                .as_slice()
+            )
         );
     }
 

@@ -201,6 +201,7 @@ pub fn regime_registered(regimen: &Regimen, registry: &str) -> Result<Regime, St
         }
         substrate.engine = identity.engine;
         substrate.weights = identity.weights;
+        substrate.chat_template_sha256 = identity.chat_template_sha256;
     }
     Ok(regime)
 }
@@ -336,6 +337,21 @@ mod tests {
             Weights::Canned {
                 acts_sha256: crate::drive::canned::acts_digest()
             }
+        );
+    }
+
+    #[test]
+    fn a_registered_chat_template_crosses_into_the_regime() {
+        use crate::drive::registry::{REGISTRY, identity};
+        let id = "accel24-llamacpp-qwen38-27b-iq3s";
+        let registered = identity(REGISTRY, id).expect("registered");
+        let regime =
+            super::regime_registered(&naming(id, &registered.hardware_fingerprint), REGISTRY)
+                .expect("registered");
+        assert!(registered.chat_template_sha256.is_some());
+        assert_eq!(
+            regime.substrates[0].chat_template_sha256,
+            registered.chat_template_sha256
         );
     }
 

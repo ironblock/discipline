@@ -30,6 +30,8 @@ struct Served {
     opened: u64,
     /// The registered substrate it announced, when it was given a regimen.
     substrate: Option<String>,
+    /// And the digest of the registry that resolved it.
+    registry_sha256: Option<String>,
     _head: HeadFile,
 }
 
@@ -88,6 +90,7 @@ fn start(endpoint: &str, extra: &[&str]) -> Served {
             .to_owned(),
         opened: announced["opened"].as_u64().expect("when it opened"),
         substrate: announced["substrate"].as_str().map(str::to_owned),
+        registry_sha256: announced["registry_sha256"].as_str().map(str::to_owned),
         child,
         _head: head,
     }
@@ -462,7 +465,12 @@ fn a_drive_server_announces_the_registered_substrate_its_regimen_names() {
     let dev_loop = format!("{}/drive/dev-loop.toml", env!("CARGO_MANIFEST_DIR"));
     let served = start(&stub.url(), &["--regimen", &dev_loop]);
     assert_eq!(served.substrate.as_deref(), Some("canned-cache-n"));
+    assert_eq!(
+        served.registry_sha256,
+        Some(diet::drive::registry::registry_sha256()),
+        "and which registry answered"
+    );
     // And without one, nothing is claimed.
     let served = start(&stub.url(), &[]);
-    assert_eq!(served.substrate, None);
+    assert_eq!((&served.substrate, &served.registry_sha256), (&None, &None));
 }
