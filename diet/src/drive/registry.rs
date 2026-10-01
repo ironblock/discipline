@@ -256,6 +256,25 @@ fn weight_set(
     }
     let draft = table.strings.get("weights_draft").cloned();
     let projector = table.strings.get("weights_projector").cloned();
+    // Each digest is checked here, at start: a record its own reader refuses
+    // after an hour's session is what a start-time refusal prevents.
+    let named = main
+        .iter()
+        .map(|shard| ("weights_main", shard))
+        .chain(draft.iter().map(|draft| ("weights_draft", draft)))
+        .chain(
+            projector
+                .iter()
+                .map(|projector| ("weights_projector", projector)),
+        );
+    for (key, value) in named {
+        if !is_a_digest(value) {
+            return Err(format!(
+                "`{id}`'s `{key}` holds \"{value}\", which is not a digest: a sha256 is \
+                 64 lowercase hex digits"
+            ));
+        }
+    }
     Ok(match (main.as_slice(), &draft, &projector) {
         ([only], None, None) => Weights::Digest(only.clone()),
         _ => Weights::Set(WeightSet {
@@ -372,6 +391,41 @@ mod tests {
         );
         let refused = identity(&registry, "x").expect_err("a draft list");
         assert!(refused.contains("`weights_draft` is a list"), "{refused}");
+    }
+
+    #[test]
+    fn a_weights_value_that_is_not_a_digest_is_refused_naming_the_key() {
+        // Refused at start, not at the record's read-back an hour later.
+        let good = "b".repeat(64);
+        for (key, line) in [
+            ("weights_main", "weights_main = \"not-a-digest\"".to_owned()),
+            (
+                "weights_main",
+                format!("weights_main = [\"{good}\", \"{}\"]", "B".repeat(64)),
+            ),
+            (
+                "weights_draft",
+                format!("weights_main = \"{good}\"\nweights_draft = \"short\""),
+            ),
+            (
+                "weights_projector",
+                format!("weights_main = \"{good}\"\nweights_projector = \"\""),
+            ),
+        ] {
+            let registry = format!(
+                "[equipment.e]\nhardware_fingerprint = \"{}\"\n\
+                 [substrate.x]\nequipment = \"e\"\nengine_name = \"n\"\n\
+                 engine_identity = \"i\"\n{line}\n",
+                "a".repeat(64)
+            );
+            let refused = identity(&registry, "x").expect_err(&line);
+            assert!(
+                refused.contains("`x`")
+                    && refused.contains(&format!("`{key}`"))
+                    && refused.contains("not a digest"),
+                "{refused}"
+            );
+        }
     }
 
     #[test]
