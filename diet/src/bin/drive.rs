@@ -218,6 +218,10 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(credential) => credential,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    let listen = match listen_on(listen, credential.is_some()) {
+        Ok(listen) => listen,
+        Err(refused) => return refused,
+    };
     let mut transport = HttpStream::new(endpoint);
     if let Some(key_file) = key_file {
         match bearer_from(&key_file) {
@@ -237,7 +241,7 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(build) => build.flatten(),
         Err(why) => return fail(EXIT_INPUT, &why),
     };
-    let listener = match listener(listen, port, credential.is_some()) {
+    let listener = match listener(listen, port) {
         Ok(listener) => listener,
         Err(refused) => return refused,
     };
@@ -286,13 +290,10 @@ fn trunk(model: String, system: String, max_output_tokens: u32) -> RequestShape 
     }
 }
 
-/// The listener `serve` binds: on `listen`, which is refused when it is a
-/// wildcard, or off loopback with no credential (fail-closed, I7).
-fn listener(
-    listen: IpAddr,
-    port: u16,
-    credentialed: bool,
-) -> Result<std::net::TcpListener, ExitCode> {
+/// The address `serve` may listen on: `listen`, refused when it is a
+/// wildcard, or off loopback with no credential (fail-closed, I7). A usage
+/// refusal, so it is made before anything touches the network.
+fn listen_on(listen: IpAddr, credentialed: bool) -> Result<IpAddr, ExitCode> {
     // `::ffff:0.0.0.0` is the IPv4 wildcard, and `::ffff:127.0.0.1` loopback:
     // judged as IPv6, the first would pass the wildcard check.
     let listen = listen.to_canonical();
@@ -314,6 +315,11 @@ fn listener(
             ),
         ));
     }
+    Ok(listen)
+}
+
+/// The listener `serve` binds on `listen`, already admitted by [`listen_on`].
+fn listener(listen: IpAddr, port: u16) -> Result<std::net::TcpListener, ExitCode> {
     std::net::TcpListener::bind((listen, port)).map_err(|why| {
         fail(
             EXIT_HALT,

@@ -531,8 +531,9 @@ fn a_drive_server_starts_only_on_the_engine_the_registry_pins() {
     // Another commit -- C0b's build, a production one commit past its pin --
     // and a dirty build of the pinned one: each refused before anything binds.
     for (build_info, names) in [
-        ("b8-e486f80", "e486f80"),
-        (&*format!("{build}-dirty"), "-dirty"),
+        // Each refusal's own words, not the build_info every refusal quotes.
+        ("b8-e486f80", "the registry pins"),
+        (&*format!("{build}-dirty"), "after its commit"),
     ] {
         let stub = Stub::serving(vec![props_saying(build_info)]).expect("loopback");
         let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
@@ -566,7 +567,7 @@ fn a_drive_server_refuses_a_substrate_with_no_registered_engine_identity_without
 #[test]
 fn a_drive_server_checks_the_engine_before_it_binds() {
     // On a port already taken, a server that bound first would fail to
-    // listen (exit 3); one that checks first refuses the engine (exit 1).
+    // listen (exit 2, halt); one that checks first refuses the engine (exit 1).
     let regimen = regimen_registered("accel24-llamacpp-qwen38-27b-iq3s");
     let path = regimen.0.to_string_lossy().into_owned();
     let taken = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
@@ -579,4 +580,17 @@ fn a_drive_server_checks_the_engine_before_it_binds() {
     let (code, said) = run_briefly(&stub.url(), &["--regimen", &path, "--port", &port]);
     assert_eq!(code, Some(1), "{said}");
     assert!(said.contains("e486f80"), "the engine's refusal: {said}");
+}
+
+#[test]
+fn a_drive_server_refuses_a_wildcard_before_it_asks_the_engine() {
+    // A usage refusal is made before anything touches the network: the
+    // endpoint is never sent the bearer for a server that could not start.
+    let regimen = regimen_registered("accel24-llamacpp-qwen38-27b-iq3s");
+    let path = regimen.0.to_string_lossy().into_owned();
+    let stub = Stub::serving(vec![props_saying("b8-e486f80")]).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path, "--listen", "0.0.0.0"]);
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.contains("is a wildcard"), "{said}");
+    assert!(stub.heads().is_empty(), "{:?}", stub.heads());
 }

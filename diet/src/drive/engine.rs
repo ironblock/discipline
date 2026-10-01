@@ -54,6 +54,11 @@ pub fn build_commit(build_info: &str) -> Result<&str, String> {
     };
     let hex = after.len() - after.trim_start_matches(is_hex).len();
     let (commit, suffix) = after.split_at(hex);
+    if commit.is_empty() {
+        return Err(format!(
+            "`build_info` \"{build_info}\" names no hex commit after its `-`"
+        ));
+    }
     if !suffix.is_empty() {
         return Err(format!(
             "`build_info` \"{build_info}\" carries \"{suffix}\" after its commit: a build that \
@@ -115,6 +120,10 @@ pub struct Passed {
     pub identity: EngineIdentity,
 }
 
+/// How much of a refusing `/props` body a refusal echoes: enough to read,
+/// and never the 64 MiB a reply may hold, nor a reflected header far down it.
+const ECHOED_BODY_CHARS: usize = 200;
+
 /// What the registry says the server must report.
 enum Expected<'a> {
     /// Exactly this `build_info`.
@@ -163,6 +172,23 @@ pub fn matches(id: &str, identity: &Identity, build_info: &str) -> Result<Engine
 ///
 /// When it declares neither, an empty literal, or a commit that is not 40
 /// lowercase hex digits.
+impl Expected<'_> {
+    /// What a refusal says was expected.
+    fn describes(&self) -> String {
+        match self {
+            Self::Literal(literal) => format!("`build_info` exactly \"{literal}\""),
+            Self::Commit(registered) => format!("a build of commit {registered}"),
+        }
+    }
+}
+
+/// The first [`ECHOED_BODY_CHARS`] characters of `body`, marked when cut.
+fn excerpt(body: &str) -> String {
+    body.char_indices()
+        .nth(ECHOED_BODY_CHARS)
+        .map_or_else(|| body.to_owned(), |(cut, _)| format!("{}…", &body[..cut]))
+}
+
 fn expected<'a>(id: &str, identity: &'a Identity) -> Result<Expected<'a>, String> {
     if let Some(literal) = identity.engine_build_info.as_deref() {
         if literal.is_empty() {
@@ -206,16 +232,23 @@ pub fn check(
     }
     // Before the server is asked: a check the registry cannot support is
     // refused without touching the server.
-    expected(id, &identity)?;
-    let reply = props()
-        .map_err(|why| format!("the engine check asked `GET /props` and got no reply: {why}"))?;
+    let wants = expected(id, &identity)?;
+    // Both values in every refusal (Q3): what the registry expects, and what
+    // the server did.
+    let refuse = |why: String| format!("`{id}` expects {}: {why}", wants.describes());
+    let reply = props().map_err(|why| {
+        refuse(format!(
+            "the engine check asked `GET /props` and got no reply: {why}"
+        ))
+    })?;
     if reply.status != 200 {
-        return Err(format!(
+        return Err(refuse(format!(
             "the engine check asked `GET /props` and was answered {}: {}",
-            reply.status, reply.body
-        ));
+            reply.status,
+            excerpt(&reply.body)
+        )));
     }
-    let build_info = build_info_of(&reply.body)?;
+    let build_info = build_info_of(&reply.body).map_err(refuse)?;
     let identity = matches(id, &identity, &build_info)?;
     Ok(Some(Passed {
         build_info,
@@ -271,6 +304,9 @@ mod tests {
         }
         let dirty = build_commit("b8-e486f80-dirty").expect_err("a suffix");
         assert!(dirty.contains("\"-dirty\""), "{dirty}");
+        // A prebuilt release names no commit at all: said so, not called a suffix.
+        let prebuilt = build_commit("b0-unknown-dirty").expect_err("no hex");
+        assert!(prebuilt.contains("names no hex commit"), "{prebuilt}");
     }
 
     #[test]
@@ -291,7 +327,7 @@ mod tests {
 
     #[test]
     fn a_server_on_another_commit_is_refused_naming_both() {
-        // C0b's build: a production rebuilt one commit past its pin.
+        // C0b's build (`b8-e486f80`), which is not this substrate's commit.
         let refused = check(REGISTRY, PINNED, || {
             Ok(answered("{\"build_info\":\"b8-e486f80\"}"))
         })
@@ -366,9 +402,15 @@ mod tests {
     #[test]
     fn a_malformed_registered_commit_is_refused() {
         let mut found = identity(REGISTRY, PINNED).expect("registered");
-        found.engine_commit = Some("4ceb171".to_owned());
-        let refused = matches(PINNED, &found, "b1-4ceb171").expect_err("seven digits registered");
-        assert!(refused.contains("malformed"), "{refused}");
+        for malformed in [
+            "4ceb171".to_owned(),
+            "g".repeat(40),
+            "4CEB1719101F32637B841206C172F3F058FFC182".to_owned(),
+        ] {
+            found.engine_commit = Some(malformed.clone());
+            let refused = matches(PINNED, &found, "b1-4ceb171").expect_err(&malformed);
+            assert!(refused.contains("malformed"), "{refused}");
+        }
     }
 
     #[test]
@@ -392,8 +434,27 @@ mod tests {
             (Ok(answered("not json")), "no string `build_info`"),
         ] {
             let refused = check(REGISTRY, PINNED, || props).expect_err(says);
-            assert!(refused.contains(says), "{refused}");
+            // Both values: the server's side, and what the registry expects.
+            assert!(
+                refused.contains(says)
+                    && refused.contains(PINNED)
+                    && refused.contains("a build of commit 4ceb1719"),
+                "{refused}"
+            );
         }
+        // A refusing body is echoed only in part.
+        let refused = check(REGISTRY, PINNED, || {
+            Ok(HttpReply {
+                status: 500,
+                body: "x".repeat(100_000),
+            })
+        })
+        .expect_err("a 500");
+        assert!(
+            refused.len() < 1_000 && refused.ends_with('…'),
+            "{} bytes",
+            refused.len()
+        );
     }
 
     #[test]
