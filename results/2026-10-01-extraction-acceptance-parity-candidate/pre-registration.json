@@ -7,7 +7,7 @@
   "A": "the candidate, accel24-llamacpp-qwen38-27b-iq3s, at its registered fingerprint",
   "B": "cpu-beellama-qwen3-1p7b-q4km, the same CPU-side substrate as #115, held constant so the only thing that changed is the rung"
  },
- "harness": "#115's, pinned at 0e14292, rebuilt --locked at #115's build path (binary f5682886..., byte-identical to #115's). Planning's text has the planned requests byte-matched to the archived ones; as ruled on the interview gap (5921525110) and built in #191, the plan is the offline rehearsal's (candidate-planned-requests.json), which holds against both of #115's fires: this file words it that way, a rewording of planning's text, stated here",
+ "harness": "#115's, pinned at 0e14292, rebuilt --locked at #115's build path (binary f5682886..., byte-identical to #115's). Planning's text (5894139110, restated in 5921525110) has the planned requests byte-matched to the archived ones; the applier (#191) checks the fire against the offline rehearsal's plan (candidate-planned-requests.json), which itself holds against both of #115's fires -- #191's construction of the ruled check, stated here",
  "band": {
   "derived_by": "band.py",
   "band_py_sha256": "a2427d8175bc7c5728aaab98011ccaf06bacce47fc520fd7b3f27c266ba06d52",
@@ -38,6 +38,6 @@
   "numbers": "seat-A floor 10 accepted fields; the archived band does not straddle zero, so refuted is reachable"
  },
  "comparison": "the candidate's effect against the floor's (#115, 0.0885) under comparison-rule.toml: substrate_independent if they differ by < 0.05; substrate_dependent if by >= 0.15 with paired p below the attainable floor; inconclusive otherwise with the sign; predicted independent",
- "cells": "the required cells (eligibility): kwarg delivery (thinking, and the refused-level row from #180); the canary: the rung's baseline draw already taken, a draw before and after the fire tested against it; the reasoning state as rendered (the candidate's template renders xhigh by default and the floor renders no level: a disclosed regime difference, not a parameter to equalise)",
+ "cells": "the required cells (eligibility): kwarg delivery (thinking, and the refused-level row from #180); the canary -- the rung's baseline draw already taken, a second draw after the fire tested against it at the declared z; the reasoning state as rendered, echoed from the head fingerprint. Disclosed regime difference: the candidate's template renders xhigh by default and the floor renders no level; the fire runs at the rung's rendered state, a known_defects line, not a parameter to equalise",
  "one_fire": "exactly one fire per seat, the first; the window's log posted on #143 with the run"
 }

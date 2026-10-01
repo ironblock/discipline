@@ -3,7 +3,7 @@ hypothesis = "Fired once per seat on the candidate rung, under the configuration
 result = "supported"
 kind = "reproducible-by-config"
 product_sha256 = "f912a6ac86451a3d94e0f96a43862569c2d57b64e31011faf9e21548d0201a40"
-pre_registration_sha256 = "2519df1892bf5e3dd17f831280248fdbcd2623ff0945a20a1e2f1383817fb561"
+pre_registration_sha256 = "6c087c632ae8755024320a9fdb149e092deb7f77db2856ce5dce4abcf469e5d7"
 controls_run = ["the routing fingerprint: every seat-B extraction answer without draft_n, every seat-A extraction answer and every interview answer of both seats with it", "the seat-B canary before the first fork: no think block and no draft_n", "the candidate's canary before and after the fire, each against its baseline draw", "the plan check: every planned fork ran with its planned request"]
 known_defects = [
   "What the word weighs, stated before the run (#115's reading, carried): the band is wide (0.024877 to 0.21789 around the archived 0.091469), so `supported` says the inversion held on the candidate rung at a size anywhere in that range. The fire's own 95% interval, [-0.008232, 0.112803] over the 31 paired forks, straddles zero: the word rests on a point estimate whose own interval reaches the sign the rule would call refuted. That is the one sentence the ruled rule writes beside the word (#143, comment 5921525110).",
