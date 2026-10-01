@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 170
+faults = 173
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -2085,6 +2085,7 @@ catches = [
     "drive::regimen::tests::a_regimen_whose_hardware_disagrees_with_the_registry_is_refused",
     "drive::regimen::tests::a_registered_chat_template_crosses_into_the_regime",
     "drive::regimen::tests::a_registered_substrate_crosses_with_the_registrys_identity",
+    "drive::registry::tests::a_file_beside_the_weights_the_record_cannot_spell_is_refused",
     "drive::registry::tests::a_header_is_read_strictly_and_never_files_keys_under_the_table_before_it",
     "drive::registry::tests::a_main_of_several_shards_resolves_in_the_registrys_order",
     "drive::registry::tests::a_registered_substrates_commit_and_chat_template_are_read",
@@ -2231,6 +2232,7 @@ anchor = '''
 becomes = '''
         if let Some((key, items)) = line.split_once(" = [").filter(|_| false) {'''
 catches = [
+    "drive::registry::tests::a_file_beside_the_weights_the_record_cannot_spell_is_refused",
     "drive::registry::tests::a_main_list_that_is_empty_or_unreadable_is_refused",
     "drive::registry::tests::a_main_of_several_shards_resolves_in_the_registrys_order",
     "drive::registry::tests::the_scan_reads_a_list_as_a_list_and_never_as_an_absent_key",
@@ -2718,4 +2720,43 @@ becomes = '''
         Some(Some(shards)) => shards.clone(),'''
 catches = [
     "drive::registry::tests::a_main_list_that_is_empty_or_unreadable_is_refused",
+]
+
+[[fault]]
+id = "drive.registry-resolves-a-sidecar-as-one-file"
+failure_class = "drive.registry-resolves-a-sidecar-as-one-file"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+        if key.starts_with("weights_") && !spelled && is_a_digest(value) {'''
+becomes = '''
+        if false && key.starts_with("weights_") && !spelled && is_a_digest(value) {'''
+catches = [
+    "drive::registry::tests::a_file_beside_the_weights_the_record_cannot_spell_is_refused",
+]
+
+[[fault]]
+id = "drive.registry-reads-a-draft-list-as-absent"
+failure_class = "drive.registry-reads-a-draft-list-as-absent"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+        if table.lists.contains_key(key) {'''
+becomes = '''
+        if false && table.lists.contains_key(key) {'''
+catches = [
+    "drive::registry::tests::a_file_beside_the_weights_the_record_cannot_spell_is_refused",
+]
+
+[[fault]]
+id = "drive.registry-keeps-a-quote-in-an-item"
+failure_class = "drive.registry-keeps-a-quote-in-an-item"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+                .filter(|item| !item.contains('"'))'''
+becomes = '''
+                .filter(|_| true)'''
+catches = [
+    "drive::registry::tests::the_scan_reads_a_list_as_a_list_and_never_as_an_absent_key",
 ]
