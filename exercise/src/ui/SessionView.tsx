@@ -231,7 +231,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
         key: net.key,
         node: first?.at ?? '',
         lane: first?.lane ?? '',
-        pending: net.key.endsWith('>pending'),
+        pending: net.pending,
         d: lines?.d ?? '',
         dots: lines?.dots ?? [],
         source: net.source,

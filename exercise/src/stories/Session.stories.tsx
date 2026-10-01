@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { SessionView } from '../ui/SessionView.tsx';
 import type { Surface } from '../ui/surface.tsx';
 import { cableOf } from './cables.ts';
+import { pointAt } from './pointing.ts';
 import { idAt, MOMENTS, sessionAt, variantAt } from './moments.ts';
 
 interface MomentArgs {
@@ -392,11 +393,13 @@ export const LinesIntoMemory: Story = {
     const entries = [...new Set(lines().map((l) => l.getAttribute('data-entry')))];
     for (const entry of entries) await expect(canvasElement.querySelector(`[id="memory/${entry}"]`)).not.toBeNull();
     await expect(lines().some((l) => l.hasAttribute('data-hot'))).toBe(false);
-    await userEvent.hover(cell.querySelector('.ex-block') as HTMLElement);
-    await waitFor(async () => expect(lines().every((l) => l.hasAttribute('data-hot'))).toBe(true));
-    for (const entry of entries) await expect(canvasElement.querySelector(`[id="memory/${entry}"]`)?.hasAttribute('data-hot')).toBe(true);
-    await userEvent.hover(canvasElement.querySelector(`[id="memory/${entries[0]}"]`) as HTMLElement);
-    await waitFor(async () => expect(cell.hasAttribute('data-hot')).toBe(true));
+    await pointAt(cell.querySelector('.ex-block') as HTMLElement, async () => {
+      await expect(lines().every((l) => l.hasAttribute('data-hot'))).toBe(true);
+      for (const entry of entries) await expect(canvasElement.querySelector(`[id="memory/${entry}"]`)?.hasAttribute('data-hot')).toBe(true);
+    });
+    await pointAt(canvasElement.querySelector(`[id="memory/${entries[0]}"]`) as HTMLElement, async () => {
+      await expect(cell.hasAttribute('data-hot')).toBe(true);
+    });
     // Opened, the side call lists its patches again.
     await userEvent.click(cell.querySelector('.ex-branch__why') as HTMLElement);
     await expect(cell.querySelector('.ex-branch__patches')).not.toBeNull();
@@ -425,15 +428,17 @@ export const ChainFromANode: Story = {
       cables: sides.every((c) => q(canvasElement, `.ex-wiring [data-hot][data-from="${c.getAttribute('data-branch')}"]`) !== null),
       others: [...canvasElement.querySelectorAll('.ex-branchcell[data-hot]')].length === sides.length,
     });
-    await userEvent.hover(node.querySelector('.ex-block') as HTMLElement);
-    await waitFor(async () => expect(lit()).toEqual({ node: true, sides: true, cables: true, others: true }));
-    // Its entries are lit too.
-    await expect(q(canvasElement, '.ex-memory__entry[data-hot]')).not.toBeNull();
+    await pointAt(node.querySelector('.ex-block') as HTMLElement, async () => {
+      await expect(lit()).toEqual({ node: true, sides: true, cables: true, others: true });
+      // Its entries are lit too.
+      await expect(q(canvasElement, '.ex-memory__entry[data-hot]')).not.toBeNull();
+    });
     await userEvent.unhover(node.querySelector('.ex-block') as HTMLElement);
     await waitFor(async () => expect(node.hasAttribute('data-hot')).toBe(false));
     // The cable itself: its node and the side calls on it.
-    await userEvent.hover(q(canvasElement, `.ex-wiring [data-point][data-node="${id}"]`) as Element);
-    await waitFor(async () => expect(lit()).toMatchObject({ node: true, cables: true }));
+    await pointAt(q(canvasElement, `.ex-wiring [data-point][data-node="${id}"]`) as Element, async () => {
+      await expect(lit()).toMatchObject({ node: true, cables: true });
+    });
   },
 };
 
@@ -450,14 +455,15 @@ export const ChainFromALine: Story = {
     await waitFor(async () => expect(hits().length).toBeGreaterThan(1));
     const hit = hits()[0] as Element;
     const entry = hit.getAttribute('data-entry') ?? '';
-    await userEvent.hover(hit);
-    await waitFor(async () => expect(cell.hasAttribute('data-hot')).toBe(true));
-    const hotEntries = [...canvasElement.querySelectorAll('.ex-memory__entry[data-hot]')].map((e) => e.id);
-    await expect(hotEntries).toEqual([`memory/${entry}`]);
-    await expect([...document.querySelectorAll('.ex-links .ex-link[data-hot]')].map((l) => l.getAttribute('data-entry'))).toEqual([entry]);
-    // Its sweep cable to the trunk is lit, and the node it came from.
-    await expect(cell.querySelector('.ex-cable')?.hasAttribute('data-hot')).toBe(true);
-    await expect(q(canvasElement, '.ex-trunk__node[data-hot]')).not.toBeNull();
+    await pointAt(hit, async () => {
+      await expect(cell.hasAttribute('data-hot')).toBe(true);
+      const hotEntries = [...canvasElement.querySelectorAll('.ex-memory__entry[data-hot]')].map((e) => e.id);
+      await expect(hotEntries).toEqual([`memory/${entry}`]);
+      await expect([...document.querySelectorAll('.ex-links .ex-link[data-hot]')].map((l) => l.getAttribute('data-entry'))).toEqual([entry]);
+      // Its sweep cable to the trunk is lit, and the node it came from.
+      await expect(cell.querySelector('.ex-cable')?.hasAttribute('data-hot')).toBe(true);
+      await expect(q(canvasElement, '.ex-trunk__node[data-hot]')).not.toBeNull();
+    });
   },
 };
 
