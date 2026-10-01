@@ -142,6 +142,26 @@
    "label": "the criterion's digest not recorded",
    "old": "\"criterion_sha256\": sha((HERE / \"criterion.toml\").read_bytes()),",
    "new": ""
+  },
+  {
+   "label": "an invalid sample never re-drawn",
+   "old": "\"discarded\": redraws < budget})",
+   "new": "\"discarded\": False})"
+  },
+  {
+   "label": "the re-draw budget ignored",
+   "old": "\"discarded\": redraws < budget})",
+   "new": "\"discarded\": True}) if redraws < 50 else None"
+  },
+  {
+   "label": "a discarded sample counted",
+   "old": "        if r.get(\"discarded\"):\n            continue\n",
+   "new": ""
+  },
+  {
+   "label": "the kwarg-delivery finding at three, not two",
+   "old": ".get(\"invalid\", 0) >= 2}",
+   "new": ".get(\"invalid\", 0) >= 3}"
   }
  ]
 }

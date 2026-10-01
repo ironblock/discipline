@@ -11,7 +11,9 @@ constraints, graded mechanically on the emitted code), reimplemented for the gym
   - Five samples per cell, in the rung's supported coding configuration, thinking on (checked per sample).
   - Word: `pass` ("no cliff") when every cell's pass count is within one sample of the control's;
     `fail` when any cell falls two or more below it; `unadjudicated` when a cell has a server error,
-    too few samples, or a sample with thinking not engaged.
+    too few samples, or a kept sample with thinking not engaged. A sample whose reply shows thinking did not
+    engage is invalid: discarded, recorded, and re-drawn within criterion.toml's `max_redraws` per cell; two or
+    more in a cell is a kwarg-delivery finding beside the word (planning, #143, comment 5921525110).
   - The four-constraint set (`supported`) is the admission probe; the eight-constraint set (`hard`)
     is a second probe admission does not require.
 
@@ -20,7 +22,7 @@ constraints, graded mechanically on the emitted code), reimplemented for the gym
 Stdlib only. Exit 0 when the command did what it says, 1 when a check it runs fails, 2 when it cannot run.
 """
 from __future__ import annotations
-import argparse, hashlib, json, pathlib, random, re, subprocess, sys, time, urllib.error, urllib.request
+import argparse, hashlib, json, pathlib, random, re, subprocess, sys, time, tomllib, urllib.error, urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
 SYSTEM = "You are a coding assistant working in a Rust repository. Honor the project rules the user states."
@@ -231,12 +233,34 @@ def cmd_run(a) -> int:
         pad, n = size_padding(srv, a.tier, corpus, ces, target, a.seed + target, a.chunk_chars, a.tolerance)
         planted = sum(1 for c in ces if any(c["text"] in m["content"] for m in pad))
         stages = [("application", s) for s in range(a.samples)] + ([("retrieval", 0)] if a.retrieval and TIERS[a.tier]["retrieval"] else [])
-        for stage, s in stages:
+        budget = int(tomllib.loads((HERE / "criterion.toml").read_text()).get("max_redraws", 0)); redraws = 0
+        queue = list(stages)
+        while queue:
+            stage, s = queue.pop(0); attempt = 0
+            while True:
+                row = draw(srv, a, stage, s, attempt, frac, target, n, planted, pad)
+                # planning (#143, comment 5921525110): a thinking-on application sample whose reply shows thinking did
+                # not engage is invalid -- discarded, recorded, and re-drawn within the criterion's declared budget
+                invalid = stage == "application" and row.get("error") is None and not row.get("reasoning_chars")
+                if invalid:
+                    row.update({"invalid": "thinking not engaged", "discarded": redraws < budget})
+                rows.write(json.dumps(row) + "\n"); rows.flush()
+                print(f"cell {frac} ({n} tok, {planted} planted) {stage} {s}: ALL={row['dims'].get('ALL')} err={row.get('error')}"
+                      + (f" INVALID ({'re-drawn' if row['discarded'] else 'budget spent, kept'})" if invalid else ""), flush=True)
+                if invalid and row["discarded"]:
+                    redraws += 1; attempt += 1; continue
+                break
+    return 0
+
+def draw(srv, a, stage, s, attempt, frac, target, n, planted, pad) -> dict:
+    """One sample: its request, its reply, its row. A re-draw changes only the seed."""
+    if True:
             final = TIERS[a.tier]["task"] if stage == "application" else TIERS[a.tier]["retrieval"]
-            body = {"messages": messages_for(a.tier, pad, final), "max_tokens": a.max_tokens, "seed": a.seed * 1000 + s,
-                    "id_slot": 0, "cache_prompt": True, **sampler}
+            body = {"messages": messages_for(a.tier, pad, final), "max_tokens": a.max_tokens, "seed": a.seed * 1000 + s + 100 * attempt,
+                    "id_slot": 0, "cache_prompt": True, **json.loads(a.sampler)}
             t0 = time.time(); row = {"fraction": frac, "depth_target": target, "depth_rendered": n, "planted": planted,
                                      "stage": stage, "sample": s}
+            if attempt: row["redraw"] = attempt
             try:
                 r = srv.call("/v1/chat/completions", body); err = None
             except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
@@ -254,9 +278,7 @@ def cmd_run(a) -> int:
                     row["truncated"] = row["finish"] == "length" and code is None; row["code"] = (code or "")[:1500]
             else:
                 row["dims"] = {"ALL": False}
-            rows.write(json.dumps(row) + "\n"); rows.flush()
-            print(f"cell {frac} ({n} tok, {planted} planted) {stage} {s}: ALL={row['dims'].get('ALL')} err={err}", flush=True)
-    return 0
+            return row
 
 def summarise(rows: list[dict]) -> dict:
     out = {}
@@ -264,6 +286,10 @@ def summarise(rows: list[dict]) -> dict:
         c = out.setdefault(str(r["fraction"]), {"depth_target": r["depth_target"], "depth_rendered": r["depth_rendered"], "planted": r["planted"],
                                                 "application": {"n": 0, "pass": 0, "errors": 0, "thinking_off": 0, "truncated": 0},
                                                 "retrieval": {"n": 0, "pass": 0}})
+        if r.get("invalid"):
+            c["application"]["invalid"] = c["application"].get("invalid", 0) + 1
+        if r.get("discarded"):
+            continue
         st = c[r["stage"]]; st["n"] += 1; st["pass"] += int(bool(r["dims"].get("ALL")))
         if r["stage"] == "application":
             st["errors"] += int(r.get("error") is not None); st["truncated"] += int(bool(r.get("truncated")))
@@ -292,8 +318,13 @@ def decide(summary: dict, criterion: dict) -> dict:
         per[f] = "fail" if cliff else "pass"
         if cliff: word = "fail"
     strict = all(c["application"]["n"] >= mins and c["application"]["pass"] == c["application"]["n"] and adjudicable(c) for c in summary.values())
-    return {"word": word, "per_cell": per, "control_pass": ctrl["application"]["pass"], "criterion": criterion,
-            "strict_beside": "pass" if strict else "not met", "strict_is": "every sample at every cell passed: reported beside the word, never the word (planning, #143)"}
+    out = {"word": word, "per_cell": per, "control_pass": ctrl["application"]["pass"],
+           "criterion": {k: criterion[k] for k in ("within", "min_samples", "max_errors") if k in criterion},
+           "strict_beside": "pass" if strict else "not met", "strict_is": "every sample at every cell passed: reported beside the word, never the word (planning, #143)"}
+    flagged = {f: c["application"]["invalid"] for f, c in summary.items() if c["application"].get("invalid", 0) >= 2}
+    if flagged:  # planning (#143, comment 5921525110): two or more invalid samples in a cell is a kwarg-delivery finding
+        out["kwarg_delivery_findings"] = {"cells": flagged, "is": "two or more samples in a cell came back with thinking not engaged though the request asked for it: a finding about how the rung delivers the thinking kwarg, noted on the cell, not the word"}
+    return out
 
 def cmd_summarise(a) -> int:
     print(json.dumps(summarise([json.loads(l) for l in open(a.rows) if l.strip()]), indent=1)); return 0
@@ -369,11 +400,39 @@ def cmd_selftest(a) -> int:
     ctrl = [b for b in probe_calls if not any(c["text"] in m["content"] for c in ces for m in b["messages"])]
     check(len(ctrl) == 6, "end to end: the control cell's requests carry no counter-example", f"{len(ctrl)} of 6")
     deep = [b for b in probe_calls if all(any(c["text"] in m["content"] for m in b["messages"]) for c in ces)]
-    check(len(deep) == 12, "end to end: every deeper request carries every counter-example", f"{len(deep)} of 12")
+    check(len(deep) == 13, "end to end: every deeper request carries every counter-example (12 samples and the one re-draw)", f"{len(deep)} of 13")
+    inv = [r for r in rows if r.get("invalid")]
+    check(len(inv) == 1 and inv[0]["discarded"] and any(r.get("redraw") == 1 and r["sample"] == inv[0]["sample"] and r["fraction"] == inv[0]["fraction"] for r in rows),
+          "end to end: a thinking-off sample is recorded, discarded and re-drawn (planning, #143, 5921525110)", f"{inv}")
     cleared = sum(1 for p, b in state["calls"] if p == "/completion" and b.get("cache_prompt") is False)
     check(cleared == 3 * 2, "end to end: every slot cleared before each cell", f"({cleared})")
     check(all(b.get("id_slot") == 0 for b in probe_calls), "end to end: every probe request pinned to slot 0")
     check(all(r["depth_rendered"] >= r["depth_target"] * 0.75 for r in rows), "end to end: every cell reached within tolerance")
+    # a rung that never engages thinking: each cell spends the declared re-draw budget, then keeps the invalid sample, so
+    # the cell cannot fill five valid samples and reads unadjudicated, with the kwarg-delivery finding beside the word
+    budget = tomllib.loads((HERE / "criterion.toml").read_text())["max_redraws"]
+    off = {"application": [dict(r, reasoning="") for r in e2e["script"]["application"]], "retrieval": e2e["script"]["retrieval"]}
+    srv3, _ = fake_server(off)
+    with tempfile.TemporaryDirectory() as td3:
+        ns3 = argparse.Namespace(**{**vars(ns), "endpoint": f"http://127.0.0.1:{srv3.server_address[1]}", "out": td3, "fractions": [0.0]})
+        with contextlib.redirect_stdout(io.StringIO()):
+            cmd_run(ns3)
+        rows3 = [json.loads(l) for l in open(pathlib.Path(td3) / "rows.jsonl")]
+    srv3.shutdown()
+    app3 = [r for r in rows3 if r["stage"] == "application"]
+    check(len(app3) == 5 + budget and sum(1 for r in app3 if r.get("discarded")) == budget,
+          f"re-draw: a cell re-draws at most the declared {budget} times, then keeps its invalid samples", f"{len(app3)} rows, {sum(1 for r in app3 if r.get('discarded'))} discarded")
+    d3 = decide(summarise(rows3), tomllib.loads((HERE / "criterion.toml").read_text()))
+    check(d3["word"] == "unadjudicated", "re-draw: a cell that cannot fill five valid samples within the budget is unadjudicated", f"{d3}")
+    base_cell = {"application": {"n": 5, "pass": 5, "errors": 0, "thinking_off": 0, "truncated": 0}, "retrieval": {"n": 1, "pass": 1}}
+    two = {"0.0": base_cell, "0.5": {"application": {**base_cell["application"], "invalid": 2}, "retrieval": base_cell["retrieval"]}}
+    one = {"0.0": base_cell, "0.5": {"application": {**base_cell["application"], "invalid": 1}, "retrieval": base_cell["retrieval"]}}
+    crit = tomllib.loads((HERE / "criterion.toml").read_text())
+    d2, d1 = decide(two, crit), decide(one, crit)
+    check(d2["word"] == "pass" and d2.get("kwarg_delivery_findings", {}).get("cells") == {"0.5": 2},
+          "decide: two invalid samples in a cell are a kwarg-delivery finding beside the word, not the word", f"{d2}")
+    check("kwarg_delivery_findings" not in d1, "decide: one invalid sample in a cell is no finding")
+    check(set(d2["criterion"]) == {"within", "min_samples", "max_errors"}, "decide: it echoes only the criterion keys it applies", f"{d2['criterion']}")
     # planting at declared depths: each counter-example sits at round(plant_at * n) among the corpus turns
     corpus = load_corpus(HERE / "fixtures/corpus/manifest.json")
     ces = json.loads((HERE / "fixtures/corpus/counterexamples.json").read_text())["tiers"]["supported"]
