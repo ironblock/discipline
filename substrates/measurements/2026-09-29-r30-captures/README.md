@@ -96,7 +96,7 @@ One read-only GET `/props` was made at 2026-10-01T03:06:11Z by `capture_c0b.py` 
 
 ## C0c: the floor's build id (2026-10-01)
 
-One read-only GET `/props` was made at 2026-10-01T06:47:22Z by `capture_c0c.py`, against the production server of `accel24-beellama-qwen27b-q4kxl`, on the instance #206 registers as `2026-10-01`. It relaunched nothing.
+One read-only GET `/props` was made at 2026-10-01T06:47:22Z by `capture_c0c.py`, against the production server of `accel24-beellama-qwen27b-q4kxl`, on the instance after the 2026-09-30 reboot (proposed as `2026-10-01` in #206). It relaunched nothing.
 
 - **What is kept.**
   - `build_info`'s JSON token as received is in `build-info-floor.raw`: `"b0-unknown-dirty"`, 18 bytes, sha256 `dc5729d0d9a8864ab71d6557a1f2ed02ad33c7ccf9b01428d96f9a61c151779d`.
@@ -104,6 +104,6 @@ One read-only GET `/props` was made at 2026-10-01T06:47:22Z by `capture_c0c.py`,
   - No other key carries a build or commit id.
 - **The engine names no commit, and no record fixes one.**
   - The engine is an unpacked prebuilt release. The registry already recorded `b0-unknown-dirty` as its self-report.
-  - Upstream's release workflow rebuilt the release's assets on every push through June, and the tag was later re-cut more than once. So the commit the downloaded tarball was built from is unknown. The entry says so (`engine_commit_unknown`) and names the two candidates by upstream's workflow runs.
+  - Upstream's release workflow rebuilt the release's assets on every push through June, and the tag was later re-cut more than once. So no commit is measured. By upstream's record, the last run to publish before the tarball was written (2026-06-14T20:09Z) built `3975b51b`, but that is not matched to the tarball's digest. The entry says so (`engine_commit_unknown`).
   - Its identity is the binary's digest, and its libraries' digests once #205 merges.
   - Under #157's ruling, the entry declares `engine_build_info = "b0-unknown-dirty"`. That is the literal a start-time check matches, and the check reports `engine_identity: unreported`.

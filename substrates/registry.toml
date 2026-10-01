@@ -313,19 +313,20 @@ the serving binary's digest. Nothing else in the capture identifies it -- the \
 binary appears there by modification time and size, if at all."""
 engine_label = "preview-v0.3.2"
 engine_label_is_not_identity = """
-Upstream re-pointed this release tag on 2026-07-10, from one commit to a \
-descendant, because the release was re-cut with extra fixes. The tarball here \
-was downloaded 2026-06-14 and is the original cut, so two machines can both \
-honestly report `preview-v0.3.2` and run different code. The label is for \
-readers; the binary digest is what parity matches."""
+Upstream's release workflow force-moved this tag and replaced the release's \
+assets on every successful push run (nine from 2026-06-07 to 2026-06-17, and \
+again on 2026-07-10), so the tag has named many commits and two machines can \
+both honestly report `preview-v0.3.2` and run different code. The tarball here \
+was written 2026-06-14T20:09Z; see engine_commit_unknown for what that fixes. \
+The label is for readers; the binary digest is what parity matches."""
 engine_release_tarball_sha256 = "9da1f400e03925c797f1d699c5f275d6bd4616df5b9cdeb4c54f649850ced558"
 engine_release_downloaded = "2026-06-14"
 engine_build_toolchain = "GCC 13.3.0, CUDA 13.1, x86_64"
 engine_self_reported_version = "0 (unknown)"
 engine_self_reported_build_info = "b0-unknown-dirty"
-engine_commit_unknown = "the binary names no commit (--version 0 (unknown); /props build_info b0-unknown-dirty, C0c) and no record fixes one: upstream published preview-v0.3.2 on 2026-06-05 and its release workflow rebuilt and replaced the assets on every push to the release branch through June, so the tarball downloaded 2026-06-14 was built from whichever push preceded the download -- by upstream's workflow runs, 100fc138 (2026-06-13T23:13Z) or 3975b51b (2026-06-14T13:57Z), not matched to the tarball's digest. The tag was later re-cut more than once (a620cbd on 2026-06-17, fe67745d on 2026-07-10), and the research program's note that a620cbd best matches production postdates the download. The engine's identity is its binary digest (and its libraries, #205); engine_build_info is the literal a start-time check matches (#157)"
+engine_commit_unknown = "the binary names no commit (--version 0 (unknown); /props build_info b0-unknown-dirty, C0c), so no commit is measured. By upstream's record it is most likely 3975b51bd73bd43b3a2972212fa1d73b9ed99166: upstream's release workflow replaced the assets and force-moved the tag on every successful push run, and the tarball was written on the host at 2026-06-14T20:09:23Z (its birth time); the last run to publish before that was 3975b51b (finished 14:23:15Z), and the one run in between (6fa65bd7) failed and skipped publishing. Not matched to the tarball's digest: the run's artifacts are past retention and the release's assets were replaced by later runs (the tag moved on each successful run through 2026-06-17 and again on 2026-07-10). The engine's identity is its binary digest (and its libraries, #205); engine_build_info is the literal a start-time check matches (#157)"
 engine_build_info = "b0-unknown-dirty"
-engine_build_info_is = "the exact literal the server reports as /props build_info, read 2026-10-01T06:47:22Z (substrates/measurements/2026-09-29-r30-captures/build-info-floor.json, C0c); the engine is a prebuilt release tarball, so the literal names no commit, there is no engine_commit to compare, and a start-time check matches the literal and reports engine_identity: unreported (#157)"
+engine_build_info_is = "the exact literal the server reports as /props build_info, read 2026-10-01T06:47:22Z (substrates/measurements/2026-09-29-r30-captures/build-info-floor.json, C0c); the engine is a prebuilt release tarball, so the literal names no commit, there is no engine_commit to compare, and a start-time check matches the literal and reports engine_identity as unreported (literal matched) (#157)"
 engine_provenance_note = """
 The engine is an unpacked prebuilt release tarball, not a local build. That is \
 why there is no git checkout at or above the serving directory, no \
