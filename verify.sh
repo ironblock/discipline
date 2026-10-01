@@ -374,8 +374,37 @@ check_exercise() {
       pnpm typecheck &&
       pnpm lint &&
       pnpm exec playwright install chromium &&
-      pnpm test
+      pnpm test &&
+      pnpm build:replay &&
+      (cd .. && check_site _site) &&
+      node scripts/replay-smoke.mjs ../_site
   )
+}
+
+# The published site (#32), DIR as Pages would serve it: two tables over its
+# two parts, then the recordings' admissions. The shell -- everything but the
+# recordings -- under the Pages table, small and curated; each recording under
+# the table that admitted it, the genesis table (#32, ruling 1), which is why
+# the recordings are not scanned under the Pages table and are not rewritten to
+# pass it. Then each recording against its admission
+# (exercise/scripts/admission.py): the recording that was admitted, under the
+# table as it was. Called by check_exercise over the build, and by pages.yml
+# over what it is about to publish. A hit names the site's own path.
+check_site() {
+  local site="${1:?check_site: name the site directory}"
+  local data="${site}/replay/data" shell log rc=0
+  shell="$(mktemp -d)" || return 2
+  log="$(mktemp)" || { rm -rf "$shell"; return 2; }
+  if ! { cp -R "${site}/." "${shell}/" && rm -rf "${shell}/replay/data"; }; then
+    rm -rf "$shell" "$log"
+    return 2
+  fi
+  bash scripts/hygiene.sh --patterns scripts/pages-patterns.tsv --tree "$shell" > "$log" 2>&1 || rc=$?
+  sed "s|${shell}|${site}|g" "$log"
+  rm -rf "$shell" "$log"
+  [ "$rc" -eq 0 ] || return "$rc"
+  bash scripts/hygiene.sh --tree "$data" || return
+  python3 exercise/scripts/admission.py verify "$data"
 }
 
 # The wiring between these checks and the CI that runs them. CI can go green

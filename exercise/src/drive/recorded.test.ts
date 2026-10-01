@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { fold } from '../session/fold.ts';
 import type { LogLine } from './log.ts';
-import { RECORDINGS, ReplayTransport, placed, recordedAt } from './recorded.ts';
+import { ReplayTransport, load, placed, recordedAt } from './recorded.ts';
+import { RECORDINGS } from './recordings.ts';
 import { SPECIMEN } from './specimen.ts';
 
 const recording = RECORDINGS['first-drive'];
@@ -69,6 +70,16 @@ describe('the first drive, recorded and migrated', () => {
     const ratifying = fold(recordedAt(recording, 530_000));
     expect(ratifying.state).toBe('ratify');
     expect(ratifying.occupancy.some((h) => h?.lane === 'ratify')).toBe(true);
+  });
+});
+
+describe('reading a recording', () => {
+  it('names the recording’s file when it fails: an event with no kind, broken JSON, a missing header (#32, ruling 9)', () => {
+    const good = JSON.stringify({ title: 't', migration: [], events: [{ kind: 'ask', t: 0 }] });
+    expect(load('x', good).title).toBe('t');
+    expect(() => load('x', JSON.stringify({ title: 't', migration: [], events: [{ t: 0 }] }))).toThrow('exercise/src/drive/recorded/x.json: not a recording: event 0 has no kind or time');
+    expect(() => load('x', '{"title":')).toThrow(/^exercise\/src\/drive\/recorded\/x\.json: not a recording: not JSON/);
+    expect(() => load('x', '{}')).toThrow('exercise/src/drive/recorded/x.json: not a recording: expected title, migration and events');
   });
 });
 

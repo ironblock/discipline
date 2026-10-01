@@ -12,11 +12,8 @@ import { useSession } from './session/useSession.ts';
 import { SessionView } from './ui/SessionView.tsx';
 import type { Surface } from './ui/surface.tsx';
 
-/**
- * The phases a person may move between. The predecessor's list, until the
- * regimen's phase graph reaches the surface with the seam (#117 R6).
- */
-export const PHASES = ['orient', 'spec', 'plan', 'build', 'review'] as const;
+export { PHASES } from './ui/phases.ts';
+import { PHASES } from './ui/phases.ts';
 
 const EXPECTS: Readonly<Record<string, string>> = {
   send: 'canned: the script expects an ask next (type anything; the model side is scripted)',
