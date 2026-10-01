@@ -7382,6 +7382,46 @@ failure_class = "drive.serve-bin-announces-no-engine-identity"
 migrated = false
 
 [[fault]]
+id = "drive.engine-accepts-a-non-hex-registered-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-accepts-a-non-hex-registered-commit"
+failure_class = "drive.engine-accepts-a-non-hex-registered-commit"
+migrated = false
+
+[[fault]]
+id = "drive.engine-echoes-the-whole-body"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-echoes-the-whole-body"
+failure_class = "drive.engine-echoes-the-whole-body"
+migrated = false
+
+[[fault]]
+id = "drive.engine-refusal-omits-what-was-expected"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-refusal-omits-what-was-expected"
+failure_class = "drive.engine-refusal-omits-what-was-expected"
+migrated = false
+
+[[fault]]
+id = "drive.engine-calls-no-commit-a-suffix"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-calls-no-commit-a-suffix"
+failure_class = "drive.engine-calls-no-commit-a-suffix"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+failure_class = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+migrated = false
+
+[[fault]]
 id = "drive.session-drops-timings"
 kind = "lane-fault"
 check = "lanes"
