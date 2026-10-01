@@ -6673,6 +6673,30 @@ failure_class = "client.journal-drops-timings"
 migrated = false
 
 [[fault]]
+id = "client.projection-drops-the-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "client.projection-drops-the-timings"
+failure_class = "client.projection-drops-the-timings"
+migrated = false
+
+[[fault]]
+id = "client.projection-leaves-rowless-timings-unnamed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.projection-leaves-rowless-timings-unnamed"
+failure_class = "client.projection-leaves-rowless-timings-unnamed"
+migrated = false
+
+[[fault]]
+id = "client.projection-leaves-unspellable-timings-unnamed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.projection-leaves-unspellable-timings-unnamed"
+failure_class = "client.projection-leaves-unspellable-timings-unnamed"
+migrated = false
+
+[[fault]]
 id = "client.reply-reads-no-timings"
 kind = "lane-fault"
 check = "lanes"
