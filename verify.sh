@@ -375,6 +375,7 @@ check_exercise() {
       pnpm lint &&
       pnpm exec playwright install chromium &&
       pnpm test &&
+      python3 scripts/test_render_ledger.py &&
       pnpm build:replay &&
       (cd .. && check_site _site) &&
       node scripts/replay-smoke.mjs ../_site
