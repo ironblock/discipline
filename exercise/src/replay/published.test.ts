@@ -28,7 +28,8 @@ describe('what the replay page publishes (#32)', () => {
 });
 
 describe('a published recording as the page loads it', () => {
-  it.each(PUBLISHED)('%s: the payload is the committed recording, byte for byte, behind one prefix', (name) => {
+  // What wrap() writes. The built files themselves are held to it by `admission.py verify` (check_site).
+  it.each(PUBLISHED)('%s: wrap() puts the committed recording, byte for byte, behind one prefix', (name) => {
     const source = readFileSync(path.join(recorded, `${name}.json`), 'utf8');
     const payload = wrap(source);
     expect(payload.startsWith(PREFIX)).toBe(true);

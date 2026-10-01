@@ -2,7 +2,8 @@
  * A published recording as the page loads it: one ES module, `export default`
  * and then the recording's JSON exactly as committed. Nothing else is in the
  * file, so the scan of what is published reads the committed bytes plus this
- * one prefix (`payload.test.ts` holds that).
+ * one prefix (`exercise/scripts/admission.py verify` holds the built files to
+ * that, byte for byte).
  */
 export const PREFIX = 'export default ';
 

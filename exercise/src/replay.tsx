@@ -43,7 +43,7 @@ const show = (page: React.ReactNode) =>
 
 if (params.has('drive')) {
   // Drive mode stays local (`diet serve`): this page cannot reach a box, and does not try.
-  show(<ReplayIndex asked="?drive (driving is local only: run the harness against diet serve)" />);
+  show(<ReplayIndex drive />);
 } else if (!isPublished(asked)) {
   show(<ReplayIndex {...(asked !== null ? { asked } : {})} />);
 } else {

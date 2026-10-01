@@ -16,7 +16,7 @@ const GAPS = [
   'Reading a diet log in the browser waits on diet’s own reader (#117), so these are migrated recordings, not logs.',
 ];
 
-/** The page's frame: where it is, what it publishes, the licence. */
+/** The page's frame, on every page: where it is, what it does not show yet and whose that is, the licence. */
 function Frame({ children }: { readonly children?: React.ReactNode }) {
   return (
     <div className="ex-replay">
@@ -24,6 +24,14 @@ function Frame({ children }: { readonly children?: React.ReactNode }) {
         <a href="../">discipline</a> · replay
       </header>
       {children}
+      <section className="ex-replay__gaps" aria-label="not here yet">
+        <h2>Not here yet</h2>
+        <ul className="ex-replay__list">
+          {GAPS.map((gap) => (
+            <li key={gap}>{gap}</li>
+          ))}
+        </ul>
+      </section>
       <footer className="ex-replay__foot">
         <a href="https://github.com/ironblock/discipline">github.com/ironblock/discipline</a> · Apache-2.0
       </footer>
@@ -31,11 +39,23 @@ function Frame({ children }: { readonly children?: React.ReactNode }) {
   );
 }
 
-/** No recording named, or one the page does not publish: what it does publish, and what it does not and why. */
-export function ReplayIndex({ asked }: { readonly asked?: string | undefined }) {
+/** Why a recording is not published, if this page says. An own key only: `?session=constructor` is not a reason. */
+const whyNot = (name: string) => (Object.hasOwn(NOT_PUBLISHED, name) ? NOT_PUBLISHED[name] : undefined);
+
+/**
+ * No recording named, one the page does not publish, or `?drive`: what it does publish, and what it does not
+ * and why. Driving is local (`diet serve`); this page replays, and says so, naming the landing page.
+ */
+export function ReplayIndex({ asked, drive = false }: { readonly asked?: string | undefined; readonly drive?: boolean }) {
+  const why = asked !== undefined ? whyNot(asked) : undefined;
   return (
     <Frame>
-      {asked !== undefined ? <p className="ex-replay__note">Not published here: {asked}. {NOT_PUBLISHED[asked] ? `It is not published because ${NOT_PUBLISHED[asked]}.` : ''}</p> : null}
+      {drive ? (
+        <p className="ex-replay__note">
+          This page replays; it does not drive. Driving is local, against <code>diet serve</code>. The project's landing page is <a href="../">discipline</a>.
+        </p>
+      ) : null}
+      {asked !== undefined ? <p className="ex-replay__note">Not published here: {asked}.{why ? ` It is not published because ${why}.` : ''}</p> : null}
       <h1>Recorded sessions</h1>
       <ul className="ex-replay__list">
         {PUBLISHED.map((name) => (
@@ -50,12 +70,6 @@ export function ReplayIndex({ asked }: { readonly asked?: string | undefined }) 
           <li key={name}>
             {name}: {why}
           </li>
-        ))}
-      </ul>
-      <h2>Not here yet</h2>
-      <ul className="ex-replay__list">
-        {GAPS.map((gap) => (
-          <li key={gap}>{gap}</li>
         ))}
       </ul>
     </Frame>
