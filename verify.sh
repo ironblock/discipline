@@ -8219,10 +8219,13 @@ PYEOF
   # A case that failed once on the runner left only "BAD exit 1": expect_exit
   # discarded the command's output, so the one log that saw the failure could
   # not name it. Defined in a subshell so its BAD lands nowhere but here.
+  # ...and only then: a case that passes prints its OK line and nothing else.
   expect_exit "a mechanics case that fails shows the command's own words" 0 \
     bash -c "eval \"\$(sed -n '/^expect_exit() {/,/^}/p' '${ROOT}/verify.sh')\"; \
       SELFTEST_BROKEN=(); out=\$(expect_exit probe 0 sh -c 'echo the-reason-it-failed >&2; exit 3'); \
-      grep -qF 'the-reason-it-failed' <<<\"\$out\""
+      grep -qF 'the-reason-it-failed' <<<\"\$out\" || exit 1; \
+      hit=\$(expect_exit quiet 0 sh -c 'echo noise-a-hit-must-not-print'); \
+      [ \"\$hit\" = 'OK    exit 0    quiet' ]"
 
   # --- the resolver's own suite cannot report a pass it did not measure ---
   #
