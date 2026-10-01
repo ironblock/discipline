@@ -35,7 +35,14 @@ jobs:
       # since it is the isolation lane's own requirement. "Green means it was
       # there all along; red means a confinement gate that never confined,
       # which is the one outcome worth two lines of YAML to rule out."
+      # BOUNDED, because a hung package mirror is not a test result: on
+      # 2026-10-01 four selftest shards sat in `apt-get update` at the archive
+      # fetch until GitHub's six-hour job limit cancelled them (#222's run
+      # 36884660921). Measured over 243 recent successful runs of this step:
+      # median 11 s, p95 24 s, p99 39 s, max 60 s. Five minutes is five times
+      # the slowest seen, so a step this slow has hung, and fails in minutes.
       - name: Install the sandbox the isolation lane confines with
+        timeout-minutes: 5
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
 
       # Diagnostic, never fatal, and run BEFORE the sysctl below so the log

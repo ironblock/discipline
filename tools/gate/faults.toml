@@ -3900,6 +3900,14 @@ failure_class = "wiring.pull-request-branch-filtered"
 legacy_signature = "carries .branches: \\[main\\]. and is reached"
 migrated = false
 [[fault]]
+id = "ci.ci_apt_step_unbounded"
+kind = "seeded-gate"
+check = "ci"
+label = "a package-mirror step left unbounded"
+failure_class = "wiring.mirror-step-unbounded"
+legacy_signature = "runs apt-get with no .timeout-minutes."
+migrated = false
+[[fault]]
 id = "ci.ci_trunk_run_cancelled"
 kind = "seeded-gate"
 check = "ci"

@@ -78,6 +78,8 @@ BRANCH_IGNORE = re.compile(r"^ {4,}branches-ignore:")
 INLINE_LIST = re.compile(r"^\[([^\]]*)\]$")
 LIST_ITEM = re.compile(r"^ {6,}-\s*(.+?)\s*$")
 ON_BLOCK = re.compile(r"^on:\s*$", re.MULTILINE)
+STEP_START = re.compile(r"^\s*- (name|uses|run):")
+STEP_TIMEOUT = re.compile(r"^\s+timeout-minutes:\s*\d+\s*$")
 BUDGET = pathlib.Path(__file__).resolve().parent.parent / ".github" / "gate-budget.tsv"
 CANCEL_IN_PROGRESS = re.compile(r"^\s*cancel-in-progress:\s*(.+?)\s*$", re.MULTILINE)
 EVENT = re.compile(r"^  ([A-Za-z_][A-Za-z0-9_]*):")
@@ -473,6 +475,28 @@ def main() -> int:
         for part in ("site-replay", "site-ledger"):
             if not re.search(rf"^\s+name: {part}\s*$", uploaded, re.M):
                 failures.append(f"pages.yml: publishes {part}, which no workflow the gate runs uploads")
+
+    # 11. a step that installs from a package mirror is bounded (#222's run)
+    #
+    #    A hung mirror is not a test result. On 2026-10-01 four selftest shards
+    #    sat in `apt-get update` until GitHub's six-hour job limit cancelled
+    #    them. A step that runs `apt-get` therefore carries `timeout-minutes`,
+    #    read off the step itself: the `- name:` line that opens it, through to
+    #    the next step or job. A job-level timeout would not do -- it bounds the
+    #    whole job, and the selftest's own runtime is what it should measure.
+    for wf in sorted(WORKFLOWS.glob("*.yml")):
+        lines = wf.read_text(encoding="utf-8").splitlines()
+        starts = [i for i, line in enumerate(lines) if STEP_START.match(line)]
+        for n, start in enumerate(starts):
+            end = starts[n + 1] if n + 1 < len(starts) else len(lines)
+            step = lines[start:end]
+            if any("apt-get" in line and not line.lstrip().startswith("#") for line in step) and not any(
+                STEP_TIMEOUT.match(line) for line in step
+            ):
+                failures.append(
+                    f"{wf.name}:{start + 1}: a step runs apt-get with no `timeout-minutes`; "
+                    f"a hung mirror holds the job until GitHub's six-hour limit"
+                )
 
     for message in failures:
         print(message, file=sys.stderr)
