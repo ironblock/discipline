@@ -243,6 +243,22 @@ list — two of its blocks are for other boards, one mounted on a custom
 described the loop without saying so would be inviting a reader to reproduce
 something they cannot.
 
+## Pruned models, and a model that is not a candidate
+
+**A pruned model's entry declares its calibration mix** (planning, #143, comment 5922544337). Pruning keeps what its calibration corpus exercises, so a number measured on a general corpus can hide a gain in one domain and a loss in another. The mix is part of what the weights are.
+
+- An entry marked `pruned = true` must carry a non-empty `calibration_mix`.
+- An entry that is not marked pruned may not carry one.
+- `check-fingerprints.py` refuses either, and runs in the `admission` check.
+- Any claim run on a pruned model declares its domain in the claim's own record.
+
+**Coder is not a candidate for any rung.** Planning's reasons, against Q8_0:
+- code KLD is at parity;
+- prose KLD is +84%;
+- top-1 agreement is 7.7 points lower.
+
+An agent's reasoning traces are prose. Q2_0 remains the top rung. The 7.7 GB that Coder would free is the subject of a separate claim (placement against pruning at equal VRAM), not a reason to serve it. Coder has no entry here, because nothing was fired on it.
+
 ## Registering your own box
 
 **A registered box is a declared fact, not an admitted rung.** An entry says what the box is. It does not say that results on it are comparable to anyone else's; that is #143's admission, which is separate work.

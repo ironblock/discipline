@@ -209,6 +209,19 @@ def read_engine(target: str, pid: bool = False) -> dict:
     return record
 
 
+def check_pruned(registry: dict) -> int:
+    """A pruned model's entry declares its calibration mix (planning, #143, comment 5922544337): pruning keeps what
+    the calibration corpus exercises, so a general-corpus number hides both sides, and the mix is part of what the
+    weights ARE. An entry marked `pruned = true` without a non-empty `calibration_mix` is refused."""
+    bad = 0
+    for name, sub in sorted((registry.get("substrate") or {}).items()):
+        if sub.get("pruned") is True and not str(sub.get("calibration_mix") or "").strip():
+            print(f"  {name}: pruned = true and no calibration_mix; a pruned model's entry declares its calibration mix"); bad += 1
+        elif "calibration_mix" in sub and sub.get("pruned") is not True:
+            print(f"  {name}: calibration_mix on an entry not marked pruned = true"); bad += 1
+    return bad
+
+
 def check_engines(registry: dict) -> int:
     bad = 0
     for name, sub in sorted((registry.get("substrate") or {}).items()):
@@ -308,6 +321,10 @@ def _cases(exe, libs, base, changed):
         ("a reason-only form passes",
          check_engines({"substrate": {"s": {"engine_identity": exe,
                                             "engine_single_digest_suffices": "static, measured"}}}) == 0),
+        ("a pruned entry with no calibration mix is refused",
+         check_pruned({"substrate": {"s": {"pruned": True}}}) == 1),
+        ("a pruned entry declaring its calibration mix passes",
+         check_pruned({"substrate": {"s": {"pruned": True, "calibration_mix": "code 60%, prose 40%"}}}) == 0),
         ("a version-string identity is outside the rule",
          check_engines({"substrate": {"s": {"engine_identity": "3.0.1"}}}) == 0),
     ]
@@ -377,6 +394,7 @@ def main(argv: list[str]) -> int:
         print(f"  {name}: {len(fields)} declared field(s), all present, digest agrees")
 
     bad += check_engines(registry)
+    bad += check_pruned(registry)
     print(f"check-fingerprints: {len(machines)} entr(ies), {bad} problem(s)")
     return EXIT_BAD if bad else 0
 
