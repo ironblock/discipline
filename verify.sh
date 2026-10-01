@@ -240,7 +240,7 @@ check_results() {
   python3 scripts/check-results.py --root results --ledger "$ledger" || rc=$?
   if [ "$rc" -eq 0 ]; then
     python3 "${RENDER_LEDGER:-exercise/scripts/render-ledger.py}" "$ledger" _site/ledger --results results \
-      --commit "$(git rev-parse HEAD 2>/dev/null || echo main)" || rc=$?
+      --commit "$(git rev-parse --verify --quiet HEAD || echo main)" || rc=$?
   fi
   rm -f "$ledger"
   return "$rc"
