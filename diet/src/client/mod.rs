@@ -1884,6 +1884,77 @@ mod tests {
         }
     }
 
+    /// Put one unspellable item's ask to the record's own reader: a key must
+    /// be refused as an unknown field on its row, a kind as an unknown kind,
+    /// and the item's prose must name what its data asks for. Whether it was
+    /// probed: an exempt item is not.
+    fn the_record_refuses(item: &journal::Unspellable) -> bool {
+        use crate::formats::record::{ParseError, SchemaError};
+        use journal::Ask;
+
+        let start = include_str!("../../formats/record/fixtures/valid/minimal.jsonl");
+        let rows = |request: &str, response: &str| {
+            format!("{}\n{request}\n{response}\n", start.trim_end())
+        };
+        let request = r#"{"record":"request","id":"q1","lane":"main","substrate":"local","head_sha256":"85c4ae51186ca1ee36eee21c92ea5dbcece090e3064325d1fab9a70c28412eed"}"#;
+        let response = r#"{"record":"response","id":"a1","to_request":"q1","output_tokens":512}"#;
+        assert!(
+            crate::formats::record::parse(&rows(request, response)).is_ok(),
+            "the probe's own record must be valid, or every refusal below is about it"
+        );
+        let with_key = |line: &str, key: &str| line.replacen('{', &format!("{{\"{key}\":1,"), 1);
+
+        let named = match item.asks {
+            Ask::Key { row, key } => Some(format!("`{row}.{key}")),
+            Ask::Kind(kind) => Some(format!("`{kind}`")),
+            Ask::Exempt(_) => None,
+        };
+        if let Some(named) = named {
+            assert!(
+                item.what.contains(&named),
+                "`{}`'s prose does not name {named}`, which its data asks for: {}",
+                item.kind.tag(),
+                item.what
+            );
+        }
+        match item.asks {
+            Ask::Key { row, key } => {
+                let document = match row {
+                    _ if row == "start" => format!(
+                        "{}\n{request}\n{response}\n",
+                        with_key(start.trim_end(), key)
+                    ),
+                    _ if row == "request" => rows(&with_key(request, key), response),
+                    _ if row == "response" => rows(request, &with_key(response, key)),
+                    _ => panic!(
+                        "`{}` asks for a key on `{row}`, which the probe does not build",
+                        item.what
+                    ),
+                };
+                match crate::formats::record::parse(&document) {
+                    Err(ParseError::Schema(SchemaError::UnknownField { field, .. }))
+                        if field == key => {}
+                    other => panic!(
+                        "`lost()` names `{row}.{key}`, which the record now spells \
+                     (or refuses for another reason): {other:?}"
+                    ),
+                }
+                true
+            }
+            Ask::Kind(kind) => {
+                let document = format!("{}{{\"record\":\"{kind}\"}}\n", rows(request, response));
+                match crate::formats::record::parse(&document) {
+                    Err(ParseError::Schema(SchemaError::UnknownKind(tag))) if tag == kind => {}
+                    other => panic!(
+                        "`lost()` names the kind `{kind}`, which the record now names: {other:?}"
+                    ),
+                }
+                true
+            }
+            Ask::Exempt(_) => false,
+        }
+    }
+
     /// EVERY UNSPELLABLE ITEM IS ONE THE RECORD REFUSES (#117 R3, D8). Each
     /// item's `asks` is put to the record's OWN reader: a key it names must
     /// be refused as an unknown field on that row, and a kind it names as an
@@ -1893,11 +1964,13 @@ mod tests {
     /// its own (the test above) could never notice that.
     ///
     /// A nested key is probed at the top-level key the row would carry it
-    /// under (`start.serving`, not `serving.concurrency`); an exempt item is
-    /// listed with its reason, and is not probed.
+    /// under (`start.serving`, not `serving.concurrency`): the outer refusal
+    /// covers the inner key, because a record that refuses `serving` cannot
+    /// hold anything inside it. An exempt item is listed with its reason, and
+    /// is not probed. Each item's prose must name the same change its data
+    /// asks for, so the two cannot drift apart.
     #[test]
     fn every_unspellable_item_is_one_the_record_refuses() {
-        use crate::formats::record::{ParseError, SchemaError};
         use journal::Ask;
 
         // One of every kind, then the per-row losses: a pinned sampler, a
@@ -1924,57 +1997,13 @@ mod tests {
         });
         let unspellable = journal::project(&journal, SUBSTRATE).unspellable;
 
-        let start = include_str!("../../formats/record/fixtures/valid/minimal.jsonl");
-        let rows = |request: &str, response: &str| {
-            format!("{}\n{request}\n{response}\n", start.trim_end())
-        };
-        let request = r#"{"record":"request","id":"q1","lane":"main","substrate":"local","head_sha256":"85c4ae51186ca1ee36eee21c92ea5dbcece090e3064325d1fab9a70c28412eed"}"#;
-        let response = r#"{"record":"response","id":"a1","to_request":"q1","output_tokens":512}"#;
-        assert!(
-            crate::formats::record::parse(&rows(request, response)).is_ok(),
-            "the probe's own record must be valid, or every refusal below is about it"
-        );
-        let with_key = |line: &str, key: &str| line.replacen('{', &format!("{{\"{key}\":1,"), 1);
-
         let mut probed = 0;
         let mut exempt = Vec::new();
         for item in &unspellable {
-            match item.asks {
-                Ask::Key { row, key } => {
-                    let document = match row {
-                        _ if row == "start" => format!(
-                            "{}\n{request}\n{response}\n",
-                            with_key(start.trim_end(), key)
-                        ),
-                        _ if row == "request" => rows(&with_key(request, key), response),
-                        _ if row == "response" => rows(request, &with_key(response, key)),
-                        _ => panic!(
-                            "`{}` asks for a key on `{row}`, which the probe does not build",
-                            item.what
-                        ),
-                    };
-                    match crate::formats::record::parse(&document) {
-                        Err(ParseError::Schema(SchemaError::UnknownField { field, .. }))
-                            if field == key => {}
-                        other => panic!(
-                            "`lost()` names `{row}.{key}`, which the record now spells \
-                             (or refuses for another reason): {other:?}"
-                        ),
-                    }
-                    probed += 1;
-                }
-                Ask::Kind(kind) => {
-                    let document =
-                        format!("{}{{\"record\":\"{kind}\"}}\n", rows(request, response));
-                    match crate::formats::record::parse(&document) {
-                        Err(ParseError::Schema(SchemaError::UnknownKind(tag))) if tag == kind => {}
-                        other => panic!(
-                            "`lost()` names the kind `{kind}`, which the record now names: {other:?}"
-                        ),
-                    }
-                    probed += 1;
-                }
-                Ask::Exempt(why) => exempt.push((item.kind.tag(), why)),
+            if the_record_refuses(item) {
+                probed += 1;
+            } else if let Ask::Exempt(why) = item.asks {
+                exempt.push((item.kind.tag(), why));
             }
         }
         assert!(
@@ -1985,13 +2014,21 @@ mod tests {
                 }),
             "the one record change demanded now is on the list"
         );
+        let exempt_kinds: Vec<&str> = exempt.iter().map(|(kind, _)| *kind).collect();
         assert_eq!(
-            exempt.len(),
-            3,
-            "exempt, each with its reason: the timeout projected to nothing, issued \
-             versus arrived, an unreported count -- {exempt:?}"
+            exempt_kinds,
+            [
+                EntryKind::Issued.tag(),
+                EntryKind::Received.tag(),
+                EntryKind::TimedOut.tag()
+            ],
+            "exempt, each with its reason: issued versus arrived, an unreported \
+             count, the timeout projected to nothing -- {exempt:?}"
         );
-        assert!(probed >= 12, "{probed} items probed");
+        assert_eq!(
+            probed, 13,
+            "every item that asks for a key or a kind is probed"
+        );
     }
 
     /// One entry of each kind. Written out rather than derived, because a
