@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 161
+faults = 166
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -1935,6 +1935,7 @@ anchor = '''
 becomes = '''
     if false && listen.is_unspecified() {'''
 catches = [
+    "a_drive_server_refuses_a_wildcard_before_it_asks_the_engine",
     "a_drive_server_refuses_a_wildcard_listen_even_with_a_credential",
 ]
 
@@ -2428,10 +2429,15 @@ failure_class = "drive.engine-asks-before-the-registry-refuses"
 target = "diet/src/drive/engine.rs"
 expect_exit = 101
 anchor = '''
-    // refused without touching the server.
-    expected(id, &identity)?;'''
+    let wants = expected(id, &identity)?;'''
 becomes = '''
-    // refused without touching the server.'''
+    let wants = match expected(id, &identity) {
+        Ok(wants) => wants,
+        Err(why) => {
+            let _ = props();
+            return Err(why);
+        }
+    };'''
 catches = [
     "drive::engine::tests::a_substrate_with_no_registered_engine_identity_is_refused_and_the_server_is_not_asked",
 ]
@@ -2541,7 +2547,7 @@ expect_exit = 101
 anchor = '''
     // The engine check, before anything binds: the server must run the'''
 becomes = '''
-    let _bound_first = match listener(listen, port, credential.is_some()) {
+    let _bound_first = match listener(listen, port) {
         Ok(listener) => listener,
         Err(refused) => return refused,
     };
@@ -2573,5 +2579,81 @@ anchor = '''
 becomes = '''
             Value::String(String::new()),'''
 catches = [
+    "a_drive_server_starts_only_on_the_engine_the_registry_pins",
+]
+
+[[fault]]
+id = "drive.engine-accepts-a-non-hex-registered-commit"
+failure_class = "drive.engine-accepts-a-non-hex-registered-commit"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+    if registered.len() != 40 || !registered.chars().all(is_hex) {'''
+becomes = '''
+    if registered.len() != 40 {'''
+catches = [
+    "drive::engine::tests::a_malformed_registered_commit_is_refused",
+]
+
+[[fault]]
+id = "drive.engine-echoes-the-whole-body"
+failure_class = "drive.engine-echoes-the-whole-body"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+        .nth(ECHOED_BODY_CHARS)'''
+becomes = '''
+        .nth(usize::MAX)'''
+catches = [
+    "drive::engine::tests::a_props_that_cannot_answer_is_a_refusal_not_a_pass",
+]
+
+[[fault]]
+id = "drive.engine-refusal-omits-what-was-expected"
+failure_class = "drive.engine-refusal-omits-what-was-expected"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+    let refuse = |why: String| format!("`{id}` expects {}: {why}", wants.describes());'''
+becomes = '''
+    let refuse = |why: String| {
+        let _ = wants.describes();
+        why
+    };'''
+catches = [
+    "drive::engine::tests::a_props_that_cannot_answer_is_a_refusal_not_a_pass",
+]
+
+[[fault]]
+id = "drive.engine-calls-no-commit-a-suffix"
+failure_class = "drive.engine-calls-no-commit-a-suffix"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+    if commit.is_empty() {'''
+becomes = '''
+    if false && commit.is_empty() {'''
+catches = [
+    "drive::engine::tests::a_build_info_names_the_commit_after_its_build_number",
+]
+
+[[fault]]
+id = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+failure_class = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    let listen = match listen_on(listen, credential.is_some()) {'''
+becomes = '''
+    let _asked_first = regime.as_ref().map(|regime| {
+        diet::drive::engine::check_served(
+            &HttpStream::new(endpoint.clone()),
+            &regime.substrates[0].id,
+        )
+    });
+    let listen = match listen_on(listen, credential.is_some()) {'''
+catches = [
+    "a_drive_server_checks_the_engine_before_it_binds",
+    "a_drive_server_refuses_a_wildcard_before_it_asks_the_engine",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
 ]
