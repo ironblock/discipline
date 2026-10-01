@@ -48,7 +48,7 @@ Both ties recompute from committed files with `python3 tie.py`. It also checks t
   - a file mapped from the directory under a name the recipe's pattern misses;
   - a shared object mapped from outside both the executable's directory and the system's library directories;
   - an executable changed on disk after the process started.
-- **The floor's process** maps 9 of its directory's 29 files: the core libraries, `libggml-cuda.so`, `libggml-rpc.so` and `libggml-cpu-haswell.so`, this CPU's variant. Each is the same inode it hashed, and none changed after the process started.
+- **The floor's process** maps 9 of its directory's 29 files, and only those 9 get the inode and status-change checks; the other 20 are hashed from disk as a disk read would hash them: the core libraries, `libggml-cuda.so`, `libggml-rpc.so` and `libggml-cpu-haswell.so`, this CPU's variant. Each is the same inode it hashed, and none changed after the process started.
 - **The 18 shared objects it maps from outside the directory** are named in `mapped_from_system`: libc and its neighbours, the CUDA toolkit and the driver. These are the instance's fields.
 - **Two reader fixes came from this host:**
   - Its `/usr/local` is `/var/usrlocal` (ostree), and the maps name the real path, so that prefix is a system prefix.
@@ -56,7 +56,7 @@ Both ties recompute from committed files with `python3 tie.py`. It also checks t
 
 ## beellama's backends
 
-beellama loads its ggml backends with `dlopen` (`GGML_BACKEND_DL`). The release ships 15 `libggml-cpu-*` variants, and the CPU decides which one is loaded. Only a process read shows which, and a process read is due when that host's production runs again. The directory recipe covers all of them, so a change to any of them moves the fingerprint.
+beellama loads its ggml backends with `dlopen` (`GGML_BACKEND_DL`). The release ships 15 `libggml-cpu-*` variants, and the CPU decides which one is loaded. The floor's process read shows `libggml-cpu-haswell.so`. The directory recipe covers all of them, so a change to any of them moves the fingerprint.
 
 ## Limits of a process read
 

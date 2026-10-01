@@ -179,11 +179,9 @@ def read_engine(target: str, pid: bool = False) -> dict:
                 raise SystemExit(f"check-fingerprints: the process maps {where.name}, replaced on disk since load")
             if where == exe:
                 continue
-            if where.parent == directory and not SHARED_OBJECT.search(path):
+            if where.parent == directory and not SHARED_OBJECT.search(where.name):
                 raise SystemExit(f"check-fingerprints: the process maps {where.name} from its directory under "
                                  "a name the recipe's pattern does not match")
-            if not SHARED_OBJECT.search(path):
-                continue
             if where.parent == directory:
                 st = where.stat()
                 # The inode always; the device only when the mapping names a real block device. btrfs maps

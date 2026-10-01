@@ -7,7 +7,7 @@ engine_release_tarball_sha256.
 candidate: every file the 2026-09-29 engine manifest hashed (exe and the 8 libraries the server loads, by soname)
 equals the disk read's file of that soname.
 registry: every substrate's engine_libraries table equals the read it cites, and no input is empty."""
-import json, pathlib, sys, tomllib
+import hashlib, json, pathlib, re, sys, tomllib
 here = pathlib.Path(__file__).resolve().parent
 root = here.parents[2]
 reg = tomllib.loads((root / "substrates/registry.toml").read_text())["substrate"]
@@ -18,12 +18,23 @@ tar = json.loads((here / "beellama-tarball-members.json").read_text())
 pinned = reg["accel24-beellama-qwen27b-q4kxl"]["engine_release_tarball_sha256"]
 files = dict(bee["libraries"], **{"llama-server": bee["exe"]})
 bad = sorted(k for k, v in files.items() if tar["regular_members"].get(k) != v)
+# both ways: every shared object the release ships is in the read, so a read that lost a library cannot pass
+shipped = {k for k in tar["regular_members"] if re.search(r"\.so(\.\d+)*$", k)}
+bad += sorted(f"{k} (shipped, not read)" for k in shipped - set(bee["libraries"]))
+# the floor's process read is the same release
+proc = json.loads((here / "beellama-floor-process.json").read_text())
+if (proc["exe"], proc["libraries"]) != (bee["exe"], bee["libraries"]):
+    bad.append("the floor's process read differs from the disk read")
 print(f"beellama: tarball {'is' if tar['tarball_sha256'] == pinned else 'IS NOT'} the pinned release; "
       f"{len(files) - len(bad)} of {len(files)} files equal its members{'; differing: ' + ', '.join(bad) if bad else ''}")
 ok &= tar["tarball_sha256"] == pinned and not bad
 
 cand = json.loads((here / "accel24-llamacpp-candidate-disk.json").read_text())
 manifest = root / "substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/raw/engine-manifest.txt"
+# the manifest is the one the candidate's admission pinned: its sha256 is that record's engine component
+pin = json.loads(json.loads((manifest.parents[1] / "fingerprint.json").read_text())["canonical"])["engine"]
+if hashlib.sha256(manifest.read_bytes()).hexdigest() != pin:
+    print("candidate: the engine manifest is not the one the admission record pins"); ok = False
 rows = [l.split() for l in manifest.read_text().splitlines() if l.startswith("cand_file ")]
 bad, matched = [], set()
 for _, digest, name in rows:
