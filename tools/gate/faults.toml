@@ -7294,6 +7294,30 @@ failure_class = "drive.registry-takes-an-empty-list"
 migrated = false
 
 [[fault]]
+id = "drive.registry-resolves-a-sidecar-as-one-file"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-resolves-a-sidecar-as-one-file"
+failure_class = "drive.registry-resolves-a-sidecar-as-one-file"
+migrated = false
+
+[[fault]]
+id = "drive.registry-reads-a-draft-list-as-absent"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-reads-a-draft-list-as-absent"
+failure_class = "drive.registry-reads-a-draft-list-as-absent"
+migrated = false
+
+[[fault]]
+id = "drive.registry-keeps-a-quote-in-an-item"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-keeps-a-quote-in-an-item"
+failure_class = "drive.registry-keeps-a-quote-in-an-item"
+migrated = false
+
+[[fault]]
 id = "drive.regime-ignores-a-hardware-disagreement"
 kind = "lane-fault"
 check = "lanes"
