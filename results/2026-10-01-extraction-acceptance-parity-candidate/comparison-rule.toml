@@ -1,0 +1,16 @@
+# The comparison row, pre-registered with the parity fire (#143, comment
+# 5894139110): the candidate's fired effect against the floor's (#115's
+# re-fire), as a `comparison` row (#181).
+
+[comparison]
+statistic = "the parity effect (seat B minus seat A, deduped gate-accept rate), this fire against #115's"
+floor = "#115's verdict.json effect, 0.088472 (planning's text: 0.0885)"
+substrate_independent = "they differ by < 0.05"
+substrate_dependent = "they differ by >= 0.15 with paired p below the attainable floor"
+inconclusive = "otherwise, reported with the sign"
+prediction = "directional: independent -- the inversion is a property of the extraction contract, not of the rung"
+margins = { independent = "0.05", dependent = "0.15" }
+
+[readings]
+sign = "the candidate's effect minus the floor's"
+paired_p = "asked only where the difference reaches 0.15; below it substrate_dependent cannot hold whatever p is, so no p is computed"

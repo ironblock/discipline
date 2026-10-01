@@ -142,6 +142,36 @@
    "label": "the criterion's digest not recorded",
    "old": "\"criterion_sha256\": sha((HERE / \"criterion.toml\").read_bytes()),",
    "new": ""
+  },
+  {
+   "label": "an invalid sample never re-drawn",
+   "old": "\"discarded\": redraws < budget})",
+   "new": "\"discarded\": False})"
+  },
+  {
+   "label": "the re-draw budget ignored",
+   "old": "\"discarded\": redraws < budget})",
+   "new": "\"discarded\": True}) if redraws < 50 else None"
+  },
+  {
+   "label": "a discarded sample counted",
+   "old": "        if r.get(\"discarded\"):\n            continue\n",
+   "new": ""
+  },
+  {
+   "label": "the kwarg-delivery finding at three, not two",
+   "old": ".get(\"invalid\", 0) >= 2}",
+   "new": ".get(\"invalid\", 0) >= 3}"
+  },
+  {
+   "label": "a re-draw sent with the invalid sample's own seed",
+   "old": "+ 100 * attempt,",
+   "new": ","
+  },
+  {
+   "label": "the re-draw budget per run, not per cell",
+   "old": "budget = int(tomllib.loads((HERE / \"criterion.toml\").read_text()).get(\"max_redraws\", 0)); redraws = 0",
+   "new": "budget = int(tomllib.loads((HERE / \"criterion.toml\").read_text()).get(\"max_redraws\", 0)); redraws = redraws if \"redraws\" in dir() else 0"
   }
  ]
 }
