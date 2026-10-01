@@ -26,6 +26,7 @@ These are captures C0–C5 of R3's plan (on #117), taken 2026-09-29 from 02:09:4
 | C4 | not taken: its condition, no progress frames in C1, did not hold | — |
 | C5, unstreamed | `diet/client/fixtures/llama-server-e7051ef-unstreamed.http` | `d9d2e92e…` |
 | C0b, build id (2026-10-01) | `build-info.json`, `build-info.raw` (one GET `/props`, occupying no slot); `engine-read.json` | `18033075…` |
+| C0c, the floor's build id (2026-10-01) | `build-info-floor.json`, `build-info-floor.raw` (one GET `/props` on the floor's production, occupying no slot); `floor-tarball-stat.json` | `6ce8fc6d…` |
 
 ## C0: the limits
 
@@ -92,3 +93,17 @@ One read-only GET `/props` was made at 2026-10-01T03:06:11Z by `capture_c0b.py` 
     - Its checkout's HEAD `e486f80` is one commit on top of `e7051ef`: a fix to QSA bias indexing when a unified cache holds several sequences, 1 file changed.
     - The binary is a 17,872-byte stub, so the digests of its linked libraries are recorded beside it.
   - C0b is therefore a receipt for the engine running on 2026-10-01. It is not evidence about C0-C5. The registry row (still `current` for `2026-09-28`) is not changed here; the new instance and the stub-pinning recipe are #202.
+
+## C0c: the floor's build id (2026-10-01)
+
+One read-only GET `/props` was made at 2026-10-01T06:47:22Z by `capture_c0c.py`, against the production server of `accel24-beellama-qwen27b-q4kxl`, on the instance after the 2026-09-30 reboot (proposed as `2026-10-01` in #206). It relaunched nothing.
+
+- **What is kept.**
+  - `build_info`'s JSON token as received is in `build-info-floor.raw`: `"b0-unknown-dirty"`, 18 bytes, sha256 `dc5729d0d9a8864ab71d6557a1f2ed02ad33c7ccf9b01428d96f9a61c151779d`.
+  - Its decoded value is 16 bytes, sha256 `c481b63c378b0d6d8ff78dacd19ee6baa1789192df1af649471b9d9fec72fb5a`.
+  - No other key carries a build or commit id.
+- **The engine names no commit, and no record fixes one.**
+  - The engine is an unpacked prebuilt release. The registry already recorded `b0-unknown-dirty` as its self-report.
+  - Upstream's release workflow force-moved the tag and replaced the release's assets on every successful push run: twelve from 2026-06-07 to 2026-06-17, and again on 2026-07-10. So no commit is measured. By upstream's record, the last run to publish before the tarball was written (2026-06-14T20:09Z, by its birth time on the host, `floor-tarball-stat.json`) built `3975b51b`, but that is not matched to the tarball's digest. The entry says so (`engine_commit_unknown`).
+  - Its identity is the binary's digest, and its libraries' digests once #205 merges.
+  - Under #157's ruling, the entry declares `engine_build_info = "b0-unknown-dirty"`. That is the literal a start-time check matches, and the check reports `engine_identity` as "unreported (literal matched)".

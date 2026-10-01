@@ -7462,6 +7462,174 @@ failure_class = "drive.serve-bin-announces-no-registry-digest"
 migrated = false
 
 [[fault]]
+id = "client.props-asked-under-the-endpoints-path"
+kind = "lane-fault"
+check = "lanes"
+label = "client.props-asked-under-the-endpoints-path"
+failure_class = "client.props-asked-under-the-endpoints-path"
+migrated = false
+
+[[fault]]
+id = "drive.engine-passes-a-dirty-build"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-passes-a-dirty-build"
+failure_class = "drive.engine-passes-a-dirty-build"
+migrated = false
+
+[[fault]]
+id = "drive.engine-takes-a-short-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-takes-a-short-commit"
+failure_class = "drive.engine-takes-a-short-commit"
+migrated = false
+
+[[fault]]
+id = "drive.engine-passes-another-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-passes-another-commit"
+failure_class = "drive.engine-passes-another-commit"
+migrated = false
+
+[[fault]]
+id = "drive.engine-accepts-a-malformed-registered-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-accepts-a-malformed-registered-commit"
+failure_class = "drive.engine-accepts-a-malformed-registered-commit"
+migrated = false
+
+[[fault]]
+id = "drive.engine-asks-before-the-registry-refuses"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-asks-before-the-registry-refuses"
+failure_class = "drive.engine-asks-before-the-registry-refuses"
+migrated = false
+
+[[fault]]
+id = "drive.engine-reads-a-refused-props"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-reads-a-refused-props"
+failure_class = "drive.engine-reads-a-refused-props"
+migrated = false
+
+[[fault]]
+id = "drive.engine-checks-a-canned-substrate"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-checks-a-canned-substrate"
+failure_class = "drive.engine-checks-a-canned-substrate"
+migrated = false
+
+[[fault]]
+id = "drive.engine-compares-the-commit-before-the-literal"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-compares-the-commit-before-the-literal"
+failure_class = "drive.engine-compares-the-commit-before-the-literal"
+migrated = false
+
+[[fault]]
+id = "drive.engine-passes-another-literal"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-passes-another-literal"
+failure_class = "drive.engine-passes-another-literal"
+migrated = false
+
+[[fault]]
+id = "drive.engine-accepts-an-empty-literal"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-accepts-an-empty-literal"
+failure_class = "drive.engine-accepts-an-empty-literal"
+migrated = false
+
+[[fault]]
+id = "drive.engine-names-both-paths-alike"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-names-both-paths-alike"
+failure_class = "drive.engine-names-both-paths-alike"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-skips-the-engine-check"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-skips-the-engine-check"
+failure_class = "drive.serve-bin-skips-the-engine-check"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-binds-before-the-engine-check"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-binds-before-the-engine-check"
+failure_class = "drive.serve-bin-binds-before-the-engine-check"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-no-engine-build"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-no-engine-build"
+failure_class = "drive.serve-bin-announces-no-engine-build"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-no-engine-identity"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-no-engine-identity"
+failure_class = "drive.serve-bin-announces-no-engine-identity"
+migrated = false
+
+[[fault]]
+id = "drive.engine-accepts-a-non-hex-registered-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-accepts-a-non-hex-registered-commit"
+failure_class = "drive.engine-accepts-a-non-hex-registered-commit"
+migrated = false
+
+[[fault]]
+id = "drive.engine-echoes-the-whole-body"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-echoes-the-whole-body"
+failure_class = "drive.engine-echoes-the-whole-body"
+migrated = false
+
+[[fault]]
+id = "drive.engine-refusal-omits-what-was-expected"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-refusal-omits-what-was-expected"
+failure_class = "drive.engine-refusal-omits-what-was-expected"
+migrated = false
+
+[[fault]]
+id = "drive.engine-calls-no-commit-a-suffix"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-calls-no-commit-a-suffix"
+failure_class = "drive.engine-calls-no-commit-a-suffix"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+failure_class = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+migrated = false
+
+[[fault]]
 id = "drive.session-drops-timings"
 kind = "lane-fault"
 check = "lanes"

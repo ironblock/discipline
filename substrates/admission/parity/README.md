@@ -39,6 +39,34 @@ Planning answered Q-P1 with the plan's D7 (a):
   - For #115's band, which is positive, this is exactly #115's rule.
 - **The seat-A floor (N1's degenerate case).** A rung whose seat A accepts almost nothing gives a stable effect equal to seat B's rate, and would pass trivially. Seat A's accepted-and-deduped count must reach the config's floor in the fire and in the band's own fire, or the word is `unadjudicated`. The floor is the pre-registration's to state; D7 proposes 10, against #115's archived 18. #115's config sets 0, which reproduces #115.
 
+## A counted-fork floor
+
+A config may carry `counted_fork_floor`, as the candidate's pre-registration does (planning, #143, comments 5894139110 and 5921525110). Below the floor of 25 counted extraction forks of 31, the fire is `unadjudicated`. Under paired pooling the count is the intersection's.
+
+- **Without a floor** (#115's config, `null`): every archived extraction fork must be present and routed. This is #115's rule, and it keeps #115's byte parity.
+- **With a floor:** an extraction fork that is missing (a timeout leaves no event) or whose routing fails is not counted, and the seat is `unadjudicated` only below the floor. The misses and their reasons are reported per seat in `counted_forks`, whatever the word. The effect is pooled over each seat's counted forks. The interview forks, the logs, the box record and the offered check stay as #115 had them.
+- **Planning's rulings on the pre-registration's gaps (#143, comment 5921525110), as config:**
+  - **`pool`.** `"per-seat"` pools each seat over its own counted forks, which is #115's form. `"paired"` pools both seats over the intersection of the forks both counted, which keeps the archived band's pairing. Under `"paired"` the counted-fork floor applies to the intersection alone. `counted_forks` reports each seat's counted total and the intersection's size (`paired`).
+  - **`interview_miss`.** `"fail"`, #115's rule, makes a missing interview fork fail the seat. Under `"byte-match"` an interview miss is reported in `interview_misses` and is not a word by itself. The fire is void (`unadjudicated`) only if **a planned fork ran with a request other than the planned one**:
+    - **The plan.** `planned_requests` names a file pinned by digest. It keys each of the 87 planned forks per seat by `lane|turn|step|ask`, with the sha256 of its planned request over lane, parent turn, messages and params. A key the fire ran more than once must match on every copy.
+    - **Where it comes from.** The plan is the offline rehearsal's, passed through the export #115's re-fired logs passed: the private alias map, **then home prefixes collapsed to `~`**. The fire's logs must pass the same two steps before grading, or every request carrying a path reads as changed.
+    - **What is not a change.** A planned fork that did not run is a miss. A fork the plan does not name, such as the replay's extra interviews, is ignored.
+    - **What a miss can do.** A miss that changed a later prompt fails the match. A miss that left every later request byte-identical changed nothing the effect depends on.
+    - **`apply.py --check-plan CONFIG FIRE_DIR`** checks a fire's logs against the plan. Over both of #115's fires, every planned fork ran with its planned request.
+    - A mis-routed fork still makes the seat `unadjudicated`.
+  - **Harness stops, timeouts and refusals, as they fall.**
+    - A harness stop (a 5xx, a repeated 4xx, a connection failure) ends the replay with no `run.end`, so that seat is `unadjudicated`.
+    - A timeout leaves a fork missing.
+    - A content refusal is a counted fork.
+    - The pinned harness's per-fork timeout is stated by value as `fork_timeout_s`: 2400 s, both arms' `turn_timeout_s` at `0e14292`. The applier does not apply it.
+  - **`report_refire_interval`.** It reports the fire's own interval: `band.py`'s method (its level, resamples and seed) over the paired counted forks, written with `--interval-out PATH` as a number beside the word, never in `verdict.json` and never as a word. Its one sentence is that it straddles zero, which bears on the sign rule. The band-edge sentence is withdrawn. Over #115's own re-fire it reads [0.022893, 0.19021], which does not straddle zero.
+  - #115's `verdict.json` stays byte-identical with `pool` and the interval switched on, and the selftest checks this.
+- **`configs/extraction-acceptance-inverts-candidate.json`** is the candidate's config:
+  - from #115: the pins, band digest, arms, interviews and disclosure;
+  - for the candidate: its model id;
+  - as ruled: a floor of 25 on the intersection, **a seat-A floor of 10**, `pool = "paired"`, the interval on, and `interview_miss = "byte-match"` with `configs/candidate-planned-requests.json` pinned.
+  - The archived band [0.024877, 0.21789] does not straddle zero, so `refuted` is reachable.
+
 ## The parity fixtures
 
 `configs/extraction-acceptance-inverts-115.json` is #115's manifest and config. With it:
@@ -53,12 +81,15 @@ Planning answered Q-P1 with the plan's D7 (a):
   - 15 fixtures on the generalised rule: a negative band five ways, a straddling band three ways, a band touching zero from each side, a point of zero, and the seat-A floor in the fire, in the band's own fire, and exactly at it;
   - band.py's seven refusals (altered tallies; a thin manifest two ways; a level out of range; a report leaving out seat B; a report disagreeing, for each seat), and that it reads its seed from the manifest;
   - apply.py's refusals of a band that is not the pinned bytes and of a config with a negative floor, bad arms or a malformed digest, and that it reads its floor from the config.
-- **`python3 mutants.py`** seeds 29 mutations into `band.py` and `apply.py`. The selftest must exit 1 on each, and **all 29 are killed**. Among them:
+- **`python3 mutants.py`** seeds 48 mutations into `band.py` and `apply.py`. The selftest must exit 1 on each, and **all 48 are killed**. Among them:
   - N1's two named faults: `decide()` restored to `effect <= 0`, and the floor check removed (in the fire, and in the band's fire);
+  - planning's rulings: the per-seat floor under paired pooling; a changed planned request not voiding; an interview miss failing the seat; the plan's pin unchecked; a planned fork that did not run read as changed; the request digest blind to the messages; the band-edge withdrawal undone; the interval never straddling zero;
   - a straddling band allowed to refute; the reference sign inverted; the band's edge excluded; the config's floor ignored;
   - #115's checks each dropped: box, canary, instance, seat-B think block, arm, routing, forks, interviews, offered, disclosure, band digest;
   - band.py's pin check, seed, stated-tally check (each seat), required pins, range check, and its refusal of a report missing a seat;
-  - a band touching zero read as straddling; the point-of-zero guard removed; the config's own checks dropped.
+  - a band touching zero read as straddling; the point-of-zero guard removed; the config's own checks dropped;
+  - the counted-fork floor: its check removed, a missing fork not listed, a mis-routed fork failing the seat, the config's floor ignored, a floor above the fork count accepted, an interview failure folded into misses, duplicate or foreign keys allowed;
+  - paired pooling ignored; the fire's interval never straddling, or drawn with another seed.
 
   #115's original 19 mutants were never committed (m2). These are re-derived against the generalised code, and committed.
 
