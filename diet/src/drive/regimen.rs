@@ -173,6 +173,38 @@ pub fn regime_of(regimen: &Regimen, endpoint_given: bool) -> Result<Regime, Stri
     })
 }
 
+/// The regime `regimen` declares, its substrate resolved from the registry
+/// in `registry` by the regimen's `substrate` id (#157 Q2): what a session
+/// against a live endpoint declares, where [`regime_of`] would refuse one.
+///
+/// The regimen still says what it is the authority on -- the arm, the dogma,
+/// the sampler, the reasoning state. The registry says what the substrate IS:
+/// its engine, its weights and its equipment's fingerprint. The regimen's
+/// own `substrate_hardware` must agree with the registry's, so the two
+/// declarations of one machine cannot disagree in a record.
+///
+/// # Errors
+///
+/// Whatever [`regime_of`] refuses for the regimen itself; a substrate the
+/// registry does not register, or cannot give the record's identity for
+/// ([`crate::drive::registry::identity`]); and a hardware disagreement.
+pub fn regime_registered(regimen: &Regimen, registry: &str) -> Result<Regime, String> {
+    let mut regime = regime_of(regimen, false)?;
+    for substrate in &mut regime.substrates {
+        let identity = crate::drive::registry::identity(registry, &substrate.id)?;
+        if substrate.hardware_fingerprint != identity.hardware_fingerprint {
+            return Err(format!(
+                "`substrate_hardware = \"{}\"` disagrees with the registry's \
+                 `hardware_fingerprint` for `{}`'s equipment, \"{}\"",
+                substrate.hardware_fingerprint, substrate.id, identity.hardware_fingerprint
+            ));
+        }
+        substrate.engine = identity.engine;
+        substrate.weights = identity.weights;
+    }
+    Ok(regime)
+}
+
 /// The regimen's word for a path that caches nothing.
 ///
 /// The same word `budget_tokens = "none"` uses one table over, because it is
@@ -270,6 +302,64 @@ mod tests {
         );
         let parsed = regimen::parse(&text).expect("the document is a regimen");
         regime_of(&parsed, false)
+    }
+
+    /// A regimen naming substrate `id`, its hardware `hardware`.
+    fn naming(id: &str, hardware: &str) -> crate::formats::regimen::Regimen {
+        let text = format!(
+            "arm = \"a\"\ndogma_version = 0\nsubstrate = \"{id}\"\n\
+             substrate_reasoning = \"off\"\nsubstrate_hardware = \"{hardware}\"\n\
+             [sampler]\nseed = 7\n"
+        );
+        regimen::parse(&text).expect("the document is a regimen")
+    }
+
+    #[test]
+    fn a_registered_substrate_crosses_with_the_registrys_identity() {
+        use crate::drive::registry::{REGISTRY, identity};
+        use crate::formats::record::Weights;
+        let id = "accel24-beellama-qwen27b-q4kxl";
+        let registered = identity(REGISTRY, id).expect("registered");
+        let regime =
+            super::regime_registered(&naming(id, &registered.hardware_fingerprint), REGISTRY)
+                .expect("a registered substrate, its hardware agreeing");
+        let substrate = &regime.substrates[0];
+        assert_eq!(substrate.engine, registered.engine);
+        assert!(matches!(&substrate.weights, Weights::Digest(sha) if sha.len() == 64));
+        assert_eq!(substrate.weights, registered.weights);
+
+        // The dev loop's own regimen resolves to the canned instance it plays.
+        let dev_loop = regimen::parse(crate::drive::canned::DEV_LOOP).expect("a regimen");
+        let regime = super::regime_registered(&dev_loop, REGISTRY).expect("canned-cache-n");
+        assert_eq!(
+            regime.substrates[0].weights,
+            Weights::Canned {
+                acts_sha256: crate::drive::canned::acts_digest()
+            }
+        );
+    }
+
+    #[test]
+    fn a_regimen_whose_hardware_disagrees_with_the_registry_is_refused() {
+        use crate::drive::registry::REGISTRY;
+        let refused = super::regime_registered(
+            &naming("accel24-beellama-qwen27b-q4kxl", &"b".repeat(64)),
+            REGISTRY,
+        )
+        .expect_err("two declarations of one machine disagree");
+        assert!(refused.contains("disagrees with the registry"), "{refused}");
+    }
+
+    #[test]
+    fn a_regimen_naming_an_unregistered_substrate_is_refused() {
+        use crate::drive::registry::REGISTRY;
+        let refused =
+            super::regime_registered(&naming("nowhere-at-all", &"a".repeat(64)), REGISTRY)
+                .expect_err("unregistered");
+        assert!(
+            refused.contains("`nowhere-at-all` is not a substrate"),
+            "{refused}"
+        );
     }
 
     /// #94 design point 1: the reasoning control crosses from the regimen
