@@ -1037,6 +1037,35 @@ mod tests {
         );
     }
 
+    /// #88: Linux refuses to execute a file that is still open for writing
+    /// (ETXTBSY), and in a test process another thread's `fork` can hold a
+    /// freshly written runner's write descriptor until that child execs. A
+    /// runner held open across the run, then closed, must still run.
+    /// Linux only: macOS executes a file open for writing, so this cannot
+    /// fail there.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_runner_still_open_for_writing_runs_once_it_is_closed() {
+        let ground = Ground::make("busy");
+        let at = ground.outside.join("stand-in");
+        let runner = Confinement::Sandbox(stand_in_runner(&at));
+        let held = fs::OpenOptions::new()
+            .write(true)
+            .open(&at)
+            .expect("held for writing");
+        let closer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            drop(held);
+        });
+        let ran = runner.run(
+            &Policy::merged_usr(),
+            &ground.tree,
+            &argv(&["sh", "-c", "exit 0"]),
+        );
+        closer.join().expect("the closer");
+        assert!(ran.is_ok(), "{ran:?}");
+    }
+
     #[test]
     fn the_record_is_read_from_the_run_and_not_written_down_as_a_constant() {
         let ground = Ground::make("record");
