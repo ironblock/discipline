@@ -6665,6 +6665,22 @@ failure_class = "client.unspellable-item-the-record-spells"
 migrated = false
 
 [[fault]]
+id = "client.unspellable-ask-disagrees-with-its-prose"
+kind = "lane-fault"
+check = "lanes"
+label = "client.unspellable-ask-disagrees-with-its-prose"
+failure_class = "client.unspellable-ask-disagrees-with-its-prose"
+migrated = false
+
+[[fault]]
+id = "client.issued-retry-reason-unnamed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.issued-retry-reason-unnamed"
+failure_class = "client.issued-retry-reason-unnamed"
+migrated = false
+
+[[fault]]
 id = "client.stream-drops-the-draft-counts"
 kind = "lane-fault"
 check = "lanes"
