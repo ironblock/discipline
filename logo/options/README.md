@@ -65,6 +65,42 @@ The letters are a window and nothing is drawn outside them, not even the ends. T
   <img alt="Discipline, inside variant" src="logo-light-inside.svg">
 </picture>
 
+### refract
+
+The `elements` glass, but the waves are bent by a displacement filter (one `feImage` map, one `feDisplacementMap`) instead of at build time, so the lines stay plain paths a future animation can move. True refraction strength.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logo-dark-refract.svg">
+  <img alt="Discipline, refract variant" src="logo-light-refract.svg">
+</picture>
+
+### refract-strong
+
+`refract` with the displacement scaled up (`REFRACT_GAIN`), as `elements` exaggerates it.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logo-dark-refract-strong.svg">
+  <img alt="Discipline, refract-strong variant" src="logo-light-refract-strong.svg">
+</picture>
+
+### refract-liquid
+
+`refract-strong` with the wide, thick `liquid` bezel, which throws light much further at the rim.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logo-dark-refract-liquid.svg">
+  <img alt="Discipline, refract-liquid variant" src="logo-light-refract-liquid.svg">
+</picture>
+
+### refract-story-noise
+
+`story-noise` with the waves bent by the displacement filter at `REFRACT_GAIN`.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logo-dark-refract-story-noise.svg">
+  <img alt="Discipline, refract-story-noise variant" src="logo-light-refract-story-noise.svg">
+</picture>
+
 ### filter-glass
 
 The previous glass, which bends the light with a displacement filter and two baked maps. Renders on iPhone Safari via GitHub. Kept as a fallback and a comparison.

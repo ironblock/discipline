@@ -37,6 +37,11 @@ carved, wide as liquid.
 
 - **`glass="filter"`**: the field is baked into two PNGs (refraction, rim light) that a filter reads
   with `feImage` and applies with `feDisplacementMap`.
+- **`glass="refract"`**: `elements`, except the waves are bent by a displacement filter instead of at
+  build time: the lines stay plain, unbent paths (so something can move them later) and one `bend`
+  filter (`feImage` + `feDisplacementMap`, 2 primitives) applied to each light layer reads the same
+  baked refraction map. The rim light is still outline strokes. In WebKitGTK the displacement
+  matches Chromium, but at 3x the filter output is blocky (see Safari).
 - **`glass="elements"`** (default): the same field is applied to the *geometry* at build time. The wave
   paths are bent where they cross each bezel and drawn as ordinary paths, the glow is layered copies of
   them with plain blurs, and the rim light is the letter outline stroked in segments whose brightness

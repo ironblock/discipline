@@ -89,6 +89,24 @@ VARIANTS = {
              "to the word.",
         margin=28, outside=False,
     ),
+    "refract": dict(
+        desc="The `elements` glass, but the waves are bent by a displacement filter (one `feImage` map, one "
+             "`feDisplacementMap`) instead of at build time, so the lines stay plain paths a future animation can move. "
+             "True refraction strength.",
+        glass="refract", gain=1.0,
+    ),
+    "refract-strong": dict(
+        desc="`refract` with the displacement scaled up (`REFRACT_GAIN`), as `elements` exaggerates it.",
+        glass="refract",
+    ),
+    "refract-liquid": dict(
+        desc="`refract-strong` with the wide, thick `liquid` bezel, which throws light much further at the rim.",
+        glass="refract", look="liquid",
+    ),
+    "refract-story-noise": dict(
+        desc="`story-noise` with the waves bent by the displacement filter at `REFRACT_GAIN`.",
+        glass="refract", harmonics="filter", outside="ends",
+    ),
     "filter-glass": dict(
         desc="The previous glass, which bends the light with a displacement filter and two baked maps. Renders on "
              "iPhone Safari via GitHub. Kept as a fallback and a comparison.",
@@ -365,25 +383,46 @@ def bevel_paths(geo, field, t, look):
     return {k: " ".join("M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in pl) for pl, _ in segs) for k, segs in buckets.items()}, QUANT
 
 
+def bend_filter(maps, gain, w):
+    """Displace whatever it is applied to by the baked refraction map: the whole of the glass's
+    refraction, in two primitives."""
+    rx, ry, rw, rh = maps["region"]
+    return (f'<filter id="bend" filterUnits="userSpaceOnUse" x="0" y="0" width="{w}" height="{H}" color-interpolation-filters="sRGB">'
+            f'<feImage href="{maps["disp"]}" x="{rx}" y="{ry}" width="{rw}" height="{rh}" preserveAspectRatio="none" result="dmap"/>'
+            f'<feDisplacementMap in="SourceGraphic" in2="dmap" scale="{maps["scale"] * gain:.2f}" xChannelSelector="R" yChannelSelector="G"/>'
+            '</filter>')
+
+
 def element_glass(t, v, geo, comps, w):
-    """Glass without a displacement filter. Returns (defs, body)."""
+    """Glass whose rim light is outline strokes. The waves are bent either at build time (glass="elements")
+    or by the `bend` displacement filter (glass="refract"). Returns (defs, body)."""
     look = lens.LOOKS[v["look"]]
-    field = geo["maps"][v["look"]]["field"]
-    paths = refracted_paths(geo, comps, v["taper"], field, geo["shift"])
+    maps = geo["maps"][v["look"]]
+    field = maps["field"]
+    bend = v["glass"] == "refract"
+    paths = {} if bend else refracted_paths(geo, comps, v["taper"], field, geo["shift"])
     bev, quant = bevel_paths(geo, field, t, look)
     b, el = t["bloom"], t["el"]
     defs = [f'<path id="{k}" d="{d}"/>' for k, d in {**paths, **bev}.items() if d]
+    if bend:
+        defs.append(bend_filter(maps, v.get("gain", REFRACT_GAIN), w))
     for name, dev in (("soft", f'{t["soft"]}'), ("frost", f'{t["frost"]}'), ("bloomA", f'{b["a"][0]} {b["a"][1]}'), ("bloomB", f'{b["b"][0]} {b["b"][1]}')):
         defs.append(f'<filter id="{name}" filterUnits="userSpaceOnUse" x="0" y="0" width="{w}" height="{H}" '
                     f'color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="{dev}"/></filter>')
 
     def light(scale, beam_scale, alpha):
-        strokes = "\n".join(f'          <use href="#r{k}" stroke="{c}"/>' for k, c in enumerate(t["wave"]))
-        return (f'<g opacity="{alpha:g}">\n'
-                f'        <g fill="none" stroke-width="{5 * scale:g}" stroke-linecap="round" stroke-linejoin="round" '
-                f'stroke-opacity="{t["wave_alpha"]}" mask="url(#wavemask)">\n{strokes}\n        </g>\n'
-                f'        <use href="#rb" fill="none" stroke="{t["beam"]}" stroke-width="{t["beam_width"] * beam_scale:g}" '
-                f'stroke-linecap="round" mask="url(#beammask)"/>\n      </g>')
+        prefix, beam_id = ("w", "beam") if bend else ("r", "rb")
+        strokes = "\n".join(f'          <use href="#{prefix}{k}" stroke="{c}"/>' for k, c in enumerate(t["wave"]))
+        group = (f'<g opacity="{alpha:g}">\n'
+                 f'        <g fill="none" stroke-width="{5 * scale:g}" stroke-linecap="round" stroke-linejoin="round" '
+                 f'stroke-opacity="{t["wave_alpha"]}" mask="url(#wavemask)">\n{strokes}\n        </g>\n'
+                 f'        <use href="#{beam_id}" fill="none" stroke="{t["beam"]}" stroke-width="{t["beam_width"] * beam_scale:g}" '
+                 f'stroke-linecap="round" mask="url(#beammask)"/>\n      </g>')
+        if not bend:
+            return group
+        # the padding rect keeps WebKit from clipping the filter to the lines' own box
+        return (f'<g filter="url(#bend)"><rect width="{w}" height="{H}" fill="{t["pad"]}" fill-opacity="0.004"/>'
+                f'{group}</g>')
 
     inner, binner = t["inner"], t["beam_inner"]
     facets = []
@@ -428,7 +467,7 @@ def svg(theme, variant, geo):
         f'    <path id="w{k}" d="{d}"/>'
         for k, d in enumerate(wave_paths(comps, v["taper"], width, beam_y, 3 if v["harmonics"] == "single" else 2, geo["shift"]))
     )
-    if v["glass"] == "elements":
+    if v["glass"] in ("elements", "refract"):
         glass_defs, glass_body = element_glass(t, v, geo, comps, w)
     else:
         glass_defs = glass_filter(t, v, w, geo["maps"][v["look"]])
