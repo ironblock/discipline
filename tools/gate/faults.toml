@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 128
+mechanics_assertions = 129
 unseedable_guards = 2
 migrated = 0
 
@@ -4356,6 +4356,15 @@ check = "resolver"
 label = "a resolver suite that collected nothing is not a pass"
 failure_class = "resolver.suite-cannot-run"
 expected_exit = "2"
+migrated = false
+
+[[fault]]
+id = "mech.a-mechanics-case-that-fails-shows-the-command-s-own-words"
+kind = "mechanics"
+check = "selftest"
+label = "a mechanics case that fails shows the command's own words"
+failure_class = "selftest.mechanics-output-shown"
+expected_exit = "0"
 migrated = false
 
 [[fault]]

@@ -8214,6 +8214,16 @@ PYEOF
       && DIET_BIN='${depless}/a-nested-trees-dep-info/diet-bin' \
       python3 '${ROOT}/scripts/resolve-diet.py'"
 
+  # --- a mechanics case that fails says why (#208) ---
+  #
+  # A case that failed once on the runner left only "BAD exit 1": expect_exit
+  # discarded the command's output, so the one log that saw the failure could
+  # not name it. Defined in a subshell so its BAD lands nowhere but here.
+  expect_exit "a mechanics case that fails shows the command's own words" 0 \
+    bash -c "eval \"\$(sed -n '/^expect_exit() {/,/^}/p' '${ROOT}/verify.sh')\"; \
+      SELFTEST_BROKEN=(); out=\$(expect_exit probe 0 sh -c 'echo the-reason-it-failed >&2; exit 3'); \
+      grep -qF 'the-reason-it-failed' <<<\"\$out\""
+
   # --- the resolver's own suite cannot report a pass it did not measure ---
   #
   # 0 from `check-merge-gate.py` is the only thing standing between a lane
