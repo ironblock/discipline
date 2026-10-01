@@ -32,6 +32,10 @@ struct Served {
     substrate: Option<String>,
     /// And the digest of the registry that resolved it.
     registry_sha256: Option<String>,
+    /// The `build_info` its engine check passed, when it made one.
+    engine_build: Option<String>,
+    /// And how the engine's identity was established.
+    engine_identity: Option<String>,
     _head: HeadFile,
 }
 
@@ -91,6 +95,8 @@ fn start(endpoint: &str, extra: &[&str]) -> Served {
         opened: announced["opened"].as_u64().expect("when it opened"),
         substrate: announced["substrate"].as_str().map(str::to_owned),
         registry_sha256: announced["registry_sha256"].as_str().map(str::to_owned),
+        engine_build: announced["engine_build"].as_str().map(str::to_owned),
+        engine_identity: announced["engine_identity"].as_str().map(str::to_owned),
         child,
         _head: head,
     }
@@ -473,4 +479,104 @@ fn a_drive_server_announces_the_registered_substrate_its_regimen_names() {
     // And without one, nothing is claimed.
     let served = start(&stub.url(), &[]);
     assert_eq!((&served.substrate, &served.registry_sha256), (&None, &None));
+}
+
+/// A regimen naming registered substrate `id`, with its equipment's own
+/// hardware fingerprint, as a file.
+fn regimen_registered(id: &str) -> HeadFile {
+    let hardware = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+        .expect("registered")
+        .hardware_fingerprint;
+    file_holding(
+        "regimen",
+        &format!(
+            "arm = \"a\"\ndogma_version = 0\nsubstrate = \"{id}\"\n\
+             substrate_reasoning = \"off\"\nsubstrate_hardware = \"{hardware}\"\n\
+             [sampler]\nseed = 7\n"
+        ),
+    )
+}
+
+/// A `/props` reply reporting `build_info`.
+fn props_saying(build_info: &str) -> Act {
+    Act::Answer(format!("{{\"build_info\":\"{build_info}\"}}"))
+}
+
+#[test]
+fn a_drive_server_starts_only_on_the_engine_the_registry_pins() {
+    // A substrate with a registered commit; its binary self-reports build 1.
+    let id = "accel24-llamacpp-qwen38-27b-iq3s";
+    let commit = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+        .expect("registered")
+        .engine_commit
+        .expect("an engine_commit");
+    let regimen = regimen_registered(id);
+    let path = regimen.0.to_string_lossy().into_owned();
+
+    let build = format!("b1-{}", &commit[..7]);
+    let stub = Stub::serving(vec![props_saying(&build)]).expect("loopback");
+    let served = start(&stub.url(), &["--regimen", &path]);
+    assert_eq!(
+        (
+            served.substrate.as_deref(),
+            served.engine_build.as_deref(),
+            served.engine_identity.as_deref()
+        ),
+        (Some(id), Some(build.as_str()), Some("checked (commit)")),
+        "the substrate, the build the check passed, and how"
+    );
+    let heads = stub.heads();
+    assert!(heads[0].starts_with("GET /props HTTP/1.1\r\n"), "{heads:?}");
+
+    // Another commit -- C0b's build, a production one commit past its pin --
+    // and a dirty build of the pinned one: each refused before anything binds.
+    for (build_info, names) in [
+        ("b8-e486f80", "e486f80"),
+        (&*format!("{build}-dirty"), "-dirty"),
+    ] {
+        let stub = Stub::serving(vec![props_saying(build_info)]).expect("loopback");
+        let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+        assert_eq!(code, Some(1), "{said}");
+        assert!(
+            said.contains(names) && !said.contains("listening"),
+            "{said}"
+        );
+    }
+    // A server that does not answer `/props` is no pass.
+    let stub = Stub::serving(vec![Act::Status(404, "no such route".to_owned())]).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("answered 404"), "{said}");
+}
+
+#[test]
+fn a_drive_server_refuses_a_substrate_with_no_registered_engine_identity_without_asking_it() {
+    let stub = Stub::serving(vec![props_saying("b1-4ceb171")]).expect("loopback");
+    let regimen = regimen_registered("all-MiniLM-L6-v2");
+    let path = regimen.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("neither an `engine_build_info` nor an `engine_commit`"),
+        "{said}"
+    );
+    assert!(stub.heads().is_empty(), "{:?}", stub.heads());
+}
+
+#[test]
+fn a_drive_server_checks_the_engine_before_it_binds() {
+    // On a port already taken, a server that bound first would fail to
+    // listen (exit 3); one that checks first refuses the engine (exit 1).
+    let regimen = regimen_registered("accel24-llamacpp-qwen38-27b-iq3s");
+    let path = regimen.0.to_string_lossy().into_owned();
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    // Through the type: `taken` dot `local` reads as a hostname to hygiene.
+    let port = std::net::TcpListener::local_addr(&taken)
+        .expect("its address")
+        .port()
+        .to_string();
+    let stub = Stub::serving(vec![props_saying("b8-e486f80")]).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path, "--port", &port]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("e486f80"), "the engine's refusal: {said}");
 }

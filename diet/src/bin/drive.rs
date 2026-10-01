@@ -91,6 +91,9 @@ fn serve_usage() -> String {
     out.push_str("it, and a wildcard (0.0.0.0, ::) is refused: name one interface.\n");
     out.push_str("--regimen names the regimen the session runs under; its substrate is\n");
     out.push_str("resolved from the registry, and an unregistered one refuses to start.\n");
+    out.push_str("Unless the substrate is canned, the server's GET /props build_info must\n");
+    out.push_str("be the registry's engine_build_info for it exactly, or else name its\n");
+    out.push_str("engine_commit, or serve refuses to start.\n");
     out
 }
 
@@ -215,10 +218,6 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(credential) => credential,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
-    let listener = match listener(listen, port, credential.is_some()) {
-        Ok(listener) => listener,
-        Err(refused) => return refused,
-    };
     let mut transport = HttpStream::new(endpoint);
     if let Some(key_file) = key_file {
         match bearer_from(&key_file) {
@@ -226,6 +225,22 @@ fn serve(args: &[String]) -> ExitCode {
             Err(why) => return fail(EXIT_INPUT, &why),
         }
     }
+    // The engine check, before anything binds: the server must run the
+    // engine the registry pins for the regimen's substrate (#157).
+    let substrate = regime
+        .as_ref()
+        .map(|regime| regime.substrates[0].id.as_str());
+    let engine = match substrate
+        .map(|id| diet::drive::engine::check_served(&transport, id))
+        .transpose()
+    {
+        Ok(build) => build.flatten(),
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
+    let listener = match listener(listen, port, credential.is_some()) {
+        Ok(listener) => listener,
+        Err(refused) => return refused,
+    };
     let session = std::sync::Arc::new(Session::open(transport, shape));
     let opened = session.opened();
     let config = Config {
@@ -237,12 +252,14 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(server) => server,
         Err(why) => return fail(EXIT_HALT, &format!("the server did not start: {why}")),
     };
-    let substrate = regime
-        .as_ref()
-        .map(|regime| regime.substrates[0].id.as_str());
     println!(
         "{}",
-        announcement(&server.addr().to_string(), opened, substrate)
+        announcement(
+            &server.addr().to_string(),
+            opened,
+            substrate,
+            engine.as_ref()
+        )
     );
     // Serves until the process is stopped. The server's threads do the work;
     // this one only keeps the process, and the server, alive.
@@ -307,7 +324,12 @@ fn listener(
 
 /// The first line `serve` prints: where it listens and when it opened, as
 /// JSON.
-fn announcement(listening: &str, opened: u64, substrate: Option<&str>) -> String {
+fn announcement(
+    listening: &str,
+    opened: u64,
+    substrate: Option<&str>,
+    engine: Option<&diet::drive::engine::Passed>,
+) -> String {
     let mut fields = BTreeMap::from([
         ("listening".to_owned(), Value::String(listening.to_owned())),
         (
@@ -322,6 +344,19 @@ fn announcement(listening: &str, opened: u64, substrate: Option<&str>) -> String
         fields.insert(
             "registry_sha256".to_owned(),
             Value::String(diet::drive::registry::registry_sha256()),
+        );
+    }
+    // The `build_info` the engine check passed, as the server reported it,
+    // and how: on both paths, so a reader never infers the path from a
+    // missing field.
+    if let Some(engine) = engine {
+        fields.insert(
+            "engine_build".to_owned(),
+            Value::String(engine.build_info.clone()),
+        );
+        fields.insert(
+            "engine_identity".to_owned(),
+            Value::String(engine.identity.tag().to_owned()),
         );
     }
     let mut out = String::new();
