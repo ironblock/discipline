@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 89
+faults = 91
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -1573,4 +1573,37 @@ becomes = '''
         Kind::Fork => Event::Fork {'''
 catches = [
     "client::tests::every_unspellable_item_is_one_the_record_refuses",
+]
+
+[[fault]]
+id = "client.unspellable-ask-disagrees-with-its-prose"
+failure_class = "client.unspellable-ask-disagrees-with-its-prose"
+target = "diet/src/client/journal.rs"
+expect_exit = 101
+anchor = '''
+            Key {
+                row: "response",
+                key: "cache",
+            },'''
+becomes = '''
+            Key {
+                row: "request",
+                key: "cache",
+            },'''
+catches = [
+    "client::tests::every_unspellable_item_is_one_the_record_refuses",
+]
+
+[[fault]]
+id = "client.issued-retry-reason-unnamed"
+failure_class = "client.issued-retry-reason-unnamed"
+target = "diet/src/client/journal.rs"
+expect_exit = 101
+anchor = '''
+    if a_retry {'''
+becomes = '''
+    if false && a_retry {'''
+catches = [
+    "client::tests::every_unspellable_item_is_one_the_record_refuses",
+    "client::tests::the_record_projection_names_every_fact_record_v0_cannot_carry",
 ]
