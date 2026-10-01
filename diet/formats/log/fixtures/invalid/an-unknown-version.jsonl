@@ -1,4 +1,4 @@
-{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"seq":0,"t":0,"version":2}
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"seq":0,"t":0,"version":3}
 {"kind":"ask","seq":1,"t":5,"text":"say hello","turn":1}
 {"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
 {"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}

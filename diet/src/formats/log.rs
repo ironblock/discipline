@@ -46,10 +46,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 1;
+pub const VERSION: i64 = 2;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1];
+pub const READS: &[i64] = &[0, 1, 2];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -235,6 +235,9 @@ pub enum Event {
         model: String,
         /// The messages the trunk starts from.
         head: Vec<HeadMessage>,
+        /// What serves the session, as the client declares it (v2, #30
+        /// D7/N10): its dialect, and its concurrency when declared.
+        serving: Option<Serving>,
     },
     /// An ask was admitted.
     Ask {
@@ -256,6 +259,10 @@ pub enum Event {
         turn: u32,
         /// The lane it was made on.
         lane: Lane,
+        /// The sha256 of the head of the request as sent: the bytes its
+        /// body starts with, as the client hashes them (v2, ruled on #157,
+        /// so a live record's request names the prefix it sent).
+        head_sha256: Option<String>,
     },
     /// A command was refused.
     Refused {
@@ -291,6 +298,12 @@ pub enum Event {
         reasoning: Option<String>,
         /// What the server measured of the call, as it reported it (v1, D1).
         timings: Option<Timings>,
+        /// The server's token counts, as it reported them, for a dialect
+        /// whose server reports no `timings` (v2, ruled on #157).
+        usage: Option<Usage>,
+        /// Whether the answer stopped at its output cap (v2, #30 D3/N10);
+        /// absent when the writer did not say.
+        capped: Option<bool>,
     },
     /// A call was stopped.
     Cancelled {
@@ -367,6 +380,30 @@ pub enum Event {
         /// Milliseconds of prefill so far, by the server's clock.
         time_ms: u64,
     },
+}
+
+/// A call's token counts as the server reported them in its `usage`
+/// object, keys as the server names them (v2). Carried only for a dialect
+/// whose server reports no `timings`: on llama.cpp they equal `timings`,
+/// measured on #157, and carrying both would let them disagree.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Usage {
+    /// Prompt tokens, cached or not.
+    pub prompt_tokens: u64,
+    /// Tokens generated.
+    pub completion_tokens: u64,
+    /// Prompt tokens reused from a cache, where the server reports them.
+    pub cached_tokens: Option<u64>,
+}
+
+/// What serves a session, as the client declares it (v2, #30 D7/N10).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Serving {
+    /// The client's dialect, by its name.
+    pub dialect: String,
+    /// How many requests the server serves at once, when declared. Absent
+    /// is undeclared, never one.
+    pub concurrency: Option<u64>,
 }
 
 /// A call's timings as the server reported them: llama.cpp's `timings`
@@ -805,6 +842,10 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 opened: fields.count("opened")?,
                 model: fields.string("model")?,
                 head: fields.head("head")?,
+                serving: match object.get("serving") {
+                    None => None,
+                    Some(_) => Some(fields.serving("serving")?),
+                },
             }
         }
         Kind::Ask => Event::Ask {
@@ -818,6 +859,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
         Kind::Request => Event::Request {
             turn: fields.turn("turn")?,
             lane: fields.tag("lane", Lane::from_tag)?,
+            head_sha256: fields.optional_digest("head_sha256")?,
         },
         Kind::Refused => Event::Refused {
             command: fields.tag("command", Command::from_tag)?,
@@ -849,6 +891,11 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 None => None,
                 Some(_) => Some(fields.timings("timings")?),
             },
+            usage: match object.get("usage") {
+                None => None,
+                Some(_) => Some(fields.usage("usage")?),
+            },
+            capped: fields.optional_flag("capped")?,
         },
         Kind::Cancelled => Event::Cancelled {
             request: fields.count("request")?,
@@ -1004,6 +1051,16 @@ pub enum Holds {
     /// A `response`'s [`Timings`]: an object of the keys [`TIMINGS`]
     /// declares, every one optional.
     Timings,
+    /// A JSON boolean (v2).
+    Flag,
+    /// A sha256: 64 lowercase hex digits (v2).
+    Digest,
+    /// A `response`'s [`Usage`]: an object of the keys [`USAGE`] declares,
+    /// every one optional (v2).
+    Usage,
+    /// A `session.start`'s [`Serving`]: an object of the keys [`SERVING`]
+    /// declares (v2).
+    Serving,
 }
 
 /// One key a kind carries.
@@ -1047,6 +1104,62 @@ const fn may_v1(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// An optional key that arrived in v2.
+const fn may_v2(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 2,
+    }
+}
+
+/// A key that arrived in v2 and is required wherever its object is written.
+const fn must_v2(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 2,
+    }
+}
+
+/// The keys a `response`'s `usage` carries, as the server names them
+/// (`prompt_tokens_details.cached_tokens` flattened to `cached_tokens`).
+/// A server that sends `usage` sends both counts; only the cache count is
+/// optional. Arrived in v2.
+pub const USAGE: &[Field] = &[
+    must_v2("prompt_tokens", Holds::Count),
+    must_v2("completion_tokens", Holds::Count),
+    may_v2("cached_tokens", Holds::Count),
+];
+
+/// The keys a `session.start`'s `serving` carries: its dialect, always, and
+/// its concurrency when declared. Arrived in v2.
+pub const SERVING: &[Field] = &[
+    must_v2("dialect", Holds::Text),
+    may_v2("concurrency", Holds::Count),
+];
+
+/// Whether `text` is a sha256 as this format writes one.
+fn is_a_digest(text: &str) -> bool {
+    text.len() == 64
+        && text
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+}
+
+/// The keys of the object a key holds, for the holders that are objects.
+#[must_use]
+pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
+    match holds {
+        Holds::Timings => Some(TIMINGS),
+        Holds::Usage => Some(USAGE),
+        Holds::Serving => Some(SERVING),
+        _ => None,
+    }
+}
+
 /// The version a kind arrived in.
 #[must_use]
 pub fn introduced(kind: Kind) -> i64 {
@@ -1081,6 +1194,7 @@ pub const TIMINGS: &[Field] = &[
 /// TypeScript bindings ([`typescript`]) and the test that pins this table
 /// against what [`render`] actually writes all read it.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn schema(kind: Kind) -> &'static [Field] {
     use Holds::{Count, Head, Tag, Text, Timings, Version};
     match kind {
@@ -1090,6 +1204,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must("opened", Count),
                 must("model", Text),
                 must("head", Head),
+                may_v2("serving", Holds::Serving),
             ];
             F
         }
@@ -1102,7 +1217,11 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             F
         }
         Kind::Request => {
-            const F: &[Field] = &[must("turn", Count), must("lane", Tag(Tags::Lane))];
+            const F: &[Field] = &[
+                must("turn", Count),
+                must("lane", Tag(Tags::Lane)),
+                may_v2("head_sha256", Holds::Digest),
+            ];
             F
         }
         Kind::Refused => {
@@ -1132,6 +1251,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may("finish_reason", Text),
                 may_v1("reasoning", Text),
                 may_v1("timings", Timings),
+                may_v2("usage", Holds::Usage),
+                may_v2("capped", Holds::Flag),
             ];
             F
         }
@@ -1198,13 +1319,16 @@ pub const BINDINGS: &str = "formats/log/log.ts";
 fn ts_holds(holds: Holds) -> String {
     match holds {
         Holds::Count | Holds::Millis => "number".to_owned(),
-        Holds::Text => "string".to_owned(),
+        Holds::Text | Holds::Digest => "string".to_owned(),
         Holds::Version => READS
             .iter()
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(" | "),
         Holds::Timings => "Timings".to_owned(),
+        Holds::Flag => "boolean".to_owned(),
+        Holds::Usage => "Usage".to_owned(),
+        Holds::Serving => "Serving".to_owned(),
         Holds::Head => "HeadMessage[]".to_owned(),
         Holds::Tag(tags) => tags.name().to_owned(),
     }
@@ -1263,11 +1387,14 @@ pub fn typescript() -> String {
         out.push_str(";\n\n");
     }
     out.push_str("export interface HeadMessage {\n  role: Role;\n  content: string;\n}\n\n");
-    out.push_str("export interface Timings {\n");
-    for field in TIMINGS {
-        let _ = writeln!(out, "  {}?: {};", field.key, ts_holds(field.holds));
+    for (name, fields) in [("Timings", TIMINGS), ("Usage", USAGE), ("Serving", SERVING)] {
+        let _ = writeln!(out, "export interface {name} {{");
+        for field in fields {
+            let optional = if field.required { "" } else { "?" };
+            let _ = writeln!(out, "  {}{optional}: {};", field.key, ts_holds(field.holds));
+        }
+        out.push_str("}\n\n");
     }
-    out.push_str("}\n\n");
     for kind in Kind::ALL {
         let name = ts_name(*kind);
         let one = exactly_one(*kind);
@@ -1329,6 +1456,7 @@ fn to_value(line: &Line) -> Value {
             opened,
             model,
             head,
+            serving,
         } => {
             put("version", Value::Integer(*version));
             put("opened", count(*opened));
@@ -1346,6 +1474,13 @@ fn to_value(line: &Line) -> Value {
                         .collect(),
                 ),
             );
+            if let Some(serving) = serving {
+                let mut object = BTreeMap::from([("dialect".to_owned(), text(&serving.dialect))]);
+                if let Some(concurrency) = serving.concurrency {
+                    object.insert("concurrency".to_owned(), count(concurrency));
+                }
+                put("serving", Value::Object(object));
+            }
             Kind::SessionStart
         }
         Event::Ask { turn, text: asked } => {
@@ -1358,9 +1493,16 @@ fn to_value(line: &Line) -> Value {
             put("to", text(to.tag()));
             Kind::Settlement
         }
-        Event::Request { turn, lane } => {
+        Event::Request {
+            turn,
+            lane,
+            head_sha256,
+        } => {
             put("turn", count(u64::from(*turn)));
             put("lane", text(lane.tag()));
+            if let Some(digest) = head_sha256 {
+                put("head_sha256", text(digest));
+            }
             Kind::Request
         }
         Event::Refused {
@@ -1391,6 +1533,8 @@ fn to_value(line: &Line) -> Value {
             finish_reason,
             reasoning,
             timings,
+            usage,
+            capped,
         } => {
             put("to_request", count(*to_request));
             put("text", text(answer));
@@ -1402,6 +1546,20 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(timings) = timings {
                 put("timings", timings_value(timings));
+            }
+            if let Some(usage) = usage {
+                let object = [
+                    ("prompt_tokens", Some(usage.prompt_tokens)),
+                    ("completion_tokens", Some(usage.completion_tokens)),
+                    ("cached_tokens", usage.cached_tokens),
+                ]
+                .into_iter()
+                .filter_map(|(key, value)| value.map(|value| (key.to_owned(), count(value))))
+                .collect();
+                put("usage", Value::Object(object));
+            }
+            if let Some(capped) = capped {
+                put("capped", Value::Boolean(*capped));
             }
             Kind::Response
         }
@@ -1593,6 +1751,71 @@ impl Fields<'_> {
         })
     }
 
+    fn optional_digest(&self, key: &str) -> Result<Option<String>, String> {
+        match self.0.get(key) {
+            None => Ok(None),
+            Some(Value::String(digest)) if is_a_digest(digest) => Ok(Some(digest.clone())),
+            Some(_) => Err(format!(
+                "`{key}` is not a sha256 of 64 lowercase hex digits"
+            )),
+        }
+    }
+
+    fn optional_flag(&self, key: &str) -> Result<Option<bool>, String> {
+        match self.0.get(key) {
+            None => Ok(None),
+            Some(Value::Boolean(flag)) => Ok(Some(*flag)),
+            Some(_) => Err(format!("`{key}` is not a boolean")),
+        }
+    }
+
+    /// The object at `key`, refusing a key `declared` does not name.
+    fn object(&self, key: &str, declared: &[Field]) -> Result<&BTreeMap<String, Value>, String> {
+        let Value::Object(object) = self.get(key)? else {
+            return Err(format!("`{key}` is not an object"));
+        };
+        if let Some(unknown) = object
+            .keys()
+            .find(|field| !declared.iter().any(|f| f.key == field.as_str()))
+        {
+            return Err(format!("`{key}` carries no `{unknown}`"));
+        }
+        Ok(object)
+    }
+
+    /// A `response`'s `usage`: an object of [`USAGE`]' keys, each a count.
+    fn usage(&self, key: &str) -> Result<Usage, String> {
+        let inner = Fields(self.object(key, USAGE)?);
+        let count = |field: &str| inner.count(field).map_err(|why| format!("`{key}`: {why}"));
+        Ok(Usage {
+            prompt_tokens: count("prompt_tokens")?,
+            completion_tokens: count("completion_tokens")?,
+            cached_tokens: match inner.0.get("cached_tokens") {
+                None => None,
+                Some(_) => Some(count("cached_tokens")?),
+            },
+        })
+    }
+
+    /// A `session.start`'s `serving`: its dialect, and its concurrency when
+    /// declared.
+    fn serving(&self, key: &str) -> Result<Serving, String> {
+        let inner = Fields(self.object(key, SERVING)?);
+        Ok(Serving {
+            dialect: inner
+                .string("dialect")
+                .map_err(|why| format!("`{key}`: {why}"))?,
+            concurrency: match inner.0.get("concurrency") {
+                None => None,
+                Some(_) => Some(
+                    inner
+                        .count("concurrency")
+                        .map_err(|why| format!("`{key}`: {why}"))?,
+                ),
+            },
+        })
+    }
+
     fn head(&self, key: &str) -> Result<Vec<HeadMessage>, String> {
         let Value::Array(messages) = self.get(key)? else {
             return Err(format!("`{key}` is not a list"));
@@ -1633,6 +1856,7 @@ mod tests {
                 version: VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
+                serving: None,
                 head: vec![HeadMessage {
                     role: Role::System,
                     content: "you are the trunk".to_owned(),
@@ -1657,6 +1881,7 @@ mod tests {
             Event::Request {
                 turn: 1,
                 lane: Lane::Trunk,
+                head_sha256: None,
             },
             Event::Delta {
                 request: 3,
@@ -1695,6 +1920,7 @@ mod tests {
             Event::Request {
                 turn: 2,
                 lane: Lane::Trunk,
+                head_sha256: None,
             },
             Event::RequestFailed {
                 request: 13,
@@ -1731,6 +1957,7 @@ mod tests {
             Event::Request {
                 turn: 3,
                 lane: Lane::Trunk,
+                head_sha256: None,
             },
             Event::Progress {
                 request: 20,
@@ -1755,6 +1982,8 @@ mod tests {
                 text: "Done.".to_owned(),
                 finish_reason: Some("stop".to_owned()),
                 reasoning: Some("weighing it\n".to_owned()),
+                usage: None,
+                capped: None,
                 timings: Some(Timings {
                     prompt_n: Some(89),
                     cache_n: Some(0),
@@ -1784,6 +2013,7 @@ mod tests {
             Event::Request {
                 turn: 4,
                 lane: Lane::Trunk,
+                head_sha256: None,
             },
             Event::RequestFailed {
                 request: 29,
@@ -1818,13 +2048,19 @@ mod tests {
             (Holds::Count | Holds::Millis, Value::Integer(n)) => *n >= 0,
             (Holds::Version, Value::Integer(n)) => READS.contains(n),
             (Holds::Millis, Value::Decimal(d)) => !d.as_str().starts_with('-'),
-            (Holds::Timings, Value::Object(timings)) => timings.iter().all(|(key, value)| {
-                TIMINGS
+            (Holds::Timings | Holds::Usage | Holds::Serving, Value::Object(object)) => {
+                let declared = object_fields(holds).expect("an object holder");
+                object.iter().all(|(key, value)| {
+                    declared
+                        .iter()
+                        .find(|f| f.key == key)
+                        .is_some_and(|f| written_as(f.holds, value))
+                }) && declared
                     .iter()
-                    .find(|f| f.key == key)
-                    .is_some_and(|f| written_as(f.holds, value))
-            }),
-            (Holds::Text, Value::String(_)) => true,
+                    .all(|f| !f.required || object.contains_key(f.key))
+            }
+            (Holds::Text, Value::String(_)) | (Holds::Flag, Value::Boolean(_)) => true,
+            (Holds::Digest, Value::String(digest)) => is_a_digest(digest),
             (Holds::Tag(tags), Value::String(tag)) => tags.tags().contains(&tag.as_str()),
             (Holds::Head, Value::Array(messages)) => messages.iter().all(|m| match m {
                 Value::Object(message) => {
@@ -1912,14 +2148,16 @@ mod tests {
                 if let Holds::Tag(tags) = field.holds {
                     the_reader_reads_it_as(&object, key, tags);
                 }
-                // Into the nested object: its keys, one level down, get the
+                // Into a nested object: its keys, one level down, get the
                 // same written-somewhere, omitted-somewhere pin.
-                if let (Holds::Timings, Value::Object(timings)) = (field.holds, value) {
-                    for inner in TIMINGS {
-                        if timings.contains_key(inner.key) {
-                            nested_written.insert(inner.key);
+                if let (Some(inner_fields), Value::Object(inner)) =
+                    (object_fields(field.holds), value)
+                {
+                    for nested in inner_fields {
+                        if inner.contains_key(nested.key) {
+                            nested_written.insert((field.key, nested.key));
                         } else {
-                            nested_omitted.insert(inner.key);
+                            nested_omitted.insert((field.key, nested.key));
                         }
                     }
                 }
@@ -1964,17 +2202,41 @@ mod tests {
                 );
             }
         }
-        for inner in TIMINGS {
-            assert!(
-                nested_written.contains(inner.key),
-                "`timings.{}` is declared and no line writes it",
-                inner.key
-            );
-            assert!(
-                nested_omitted.contains(inner.key),
-                "`timings.{}` is declared optional and every line writes it",
-                inner.key
-            );
+        every_nested_key_is_written_and_omitted_as_declared(&nested_written, &nested_omitted);
+    }
+
+    /// The nested half of [`the_schema_is_what_every_kind_writes`]: every key
+    /// of every object holder is written somewhere, and is left out
+    /// somewhere exactly when it is optional.
+    fn every_nested_key_is_written_and_omitted_as_declared(
+        nested_written: &BTreeSet<(&str, &str)>,
+        nested_omitted: &BTreeSet<(&str, &str)>,
+    ) {
+        for (outer, inner_fields) in [("timings", TIMINGS), ("usage", USAGE), ("serving", SERVING)]
+        {
+            for inner in inner_fields {
+                assert!(
+                    nested_written.contains(&(outer, inner.key)),
+                    "`{outer}.{}` is declared and no line writes it",
+                    inner.key
+                );
+                assert_eq!(
+                    nested_omitted.contains(&(outer, inner.key)),
+                    !inner.required,
+                    "`{outer}.{}`: declared {}, and {}",
+                    inner.key,
+                    if inner.required {
+                        "required"
+                    } else {
+                        "optional"
+                    },
+                    if inner.required {
+                        "a line leaves it out"
+                    } else {
+                        "every line writes it"
+                    }
+                );
+            }
         }
     }
 
