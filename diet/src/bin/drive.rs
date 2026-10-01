@@ -261,19 +261,30 @@ fn serve(args: &[String]) -> ExitCode {
         Err(refused) => return refused,
     };
     let session = std::sync::Arc::new(Session::open(transport, shape));
-    let log = log_file.map(|(file, truncated)| {
-        keep_log(std::sync::Arc::clone(&session), file);
-        truncated
-    });
+    let teeing = std::sync::Arc::clone(&session);
     let opened = session.opened();
     let config = Config {
         allowed_origins,
         credential,
         ..Config::default()
     };
-    let server = match Server::start(listener, session, config, diet::drive::session::render) {
+    // One render for the stream and the log, so they are one text.
+    let render = diet::drive::session::render;
+    let server = match Server::start(listener, session, config, render) {
         Ok(server) => server,
         Err(why) => return fail(EXIT_HALT, &format!("the server did not start: {why}")),
+    };
+    // Emptied only now that the server runs; the tee writes from the log's
+    // first line whenever it starts.
+    let log = match log_file.map(|(file, truncated)| {
+        file.set_len(0).map(|()| {
+            keep_log(teeing, render, file);
+            truncated
+        })
+    }) {
+        Some(Err(why)) => return fail(EXIT_OUTPUT, &format!("the log cannot be emptied: {why}")),
+        Some(Ok(truncated)) => Some(truncated),
+        None => None,
     };
     println!(
         "{}",
@@ -292,11 +303,17 @@ fn serve(args: &[String]) -> ExitCode {
     }
 }
 
-/// The file at `path`, created (or emptied) for writing, and whether it held
-/// anything that emptying it lost.
+/// The file at `path`, opened for writing (created if absent) but NOT yet
+/// emptied, and whether it holds anything. It is emptied only once the
+/// server has started, so a start that fails leaves an operator's file as
+/// it was.
 fn created(path: &str) -> Result<(std::fs::File, bool), String> {
     let truncated = std::fs::metadata(path).is_ok_and(|held| held.len() > 0);
-    std::fs::File::create(path)
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
         .map(|file| (file, truncated))
         .map_err(|why| format!("{path} cannot be written: {why}"))
 }
@@ -304,13 +321,13 @@ fn created(path: &str) -> Result<(std::fs::File, bool), String> {
 /// The session's log, written to `file` as each line is appended (`--log`,
 /// #157). A write that fails stops the process: a log that quietly stopped
 /// would be a shorter log claiming to be the session's.
-fn keep_log(session: std::sync::Arc<Session<HttpStream>>, file: std::fs::File) {
+fn keep_log(
+    session: std::sync::Arc<Session<HttpStream>>,
+    render: diet::drive::serve::Render,
+    file: std::fs::File,
+) {
     std::thread::spawn(move || {
-        let why = diet::drive::serve::tee(
-            &session,
-            diet::drive::session::render,
-            &mut std::io::BufWriter::new(file),
-        );
+        let why = diet::drive::serve::tee(&session, render, &mut std::io::BufWriter::new(file));
         let _ = fail(EXIT_OUTPUT, &format!("the log could not be written: {why}"));
         std::process::exit(i32::from(EXIT_OUTPUT));
     });
@@ -789,7 +806,9 @@ fn fail(code: u8, why: &str) -> ExitCode {
         ),
         &mut out,
     );
-    println!("{out}");
+    // Never a panicking print: a reader that closed stdout must not stop the
+    // caller from exiting with its code (the log's writer above all).
+    let _ = std::io::Write::write_all(&mut std::io::stdout().lock(), format!("{out}\n").as_bytes());
     ExitCode::from(code)
 }
 

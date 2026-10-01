@@ -68,6 +68,7 @@ pub fn tee<S: Streaming + 'static>(
     loop {
         for logged in session.wait_from(next, Duration::from_secs(60)) {
             let line = render(&logged);
+            debug_assert!(!line.contains('\n'), "one event, one line: {line}");
             if let Err(why) = out
                 .write_all(line.as_bytes())
                 .and_then(|()| out.write_all(b"\n"))
@@ -1251,11 +1252,19 @@ mod tests {
     }
 
     #[test]
-    fn the_teed_log_is_the_events_stream_line_for_line() {
+    fn the_teed_log_is_every_line_rendered_as_it_is_appended() {
         let session = Arc::new(Session::open(
             Canned::new([deltas(&["Hel", "lo"])]),
             template(),
         ));
+        // `tee` never returns while its writes succeed, so it runs on its own
+        // thread, started BEFORE the turn so it tails the lines as they are
+        // appended, and is read against a deadline: a line it drops fails
+        // this, rather than hanging it.
+        let written = Shared::default();
+        let teeing = Arc::clone(&session);
+        let mut out = written.clone();
+        thread::spawn(move || tee(&teeing, crate::drive::session::render, &mut out));
         session.ask("one", None).expect("accepted");
         wait_until(&session, "the turn to settle", settled);
         assert_eq!(session.end(None), Ok(()));
@@ -1264,13 +1273,6 @@ mod tests {
             .iter()
             .map(|logged| crate::drive::session::render(logged) + "\n")
             .collect();
-        // `tee` never returns while its writes succeed, so it runs on its own
-        // thread and is read against a deadline: a line it drops fails this,
-        // rather than hanging it.
-        let written = Shared::default();
-        let teeing = Arc::clone(&session);
-        let mut out = written.clone();
-        thread::spawn(move || tee(&teeing, crate::drive::session::render, &mut out));
         let deadline = Instant::now() + Duration::from_secs(5);
         let read = || {
             String::from_utf8(

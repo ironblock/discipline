@@ -124,16 +124,33 @@ fn exchange(address: &str, raw: &str, done: impl Fn(&str) -> bool) -> String {
         .write_all(raw.as_bytes())
         .expect("the request is written");
     let give_up = Instant::now() + Duration::from_secs(10);
+    // The bytes, decoded whole each time: a character split across two reads
+    // is never decoded as two halves.
+    let mut bytes = Vec::new();
     let mut read = String::new();
     let mut chunk = [0_u8; 8192];
     while !done(&read) && Instant::now() < give_up {
         match stream.read(&mut chunk) {
             Ok(0) => break,
-            Ok(count) => read.push_str(&String::from_utf8_lossy(&chunk[..count])),
+            Ok(count) => {
+                bytes.extend_from_slice(&chunk[..count]);
+                read = String::from_utf8_lossy(&bytes).into_owned();
+            }
             Err(_) => {}
         }
     }
     read
+}
+
+/// How many whole server-sent events with `data:` a stream read holds: the
+/// last, unterminated one is not counted until its blank line arrives.
+fn complete_data_events(read: &str) -> usize {
+    let mut events: Vec<&str> = read.split("\n\n").collect();
+    events.pop();
+    events
+        .iter()
+        .filter(|event| event.contains("data: "))
+        .count()
 }
 
 fn post(address: &str, host: &str, json: &str) -> String {
@@ -626,7 +643,7 @@ fn a_drive_servers_log_file_is_the_events_stream_line_for_line() {
     let stream = exchange(
         &address,
         &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
-        |read| read.matches("data: ").count() >= written.lines().count(),
+        |read| complete_data_events(read) >= written.lines().count(),
     );
     let streamed = stream
         .lines()
@@ -711,4 +728,97 @@ fn a_drive_server_says_when_its_log_flag_emptied_a_file() {
     // And without the flag, nothing is claimed.
     let served = start(&stub.url(), &[]);
     assert_eq!(served.log, None);
+}
+
+/// `diet-drive serve` started through `sh` with `prelude` before it, its
+/// first line read and its stdout then closed, as `start` closes it.
+fn start_through_sh(prelude: &str, endpoint: &str, extra: &[&str]) -> (Child, String, HeadFile) {
+    let head = file_holding("head", HEAD);
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(format!("{prelude}; exec \"$0\" \"$@\""))
+        .arg(DRIVE)
+        .args([
+            "serve",
+            "--endpoint",
+            endpoint,
+            "--model",
+            "a-model",
+            "--head",
+        ])
+        .arg(&head.0)
+        .args(extra)
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("sh starts");
+    let mut first = String::new();
+    let mut stdout = BufReader::new(child.stdout.take().expect("stdout is piped"));
+    let _ = stdout.read_line(&mut first);
+    drop(stdout);
+    let listening = log_line_object(&first)["listening"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no announcement: {first}"))
+        .to_owned();
+    (child, listening, head)
+}
+
+#[test]
+fn a_log_that_cannot_be_written_stops_the_server_even_with_its_stdout_closed() {
+    // A file-size limit of one block, its signal ignored, so the log's
+    // write fails as a full disk's would; and stdout closed after the
+    // announcement, which once turned the failure into a panic that left
+    // the server running with its log stopped (#230's review, finding 1).
+    let stub = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");
+    let log_file = file_holding("log", "");
+    let path = log_file.0.to_string_lossy().into_owned();
+    let (mut child, address, _head) =
+        start_through_sh("ulimit -f 1; trap '' XFSZ", &stub.url(), &["--log", &path]);
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let give_up = Instant::now() + Duration::from_secs(10);
+    let exited = loop {
+        if let Some(exited) = child.try_wait().expect("the child is waited on") {
+            break exited.code();
+        }
+        if Instant::now() >= give_up {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(exited, Some(3), "a log that stopped stops the server");
+}
+
+#[test]
+fn a_log_file_that_cannot_be_created_refuses_before_anything_binds() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let path = std::env::temp_dir()
+        .join(format!("diet-drive-no-such-dir-{}", std::process::id()))
+        .join("log.jsonl");
+    let (code, said) = run_briefly(&stub.url(), &["--log", &path.to_string_lossy()]);
+    assert_eq!(code, Some(3), "{said}");
+    assert!(
+        said.contains("cannot be written") && !said.contains("listening"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_server_that_fails_to_start_leaves_an_existing_log_file_as_it_was() {
+    // Emptied only once the server runs (#230's review, finding 3).
+    let held = file_holding("log", "an earlier session's log\n");
+    let path = held.0.to_string_lossy().into_owned();
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    let port = std::net::TcpListener::local_addr(&taken)
+        .expect("its address")
+        .port()
+        .to_string();
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--log", &path, "--port", &port]);
+    assert_eq!(code, Some(2), "the bind fails: {said}");
+    assert_eq!(
+        std::fs::read_to_string(&held.0).expect("still there"),
+        "an earlier session's log\n"
+    );
 }
