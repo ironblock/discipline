@@ -315,8 +315,10 @@ check_recompute() { python3 scripts/check-recompute.py --root results; }
 # admission-recompute.sh and its word compared with the word its results derive under planning's rule (#143).
 #
 # The registry's fingerprints first (#202): every equipment entry's hardware fingerprint covers its declared
-# fields, and every substrate whose engine is one exe digest pins the libraries beside it (or says why one
-# digest suffices), so a library rebuilt under an unchanged stub reads as a changed engine.
+# fields, and every substrate whose engine is one exe digest also pins the libraries beside it (or says why one
+# digest suffices), with an engine_fingerprint that recomputes from them. This checks the REGISTRY: a library
+# digest edited under a held exe reads as a changed fingerprint. Whether a host still runs what the registry
+# pins is a read on the host (`check-fingerprints.py --read-engine-pid`), which no gate here can take.
 check_admission() {
   python3 substrates/check-fingerprints.py --selftest &&
     python3 substrates/check-fingerprints.py &&
@@ -2978,6 +2980,17 @@ p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="
 old = 'json.dumps({"exe": exe, "libraries": libraries}, sort_keys=True,'
 assert old in s, "the recipe moved"
 p.write_text(s.replace(old, 'json.dumps({"exe": exe}, sort_keys=True,', 1), encoding="utf-8")
+PYEOF
+}
+# #202: the recipe's shared-object pattern narrowed to bare `.so`, so a versioned library (libllama.so.0.4.1)
+# drops out of the engine fingerprint unseen.
+inject_admission_engine_pattern_narrowed() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
+old = 'SHARED_OBJECT = re.compile(r"\\.so(\\.\\d+)*$")'
+assert old in s, "the pattern moved"
+p.write_text(s.replace(old, 'SHARED_OBJECT = re.compile(r"\\.so$")', 1), encoding="utf-8")
 PYEOF
 }
 # An admission record one level deeper than the glob looks.
@@ -7096,6 +7109,8 @@ selftest() {
     'ada48-llamacpp-qwen38flashnext-q20: engine_fingerprint changed'
   seeded_case "the engine recipe narrowed to the exe" admission inject_admission_engine_recipe_exe_only \
     'FAIL  engine: a library changed with the exe held changes the fingerprint'
+  seeded_case "the engine recipe's library pattern narrowed" admission inject_admission_engine_pattern_narrowed \
+    'FAIL  engine: the recipe hashes every shared object in the directory, a versioned name included'
   seeded_case "an admission record the glob cannot see" admission inject_admission_record_moved \
     'admission.record-not-found'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \

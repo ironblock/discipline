@@ -3567,6 +3567,14 @@ failure_class = "admission.rule-broken"
 legacy_signature = "FAIL  engine: a library changed with the exe held changes the fingerprint"
 migrated = false
 [[fault]]
+id = "admission.admission_engine_pattern_narrowed"
+kind = "seeded-gate"
+check = "admission"
+label = "the engine recipe's library pattern narrowed"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  engine: the recipe hashes every shared object in the directory, a versioned name included"
+migrated = false
+[[fault]]
 id = "admission.admission_constitutional_unrequired"
 kind = "seeded-gate"
 check = "admission"

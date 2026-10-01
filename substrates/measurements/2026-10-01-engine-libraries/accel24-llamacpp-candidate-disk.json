@@ -2,6 +2,7 @@
  "read": "disk",
  "exe": "865044a2bf2d56856f843b7cf080faf519030e338d8b75d366270b5b9d2b5511",
  "exe_bytes": 17888,
+ "exe_mtime": "2026-09-22T16:58:33Z",
  "libraries": {
   "libggml-base.so.0.24.0": "76fccaca96c6b39ef6a70b77923929501a5f54966c007f73cf253f80ddb68dcd",
   "libggml-cpu.so.0.24.0": "046fa0ca6467d75ab4980fe49583f1cb88fc586e7fca0f4790195bfbffa27899",
@@ -18,6 +19,23 @@
   "libllama-server-impl.so": "33b77954e65ba5a8763664dc4d93764971151c32e90f90213ad8fa09562245d5",
   "libllama.so.0.4.1": "75ee69002de615f4d54b4d20ce613c7088972cc4f62819fbd9b72306f30e8c38",
   "libmtmd.so.0.4.1": "b51513377dea9e25bc33fd94bda3cea64549a589e368f02208e79a82c147c1b7"
+ },
+ "library_mtimes": {
+  "libggml-base.so.0.24.0": "2026-09-22T16:46:55Z",
+  "libggml-cpu.so.0.24.0": "2026-09-22T16:55:39Z",
+  "libggml-cuda.so.0.24.0": "2026-09-22T16:55:45Z",
+  "libggml.so.0.24.0": "2026-09-22T16:55:45Z",
+  "libllama-batched-bench-impl.so": "2026-09-22T16:58:25Z",
+  "libllama-bench-impl.so": "2026-09-22T16:58:25Z",
+  "libllama-cli-impl.so": "2026-09-22T16:58:26Z",
+  "libllama-common.so.0.4.1": "2026-09-22T16:57:09Z",
+  "libllama-completion-impl.so": "2026-09-22T16:58:26Z",
+  "libllama-fit-params-impl.so": "2026-09-22T16:58:30Z",
+  "libllama-perplexity-impl.so": "2026-09-22T16:58:26Z",
+  "libllama-quantize-impl.so": "2026-09-22T16:58:26Z",
+  "libllama-server-impl.so": "2026-09-22T16:57:34Z",
+  "libllama.so.0.4.1": "2026-09-22T16:56:13Z",
+  "libmtmd.so.0.4.1": "2026-09-22T16:57:10Z"
  },
  "engine_fingerprint": "2c2bbdfd05dd5d3224b4ec8546c3fbe942de769e01527f08bb891e4b99bcaf99"
 }

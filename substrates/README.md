@@ -193,11 +193,20 @@ registry at exit 2.
 - `engine_libraries_unreadable`, giving the reason;
 - `engine_single_digest_suffices`, giving the reason, stated as measured.
 
-The recipe hashes every shared object in the executable's own directory. It is read with:
+The recipe hashes every shared object in the executable's own directory. It is read on the host with one of:
 
-    python3 substrates/check-fingerprints.py --read-engine <pid or path>
+    python3 substrates/check-fingerprints.py --read-engine <path>
+    python3 substrates/check-fingerprints.py --read-engine-pid <pid>
 
-It is seen red when a library digest changes while the exe digest holds, and when the recipe is narrowed back to the exe. The four reads behind the current fields are in `measurements/2026-10-01-engine-libraries/`.
+A process read refuses a library replaced since load or mapped from outside the directory and the system's. The gate checks the registry, that its fingerprints recompute; whether a host still runs what it pins is the read, taken on the host.
+
+It is seen red in three cases:
+
+- a library digest changes while the exe digest holds;
+- the recipe is narrowed back to the exe;
+- its shared-object pattern loses versioned names.
+
+The reads behind the current fields, and how each is tied to its instance, are in `measurements/2026-10-01-engine-libraries/`.
 
 ## The interconnect, as a worked example of being wrong twice
 

@@ -1,0 +1,8 @@
+{
+ "tarball_sha256": "9da1f400e03925c797f1d699c5f275d6bd4616df5b9cdeb4c54f649850ced558",
+ "libraries": 29,
+ "libraries_matching_tarball": 29,
+ "exe_matches_tarball": true,
+ "mismatched": [],
+ "read": "2026-10-01T04:37Z, hand-run: python3 tarfile over the release tarball still on the host, sha256 of every regular member, compared by basename with beellama-preview-v0.3.2-disk.json"
+}

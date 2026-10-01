@@ -42,12 +42,14 @@ substrate whose `engine_identity` is a 64-hex digest carries exactly one of:
 THE RECIPE, one for both sides: every regular shared-object file (a name ending
 `.so` or `.so.<n>...`, symlinks resolved and counted once, keyed by the real
 file's basename) in the executable's own directory -- the build's output. Read
-from a running process (`--read-engine PID`), the directory is the one
+from a running process (`--read-engine-pid PID`), the directory is the one
 /proc/<pid>/exe resolves into, and every shared object the process maps from
-it must be among those hashed. Read from disk (`--read-engine PATH`), the same
-set is hashed without the mapping check, and the entry says so. The system's
-libraries (libc, the CUDA toolkit and driver) are outside the directory and are
-the instance's fields, not the engine's.
+it must be the same file (device and inode) as the one hashed; a mapping
+replaced on disk since load, or one from outside both that directory and the
+system's library directories, is refused. Read from disk (`--read-engine
+PATH`), the same set is hashed without the mapping check, and the entry says
+so. A symlink in the directory resolving outside it is refused either way. The
+system's libraries (libc, the CUDA toolkit and driver) are the instance's fields, not the engine's.
 
 Stdlib only. Exit 0 when every entry checks out, 1 when one does not, 2 when the
 check cannot run at all.
@@ -55,6 +57,7 @@ check cannot run at all.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import os
@@ -102,40 +105,79 @@ def sha256_file(path: pathlib.Path) -> str:
     return h.hexdigest()
 
 
-def read_engine(target: str) -> dict:
-    """The recipe, applied to a running process (a pid) or an executable on disk (a path)."""
-    if target.isdigit():
-        exe_link = pathlib.Path(f"/proc/{target}/exe")
-        exe = pathlib.Path(os.readlink(exe_link))
-        exe_digest, read = sha256_file(exe_link), "process"
-    else:
-        exe = pathlib.Path(target).resolve()
-        exe_digest, read = sha256_file(exe), "disk"
-    directory = exe.parent
-    libraries, real_of = {}, {}
+# Where a process may map a shared object from outside the engine's directory: the system's and the CUDA
+# toolkit's libraries, which are the instance's fields (`os`, `cuda`). A mapping anywhere else is refused,
+# because it could be engine code the recipe does not hash.
+SYSTEM_PREFIXES = ("/usr/lib/", "/usr/lib64/", "/lib/", "/lib64/", "/usr/local/cuda")
+
+
+def utc(t: float) -> str:
+    return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def hash_directory(directory: pathlib.Path) -> tuple[dict, dict]:
+    """Every shared object in the directory, symlinks resolved and counted once, keyed by the real name."""
+    libraries, mtimes = {}, {}
     for entry in sorted(directory.iterdir()):
         if not SHARED_OBJECT.search(entry.name):
             continue
         real = entry.resolve()
-        if not real.is_file() or real.parent != directory:
+        if real.parent != directory:
+            raise SystemExit(f"check-fingerprints: {entry.name} resolves outside the executable's "
+                             "directory; the recipe cannot say what it covers")
+        if not real.is_file():
             continue
-        real_of[str(entry)] = real.name
-        libraries.setdefault(real.name, sha256_file(real))
-    record = {"read": read, "exe": exe_digest, "exe_bytes": exe.stat().st_size if read == "disk" else
-              pathlib.Path(f"/proc/{target}/exe").stat().st_size, "libraries": libraries}
-    if read == "process":
-        mapped = set()
+        if real.name not in libraries:
+            libraries[real.name] = sha256_file(real)
+            mtimes[real.name] = utc(real.stat().st_mtime)
+    return libraries, mtimes
+
+
+def read_engine(target: str, pid: bool = False) -> dict:
+    """The recipe, applied to a running process (`pid`) or to an executable on disk."""
+    if pid:
+        exe_link = pathlib.Path(f"/proc/{target}/exe")
+        exe = pathlib.Path(os.readlink(exe_link))
+        if exe.name.endswith(" (deleted)"):
+            raise SystemExit("check-fingerprints: the running executable was replaced on disk")
+        exe_digest, exe_bytes, read = sha256_file(exe_link), exe_link.stat().st_size, "process"
+    else:
+        exe = pathlib.Path(target).resolve()
+        exe_digest, exe_bytes, read = sha256_file(exe), exe.stat().st_size, "disk"
+    directory = exe.parent
+    libraries, mtimes = hash_directory(directory)
+    record = {"read": read, "exe": exe_digest, "exe_bytes": exe_bytes, "exe_mtime": utc(exe.stat().st_mtime),
+              "libraries": libraries, "library_mtimes": mtimes}
+    if pid:
+        # A process read must hash what is LOADED. A mapping whose file was replaced after load reads
+        # "(deleted)"; one whose path now names a different file has another device or inode. Either
+        # makes the directory's bytes something other than the mapped bytes, so either is refused.
+        inside, outside = set(), set()
         for line in pathlib.Path(f"/proc/{target}/maps").read_text().splitlines():
             parts = line.split(None, 5)
-            if len(parts) == 6 and SHARED_OBJECT.search(parts[5]):
-                mapped.add(parts[5])
-        inside = sorted(m for m in mapped if pathlib.Path(m).parent == directory)
-        record["mapped_from_directory"] = sorted(pathlib.Path(m).name for m in inside)
-        record["mapped_outside_directory"] = len(mapped) - len(inside)
-        missing = [m for m in inside if pathlib.Path(m).name not in libraries]
+            if len(parts) < 6 or ".so" not in parts[5]:
+                continue
+            path, (major, minor), inode = parts[5], parts[3].split(":"), int(parts[4])
+            if path.endswith(" (deleted)"):
+                raise SystemExit(f"check-fingerprints: the process maps {path}, replaced on disk since load")
+            if not SHARED_OBJECT.search(path):
+                continue
+            where = pathlib.Path(path)
+            if where.parent == directory:
+                st = where.stat()
+                if (st.st_ino, os.major(st.st_dev), os.minor(st.st_dev)) != (inode, int(major, 16), int(minor, 16)):
+                    raise SystemExit(f"check-fingerprints: {where.name} on disk is not the file the process mapped")
+                inside.add(where.name)
+            elif path.startswith(SYSTEM_PREFIXES):
+                outside.add(where.name)
+            else:
+                raise SystemExit(f"check-fingerprints: the process maps {where.name} from outside both the "
+                                 "executable's directory and the system's; the recipe would not cover it")
+        missing = sorted(inside - set(libraries))
         if missing:
-            raise SystemExit(f"check-fingerprints: the process maps {missing} from its directory "
-                             "and the recipe did not hash them")
+            raise SystemExit(f"check-fingerprints: the process maps {missing} and the recipe did not hash them")
+        record["mapped_from_directory"] = sorted(inside)
+        record["mapped_from_system"] = sorted(outside)
     record["engine_fingerprint"] = engine_fingerprint(exe_digest, libraries)
     return record
 
@@ -145,6 +187,8 @@ def check_engines(registry: dict) -> int:
     for name, sub in sorted((registry.get("substrate") or {}).items()):
         identity = sub.get("engine_identity")
         if not (isinstance(identity, str) and HEX64.match(identity)):
+            print(f"  {name}: outside the engine rule: engine_identity is "
+                  f"{identity!r}, not one sha256 digest")
             continue
         forms = [f for f in ENGINE_FORMS if f in sub]
         if len(forms) != 1:
@@ -189,8 +233,35 @@ def selftest() -> int:
     import contextlib, io
     quiet = contextlib.redirect_stdout(io.StringIO())
     with quiet:
-        cases = _cases(exe, libs, base, changed)
+        cases = _cases(exe, libs, base, changed) + _reader_cases()
     return _report(cases)
+
+
+def _reader_cases():
+    """The recipe on a built directory: versioned names, a symlink counted once, a stray file ignored,
+    and a symlink out of the directory refused."""
+    import tempfile
+    cases = []
+    with tempfile.TemporaryDirectory() as tmp:
+        d = pathlib.Path(tmp) / "bin"; d.mkdir()
+        (d / "server").write_bytes(b"stub")
+        (d / "libllama.so.0.4.1").write_bytes(b"llama")
+        (d / "libllama.so.0").symlink_to("libllama.so.0.4.1")
+        (d / "libggml-cuda.so").write_bytes(b"cuda")
+        (d / "notes.txt").write_bytes(b"not a library")
+        r = read_engine(str(d / "server"))
+        cases.append(("the recipe hashes every shared object in the directory, a versioned name included",
+                      sorted(r["libraries"]) == ["libggml-cuda.so", "libllama.so.0.4.1"]))
+        cases.append(("the recipe's fingerprint is the exe and its libraries",
+                      r["engine_fingerprint"] == engine_fingerprint(r["exe"], r["libraries"])))
+        (pathlib.Path(tmp) / "elsewhere.so").write_bytes(b"outside")
+        (d / "libout.so").symlink_to(pathlib.Path(tmp) / "elsewhere.so")
+        try:
+            read_engine(str(d / "server")); refused = False
+        except SystemExit:
+            refused = True
+        cases.append(("a symlink resolving outside the directory is refused", refused))
+    return cases
 
 
 def _cases(exe, libs, base, changed):
@@ -228,8 +299,8 @@ def _report(cases) -> int:
 def main(argv: list[str]) -> int:
     if argv[:1] == ["--selftest"]:
         return selftest()
-    if argv[:1] == ["--read-engine"] and len(argv) == 2:
-        print(json.dumps(read_engine(argv[1]), indent=1))
+    if argv[:1] in (["--read-engine"], ["--read-engine-pid"]) and len(argv) == 2:
+        print(json.dumps(read_engine(argv[1], pid=argv[0] == "--read-engine-pid"), indent=1))
         return 0
     path = pathlib.Path(argv[0]) if argv else REGISTRY
     try:
