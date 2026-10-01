@@ -27,6 +27,7 @@ These are captures C0–C5 of R3's plan (on #117), taken 2026-09-29 from 02:09:4
 | C5, unstreamed | `diet/client/fixtures/llama-server-e7051ef-unstreamed.http` | `d9d2e92e…` |
 | C0b, build id (2026-10-01) | `build-info.json`, `build-info.raw` (one GET `/props`, occupying no slot); `engine-read.json` | `18033075…` |
 | C0c, the floor's build id (2026-10-01) | `build-info-floor.json`, `build-info-floor.raw` (one GET `/props` on the floor's production, occupying no slot); `floor-tarball-stat.json` | `6ce8fc6d…` |
+| C0d, the floor's usage and timings (2026-10-01) | `C0d-unstreamed.http`, `C0d-streamed.http`, their request bodies, `notes-c0d.json` | `d61b492c…`, `f05eaaec…` |
 
 ## C0: the limits
 
@@ -107,3 +108,21 @@ One read-only GET `/props` was made at 2026-10-01T06:47:22Z by `capture_c0c.py`,
   - Upstream's release workflow force-moved the tag and replaced the release's assets on every successful push run: twelve from 2026-06-07 to 2026-06-17, and again on 2026-07-10. So no commit is measured. By upstream's record, the last run to publish before the tarball was written (2026-06-14T20:09Z, by its birth time on the host, `floor-tarball-stat.json`) built `3975b51b`, but that is not matched to the tarball's digest. The entry says so (`engine_commit_unknown`).
   - Its identity is the binary's digest, and its libraries' digests once #205 merges.
   - Under #157's ruling, the entry declares `engine_build_info = "b0-unknown-dirty"`. That is the literal a start-time check matches, and the check reports `engine_identity` as "unreported (literal matched)".
+
+## C0d: the floor's usage and timings (2026-10-01)
+
+These are two chat replies from the floor's production server (`accel24-beellama-qwen27b-q4kxl`, the beellama release, `system_fingerprint` `b0-unknown-dirty`), taken by `capture_c0d.py` at 2026-10-01T22:06:16Z. The capture was read-only and relaunched nothing. Each reply carries both `usage` and `timings`, so the record can see on this engine what #157 measured on two mainline builds: whether llama.cpp's usage counts equal its timing counts.
+
+- **What is kept:** the raw server-to-client bytes as received, and the request bodies. This server takes no key, and each prompt is one fixed short sentence opened by a nonce.
+- **`C0d-unstreamed.http`:** sha256 `d61b492cbbc3d457563bed1e2f7065b81b8612c8b3e849afc9a53a9104ef25ec`.
+  - `usage`: prompt 42, completion 3, cached 0.
+  - `timings`: `prompt_n` 42, `cache_n` 0, `predicted_n` 3.
+- **`C0d-streamed.http`:** `stream_options.include_usage`, sha256 `f05eaaec812054600d96b7c317c131c4c30d97805574742021aef746bfcd755e`. There are 5 `data:` events; the final one carries `usage` and `timings` together.
+  - `usage`: prompt 42, completion 3, cached 38.
+  - `timings`: `prompt_n` 4, `cache_n` 38, `predicted_n` 3.
+- **The three equalities hold in both replies:**
+  - `prompt_tokens = prompt_n + cache_n`;
+  - `completion_tokens = predicted_n`;
+  - `cached_tokens = cache_n`.
+
+  The streamed reply reused the unstreamed reply's prefix, so it tests the cache equality at a non-zero count (38).

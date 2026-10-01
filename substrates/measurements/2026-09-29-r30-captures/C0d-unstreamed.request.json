@@ -1,0 +1,1 @@
+{"messages": [{"role": "user", "content": "[b29745cbe6d4] Name one prime number between 10 and 20. Answer in one line."}], "max_tokens": 32, "temperature": 0.6, "top_k": 20, "top_p": 1.0, "chat_template_kwargs": {"enable_thinking": false}}
