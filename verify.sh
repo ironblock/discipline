@@ -3229,9 +3229,9 @@ inject_admission_pruned_mix_unrequired() {
   python3 - <<'PYEOF'
 import pathlib
 p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
-old = 'if sub.get("pruned") is True and not str(sub.get("calibration_mix") or "").strip():'
+old = 'elif sub.get("pruned") is True and not (isinstance(sub.get("calibration_mix"), str) and sub["calibration_mix"].strip()):'
 assert old in s, "the rule moved"
-p.write_text(s.replace(old, 'if False:', 1), encoding="utf-8")
+p.write_text(s.replace(old, 'elif False:', 1), encoding="utf-8")
 PYEOF
 }
 # An admission record one level deeper than the glob looks.

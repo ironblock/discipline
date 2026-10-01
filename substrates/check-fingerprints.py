@@ -210,15 +210,15 @@ def read_engine(target: str, pid: bool = False) -> dict:
 
 
 def check_pruned(registry: dict) -> int:
-    """A pruned model's entry declares its calibration mix (planning, #143, comment 5922544337): pruning keeps what
-    the calibration corpus exercises, so a general-corpus number hides both sides, and the mix is part of what the
-    weights ARE. An entry marked `pruned = true` without a non-empty `calibration_mix` is refused."""
+    """A pruned model's entry declares its calibration mix (planning, #143, comment 5922544337). `pruned`, where
+    present, is a boolean; an entry with `pruned = true` must carry `calibration_mix` as a non-empty string. Nothing
+    here restricts `calibration_mix` on other entries: an imatrix quant has a calibration corpus too."""
     bad = 0
     for name, sub in sorted((registry.get("substrate") or {}).items()):
-        if sub.get("pruned") is True and not str(sub.get("calibration_mix") or "").strip():
-            print(f"  {name}: pruned = true and no calibration_mix; a pruned model's entry declares its calibration mix"); bad += 1
-        elif "calibration_mix" in sub and sub.get("pruned") is not True:
-            print(f"  {name}: calibration_mix on an entry not marked pruned = true"); bad += 1
+        if "pruned" in sub and not isinstance(sub["pruned"], bool):
+            print(f"  {name}: pruned is {sub['pruned']!r}, not a boolean"); bad += 1
+        elif sub.get("pruned") is True and not (isinstance(sub.get("calibration_mix"), str) and sub["calibration_mix"].strip()):
+            print(f"  {name}: pruned = true and no calibration_mix string; a pruned model's entry declares its calibration mix"); bad += 1
     return bad
 
 
@@ -325,6 +325,10 @@ def _cases(exe, libs, base, changed):
          check_pruned({"substrate": {"s": {"pruned": True}}}) == 1),
         ("a pruned entry declaring its calibration mix passes",
          check_pruned({"substrate": {"s": {"pruned": True, "calibration_mix": "code 60%, prose 40%"}}}) == 0),
+        ("a pruned flag that is not a boolean is refused",
+         check_pruned({"substrate": {"s": {"pruned": "true"}}}) == 1),
+        ("a pruned entry whose calibration mix is not a string is refused",
+         check_pruned({"substrate": {"s": {"pruned": True, "calibration_mix": ["code"]}}}) == 1),
         ("a version-string identity is outside the rule",
          check_engines({"substrate": {"s": {"engine_identity": "3.0.1"}}}) == 0),
     ]

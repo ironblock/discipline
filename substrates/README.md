@@ -245,17 +245,15 @@ something they cannot.
 
 ## Pruned models, and a model that is not a candidate
 
-**A pruned model's entry declares its calibration mix** (planning, #143, comment 5922544337). Pruning keeps what its calibration corpus exercises, so a number measured on a general corpus can hide a gain in one domain and a loss in another. The mix is part of what the weights are.
+**A pruned model's entry declares its calibration mix, and any claim run on one declares its domain, because a general-corpus number would hide both sides** (planning, #143, comment 5922544337).
 
-- An entry marked `pruned = true` must carry a non-empty `calibration_mix`.
-- An entry that is not marked pruned may not carry one.
-- `check-fingerprints.py` refuses either, and runs in the `admission` check.
-- Any claim run on a pruned model declares its domain in the claim's own record.
+- An entry marked `pruned = true` must carry `calibration_mix` as a non-empty string, and `pruned` is a boolean where present. `check-fingerprints.py` refuses either violation, and runs in the `admission` check.
+- Nothing restricts `calibration_mix` on an entry that is not pruned: an imatrix quant has a calibration corpus too.
 
 **Coder is not a candidate for any rung.** Planning's reasons, against Q8_0:
 - code KLD is at parity;
 - prose KLD is +84%;
-- top-1 agreement is 7.7 points lower.
+- top-1 is 7.7 points lower.
 
 An agent's reasoning traces are prose. Q2_0 remains the top rung. The 7.7 GB that Coder would free is the subject of a separate claim (placement against pruning at equal VRAM), not a reason to serve it. Coder has no entry here, because nothing was fired on it.
 
