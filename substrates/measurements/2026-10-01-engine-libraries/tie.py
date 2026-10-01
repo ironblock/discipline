@@ -5,7 +5,8 @@ beellama: every file of the disk read (exe and 29 libraries) equals the same-nam
 tarball, whose sha256 (beellama-tarball-members.json, hashed on the host) must be the registry's
 engine_release_tarball_sha256.
 candidate: every file the 2026-09-29 engine manifest hashed (exe and the 8 libraries the server loads, by soname)
-equals the disk read's file of that soname."""
+equals the disk read's file of that soname.
+registry: every substrate's engine_libraries table equals the read it cites, and no input is empty."""
 import json, pathlib, sys, tomllib
 here = pathlib.Path(__file__).resolve().parent
 root = here.parents[2]
@@ -37,5 +38,18 @@ for _, digest, name in rows:
 rest = sorted(set(cand["libraries"]) - matched)
 print(f"candidate: {len(rows) - len(bad)} of {len(rows)} files of the 2026-09-29 manifest equal the disk read"
       f"{'; differing: ' + ', '.join(bad) if bad else ''}; not in the manifest: {', '.join(rest)}")
-ok &= not bad
+ok &= not bad and len(rows) > 1 and any(r[2] == "llama-server" for r in rows)
+
+# Each registry table is the read it cites, so a read edited after the fact (or a table) cannot pass unseen.
+cites = {"accel24-beellama-qwen27b-q4kxl": "beellama-floor-process.json",
+         "cpu-beellama-qwen3-1p7b-q4km": "beellama-preview-v0.3.2-disk.json",
+         "accel24-llamacpp-qwen38-27b-iq3s": "accel24-llamacpp-candidate-disk.json",
+         "ada48-llamacpp-qwen38flashnext-q20": "ada48-2026-09-28-build-disk.json"}
+for name, read in cites.items():
+    d = json.loads((here / read).read_text()); r = reg[name]
+    same = (r["engine_identity"], r["engine_libraries"], r["engine_fingerprint"], r["engine_libraries_read"]) == \
+           (d["exe"], d["libraries"], d["engine_fingerprint"], d["read"]) and d["libraries"]
+    print(f"registry: {name} {'equals' if same else 'DOES NOT EQUAL'} {read}")
+    ok &= bool(same)
+ok &= len(files) > 1 and tar["regular_members"] != {}
 sys.exit(0 if ok else 1)

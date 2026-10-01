@@ -198,7 +198,7 @@ The recipe hashes every shared object in the executable's own directory. It is r
     python3 substrates/check-fingerprints.py --read-engine <path>
     python3 substrates/check-fingerprints.py --read-engine-pid <pid>
 
-A process read refuses a library replaced since load or mapped from outside the directory and the system's. The gate checks the registry, that its fingerprints recompute; whether a host still runs what it pins is the read, taken on the host.
+A process read refuses a library replaced or rewritten since load, or mapped from outside the directory and the system's. The gate checks the registry, that its fingerprints recompute; whether a host still runs what it pins is the read, taken on the host.
 
 It is seen red in three cases:
 

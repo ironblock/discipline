@@ -108,7 +108,9 @@ def sha256_file(path: pathlib.Path) -> str:
 # Where a process may map a shared object from outside the engine's directory: the system's and the CUDA
 # toolkit's libraries, which are the instance's fields (`os`, `cuda`). A mapping anywhere else is refused,
 # because it could be engine code the recipe does not hash.
-SYSTEM_PREFIXES = ("/usr/lib/", "/usr/lib64/", "/lib/", "/lib64/", "/usr/local/cuda/", "/usr/local/cuda-")
+SYSTEM_PREFIXES = ("/usr/lib/", "/usr/lib64/", "/lib/", "/lib64/", "/usr/local/cuda/", "/usr/local/cuda-",
+                   # an ostree system's /usr/local is /var/usrlocal, and maps names the real path (the floor's host)
+                   "/var/usrlocal/cuda/", "/var/usrlocal/cuda-")
 
 
 def utc(t: float) -> str:
@@ -158,15 +160,25 @@ def read_engine(target: str, pid: bool = False) -> dict:
                          if l.startswith("btime ")))
         ticks = int(pathlib.Path(f"/proc/{target}/stat").read_text().rsplit(")", 1)[1].split()[19])
         started = btime + ticks / os.sysconf("SC_CLK_TCK")
+        if exe.stat().st_ctime > started:
+            raise SystemExit("check-fingerprints: the executable changed on disk after the process started")
+        record["process_started"] = utc(started)
         inside, outside = set(), set()
         for line in pathlib.Path(f"/proc/{target}/maps").read_text().splitlines():
             parts = line.split(None, 5)
-            if len(parts) < 6 or ".so" not in parts[5]:
+            if len(parts) < 6 or not parts[5].startswith("/"):
                 continue
             path, (major, minor), inode = parts[5], parts[3].split(":"), int(parts[4])
-            if path.endswith(" (deleted)"):
-                raise SystemExit(f"check-fingerprints: the process maps {path}, replaced on disk since load")
-            where = pathlib.Path(path)
+            deleted = path.endswith(" (deleted)")
+            where = pathlib.Path(path.removesuffix(" (deleted)"))
+            # Only code can be engine: a file from the engine's directory or any shared object. Device and
+            # anonymous mappings (/dev/zero, /dev/nvidia*) are neither and are not the recipe's business.
+            if not (where.parent == directory or SHARED_OBJECT.search(where.name)):
+                continue
+            if deleted:
+                raise SystemExit(f"check-fingerprints: the process maps {where.name}, replaced on disk since load")
+            if where == exe:
+                continue
             if where.parent == directory and not SHARED_OBJECT.search(path):
                 raise SystemExit(f"check-fingerprints: the process maps {where.name} from its directory under "
                                  "a name the recipe's pattern does not match")
@@ -174,7 +186,12 @@ def read_engine(target: str, pid: bool = False) -> dict:
                 continue
             if where.parent == directory:
                 st = where.stat()
-                if (st.st_ino, os.major(st.st_dev), os.minor(st.st_dev)) != (inode, int(major, 16), int(minor, 16)):
+                # The inode always; the device only when the mapping names a real block device. btrfs maps
+                # under an anonymous device (major 0) that stat does not report, so there the inode and the
+                # status-change time below are the whole identity check (measured on the floor's host).
+                same = st.st_ino == inode and (int(major, 16) == 0 or
+                                               (os.major(st.st_dev), os.minor(st.st_dev)) == (int(major, 16), int(minor, 16)))
+                if not same:
                     raise SystemExit(f"check-fingerprints: {where.name} on disk is not the file the process mapped")
                 # Rewritten in place keeps the inode; its status-change time then postdates the process's start.
                 if st.st_ctime > started:
