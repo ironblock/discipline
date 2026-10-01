@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 146
+faults = 161
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -2073,6 +2073,14 @@ catches = [
     "drive::canned::tests::every_registered_canned_digest_is_acts_this_crate_keeps",
     "drive::canned::tests::the_first_registered_acts_still_hash_to_their_registered_digest",
     "drive::canned::tests::the_regimen_names_the_substrate_that_plays_these_acts",
+    "drive::engine::tests::a_canned_substrate_is_not_checked",
+    "drive::engine::tests::a_declared_literal_is_matched_exactly_before_any_commit",
+    "drive::engine::tests::a_malformed_registered_commit_is_refused",
+    "drive::engine::tests::a_prebuilt_engine_passes_through_the_check_as_unreported",
+    "drive::engine::tests::a_props_that_cannot_answer_is_a_refusal_not_a_pass",
+    "drive::engine::tests::a_server_on_another_commit_is_refused_naming_both",
+    "drive::engine::tests::a_server_on_the_registered_commit_passes_and_reports_its_build",
+    "drive::engine::tests::a_substrate_with_no_registered_engine_identity_is_refused_and_the_server_is_not_asked",
     "drive::regimen::tests::a_regimen_whose_hardware_disagrees_with_the_registry_is_refused",
     "drive::regimen::tests::a_registered_chat_template_crosses_into_the_regime",
     "drive::regimen::tests::a_registered_substrate_crosses_with_the_registrys_identity",
@@ -2288,7 +2296,10 @@ becomes = '''
     let regime = match regimen_file.as_deref().filter(|_| false).map(registered_regime).transpose() {'''
 catches = [
     "a_drive_server_announces_the_registered_substrate_its_regimen_names",
+    "a_drive_server_checks_the_engine_before_it_binds",
+    "a_drive_server_refuses_a_substrate_with_no_registered_engine_identity_without_asking_it",
     "a_drive_server_refuses_to_start_on_a_substrate_the_registry_does_not_resolve",
+    "a_drive_server_starts_only_on_the_engine_the_registry_pins",
 ]
 
 [[fault]]
@@ -2327,6 +2338,9 @@ anchor = '''
 becomes = '''
         engine_commit: None,'''
 catches = [
+    "drive::engine::tests::a_props_that_cannot_answer_is_a_refusal_not_a_pass",
+    "drive::engine::tests::a_server_on_another_commit_is_refused_naming_both",
+    "drive::engine::tests::a_server_on_the_registered_commit_passes_and_reports_its_build",
     "drive::registry::tests::a_registered_substrates_commit_and_chat_template_are_read",
 ]
 
@@ -2354,4 +2368,210 @@ becomes = '''
             Value::String(String::new()),'''
 catches = [
     "a_drive_server_announces_the_registered_substrate_its_regimen_names",
+]
+
+[[fault]]
+id = "drive.engine-passes-a-dirty-build"
+failure_class = "drive.engine-passes-a-dirty-build"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+    if !suffix.is_empty() {'''
+becomes = '''
+    if false && !suffix.is_empty() {'''
+catches = [
+    "drive::engine::tests::a_build_info_names_the_commit_after_its_build_number",
+]
+
+[[fault]]
+id = "drive.engine-takes-a-short-commit"
+failure_class = "drive.engine-takes-a-short-commit"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+    if commit.len() < SHORTEST_COMMIT {'''
+becomes = '''
+    if false && commit.len() < SHORTEST_COMMIT {'''
+catches = [
+    "drive::engine::tests::a_build_info_names_the_commit_after_its_build_number",
+]
+
+[[fault]]
+id = "drive.engine-passes-another-commit"
+failure_class = "drive.engine-passes-another-commit"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+            if !registered.starts_with(reported) {'''
+becomes = '''
+            if false && !registered.starts_with(reported) {'''
+catches = [
+    "drive::engine::tests::a_server_on_another_commit_is_refused_naming_both",
+]
+
+[[fault]]
+id = "drive.engine-accepts-a-malformed-registered-commit"
+failure_class = "drive.engine-accepts-a-malformed-registered-commit"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+    if registered.len() != 40 || !registered.chars().all(is_hex) {'''
+becomes = '''
+    if false && (registered.len() != 40 || !registered.chars().all(is_hex)) {'''
+catches = [
+    "drive::engine::tests::a_malformed_registered_commit_is_refused",
+]
+
+[[fault]]
+id = "drive.engine-asks-before-the-registry-refuses"
+failure_class = "drive.engine-asks-before-the-registry-refuses"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+    // refused without touching the server.
+    expected(id, &identity)?;'''
+becomes = '''
+    // refused without touching the server.'''
+catches = [
+    "drive::engine::tests::a_substrate_with_no_registered_engine_identity_is_refused_and_the_server_is_not_asked",
+]
+
+[[fault]]
+id = "drive.engine-reads-a-refused-props"
+failure_class = "drive.engine-reads-a-refused-props"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+    if reply.status != 200 {'''
+becomes = '''
+    if false && reply.status != 200 {'''
+catches = [
+    "drive::engine::tests::a_props_that_cannot_answer_is_a_refusal_not_a_pass",
+]
+
+[[fault]]
+id = "drive.engine-checks-a-canned-substrate"
+failure_class = "drive.engine-checks-a-canned-substrate"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+    if matches!(identity.weights, Weights::Canned { .. }) {'''
+becomes = '''
+    if false && matches!(identity.weights, Weights::Canned { .. }) {'''
+catches = [
+    "drive::engine::tests::a_canned_substrate_is_not_checked",
+]
+
+[[fault]]
+id = "drive.engine-compares-the-commit-before-the-literal"
+failure_class = "drive.engine-compares-the-commit-before-the-literal"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+    if let Some(literal) = identity.engine_build_info.as_deref() {'''
+becomes = '''
+    if let Some(literal) = identity
+        .engine_build_info
+        .as_deref()
+        .filter(|_| identity.engine_commit.is_none())
+    {'''
+catches = [
+    "drive::engine::tests::a_declared_literal_is_matched_exactly_before_any_commit",
+]
+
+[[fault]]
+id = "drive.engine-passes-another-literal"
+failure_class = "drive.engine-passes-another-literal"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+            if build_info != literal {'''
+becomes = '''
+            if false && build_info != literal {'''
+catches = [
+    "drive::engine::tests::a_declared_literal_is_matched_exactly_before_any_commit",
+]
+
+[[fault]]
+id = "drive.engine-accepts-an-empty-literal"
+failure_class = "drive.engine-accepts-an-empty-literal"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+        if literal.is_empty() {'''
+becomes = '''
+        if false && literal.is_empty() {'''
+catches = [
+    "drive::engine::tests::a_declared_literal_is_matched_exactly_before_any_commit",
+]
+
+[[fault]]
+id = "drive.engine-names-both-paths-alike"
+failure_class = "drive.engine-names-both-paths-alike"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+            Self::Unreported => "unreported (literal matched)",'''
+becomes = '''
+            Self::Unreported => "checked (commit)",'''
+catches = [
+    "drive::engine::tests::a_prebuilt_engine_passes_through_the_check_as_unreported",
+]
+
+[[fault]]
+id = "drive.serve-bin-skips-the-engine-check"
+failure_class = "drive.serve-bin-skips-the-engine-check"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+        .map(|id| diet::drive::engine::check_served(&transport, id))'''
+becomes = '''
+        .map(|_| Ok::<Option<diet::drive::engine::Passed>, String>(None))'''
+catches = [
+    "a_drive_server_checks_the_engine_before_it_binds",
+    "a_drive_server_refuses_a_substrate_with_no_registered_engine_identity_without_asking_it",
+    "a_drive_server_starts_only_on_the_engine_the_registry_pins",
+]
+
+[[fault]]
+id = "drive.serve-bin-binds-before-the-engine-check"
+failure_class = "drive.serve-bin-binds-before-the-engine-check"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    // The engine check, before anything binds: the server must run the'''
+becomes = '''
+    let _bound_first = match listener(listen, port, credential.is_some()) {
+        Ok(listener) => listener,
+        Err(refused) => return refused,
+    };
+    // The engine check, before anything binds: the server must run the'''
+catches = [
+    "a_drive_server_checks_the_engine_before_it_binds",
+]
+
+[[fault]]
+id = "drive.serve-bin-announces-no-engine-build"
+failure_class = "drive.serve-bin-announces-no-engine-build"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            Value::String(engine.build_info.clone()),'''
+becomes = '''
+            Value::String(String::new()),'''
+catches = [
+    "a_drive_server_starts_only_on_the_engine_the_registry_pins",
+]
+
+[[fault]]
+id = "drive.serve-bin-announces-no-engine-identity"
+failure_class = "drive.serve-bin-announces-no-engine-identity"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            Value::String(engine.identity.tag().to_owned()),'''
+becomes = '''
+            Value::String(String::new()),'''
+catches = [
+    "a_drive_server_starts_only_on_the_engine_the_registry_pins",
 ]
