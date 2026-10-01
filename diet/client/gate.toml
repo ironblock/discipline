@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 84
+faults = 89
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -199,15 +199,17 @@ failure_class = "client.timeout-projects-a-response"
 target = "diet/src/client/journal.rs"
 expect_exit = 101
 anchor = '''
-        Entry::TimedOut { .. } => Some(
+        Entry::TimedOut { .. } => Some((
             "a timeout as a typed outcome. Deliberately projected to NOTHING: a response \
              with an empty string is exactly the defect this client exists to stop, so a \
              timed-out request has no response row at all until the schema has one",
-        ),'''
+            Exempt("no row is written to carry a key: the timeout is projected to nothing"),
+        )),'''
 becomes = '''
         Entry::TimedOut { .. } => None,'''
 catches = [
     "client::tests::every_journal_entry_kind_is_decided_by_the_projection",
+    "client::tests::every_unspellable_item_is_one_the_record_refuses",
 ]
 
 [[fault]]
@@ -230,6 +232,7 @@ becomes = '''
 catches = [
     "client::tests::a_stall_past_the_deadline_is_a_typed_timeout_and_never_an_empty_answer",
     "client::tests::every_journal_entry_kind_is_decided_by_the_projection",
+    "client::tests::every_unspellable_item_is_one_the_record_refuses",
 ]
 
 [[fault]]
@@ -447,16 +450,18 @@ failure_class = "client.issued-is-recorded-only-on-success"
 target = "diet/src/client/journal.rs"
 expect_exit = 101
 anchor = '''
-                note(
-                    EntryKind::Issued,
-                    "the difference between a request the client ISSUED and one that \
-                     reached the substrate: the record's `request` means the second, \
-                     and a connection refused produces the first",
-                );'''
+    note(
+        EntryKind::Issued,
+        "the difference between a request the client ISSUED and one that \
+             reached the substrate: the record's `request` means the second, \
+             and a connection refused produces the first",
+        Ask::Exempt("a meaning of the `request` row, not a key it lacks"),
+    );'''
 becomes = '''
 '''
 catches = [
     "client::tests::a_request_that_never_reached_a_server_is_still_a_request_the_client_issued",
+    "client::tests::every_unspellable_item_is_one_the_record_refuses",
     "client::tests::the_record_projection_names_every_fact_record_v0_cannot_carry",
 ]
 
@@ -1157,6 +1162,7 @@ becomes = '''
             draft_n: None,'''
 catches = [
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
+    "client::tests::a_llama_cpp_reply_journals_its_timings",
 ]
 
 [[fault]]
@@ -1482,4 +1488,89 @@ becomes = '''
         }'''
 catches = [
     "client::stream::tests::a_chunks_progress_comes_before_that_chunks_text",
+]
+
+[[fault]]
+id = "client.journal-drops-timings"
+failure_class = "client.journal-drops-timings"
+target = "diet/src/client/mod.rs"
+expect_exit = 101
+anchor = '''
+        if let Some(timings) = parsed.timings {
+            journal.push(Entry::Timings {'''
+becomes = '''
+        if let Some(timings) = parsed.timings.filter(|_| false) {
+            journal.push(Entry::Timings {'''
+catches = [
+    "client::tests::a_llama_cpp_reply_journals_its_timings",
+    "client::tests::the_record_projection_names_every_fact_record_v0_cannot_carry",
+]
+
+[[fault]]
+id = "client.reply-reads-no-timings"
+failure_class = "client.reply-reads-no-timings"
+target = "diet/src/client/wire.rs"
+expect_exit = 101
+anchor = '''
+            .filter(|timings| timings.is_object())
+            .map(Timings::read),'''
+becomes = '''
+            .filter(|_| false)
+            .map(Timings::read),'''
+catches = [
+    "client::tests::a_llama_cpp_reply_journals_its_timings",
+    "client::tests::the_record_projection_names_every_fact_record_v0_cannot_carry",
+]
+
+[[fault]]
+id = "client.dialect-declares-no-timings-path"
+failure_class = "client.dialect-declares-no-timings-path"
+target = "diet/src/client/shape.rs"
+expect_exit = 101
+anchor = '''
+            timings: Some("timings".to_owned()),'''
+becomes = '''
+            timings: None,'''
+catches = [
+    "client::tests::a_llama_cpp_reply_journals_its_timings",
+    "client::tests::the_record_projection_names_every_fact_record_v0_cannot_carry",
+]
+
+[[fault]]
+id = "client.unspellable-asks-for-a-key-the-record-has"
+failure_class = "client.unspellable-asks-for-a-key-the-record-has"
+target = "diet/src/client/journal.rs"
+expect_exit = 101
+anchor = '''
+            Key {
+                row: "response",
+                key: "timings",
+            },'''
+becomes = '''
+            Key {
+                row: "response",
+                key: "text",
+            },'''
+catches = [
+    "client::tests::every_unspellable_item_is_one_the_record_refuses",
+]
+
+[[fault]]
+id = "client.unspellable-item-the-record-spells"
+failure_class = "client.unspellable-item-the-record-spells"
+target = "diet/src/formats/record/mod.rs"
+expect_exit = 101
+anchor = '''
+            text: take_optional_text(&mut members, of, "text")?,
+        },
+        Kind::Fork => Event::Fork {'''
+becomes = '''
+            text: {
+                members.remove("timings");
+                take_optional_text(&mut members, of, "text")?
+            },
+        },
+        Kind::Fork => Event::Fork {'''
+catches = [
+    "client::tests::every_unspellable_item_is_one_the_record_refuses",
 ]
