@@ -1874,8 +1874,8 @@ import pathlib
 
 path = pathlib.Path("diet/src/formats/record/mod.rs")
 source = path.read_text(encoding="utf-8")
-old = '            let text = take_string(&mut members, of, "sha256")?;\n            if !digest_ok(&text) {'
-new = '            let text = take_string(&mut members, of, "sha256")?;\n            if false && !digest_ok(&text) {'
+old = "    for digest in main.iter().chain(draft.iter()).chain(projector.iter()) {"
+new = "    for digest in draft.iter().chain(projector.iter()) {"
 if source.count(old) != 1:
     raise SystemExit(f"the weights check appears {source.count(old)} times")
 path.write_text(source.replace(old, new), encoding="utf-8")
