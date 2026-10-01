@@ -22,6 +22,7 @@ use std::fmt::{self, Write as _};
 use serde_json::Value;
 
 use super::shape::{Dialect, Pin, RequestShape};
+use super::stream::Timings;
 
 /// What came back, read through the dialect's declared paths.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -57,6 +58,9 @@ pub struct Reply {
     pub echo_site_declared: bool,
     /// Whether the declared echo site was present in the reply.
     pub echo_site_present: bool,
+    /// What the server measured of the request, read at the dialect's
+    /// declared `timings` path, when it is there and an object.
+    pub timings: Option<Timings>,
 }
 
 /// A value the server reported for one of its settings.
@@ -335,6 +339,12 @@ pub fn read(dialect: &Dialect, text: &str) -> Result<Reply, WireError> {
             .as_deref()
             .and_then(|path| at(&root, path))
             .and_then(as_text),
+        timings: dialect
+            .timings
+            .as_deref()
+            .and_then(|path| at(&root, path))
+            .filter(|timings| timings.is_object())
+            .map(Timings::read),
         output_tokens: at(&root, "usage.completion_tokens").and_then(as_count),
         prompt_tokens: dialect
             .prompt_tokens

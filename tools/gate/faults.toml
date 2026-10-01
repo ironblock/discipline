@@ -6625,6 +6625,62 @@ failure_class = "client.dialect-declares-an-echo-site-the-chat-reply-lacks"
 migrated = false
 
 [[fault]]
+id = "client.journal-drops-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "client.journal-drops-timings"
+failure_class = "client.journal-drops-timings"
+migrated = false
+
+[[fault]]
+id = "client.reply-reads-no-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "client.reply-reads-no-timings"
+failure_class = "client.reply-reads-no-timings"
+migrated = false
+
+[[fault]]
+id = "client.dialect-declares-no-timings-path"
+kind = "lane-fault"
+check = "lanes"
+label = "client.dialect-declares-no-timings-path"
+failure_class = "client.dialect-declares-no-timings-path"
+migrated = false
+
+[[fault]]
+id = "client.unspellable-asks-for-a-key-the-record-has"
+kind = "lane-fault"
+check = "lanes"
+label = "client.unspellable-asks-for-a-key-the-record-has"
+failure_class = "client.unspellable-asks-for-a-key-the-record-has"
+migrated = false
+
+[[fault]]
+id = "client.unspellable-item-the-record-spells"
+kind = "lane-fault"
+check = "lanes"
+label = "client.unspellable-item-the-record-spells"
+failure_class = "client.unspellable-item-the-record-spells"
+migrated = false
+
+[[fault]]
+id = "client.unspellable-ask-disagrees-with-its-prose"
+kind = "lane-fault"
+check = "lanes"
+label = "client.unspellable-ask-disagrees-with-its-prose"
+failure_class = "client.unspellable-ask-disagrees-with-its-prose"
+migrated = false
+
+[[fault]]
+id = "client.issued-retry-reason-unnamed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.issued-retry-reason-unnamed"
+failure_class = "client.issued-retry-reason-unnamed"
+migrated = false
+
+[[fault]]
 id = "client.stream-drops-the-draft-counts"
 kind = "lane-fault"
 check = "lanes"
