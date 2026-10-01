@@ -14,15 +14,16 @@
 //! diet has no TOML reader (the regimen is its own format), and this reads
 //! the registry the way #162's registry tests do. By rule, every field read
 //! here stays a one-line `key = "value"` string -- `equipment`,
-//! `engine_name`, `engine_identity`, `engine_commit`, `engine_build_info`, `weights_kind`,
-//! `weights_acts_sha256`, `weights_main` and `hardware_fingerprint` -- and a
-//! field written another way is not read. A one-line LIST is recorded as a
-//! list, never mistaken for an absent key, because a list is exactly what a
-//! multi-shard `weights_main` is. Lines inside a `"""` string are skipped.
+//! `engine_name`, `engine_identity`, `engine_commit`, `engine_build_info`,
+//! `weights_kind`, `weights_acts_sha256`, `weights_main`, `weights_draft`,
+//! `weights_projector` and `hardware_fingerprint` -- or, for a multi-shard
+//! `weights_main`, a one-line list of quoted digests. A field written another
+//! way is not read, and a list the scan cannot read is kept as unreadable,
+//! never mistaken for an absent key. Lines inside a `"""` string are skipped.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-use crate::formats::record::{Engine, Weights};
+use crate::formats::record::{Engine, WeightSet, Weights};
 
 /// The registry this program was built with: one copy, read at build time,
 /// so a binary and the registry it resolves against cannot be two files.
@@ -40,8 +41,9 @@ pub fn registry_sha256() -> String {
 pub struct Table {
     /// Its one-line string values.
     pub strings: BTreeMap<String, String>,
-    /// The keys bound to a one-line list.
-    pub lists: BTreeSet<String>,
+    /// The keys bound to a one-line list: its quoted items, or `None` when
+    /// the list is not one-line quoted strings.
+    pub lists: BTreeMap<String, Option<Vec<String>>>,
 }
 
 /// Every `[kind.id]` table of a TOML document. See the module's doc for what
@@ -79,12 +81,12 @@ pub fn tables(document: &str) -> BTreeMap<String, Table> {
                 );
             continue;
         }
-        if let Some((key, _)) = line.split_once(" = [") {
+        if let Some((key, items)) = line.split_once(" = [") {
             tables
                 .entry(current.clone())
                 .or_default()
                 .lists
-                .insert(key.trim().to_owned());
+                .insert(key.trim().to_owned(), quoted_items(items));
             continue;
         }
         let Some((key, value)) = line.split_once(" = \"") else {
@@ -100,6 +102,25 @@ pub fn tables(document: &str) -> BTreeMap<String, Table> {
             .insert(key.trim().to_owned(), value.to_owned());
     }
     tables
+}
+
+/// The items of a one-line list, from just after its `[`: each a quoted
+/// string with no quote inside it, or `None` for anything else.
+fn quoted_items(after_bracket: &str) -> Option<Vec<String>> {
+    let inner = after_bracket.trim_end().strip_suffix(']')?;
+    if inner.trim().is_empty() {
+        return Some(Vec::new());
+    }
+    inner
+        .split(',')
+        .map(|item| {
+            item.trim()
+                .strip_prefix('"')
+                .and_then(|item| item.strip_suffix('"'))
+                .filter(|item| !item.contains('"'))
+                .map(str::to_owned)
+        })
+        .collect()
 }
 
 /// What the registry says a substrate is, in the record's terms.
@@ -127,8 +148,8 @@ pub struct Identity {
 /// # Errors
 ///
 /// When `id` is not a registered substrate; when its entry lacks a field the
-/// record requires; or when its main weights are several files, which the
-/// record's `weights` cannot spell (#92).
+/// record requires; or when its `weights_main` is a list that is empty or
+/// cannot be read.
 pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
     let tables = tables(document);
     let table_name = format!("substrate.{id}");
@@ -150,15 +171,8 @@ pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
         Weights::Canned {
             acts_sha256: field("weights_acts_sha256")?,
         }
-    } else if table.lists.contains("weights_main") {
-        return Err(format!(
-            "`{id}`'s `weights_main` is a list of shards, and the record's `weights` holds \
-             one digest. No digest of digests is minted here: the server never reports \
-             one. It waits on the record change requested on #92 -- `Weights::Digest` \
-             widened to a list, or a shards kind"
-        ));
     } else {
-        Weights::Digest(field("weights_main")?)
+        weight_set(id, table, field("weights_main"))?
     };
     let equipment = field("equipment")?;
     let hardware_fingerprint = tables
@@ -181,18 +195,55 @@ pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
     })
 }
 
+/// The weights a non-canned substrate's server loads: every main shard in
+/// the registry's order, and the draft and projector beside them (#92, as
+/// #211 spells it). One main file with nothing beside it is a
+/// [`Weights::Digest`], its one spelling.
+fn weight_set(
+    id: &str,
+    table: &Table,
+    one_main: Result<String, String>,
+) -> Result<Weights, String> {
+    let main = match table.lists.get("weights_main") {
+        Some(Some(shards)) if !shards.is_empty() => shards.clone(),
+        Some(_) => {
+            return Err(format!(
+                "`{id}`'s `weights_main` is a list the scan cannot read, or an empty one: \
+                 one line of quoted digests, in the registry's order"
+            ));
+        }
+        None => vec![one_main?],
+    };
+    let draft = table.strings.get("weights_draft").cloned();
+    let projector = table.strings.get("weights_projector").cloned();
+    Ok(match (main.as_slice(), &draft, &projector) {
+        ([only], None, None) => Weights::Digest(only.clone()),
+        _ => Weights::Set(WeightSet {
+            main,
+            draft,
+            projector,
+        }),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn a_registered_digest_substrate_resolves_to_what_the_registry_declares() {
+    fn a_registered_weights_set_resolves_to_every_file_the_registry_declares() {
+        // The floor: one main file, a draft beside it, and a projector. All
+        // three are what the server loads, so all three are the weights.
         let found =
             identity(REGISTRY, "accel24-beellama-qwen27b-q4kxl").expect("a registered substrate");
         let table = &tables(REGISTRY)["substrate.accel24-beellama-qwen27b-q4kxl"];
         assert_eq!(
             found.weights,
-            Weights::Digest(table.strings["weights_main"].clone())
+            Weights::Set(WeightSet {
+                main: vec![table.strings["weights_main"].clone()],
+                draft: Some(table.strings["weights_draft"].clone()),
+                projector: Some(table.strings["weights_projector"].clone()),
+            })
         );
         assert_eq!(found.engine.name, table.strings["engine_name"]);
         assert_eq!(
@@ -226,13 +277,51 @@ mod tests {
     }
 
     #[test]
-    fn a_main_of_several_shards_is_refused_and_names_the_record_change() {
-        // The DoD 1 instance: two shards, which `Weights::Digest` cannot hold.
-        let refused =
-            identity(REGISTRY, "ada48-llamacpp-qwen38flashnext-q20").expect_err("two shards");
-        assert!(
-            refused.contains("list of shards") && refused.contains("#92"),
-            "{refused}"
+    fn a_main_of_several_shards_resolves_in_the_registrys_order() {
+        // Two shards and a draft (`registry.toml`'s `weights_main` list, in
+        // its own order), which record v1 spells since #211.
+        let found =
+            identity(REGISTRY, "ada48-llamacpp-qwen38flashnext-q20").expect("two shards resolve");
+        assert_eq!(
+            found.weights,
+            Weights::Set(WeightSet {
+                main: vec![
+                    "69820c02ec7d0b45ef2ebb19d6620299db749fe2aded7f39f93c6b88b199b720".to_owned(),
+                    "316b46f3a2dbd68c900f43136ab9449f9dcc3725dfd8c794847c204bc161e113".to_owned(),
+                ],
+                draft: Some(
+                    "b646ef60eaae2a9ed849e75f15f399629ca22633555e99e809959e95f22a1575".to_owned()
+                ),
+                projector: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_main_list_that_is_empty_or_unreadable_is_refused() {
+        for list in ["[]", "[1, 2]"] {
+            let registry = format!(
+                "[equipment.e]\nhardware_fingerprint = \"{}\"\n\
+                 [substrate.x]\nequipment = \"e\"\nengine_name = \"n\"\n\
+                 engine_identity = \"i\"\nweights_main = {list}\n",
+                "a".repeat(64)
+            );
+            let refused = identity(&registry, "x").expect_err(list);
+            assert!(
+                refused.contains("cannot read, or an empty one"),
+                "{refused}"
+            );
+        }
+    }
+
+    #[test]
+    fn one_main_file_with_nothing_beside_it_is_a_digest() {
+        // A set of one file has one spelling (record v1 refuses the other).
+        let id = "accel24-llamacpp-qwen38-27b-iq3s";
+        let table = &tables(REGISTRY)[&format!("substrate.{id}")];
+        assert_eq!(
+            identity(REGISTRY, id).expect("registered").weights,
+            Weights::Digest(table.strings["weights_main"].clone())
         );
     }
 
@@ -290,9 +379,16 @@ mod tests {
 
     #[test]
     fn the_scan_reads_a_list_as_a_list_and_never_as_an_absent_key() {
-        let scanned = tables("[substrate.x]\nweights_main = [\"a\", \"b\"]\nengine_name = \"e\"\n");
+        let scanned = tables(
+            "[substrate.x]\nweights_main = [\"a\", \"b\"]\nengine_name = \"e\"\n\
+             unread = [1, 2]\n",
+        );
         let table = &scanned["substrate.x"];
-        assert!(table.lists.contains("weights_main"));
+        assert_eq!(
+            table.lists["weights_main"],
+            Some(vec!["a".to_owned(), "b".to_owned()])
+        );
+        assert_eq!(table.lists["unread"], None, "not quoted strings");
         assert!(!table.strings.contains_key("weights_main"));
         assert_eq!(table.strings["engine_name"], "e");
     }

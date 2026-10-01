@@ -454,15 +454,6 @@ fn a_drive_server_refuses_to_start_on_a_substrate_the_registry_does_not_resolve(
         said.contains("`nowhere-at-all` is not a substrate"),
         "{said}"
     );
-    // Registered, and its main weights are two shards the record cannot spell.
-    let regimen = regimen_naming("ada48-llamacpp-qwen38flashnext-q20");
-    let path = regimen.0.to_string_lossy().into_owned();
-    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
-    assert_eq!(code, Some(1), "{said}");
-    assert!(
-        said.contains("list of shards") && said.contains("#92"),
-        "{said}"
-    );
 }
 
 #[test]
@@ -593,4 +584,19 @@ fn a_drive_server_refuses_a_wildcard_before_it_asks_the_engine() {
     assert_eq!(code, Some(2), "{said}");
     assert!(said.contains("is a wildcard"), "{said}");
     assert!(stub.heads().is_empty(), "{:?}", stub.heads());
+}
+
+#[test]
+fn a_drive_server_starts_on_a_substrate_of_several_shards() {
+    // Two main shards and a draft, which record v1 spells since #211: the
+    // substrate resolves, and its server on the pinned commit starts.
+    let id = "ada48-llamacpp-qwen38flashnext-q20";
+    let regimen = regimen_registered(id);
+    let path = regimen.0.to_string_lossy().into_owned();
+    let stub = Stub::serving(vec![props_saying("b7-e7051ef")]).expect("loopback");
+    let served = start(&stub.url(), &["--regimen", &path]);
+    assert_eq!(
+        (served.substrate.as_deref(), served.engine_build.as_deref()),
+        (Some(id), Some("b7-e7051ef"))
+    );
 }

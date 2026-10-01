@@ -326,7 +326,10 @@ mod tests {
                 .expect("a registered substrate, its hardware agreeing");
         let substrate = &regime.substrates[0];
         assert_eq!(substrate.engine, registered.engine);
-        assert!(matches!(&substrate.weights, Weights::Digest(sha) if sha.len() == 64));
+        // The floor's whole set: its main file, its draft and its projector.
+        assert!(
+            matches!(&substrate.weights, Weights::Set(set) if set.main.len() == 1 && set.draft.is_some() && set.projector.is_some())
+        );
         assert_eq!(substrate.weights, registered.weights);
 
         // The dev loop's own regimen resolves to the canned instance it plays.
