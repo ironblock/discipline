@@ -8486,7 +8486,9 @@ while [ "$#" -gt 0 ]; do
       selected+=("$2")
       shift 2
       ;;
-    --selftest) mode="selftest"; shift ;;
+    --selftest)
+      [ "$mode" != "site" ] || { echo "verify: --site checks a site and nothing else" >&2; exit "$EXIT_MISUSE"; }
+      mode="selftest"; shift ;;
     --derive-scopes)
       [ "$#" -ge 2 ] || { echo "verify: --derive-scopes needs a directory" >&2; exit "$EXIT_MISUSE"; }
       SELFTEST_DERIVE="$2"
@@ -8560,6 +8562,7 @@ while [ "$#" -gt 0 ]; do
         /*) SITE_DIR="$2" ;;
         *)  SITE_DIR="$(pwd)/$2" ;;
       esac
+      [ "$mode" != "selftest" ] || { echo "verify: --site checks a site and nothing else" >&2; exit "$EXIT_MISUSE"; }
       mode="site"
       shift 2
       ;;
@@ -8574,12 +8577,16 @@ cd "$ROOT"
 # `--site DIR`: the published site, checked as pages.yml checks it before it
 # publishes (#32). Alone: a site check that also ran other checks, or ran
 # under a selftest's flags, would be a different question answered.
-if [ "$mode" = "site" ]; then
-  if [ "${#selected[@]}" -ne 0 ] || [ -n "$VERIFY_SCOPE_GIVEN" ] || [ -n "$VERIFY_HISTORY_RANGE" ] ||
-     [ "$SELFTEST_SHARD" -ne 0 ] || [ -n "$SELFTEST_CENSUS" ] || [ -n "$SELFTEST_SCOPE_PLAN" ]; then
+# `--site` given beside `--selftest`, in either order, is refused rather than
+# letting whichever came last decide.
+if [ -n "$SITE_DIR" ]; then
+  if [ "$mode" != "site" ] || [ "${#selected[@]}" -ne 0 ] || [ -n "$VERIFY_SCOPE_GIVEN" ] ||
+     [ -n "$VERIFY_HISTORY_RANGE" ] || [ "$SELFTEST_SHARD" -ne 0 ] || [ -n "$SELFTEST_CENSUS" ] ||
+     [ -n "$SELFTEST_SCOPE_PLAN" ] || [ -n "$SELFTEST_DERIVE" ]; then
     echo "verify: --site checks a site and nothing else" >&2
     exit "$EXIT_MISUSE"
   fi
+  [ -d "$SITE_DIR" ] || { echo "verify: --site ${SITE_DIR}: no such directory" >&2; exit "$EXIT_MISUSE"; }
   check_site "$SITE_DIR"
   exit $?
 fi
