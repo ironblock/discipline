@@ -2784,6 +2784,15 @@ inject_exercise_type_error() {
   printf '\nexport const seededFault: number = %s;\n' "'not a number'" >> exercise/src/ui/format.ts
 }
 
+# One story's assertion broken in place: the kitchen sink's receipt expecting
+# 2.1 side calls an ask where the session makes 2.0. Typecheck and lint pass
+# it; only the browser tests -- every story run in Chromium -- can see it
+# (#175). The signature is Vitest's failure message for that assertion, which
+# only this fault prints; the story's FAIL line would name any of its failures.
+inject_exercise_story_assertion() {
+  edit_in_place "s/row('side-calls-per-ask')).toBe('2.0')/row('side-calls-per-ask')).toBe('2.1')/" exercise/src/stories/KitchenSink.stories.tsx
+}
+
 # A pnpm the check cannot have: the class #194 was, on the hosts it was on --
 # the pinned pnpm unobtainable there -- made true on every host by pinning a
 # version that was never published. The signature is npm's own `notarget`
@@ -7230,6 +7239,8 @@ selftest() {
     'hygiene: external-subresource:'
   seeded_case "a type error in the web surface"       exercise inject_exercise_type_error \
     'error TS2322'
+  seeded_case "a story's assertion broken in place"   exercise inject_exercise_story_assertion \
+    "expected '2\\.0' to be '2\\.1'"
   seeded_case "a pinned pnpm the host cannot have"    exercise inject_exercise_pnpm_unobtainable \
     'notarget No matching version found for pnpm@0\.0\.0-unpublished'
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
