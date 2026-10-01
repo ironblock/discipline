@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 166
+faults = 168
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -2656,4 +2656,34 @@ catches = [
     "a_drive_server_checks_the_engine_before_it_binds",
     "a_drive_server_refuses_a_wildcard_before_it_asks_the_engine",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
+]
+
+[[fault]]
+id = "drive.serve-log-drops-a-line"
+failure_class = "drive.serve-log-drops-a-line"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+            let line = render(&logged);'''
+becomes = '''
+            if logged.seq == 1 {
+                next = logged.seq + 1;
+                continue;
+            }
+            let line = render(&logged);'''
+catches = [
+    "drive::serve::tests::the_teed_log_is_the_events_stream_line_for_line",
+]
+
+[[fault]]
+id = "drive.serve-bin-ignores-the-log-flag"
+failure_class = "drive.serve-bin-ignores-the-log-flag"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+        keep_log(std::sync::Arc::clone(&session), file);'''
+becomes = '''
+        let _ = file;'''
+catches = [
+    "a_drive_servers_log_file_is_the_events_stream_line_for_line",
 ]
