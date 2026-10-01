@@ -458,7 +458,8 @@ successor_staged = "44.20260928"
 successor_staged_note = "read 2026-09-29 (rpm-ostree status): staged, not booted; it mints a new instance on the next reboot"
 accelerator_driver_read = "615.71.09"
 accelerator_driver_read_note = "read by nvidia-smi 2026-09-29; the equipment entry records 610.57.04 as measured 2026-09-05 and is left as its fingerprint was taken"
-current = true
+current = false
+current_note = "superseded 2026-10-01 by the instance the reboot of 2026-09-30T05:18Z minted (the staged image below, booted)"
 
 [[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
 id = "2026-09-04"
@@ -489,6 +490,26 @@ during that session records the same deployment digest, version and kernel as \
 this instance and no other, which is what ties the digest to this instance \
 rather than to the substrate at large."""
 current = false
+
+[[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
+id = "2026-10-01"
+os_deployment_version = "44.20260928.1"
+os_deployment_digest = "e3307b110e1c656633f655bb3b6cf9123a45dbac788ac8a9421e407c56dae88e"
+os_deployment_checksum = "d1e67933bd2b2253fb29e63960a58d17e058ca974217f87486dd5241cc69576e"
+kernel = "7.2.7-ogc1.1.fc44.x86_64"
+pinned_by = "substrate capture of 2026-10-01 (--hash-models), taken after the restore of that day: the machine rebooted 2026-09-30T05:18:53Z into the staged operating system image during its owner's scheduled use, and production was dark until the provisioning script restored it (first health 2026-10-01T05:05:44Z; #143)"
+os_update_note = """
+The 2026-09-20 instance recorded 44.20260928 as staged; the image booted is 44.20260928.1. Against the 2026-09-20 capture, `fingerprint --check` drifts in three fields, kernel, deployment digest and kargs, and in nothing else: launch flags and the three model files' digests are identical."""
+engine_identity_measured = true
+engine_identity_measured_on = "2026-10-01"
+engine_identity_measured_how = """
+The running server's binary hashed through `/proc/<pid>/exe` (process found by `pgrep -x`) returned the substrate's engine digest."""
+accelerator_driver_read = "615.71.09"
+accelerator_driver_read_note = "the driver library the restored process maps (libcuda.so.615.71.09), unchanged from the 2026-09-29 read"
+canary = """
+Canary e0827, k = 36, one draw at registration (2026-10-01, after the restore): 36/36, 95% Wilson [0.904, 1.000], read against the 2026-09-20 instance's pooled baseline, PASS. Under #114's rule this instance's own pool begins with that draw; the draw is not committed, so it is not yet poolable."""
+admission_note = "the floor's admission (substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/) stands on this instance: its fingerprint is engine, weights, template, serving line and reasoning state, and an operating-system change is instance state (Dispatch, relaying #143)"
+current = true
 
 [substrate.accel24-llamacpp-qwen38-27b-iq3s]
 equipment = "linux-pc"
