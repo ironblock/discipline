@@ -101,7 +101,8 @@ export const MOMENTS = {
   specSettled: { beat: 3 },
   ratifying: { beat: 4, t: 2_000 },
   refilled: { beat: 4 },
-  buildReading: { beat: 5, t: 1_000 },
+  // After the targeted read has printed (t/3 ends at 1,935).
+  buildReading: { beat: 5, t: 2_000 },
   testsRunning: { beat: 5, t: 12_500 },
   done: { beat: 5 },
 } as const satisfies Record<string, Cursor>;

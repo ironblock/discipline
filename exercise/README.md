@@ -14,7 +14,7 @@ workflow requirements this application expresses, not the other way round.
 pnpm install
 pnpm dev              # the harness on the canned transport, http://localhost:5173 (?speed=4 to hurry it)
 pnpm storybook        # the surface at every moment of the specimen, http://localhost:6006
-pnpm verify           # typecheck, lint, unit tests, every story as a browser test (but Session/Live, driven by hand)
+pnpm verify           # typecheck, lint, unit tests, every story as a browser test
 pnpm perf             # a performance trace: frames, long frames, layout, style, script, a profile (--ablate, --css)
 ```
 
@@ -103,7 +103,7 @@ CI runs the same thing as the repository's `exercise` check (`./verify.sh --only
 | `src/session/gap.ts`, `useIdleGap.ts` | The idle gap (Q4 on #117), measured on the page: from a turn settling to the person's next accepted command, split into notice, read, compose, away and blocked -- integer ms, summing exactly to the gap -- and carried as `idle_gap` on the command that ends it, which the drive logs as `idle.gap`. `diet` logs it only if that command is admitted (#146); the canned transport does the same. The receipt's sixth number is exact once every gap was measured. |
 | `src/session/fold.ts` | The only place an event becomes something drawable. Every node is branded `Folded`, carries the log positions it came from, and the steps of #117 it waits on. |
 | `src/ui/` | The parts. `Block` is the session event; messages, tool calls and lane bars refine it. |
-| `src/stories/` | `Session/Moments`: the whole surface at eleven moments of the specimen. `Session/Recorded`: a real session where it went wrong. `Session/Kitchen sink`: the happy path. `Session/Failures`: every way a session fails, drawn. `Session/Live`: the canned transport, driven. `Parts`: one story per state each part distinguishes, and each open set's fallback. |
+| `src/stories/` | `Session/Moments`: the whole surface at eleven moments of the specimen. `Session/Recorded`: a real session where it went wrong. `Session/Kitchen sink`: the happy path. `Session/Failures`: every way a session fails, drawn. `Session/Live`: the canned transport, to drive by hand, and one ask driven by the test. `Parts`: one story per state each part distinguishes, and each open set's fallback. |
 
 Theme tokens (`src/theme/tokens.css`) are named for kinds of text and
 meanings, never for faces or hues; several resolve to the same value on

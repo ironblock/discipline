@@ -8,6 +8,8 @@ import { Block } from '../ui/Block.tsx';
 import type { Tone } from '../ui/Block.tsx';
 import { Branch } from '../ui/Branch.tsx';
 import { Cable } from '../ui/Cable.tsx';
+import { Copy } from '../ui/Copy.tsx';
+import { Flowing } from '../ui/Flowing.tsx';
 import { Composer } from '../ui/Composer.tsx';
 import type { ComposerProps } from '../ui/Composer.tsx';
 import { Preferred, Settings } from '../ui/Prefs.tsx';
@@ -15,7 +17,9 @@ import { Memory } from '../ui/Memory.tsx';
 import { Prose, ProseProbe } from '../ui/Prose.tsx';
 import { AssistantMessage, SystemMessage, UserMessage } from '../ui/Message.tsx';
 import { Seam } from '../ui/Seam.tsx';
+import { Segments } from '../ui/Segments.tsx';
 import { SessionHeader } from '../ui/SessionHeader.tsx';
+import { ms, rate, tokens, took } from '../ui/format.ts';
 import { laneStyle } from '../ui/sets.ts';
 import { ToolBlock } from '../ui/ToolCall.tsx';
 import { PHASES } from '../App.tsx';
@@ -252,6 +256,16 @@ export const CableLanesApart: Story = {
 export const SystemPriming: Story = {
   name: 'Message · system, the phase’s priming',
   render: () => <SystemMessage node={sessionAt(MOMENTS.opened).eras[0]!.system} />,
+  play: async ({ canvasElement }) => {
+    const prose = () => canvasElement.querySelector('.ex-prose')?.textContent ?? '';
+    await expect(prose()).toMatch(/^You are a coding agent working in \/work\/tally/);
+    // Its first lines, then the rest on request.
+    const more = canvasElement.querySelector('.ex-more') as HTMLElement;
+    await expect(more.getAttribute('aria-expanded')).toBe('false');
+    const shown = prose().length;
+    await userEvent.click(more);
+    await expect(prose().length).toBeGreaterThan(shown);
+  },
 };
 
 export const SystemRender: Story = {
@@ -265,6 +279,12 @@ export const SystemRender: Story = {
 export const UserCold: Story = {
   name: 'Message · user, the first ask (a cold prefix)',
   render: () => <UserMessage node={trunkNodeAt(MOMENTS.firstSettled, 'ask/1', 'user')} />,
+  play: async ({ canvasElement }) => {
+    // Cold: every token it put in front of the model was new, none warm in the slot.
+    const read = canvasElement.querySelector('[title^="new tokens this ask put in front of the model"]');
+    await expect(read?.textContent).toBe(`+${tokens(1236)} tok`);
+    await expect(read?.getAttribute('title')).toContain(`; ${tokens(0)} before it were warm`);
+  },
 };
 
 export const UserAfterRefill: Story = {
@@ -425,6 +445,11 @@ export const AssistantDone: Story = {
 export const AssistantWithCode: Story = {
   name: 'Message · assistant, with a code block',
   render: () => <AssistantMessage node={trunkNodeAt(MOMENTS.done, 'q/8', 'assistant')} />,
+  play: async ({ canvasElement }) => {
+    const code = canvasElement.querySelector('.ex-prose .ex-prose__code');
+    await expect(code).not.toBeNull();
+    await expect(code?.textContent?.trim().length).toBeGreaterThan(0);
+  },
 };
 
 // ---------------------------------------------------------------- Prose
@@ -650,14 +675,28 @@ function Pair({ at, message, tool, callsFrom }: { readonly at: Cursor; readonly 
 
 const lane = (children: ReactNode) => <div style={{ maxWidth: 'var(--lane-width)' }}>{children}</div>;
 
+/** A side call opened, and what it landed: each patch's op and entry, in order. */
+async function landed(root: HTMLElement) {
+  await userEvent.click(root.querySelector('.ex-branch__why') as HTMLElement);
+  return [...root.querySelectorAll('.ex-patch')].map((p) => `${p.getAttribute('data-op') ?? ''} ${p.querySelector('.ex-patch__id')?.textContent ?? ''}`);
+}
+
 export const BranchRunning: Story = {
   name: 'Branch · interview, running',
   render: () => lane(<Branch node={branchAt(MOMENTS.idleGapInterview, 'i/1')} />),
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('.ex-branch')?.getAttribute('data-outcome')).toBe('running');
+    await expect(canvasElement.querySelector('.ex-patchsum')).toBeNull();
+  },
 };
 
 export const BranchLanded: Story = {
   name: 'Branch · interview, three facts landed',
   render: () => lane(<Branch node={branchAt(MOMENTS.firstSettled, 'i/1')} />),
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('.ex-branch')?.getAttribute('data-outcome')).toBe('value');
+    await expect(await landed(canvasElement)).toEqual(['add #f1', 'add #f2', 'add #f3']);
+  },
 };
 
 export const BranchOpened: Story = {
@@ -681,28 +720,56 @@ export const BranchOpened: Story = {
 export const BranchSupersede: Story = {
   name: 'Branch · interview, superseding an open question',
   render: () => lane(<Branch node={branchAt(MOMENTS.specSettled, 'i/3')} />),
+  play: async ({ canvasElement }) => {
+    await expect(await landed(canvasElement)).toEqual(['supersede #d3', 'add #c1']);
+    // The entry it replaces is the open question.
+    await expect(canvasElement.querySelector('.ex-patch[data-op="supersede"]')?.textContent).toContain('replaces #o1');
+  },
 };
 
 export const BranchRatify: Story = {
   name: 'Branch · ratify, retiring and adding',
   render: () => lane(<Branch node={branchAt(MOMENTS.refilled, 'r/1')} />),
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('.ex-branch')?.getAttribute('data-lane')).toBe('ratify');
+    await expect(await landed(canvasElement)).toEqual(['retire #f3', 'add #n1']);
+  },
 };
 
 // ---------------------------------------------------------------- Working memory
 
+/** Working memory's entries as drawn: id and state, and whether it is new. */
+const entriesOf = (root: HTMLElement) =>
+  [...root.querySelectorAll('.ex-memory__entry')].map((e) => `${e.querySelector('.ex-memory__id')?.textContent ?? ''} ${e.getAttribute('data-state') ?? ''}${e.hasAttribute('data-fresh') ? ' new' : ''}`);
+
 export const MemoryEmpty: Story = {
   name: 'Memory · empty',
   render: () => lane(<Memory entries={sessionAt(MOMENTS.opened).memory} />),
+  play: async ({ canvasElement }) => {
+    await expect(entriesOf(canvasElement)).toEqual([]);
+    await expect(canvasElement.querySelector('.ex-memory__empty')).not.toBeNull();
+  },
 };
 
 export const MemoryFresh: Story = {
   name: 'Memory · six fresh entries',
   render: () => lane(<Memory entries={sessionAt(MOMENTS.firstSettled).memory} />),
+  play: async ({ canvasElement }) => {
+    await expect([...entriesOf(canvasElement)].sort()).toEqual(['#d1 live new', '#d2 live new', '#f1 live new', '#f2 live new', '#f3 live new', '#o1 live new']);
+    await expect(canvasElement.querySelector('.ex-memory__fresh')?.textContent).toBe('+6 new');
+  },
 };
 
 export const MemoryAfterRefill: Story = {
   name: 'Memory · superseded and retired, kept visible',
   render: () => lane(<Memory entries={sessionAt(MOMENTS.refilled).memory} />),
+  play: async ({ canvasElement }) => {
+    const drawn = entriesOf(canvasElement).map((e) => e.replace(/ new$/, ''));
+    // Kept, not dropped: the superseded question and the retired fact are still there, marked.
+    await expect(drawn).toContain('#o1 superseded');
+    await expect(drawn).toContain('#f3 retired');
+    await expect(drawn).toHaveLength(9);
+  },
 };
 
 // ---------------------------------------------------------------- Seam
@@ -710,6 +777,11 @@ export const MemoryAfterRefill: Story = {
 export const SeamRefill: Story = {
   name: 'Seam · the refill',
   render: () => <Seam node={sessionAt(MOMENTS.refilled).eras[1]!.seam!} />,
+  play: async ({ canvasElement }) => {
+    const label = canvasElement.querySelector('.ex-seam__label')?.textContent ?? '';
+    await expect(canvasElement.querySelector('.ex-seam__kind')?.textContent).toBe('refill');
+    for (const said of ['spec → build', `${tokens(18_009)} → ${tokens(1_512)} tok`, 'a41c09e2 → 7e02b5d1', `warm ${ms(1_050)}`]) await expect(label).toContain(said);
+  },
 };
 
 // ---------------------------------------------------------------- What this surface does not know
@@ -816,11 +888,49 @@ const composer = (state: ComposerProps['state'], phase = 'spec') => (
   <Composer state={state} phase={phase} phases={PHASES} dispatch={async () => ({ ok: true })} />
 );
 
-export const ComposerAwaiting: Story = { name: 'Composer · your turn', render: () => composer('awaiting') };
-export const ComposerTurn: Story = { name: 'Composer · the trunk is working', render: () => composer('turn') };
-export const ComposerCapture: Story = { name: 'Composer · an interview in the idle gap', render: () => composer('capture') };
-export const ComposerRatify: Story = { name: 'Composer · ratifying', render: () => composer('ratify', 'spec') };
-export const ComposerEnded: Story = { name: 'Composer · ended', render: () => composer('ended', 'build') };
+/** What the composer says, and what it lets a person do: type, refill, cancel. */
+const composerSays = (root: HTMLElement) => ({
+  state: root.querySelector('.ex-composer__state')?.textContent,
+  typing: !(root.querySelector('textarea') as HTMLTextAreaElement).disabled,
+  refill: !(root.querySelector('.ex-composer__seam button') as HTMLButtonElement).disabled,
+  cancel: root.querySelector('.ex-composer__cancel') !== null,
+});
+
+export const ComposerAwaiting: Story = {
+  name: 'Composer · your turn',
+  render: () => composer('awaiting'),
+  play: async ({ canvasElement }) => {
+    await expect(composerSays(canvasElement)).toEqual({ state: 'your turn', typing: true, refill: true, cancel: false });
+  },
+};
+export const ComposerTurn: Story = {
+  name: 'Composer · the trunk is working',
+  render: () => composer('turn'),
+  play: async ({ canvasElement }) => {
+    await expect(composerSays(canvasElement)).toEqual({ state: 'working · esc cancels', typing: true, refill: false, cancel: true });
+  },
+};
+export const ComposerCapture: Story = {
+  name: 'Composer · an interview in the idle gap',
+  render: () => composer('capture'),
+  play: async ({ canvasElement }) => {
+    await expect(composerSays(canvasElement)).toEqual({ state: 'interview running · send when it settles', typing: true, refill: false, cancel: true });
+  },
+};
+export const ComposerRatify: Story = {
+  name: 'Composer · ratifying',
+  render: () => composer('ratify', 'spec'),
+  play: async ({ canvasElement }) => {
+    await expect(composerSays(canvasElement)).toEqual({ state: 'ratifying before the refill', typing: true, refill: false, cancel: true });
+  },
+};
+export const ComposerEnded: Story = {
+  name: 'Composer · ended',
+  render: () => composer('ended', 'build'),
+  play: async ({ canvasElement }) => {
+    await expect(composerSays(canvasElement)).toEqual({ state: 'the session has ended', typing: false, refill: false, cancel: false });
+  },
+};
 
 /**
  * Narrow -- the trunk's column beside lanes and memory -- the composer's bar
@@ -845,5 +955,67 @@ export const ComposerNarrow: Story = {
     await expect(Math.abs(action.top - seam.top)).toBeLessThan(4);
     await expect(Math.abs(action.right - bar.right)).toBeLessThan(2);
     await expect(Math.abs(box('.ex-composer__phase').top - seam.top)).toBeLessThan(6);
+  },
+};
+
+/** Copy: says it copied, or that it could not -- the clipboard stood in for, both ways. */
+export const CopySaysSo: Story = {
+  name: 'Copy · says it copied, or that it could not',
+  render: () => <Copy text="cargo test --all" />,
+  play: async ({ canvasElement }) => {
+    const clipboard = navigator.clipboard;
+    const button = canvasElement.querySelector('button') as HTMLButtonElement;
+    let written: string | undefined;
+    try {
+      clipboard.writeText = async (text: string) => void (written = text);
+      await userEvent.click(button);
+      await waitFor(async () => expect(button.textContent).toBe('copied'));
+      await expect(written).toBe('cargo test --all');
+      await waitFor(async () => expect(button.textContent).toBe('copy'), { timeout: 3_000 });
+      clipboard.writeText = () => Promise.reject(new Error('denied'));
+      await userEvent.click(button);
+      await waitFor(async () => expect(button.textContent).toBe('not copied'));
+    } finally {
+      // The stand-in was an own property over the prototype's method: removing it restores the real one.
+      delete (clipboard as { writeText?: unknown }).writeText;
+    }
+  },
+};
+
+/** Flowing: a running flow counts, coloured by how worrying its time is; a finished one says tokens, time and rate. */
+export const FlowingRunningAndDone: Story = {
+  name: 'Flowing · running, counted and coloured; finished, with its rate',
+  render: () => (
+    <p>
+      <Flowing flow={{ phase: 'pp', ms: 2_400, running: true }} level="slow" /> ·{' '}
+      <Flowing flow={{ phase: 'tg', n: 1_200, ms: 2_000, running: false }} level="slow" />
+    </p>
+  ),
+  play: async ({ canvasElement }) => {
+    const [running, done] = [...canvasElement.querySelectorAll('p > span')] as HTMLElement[];
+    await expect([running?.className, running?.dataset['level'], running?.textContent]).toEqual(['ex-elapsed', 'slow', `reading · ${took(2_400)}`]);
+    // Finished, it is no longer coloured: the level is only for what is still running.
+    await expect([done?.className, done?.dataset['level'], done?.textContent]).toEqual(['', undefined, `+${tokens(1_200)} tok in ${took(2_000)} (${rate(1_200, 2_000)} t/s tg)`]);
+  },
+};
+
+function PickOne() {
+  const [value, setValue] = useState<'trace' | 'sweep' | 'off'>('trace');
+  return <Segments name="connectors" options={['trace', 'sweep', 'off'] as const} value={value} onPick={setValue} unavailable={['off']} why="not while the curtain is open" />;
+}
+
+/** Segments: one of a few, as radios -- a pick moves it; what cannot be picked now says why. */
+export const SegmentsPick: Story = {
+  name: 'Segments · a pick moves it; an unavailable option says why',
+  render: () => <PickOne />,
+  play: async ({ canvasElement }) => {
+    const group = canvas(canvasElement).getByRole('radiogroup', { name: 'connectors' });
+    const on = () => group.querySelector('[data-on]')?.textContent;
+    await expect(on()).toBe('trace');
+    await userEvent.click(canvas(group).getByRole('radio', { name: 'sweep' }));
+    await expect(on()).toBe('sweep');
+    const off = canvas(group).getByRole('radio', { name: 'off' }) as HTMLInputElement;
+    await expect(off.disabled).toBe(true);
+    await expect(off.closest('label')?.getAttribute('title')).toBe('not while the curtain is open');
   },
 };
