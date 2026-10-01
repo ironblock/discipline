@@ -108,7 +108,7 @@ def sha256_file(path: pathlib.Path) -> str:
 # Where a process may map a shared object from outside the engine's directory: the system's and the CUDA
 # toolkit's libraries, which are the instance's fields (`os`, `cuda`). A mapping anywhere else is refused,
 # because it could be engine code the recipe does not hash.
-SYSTEM_PREFIXES = ("/usr/lib/", "/usr/lib64/", "/lib/", "/lib64/", "/usr/local/cuda")
+SYSTEM_PREFIXES = ("/usr/lib/", "/usr/lib64/", "/lib/", "/lib64/", "/usr/local/cuda/", "/usr/local/cuda-")
 
 
 def utc(t: float) -> str:
@@ -152,6 +152,12 @@ def read_engine(target: str, pid: bool = False) -> dict:
         # A process read must hash what is LOADED. A mapping whose file was replaced after load reads
         # "(deleted)"; one whose path now names a different file has another device or inode. Either
         # makes the directory's bytes something other than the mapped bytes, so either is refused.
+        # The process's start: boot time plus its starttime in clock ticks (proc(5), stat field 22). The
+        # /proc/<pid> directory's own times are when the kernel instantiated it, not when the process began.
+        btime = int(next(l.split()[1] for l in pathlib.Path("/proc/stat").read_text().splitlines()
+                         if l.startswith("btime ")))
+        ticks = int(pathlib.Path(f"/proc/{target}/stat").read_text().rsplit(")", 1)[1].split()[19])
+        started = btime + ticks / os.sysconf("SC_CLK_TCK")
         inside, outside = set(), set()
         for line in pathlib.Path(f"/proc/{target}/maps").read_text().splitlines():
             parts = line.split(None, 5)
@@ -160,13 +166,19 @@ def read_engine(target: str, pid: bool = False) -> dict:
             path, (major, minor), inode = parts[5], parts[3].split(":"), int(parts[4])
             if path.endswith(" (deleted)"):
                 raise SystemExit(f"check-fingerprints: the process maps {path}, replaced on disk since load")
+            where = pathlib.Path(path)
+            if where.parent == directory and not SHARED_OBJECT.search(path):
+                raise SystemExit(f"check-fingerprints: the process maps {where.name} from its directory under "
+                                 "a name the recipe's pattern does not match")
             if not SHARED_OBJECT.search(path):
                 continue
-            where = pathlib.Path(path)
             if where.parent == directory:
                 st = where.stat()
                 if (st.st_ino, os.major(st.st_dev), os.minor(st.st_dev)) != (inode, int(major, 16), int(minor, 16)):
                     raise SystemExit(f"check-fingerprints: {where.name} on disk is not the file the process mapped")
+                # Rewritten in place keeps the inode; its status-change time then postdates the process's start.
+                if st.st_ctime > started:
+                    raise SystemExit(f"check-fingerprints: {where.name} changed on disk after the process started")
                 inside.add(where.name)
             elif path.startswith(SYSTEM_PREFIXES):
                 outside.add(where.name)

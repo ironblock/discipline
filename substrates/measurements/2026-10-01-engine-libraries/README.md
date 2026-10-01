@@ -1,6 +1,6 @@
 # Engine libraries: the reads behind #202's registry fields
 
-Every read here was taken on 2026-10-01 at 04:37Z by `substrates/check-fingerprints.py`, the same recipe the check recomputes:
+The four reads here were taken on 2026-10-01 at 04:52Z by `substrates/check-fingerprints.py`, the same recipe the check recomputes:
 
 - `--read-engine PATH` reads from disk;
 - `--read-engine-pid PID` reads from a running process.
@@ -24,19 +24,22 @@ A disk read hashes what is on disk now. On its own it does not show that the pro
 
 - **beellama: tied by the pinned release.**
   - The release tarball is still on the host, and it hashes to the registry's `engine_release_tarball_sha256`.
-  - The exe and all 29 libraries equal its members byte for byte (`beellama-tarball-tie.json`).
+  - Its regular members' digests were read on the host into `beellama-tarball-members.json`. The exe and all 29 libraries equal them.
 - **The candidate: tied by its own instance-time read.**
-  - The 2026-09-29 engine manifest hashed the exe and the 8 libraries the server loads (`substrates/admission/.../raw/engine-manifest.txt`). All 9 are equal on disk now (`candidate-instance-tie.json`).
+  - The 2026-09-29 engine manifest hashed the exe and the 8 libraries the server loads (`substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/raw/engine-manifest.txt`). All 9 are equal on disk now.
   - The other 7 files are the build's tool libraries (bench, cli, perplexity and so on). The server does not load them.
 - **The DoD 1 build of 2026-09-28: weakly tied.**
   - The disk files' modification times are 2026-09-26T01:11–01:14Z, recorded in the read, and precede the pin. Modification times can be set, so this is weak.
   - No read of 2026-09-28 recorded the libraries. The registry says so in the entry.
 
+Both ties recompute from committed files with `python3 tie.py`, which exits 1 if either fails.
+
 ## The process read
 
 - The reader takes the process's own mapping list and refuses three things:
   - a mapping replaced on disk since load (`(deleted)`);
-  - a library whose device and inode differ from the mapped one;
+  - a library whose device and inode differ from the mapped one, or whose status-change time is later than the process's start (a file rewritten in place);
+  - a file mapped from the directory under a name the recipe's pattern misses;
   - a shared object mapped from outside both the executable's directory and the system's library directories.
 - The DoD 1 process maps exactly the 8 shared objects in its directory, each the same file it hashed.
 - The 20 shared objects it maps from outside that directory are named in `mapped_from_system`. They are libc and its neighbours, the CUDA toolkit and the driver, which are the instance's fields (`os`, `cuda`).
@@ -44,3 +47,8 @@ A disk read hashes what is on disk now. On its own it does not show that the pro
 ## beellama's backends
 
 beellama loads its ggml backends with `dlopen` (`GGML_BACKEND_DL`). The release ships 15 `libggml-cpu-*` variants, and the CPU decides which one is loaded. Only a process read shows which, and a process read is due when that host's production runs again. The directory recipe covers all of them, so a change to any of them moves the fingerprint.
+
+## Limits of a process read
+
+- The system prefixes are trusted as system. A build installed under `/usr/lib` would be read as system libraries, giving an empty library table. The check refuses an empty table, but the reader does not.
+- The reader runs in the host's mount namespace. A server inside a container whose engine directory is not visible at the same path would fail the read rather than refuse it cleanly.
