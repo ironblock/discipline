@@ -251,7 +251,8 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(build) => build.flatten(),
         Err(why) => return fail(EXIT_INPUT, &why),
     };
-    let log_file = match log_file.as_deref().map(created).transpose() {
+    let log_path = log_file;
+    let log_file = match log_path.as_deref().map(created).transpose() {
         Ok(file) => file,
         Err(why) => return fail(EXIT_OUTPUT, &why),
     };
@@ -260,9 +261,10 @@ fn serve(args: &[String]) -> ExitCode {
         Err(refused) => return refused,
     };
     let session = std::sync::Arc::new(Session::open(transport, shape));
-    if let Some(file) = log_file {
+    let log = log_file.map(|(file, truncated)| {
         keep_log(std::sync::Arc::clone(&session), file);
-    }
+        truncated
+    });
     let opened = session.opened();
     let config = Config {
         allowed_origins,
@@ -279,7 +281,8 @@ fn serve(args: &[String]) -> ExitCode {
             &server.addr().to_string(),
             opened,
             substrate,
-            engine.as_ref()
+            engine.as_ref(),
+            log_path.as_deref().zip(log),
         )
     );
     // Serves until the process is stopped. The server's threads do the work;
@@ -289,9 +292,13 @@ fn serve(args: &[String]) -> ExitCode {
     }
 }
 
-/// The file at `path`, created (or emptied) for writing.
-fn created(path: &str) -> Result<std::fs::File, String> {
-    std::fs::File::create(path).map_err(|why| format!("{path} cannot be written: {why}"))
+/// The file at `path`, created (or emptied) for writing, and whether it held
+/// anything that emptying it lost.
+fn created(path: &str) -> Result<(std::fs::File, bool), String> {
+    let truncated = std::fs::metadata(path).is_ok_and(|held| held.len() > 0);
+    std::fs::File::create(path)
+        .map(|file| (file, truncated))
+        .map_err(|why| format!("{path} cannot be written: {why}"))
 }
 
 /// The session's log, written to `file` as each line is appended (`--log`,
@@ -372,6 +379,7 @@ fn announcement(
     opened: u64,
     substrate: Option<&str>,
     engine: Option<&diet::drive::engine::Passed>,
+    log: Option<(&str, bool)>,
 ) -> String {
     let mut fields = BTreeMap::from([
         ("listening".to_owned(), Value::String(listening.to_owned())),
@@ -401,6 +409,12 @@ fn announcement(
             "engine_identity".to_owned(),
             Value::String(engine.identity.tag().to_owned()),
         );
+    }
+    // Where the log is written, and whether naming it emptied a file that
+    // held something (ruled on #230).
+    if let Some((path, truncated)) = log {
+        fields.insert("log".to_owned(), Value::String(path.to_owned()));
+        fields.insert("log_truncated".to_owned(), Value::Boolean(truncated));
     }
     let mut out = String::new();
     json::render(&Value::Object(fields), &mut out);

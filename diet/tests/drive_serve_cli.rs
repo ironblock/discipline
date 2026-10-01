@@ -36,6 +36,8 @@ struct Served {
     engine_build: Option<String>,
     /// And how the engine's identity was established.
     engine_identity: Option<String>,
+    /// Where `--log` writes, and whether naming it emptied a file.
+    log: Option<(String, bool)>,
     _head: HeadFile,
 }
 
@@ -97,6 +99,10 @@ fn start(endpoint: &str, extra: &[&str]) -> Served {
         registry_sha256: announced["registry_sha256"].as_str().map(str::to_owned),
         engine_build: announced["engine_build"].as_str().map(str::to_owned),
         engine_identity: announced["engine_identity"].as_str().map(str::to_owned),
+        log: announced["log"]
+            .as_str()
+            .zip(announced["log_truncated"].as_bool())
+            .map(|(path, truncated)| (path.to_owned(), truncated)),
         child,
         _head: head,
     }
@@ -592,6 +598,11 @@ fn a_drive_servers_log_file_is_the_events_stream_line_for_line() {
     let log_file = file_holding("log", "");
     let path = log_file.0.to_string_lossy().into_owned();
     let served = start(&stub.url(), &["--log", &path]);
+    assert_eq!(
+        served.log,
+        Some((path.clone(), false)),
+        "the announcement names the log, and nothing was emptied"
+    );
     let address = served.listening.clone();
     let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
     assert_eq!(status(&reply), 200, "{reply}");
@@ -629,7 +640,10 @@ fn a_drive_servers_log_file_is_the_events_stream_line_for_line() {
     assert_eq!(
         written, streamed,
         "the log file is the stream's data, byte for byte"
+    );
+}
 
+#[test]
 fn a_drive_server_starts_on_a_substrate_of_several_shards() {
     // Two main shards and a draft, which record v1 spells since #211: the
     // substrate resolves, and its server on the registered engine starts.
@@ -683,4 +697,18 @@ fn a_drive_server_starts_on_a_prebuilt_engine_by_its_literal() {
         said.contains("reports exactly") && said.contains("b0-unknown-dirty"),
         "{said}"
     );
+}
+
+#[test]
+fn a_drive_server_says_when_its_log_flag_emptied_a_file() {
+    // Ruled on #230: the file is truncated, as the scripted path's output is,
+    // and the announcement says so.
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let held = file_holding("log", "an earlier session's log\n");
+    let path = held.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--log", &path]);
+    assert_eq!(served.log, Some((path, true)));
+    // And without the flag, nothing is claimed.
+    let served = start(&stub.url(), &[]);
+    assert_eq!(served.log, None);
 }
