@@ -7494,6 +7494,22 @@ failure_class = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
 migrated = false
 
 [[fault]]
+id = "drive.serve-log-drops-a-line"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-log-drops-a-line"
+failure_class = "drive.serve-log-drops-a-line"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-ignores-the-log-flag"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-ignores-the-log-flag"
+failure_class = "drive.serve-bin-ignores-the-log-flag"
+migrated = false
+
+[[fault]]
 id = "drive.session-drops-timings"
 kind = "lane-fault"
 check = "lanes"
