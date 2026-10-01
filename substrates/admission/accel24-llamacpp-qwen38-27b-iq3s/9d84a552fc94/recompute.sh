@@ -104,11 +104,11 @@ if (here / "raw/fill.json").exists():
     fl = json.loads((here / "raw/fill.json").read_text())
     ref = int(re.search(r"([\d,]+) MiB", cells["headroom"]["criterion"]).group(1).replace(",", ""))
     derived("headroom", "pass" if fl["vram_free_at_peak_mib"] >= ref and all("error" not in r for r in fl["requests"]) else "fail")
-# checkpoint restore (#143, I4b): the committed instrument's decide over the raw measurements must reproduce the
-# committed decide output (so the instrument and criterion it ran are pinned by what they gave); the reading's
-# figures are that output's; the rung header is the hybrid the reading names; the window log's exes are the
-# identity's and this fingerprint's, and production was undisturbed; the measured floor process is the one the
-# 09:00Z restore brought back, whose fingerprint check read SUBSTRATE IDENTICAL (#184's depth/raw)
+# checkpoint restore (#143, I4b), measured in the candidate's parity window (2026-10-01): the committed instrument's
+# decide over the raw measurements must reproduce the committed decide output; the reading's figures are that output's;
+# the rung header is the hybrid the reading names; the reference ran CPU-only on the bottom rung's registered file, on
+# this rung's own binary; and the window log's exes are the identity's, the rung's being the candidate process that
+# served the parity fire, whose binary is this fingerprint's engine manifest's llama-server
 if (here / "raw/checkpoint-rung.json").exists():
     import subprocess
     inst = here.parents[1] / "checkpoint-restore"
@@ -119,44 +119,40 @@ if (here / "raw/checkpoint-rung.json").exists():
     elif json.loads(r.stdout) != committed: fail("[checkpoint_restore] the instrument now decides differently from the committed raw/checkpoint-decide.json")
     derived("checkpoint_restore", committed["word"])
     cp = cells.get("checkpoint_restore", {}); rd = cp.get("reading", "")
-    unm = json.loads((here / "raw/checkpoint-reference-unmatched.json").read_text())
     sys.path.insert(0, str(inst)); import checkpoint_restore as cr
-    ua = cr.reusing(unm); unmatched = max(cr.dist(w["top"], ua["cold"][0]["top"], committed["criterion"]["top_k"]) for w in cr.warms(ua)) if ua else None
     for fig in (f"reused {committed['rung_cache_n']} tokens", f"warm against cold {committed['distance']:.4f}", f"Tolerance {committed['tolerance']:.4f}",
-                f"({committed['reference_warm_prompt_n']} tokens against the rung's {committed['rung_warm_prompt_n']})", f"reads {unmatched:.4f}" if unmatched is not None else "unmatched"):
+                f"({committed['reference_warm_prompt_n']} tokens against the rung's {committed['rung_warm_prompt_n']})"):
         if fig not in rd: fail(f"[checkpoint_restore] the reading does not state {fig!r}")
-    # the reading's other claims, each from the decide output or the raw measurements
-    ra = cr.reusing(json.loads((here / "raw/checkpoint-reference.json").read_text())); fa = cr.reusing(json.loads((here / "raw/checkpoint-rung.json").read_text()))
+    ra = cr.reusing(json.loads((here / "raw/checkpoint-reference.json").read_text()))
     k = committed["criterion"]["top_k"]; draws = [cr.dist(w["top"], ra["cold"][0]["top"], k) for w in cr.warms(ra)]
     claims = {"; cold against cold 0. ": committed["tolerance_parts"]["cold_cold_rung"] == 0, "the same top token": committed["top1_same"],
               "on the first attempt": committed["rung_attempts"] == 1, "its three draws are identical": len(draws) == 3 and len(set(draws)) == 1,
               "the reference's cold against cold 0": committed["tolerance_parts"]["cold_cold_reference"] == 0}
     for phrase, holds in claims.items():
         if (phrase in rd) != holds: fail(f"[checkpoint_restore] the reading {'states' if phrase in rd else 'omits'} {phrase!r}, and the raw files say {holds}")
-    # the reference model: its weights are the bottom rung's registered file, and its server ran CPU-only on that file
-    reg = tomllib.loads((here.parents[2] / "registry.toml").read_text())["substrate"]["cpu-beellama-qwen3-1p7b-q4km"]
-    rw = re.search(r"reference_weights ([0-9a-f]{64})", (here / "raw/checkpoint-reference-weights.txt").read_text())
+    reg = tomllib.loads((here.parents[2] / "registry.toml").read_text())["substrate"]
+    wid = {l.split()[0]: l.split()[1] for l in (here / "raw/checkpoint-window-identity.txt").read_text().splitlines() if len(l.split()) > 1}
     slog = (here / "raw/checkpoint-reference-server.log").read_text()
-    if not rw or rw.group(1) != reg["weights_main"]: fail("[checkpoint_restore] the reference's weights are not the bottom rung's registered file")
-    if "no CUDA-capable device is detected" not in slog or f"loading model '~/Models/{reg['weights_main_file']}'" not in slog: fail("[checkpoint_restore] the reference server's log does not show it CPU-only on the registered file")
+    if wid.get("seatb_weights") != reg["cpu-beellama-qwen3-1p7b-q4km"]["weights_main"]: fail("[checkpoint_restore] the reference's weights are not the bottom rung's registered file")
+    if "no CUDA-capable device is detected" not in slog or f"loading model '~/Models/{reg['cpu-beellama-qwen3-1p7b-q4km']['weights_main_file']}'" not in slog: fail("[checkpoint_restore] the reference server's log does not show it CPU-only on the registered file")
     hdr = json.loads((here / "raw/checkpoint-rung-header.json").read_text())
     hybrid = any(any(m in k for m in cr.RECURRENT) for k in hdr.get("keys", []))
     if ("hybrid" in rd) != hybrid: fail(f"[checkpoint_restore] the reading's hybrid claim does not match the rung header ({hdr.get('architecture')})")
     ident = json.loads((here / "raw/checkpoint-identity.json").read_text())
     if ident["reference_header"] != json.loads((here / "raw/checkpoint-reference-header.json").read_text()): fail("[checkpoint_restore] the identity's reference header is not the one read")
     wl = (here / "raw/checkpoint-window.log").read_text()
-    bf = re.search(r"floor pid=(\d+) exe=([0-9a-f]{64}) vram=(\d+) MiB health=\{\"status\":\"ok\"\}", wl)
-    af = re.search(r"floor after: pid=(\d+) vram=(\d+) MiB health=\{\"status\":\"ok\"\}", wl)
-    rf = re.search(r"reference pid=\d+ exe=([0-9a-f]{64})", wl)
-    eng = json.loads(json.loads((here / "fingerprint.json").read_text())["canonical"])["engine"]
-    if not (bf and af and rf): fail("[checkpoint_restore] the window log does not record the floor before and after and the reference")
+    cu = re.search(r"candidate up server=(\d+) exe=([0-9a-f]{16})", wl); fd = re.search(r"fire done; candidate still serving: exe=([0-9a-f]{16})", wl)
+    rr = re.search(r"checkpoint rung rc=0", wl); rf = re.search(r"checkpoint reference up pid=\d+ exe=([0-9a-f]{64})", wl)
+    man = {l.split()[2]: l.split()[1] for l in (here / "raw/engine-manifest.txt").read_text().splitlines() if l.startswith("cand_file ")}
+    if not (cu and fd and rr and rf): fail("[checkpoint_restore] the window log does not record the candidate up, still serving after the fire, the rung measured and the reference")
     else:
-        if (bf.group(1), bf.group(3)) != af.groups(): fail("[checkpoint_restore] the floor's pid or VRAM changed across the window")
-        if not (bf.group(2) == ident["rung_engine"] == eng and rf.group(1) == ident["reference_engine"]): fail("[checkpoint_restore] the window log's exes are not the identity's and this fingerprint's")
-        rest = here.parents[1] / "accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/depth/raw"
-        tie = (rest / "window.log").exists() and re.search(rf"restored: pid={bf.group(1)} exe={eng[:16]} cmdline_same=yes", (rest / "window.log").read_text()) \
-              and "SUBSTRATE IDENTICAL" in (rest / "restore-checks.txt").read_text()
-        if not tie: fail("[checkpoint_restore] the measured floor process is not the one the recorded restore brought back with its fingerprint identical")
+        if not (ident["rung_engine"] == ident["reference_engine"] == rf.group(1) == man["llama-server"] and ident["rung_engine"].startswith(cu.group(2)) and ident["rung_engine"].startswith(fd.group(1))):
+            fail("[checkpoint_restore] the window log's exes are not the identity's and this fingerprint's engine manifest's llama-server")
+        if wid.get("cand_running_exe") != man["llama-server"] or not wid.get("cand_running_exe", "").startswith(cu.group(2)):
+            fail("[checkpoint_restore] the window identity's running candidate is not this fingerprint's binary")
+        pid = re.search(r"^cand_running_exe [0-9a-f]{64} pid=(\d+)$", (here / "raw/checkpoint-window-identity.txt").read_text(), re.M)
+        if not pid or pid.group(1) != cu.group(1):
+            fail("[checkpoint_restore] the measured candidate is not, by pid, the process the window launched and read")
 # pass and fail are results: a cell may carry one only if this script re-derived it from a raw file (review of #185)
 for name, c in cells.items():
     if isinstance(c, dict) and c.get("word") in ("pass", "fail") and name not in DERIVED: fail(f"[{name}] says {c['word']!r}, but no raw file re-derives it")

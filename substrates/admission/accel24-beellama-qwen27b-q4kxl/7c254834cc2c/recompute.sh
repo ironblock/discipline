@@ -117,7 +117,8 @@ if (here / "raw/checkpoint-rung.json").exists():
     committed = json.loads((here / "raw/checkpoint-decide.json").read_text())
     if r.returncode != 0: fail(f"[checkpoint_restore] the instrument's decide exited {r.returncode}")
     elif json.loads(r.stdout) != committed: fail("[checkpoint_restore] the instrument now decides differently from the committed raw/checkpoint-decide.json")
-    derived("checkpoint_restore", committed["word"])
+    if not (here / "raw/checkpoint-gpu-decide.json").exists():  # superseded by the GPU-derived tolerance where one is committed (#143)
+        derived("checkpoint_restore", committed["word"])
     cp = cells.get("checkpoint_restore", {}); rd = cp.get("reading", "")
     unm = json.loads((here / "raw/checkpoint-reference-unmatched.json").read_text())
     sys.path.insert(0, str(inst)); import checkpoint_restore as cr
@@ -157,6 +158,33 @@ if (here / "raw/checkpoint-rung.json").exists():
         tie = (rest / "window.log").exists() and re.search(rf"restored: pid={bf.group(1)} exe={eng[:16]} cmdline_same=yes", (rest / "window.log").read_text()) \
               and "SUBSTRATE IDENTICAL" in (rest / "restore-checks.txt").read_text()
         if not tie: fail("[checkpoint_restore] the measured floor process is not the one the recorded restore brought back with its fingerprint identical")
+# the GPU-derived tolerance (#143, as ruled: it replaces the CPU-derived one in this cell): the floor's own rung
+# measurement against the same dense 1.7B on this rung's binary with the card free, taken in the candidate's parity
+# window of 2026-10-01; the instrument's decide over it must reproduce the committed output, and this cell's word is
+# that output's. The reference ran on the GPU (its log names the card; the window log reads its VRAM), on the
+# registered file, on this fingerprint's engine
+if (here / "raw/checkpoint-gpu-decide.json").exists():
+    import subprocess
+    inst = here.parents[1] / "checkpoint-restore"
+    r = subprocess.run([sys.executable, "-B", str(inst / "checkpoint_restore.py"), "decide", str(here / "raw/checkpoint-rung.json"), str(here / "raw/checkpoint-gpu-reference.json"),
+                        str(here / "raw/checkpoint-gpu-identity.json"), str(inst / "criterion.toml")], capture_output=True, text=True)
+    gd = json.loads((here / "raw/checkpoint-gpu-decide.json").read_text())
+    if r.returncode != 0: fail(f"[checkpoint_restore] the instrument's decide over the GPU reference exited {r.returncode}")
+    elif json.loads(r.stdout) != gd: fail("[checkpoint_restore] the instrument now decides differently from the committed raw/checkpoint-gpu-decide.json")
+    derived("checkpoint_restore", gd["word"])
+    rd = cells.get("checkpoint_restore", {}).get("reading", "")
+    for fig in (f"GPU-derived tolerance {gd['tolerance']:.4f}", f"warm against cold {gd['distance']:.4f}", f"({gd['reference_warm_prompt_n']} tokens against the rung's {gd['rung_warm_prompt_n']})"):
+        if fig not in rd: fail(f"[checkpoint_restore] the reading does not state {fig!r}")
+    gl = (here / "raw/checkpoint-gpu-reference-server.log").read_text(); gw = (here / "raw/checkpoint-gpu-window.log").read_text()
+    gi = json.loads((here / "raw/checkpoint-gpu-identity.json").read_text())
+    regs = tomllib.loads((here.parents[2] / "registry.toml").read_text())["substrate"]
+    gu = re.search(r"GPU reference up pid=\d+ exe=([0-9a-f]{64}) vram=(\d+) MiB", gw)
+    if "CUDA0" not in gl or "no CUDA-capable device" in gl or not gu or int(gu.group(2)) < 1000: fail("[checkpoint_restore] the GPU reference's logs do not show it on the card")
+    elif not (gu.group(1) == gi["reference_engine"] == gi["rung_engine"] == regs["accel24-beellama-qwen27b-q4kxl"]["engine_identity"]): fail("[checkpoint_restore] the GPU reference's exe is not this rung's engine")
+    if f"loading model '~/Models/{regs['cpu-beellama-qwen3-1p7b-q4km']['weights_main_file']}'" not in gl: fail("[checkpoint_restore] the GPU reference did not load the bottom rung's registered file")
+    gwid = {l.split()[0]: l.split()[1] for l in (here / "raw/checkpoint-gpu-window-identity.txt").read_text().splitlines() if len(l.split()) > 1}
+    if gwid.get("seatb_weights") != regs["cpu-beellama-qwen3-1p7b-q4km"]["weights_main"]: fail("[checkpoint_restore] the GPU reference's weights are not the bottom rung's registered file")
+    if gi["reference_header"] != json.loads((here / "raw/checkpoint-reference-header.json").read_text()): fail("[checkpoint_restore] the GPU identity's reference header is not the one read")
 # pass and fail are results: a cell may carry one only if this script re-derived it from a raw file (review of #185)
 for name, c in cells.items():
     if isinstance(c, dict) and c.get("word") in ("pass", "fail") and name not in DERIVED: fail(f"[{name}] says {c['word']!r}, but no raw file re-derives it")

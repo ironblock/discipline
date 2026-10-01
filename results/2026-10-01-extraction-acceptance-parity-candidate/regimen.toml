@@ -1,0 +1,9 @@
+# The regimen this run applied: the candidate rung's parity fire of the
+# extraction-seat bakeoff (#143), seats A and B fired once each through the
+# harness #115 fired with, replaying the same human-driven drive's main lane
+# byte for byte. Seat A is the candidate rung on the accelerator; seat B's
+# extraction lane is routed to the same CPU substrate as #115's, and its spine,
+# warm calls and interviews run on the candidate.
+arm = "extraction-seat-parity-refire"
+substrates = ["accel24-llamacpp-qwen38-27b-iq3s", "cpu-beellama-qwen3-1p7b-q4km"]
+dogma_version = 0

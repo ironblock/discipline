@@ -1,0 +1,34 @@
+{
+ "candidate_effect": 0.03709513924840692,
+ "floor_effect": 0.08847236014564713,
+ "difference": -0.051377220897240214,
+ "abs_difference": 0.051377220897240214,
+ "candidate_counts": {
+  "seat_a": {
+   "offered": 1177,
+   "accepted_deduped": 52
+  },
+  "seat_b": {
+   "offered": 2227,
+   "accepted_deduped": 181
+  },
+  "paired_forks": 31
+ },
+ "floor_counts": {
+  "seat_a": {
+   "offered": 912,
+   "accepted_deduped": 26
+  },
+  "seat_b": {
+   "offered": 1590,
+   "accepted_deduped": 186
+  }
+ },
+ "rule": "comparison-rule.toml",
+ "word": "inconclusive",
+ "sign": "negative",
+ "paired_p": null,
+ "paired_p_reason": "|difference| < 0.15, so substrate_dependent cannot hold and no p is asked",
+ "prediction": "independent",
+ "prediction_met": false
+}
