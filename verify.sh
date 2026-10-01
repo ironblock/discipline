@@ -243,6 +243,11 @@ check_results() {
     python3 "${RENDER_LEDGER:-exercise/scripts/render-ledger.py}" "$ledger" _site/ledger --results results \
       --commit "$(git rev-parse --verify --quiet HEAD || echo main)" || rc=$?
   fi
+  # And the page as published, under the Pages table (#32 I3): it is checked
+  # here, where the gate can fail, and not first at deploy time.
+  if [ "$rc" -eq 0 ]; then
+    bash scripts/hygiene.sh --patterns scripts/pages-patterns.tsv --tree _site/ledger || rc=$?
+  fi
   rm -f "$ledger"
   return "$rc"
 }
@@ -2938,6 +2943,14 @@ inject_results_ledger_row_without_word() {
   edit_in_place '/"result": front.get("result"),/d' scripts/check-results.py
 }
 
+# #32 I3 (track five's fault, carried here by courier): the ledger page pulls
+# in an outside stylesheet. Only the Pages table refuses it, and check_results
+# runs that table over the page it rendered, so it fails here and not first at
+# deploy time.
+inject_results_ledger_page_calls_out() {
+  edit_in_place 's#^<meta charset="utf-8">$#<meta charset="utf-8"><link rel="stylesheet" href="https://example.org/ledger.css">#' exercise/scripts/render-ledger.py
+}
+
 inject_hygiene() {
   bash scripts/seed-hygiene-fault.sh seeded-faults > /dev/null
   git add --all
@@ -3800,6 +3813,49 @@ inject_ci() {
 # request is scoped against goes stale while CI stays green.
 inject_ci_trunk_run_cancelled() {
   edit_in_place "s/^  cancel-in-progress: .*/  cancel-in-progress: true/" .github/workflows/verify.yml
+}
+
+# #32 I3's deploy (track five's faults, carried here by courier): each guard
+# pages.yml holds, broken.
+
+# Deploys on a verify run whatever its conclusion.
+inject_ci_pages_deploys_on_any_conclusion() {
+  edit_in_place "s/github.event.workflow_run.conclusion == 'success' && //" .github/workflows/pages.yml
+}
+
+# Deploys on a verify run that was not a push.
+inject_ci_pages_deploys_on_any_event() {
+  edit_in_place "s/ && github.event.workflow_run.event == 'push'//" .github/workflows/pages.yml
+}
+
+# Deploys a fork's code: a pull request from a fork's `main` matches the branch filter by name.
+inject_ci_pages_deploys_forks() {
+  edit_in_place "s/ && github.event.workflow_run.head_repository.full_name == github.repository//" .github/workflows/pages.yml
+}
+
+# The guards joined by || rather than &&: any one of them is enough.
+inject_ci_pages_guards_either() {
+  edit_in_place "s/== 'success' && github/== 'success' || github/" .github/workflows/pages.yml
+}
+
+# Uploads the site without checking it.
+inject_ci_pages_uploads_unchecked() {
+  edit_in_place '/run: .\/verify.sh --site _site/d' .github/workflows/pages.yml
+}
+
+# Publishes whatever sha the run checked, main's tip or not.
+inject_ci_pages_publishes_an_older_sha() {
+  edit_in_place '/git ls-remote origin refs\/heads\/main/d' .github/workflows/pages.yml
+}
+
+# Publishes on a trigger of its own, beside the gate.
+inject_ci_pages_publishes_on_its_own_trigger() {
+  edit_in_place '/^    branches: \[main\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
+}
+
+# The ledger the deploy publishes, uploaded by nothing.
+inject_ci_pages_ledger_not_uploaded() {
+  edit_in_place 's/^          name: site-ledger$/          name: site-ledger-renamed/' .github/workflows/pkg-diet.yml
 }
 
 # A branch filter on the PULL-REQUEST trigger. On `push` the same filter is
@@ -7450,6 +7506,8 @@ selftest() {
     'render-ledger: [0-9a-z-]+-stale: no such directory'
   seeded_case "a ledger row with no word"              results inject_results_ledger_row_without_word \
     'render-ledger: [0-9a-z-]+: row carries no result'
+  seeded_case "the ledger page pulls in an outside stylesheet" results inject_results_ledger_page_calls_out \
+    'hygiene: external-stylesheet:'
   seeded_case "a type error in the web surface"       exercise inject_exercise_type_error \
     'error TS2322'
   seeded_case "an authored session on the published list" exercise inject_exercise_published_list_carries_authored_session \
@@ -7492,6 +7550,22 @@ selftest() {
     'results are present and none recomputed'
   seeded_case "a check no workflow runs"              ci       inject_ci \
     'has no owner in check-owners\.tsv'
+  seeded_case "the site deployed whatever the gate said" ci inject_ci_pages_deploys_on_any_conclusion \
+    "pages.yml: deploys on a workflow_run whatever its conclusion"
+  seeded_case "the site deployed from a run not a push" ci inject_ci_pages_deploys_on_any_event \
+    "pages.yml: deploys on a run that was not a push"
+  seeded_case "the site deployed from a fork's code" ci inject_ci_pages_deploys_forks \
+    "pages.yml: deploys a run of a fork's code"
+  seeded_case "the deploy guards joined by ||" ci inject_ci_pages_guards_either \
+    "pages.yml: the deploy's condition is not exactly its guards joined by &&"
+  seeded_case "the site uploaded unchecked" ci inject_ci_pages_uploads_unchecked \
+    "pages.yml: upload-pages-artifact is not preceded by \./verify\.sh --site _site"
+  seeded_case "the site published at a sha not main's tip" ci inject_ci_pages_publishes_an_older_sha \
+    "pages.yml: publishes a sha without checking it is still main's tip"
+  seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
+    "pages.yml: publishes on a trigger of its own"
+  seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \
+    "pages.yml: publishes site-ledger, which no workflow the gate runs uploads"
   seeded_case "pull requests filtered by branch"      ci       inject_ci_pr_branch_filter \
     'carries .branches: \[main\]. and is reached'
   seeded_case "the trunk's run cancelled by a merge"  ci       inject_ci_trunk_run_cancelled \
@@ -8650,6 +8724,14 @@ EOF
     bash "${ROOT}/verify.sh" --only injections --scope inject_this_repository_does_not_define
   expect_exit "a shard outside 1..N is a misuse" 2 \
     bash "${ROOT}/verify.sh" --selftest --shard 9/8
+  # --site checks a site and nothing else, in either order, and names a
+  # directory that is not there (#32 I3).
+  expect_exit "--site beside --selftest is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --site "${ROOT}/pages" --selftest
+  expect_exit "--selftest beside --site is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --selftest --site "${ROOT}/pages"
+  expect_exit "--site naming no directory is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --site "${ROOT}/this-site-is-not-here"
 }
 
 # --------------------------------------------------------------------------
