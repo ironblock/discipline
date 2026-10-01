@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 133
+faults = 135
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -902,7 +902,7 @@ catches = [
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_gap_closes_at_the_command_that_ends_it_even_when_that_command_carries_none",
-    "drive::session::tests::a_real_sessions_whole_log_is_a_v0_log",
+    "drive::session::tests::a_real_sessions_whole_log_is_a_log_the_format_reads",
     "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
     "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
 ]
@@ -973,7 +973,7 @@ catches = [
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_failed_call_is_typed_and_leaves_the_trunk_alone",
     "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
-    "drive::session::tests::a_real_sessions_whole_log_is_a_v0_log",
+    "drive::session::tests::a_real_sessions_whole_log_is_a_log_the_format_reads",
     "drive::session::tests::a_refused_commands_gap_is_neither_logged_nor_closed_and_the_admitted_one_carries_it",
     "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
@@ -1098,7 +1098,7 @@ becomes = '''
 catches = [
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
     "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
-    "drive::session::tests::a_real_sessions_whole_log_is_a_v0_log",
+    "drive::session::tests::a_real_sessions_whole_log_is_a_log_the_format_reads",
     "drive::session::tests::a_refused_commands_gap_is_neither_logged_nor_closed_and_the_admitted_one_carries_it",
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
     "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
@@ -2143,6 +2143,56 @@ anchor = '''
         cache_n: timings.cache_n,'''
 becomes = '''
         cache_n: None,'''
+catches = [
+    "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
+]
+
+[[fault]]
+id = "drive.session-logs-progress-after-the-end"
+failure_class = "drive.session-logs-progress-after-the-end"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+                timings,
+            });
+            state.push(Event::TurnSettled {
+                turn,
+                reason: SettleReason::Final,'''
+becomes = '''
+                timings,
+            });
+            state.push(Event::Progress {
+                request,
+                progress: Progress {
+                    total: 1,
+                    cache: 0,
+                    processed: 1,
+                    time_ms: 1,
+                },
+            });
+            state.push(Event::TurnSettled {
+                turn,
+                reason: SettleReason::Final,'''
+catches = [
+    "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
+    "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
+    "drive::session::tests::a_real_sessions_whole_log_is_a_log_the_format_reads",
+    "drive::session::tests::a_refused_commands_gap_is_neither_logged_nor_closed_and_the_admitted_one_carries_it",
+    "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
+    "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
+    "drive::session::tests::progress_is_logged_before_the_first_delta_and_never_after_the_end",
+]
+
+[[fault]]
+id = "drive.session-a-timings-line-drops-a-draft-count"
+failure_class = "drive.session-a-timings-line-drops-a-draft-count"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        draft_n: timings.draft_n,'''
+becomes = '''
+        draft_n: None,'''
 catches = [
     "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
     "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
