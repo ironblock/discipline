@@ -3224,6 +3224,16 @@ assert old in s, "the pattern moved"
 p.write_text(s.replace(old, 'SHARED_OBJECT = re.compile(r"\\.so$")', 1), encoding="utf-8")
 PYEOF
 }
+# planning (#143, 5922544337): a pruned model's entry declares its calibration mix; the rule removed.
+inject_admission_pruned_mix_unrequired() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
+old = 'elif sub.get("pruned") is True and not (isinstance(sub.get("calibration_mix"), str) and sub["calibration_mix"].strip()):'
+assert old in s, "the rule moved"
+p.write_text(s.replace(old, 'elif False:', 1), encoding="utf-8")
+PYEOF
+}
 # An admission record one level deeper than the glob looks.
 inject_admission_record_moved() {
   mkdir -p substrates/admission/accel24-beellama-qwen27b-q4kxl/deeper
@@ -7374,6 +7384,8 @@ selftest() {
     'FAIL  engine: a library changed with the exe held changes the fingerprint'
   seeded_case "the engine recipe's library pattern narrowed" admission inject_admission_engine_pattern_narrowed \
     'FAIL  engine: the recipe hashes every shared object in the directory, a versioned name included'
+  seeded_case "a pruned entry's calibration mix not required" admission inject_admission_pruned_mix_unrequired \
+    'FAIL  engine: a pruned entry with no calibration mix is refused'
   seeded_case "an admission record the glob cannot see" admission inject_admission_record_moved \
     'admission.record-not-found'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \

@@ -3752,6 +3752,14 @@ failure_class = "admission.rule-broken"
 legacy_signature = "FAIL  engine: the recipe hashes every shared object in the directory, a versioned name included"
 migrated = false
 [[fault]]
+id = "admission.admission_pruned_mix_unrequired"
+kind = "seeded-gate"
+check = "admission"
+label = "a pruned entry's calibration mix not required"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  engine: a pruned entry with no calibration mix is refused"
+migrated = false
+[[fault]]
 id = "admission.admission_constitutional_unrequired"
 kind = "seeded-gate"
 check = "admission"
