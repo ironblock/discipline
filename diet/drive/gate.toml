@@ -972,6 +972,7 @@ catches = [
     "drive::serve::tests::a_reader_resuming_after_an_id_of_this_process_starts_at_the_next",
     "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
+    "drive::serve::tests::the_teed_log_is_the_events_stream_line_for_line",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_failed_call_is_typed_and_leaves_the_trunk_alone",
     "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
