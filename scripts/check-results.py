@@ -47,6 +47,16 @@ exit 2, not a pass -- when the resolver cannot name one.
 Usage:
     check-results.py --root results          # lint every run directory under a root
     check-results.py DIR [DIR ...]           # lint the named run directories
+    check-results.py --root results --ledger PATH
+                                             # and, if every directory passes, write the ledger
+
+THE LEDGER (#32 I2) is what the results page is rendered from, and only from:
+per directory that passed, its front-matter word and product digest, its
+hypothesis, and each claim row as diet's canonical rendering gave it -- its
+id, its word, the digests it consumed -- with the `decision-rule*.toml` among
+those named as the rule. Written only when every linted directory passes: a
+page drawn from a ledger with a failing row in it would be drawn from what
+this gate refused. `exercise/scripts/render-ledger.py` draws it.
 
 Exit code is 0 if every linted directory passes, 1 otherwise, and 2 when no
 ``diet`` binary could be resolved to ask. A sweep that finds no run
@@ -729,7 +739,37 @@ def check_run(directory: pathlib.Path) -> list[str]:
             f"README.md sections are {headings!r}, expected exactly {SECTIONS!r} in order"
         )
 
+    if LEDGER is not None and not failures and name != TEMPLATE_DIR:
+        LEDGER.append(ledger_row(directory, front, claims))
     return failures
+
+
+# Each directory this run passed, as the results page draws it (--ledger), or
+# None when no ledger was asked for.
+LEDGER: list[dict] | None = None
+
+# The rule a claim was decided by: a pre-registered decision rule it consumed,
+# by any name the directories have used (`decision-rule.toml`,
+# `decision-rule-v2.toml`). Matched by name, since the claim row names its
+# evidence and nothing else says which is the rule.
+RULE_FILE = re.compile(r"decision-rule[^/]*\.toml")
+
+
+def ledger_row(directory: pathlib.Path, front: dict, claims: list[dict]) -> dict:
+    """One passing directory for the ledger, from what was just checked."""
+    consumed = [c for claim in claims for c in claim.get("consumes", []) if isinstance(c, dict)]
+    rules = sorted({(c.get("path"), c.get("sha256")) for c in consumed if RULE_FILE.fullmatch(str(c.get("path", "")))})
+    return {
+        "directory": directory.name,
+        "result": front.get("result"),
+        "product_sha256": front.get("product_sha256"),
+        "hypothesis": front.get("hypothesis"),
+        "claims": [
+            {"id": claim.get("id"), "result": claim.get("result"), "consumes": claim.get("consumes", [])}
+            for claim in claims
+        ],
+        "rules": [{"path": path, "sha256": sha} for path, sha in rules],
+    }
 
 
 def digest_of(path: pathlib.Path) -> str:
@@ -873,6 +913,12 @@ def main(argv: list[str]) -> int:
         help="a directory whose subdirectories are run directories",
     )
     parser.add_argument(
+        "--ledger",
+        type=pathlib.Path,
+        metavar="PATH",
+        help="write the results ledger here if every directory passes (#32 I2)",
+    )
+    parser.add_argument(
         "directories",
         nargs="*",
         type=pathlib.Path,
@@ -884,7 +930,9 @@ def main(argv: list[str]) -> int:
     if not args.root and not args.directories:
         parser.error("nothing to lint: pass --root DIR or one or more run directories")
 
-    global DIET
+    global DIET, LEDGER
+    if args.ledger is not None:
+        LEDGER = []
     resolved = resolve_diet()
     if resolved is None:
         print(
@@ -943,6 +991,9 @@ def main(argv: list[str]) -> int:
         )
         return 1
     print(f"check-results: {checked} directory(ies) pass")
+    if args.ledger is not None:
+        args.ledger.write_text(json.dumps({"version": 1, "directories": LEDGER}, indent=1) + "\n", encoding="utf-8")
+        print(f"check-results: the ledger, {len(LEDGER)} directory(ies), to {args.ledger}")
     return 0
 
 
