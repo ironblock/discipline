@@ -25,7 +25,7 @@ These are captures C0–C5 of R3's plan (on #117), taken 2026-09-29 from 02:09:4
 | C3, overflow | `diet/client/fixtures/llama-server-e7051ef-context-overflow.http` | `634e1ce4…` |
 | C4 | not taken: its condition, no progress frames in C1, did not hold | — |
 | C5, unstreamed | `diet/client/fixtures/llama-server-e7051ef-unstreamed.http` | `d9d2e92e…` |
-| C0b, build id (2026-10-01) | `build-info.json`, `build-info.raw` (one GET `/props`, occupying no slot) | `18033075…` |
+| C0b, build id (2026-10-01) | `build-info.json`, `build-info.raw` (one GET `/props`, occupying no slot); `engine-read.json` | `18033075…` |
 
 ## C0: the limits
 
@@ -85,7 +85,10 @@ One read-only GET `/props` was made at 2026-10-01T03:06:11Z by `capture_c0b.py` 
   - The full response is not kept, because it carries the model path. Only its digest and size are recorded in `build-info.json`.
 - **No other key carries a build or commit id.** At any depth of `/props`, no key name contains `build` or `commit`, and no string value is commit-shaped.
 - **This is not the engine of C0-C5.**
-  - C0-C5 ran on instance `2026-09-28`, engine `e7051ef`, which reports itself as `b7-e7051ef`.
-  - At C0b, production reports `b8-e486f80`. That commit is one commit on top of `e7051ef`: a fix to QSA bias indexing when a unified cache holds several sequences, 1 file changed.
-  - The running binary's sha256 is `f316bc7f…`, not the registry's `41e6591d…`. Production was rebuilt and relaunched on 2026-09-30.
-  - C0b is therefore a receipt for the engine running on 2026-10-01. It is not evidence about C0-C5. The registry row is not changed here.
+  - C0-C5 ran on instance `2026-09-28`, engine `e7051ef`. The registry records that engine reporting itself as `system_fingerprint` `b7-e7051ef` on the chat reply.
+  - At C0b, `/props` `build_info` reads `b8-e486f80`. These are two fields, but both carry the build number and the commit the server was built from.
+  - Read-only reads on the host minutes later are in `engine-read.json`. No full response or path is kept there.
+    - The running binary's sha256 is `f316bc7f…`, not the registry's `41e6591d…`. It was built and launched on 2026-09-30.
+    - Its checkout's HEAD `e486f80` is one commit on top of `e7051ef`: a fix to QSA bias indexing when a unified cache holds several sequences, 1 file changed.
+    - The binary is a 17,872-byte stub, so the digests of its linked libraries are recorded beside it.
+  - C0b is therefore a receipt for the engine running on 2026-10-01. It is not evidence about C0-C5. The registry row (still `current` for `2026-09-28`) is not changed here; the new instance and the stub-pinning recipe are #202.

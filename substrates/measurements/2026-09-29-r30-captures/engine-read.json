@@ -1,0 +1,24 @@
+{
+ "read": "2026-10-01, minutes after C0b, on the production host, read-only (nothing stopped, rebuilt or checked out)",
+ "how": "pgrep -x llama-server; ps -o lstart; sha256sum /proc/<pid>/exe; readlink /proc/<pid>/exe and git log/merge-base in the checkout it names; ldd on that binary and sha256sum of each llama/ggml library it resolves",
+ "process": {"count": 1, "started_host_local": "2026-09-30 18:10:27"},
+ "exe_sha256": "f316bc7fac028eff006d9111f7748b6d1c65d7abc9cd4ef8e48e2bf49826f12b",
+ "exe_bytes": 17872,
+ "exe_built_host_local": "2026-09-30 15:19:07",
+ "checkout": {"head": "e486f802d3b46d9aa98b38d162e952b150cb5082", "branch": "q8-sparse-fa-biasfix",
+              "head_subject": "qwen4exp: fix per-block QSA bias indexing when a unified cache holds several sequences",
+              "descends_from_e7051efc8002847f7269c5606318431179b5904e": true,
+              "commits_past_e7051ef": 1, "diff_stat_vs_e7051ef": "1 file changed, 24 insertions(+), 2 deletions(-)",
+              "is_the_registered_checkout": false},
+ "linked_library_sha256": {
+  "libllama-server-impl.so": "75c943ce656e96f7e2b10df562c2a180ef8ee52a2a03666d7e94b855257b358f",
+  "libllama-common.so.0": "0f9cf135bd2db832becbcb3e2aab17abe52a8a01ad2ef5cd62d87a379d2f6811",
+  "libmtmd.so.0": "42557b20041eb4bc112b98ea4bb00d11b45019da1d4d115b1bc380269654cf7f",
+  "libllama.so.0": "95b5f2b577a7dffcbe00dc8436a16eff601bcf890ac3b48e1672a4e010fd3680",
+  "libggml.so.0": "ee5310db5558bc46826a9d9990cff7e02ffc40082b1815b2d20fef23e21ee963",
+  "libggml-base.so.0": "06b34aeb236b33336173711d2fd6eeb1659f12b8fc80ee5839438a6cbf67bf3f",
+  "libggml-cpu.so.0": "ed746c0908f89977c2dfd925e7722ebe372f81704d378dc79b55898a24dc519d",
+  "libggml-cuda.so.0": "727bdc273a67255442fb712da4d190de1d2541e1265cb82d21429bf9187542ee"
+ },
+ "command_line": "the running process's command line has the same sha256 as the host's launch file (not recorded here: it carries the key); whether it differs from 2026-09-28's line was not read"
+}
