@@ -6190,14 +6190,21 @@ prove_patterns() {
 # reverted-and-still-green before this existed.
 expect_exit() {
   local label="$1" want="$2"; shift 2
-  local rc=0
-  "$@" > /dev/null 2>&1 || rc=$?
+  local rc=0 said
+  # Kept, and shown only when the exit is wrong (#208): a mechanics case that
+  # fails once on the runner and passes everywhere else is diagnosed from the
+  # one log that saw it, or not at all. Discarding the output made "BAD exit 1"
+  # the whole record of a failure nobody could then reproduce.
+  said="$(mktemp)" || said=/dev/null
+  "$@" > "$said" 2>&1 || rc=$?
   if [ "$rc" -eq "$want" ]; then
     printf 'OK    exit %-3d  %s\n' "$rc" "$label"
   else
     printf 'BAD   exit %-3d (wanted %d)  %s\n' "$rc" "$want" "$label"
+    [ "$said" = /dev/null ] || tail -n 40 "$said" | sed 's/^/      | /'
     SELFTEST_BROKEN+=("mechanics: ${label}")
   fi
+  [ "$said" = /dev/null ] || rm -f "$said"
 }
 
 prove_mechanics() {
