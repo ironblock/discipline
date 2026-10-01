@@ -257,10 +257,10 @@ something they cannot.
 
 ### The equipment entry: `[equipment.<id>]`
 
-- **`entry_type`**, one the registry declares: `accelerator-host`, `x86-workstation`, `apple-silicon-laptop` or `canned-server`. Each type's `hardware_fields` are listed under `[entry_type.<type>]`.
+- **`entry_type`**, one the registry declares for real hardware: `accelerator-host`, `x86-workstation` or `apple-silicon-laptop`. (`canned-server` is diet-drive's own loopback server, not a machine.) Each type's `hardware_fields` are listed under `[entry_type.<type>]`; if your machine needs a type none of these fits, that is a new `[entry_type.*]` with its own field list.
 - **Every field its type declares**, as measured on the machine: the parts, memory and accelerator.
-  - No hostname, serial number, MAC address or location appears anywhere; those are identity, and the gate refuses them.
-  - A value you could not read is marked `<field>_inferred = true`, and the fingerprint excludes it.
+  - No hostname, serial number, MAC address or location appears anywhere. Those are identity (the ruling on #52), and keeping them out is a rule reviewers hold you to; the hygiene gate catches only some shapes of them.
+  - A value you could not measure stays out of the identity. Record it on the entry with `<field>_inferred = true` only if the field is not one the type declares: `check-fingerprints.py` refuses an inferred field the type declares (an unverified claim cannot be part of an identifier). The laptop's core counts are the live case: recorded, inferred, and not in its type's `hardware_fields`.
 - **`hardware_fingerprint`**: the sha256 of exactly the declared fields, canonically serialised. `check-fingerprints.py` recomputes it and prints the digest it wants. The digest is also what a regimen's `substrate_hardware` must equal.
 
 ### The substrate entry: `[substrate.<id>]`
