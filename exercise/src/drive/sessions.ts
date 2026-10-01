@@ -1,5 +1,5 @@
 import { KITCHEN_SINK } from './kitchen-sink.ts';
-import { RECORDINGS } from './recorded.ts';
+import { RECORDINGS } from './recordings.ts';
 
 /**
  * Every session the app can replay by name (`?session=`): the recordings,

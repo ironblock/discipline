@@ -6,8 +6,9 @@ import { PHASES } from '../App.tsx';
 import { cableOf } from './cables.ts';
 import { pointAt } from './pointing.ts';
 import { colourContrast, contrast, fillContrast } from './contrast.ts';
-import { labelsOf, RECORDINGS, recordedAt } from '../drive/recorded.ts';
-import type { RecordingName } from '../drive/recorded.ts';
+import { labelsOf, recordedAt } from '../drive/recorded.ts';
+import { RECORDINGS } from '../drive/recordings.ts';
+import type { RecordingName } from '../drive/recordings.ts';
 import { fold } from '../session/fold.ts';
 import { SessionView } from '../ui/SessionView.tsx';
 

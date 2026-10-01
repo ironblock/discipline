@@ -1,0 +1,2 @@
+The record carries the server's own keys and none of its arithmetic on them;
+`prompt_per_second` is prompt_n over prompt_ms, re-derivable and not evidence.
