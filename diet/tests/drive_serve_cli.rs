@@ -600,3 +600,34 @@ fn a_drive_server_starts_on_a_substrate_of_several_shards() {
         (Some(id), Some("b7-e7051ef"))
     );
 }
+
+#[test]
+fn a_drive_server_starts_on_a_prebuilt_engine_by_its_literal() {
+    // The floor: a prebuilt engine whose `/props` names no commit, declared
+    // by the literal it reports (#209). Ruled onto this PR by #214.
+    let id = "accel24-beellama-qwen27b-q4kxl";
+    let regimen = regimen_registered(id);
+    let path = regimen.0.to_string_lossy().into_owned();
+    let stub = Stub::serving(vec![props_saying("b0-unknown-dirty")]).expect("loopback");
+    let served = start(&stub.url(), &["--regimen", &path]);
+    assert_eq!(
+        (
+            served.substrate.as_deref(),
+            served.engine_build.as_deref(),
+            served.engine_identity.as_deref()
+        ),
+        (
+            Some(id),
+            Some("b0-unknown-dirty"),
+            Some("unreported (literal matched)")
+        )
+    );
+    // Any other build is refused, naming the literal it is not.
+    let stub = Stub::serving(vec![props_saying("b1-4ceb171")]).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("reports exactly") && said.contains("b0-unknown-dirty"),
+        "{said}"
+    );
+}
