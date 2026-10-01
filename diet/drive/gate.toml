@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 173
+faults = 174
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -2090,6 +2090,7 @@ catches = [
     "drive::registry::tests::a_main_of_several_shards_resolves_in_the_registrys_order",
     "drive::registry::tests::a_registered_substrates_commit_and_chat_template_are_read",
     "drive::registry::tests::a_registered_weights_set_resolves_to_every_file_the_registry_declares",
+    "drive::registry::tests::a_weights_value_that_is_not_a_digest_is_refused_naming_the_key",
     "drive::registry::tests::one_main_file_with_nothing_beside_it_is_a_digest",
     "drive::registry::tests::the_canned_instance_resolves_to_the_acts_this_crate_plays",
     "drive::registry::tests::the_scan_reads_a_list_as_a_list_and_never_as_an_absent_key",
@@ -2235,6 +2236,7 @@ catches = [
     "drive::registry::tests::a_file_beside_the_weights_the_record_cannot_spell_is_refused",
     "drive::registry::tests::a_main_list_that_is_empty_or_unreadable_is_refused",
     "drive::registry::tests::a_main_of_several_shards_resolves_in_the_registrys_order",
+    "drive::registry::tests::a_weights_value_that_is_not_a_digest_is_refused_naming_the_key",
     "drive::registry::tests::the_scan_reads_a_list_as_a_list_and_never_as_an_absent_key",
 ]
 
@@ -2263,6 +2265,7 @@ becomes = '''
         Some(Some(shards)) if !shards.is_empty() => shards[..1].to_vec(),'''
 catches = [
     "drive::registry::tests::a_main_of_several_shards_resolves_in_the_registrys_order",
+    "drive::registry::tests::a_weights_value_that_is_not_a_digest_is_refused_naming_the_key",
 ]
 
 [[fault]]
@@ -2684,6 +2687,7 @@ becomes = '''
 catches = [
     "drive::regimen::tests::a_registered_substrate_crosses_with_the_registrys_identity",
     "drive::registry::tests::a_registered_weights_set_resolves_to_every_file_the_registry_declares",
+    "drive::registry::tests::a_weights_value_that_is_not_a_digest_is_refused_naming_the_key",
 ]
 
 [[fault]]
@@ -2699,6 +2703,7 @@ catches = [
     "drive::regimen::tests::a_registered_substrate_crosses_with_the_registrys_identity",
     "drive::registry::tests::a_main_of_several_shards_resolves_in_the_registrys_order",
     "drive::registry::tests::a_registered_weights_set_resolves_to_every_file_the_registry_declares",
+    "drive::registry::tests::a_weights_value_that_is_not_a_digest_is_refused_naming_the_key",
 ]
 
 [[fault]]
@@ -2764,4 +2769,17 @@ becomes = '''
                 .filter(|_| true)'''
 catches = [
     "drive::registry::tests::the_scan_reads_a_list_as_a_list_and_never_as_an_absent_key",
+]
+
+[[fault]]
+id = "drive.registry-takes-any-string-as-a-digest"
+failure_class = "drive.registry-takes-any-string-as-a-digest"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+        if !is_a_digest(value) {'''
+becomes = '''
+        if false && !is_a_digest(value) {'''
+catches = [
+    "drive::registry::tests::a_weights_value_that_is_not_a_digest_is_refused_naming_the_key",
 ]
