@@ -874,6 +874,15 @@ legacy_signature = "error TS2322"
 migrated = false
 
 [[fault]]
+id = "exercise.exercise_story_assertion"
+kind = "seeded-gate"
+check = "exercise"
+label = "a story's assertion broken in place"
+failure_class = "exercise.story"
+legacy_signature = "FAIL.*KitchenSink\\.stories\\.tsx.*1 · the whole session, and its receipt"
+migrated = false
+
+[[fault]]
 id = "exercise.exercise_pnpm_unobtainable"
 kind = "seeded-gate"
 check = "exercise"

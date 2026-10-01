@@ -2695,6 +2695,15 @@ inject_exercise_type_error() {
 # version that was never published. The signature is npm's own `notarget`
 # line, not pnpm's `[ERROR]`: a check that went back to the host's pnpm
 # would fail here too, but not in these words, and the case would say so.
+# One story's assertion broken in place: the kitchen sink's receipt expecting
+# 2.1 side calls an ask where the session makes 2.0. Typecheck and lint pass
+# it; only the browser tests -- every story run in Chromium -- can see it
+# (#175). The signature is Vitest's failure line for that story: its file and
+# its name, on the line that says FAIL. `.*` spans any colour codes between.
+inject_exercise_story_assertion() {
+  edit_in_place "s/row('side-calls-per-ask')).toBe('2.0')/row('side-calls-per-ask')).toBe('2.1')/" exercise/src/stories/KitchenSink.stories.tsx
+}
+
 inject_exercise_pnpm_unobtainable() {
   edit_in_place 's/"packageManager": "pnpm@[^"]*"/"packageManager": "pnpm@0.0.0-unpublished"/' exercise/package.json
 }
@@ -7124,6 +7133,8 @@ selftest() {
     'hygiene: external-subresource:'
   seeded_case "a type error in the web surface"       exercise inject_exercise_type_error \
     'error TS2322'
+  seeded_case "a story's assertion broken in place"   exercise inject_exercise_story_assertion \
+    'FAIL.*KitchenSink\.stories\.tsx.*1 · the whole session, and its receipt'
   seeded_case "a pinned pnpm the host cannot have"    exercise inject_exercise_pnpm_unobtainable \
     'notarget No matching version found for pnpm@0\.0\.0-unpublished'
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
