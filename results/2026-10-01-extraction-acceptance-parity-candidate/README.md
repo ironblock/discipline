@@ -3,7 +3,7 @@ hypothesis = "Fired once per seat on the candidate rung, under the configuration
 result = "supported"
 kind = "reproducible-by-config"
 product_sha256 = "f912a6ac86451a3d94e0f96a43862569c2d57b64e31011faf9e21548d0201a40"
-pre_registration_sha256 = "b36fb625380b428f5500560450f6bd4d35bb7a7d911f0c893dfec60fea77a872"
+pre_registration_sha256 = "2519df1892bf5e3dd17f831280248fdbcd2623ff0945a20a1e2f1383817fb561"
 controls_run = ["the routing fingerprint: every seat-B extraction answer without draft_n, every seat-A extraction answer and every interview answer of both seats with it", "the seat-B canary before the first fork: no think block and no draft_n", "the candidate's canary before and after the fire, each against its baseline draw", "the plan check: every planned fork ran with its planned request"]
 known_defects = [
   "What the word weighs, stated before the run (#115's reading, carried): the band is wide (0.024877 to 0.21789 around the archived 0.091469), so `supported` says the inversion held on the candidate rung at a size anywhere in that range. The fire's own 95% interval, [-0.008232, 0.112803] over the 31 paired forks, straddles zero: the word rests on a point estimate whose own interval reaches the sign the rule would call refuted. That is the one sentence the ruled rule writes beside the word (#143, comment 5921525110).",
@@ -17,7 +17,7 @@ known_defects = [
   "The candidate's canary before and after the fire were each one draw (36 of 36), read against the candidate's baseline draw by the instrument's rule; the canary files here are those draws' logs. The floor's canary after the restore (35 of 36, PASS against its pool) is in window/canary-floor-after.log and is not part of box.json, whose canary fields are the candidate's.",
   "`apply.py`'s selftest runs under #115's config (extraction-acceptance-inverts-115.json, carried here), the config its fixtures were written and proven against (#191); under the candidate config it stops on a fixture written for #115's switches. The verdict itself is re-derived under the candidate config.",
   "`pre-registration.json` and `decision-rule.toml` were written as files after the fire, transcribing the ratified text on #143 (comments 5894139110 and 5921525110); the operative rule is apply.py and the candidate config, merged in #191 before the first fork.",
-  "The README's prose figures are not bound to the product, the class #115's record discloses: recompute.sh re-derives the band, the grader's report, the verdict, the interval, the plan check, the comparison and the front matter's numbers, and reads nothing else.",
+  "The README's prose figures are not bound to the product, the class #115's record discloses, and neither are the figures inside these known_defects strings: recompute.sh re-derives the band, the grader's report, the verdict, the interval, the plan check, the comparison and the front matter's numeric fields, and reads nothing else.",
   "The window's raw outputs under window/ are the Mac driver's and the box script's logs, scrubbed as the seat logs were; server logs are not committed (they carry paths). mac.log and box-window.log give each step's time and exit code; #143 carries the same timeline, posted after the applier ran.",
 ]
 targets_checked = 54

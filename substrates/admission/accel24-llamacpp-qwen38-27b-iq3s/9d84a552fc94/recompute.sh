@@ -150,6 +150,9 @@ if (here / "raw/checkpoint-rung.json").exists():
             fail("[checkpoint_restore] the window log's exes are not the identity's and this fingerprint's engine manifest's llama-server")
         if wid.get("cand_running_exe") != man["llama-server"] or not wid.get("cand_running_exe", "").startswith(cu.group(2)):
             fail("[checkpoint_restore] the window identity's running candidate is not this fingerprint's binary")
+        pid = re.search(r"^cand_running_exe [0-9a-f]{64} pid=(\d+)$", (here / "raw/checkpoint-window-identity.txt").read_text(), re.M)
+        if not pid or pid.group(1) != cu.group(1):
+            fail("[checkpoint_restore] the measured candidate is not, by pid, the process the window launched and read")
 # pass and fail are results: a cell may carry one only if this script re-derived it from a raw file (review of #185)
 for name, c in cells.items():
     if isinstance(c, dict) and c.get("word") in ("pass", "fail") and name not in DERIVED: fail(f"[{name}] says {c['word']!r}, but no raw file re-derives it")

@@ -117,7 +117,8 @@ if (here / "raw/checkpoint-rung.json").exists():
     committed = json.loads((here / "raw/checkpoint-decide.json").read_text())
     if r.returncode != 0: fail(f"[checkpoint_restore] the instrument's decide exited {r.returncode}")
     elif json.loads(r.stdout) != committed: fail("[checkpoint_restore] the instrument now decides differently from the committed raw/checkpoint-decide.json")
-    derived("checkpoint_restore", committed["word"])
+    if not (here / "raw/checkpoint-gpu-decide.json").exists():  # superseded by the GPU-derived tolerance where one is committed (#143)
+        derived("checkpoint_restore", committed["word"])
     cp = cells.get("checkpoint_restore", {}); rd = cp.get("reading", "")
     unm = json.loads((here / "raw/checkpoint-reference-unmatched.json").read_text())
     sys.path.insert(0, str(inst)); import checkpoint_restore as cr
