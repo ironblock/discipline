@@ -254,31 +254,30 @@ def cmd_run(a) -> int:
 
 def draw(srv, a, stage, s, attempt, frac, target, n, planted, pad) -> dict:
     """One sample: its request, its reply, its row. A re-draw changes only the seed."""
-    if True:
-            final = TIERS[a.tier]["task"] if stage == "application" else TIERS[a.tier]["retrieval"]
-            body = {"messages": messages_for(a.tier, pad, final), "max_tokens": a.max_tokens, "seed": a.seed * 1000 + s + 100 * attempt,
-                    "id_slot": 0, "cache_prompt": True, **json.loads(a.sampler)}
-            t0 = time.time(); row = {"fraction": frac, "depth_target": target, "depth_rendered": n, "planted": planted,
-                                     "stage": stage, "sample": s}
-            if attempt: row["redraw"] = attempt
-            try:
-                r = srv.call("/v1/chat/completions", body); err = None
-            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
-                r, err = None, f"{type(e).__name__} {getattr(e, 'code', '')}".strip()
-            row.update({"error": err, "wall_s": round(time.time() - t0, 1)})
-            if r is not None:
-                m = r["choices"][0]["message"]; content = m.get("content") or ""
-                row.update({"prompt_tokens": r["usage"]["prompt_tokens"], "completion_tokens": r["usage"]["completion_tokens"],
-                            "finish": r["choices"][0].get("finish_reason"), "reasoning_chars": len(m.get("reasoning_content") or ""),
-                            "timings": r.get("timings")})
-                if stage == "retrieval":
-                    row["dims"] = grade_retrieval(content); row["answer"] = content[:600]
-                else:
-                    code = final_code(content); row["dims"] = grade(a.tier, code)
-                    row["truncated"] = row["finish"] == "length" and code is None; row["code"] = (code or "")[:1500]
-            else:
-                row["dims"] = {"ALL": False}
-            return row
+    final = TIERS[a.tier]["task"] if stage == "application" else TIERS[a.tier]["retrieval"]
+    body = {"messages": messages_for(a.tier, pad, final), "max_tokens": a.max_tokens, "seed": a.seed * 1000 + s + 100 * attempt,
+            "id_slot": 0, "cache_prompt": True, **json.loads(a.sampler)}
+    t0 = time.time(); row = {"fraction": frac, "depth_target": target, "depth_rendered": n, "planted": planted,
+                             "stage": stage, "sample": s}
+    if attempt: row["redraw"] = attempt
+    try:
+        r = srv.call("/v1/chat/completions", body); err = None
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
+        r, err = None, f"{type(e).__name__} {getattr(e, 'code', '')}".strip()
+    row.update({"error": err, "wall_s": round(time.time() - t0, 1)})
+    if r is not None:
+        m = r["choices"][0]["message"]; content = m.get("content") or ""
+        row.update({"prompt_tokens": r["usage"]["prompt_tokens"], "completion_tokens": r["usage"]["completion_tokens"],
+                    "finish": r["choices"][0].get("finish_reason"), "reasoning_chars": len(m.get("reasoning_content") or ""),
+                    "timings": r.get("timings")})
+        if stage == "retrieval":
+            row["dims"] = grade_retrieval(content); row["answer"] = content[:600]
+        else:
+            code = final_code(content); row["dims"] = grade(a.tier, code)
+            row["truncated"] = row["finish"] == "length" and code is None; row["code"] = (code or "")[:1500]
+    else:
+        row["dims"] = {"ALL": False}
+    return row
 
 def summarise(rows: list[dict]) -> dict:
     out = {}
@@ -300,7 +299,8 @@ def decide(summary: dict, criterion: dict) -> dict:
     """The ruled word. criterion: within (1), min_samples (5), max_errors (0). The control is the
     fraction-0 cell. A cell with an error, a thinking-off sample, or too few samples is unadjudicated;
     a cell whose pass count falls more than `within` below the control's is a cliff and fails; a
-    fail outranks an unadjudicated cell; the control itself must be adjudicable."""
+    fail outranks an unadjudicated cell; the control itself must be adjudicable. It echoes only the criterion keys
+    it applies, and adds `kwarg_delivery_findings` beside the word when a cell had two or more invalid samples."""
     within, mins, maxe = criterion.get("within", 1), criterion.get("min_samples", 5), criterion.get("max_errors", 0)
     if "0" not in summary and "0.0" not in summary:
         return {"word": "unadjudicated", "why": "no zero-pad control cell"}
@@ -412,16 +412,25 @@ def cmd_selftest(a) -> int:
     # the cell cannot fill five valid samples and reads unadjudicated, with the kwarg-delivery finding beside the word
     budget = tomllib.loads((HERE / "criterion.toml").read_text())["max_redraws"]
     off = {"application": [dict(r, reasoning="") for r in e2e["script"]["application"]], "retrieval": e2e["script"]["retrieval"]}
-    srv3, _ = fake_server(off)
+    srv3, state3 = fake_server(off)
     with tempfile.TemporaryDirectory() as td3:
-        ns3 = argparse.Namespace(**{**vars(ns), "endpoint": f"http://127.0.0.1:{srv3.server_address[1]}", "out": td3, "fractions": [0.0]})
+        ns3 = argparse.Namespace(**{**vars(ns), "endpoint": f"http://127.0.0.1:{srv3.server_address[1]}", "out": td3, "fractions": [0.0, 0.5]})
         with contextlib.redirect_stdout(io.StringIO()):
             cmd_run(ns3)
         rows3 = [json.loads(l) for l in open(pathlib.Path(td3) / "rows.jsonl")]
     srv3.shutdown()
     app3 = [r for r in rows3 if r["stage"] == "application"]
-    check(len(app3) == 5 + budget and sum(1 for r in app3 if r.get("discarded")) == budget,
-          f"re-draw: a cell re-draws at most the declared {budget} times, then keeps its invalid samples", f"{len(app3)} rows, {sum(1 for r in app3 if r.get('discarded'))} discarded")
+    per3 = {f: [r for r in app3 if r["fraction"] == f] for f in (0.0, 0.5)}
+    check(all(len(v) == 5 + budget and sum(1 for r in v if r.get("discarded")) == budget for v in per3.values()),
+          f"re-draw: each cell re-draws at most the declared {budget} times, the budget per cell, then keeps its invalid samples",
+          f"{ {f: (len(v), sum(1 for r in v if r.get('discarded'))) for f, v in per3.items()} }")
+    by_cell = {}
+    for p_, b in state3["calls"]:
+        if p_ == "/v1/chat/completions" and not b["messages"][-1]["content"].startswith("List this project"):
+            by_cell.setdefault(len(json.dumps(b["messages"])), []).append(b["seed"])  # a cell's requests share its padding
+    check(len(by_cell) == 2 and all(len(v) == len(set(v)) for v in by_cell.values()),
+          "re-draw: within a cell every re-draw is sent with a seed of its own, never a replay of the invalid sample",
+          f"{ {k: (len(v), len(set(v))) for k, v in by_cell.items()} }")
     d3 = decide(summarise(rows3), tomllib.loads((HERE / "criterion.toml").read_text()))
     check(d3["word"] == "unadjudicated", "re-draw: a cell that cannot fill five valid samples within the budget is unadjudicated", f"{d3}")
     base_cell = {"application": {"n": 5, "pass": 5, "errors": 0, "thinking_off": 0, "truncated": 0}, "retrieval": {"n": 1, "pass": 1}}
