@@ -1246,6 +1246,100 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A projector's digest left unchecked: a file name would pass as its identity
+# (#211's review, B1).
+inject_record_weights_projector_undigested() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "for digest in main.iter().chain(draft.iter()).chain(projector.iter()) {"
+new = "for digest in main.iter().chain(draft.iter()) {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The integer arm of the duration rule: without its sign check, unsigned_abs
+# turns -40 into 40 and the sign is lost silently (#211's review, B2).
+inject_record_timings_negative_integer_ms_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "Some(Value::Integer(n)) if n >= 0 => Ok(Some(Millis::Whole("
+new = "Some(Value::Integer(n)) => Ok(Some(Millis::Whole("
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A response's timings taking any key: the server's own arithmetic on its
+# numbers would then pass as evidence (#92).
+inject_record_timings_unknown_key_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "if let Some(key) = fields.keys().next() {\n        return Err(SchemaError::UnknownField {\n            of,\n            field: format!(\"timings.{key}\"),"
+new = "if let Some(key) = fields.keys().next().filter(|_| false) {\n        return Err(SchemaError::UnknownField {\n            of,\n            field: format!(\"timings.{key}\"),"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A negative decimal duration read as a duration (#92).
+inject_record_timings_negative_ms_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "Some(Value::Decimal(d)) if !d.as_str().starts_with('-') => Ok(Some(Millis::Exact(d))),"
+new = "Some(Value::Decimal(d)) if true || !d.as_str().starts_with('-') => Ok(Some(Millis::Exact(d))),"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# One weights file read in two spellings, a string and a list of one: two
+# records of one substrate would then differ (#92).
+inject_record_weights_one_file_list_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "Some(Value::Array(items)) if items.len() < 2 => {"
+new = "Some(Value::Array(items)) if items.len() < 1 => {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A draft's digest left unchecked: a file name would pass as its identity (#92).
+inject_record_weights_draft_undigested() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "for digest in main.iter().chain(draft.iter()).chain(projector.iter()) {"
+new = "for digest in main.iter().chain(projector.iter()) {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # The kind's own fields made advisory. `turns` is drained and thrown away on a
 # recompute summary, so the row is accepted and the number nobody can compute
 # is simply not there afterwards -- which is exactly the "tolerate the stray
@@ -1856,8 +1950,8 @@ import pathlib
 
 path = pathlib.Path("diet/src/formats/record/mod.rs")
 source = path.read_text(encoding="utf-8")
-old = '            let text = take_string(&mut members, of, "sha256")?;\n            if !digest_ok(&text) {'
-new = '            let text = take_string(&mut members, of, "sha256")?;\n            if false && !digest_ok(&text) {'
+old = "    for digest in main.iter().chain(draft.iter()).chain(projector.iter()) {"
+new = "    for digest in draft.iter().chain(projector.iter()) {"
 if source.count(old) != 1:
     raise SystemExit(f"the weights check appears {source.count(old)} times")
 path.write_text(source.replace(old, new), encoding="utf-8")
@@ -6975,6 +7069,18 @@ selftest() {
     'record/fixtures/invalid/regime-missing-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "a comparison's word left open"        test     inject_record_comparison_word_open \
     'record/fixtures/invalid/comparison-word-outside-its-four\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a weights projector named rather than digested" test inject_record_weights_projector_undigested \
+    'record/fixtures/invalid/weights-projector-named-not-digested\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a negative whole-millisecond duration read" test inject_record_timings_negative_integer_ms_read \
+    'record/fixtures/invalid/timings-duration-that-is-a-negative-integer\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a timings key the server does not send read" test inject_record_timings_unknown_key_read \
+    'record/fixtures/invalid/timings-key-the-server-does-not-send\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a negative timings duration read" test inject_record_timings_negative_ms_read \
+    'record/fixtures/invalid/timings-duration-that-is-negative\.jsonl' 'test:conformance/formats::record'
+  seeded_case "one weights file spelled as a list read" test inject_record_weights_one_file_list_read \
+    'record/fixtures/invalid/weights-of-one-file-spelled-as-a-list\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a weights draft named rather than digested" test inject_record_weights_draft_undigested \
+    'record/fixtures/invalid/weights-draft-named-not-digested\.jsonl' 'test:conformance/formats::record'
   seeded_case "a summary kind's fields made advisory" test     inject_record_summary_kind_fields_advisory \
     'record/fixtures/invalid/recompute-summary-carries-turns\.jsonl' 'test:conformance/formats::record'
   seeded_case "a recompute summary with no product digest" test inject_record_recompute_digest_optional \

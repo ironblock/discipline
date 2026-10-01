@@ -171,6 +171,66 @@ legacy_signature = "record/fixtures/invalid/comparison-word-outside-its-four\\.j
 migrated = false
 
 [[fault]]
+id = "test.record_weights_projector_undigested"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a weights projector named rather than digested"
+failure_class = "record.weights-projector-undigested"
+legacy_signature = "record/fixtures/invalid/weights-projector-named-not-digested\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.record_timings_negative_integer_ms_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a negative whole-millisecond duration read"
+failure_class = "record.timings-negative-ms-read"
+legacy_signature = "record/fixtures/invalid/timings-duration-that-is-a-negative-integer\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.record_timings_unknown_key_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a timings key the server does not send read"
+failure_class = "record.timings-unknown-key-read"
+legacy_signature = "record/fixtures/invalid/timings-key-the-server-does-not-send\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.record_timings_negative_ms_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a negative timings duration read"
+failure_class = "record.timings-negative-ms-read"
+legacy_signature = "record/fixtures/invalid/timings-duration-that-is-negative\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.record_weights_one_file_list_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "one weights file spelled as a list read"
+failure_class = "record.weights-second-spelling-read"
+legacy_signature = "record/fixtures/invalid/weights-of-one-file-spelled-as-a-list\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.record_weights_draft_undigested"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a weights draft named rather than digested"
+failure_class = "record.weights-draft-undigested"
+legacy_signature = "record/fixtures/invalid/weights-draft-named-not-digested\\.jsonl"
+migrated = false
+
+[[fault]]
 id = "test.record_summary_kind_fields_advisory"
 kind = "seeded-gate"
 check = "test"
@@ -6711,6 +6771,30 @@ kind = "lane-fault"
 check = "lanes"
 label = "client.journal-drops-timings"
 failure_class = "client.journal-drops-timings"
+migrated = false
+
+[[fault]]
+id = "client.projection-drops-the-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "client.projection-drops-the-timings"
+failure_class = "client.projection-drops-the-timings"
+migrated = false
+
+[[fault]]
+id = "client.projection-leaves-rowless-timings-unnamed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.projection-leaves-rowless-timings-unnamed"
+failure_class = "client.projection-leaves-rowless-timings-unnamed"
+migrated = false
+
+[[fault]]
+id = "client.projection-leaves-unspellable-timings-unnamed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.projection-leaves-unspellable-timings-unnamed"
+failure_class = "client.projection-leaves-unspellable-timings-unnamed"
 migrated = false
 
 [[fault]]
