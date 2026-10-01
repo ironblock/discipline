@@ -7642,6 +7642,14 @@ failure_class = "drive.serve-bin-ignores-the-log-flag"
 migrated = false
 
 [[fault]]
+id = "drive.serve-bin-hides-a-truncated-log"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-hides-a-truncated-log"
+failure_class = "drive.serve-bin-hides-a-truncated-log"
+migrated = false
+
+[[fault]]
 id = "drive.session-drops-timings"
 kind = "lane-fault"
 check = "lanes"
