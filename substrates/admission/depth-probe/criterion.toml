@@ -3,3 +3,8 @@
 within = 1
 min_samples = 5
 max_errors = 0
+# planning (#143, comment 5921525110): a thinking-on application sample whose reply shows thinking did not engage is
+# invalid -- discarded, recorded, and re-drawn; a cell may re-draw at most this many times, after which an invalid
+# sample is kept, so a cell that cannot fill five valid samples reads unadjudicated. Two or more invalid samples in one
+# cell is a kwarg-delivery finding, noted beside the word.
+max_redraws = 5

@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 168
+faults = 176
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -2086,9 +2086,13 @@ catches = [
     "drive::regimen::tests::a_regimen_whose_hardware_disagrees_with_the_registry_is_refused",
     "drive::regimen::tests::a_registered_chat_template_crosses_into_the_regime",
     "drive::regimen::tests::a_registered_substrate_crosses_with_the_registrys_identity",
+    "drive::registry::tests::a_file_beside_the_weights_the_record_cannot_spell_is_refused",
     "drive::registry::tests::a_header_is_read_strictly_and_never_files_keys_under_the_table_before_it",
-    "drive::registry::tests::a_registered_digest_substrate_resolves_to_what_the_registry_declares",
+    "drive::registry::tests::a_main_of_several_shards_resolves_in_the_registrys_order",
     "drive::registry::tests::a_registered_substrates_commit_and_chat_template_are_read",
+    "drive::registry::tests::a_registered_weights_set_resolves_to_every_file_the_registry_declares",
+    "drive::registry::tests::a_weights_value_that_is_not_a_digest_is_refused_naming_the_key",
+    "drive::registry::tests::one_main_file_with_nothing_beside_it_is_a_digest",
     "drive::registry::tests::the_canned_instance_resolves_to_the_acts_this_crate_plays",
     "drive::registry::tests::the_scan_reads_a_list_as_a_list_and_never_as_an_absent_key",
 ]
@@ -2226,11 +2230,14 @@ failure_class = "drive.registry-scan-reads-a-list-as-absent"
 target = "diet/src/drive/registry.rs"
 expect_exit = 101
 anchor = '''
-        if let Some((key, _)) = line.split_once(" = [") {'''
+        if let Some((key, items)) = line.split_once(" = [") {'''
 becomes = '''
-        if let Some((key, _)) = line.split_once(" = [").filter(|_| false) {'''
+        if let Some((key, items)) = line.split_once(" = [").filter(|_| false) {'''
 catches = [
-    "drive::registry::tests::a_main_of_several_shards_is_refused_and_names_the_record_change",
+    "drive::registry::tests::a_file_beside_the_weights_the_record_cannot_spell_is_refused",
+    "drive::registry::tests::a_main_list_that_is_empty_or_unreadable_is_refused",
+    "drive::registry::tests::a_main_of_several_shards_resolves_in_the_registrys_order",
+    "drive::registry::tests::a_weights_value_that_is_not_a_digest_is_refused_naming_the_key",
     "drive::registry::tests::the_scan_reads_a_list_as_a_list_and_never_as_an_absent_key",
 ]
 
@@ -2254,11 +2261,12 @@ failure_class = "drive.registry-takes-one-shard-of-many"
 target = "diet/src/drive/registry.rs"
 expect_exit = 101
 anchor = '''
-    } else if table.lists.contains("weights_main") {'''
+        Some(Some(shards)) if !shards.is_empty() => shards.clone(),'''
 becomes = '''
-    } else if false && table.lists.contains("weights_main") {'''
+        Some(Some(shards)) if !shards.is_empty() => shards[..1].to_vec(),'''
 catches = [
-    "drive::registry::tests::a_main_of_several_shards_is_refused_and_names_the_record_change",
+    "drive::registry::tests::a_main_of_several_shards_resolves_in_the_registrys_order",
+    "drive::registry::tests::a_weights_value_that_is_not_a_digest_is_refused_naming_the_key",
 ]
 
 [[fault]]
@@ -2301,6 +2309,8 @@ catches = [
     "a_drive_server_checks_the_engine_before_it_binds",
     "a_drive_server_refuses_a_substrate_with_no_registered_engine_identity_without_asking_it",
     "a_drive_server_refuses_to_start_on_a_substrate_the_registry_does_not_resolve",
+    "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
+    "a_drive_server_starts_on_a_substrate_of_several_shards",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
 ]
 
@@ -2537,6 +2547,8 @@ becomes = '''
 catches = [
     "a_drive_server_checks_the_engine_before_it_binds",
     "a_drive_server_refuses_a_substrate_with_no_registered_engine_identity_without_asking_it",
+    "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
+    "a_drive_server_starts_on_a_substrate_of_several_shards",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
 ]
 
@@ -2567,6 +2579,8 @@ anchor = '''
 becomes = '''
             Value::String(String::new()),'''
 catches = [
+    "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
+    "a_drive_server_starts_on_a_substrate_of_several_shards",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
 ]
 
@@ -2580,6 +2594,7 @@ anchor = '''
 becomes = '''
             Value::String(String::new()),'''
 catches = [
+    "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
 ]
 
@@ -2656,7 +2671,118 @@ becomes = '''
 catches = [
     "a_drive_server_checks_the_engine_before_it_binds",
     "a_drive_server_refuses_a_wildcard_before_it_asks_the_engine",
+    "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
+    "a_drive_server_starts_on_a_substrate_of_several_shards",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
+]
+
+[[fault]]
+id = "drive.registry-drops-the-projector"
+failure_class = "drive.registry-drops-the-projector"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+    let projector = table.strings.get("weights_projector").cloned();'''
+becomes = '''
+    let projector: Option<String> = None;'''
+catches = [
+    "drive::regimen::tests::a_registered_substrate_crosses_with_the_registrys_identity",
+    "drive::registry::tests::a_registered_weights_set_resolves_to_every_file_the_registry_declares",
+    "drive::registry::tests::a_weights_value_that_is_not_a_digest_is_refused_naming_the_key",
+]
+
+[[fault]]
+id = "drive.registry-drops-the-draft"
+failure_class = "drive.registry-drops-the-draft"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+    let draft = table.strings.get("weights_draft").cloned();'''
+becomes = '''
+    let draft: Option<String> = None;'''
+catches = [
+    "drive::regimen::tests::a_registered_substrate_crosses_with_the_registrys_identity",
+    "drive::registry::tests::a_main_of_several_shards_resolves_in_the_registrys_order",
+    "drive::registry::tests::a_registered_weights_set_resolves_to_every_file_the_registry_declares",
+    "drive::registry::tests::a_weights_value_that_is_not_a_digest_is_refused_naming_the_key",
+]
+
+[[fault]]
+id = "drive.registry-calls-one-file-a-set"
+failure_class = "drive.registry-calls-one-file-a-set"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+        ([only], None, None) => Weights::Digest(only.clone()),'''
+becomes = '''
+        ([only], None, None) if false => Weights::Digest(only.clone()),'''
+catches = [
+    "drive::registry::tests::one_main_file_with_nothing_beside_it_is_a_digest",
+]
+
+[[fault]]
+id = "drive.registry-takes-an-empty-list"
+failure_class = "drive.registry-takes-an-empty-list"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+        Some(Some(shards)) if !shards.is_empty() => shards.clone(),'''
+becomes = '''
+        Some(Some(shards)) => shards.clone(),'''
+catches = [
+    "drive::registry::tests::a_main_list_that_is_empty_or_unreadable_is_refused",
+]
+
+[[fault]]
+id = "drive.registry-resolves-a-sidecar-as-one-file"
+failure_class = "drive.registry-resolves-a-sidecar-as-one-file"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+        if key.starts_with("weights_") && !spelled && is_a_digest(value) {'''
+becomes = '''
+        if false && key.starts_with("weights_") && !spelled && is_a_digest(value) {'''
+catches = [
+    "drive::registry::tests::a_file_beside_the_weights_the_record_cannot_spell_is_refused",
+]
+
+[[fault]]
+id = "drive.registry-reads-a-draft-list-as-absent"
+failure_class = "drive.registry-reads-a-draft-list-as-absent"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+        if table.lists.contains_key(key) {'''
+becomes = '''
+        if false && table.lists.contains_key(key) {'''
+catches = [
+    "drive::registry::tests::a_file_beside_the_weights_the_record_cannot_spell_is_refused",
+]
+
+[[fault]]
+id = "drive.registry-keeps-a-quote-in-an-item"
+failure_class = "drive.registry-keeps-a-quote-in-an-item"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+                .filter(|item| !item.contains('"'))'''
+becomes = '''
+                .filter(|_| true)'''
+catches = [
+    "drive::registry::tests::the_scan_reads_a_list_as_a_list_and_never_as_an_absent_key",
+]
+
+[[fault]]
+id = "drive.registry-takes-any-string-as-a-digest"
+failure_class = "drive.registry-takes-any-string-as-a-digest"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+        if !is_a_digest(value) {'''
+becomes = '''
+        if false && !is_a_digest(value) {'''
+catches = [
+    "drive::registry::tests::a_weights_value_that_is_not_a_digest_is_refused_naming_the_key",
 ]
 
 [[fault]]

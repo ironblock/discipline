@@ -1,0 +1,25 @@
+2026-10-01T14:51:05Z identity read; prod pid=9567 vram=23244 MiB
+2026-10-01T14:51:06Z production stopped vram=21 MiB
+2026-10-01T14:51:22Z candidate up server=28079 exe=865044a2bf2d5685 vram=22406 MiB
+2026-10-01T14:51:22Z rendered head and props read
+2026-10-01T14:51:22Z build_info candidate: {"response_bytes": 11121, "response_sha256": "e52e66940206c2dd7f702afce08a74c7536911ad9e2e9daa22ee32905ee78378", "build_info_token": "\"b1-4ceb171\"", "token_sha256": "56eafd4fd9241dcd1020535cd35a355cb84d110b03f463fe3439fe2024c706fe"}
+2026-10-01T14:51:26Z seat-B up pid=28202 exe=980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4 vram=22406 MiB
+2026-10-01T14:51:26Z build_info seatb: {"response_bytes": 6966, "response_sha256": "4d698e339f19eafc9a7e7ebfa205ef63f4e3396de762078d8f5e50adeb01d83a", "build_info_token": "\"b0-unknown-dirty\"", "token_sha256": "dc5729d0d9a8864ab71d6557a1f2ed02ad33c7ccf9b01428d96f9a61c151779d"}
+2026-10-01T14:51:26Z waiting for the Mac (rehearsal, seats, canaries)
+2026-10-01T16:06:07Z fire done; candidate still serving: exe=865044a2bf2d5685
+2026-10-01T16:06:09Z seat-B stopped
+2026-10-01T16:06:20Z checkpoint rung rc=0
+2026-10-01T16:06:24Z checkpoint reference up pid=39886 exe=865044a2bf2d56856f843b7cf080faf519030e338d8b75d366270b5b9d2b5511
+2026-10-01T16:07:20Z reference ~/cw/out/ckpt-reference.json drop=22 rc=0
+2026-10-01T16:07:20Z reference warm prompt_n=513 against rung 515
+2026-10-01T16:07:20Z checkpoint reference matched rc=0
+2026-10-01T16:07:22Z candidate stopped vram=21 MiB
+2026-10-01T16:07:26Z GPU reference up pid=40349 exe=980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4 vram=2330 MiB
+2026-10-01T16:07:27Z reference ~/cw/out/gpuref-reference.json drop=22 rc=0
+2026-10-01T16:07:27Z reference warm prompt_n=513 against rung 515
+2026-10-01T16:07:27Z GPU reference matched rc=0
+2026-10-01T16:07:29Z phases done
+2026-10-01T16:07:29Z restore: begin
+2026-10-01T16:07:45Z provision-diet rc=0
+2026-10-01T16:07:46Z restored: pid=40490 exe=980845d60ae7a820 cmdline_same=yes vram=23066 MiB
+2026-10-01T16:07:46Z END

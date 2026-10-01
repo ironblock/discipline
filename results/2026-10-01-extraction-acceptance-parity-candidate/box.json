@@ -1,0 +1,18 @@
+{
+ "instance_before": "2026-10-01",
+ "instance_after": "2026-10-01",
+ "verify_before": 0,
+ "verify_after": 0,
+ "fingerprint_before": 0,
+ "fingerprint_after": 0,
+ "canary_before": [
+  "PASS"
+ ],
+ "canary_after": [
+  "PASS"
+ ],
+ "seatb_canary": {
+  "think": false,
+  "draft_n": false
+ }
+}

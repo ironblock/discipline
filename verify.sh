@@ -9,6 +9,7 @@
 #   verify.sh --only injections --scope inject_NAME   apply one injection (selftest only)
 #   verify.sh --only history --range A..B   scan an explicit range, to repro
 #   verify.sh --list          name the checks, in order
+#   verify.sh --site DIR      check a built site as Pages would serve it (#32): check_site
 #   verify.sh --selftest      prove the gate goes red on seeded faults (bash 4+)
 #   verify.sh --selftest --shard K/N    run this job's share of the faults
 #   verify.sh --selftest --scope-plan F re-prove only what plan F does not inherit (#112)
@@ -224,7 +225,27 @@ build_diet() {
 # The report contract, with the record's format verdict dispatched to
 # `diet check-record` through the resolver. The linter prints which binary
 # answered; it does not read run.jsonl itself.
-check_results() { build_diet && python3 scripts/check-results.py --root results; }
+# The results linter over every directory, and the ledger page drawn from what
+# it passed (#32 I2): check-results.py emits the ledger only if every
+# directory passes, and exercise/scripts/render-ledger.py draws _site/ledger
+# from it, refusing -- naming the directory -- a row with no word, no product
+# digest, or no directory behind it. Each step's own exit status is the
+# check's: the renderer's verdict reaches it (`RENDER_LEDGER` names the
+# renderer, so the mechanics assertion can stand one in). The page links the
+# commit it was rendered from; a tree with no commit (the selftest's box)
+# links main.
+check_results() {
+  build_diet || return
+  local ledger rc=0
+  ledger="$(mktemp)" || return 2
+  python3 scripts/check-results.py --root results --ledger "$ledger" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    python3 "${RENDER_LEDGER:-exercise/scripts/render-ledger.py}" "$ledger" _site/ledger --results results \
+      --commit "$(git rev-parse --verify --quiet HEAD || echo main)" || rc=$?
+  fi
+  rm -f "$ledger"
+  return "$rc"
+}
 
 # Every regimen.toml under results/ must parse as a `regimen` document. This
 # is what keeps diet/formats load-bearing: the format is used on the
@@ -313,8 +334,16 @@ check_recompute() { python3 scripts/check-recompute.py --root results; }
 # A rung's admission word, derived from its admission directory rather than trusted as written (#183): the
 # derivation's own fixtures first, then every admission.toml in the tree re-verified through its own
 # admission-recompute.sh and its word compared with the word its results derive under planning's rule (#143).
+#
+# The registry's fingerprints first (#202): every equipment entry's hardware fingerprint covers its declared
+# fields, and every substrate whose engine is one exe digest also pins the libraries beside it (or says why one
+# digest suffices), with an engine_fingerprint that recomputes from them. This checks the REGISTRY: a library
+# digest edited under a held exe reads as a changed fingerprint. Whether a host still runs what the registry
+# pins is a read on the host (`check-fingerprints.py --read-engine-pid`), which no gate here can take.
 check_admission() {
-  python3 substrates/admission/derive_admission.py --selftest &&
+  python3 substrates/check-fingerprints.py --selftest &&
+    python3 substrates/check-fingerprints.py &&
+    python3 substrates/admission/derive_admission.py --selftest &&
     python3 substrates/admission/derive_admission.py --all
 }
 
@@ -2894,6 +2923,21 @@ inject_exercise_pnpm_unobtainable() {
   edit_in_place 's/"packageManager": "pnpm@[^"]*"/"packageManager": "pnpm@0.0.0-unpublished"/' exercise/package.json
 }
 
+# #32 I2's emitter mutated (track five's faults, carried here by courier): a
+# ledger row the renderer must refuse, naming the directory. The fixture loop
+# never reaches the renderer, and a record diet accepted cannot lack a word,
+# so the emitter is the one place a wrong row can come from.
+
+# A ledger row citing a directory that is not there.
+inject_results_ledger_row_cites_missing_directory() {
+  edit_in_place 's/"directory": directory.name,/"directory": directory.name + "-stale",/' scripts/check-results.py
+}
+
+# A ledger row with no word.
+inject_results_ledger_row_without_word() {
+  edit_in_place '/"result": front.get("result"),/d' scripts/check-results.py
+}
+
 inject_hygiene() {
   bash scripts/seed-hygiene-fault.sh seeded-faults > /dev/null
   git add --all
@@ -3143,6 +3187,51 @@ p = pathlib.Path("substrates/admission/derive_admission.py"); s = p.read_text(en
 old = '    if missing:\n        raise ValueError'
 assert old in s, "the rule moved"
 p.write_text(s.replace(old, '    if False:\n        raise ValueError', 1), encoding="utf-8")
+PYEOF
+}
+# #202: one library of the DoD 1 engine rebuilt while its exe stub holds. The exe digest alone would not move;
+# the engine fingerprint must.
+inject_admission_engine_library_changed() {
+  python3 - <<'PYEOF'
+import pathlib, re
+p = pathlib.Path("substrates/registry.toml"); s = p.read_text(encoding="utf-8")
+head = "[substrate.ada48-llamacpp-qwen38flashnext-q20.engine_libraries]\n"
+i = s.index(head) + len(head)
+m = re.compile(r'^("libggml-cuda[^"]*" = ")([0-9a-f])', re.M).search(s, i)
+assert m, "the library table moved"
+flip = "0" if m.group(2) != "0" else "1"
+p.write_text(s[:m.start(2)] + flip + s[m.end(2):], encoding="utf-8")
+PYEOF
+}
+# #202: the recipe narrowed back to the exe alone, the defect it exists to close.
+inject_admission_engine_recipe_exe_only() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
+old = 'json.dumps({"exe": exe, "libraries": libraries}, sort_keys=True,'
+assert old in s, "the recipe moved"
+p.write_text(s.replace(old, 'json.dumps({"exe": exe}, sort_keys=True,', 1), encoding="utf-8")
+PYEOF
+}
+# #202: the recipe's shared-object pattern narrowed to bare `.so`, so a versioned library (libllama.so.0.4.1)
+# drops out of the engine fingerprint unseen.
+inject_admission_engine_pattern_narrowed() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
+old = 'SHARED_OBJECT = re.compile(r"\\.so(\\.\\d+)*$")'
+assert old in s, "the pattern moved"
+p.write_text(s.replace(old, 'SHARED_OBJECT = re.compile(r"\\.so$")', 1), encoding="utf-8")
+PYEOF
+}
+# planning (#143, 5922544337): a pruned model's entry declares its calibration mix; the rule removed.
+inject_admission_pruned_mix_unrequired() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
+old = 'elif sub.get("pruned") is True and not (isinstance(sub.get("calibration_mix"), str) and sub["calibration_mix"].strip()):'
+assert old in s, "the rule moved"
+p.write_text(s.replace(old, 'elif False:', 1), encoding="utf-8")
 PYEOF
 }
 # An admission record one level deeper than the glob looks.
@@ -6184,6 +6273,18 @@ prove_mechanics() {
   expect_exit "an ordinary binary does not false-positive" 0 \
     bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/bin-clean"
 
+  # The ledger renderer's verdict reaches the results check (#32 I2): a
+  # renderer that exits 7 makes `check_results` exit 7 -- its own status,
+  # which no other step of the check produces, so the assertion cannot pass
+  # for a reason that is not the renderer's. And, beside it, the real
+  # renderer passes. The pipe rule (AGENTS.md), on the step after the linter.
+  printf '#!/usr/bin/env python3\nimport sys\nsys.exit(7)\n' > "${box}/renderer-exits-7.py"
+  results_with_renderer() { (cd "$ROOT" && RENDER_LEDGER="$1" check_results); }
+  expect_exit "the ledger renderer's own exit status reaches the results check" 7 \
+    results_with_renderer "${box}/renderer-exits-7.py"
+  expect_exit "the results check passes with the real ledger renderer" 0 \
+    results_with_renderer "${ROOT}/exercise/scripts/render-ledger.py"
+
   # The pattern-table exemption is scoped to scripts/. Any other file that
   # happens to be named that way is still scanned.
   mkdir -p "${box}/fake-table/docs"
@@ -7277,6 +7378,14 @@ selftest() {
     'FAIL  derive: a refuted parity fire bars'
   seeded_case "a constitutional cell not required" admission inject_admission_constitutional_unrequired \
     'FAIL  derive refuses a record missing a constitutional cell'
+  seeded_case "an engine library changed under a held exe" admission inject_admission_engine_library_changed \
+    'ada48-llamacpp-qwen38flashnext-q20: engine_fingerprint changed'
+  seeded_case "the engine recipe narrowed to the exe" admission inject_admission_engine_recipe_exe_only \
+    'FAIL  engine: a library changed with the exe held changes the fingerprint'
+  seeded_case "the engine recipe's library pattern narrowed" admission inject_admission_engine_pattern_narrowed \
+    'FAIL  engine: the recipe hashes every shared object in the directory, a versioned name included'
+  seeded_case "a pruned entry's calibration mix not required" admission inject_admission_pruned_mix_unrequired \
+    'FAIL  engine: a pruned entry with no calibration mix is refused'
   seeded_case "an admission record the glob cannot see" admission inject_admission_record_moved \
     'admission.record-not-found'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
@@ -7337,6 +7446,10 @@ selftest() {
     'hygiene: internal-ticket-id:'
   seeded_case "external subresource on the site"      pages    inject_pages \
     'hygiene: external-subresource:'
+  seeded_case "a ledger row citing a missing directory" results inject_results_ledger_row_cites_missing_directory \
+    'render-ledger: [0-9a-z-]+-stale: no such directory'
+  seeded_case "a ledger row with no word"              results inject_results_ledger_row_without_word \
+    'render-ledger: [0-9a-z-]+: row carries no result'
   seeded_case "a type error in the web surface"       exercise inject_exercise_type_error \
     'error TS2322'
   seeded_case "an authored session on the published list" exercise inject_exercise_published_list_carries_authored_session \
@@ -8545,6 +8658,7 @@ EOF
 
 selected=()
 mode="all"
+SITE_DIR=""
 shard_arg=""
 
 while [ "$#" -gt 0 ]; do
@@ -8558,7 +8672,9 @@ while [ "$#" -gt 0 ]; do
       selected+=("$2")
       shift 2
       ;;
-    --selftest) mode="selftest"; shift ;;
+    --selftest)
+      [ "$mode" != "site" ] || { echo "verify: --site checks a site and nothing else" >&2; exit "$EXIT_MISUSE"; }
+      mode="selftest"; shift ;;
     --derive-scopes)
       [ "$#" -ge 2 ] || { echo "verify: --derive-scopes needs a directory" >&2; exit "$EXIT_MISUSE"; }
       SELFTEST_DERIVE="$2"
@@ -8625,6 +8741,17 @@ while [ "$#" -gt 0 ]; do
       esac
       shift 2
       ;;
+    --site)
+      [ "$#" -ge 2 ] || { echo "verify: --site needs the site's directory" >&2; exit "$EXIT_MISUSE"; }
+      # Resolved here, against the directory the caller is in, as --census is.
+      case "$2" in
+        /*) SITE_DIR="$2" ;;
+        *)  SITE_DIR="$(pwd)/$2" ;;
+      esac
+      [ "$mode" != "selftest" ] || { echo "verify: --site checks a site and nothing else" >&2; exit "$EXIT_MISUSE"; }
+      mode="site"
+      shift 2
+      ;;
     --list) printf '%s\n' "${CHECKS[@]}"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "verify: unknown argument '$1'" >&2; usage >&2; exit "$EXIT_MISUSE" ;;
@@ -8632,6 +8759,23 @@ while [ "$#" -gt 0 ]; do
 done
 
 cd "$ROOT"
+
+# `--site DIR`: the published site, checked as pages.yml checks it before it
+# publishes (#32). Alone: a site check that also ran other checks, or ran
+# under a selftest's flags, would be a different question answered.
+# `--site` given beside `--selftest`, in either order, is refused rather than
+# letting whichever came last decide.
+if [ -n "$SITE_DIR" ]; then
+  if [ "$mode" != "site" ] || [ "${#selected[@]}" -ne 0 ] || [ -n "$VERIFY_SCOPE_GIVEN" ] ||
+     [ -n "$VERIFY_HISTORY_RANGE" ] || [ "$SELFTEST_SHARD" -ne 0 ] || [ -n "$SELFTEST_CENSUS" ] ||
+     [ -n "$SELFTEST_SCOPE_PLAN" ] || [ -n "$SELFTEST_DERIVE" ]; then
+    echo "verify: --site checks a site and nothing else" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  [ -d "$SITE_DIR" ] || { echo "verify: --site ${SITE_DIR}: no such directory" >&2; exit "$EXIT_MISUSE"; }
+  check_site "$SITE_DIR"
+  exit $?
+fi
 
 # `--shard` and `--census` describe a selftest run. Silently ignoring them on
 # an ordinary run would let a workflow think it had sharded a gate that in

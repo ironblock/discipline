@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 126
+mechanics_assertions = 128
 unseedable_guards = 2
 migrated = 0
 
@@ -925,6 +925,24 @@ legacy_signature = "hygiene: external-subresource:"
 migrated = false
 
 [[fault]]
+id = "results.results_ledger_row_cites_missing_directory"
+kind = "seeded-gate"
+check = "results"
+label = "a ledger row citing a missing directory"
+failure_class = "results.ledger-directory"
+legacy_signature = "render-ledger: [0-9a-z-]+-stale: no such directory"
+migrated = false
+
+[[fault]]
+id = "results.results_ledger_row_without_word"
+kind = "seeded-gate"
+check = "results"
+label = "a ledger row with no word"
+failure_class = "results.ledger-word"
+legacy_signature = "render-ledger: [0-9a-z-]+: row carries no result"
+migrated = false
+
+[[fault]]
 id = "exercise.exercise_type_error"
 kind = "seeded-gate"
 check = "exercise"
@@ -1530,6 +1548,24 @@ failure_class = "pages.forbidden-pattern"
 pattern = "api-key-shape"
 migrated = false
 
+
+[[fault]]
+id = "mech.the-ledger-renderer-s-own-exit-status-reaches-the-results-check"
+kind = "mechanics"
+check = "results"
+label = "the ledger renderer's own exit status reaches the results check"
+failure_class = "results.ledger-verdict-lost"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.the-results-check-passes-with-the-real-ledger-renderer"
+kind = "mechanics"
+check = "results"
+label = "the results check passes with the real ledger renderer"
+failure_class = "results.ledger-verdict-lost"
+legacy_signature = ""
+migrated = false
 
 [[fault]]
 id = "mech.cargo-build-target-dir-is-where-cargo-built"
@@ -3690,6 +3726,38 @@ check = "admission"
 label = "a refuted parity fire read as admitting"
 failure_class = "admission.rule-broken"
 legacy_signature = "FAIL  derive: a refuted parity fire bars"
+migrated = false
+[[fault]]
+id = "admission.admission_engine_library_changed"
+kind = "seeded-gate"
+check = "admission"
+label = "an engine library changed under a held exe"
+failure_class = "admission.engine-fingerprint-changed"
+legacy_signature = "ada48-llamacpp-qwen38flashnext-q20: engine_fingerprint changed"
+migrated = false
+[[fault]]
+id = "admission.admission_engine_recipe_exe_only"
+kind = "seeded-gate"
+check = "admission"
+label = "the engine recipe narrowed to the exe"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  engine: a library changed with the exe held changes the fingerprint"
+migrated = false
+[[fault]]
+id = "admission.admission_engine_pattern_narrowed"
+kind = "seeded-gate"
+check = "admission"
+label = "the engine recipe's library pattern narrowed"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  engine: the recipe hashes every shared object in the directory, a versioned name included"
+migrated = false
+[[fault]]
+id = "admission.admission_pruned_mix_unrequired"
+kind = "seeded-gate"
+check = "admission"
+label = "a pruned entry's calibration mix not required"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  engine: a pruned entry with no calibration mix is refused"
 migrated = false
 [[fault]]
 id = "admission.admission_constitutional_unrequired"
@@ -7259,6 +7327,70 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.registry-takes-one-shard-of-many"
 failure_class = "drive.registry-takes-one-shard-of-many"
+migrated = false
+
+[[fault]]
+id = "drive.registry-drops-the-projector"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-drops-the-projector"
+failure_class = "drive.registry-drops-the-projector"
+migrated = false
+
+[[fault]]
+id = "drive.registry-drops-the-draft"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-drops-the-draft"
+failure_class = "drive.registry-drops-the-draft"
+migrated = false
+
+[[fault]]
+id = "drive.registry-calls-one-file-a-set"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-calls-one-file-a-set"
+failure_class = "drive.registry-calls-one-file-a-set"
+migrated = false
+
+[[fault]]
+id = "drive.registry-takes-an-empty-list"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-takes-an-empty-list"
+failure_class = "drive.registry-takes-an-empty-list"
+migrated = false
+
+[[fault]]
+id = "drive.registry-resolves-a-sidecar-as-one-file"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-resolves-a-sidecar-as-one-file"
+failure_class = "drive.registry-resolves-a-sidecar-as-one-file"
+migrated = false
+
+[[fault]]
+id = "drive.registry-reads-a-draft-list-as-absent"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-reads-a-draft-list-as-absent"
+failure_class = "drive.registry-reads-a-draft-list-as-absent"
+migrated = false
+
+[[fault]]
+id = "drive.registry-keeps-a-quote-in-an-item"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-keeps-a-quote-in-an-item"
+failure_class = "drive.registry-keeps-a-quote-in-an-item"
+migrated = false
+
+[[fault]]
+id = "drive.registry-takes-any-string-as-a-digest"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-takes-any-string-as-a-digest"
+failure_class = "drive.registry-takes-any-string-as-a-digest"
 migrated = false
 
 [[fault]]

@@ -185,9 +185,28 @@ in a digest, an inferred field added to a type's list, an instance field added
 to one — plus an undeclared type, an empty declaration, and an unreadable
 registry at exit 2.
 
-**It is not wired into `verify.sh` yet**, because that file and `scripts/` are
-the clean room's. Until it is, this is a check that exists and does not run,
-which is the state the rule was written to avoid; the ask is on #68.
+**It runs in `verify.sh`'s `admission` check** (#202), before the admission derivation, with its own `--selftest` first.
+
+**The engine has a fingerprint too (#202).** `engine_identity` used to be the sha256 of the server executable alone. A llama.cpp build's executable is a stub of about 18 KB, and its engine is the shared objects beside it. So every substrate whose `engine_identity` is one digest also carries exactly one of these:
+
+- `engine_libraries` (basename to sha256), with `engine_fingerprint` over the exe and every library, and `engine_libraries_read` set to `process` or `disk`;
+- `engine_libraries_unreadable`, giving the reason;
+- `engine_single_digest_suffices`, giving the reason, stated as measured.
+
+The recipe hashes every shared object in the executable's own directory. It is read on the host with one of:
+
+    python3 substrates/check-fingerprints.py --read-engine <path>
+    python3 substrates/check-fingerprints.py --read-engine-pid <pid>
+
+A process read refuses a library replaced or rewritten since load, or mapped from outside the directory and the system's. The gate checks the registry, that its fingerprints recompute; whether a host still runs what it pins is the read, taken on the host.
+
+It is seen red in three cases:
+
+- a library digest changes while the exe digest holds;
+- the recipe is narrowed back to the exe;
+- its shared-object pattern loses versioned names.
+
+The reads behind the current fields, and how each is tied to its instance, are in `measurements/2026-10-01-engine-libraries/`.
 
 ## The interconnect, as a worked example of being wrong twice
 
@@ -223,6 +242,64 @@ list — two of its blocks are for other boards, one mounted on a custom
 3D-printed adapter. Everything else in the entry is orderable. A manifest that
 described the loop without saying so would be inviting a reader to reproduce
 something they cannot.
+
+## Pruned models, and a model that is not a candidate
+
+**A pruned model's entry declares its calibration mix, and any claim run on one declares its domain, because a general-corpus number would hide both sides** (planning, #143, comment 5922544337).
+
+- An entry marked `pruned = true` must carry `calibration_mix` as a non-empty string, and `pruned` is a boolean where present. `check-fingerprints.py` refuses either violation, and runs in the `admission` check.
+- Nothing restricts `calibration_mix` on an entry that is not pruned: an imatrix quant has a calibration corpus too.
+
+**Coder is not a candidate for any rung.** Planning's reasons, against Q8_0:
+- code KLD is at parity;
+- prose KLD is +84%;
+- top-1 is 7.7 points lower.
+
+An agent's reasoning traces are prose. Q2_0 remains the top rung. The 7.7 GB that Coder would free is the subject of a separate claim (placement against pruning at equal VRAM), not a reason to serve it. Coder has no entry here, because nothing was fired on it.
+
+## Registering your own box
+
+**A registered box is a declared fact, not an admitted rung.** An entry says what the box is. It does not say that results on it are comparable to anyone else's; that is #143's admission, which is separate work.
+
+**The registry is compiled into the binary.** `diet/src/drive/registry.rs` reads `substrates/registry.toml` with `include_str!`. `diet-drive serve --regimen` therefore refuses an id it does not find, and it names the id: "`<id>` is not a substrate in the registry". To drive under a regimen on your own server:
+
+1. add an equipment entry and a substrate entry to `substrates/registry.toml`;
+2. rebuild: `cargo build -p discipline-diet --bin diet-drive`, from the repository root;
+3. run `python3 substrates/check-fingerprints.py` until it reports no problems.
+
+`serve` without `--regimen` needs none of this. It starts against any endpoint and announces no substrate.
+
+### The equipment entry: `[equipment.<id>]`
+
+- **`entry_type`**, one the registry declares for real hardware: `accelerator-host`, `x86-workstation` or `apple-silicon-laptop`. (`canned-server` is diet-drive's own loopback server, not a machine.) Each type's `hardware_fields` are listed under `[entry_type.<type>]`; if your machine needs a type none of these fits, that is a new `[entry_type.*]` with its own field list.
+- **Every field its type declares**, as measured on the machine: the parts, memory and accelerator.
+  - No hostname, serial number, MAC address or location appears anywhere. Those are identity (the ruling on #52), and keeping them out is a rule reviewers hold you to; the hygiene gate catches only some shapes of them.
+  - A value you could not measure stays out of the identity. Record it on the entry with `<field>_inferred = true` only if the field is not one the type declares: `check-fingerprints.py` refuses an inferred field the type declares (an unverified claim cannot be part of an identifier). The laptop's core counts are the live case: recorded, inferred, and not in its type's `hardware_fields`.
+- **`hardware_fingerprint`**: the sha256 of exactly the declared fields, canonically serialised. `check-fingerprints.py` recomputes it and prints the digest it wants. The digest is also what a regimen's `substrate_hardware` must equal.
+
+### The substrate entry: `[substrate.<id>]`
+
+| field | what it holds | how it is measured |
+| --- | --- | --- |
+| `equipment` | the equipment id above | -- |
+| `engine_name` | the engine, e.g. `llama.cpp` | -- |
+| `engine_identity` | the sha256 of the running server binary | `sha256sum /proc/<pid>/exe` on Linux, with the process found by exact name (`pgrep -x llama-server`) |
+| `engine_libraries`, `engine_libraries_read`, `engine_fingerprint` | the shared objects beside the binary, which are where a llama.cpp build's engine lives | `python3 substrates/check-fingerprints.py --read-engine-pid <pid>` (or `--read-engine <path>` from disk), copied as it prints them; a static binary instead says why in `engine_single_digest_suffices` |
+| `engine_commit` **or** `engine_build_info` | what the start-time check compares with the server's `GET /props` `build_info` | if `build_info` names a commit (`bNNNN-<hash>`), `engine_commit` is the full 40-hex commit the hash resolves to in your checkout (`git rev-parse <hash>`). If it names none, as a prebuilt release reports `b0-unknown-dirty`, `engine_build_info` is that exact literal, and the check reports `engine_identity` as unreported (literal matched) (#157) |
+| `weights_main` | the sha256 of the model file | `sha256sum`. One file is one string. The drive refuses a list of shards today (#92) |
+| `weights_main_file`, `weights_draft` | the file's name; a draft model's digest, if the server loads one | -- |
+| `serving_flags`, `serving_context`, `serving_slots` | the serving line, without paths or keys | read off the running process's command line (`/proc/<pid>/cmdline`) |
+| `sampler_card` | what the line fixes, or "none on the serving line; each request sets its own" | -- |
+| `chat_template_sha256` | optional: the served template's digest | from `GET /props` `chat_template` |
+
+**Instances.** One instance, with the date of its reads and `current = true`, says what deployment pinned the entry (see Instances above). A later change to the operating system, engine or line is a new instance, never an edit.
+
+A regimen naming your substrate then binds the session to these declared facts:
+- the substrate id;
+- `substrate_hardware`, the equipment's fingerprint;
+- the server's `build_info`, against `engine_commit` or `engine_build_info`.
+
+`serve` refuses at start if any of these disagrees, and names the field.
 
 ## Still to be registered
 
