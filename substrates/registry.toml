@@ -323,6 +323,8 @@ engine_release_downloaded = "2026-06-14"
 engine_build_toolchain = "GCC 13.3.0, CUDA 13.1, x86_64"
 engine_self_reported_version = "0 (unknown)"
 engine_self_reported_build_info = "b0-unknown-dirty"
+engine_commit = "a620cbd481d16d3ccb5c8c96fa2fbd70191bea38"
+engine_commit_is = "BY RECORD, NOT BY THE BYTES: the commit the release tag preview-v0.3.2 named when the tarball was downloaded (2026-06-14), before upstream re-pointed the tag to a descendant on 2026-07-10; the research program's local checkout of that tag records this full hash. The binary names no commit: --version reads 0 (unknown) and /props build_info reads b0-unknown-dirty (substrates/measurements/2026-09-29-r30-captures/build-info-floor.json, 2026-10-01). A check comparing build_info's commit part with this field has nothing to compare on this engine; the binary and library digests are its identity"
 engine_provenance_note = """
 The engine is an unpacked prebuilt release tarball, not a local build. That is \
 why there is no git checkout at or above the serving directory, no \
@@ -544,6 +546,8 @@ pinned = true
 engine_name = "beellama"
 engine_identity = "980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4"
 engine_identity_is = "sha256 of the llama-server binary, hashed through `/proc/<pid>/exe` of the running seat-B server at its launch on 2026-09-25 -- the same binary as the accelerator substrate's, run with the accelerator hidden"
+engine_commit = "a620cbd481d16d3ccb5c8c96fa2fbd70191bea38"
+engine_commit_is = "the same release as accel24-beellama-qwen27b-q4kxl, by the same record: see that entry's engine_commit_is"
 
 weights_main = "b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897"
 weights_main_file = "Qwen3-1.7B-Q4_K_M.gguf"
