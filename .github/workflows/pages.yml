@@ -1,21 +1,36 @@
 name: pages
 
-# Publishes the static placeholder through the Pages *Actions* pipeline, which
-# is how this repository's Pages is configured -- there is no gh-pages branch
-# to push to, and pushing one would leave a branch GitHub ignores while the
-# deploy reported success.
+# Publishes the site the gate built and passed, through the Pages *Actions*
+# pipeline -- there is no gh-pages branch, and pushing one would leave a branch
+# GitHub ignores while the deploy reported success (#32).
+#
+# Downstream of the gate's verdict, never beside it: this runs when a `verify`
+# run on main has COMPLETED, and publishes only if that run SUCCEEDED and was a
+# PUSH -- not a scheduled run, which re-checks an old sha and must not
+# redeploy it, and not a pull request. It builds nothing: the `exercise` and
+# `results` jobs of that very run built the replay and the ledger and uploaded
+# them as artifacts (`site-replay`, `site-ledger`); this downloads them by the
+# run's id, lays them beside the landing page, and checks the whole site again
+# with `./verify.sh --site` -- the shell under the Pages table, each recording
+# under the table that admitted it, each recording against its admission --
+# before it uploads anything. So it needs bash and the repository at the sha
+# that run checked, and no toolchain. scripts/check-ci-coverage.py holds the
+# guards and the order, mechanically.
 #
 # Static only. Nothing here reaches a network, a model, or a secret; the
 # id-token permission exists so deploy-pages can prove to Pages that this
-# workflow produced the artifact, not to reach anything.
+# workflow produced the artifact, and actions: read so it can fetch another
+# run's artifacts.
 
 on:
-  push:
+  workflow_run:
+    workflows: [verify]
+    types: [completed]
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -26,26 +41,44 @@ concurrency:
 jobs:
   deploy:
     name: publish
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # The sha that run checked: the site is that sha's, and so are the
+      # admissions and tables it is checked against.
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
-      # Publishing must not be able to route around the gate. Without this the
-      # site could serve a surface `./verify.sh --only pages` rejects.
-      - name: Gate the surface
-        run: ./verify.sh --only pages
-
-      - uses: actions/configure-pages@v5
+      - name: Fetch the replay and the ledger that run built
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          pattern: site-*
+          path: _artifacts
 
       - name: Assemble the site
         run: |
           set -euo pipefail
+          for part in replay ledger; do
+            [ -d "_artifacts/site-${part}" ] || { echo "::error::the run built no site-${part}; nothing is published without it"; exit 1; }
+          done
           rm -rf _site
           cp -r pages _site
-          ls -la _site
+          cp -r _artifacts/site-replay _site/replay
+          cp -r _artifacts/site-ledger _site/ledger
+          find _site -type f | sort
+
+      # The same check the gate ran over the build, run again over exactly what
+      # is about to be uploaded.
+      - name: Check the site
+        run: ./verify.sh --site _site
+
+      - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
