@@ -383,16 +383,20 @@ check_exercise() {
 
 # The published site (#32), DIR as Pages would serve it: two tables over its
 # two parts, then the recordings' admissions. The shell -- everything but the
-# recordings -- under the Pages table, small and curated; each recording under
-# the table that admitted it, the genesis table (#32, ruling 1), which is why
-# the recordings are not scanned under the Pages table and are not rewritten to
-# pass it. Then each recording against its admission
-# (exercise/scripts/admission.py): the recording that was admitted, under the
-# table as it was. Called by check_exercise over the build, and by pages.yml
-# over what it is about to publish. A hit names the site's own path.
+# recordings -- under the Pages table, small and curated. Each recording under
+# the table that admitted it (#32, ruling 1; the ruling on #210): the snapshot
+# its admission names, scripts/hygiene-admitted-<id>-patterns.tsv and its
+# siblings, not the live table, which may have moved on -- so the recordings
+# are not scanned under the Pages table, nor rewritten to pass it, nor failed
+# by a later table nobody admitted them under. Then each recording against its
+# admission (exercise/scripts/admission.py): the recording that was admitted,
+# under the snapshot as it was written. Called by check_exercise over the
+# build, and by pages.yml over what it is about to publish. A hit names the
+# site's own path.
 check_site() {
   local site="${1:?check_site: name the site directory}"
-  local data="${site}/replay/data" shell log rc=0
+  local data="${site}/replay/data" shell log groups patterns hashes rc=0
+  local -a payloads
   shell="$(mktemp -d)" || return 2
   log="$(mktemp)" || { rm -rf "$shell"; return 2; }
   if ! { cp -R "${site}/." "${shell}/" && rm -rf "${shell}/replay/data"; }; then
@@ -401,9 +405,20 @@ check_site() {
   fi
   bash scripts/hygiene.sh --patterns scripts/pages-patterns.tsv --tree "$shell" > "$log" 2>&1 || rc=$?
   sed "s|${shell}|${site}|g" "$log"
-  rm -rf "$shell" "$log"
-  [ "$rc" -eq 0 ] || return "$rc"
-  bash scripts/hygiene.sh --tree "$data" || return
+  rm -rf "$shell"
+  [ "$rc" -eq 0 ] || { rm -f "$log"; return "$rc"; }
+  # Each admitted table, over the recordings it governs, in a box of their own.
+  groups="$(python3 exercise/scripts/admission.py tables "$data")" || { rc=$?; rm -f "$log"; return "$rc"; }
+  while IFS=$'\t' read -r patterns hashes rest; do
+    IFS=$'\t' read -r -a payloads <<< "$rest"
+    shell="$(mktemp -d)" || { rm -f "$log"; return 2; }
+    cp -- "${payloads[@]}" "$shell/" || { rm -rf "$shell" "$log"; return 2; }
+    bash scripts/hygiene.sh --patterns "$patterns" --hashes "$hashes" --tree "$shell" > "$log" 2>&1 || rc=$?
+    sed "s|${shell}|${data}|g" "$log"
+    rm -rf "$shell"
+    [ "$rc" -eq 0 ] || { rm -f "$log"; return "$rc"; }
+  done <<< "$groups"
+  rm -f "$log"
   python3 exercise/scripts/admission.py verify "$data"
 }
 

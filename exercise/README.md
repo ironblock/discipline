@@ -28,13 +28,16 @@ since its side calls were written after the session, and the page says so.
 Each published recording is a file of its own beside the page,
 `data/<name>.js`, and carries its **admission** beside it in the tree:
 `src/drive/recorded/<name>.admission.json`, written by
-`python3 scripts/admission.py admit <name>`. The admission records the
-genesis table it was scanned under (by digest), the recording's own digest,
-and its scrub. A recording edited since, or a table changed since, fails the
-build until it is admitted again; a published recording with no admission
-does not build. The repository's `check_site` (`verify.sh`) scans the built
-site: the shell under the Pages table, the recordings under the genesis table,
-then each against its admission. `scripts/replay-smoke.mjs` opens the built
+`python3 scripts/admission.py admit <name>`. The admission names the table
+it was admitted under -- a snapshot of the genesis table, written once into
+`scripts/` as `hygiene-admitted-<id>-patterns.tsv` and its siblings -- with
+the snapshot's digests, the recording's own digest, and its scrub. A recording
+edited since, or a snapshot edited, fails the build; a change to the live
+table does not, since each recording stays under its snapshot until it is
+admitted again, deliberately. A published recording with no admission does not
+build. The repository's `check_site` (`verify.sh`) scans the built site: the
+shell under the Pages table, each recording under its admitted snapshot, then
+each against its admission. `scripts/replay-smoke.mjs` opens the built
 page under a path, as Pages serves it, and loads a recording through its real
 path.
 
