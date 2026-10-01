@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 94
+faults = 95
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -421,9 +421,9 @@ failure_class = "client.reply-cap-ignored"
 target = "diet/src/client/transport.rs"
 expect_exit = 101
 anchor = '''
-                    if raw.len() > self.reply_cap {'''
+                if raw.len() > reply_cap {'''
 becomes = '''
-                    if false && raw.len() > self.reply_cap {'''
+                if false && raw.len() > reply_cap {'''
 catches = [
     "client::tests::a_reply_past_the_declared_cap_is_refused_rather_than_read_forever",
 ]
@@ -1035,6 +1035,7 @@ becomes = '''
                 format!("X-Unused: {}\r\n", key.len())'''
 catches = [
     "client::stream::tests::a_bearer_credential_is_sent_as_an_authorization_header_and_only_then",
+    "client::stream::tests::props_is_asked_at_the_servers_root_with_the_bearer",
 ]
 
 [[fault]]
@@ -1655,4 +1656,17 @@ becomes = '''
     if false && spelled.is_none() {'''
 catches = [
     "client::tests::a_journalled_timings_rides_on_its_responses_row_digit_for_digit",
+]
+
+[[fault]]
+id = "client.props-asked-under-the-endpoints-path"
+failure_class = "client.props-asked-under-the-endpoints-path"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            "GET /props HTTP/1.1\r\nHost: {}:{}\r\nAccept: application/json\r\n\'''
+becomes = '''
+            "GET /v1/props HTTP/1.1\r\nHost: {}:{}\r\nAccept: application/json\r\n\'''
+catches = [
+    "client::stream::tests::props_is_asked_at_the_servers_root_with_the_bearer",
 ]

@@ -398,6 +398,34 @@ impl HttpStream {
         self
     }
 
+    /// The `Authorization` header line every request carries, or nothing
+    /// when there is no bearer.
+    fn authorization(&self) -> String {
+        self.bearer
+            .as_ref()
+            .map_or_else(String::new, |Bearer(key)| {
+                format!("Authorization: Bearer {key}\r\n")
+            })
+    }
+
+    /// The server's `GET /props`, at the root of the endpoint's host and
+    /// port whatever the endpoint's path, with the bearer when there is one:
+    /// where llama.cpp reports its `build_info` (the engine check, #157).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransportFailure`] when no reply arrived. A status other
+    /// than `200` is a reply, and is the caller's to judge.
+    pub fn props(&self, deadline: Instant) -> Result<transport::HttpReply, TransportFailure> {
+        let authorization = self.authorization();
+        let request = format!(
+            "GET /props HTTP/1.1\r\nHost: {}:{}\r\nAccept: application/json\r\n\
+             {authorization}Connection: close\r\n\r\n",
+            self.endpoint.host, self.endpoint.port
+        );
+        transport::exchange(&self.endpoint, &request, self.reply_cap, deadline)
+    }
+
     /// The same, with a smaller cap -- the unstreamed transport's reason,
     /// and its name: a 64 MiB guard is one no test can afford to fire, and a
     /// guard nobody has seen fire is not a guard. This is how it is seen.
@@ -468,12 +496,7 @@ impl Streaming for HttpStream {
         let _closing = Closing(handle);
 
         let body = wire::streaming_body(shape);
-        let authorization = self
-            .bearer
-            .as_ref()
-            .map_or_else(String::new, |Bearer(key)| {
-                format!("Authorization: Bearer {key}\r\n")
-            });
+        let authorization = self.authorization();
         let request = format!(
             "POST {} HTTP/1.1\r\nHost: {}:{}\r\nContent-Type: application/json\r\n\
              Accept: text/event-stream\r\n{authorization}Content-Length: {}\r\n\
@@ -1207,6 +1230,29 @@ mod tests {
                 (true, "thinking\n".to_owned()),
                 (false, "answer".to_owned())
             ]
+        );
+    }
+
+    #[test]
+    fn props_is_asked_at_the_servers_root_with_the_bearer() {
+        let stub = Stub::serving(vec![Act::Answer(
+            "{\"build_info\":\"b1-4ceb171\"}".to_owned(),
+        )])
+        .expect("loopback");
+        let bearer = Bearer::new("k3y-for-the-endpoint").expect("a usable key");
+        let reply = HttpStream::new(endpoint(&stub))
+            .with_bearer(bearer)
+            .props(deadline())
+            .expect("a reply");
+        assert_eq!(
+            (reply.status, reply.body.as_str()),
+            (200, "{\"build_info\":\"b1-4ceb171\"}")
+        );
+        let heads = stub.heads();
+        assert!(
+            heads[0].starts_with("GET /props HTTP/1.1\r\n")
+                && heads[0].contains("\r\nAuthorization: Bearer k3y-for-the-endpoint\r\n"),
+            "at the root, not under the endpoint's /v1/chat/completions: {heads:?}"
         );
     }
 
