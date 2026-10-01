@@ -26,7 +26,7 @@ These are captures C0–C5 of R3's plan (on #117), taken 2026-09-29 from 02:09:4
 | C4 | not taken: its condition, no progress frames in C1, did not hold | — |
 | C5, unstreamed | `diet/client/fixtures/llama-server-e7051ef-unstreamed.http` | `d9d2e92e…` |
 | C0b, build id (2026-10-01) | `build-info.json`, `build-info.raw` (one GET `/props`, occupying no slot); `engine-read.json` | `18033075…` |
-| C0c, the floor's build id (2026-10-01) | `build-info-floor.json`, `build-info-floor.raw` (one GET `/props` on the floor's production, occupying no slot) | `6ce8fc6d…` |
+| C0c, the floor's build id (2026-10-01) | `build-info-floor.json`, `build-info-floor.raw` (one GET `/props` on the floor's production, occupying no slot); `floor-tarball-stat.json` | `6ce8fc6d…` |
 
 ## C0: the limits
 
@@ -106,4 +106,4 @@ One read-only GET `/props` was made at 2026-10-01T06:47:22Z by `capture_c0c.py`,
   - The engine is an unpacked prebuilt release. The registry already recorded `b0-unknown-dirty` as its self-report.
   - Upstream's release workflow force-moved the tag and replaced the release's assets on every successful push run: twelve from 2026-06-07 to 2026-06-17, and again on 2026-07-10. So no commit is measured. By upstream's record, the last run to publish before the tarball was written (2026-06-14T20:09Z, by its birth time on the host, `floor-tarball-stat.json`) built `3975b51b`, but that is not matched to the tarball's digest. The entry says so (`engine_commit_unknown`).
   - Its identity is the binary's digest, and its libraries' digests once #205 merges.
-  - Under #157's ruling, the entry declares `engine_build_info = "b0-unknown-dirty"`. That is the literal a start-time check matches, and the check reports `engine_identity: unreported`.
+  - Under #157's ruling, the entry declares `engine_build_info = "b0-unknown-dirty"`. That is the literal a start-time check matches, and the check reports `engine_identity` as "unreported (literal matched)".

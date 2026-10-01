@@ -4,5 +4,10 @@
  "bytes": 375306877,
  "birth": "2026-06-14T20:09:23Z",
  "modified": "2026-06-14T20:09:41Z",
- "note": "birth is when the file was written on the host (the download); its sha256 is the registry's engine_release_tarball_sha256"
+ "note": "birth is when the file was written on the host (the download); its sha256 is the registry's engine_release_tarball_sha256",
+ "stat_raw": {
+  "birth_epoch": 1781467763,
+  "modified_epoch": 1781467781,
+  "bytes": 375306877
+ }
 }
