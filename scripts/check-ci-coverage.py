@@ -427,6 +427,53 @@ def main() -> int:
                 f"(found {value!r}); it is what CI is held to, and nothing else says it"
             )
 
+    # 10. the site is published only from what the gate passed (#32 I3)
+    #
+    #    pages.yml runs downstream of a `verify` run and publishes only when
+    #    that run SUCCEEDED, was a PUSH and ran this repository's code -- a
+    #    branch filter matches a fork's `main` by name -- and only the sha still
+    #    at main's tip, so a re-run of an older push run cannot deploy over a
+    #    newer one. It checks the site with `./verify.sh --site _site` before
+    #    it uploads, nothing lets a step fail and the job go on, and what it
+    #    uploads is the site it checked. Read from the lines that are not
+    #    comments: a guard commented out is no guard. And the two parts it
+    #    downloads must be uploaded by something the gate runs.
+    pages = WORKFLOWS / "pages.yml"
+    if pages.is_file():
+        live = "\n".join(l for l in pages.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("#"))
+        if not re.search(r"^  workflow_run:\s*$", live, re.M) or not re.search(r"^\s+workflows: \[verify\]\s*$", live, re.M):
+            failures.append("pages.yml: does not run downstream of the `verify` workflow (workflow_run of verify)")
+        if re.search(r"^  (push|workflow_dispatch|schedule|pull_request|pull_request_target):", live, re.M):
+            failures.append("pages.yml: publishes on a trigger of its own, not only on a `verify` run's completion")
+        guards = {
+            "github.event.workflow_run.conclusion == 'success'": "pages.yml: deploys on a workflow_run whatever its conclusion",
+            "github.event.workflow_run.event == 'push'": "pages.yml: deploys on a run that was not a push",
+            "github.event.workflow_run.head_repository.full_name == github.repository": "pages.yml: deploys a run of a fork's code",
+        }
+        conditions = re.findall(r"^    if: (.+?)\s*$", live, re.M)
+        clauses = [c.strip() for c in conditions[0].split("&&")] if len(conditions) == 1 else []
+        for guard, message in guards.items():
+            if guard not in clauses:
+                failures.append(message)
+        if len(conditions) == 1 and (set(clauses) - set(guards) or "||" in conditions[0] or "!" in conditions[0]):
+            failures.append(f"pages.yml: the deploy's condition is not exactly its guards joined by && (found `{conditions[0]}`)")
+        upload_at = live.find("actions/upload-pages-artifact")
+        check = re.search(r"^\s+run: \./verify\.sh --site _site\s*$", live, re.M)
+        if upload_at != -1 and (not check or check.start() > upload_at):
+            failures.append("pages.yml: upload-pages-artifact is not preceded by ./verify.sh --site _site")
+        tip = live.find("git ls-remote origin refs/heads/main")
+        if upload_at != -1 and (tip == -1 or tip > upload_at):
+            failures.append("pages.yml: publishes a sha without checking it is still main's tip")
+        if re.search(r"^\s+continue-on-error:", live, re.M):
+            failures.append("pages.yml: a step may fail and the deploy go on (continue-on-error)")
+        uploaded_path = re.search(r"actions/upload-pages-artifact@\S+\s*\n\s+with:\s*\n\s+path: (\S+)", live)
+        if upload_at != -1 and (not uploaded_path or uploaded_path.group(1) != "_site"):
+            failures.append("pages.yml: uploads something other than the _site it checked")
+        uploaded = "".join((WORKFLOWS / wf).read_text(encoding="utf-8") for wf in sorted(gating) if (WORKFLOWS / wf).is_file())
+        for part in ("site-replay", "site-ledger"):
+            if not re.search(rf"^\s+name: {part}\s*$", uploaded, re.M):
+                failures.append(f"pages.yml: publishes {part}, which no workflow the gate runs uploads")
+
     for message in failures:
         print(message, file=sys.stderr)
     if failures:

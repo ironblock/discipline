@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 128
+mechanics_assertions = 131
 unseedable_guards = 2
 migrated = 0
 
@@ -943,6 +943,15 @@ legacy_signature = "render-ledger: [0-9a-z-]+: row carries no result"
 migrated = false
 
 [[fault]]
+id = "results.results_ledger_page_calls_out"
+kind = "seeded-gate"
+check = "results"
+label = "the ledger page pulls in an outside stylesheet"
+failure_class = "results.ledger-pages-table"
+legacy_signature = "hygiene: external-stylesheet:"
+migrated = false
+
+[[fault]]
 id = "exercise.exercise_type_error"
 kind = "seeded-gate"
 check = "exercise"
@@ -1564,6 +1573,33 @@ kind = "mechanics"
 check = "results"
 label = "the results check passes with the real ledger renderer"
 failure_class = "results.ledger-verdict-lost"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.site-beside-selftest-is-a-misuse"
+kind = "mechanics"
+check = "repo"
+label = "--site beside --selftest is a misuse"
+failure_class = "usage.site-misuse"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.selftest-beside-site-is-a-misuse"
+kind = "mechanics"
+check = "repo"
+label = "--selftest beside --site is a misuse"
+failure_class = "usage.site-misuse"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.site-naming-no-directory-is-a-misuse"
+kind = "mechanics"
+check = "repo"
+label = "--site naming no directory is a misuse"
+failure_class = "usage.site-misuse"
 legacy_signature = ""
 migrated = false
 
@@ -3758,6 +3794,70 @@ check = "derive"
 label = "a scope past its own failure accepted"
 failure_class = "gate.derive-accepts-a-fast-green"
 legacy_signature = "a scope naming another target selected something"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_deploys_on_any_conclusion"
+kind = "seeded-gate"
+check = "ci"
+label = "the site deployed whatever the gate said"
+failure_class = "wiring.pages-conclusion"
+legacy_signature = "pages.yml: deploys on a workflow_run whatever its conclusion"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_deploys_on_any_event"
+kind = "seeded-gate"
+check = "ci"
+label = "the site deployed from a run not a push"
+failure_class = "wiring.pages-event"
+legacy_signature = "pages.yml: deploys on a run that was not a push"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_deploys_forks"
+kind = "seeded-gate"
+check = "ci"
+label = "the site deployed from a fork's code"
+failure_class = "wiring.pages-fork"
+legacy_signature = "pages.yml: deploys a run of a fork's code"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_guards_either"
+kind = "seeded-gate"
+check = "ci"
+label = "the deploy guards joined by ||"
+failure_class = "wiring.pages-conjunction"
+legacy_signature = "pages.yml: the deploy's condition is not exactly its guards joined by &&"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_uploads_unchecked"
+kind = "seeded-gate"
+check = "ci"
+label = "the site uploaded unchecked"
+failure_class = "wiring.pages-unchecked-upload"
+legacy_signature = "pages.yml: upload-pages-artifact is not preceded by \\./verify\\.sh --site _site"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_publishes_an_older_sha"
+kind = "seeded-gate"
+check = "ci"
+label = "the site published at a sha not main's tip"
+failure_class = "wiring.pages-older-sha"
+legacy_signature = "pages.yml: publishes a sha without checking it is still main's tip"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_publishes_on_its_own_trigger"
+kind = "seeded-gate"
+check = "ci"
+label = "the site published on a trigger of its own"
+failure_class = "wiring.pages-own-trigger"
+legacy_signature = "pages.yml: publishes on a trigger of its own"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_ledger_not_uploaded"
+kind = "seeded-gate"
+check = "ci"
+label = "the ledger published but never uploaded"
+failure_class = "wiring.pages-part-not-uploaded"
+legacy_signature = "pages.yml: publishes site-ledger, which no workflow the gate runs uploads"
 migrated = false
 [[fault]]
 id = "ci.ci_pr_branch_filter"
