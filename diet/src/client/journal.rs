@@ -16,9 +16,11 @@
 //!
 //! This is the second. [`project`] returns both halves.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
-use crate::formats::record::{Count, Event};
+use crate::formats::record::json::Decimal;
+use crate::formats::record::{self, Count, Event};
 
 use super::echo::Verified;
 use super::head::Head;
@@ -386,21 +388,17 @@ fn lost(entry: &Entry) -> Option<(&'static str, Ask)> {
                 key: "cache",
             },
         )),
-        Entry::Timings { .. } => Some((
-            "per-request timings as the server reported them: `response.timings`, the \
-             server's own keys (prompt_n, cache_n, prompt_ms, predicted_n, predicted_ms, \
-             draft_n, draft_n_accepted), milliseconds as exact decimals. DEMANDED by #117's \
-             re-ranking ruling: per-message timings and cache counts are blocking",
-            Key {
-                row: "response",
-                key: "timings",
-            },
-        )),
         // The retry LINK is spellable and is carried by the next request's
         // `retry_of`; only its reason is not, and that is noted on `Sent`
         // where the reason travels. `Sent` and `Received` are projected, and
-        // what they lose is decided per-row inside the projection.
-        Entry::Retried { .. } | Entry::Issued { .. } | Entry::Received { .. } => None,
+        // what they lose is decided per-row inside the projection. Timings
+        // are spelled since #92's record bump: `project` writes them onto the
+        // response row of the request they measured, and names there what it
+        // cannot write.
+        Entry::Retried { .. }
+        | Entry::Issued { .. }
+        | Entry::Received { .. }
+        | Entry::Timings { .. } => None,
     }
 }
 
@@ -473,6 +471,18 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
         }
     };
 
+    // A request's timings are their own entry, journalled before its
+    // response's; they ride on that response's row (#92, R3's DoD 5).
+    let timings_of: BTreeMap<&str, &Timings> = journal
+        .entries
+        .iter()
+        .filter_map(|entry| match entry {
+            Entry::Timings { id, timings } => Some((id.as_str(), timings)),
+            _ => None,
+        })
+        .collect();
+    let mut answered = BTreeSet::new();
+
     for entry in &journal.entries {
         match entry {
             Entry::Issued {
@@ -511,8 +521,11 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
                     // spelling for a count, so the absence is what is lost.
                     output_tokens: output_tokens.unwrap_or_default(),
                     text: None,
-                    timings: None,
+                    timings: timings_of
+                        .get(to_request.as_str())
+                        .and_then(|timings| spelled_timings(timings, &mut note)),
                 });
+                answered.insert(to_request.as_str());
                 if output_tokens.is_none() {
                     note(
                         EntryKind::Received,
@@ -536,6 +549,8 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
                     );
                 }
             }
+            // Written onto its response's row, above.
+            Entry::Timings { .. } => {}
             // Everything else loses all or nothing, and `lost` is the
             // exhaustive match: a new entry kind fails to compile there until
             // somebody decides whether the record can spell it.
@@ -547,8 +562,63 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
         }
     }
 
+    if timings_of.keys().any(|id| !answered.contains(id)) {
+        note(
+            EntryKind::Timings,
+            "timings for an attempt that wrote no response row",
+            Ask::Exempt("`response.timings` is spelled; the row it rides on is what is missing"),
+        );
+    }
+
     Projection {
         events,
         unspellable,
     }
+}
+
+/// `timings` as the record spells them, or nothing and a note naming why.
+fn spelled_timings(
+    timings: &Timings,
+    note: &mut impl FnMut(EntryKind, &'static str, Ask),
+) -> Option<record::Timings> {
+    let spelled = record_timings(timings);
+    if spelled.is_none() {
+        note(
+            EntryKind::Timings,
+            "timings with a value past what the record can spell",
+            Ask::Exempt("the client's reader refuses such a value before it journals one"),
+        );
+    }
+    spelled
+}
+
+/// The client's timings as the record spells them: key for key, and a
+/// duration's digits exactly as the server wrote them (#92). `None` when a
+/// value is past what the record can spell.
+fn record_timings(timings: &Timings) -> Option<record::Timings> {
+    let count = |n: Option<u64>| match n {
+        None => Some(None),
+        Some(n) => Count::new(n).ok().map(Some),
+    };
+    let millis = |m: &Option<super::stream::Millis>| match m {
+        None => Some(None),
+        Some(m) => {
+            let text = m.as_str();
+            match text.parse::<u64>() {
+                Ok(n) if n.to_string() == text => {
+                    Count::new(n).ok().map(|n| Some(record::Millis::Whole(n)))
+                }
+                _ => Decimal::new(text).map(|d| Some(record::Millis::Exact(d))),
+            }
+        }
+    };
+    Some(record::Timings {
+        prompt_n: count(timings.prompt_n)?,
+        cache_n: count(timings.cache_n)?,
+        prompt_ms: millis(&timings.prompt_ms)?,
+        predicted_n: count(timings.predicted_n)?,
+        predicted_ms: millis(&timings.predicted_ms)?,
+        draft_n: count(timings.draft_n)?,
+        draft_n_accepted: count(timings.draft_n_accepted)?,
+    })
 }
