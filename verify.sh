@@ -6299,14 +6299,21 @@ prove_patterns() {
 # reverted-and-still-green before this existed.
 expect_exit() {
   local label="$1" want="$2"; shift 2
-  local rc=0
-  "$@" > /dev/null 2>&1 || rc=$?
+  local rc=0 said
+  # Kept, and shown only when the exit is wrong (#208): a mechanics case that
+  # fails once on the runner and passes everywhere else is diagnosed from the
+  # one log that saw it, or not at all. Discarding the output made "BAD exit 1"
+  # the whole record of a failure nobody could then reproduce.
+  said="$(mktemp)" || said=/dev/null
+  "$@" > "$said" 2>&1 || rc=$?
   if [ "$rc" -eq "$want" ]; then
     printf 'OK    exit %-3d  %s\n' "$rc" "$label"
   else
     printf 'BAD   exit %-3d (wanted %d)  %s\n' "$rc" "$want" "$label"
+    [ "$said" = /dev/null ] || tail -n 40 "$said" | sed 's/^/      | /'
     SELFTEST_BROKEN+=("mechanics: ${label}")
   fi
+  [ "$said" = /dev/null ] || rm -f "$said"
 }
 
 prove_mechanics() {
@@ -8341,6 +8348,19 @@ PYEOF
     bash -c "cd '${depless}/a-nested-trees-dep-info' \
       && DIET_BIN='${depless}/a-nested-trees-dep-info/diet-bin' \
       python3 '${ROOT}/scripts/resolve-diet.py'"
+
+  # --- a mechanics case that fails says why (#208) ---
+  #
+  # A case that failed once on the runner left only "BAD exit 1": expect_exit
+  # discarded the command's output, so the one log that saw the failure could
+  # not name it. Defined in a subshell so its BAD lands nowhere but here.
+  # ...and only then: a case that passes prints its OK line and nothing else.
+  expect_exit "a mechanics case that fails shows the command's own words" 0 \
+    bash -c "eval \"\$(sed -n '/^expect_exit() {/,/^}/p' '${ROOT}/verify.sh')\"; \
+      SELFTEST_BROKEN=(); out=\$(expect_exit probe 0 sh -c 'echo the-reason-it-failed >&2; exit 3'); \
+      grep -qF 'the-reason-it-failed' <<<\"\$out\" || exit 1; \
+      hit=\$(expect_exit quiet 0 sh -c 'echo noise-a-hit-must-not-print'); \
+      [ \"\$hit\" = 'OK    exit 0    quiet' ]"
 
   # --- the resolver's own suite cannot report a pass it did not measure ---
   #
