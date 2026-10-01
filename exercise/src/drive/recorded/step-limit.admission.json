@@ -1,0 +1,35 @@
+{
+  "recording": "exercise/src/drive/recorded/step-limit.json",
+  "recording_sha256": "3af03d41a802a84f09690cf6a633d4658a138b4b2d112089ed24623bb3a10805",
+  "table": {
+    "id": "2e4af4dbf851",
+    "patterns": {
+      "path": "scripts/hygiene-admitted-2e4af4dbf851-patterns.tsv",
+      "sha256": "1400a5e90b1053bcfeb3b8dd2f270d2991d0bdef9497b27007afbdf3e64fc06b"
+    },
+    "exceptions": {
+      "path": "scripts/hygiene-admitted-2e4af4dbf851-exceptions.tsv",
+      "sha256": "d6cb790d9144801ef99341b8b3ee758252cda0c26aa7e1bd8315b0b80f627332"
+    },
+    "hashes": {
+      "path": "scripts/hygiene-admitted-2e4af4dbf851-hashes.txt",
+      "sha256": "3d0d8da5e532e11723bf71a5c218812fce29fd6322c126f11386683a5b58bdb3"
+    }
+  },
+  "taken_from": {
+    "patterns": {
+      "path": "scripts/hygiene-patterns.tsv",
+      "sha256": "1400a5e90b1053bcfeb3b8dd2f270d2991d0bdef9497b27007afbdf3e64fc06b"
+    },
+    "exceptions": {
+      "path": "scripts/hygiene-exceptions.tsv",
+      "sha256": "d6cb790d9144801ef99341b8b3ee758252cda0c26aa7e1bd8315b0b80f627332"
+    },
+    "hashes": {
+      "path": "scripts/hygiene-hashes.txt",
+      "sha256": "3d0d8da5e532e11723bf71a5c218812fce29fd6322c126f11386683a5b58bdb3"
+    }
+  },
+  "cites": "the snapshot (table): the rule this recording was admitted under. At admission it was the live genesis table (taken_from), byte for byte; the live table may move on, and this recording stays under its snapshot until it is admitted again.",
+  "scrub": "Scrubbed: the account name and its home directory (now user and /work), run directories (/tmp/session), internal ticket ids."
+}

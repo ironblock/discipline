@@ -1,11 +1,16 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { existsSync, readFileSync } from 'node:fs';
+
 import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
 import react from '@vitejs/plugin-react';
 import { playwright } from '@vitest/browser-playwright';
-import type { ProxyOptions } from 'vite';
+import type { Plugin, ProxyOptions } from 'vite';
 import { defineConfig } from 'vitest/config';
+
+import { PUBLISHED } from './src/replay/published.ts';
+import { wrap } from './src/replay/payload.ts';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,13 +31,49 @@ const configure: NonNullable<ProxyOptions['configure']> = (proxy) => {
 };
 const proxied = drive ? Object.fromEntries(['/events', '/commands'].map((route) => [route, { target: drive, changeOrigin: false, configure }])) : undefined;
 
+// The replay page (#32): `pnpm build:replay` builds `replay.html` alone into
+// ../_site/replay/, its index, with `base: './'` so it works under whatever
+// path Pages serves it from. Each published recording is written beside it as
+// `data/<name>.js` (src/replay/payload.ts), with its admission -- the table it
+// was scanned under and its digests (scripts/admission.py) -- beside that: never
+// imported, so never bundled. A published recording with no admission does
+// not build.
+const recorded = (file: string) => path.join(dirname, 'src/drive/recorded', file);
+const replayPayload: Plugin = {
+  name: 'exercise:replay-payload',
+  apply: 'build',
+  // After Vite's own HTML plugin has emitted the page, so the page can be renamed.
+  enforce: 'post',
+  generateBundle(_options, bundle) {
+    // The page is the directory's index: `replay/`, not `replay/replay.html`.
+    const html = bundle['replay.html'];
+    if (html?.type === 'asset') {
+      delete bundle['replay.html'];
+      this.emitFile({ type: 'asset', fileName: 'index.html', source: html.source });
+    }
+    for (const name of PUBLISHED) {
+      const admission = recorded(`${name}.admission.json`);
+      if (!existsSync(admission)) this.error(`exercise/src/drive/recorded/${name}.json: published but never admitted (no ${name}.admission.json beside it; scripts/admission.py admit ${name})`);
+      this.emitFile({ type: 'asset', fileName: `data/${name}.js`, source: wrap(readFileSync(recorded(`${name}.json`), 'utf8')) });
+      this.emitFile({ type: 'asset', fileName: `data/${name}.admission.json`, source: readFileSync(admission, 'utf8') });
+    }
+  },
+};
+
 // One config for the app (`pnpm dev`), Storybook and Vitest. Two test
 // projects: every story that is not tagged `!test` is a browser test
 // (`storybook`), and every `*.test.ts` is a plain unit test in Node (`unit`)
 // -- the fold, the transports, the layout maths: cases that are sequences,
 // not pictures.
-export default defineConfig({
-  plugins: [react()],
+export default defineConfig(({ mode }) => ({
+  plugins: [react(), ...(mode === 'replay' ? [replayPayload] : [])],
+  ...(mode === 'replay' ? { base: './' } : {}),
+  build: {
+    // Off: Vite 8 hands the modulepreload polyfill to Rolldown, whose injected
+    // text calls `fetch(`, which the Pages table forbids (#32, N1).
+    modulePreload: { polyfill: false },
+    ...(mode === 'replay' ? { outDir: path.join(dirname, '../_site/replay'), emptyOutDir: true, rollupOptions: { input: path.join(dirname, 'replay.html') } } : {}),
+  },
   ...(proxied ? { server: { proxy: proxied } } : {}),
   test: {
     projects: [
@@ -55,4 +96,4 @@ export default defineConfig({
       },
     ],
   },
-});
+}));

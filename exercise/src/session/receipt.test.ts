@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { LogLine } from '../drive/log.ts';
 import { place } from '../drive/place.ts';
 import type { Unplaced } from '../drive/script.ts';
-import { RECORDINGS, recordedAt } from '../drive/recorded.ts';
+import { recordedAt } from '../drive/recorded.ts';
+import { RECORDINGS } from '../drive/recordings.ts';
 import { fold } from './fold.ts';
 import { receiptOf } from './receipt.ts';
 

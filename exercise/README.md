@@ -16,7 +16,30 @@ pnpm dev              # the harness on the canned transport, http://localhost:51
 pnpm storybook        # the surface at every moment of the specimen, http://localhost:6006
 pnpm verify           # typecheck, lint, unit tests, every story as a browser test
 pnpm perf             # a performance trace: frames, long frames, layout, style, script, a profile (--ablate, --css)
+pnpm build:replay     # the replay page for Pages (#32), into ../_site/replay/
 ```
+
+**The replay page** (#32, `replay.html`, `src/replay.tsx`) is the surface
+built for GitHub Pages: a recorded session replayed from this origin, with
+no drive, no endpoint and nothing fetched but the site's own files. It
+publishes `first-drive`, `cancelled-capture` and `step-limit`, which were
+recorded whole (`src/replay/published.ts`); `voxel-stress` is not published,
+since its side calls were written after the session, and the page says so.
+Each published recording is a file of its own beside the page,
+`data/<name>.js`, and carries its **admission** beside it in the tree:
+`src/drive/recorded/<name>.admission.json`, written by
+`python3 scripts/admission.py admit <name>`. The admission names the table
+it was admitted under -- a snapshot of the genesis table, written once into
+`scripts/` as `hygiene-admitted-<id>-patterns.tsv` and its siblings -- with
+the snapshot's digests, the recording's own digest, and its scrub. A recording
+edited since, or a snapshot edited, fails the build; a change to the live
+table does not, since each recording stays under its snapshot until it is
+admitted again, deliberately. A published recording with no admission does not
+build. The repository's `check_site` (`verify.sh`) scans the built site: the
+shell under the Pages table, each recording under its admitted snapshot, then
+each against its admission. `scripts/replay-smoke.mjs` opens the built
+page under a path, as Pages serves it, and loads a recording through its real
+path.
 
 pnpm is pinned in `package.json` (`packageManager`). A pnpm at another
 version switches to the pinned one by itself, and on an Intel Mac that switch

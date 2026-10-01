@@ -13,6 +13,7 @@
     "dev": "vite",
     "storybook": "storybook dev -p 6006",
     "build": "storybook build",
+    "build:replay": "vite build --mode replay",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
