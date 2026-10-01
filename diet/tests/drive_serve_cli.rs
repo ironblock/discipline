@@ -454,15 +454,6 @@ fn a_drive_server_refuses_to_start_on_a_substrate_the_registry_does_not_resolve(
         said.contains("`nowhere-at-all` is not a substrate"),
         "{said}"
     );
-    // Registered, and its main weights are two shards the record cannot spell.
-    let regimen = regimen_naming("ada48-llamacpp-qwen38flashnext-q20");
-    let path = regimen.0.to_string_lossy().into_owned();
-    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
-    assert_eq!(code, Some(1), "{said}");
-    assert!(
-        said.contains("list of shards") && said.contains("#92"),
-        "{said}"
-    );
 }
 
 #[test]
@@ -593,4 +584,60 @@ fn a_drive_server_refuses_a_wildcard_before_it_asks_the_engine() {
     assert_eq!(code, Some(2), "{said}");
     assert!(said.contains("is a wildcard"), "{said}");
     assert!(stub.heads().is_empty(), "{:?}", stub.heads());
+}
+
+#[test]
+fn a_drive_server_starts_on_a_substrate_of_several_shards() {
+    // Two main shards and a draft, which record v1 spells since #211: the
+    // substrate resolves, and its server on the registered engine starts.
+    let id = "ada48-llamacpp-qwen38flashnext-q20";
+    let regimen = regimen_registered(id);
+    let path = regimen.0.to_string_lossy().into_owned();
+    // The build its registered engine reports, read from the registry rather
+    // than written here: the entry moves with its instances (#225).
+    let registered = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+        .expect("two shards resolve");
+    let build = registered.engine_build_info.unwrap_or_else(|| {
+        format!(
+            "b1-{}",
+            &registered.engine_commit.expect("an engine identity")[..7]
+        )
+    });
+    let stub = Stub::serving(vec![props_saying(&build)]).expect("loopback");
+    let served = start(&stub.url(), &["--regimen", &path]);
+    assert_eq!(
+        (served.substrate.as_deref(), served.engine_build.as_deref()),
+        (Some(id), Some(build.as_str()))
+    );
+}
+
+#[test]
+fn a_drive_server_starts_on_a_prebuilt_engine_by_its_literal() {
+    // The floor: a prebuilt engine whose `/props` names no commit, declared
+    // by the literal it reports (#209). Ruled onto this PR by #214.
+    let id = "accel24-beellama-qwen27b-q4kxl";
+    let regimen = regimen_registered(id);
+    let path = regimen.0.to_string_lossy().into_owned();
+    let stub = Stub::serving(vec![props_saying("b0-unknown-dirty")]).expect("loopback");
+    let served = start(&stub.url(), &["--regimen", &path]);
+    assert_eq!(
+        (
+            served.substrate.as_deref(),
+            served.engine_build.as_deref(),
+            served.engine_identity.as_deref()
+        ),
+        (
+            Some(id),
+            Some("b0-unknown-dirty"),
+            Some("unreported (literal matched)")
+        )
+    );
+    // Any other build is refused, naming the literal it is not.
+    let stub = Stub::serving(vec![props_saying("b1-4ceb171")]).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("reports exactly") && said.contains("b0-unknown-dirty"),
+        "{said}"
+    );
 }
