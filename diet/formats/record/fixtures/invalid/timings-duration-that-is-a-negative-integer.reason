@@ -1,0 +1,2 @@
+A duration is never negative, whether the server wrote it as an integer or a
+decimal; read through unsigned_abs, -40 would become 40.
