@@ -589,15 +589,25 @@ fn a_drive_server_refuses_a_wildcard_before_it_asks_the_engine() {
 #[test]
 fn a_drive_server_starts_on_a_substrate_of_several_shards() {
     // Two main shards and a draft, which record v1 spells since #211: the
-    // substrate resolves, and its server on the pinned commit starts.
+    // substrate resolves, and its server on the registered engine starts.
     let id = "ada48-llamacpp-qwen38flashnext-q20";
     let regimen = regimen_registered(id);
     let path = regimen.0.to_string_lossy().into_owned();
-    let stub = Stub::serving(vec![props_saying("b7-e7051ef")]).expect("loopback");
+    // The build its registered engine reports, read from the registry rather
+    // than written here: the entry moves with its instances (#225).
+    let registered = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+        .expect("two shards resolve");
+    let build = registered.engine_build_info.unwrap_or_else(|| {
+        format!(
+            "b1-{}",
+            &registered.engine_commit.expect("an engine identity")[..7]
+        )
+    });
+    let stub = Stub::serving(vec![props_saying(&build)]).expect("loopback");
     let served = start(&stub.url(), &["--regimen", &path]);
     assert_eq!(
         (served.substrate.as_deref(), served.engine_build.as_deref()),
-        (Some(id), Some("b7-e7051ef"))
+        (Some(id), Some(build.as_str()))
     );
 }
 
