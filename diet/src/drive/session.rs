@@ -1606,13 +1606,18 @@ pub(in crate::drive) mod tests {
                 _ => None,
             })
             .expect("a response line");
-        let response = response.expect("the response line carries timings");
         assert_eq!(
-            (
-                response.cache_n,
-                response.prompt_ms.as_ref().map(log::Millis::as_str)
-            ),
-            (Some(160), Some("225.217"))
+            response,
+            Some(log::Timings {
+                prompt_n: Some(18),
+                cache_n: Some(160),
+                prompt_ms: log::Millis::new("225.217"),
+                predicted_n: Some(66),
+                predicted_ms: log::Millis::new("557.106"),
+                draft_n: Some(72),
+                draft_n_accepted: Some(44),
+            }),
+            "every key, as the server sent it"
         );
     }
 
@@ -2273,8 +2278,8 @@ pub(in crate::drive) mod tests {
                     prompt_ms: crate::client::stream::Millis::new("297.198"),
                     predicted_n: Some(312),
                     predicted_ms: crate::client::stream::Millis::new("2591"),
-                    draft_n: None,
-                    draft_n_accepted: None,
+                    draft_n: Some(312),
+                    draft_n_accepted: Some(207),
                 }),
             },
             Event::Cancelled {
@@ -2412,8 +2417,8 @@ pub(in crate::drive) mod tests {
                     prompt_ms: log::Millis::new("297.198"),
                     predicted_n: Some(312),
                     predicted_ms: log::Millis::new("2591"),
-                    draft_n: None,
-                    draft_n_accepted: None,
+                    draft_n: Some(312),
+                    draft_n_accepted: Some(207),
                 }),
             },
             log::Event::Cancelled {
@@ -2504,7 +2509,7 @@ pub(in crate::drive) mod tests {
     }
 
     #[test]
-    fn a_real_sessions_whole_log_is_a_v0_log() {
+    fn a_real_sessions_whole_log_is_a_log_the_format_reads() {
         // Every rule that spans lines included: an answer, a cancel, a
         // failure, a refusal by the server.
         let gate = Gate::new();
