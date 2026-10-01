@@ -55,12 +55,19 @@ ok &= not bad and len(rows) > 1 and any(r[2] == "llama-server" for r in rows)
 cites = {"accel24-beellama-qwen27b-q4kxl": "beellama-floor-process.json",
          "cpu-beellama-qwen3-1p7b-q4km": "beellama-preview-v0.3.2-disk.json",
          "accel24-llamacpp-qwen38-27b-iq3s": "accel24-llamacpp-candidate-disk.json",
-         "ada48-llamacpp-qwen38flashnext-q20": "ada48-2026-09-28-build-disk.json"}
+         "ada48-llamacpp-qwen38flashnext-q20": "ada48-running-2026-10-01-process.json"}
 for name, read in cites.items():
     d = json.loads((here / read).read_text()); r = reg[name]
     same = (r["engine_identity"], r["engine_libraries"], r["engine_fingerprint"], r["engine_libraries_read"]) == \
            (d["exe"], d["libraries"], d["engine_fingerprint"], d["read"]) and d["libraries"]
     print(f"registry: {name} {'equals' if same else 'DOES NOT EQUAL'} {read}")
     ok &= bool(same)
+# the substrate's engine fields name the 2026-10-01 build since its instance row (#143); the 2026-09-28 instance keeps
+# what it ran, which is the disk read of that build
+old = next(i for i in reg["ada48-llamacpp-qwen38flashnext-q20"]["instance"] if i["id"] == "2026-09-28")
+dd = json.loads((here / "ada48-2026-09-28-build-disk.json").read_text())
+same = (old.get("engine_identity"), old.get("engine_fingerprint")) == (dd["exe"], dd["engine_fingerprint"])
+print(f"registry: ada48's 2026-09-28 instance {'equals' if same else 'DOES NOT EQUAL'} ada48-2026-09-28-build-disk.json")
+ok &= same
 ok &= len(files) > 1 and tar["regular_members"] != {}
 sys.exit(0 if ok else 1)
