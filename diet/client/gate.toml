@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 91
+faults = 94
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -226,6 +226,7 @@ becomes = '''
                     to_request: id.clone(),
                     output_tokens: Count::default(),
                     text: Some(String::new()),
+                    timings: None,
                 });
             }
             // Everything else loses all or nothing, and `lost` is the'''
@@ -1228,6 +1229,7 @@ becomes = '''
         (integer || decimal).then(|| Self(if integer { format!("{text}.0") } else { text.to_owned() }))'''
 catches = [
     "client::stream::tests::a_timings_digits_survive_the_transport",
+    "client::tests::a_journalled_timings_rides_on_its_responses_row_digit_for_digit",
 ]
 
 [[fault]]
@@ -1241,6 +1243,7 @@ becomes = '''
         (integer || decimal).then(|| Self(text.split('.').next().unwrap_or(text).to_owned()))'''
 catches = [
     "client::stream::tests::a_timings_digits_survive_the_transport",
+    "client::tests::a_journalled_timings_rides_on_its_responses_row_digit_for_digit",
 ]
 
 [[fault]]
@@ -1503,7 +1506,6 @@ becomes = '''
             journal.push(Entry::Timings {'''
 catches = [
     "client::tests::a_llama_cpp_reply_journals_its_timings",
-    "client::tests::the_record_projection_names_every_fact_record_v0_cannot_carry",
 ]
 
 [[fault]]
@@ -1519,7 +1521,6 @@ becomes = '''
             .map(Timings::read),'''
 catches = [
     "client::tests::a_llama_cpp_reply_journals_its_timings",
-    "client::tests::the_record_projection_names_every_fact_record_v0_cannot_carry",
 ]
 
 [[fault]]
@@ -1533,7 +1534,6 @@ becomes = '''
             timings: None,'''
 catches = [
     "client::tests::a_llama_cpp_reply_journals_its_timings",
-    "client::tests::the_record_projection_names_every_fact_record_v0_cannot_carry",
 ]
 
 [[fault]]
@@ -1544,7 +1544,7 @@ expect_exit = 101
 anchor = '''
             Key {
                 row: "response",
-                key: "timings",
+                key: "cache",
             },'''
 becomes = '''
             Key {
@@ -1609,4 +1609,44 @@ becomes = '''
 catches = [
     "client::tests::every_unspellable_item_is_one_the_record_refuses",
     "client::tests::the_record_projection_names_every_fact_record_v0_cannot_carry",
+]
+
+[[fault]]
+id = "client.projection-drops-the-timings"
+failure_class = "client.projection-drops-the-timings"
+target = "diet/src/client/journal.rs"
+expect_exit = 101
+anchor = '''
+                        .and_then(|timings| spelled_timings(timings, &mut note)),'''
+becomes = '''
+                        .and_then(|_| None),'''
+catches = [
+    "client::tests::a_journalled_timings_rides_on_its_responses_row_digit_for_digit",
+]
+
+[[fault]]
+id = "client.projection-leaves-rowless-timings-unnamed"
+failure_class = "client.projection-leaves-rowless-timings-unnamed"
+target = "diet/src/client/journal.rs"
+expect_exit = 101
+anchor = '''
+    if timings_of.keys().any(|id| !answered.contains(id)) {'''
+becomes = '''
+    if false && timings_of.keys().any(|id| !answered.contains(id)) {'''
+catches = [
+    "client::tests::a_journalled_timings_rides_on_its_responses_row_digit_for_digit",
+    "client::tests::every_journal_entry_kind_is_decided_by_the_projection",
+]
+
+[[fault]]
+id = "client.projection-leaves-unspellable-timings-unnamed"
+failure_class = "client.projection-leaves-unspellable-timings-unnamed"
+target = "diet/src/client/journal.rs"
+expect_exit = 101
+anchor = '''
+    if spelled.is_none() {'''
+becomes = '''
+    if false && spelled.is_none() {'''
+catches = [
+    "client::tests::a_journalled_timings_rides_on_its_responses_row_digit_for_digit",
 ]
