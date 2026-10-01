@@ -1668,6 +1668,7 @@ mod tests {
             to_request: "q1".to_owned(),
             output_tokens: record::Count::default(),
             text: Some("The parser keeps every line. I'll read the caller.".to_owned()),
+            timings: None,
         });
         let decisions = router.observe(&call("t1", 1, "bash", shell("cat diet/src/lib.rs")));
         let ask = decisions[0]
@@ -1699,6 +1700,7 @@ mod tests {
             to_request: "q2".to_owned(),
             output_tokens: record::Count::default(),
             text: Some("Let me answer that.".to_owned()),
+            timings: None,
         });
         let decisions = aside.observe(&call("t1", 1, "bash", shell("cat diet/src/lib.rs")));
         assert_eq!(

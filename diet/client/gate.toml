@@ -1561,13 +1561,16 @@ failure_class = "client.unspellable-item-the-record-spells"
 target = "diet/src/formats/record/mod.rs"
 expect_exit = 101
 anchor = '''
-            text: take_optional_text(&mut members, of, "text")?,
+            timings: take_timings(&mut members, of)?,
         },
         Kind::Fork => Event::Fork {'''
 becomes = '''
-            text: {
-                members.remove("timings");
-                take_optional_text(&mut members, of, "text")?
+            timings: {
+                // Re-pointed by #92's record bump: the record now spells
+                // `timings`, so the item taken and dropped is `capped_at`,
+                // which `lost()` still names and the record still refuses.
+                members.remove("capped_at");
+                take_timings(&mut members, of)?
             },
         },
         Kind::Fork => Event::Fork {'''

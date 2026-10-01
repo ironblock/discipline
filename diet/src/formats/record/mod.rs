@@ -39,7 +39,7 @@ use pest::Parser as _;
 use pest::iterators::Pair;
 use pest_derive::Parser;
 
-use json::{Value, ValueError};
+use json::{Decimal, Value, ValueError};
 
 #[derive(Parser)]
 #[grammar = "../formats/record/grammar.pest"]
@@ -136,8 +136,15 @@ vocabulary! {
 /// engine's name, which is a label standing in for a value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Weights {
-    /// Weights on disk, by sha256.
+    /// Weights on disk, by sha256: one file, nothing beside it.
     Digest(String),
+    /// Weights on disk as a SET (#92, ruled on #157 Q2 and extended on #204):
+    /// a main of several shards, in the registry's order, and the draft and
+    /// projector a server loads beside it. The same kind as [`Weights::Digest`]
+    /// -- `"kind":"digest"` -- because it says what the weights ARE in the same
+    /// way; a set of one main file and nothing beside it is spelled
+    /// [`Weights::Digest`], and the parser never builds one here.
+    Set(WeightSet),
     /// Weights behind an endpoint.
     Hosted {
         /// Who serves them.
@@ -160,12 +167,24 @@ pub enum Weights {
     },
 }
 
+/// The files a [`Weights::Set`] names, each by sha256.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WeightSet {
+    /// The main weights, one digest per shard, in the registry's order. One
+    /// shard when a draft or projector is what makes it a set.
+    pub main: Vec<String>,
+    /// A speculative decoder's draft model, if the server loads one.
+    pub draft: Option<String>,
+    /// A multimodal projector, if the server loads one.
+    pub projector: Option<String>,
+}
+
 impl Weights {
     /// Which kind these are.
     #[must_use]
     pub fn kind(&self) -> WeightsKind {
         match self {
-            Self::Digest(_) => WeightsKind::Digest,
+            Self::Digest(_) | Self::Set(_) => WeightsKind::Digest,
             Self::Hosted { .. } => WeightsKind::Hosted,
             Self::Canned { .. } => WeightsKind::Canned,
         }
@@ -184,7 +203,7 @@ impl Weights {
         // the stronger of the two: the acts play again exactly. See
         // [`Weights::is_replayed`] for the half that decides HOW a gate
         // compares, which is a different question from whether it may.
-        matches!(self, Self::Digest(_) | Self::Canned { .. })
+        matches!(self, Self::Digest(_) | Self::Set(_) | Self::Canned { .. })
     }
 
     /// Whether reproducing this means replaying acts rather than re-firing.
@@ -622,6 +641,38 @@ pub struct Artifact {
     pub path: String,
     /// Its digest, 64 lowercase hex characters.
     pub sha256: String,
+}
+
+/// A duration in milliseconds, kept as the server wrote it: a whole number
+/// stays one, and a decimal keeps its digits exactly (#162, disclosure 9).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Millis {
+    /// Written as an integer.
+    Whole(Count),
+    /// Written with a fraction, in the record's exact decimal.
+    Exact(Decimal),
+}
+
+/// What the server reported about one response's work, in its own keys (#92).
+/// Every key is optional, and absent when the server did not send it: absent
+/// is never zero. The server's arithmetic on these (`*_per_second`,
+/// `*_per_token_ms`) is not carried.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Timings {
+    /// Prompt tokens prefilled.
+    pub prompt_n: Option<Count>,
+    /// Prompt tokens reused from the slot's cache.
+    pub cache_n: Option<Count>,
+    /// How long the prefill took.
+    pub prompt_ms: Option<Millis>,
+    /// Tokens generated.
+    pub predicted_n: Option<Count>,
+    /// How long generation took.
+    pub predicted_ms: Option<Millis>,
+    /// Tokens a speculative decoder drafted.
+    pub draft_n: Option<Count>,
+    /// How many of those were accepted.
+    pub draft_n_accepted: Option<Count>,
 }
 
 vocabulary! {
@@ -1207,6 +1258,8 @@ pub enum Event {
         /// typed outcome, and a record that could not spell it would be a
         /// record that could not show the collapse it exists to catch.
         text: Option<String>,
+        /// What the server reported about the work, when it reported it.
+        timings: Option<Timings>,
     },
     /// An interview fork was opened.
     Fork {
@@ -2324,6 +2377,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             to_request: take_string(&mut members, of, "to_request")?,
             output_tokens: take_u64(&mut members, of, "output_tokens")?,
             text: take_optional_text(&mut members, of, "text")?,
+            timings: take_timings(&mut members, of)?,
         },
         Kind::Fork => Event::Fork {
             id: take_string(&mut members, of, "id")?,
@@ -2747,11 +2801,7 @@ fn weights(fields: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Wei
             // Identity, so it is checked as a digest rather than accepted as
             // a name. This is the variant that says what the weights ARE, and
             // a string that is not a digest cannot say it.
-            let text = take_string(&mut members, of, "sha256")?;
-            if !digest_ok(&text) {
-                return Err(StructureError::BadDigest(text).into());
-            }
-            Weights::Digest(text)
+            digest_weights(&mut members, of)?
         }
         // Not checked as a digest, because there is nothing to digest. Three
         // required strings and no identity claim: what a later reader has is
@@ -3053,6 +3103,135 @@ fn take_artifacts(
         artifacts.push(artifact);
     }
     Ok(artifacts)
+}
+
+/// A `digest` weights object: `sha256` a digest, or a list of two or more in
+/// the registry's order; `draft` and `projector` optional digests beside it.
+/// A one-element list is refused, because a single file has one spelling.
+fn digest_weights(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Weights, ParseError> {
+    let main = match members.remove("sha256") {
+        Some(Value::String(text)) => vec![text],
+        Some(Value::Array(items)) if items.len() < 2 => {
+            return Err(SchemaError::BadValue {
+                of,
+                field: "weights.sha256",
+                found: format!("a list of {}; one file is spelled as a string", items.len()),
+            }
+            .into());
+        }
+        Some(Value::Array(items)) => items
+            .into_iter()
+            .map(|item| match item {
+                Value::String(text) => Ok(text),
+                _ => Err(SchemaError::WrongType {
+                    of,
+                    field: "weights.sha256[]".to_owned(),
+                    want: "a digest",
+                }),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(_) => {
+            return Err(SchemaError::WrongType {
+                of,
+                field: "weights.sha256".to_owned(),
+                want: "a digest, or a list of two or more",
+            }
+            .into());
+        }
+        None => {
+            return Err(SchemaError::MissingField {
+                of,
+                field: "sha256",
+            }
+            .into());
+        }
+    };
+    let draft = take_optional_string(members, of, "draft")?;
+    let projector = take_optional_string(members, of, "projector")?;
+    for digest in main.iter().chain(draft.iter()).chain(projector.iter()) {
+        if !digest_ok(digest) {
+            return Err(StructureError::BadDigest(digest.clone()).into());
+        }
+    }
+    Ok(match (main.as_slice(), &draft, &projector) {
+        ([only], None, None) => Weights::Digest(only.clone()),
+        _ => Weights::Set(WeightSet {
+            main,
+            draft,
+            projector,
+        }),
+    })
+}
+
+/// A `response` row's `timings`: the server's own keys, each optional, as log
+/// v1 carries them (#92, for #117's R3). A count is a non-negative integer; a
+/// duration is a non-negative integer or exact decimal, kept as written.
+fn take_timings(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<Timings>, ParseError> {
+    let Some(mut fields) = take_optional_object(members, of, "timings")? else {
+        return Ok(None);
+    };
+    let mut count = |key: &'static str| match fields.remove(key) {
+        None => Ok(None),
+        Some(Value::Integer(n)) if n >= 0 => {
+            Ok(Some(Count::new(n.unsigned_abs()).unwrap_or_default()))
+        }
+        Some(_) => Err(SchemaError::WrongType {
+            of,
+            field: format!("timings.{key}"),
+            want: "a non-negative integer",
+        }),
+    };
+    let prompt_n = count("prompt_n")?;
+    let cache_n = count("cache_n")?;
+    let predicted_n = count("predicted_n")?;
+    let draft_n = count("draft_n")?;
+    let draft_n_accepted = count("draft_n_accepted")?;
+    let mut millis = |key: &'static str, field: &'static str| match fields.remove(key) {
+        None => Ok(None),
+        Some(Value::Integer(n)) if n >= 0 => Ok(Some(Millis::Whole(
+            Count::new(n.unsigned_abs()).unwrap_or_default(),
+        ))),
+        Some(Value::Decimal(d)) if !d.as_str().starts_with('-') => Ok(Some(Millis::Exact(d))),
+        Some(Value::Integer(n)) => Err(SchemaError::BadValue {
+            of,
+            field,
+            found: n.to_string(),
+        }),
+        Some(Value::Decimal(d)) => Err(SchemaError::BadValue {
+            of,
+            field,
+            found: d.as_str().to_owned(),
+        }),
+        Some(_) => Err(SchemaError::WrongType {
+            of,
+            field: field.to_owned(),
+            want: "a non-negative integer or exact decimal",
+        }),
+    };
+    let prompt_ms = millis("prompt_ms", "timings.prompt_ms")?;
+    let predicted_ms = millis("predicted_ms", "timings.predicted_ms")?;
+    if let Some(key) = fields.keys().next() {
+        return Err(SchemaError::UnknownField {
+            of,
+            field: format!("timings.{key}"),
+        }
+        .into());
+    }
+    Ok(Some(Timings {
+        prompt_n,
+        cache_n,
+        prompt_ms,
+        predicted_n,
+        predicted_ms,
+        draft_n,
+        draft_n_accepted,
+    }))
 }
 
 /// The diff a `prefix.changed` row carries, with every delta read kind-first.
@@ -4165,11 +4344,13 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             to_request,
             output_tokens,
             text,
+            timings,
             ..
         } => {
             members.put_text("to_request", to_request);
             members.put_count("output_tokens", *output_tokens);
             members.put_optional("text", text.clone().map(Value::String));
+            members.put_optional("timings", timings.as_ref().map(timings_value));
         }
         Event::Fork {
             lane,
@@ -4450,6 +4631,35 @@ fn source_value(source: &Source) -> Value {
     Value::Object(members)
 }
 
+/// A response's timings as a record value: only the keys the server sent.
+fn timings_value(timings: &Timings) -> Value {
+    let millis = |m: &Millis| match m {
+        Millis::Whole(n) => integer(*n),
+        Millis::Exact(d) => Value::Decimal(d.clone()),
+    };
+    let mut members = BTreeMap::new();
+    for (key, count) in [
+        ("prompt_n", timings.prompt_n),
+        ("cache_n", timings.cache_n),
+        ("predicted_n", timings.predicted_n),
+        ("draft_n", timings.draft_n),
+        ("draft_n_accepted", timings.draft_n_accepted),
+    ] {
+        if let Some(count) = count {
+            members.insert(key.to_owned(), integer(count));
+        }
+    }
+    for (key, value) in [
+        ("prompt_ms", &timings.prompt_ms),
+        ("predicted_ms", &timings.predicted_ms),
+    ] {
+        if let Some(value) = value {
+            members.insert(key.to_owned(), millis(value));
+        }
+    }
+    Value::Object(members)
+}
+
 fn weights_value(weights: &Weights) -> Value {
     let mut members = BTreeMap::from([(
         "kind".to_owned(),
@@ -4458,6 +4668,18 @@ fn weights_value(weights: &Weights) -> Value {
     match weights {
         Weights::Digest(sha256) => {
             members.insert("sha256".to_owned(), Value::String(sha256.clone()));
+        }
+        Weights::Set(set) => {
+            let main = match set.main.as_slice() {
+                [only] => Value::String(only.clone()),
+                shards => Value::Array(shards.iter().cloned().map(Value::String).collect()),
+            };
+            members.insert("sha256".to_owned(), main);
+            for (key, digest) in [("draft", &set.draft), ("projector", &set.projector)] {
+                if let Some(digest) = digest {
+                    members.insert(key.to_owned(), Value::String(digest.clone()));
+                }
+            }
         }
         Weights::Hosted {
             provider,
@@ -4859,6 +5081,90 @@ mod tests {
         let bad = COMPARISON.replace(&"a".repeat(64), "nope");
         assert!(matches!(
             parse(&record(&format!("{bad}\n"))),
+            Err(ParseError::Structure(StructureError::BadDigest(_)))
+        ));
+    }
+
+    // RESPONSE TIMINGS (#92, requested by track three for #117's R3): the
+    // same object log v1 carries, with the server's own keys and the record's
+    // exact decimal for a duration. Absent is never zero.
+    const TIMED_REQUEST: &str = r#"{"record":"request","id":"r1","lane":"main","substrate":"local","head_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#;
+    const TIMED: &str = r#"{"record":"response","id":"a1","to_request":"r1","output_tokens":3,"timings":{"prompt_n":10,"cache_n":2,"prompt_ms":12.5,"predicted_n":3,"predicted_ms":40,"draft_n":3,"draft_n_accepted":2}}"#;
+
+    fn timed(response: &str) -> String {
+        record(&format!("{TIMED_REQUEST}\n{response}\n"))
+    }
+
+    #[test]
+    fn a_response_carries_the_servers_timings() {
+        assert!(parse(&timed(TIMED)).is_ok(), "{:?}", parse(&timed(TIMED)));
+    }
+
+    #[test]
+    fn a_timings_key_the_server_does_not_send_is_refused_by_name() {
+        let row = TIMED.replace(
+            "\"draft_n_accepted\":2",
+            "\"draft_n_accepted\":2,\"prompt_per_second\":800",
+        );
+        let refused = parse(&timed(&row));
+        let Err(ParseError::Schema(SchemaError::UnknownField { field, .. })) = refused else {
+            panic!("an unknown timings key was not refused as one: {refused:?}");
+        };
+        assert_eq!(field, "timings.prompt_per_second");
+    }
+
+    #[test]
+    fn a_negative_timings_duration_is_refused() {
+        let row = TIMED.replace("\"prompt_ms\":12.5", "\"prompt_ms\":-12.5");
+        let refused = parse(&timed(&row));
+        let Err(ParseError::Schema(SchemaError::BadValue { of, field, .. })) = refused else {
+            panic!("a negative duration was not refused as one: {refused:?}");
+        };
+        assert_eq!((of, field), ("response", "timings.prompt_ms"));
+    }
+
+    // WEIGHTS AS A SET (#92, ruled on #157 Q2 and extended on #204): a main of
+    // several shards, in the registry's order, with the draft and projector
+    // beside it. The registry's own two-shard entry is the case.
+    const ADA48: &str = r#""weights":{"kind":"digest","sha256":["69820c02ec7d0b45ef2ebb19d6620299db749fe2aded7f39f93c6b88b199b720","316b46f3a2dbd68c900f43136ab9449f9dcc3725dfd8c794847c204bc161e113"],"draft":"b646ef60eaae2a9ed849e75f15f399629ca22633555e99e809959e95f22a1575"}"#;
+
+    fn with_weights(weights: &str) -> String {
+        let one = r#""weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#;
+        assert_eq!(
+            START.matches(one).count(),
+            1,
+            "START names one digest weights"
+        );
+        format!("{}\n", START.replace(one, weights))
+    }
+
+    #[test]
+    fn a_main_of_two_shards_and_its_draft_parse() {
+        assert!(
+            parse(&with_weights(ADA48)).is_ok(),
+            "{:?}",
+            parse(&with_weights(ADA48))
+        );
+    }
+
+    #[test]
+    fn a_main_of_one_shard_spelled_as_a_list_is_refused() {
+        let one = r#""weights":{"kind":"digest","sha256":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]}"#;
+        let refused = parse(&with_weights(one));
+        let Err(ParseError::Schema(SchemaError::BadValue { field, .. })) = refused else {
+            panic!("a one-shard list was not refused as a second spelling: {refused:?}");
+        };
+        assert_eq!(field, "weights.sha256");
+    }
+
+    #[test]
+    fn a_draft_that_is_not_a_digest_is_refused() {
+        let draft = ADA48.replace(
+            "b646ef60eaae2a9ed849e75f15f399629ca22633555e99e809959e95f22a1575",
+            "nope",
+        );
+        assert!(matches!(
+            parse(&with_weights(&draft)),
             Err(ParseError::Structure(StructureError::BadDigest(_)))
         ));
     }

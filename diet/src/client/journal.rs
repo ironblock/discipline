@@ -511,6 +511,7 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
                     // spelling for a count, so the absence is what is lost.
                     output_tokens: output_tokens.unwrap_or_default(),
                     text: None,
+                    timings: None,
                 });
                 if output_tokens.is_none() {
                     note(
