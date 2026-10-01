@@ -121,6 +121,16 @@ jobs:
           printf 'checks owned by diet: %s\n' "${checks[*]}"
           ./verify.sh "${args[@]}"
 
+      # The results ledger this run rendered from what the results check passed
+      # (#32): what pages.yml publishes if this run passes on a push to main,
+      # downloaded by run id.
+      - name: Keep the results ledger this run rendered
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-ledger
+          path: _site/ledger
+          if-no-files-found: error
+
   # #78, rows 1 and 4 (ruled 2026-09-14): the wasm32 build of the read side,
   # proven against native in a wasm runtime, and the trap control proven
   # against a real failure rather than assumed. A sibling job, not a step

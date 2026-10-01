@@ -243,6 +243,11 @@ check_results() {
     python3 "${RENDER_LEDGER:-exercise/scripts/render-ledger.py}" "$ledger" _site/ledger --results results \
       --commit "$(git rev-parse --verify --quiet HEAD || echo main)" || rc=$?
   fi
+  # And the page as published, under the Pages table (#32 I3): it is checked
+  # here, where the gate can fail, and not first at deploy time.
+  if [ "$rc" -eq 0 ]; then
+    bash scripts/hygiene.sh --patterns scripts/pages-patterns.tsv --tree _site/ledger || rc=$?
+  fi
   rm -f "$ledger"
   return "$rc"
 }
@@ -334,8 +339,16 @@ check_recompute() { python3 scripts/check-recompute.py --root results; }
 # A rung's admission word, derived from its admission directory rather than trusted as written (#183): the
 # derivation's own fixtures first, then every admission.toml in the tree re-verified through its own
 # admission-recompute.sh and its word compared with the word its results derive under planning's rule (#143).
+#
+# The registry's fingerprints first (#202): every equipment entry's hardware fingerprint covers its declared
+# fields, and every substrate whose engine is one exe digest also pins the libraries beside it (or says why one
+# digest suffices), with an engine_fingerprint that recomputes from them. This checks the REGISTRY: a library
+# digest edited under a held exe reads as a changed fingerprint. Whether a host still runs what the registry
+# pins is a read on the host (`check-fingerprints.py --read-engine-pid`), which no gate here can take.
 check_admission() {
-  python3 substrates/admission/derive_admission.py --selftest &&
+  python3 substrates/check-fingerprints.py --selftest &&
+    python3 substrates/check-fingerprints.py &&
+    python3 substrates/admission/derive_admission.py --selftest &&
     python3 substrates/admission/derive_admission.py --all
 }
 
@@ -2930,6 +2943,14 @@ inject_results_ledger_row_without_word() {
   edit_in_place '/"result": front.get("result"),/d' scripts/check-results.py
 }
 
+# #32 I3 (track five's fault, carried here by courier): the ledger page pulls
+# in an outside stylesheet. Only the Pages table refuses it, and check_results
+# runs that table over the page it rendered, so it fails here and not first at
+# deploy time.
+inject_results_ledger_page_calls_out() {
+  edit_in_place 's#^<meta charset="utf-8">$#<meta charset="utf-8"><link rel="stylesheet" href="https://example.org/ledger.css">#' exercise/scripts/render-ledger.py
+}
+
 inject_hygiene() {
   bash scripts/seed-hygiene-fault.sh seeded-faults > /dev/null
   git add --all
@@ -3179,6 +3200,51 @@ p = pathlib.Path("substrates/admission/derive_admission.py"); s = p.read_text(en
 old = '    if missing:\n        raise ValueError'
 assert old in s, "the rule moved"
 p.write_text(s.replace(old, '    if False:\n        raise ValueError', 1), encoding="utf-8")
+PYEOF
+}
+# #202: one library of the DoD 1 engine rebuilt while its exe stub holds. The exe digest alone would not move;
+# the engine fingerprint must.
+inject_admission_engine_library_changed() {
+  python3 - <<'PYEOF'
+import pathlib, re
+p = pathlib.Path("substrates/registry.toml"); s = p.read_text(encoding="utf-8")
+head = "[substrate.ada48-llamacpp-qwen38flashnext-q20.engine_libraries]\n"
+i = s.index(head) + len(head)
+m = re.compile(r'^("libggml-cuda[^"]*" = ")([0-9a-f])', re.M).search(s, i)
+assert m, "the library table moved"
+flip = "0" if m.group(2) != "0" else "1"
+p.write_text(s[:m.start(2)] + flip + s[m.end(2):], encoding="utf-8")
+PYEOF
+}
+# #202: the recipe narrowed back to the exe alone, the defect it exists to close.
+inject_admission_engine_recipe_exe_only() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
+old = 'json.dumps({"exe": exe, "libraries": libraries}, sort_keys=True,'
+assert old in s, "the recipe moved"
+p.write_text(s.replace(old, 'json.dumps({"exe": exe}, sort_keys=True,', 1), encoding="utf-8")
+PYEOF
+}
+# #202: the recipe's shared-object pattern narrowed to bare `.so`, so a versioned library (libllama.so.0.4.1)
+# drops out of the engine fingerprint unseen.
+inject_admission_engine_pattern_narrowed() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
+old = 'SHARED_OBJECT = re.compile(r"\\.so(\\.\\d+)*$")'
+assert old in s, "the pattern moved"
+p.write_text(s.replace(old, 'SHARED_OBJECT = re.compile(r"\\.so$")', 1), encoding="utf-8")
+PYEOF
+}
+# planning (#143, 5922544337): a pruned model's entry declares its calibration mix; the rule removed.
+inject_admission_pruned_mix_unrequired() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
+old = 'elif sub.get("pruned") is True and not (isinstance(sub.get("calibration_mix"), str) and sub["calibration_mix"].strip()):'
+assert old in s, "the rule moved"
+p.write_text(s.replace(old, 'elif False:', 1), encoding="utf-8")
 PYEOF
 }
 # An admission record one level deeper than the glob looks.
@@ -3747,6 +3813,49 @@ inject_ci() {
 # request is scoped against goes stale while CI stays green.
 inject_ci_trunk_run_cancelled() {
   edit_in_place "s/^  cancel-in-progress: .*/  cancel-in-progress: true/" .github/workflows/verify.yml
+}
+
+# #32 I3's deploy (track five's faults, carried here by courier): each guard
+# pages.yml holds, broken.
+
+# Deploys on a verify run whatever its conclusion.
+inject_ci_pages_deploys_on_any_conclusion() {
+  edit_in_place "s/github.event.workflow_run.conclusion == 'success' && //" .github/workflows/pages.yml
+}
+
+# Deploys on a verify run that was not a push.
+inject_ci_pages_deploys_on_any_event() {
+  edit_in_place "s/ && github.event.workflow_run.event == 'push'//" .github/workflows/pages.yml
+}
+
+# Deploys a fork's code: a pull request from a fork's `main` matches the branch filter by name.
+inject_ci_pages_deploys_forks() {
+  edit_in_place "s/ && github.event.workflow_run.head_repository.full_name == github.repository//" .github/workflows/pages.yml
+}
+
+# The guards joined by || rather than &&: any one of them is enough.
+inject_ci_pages_guards_either() {
+  edit_in_place "s/== 'success' && github/== 'success' || github/" .github/workflows/pages.yml
+}
+
+# Uploads the site without checking it.
+inject_ci_pages_uploads_unchecked() {
+  edit_in_place '/run: .\/verify.sh --site _site/d' .github/workflows/pages.yml
+}
+
+# Publishes whatever sha the run checked, main's tip or not.
+inject_ci_pages_publishes_an_older_sha() {
+  edit_in_place '/git ls-remote origin refs\/heads\/main/d' .github/workflows/pages.yml
+}
+
+# Publishes on a trigger of its own, beside the gate.
+inject_ci_pages_publishes_on_its_own_trigger() {
+  edit_in_place '/^    branches: \[main\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
+}
+
+# The ledger the deploy publishes, uploaded by nothing.
+inject_ci_pages_ledger_not_uploaded() {
+  edit_in_place 's/^          name: site-ledger$/          name: site-ledger-renamed/' .github/workflows/pkg-diet.yml
 }
 
 # A branch filter on the PULL-REQUEST trigger. On `push` the same filter is
@@ -7332,6 +7441,14 @@ selftest() {
     'FAIL  derive: a refuted parity fire bars'
   seeded_case "a constitutional cell not required" admission inject_admission_constitutional_unrequired \
     'FAIL  derive refuses a record missing a constitutional cell'
+  seeded_case "an engine library changed under a held exe" admission inject_admission_engine_library_changed \
+    'ada48-llamacpp-qwen38flashnext-q20: engine_fingerprint changed'
+  seeded_case "the engine recipe narrowed to the exe" admission inject_admission_engine_recipe_exe_only \
+    'FAIL  engine: a library changed with the exe held changes the fingerprint'
+  seeded_case "the engine recipe's library pattern narrowed" admission inject_admission_engine_pattern_narrowed \
+    'FAIL  engine: the recipe hashes every shared object in the directory, a versioned name included'
+  seeded_case "a pruned entry's calibration mix not required" admission inject_admission_pruned_mix_unrequired \
+    'FAIL  engine: a pruned entry with no calibration mix is refused'
   seeded_case "an admission record the glob cannot see" admission inject_admission_record_moved \
     'admission.record-not-found'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
@@ -7396,6 +7513,8 @@ selftest() {
     'render-ledger: [0-9a-z-]+-stale: no such directory'
   seeded_case "a ledger row with no word"              results inject_results_ledger_row_without_word \
     'render-ledger: [0-9a-z-]+: row carries no result'
+  seeded_case "the ledger page pulls in an outside stylesheet" results inject_results_ledger_page_calls_out \
+    'hygiene: external-stylesheet:'
   seeded_case "a type error in the web surface"       exercise inject_exercise_type_error \
     'error TS2322'
   seeded_case "an authored session on the published list" exercise inject_exercise_published_list_carries_authored_session \
@@ -7438,6 +7557,22 @@ selftest() {
     'results are present and none recomputed'
   seeded_case "a check no workflow runs"              ci       inject_ci \
     'has no owner in check-owners\.tsv'
+  seeded_case "the site deployed whatever the gate said" ci inject_ci_pages_deploys_on_any_conclusion \
+    "pages.yml: deploys on a workflow_run whatever its conclusion"
+  seeded_case "the site deployed from a run not a push" ci inject_ci_pages_deploys_on_any_event \
+    "pages.yml: deploys on a run that was not a push"
+  seeded_case "the site deployed from a fork's code" ci inject_ci_pages_deploys_forks \
+    "pages.yml: deploys a run of a fork's code"
+  seeded_case "the deploy guards joined by ||" ci inject_ci_pages_guards_either \
+    "pages.yml: the deploy's condition is not exactly its guards joined by &&"
+  seeded_case "the site uploaded unchecked" ci inject_ci_pages_uploads_unchecked \
+    "pages.yml: upload-pages-artifact is not preceded by \./verify\.sh --site _site"
+  seeded_case "the site published at a sha not main's tip" ci inject_ci_pages_publishes_an_older_sha \
+    "pages.yml: publishes a sha without checking it is still main's tip"
+  seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
+    "pages.yml: publishes on a trigger of its own"
+  seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \
+    "pages.yml: publishes site-ledger, which no workflow the gate runs uploads"
   seeded_case "pull requests filtered by branch"      ci       inject_ci_pr_branch_filter \
     'carries .branches: \[main\]. and is reached'
   seeded_case "the trunk's run cancelled by a merge"  ci       inject_ci_trunk_run_cancelled \
@@ -8609,6 +8744,14 @@ EOF
     bash "${ROOT}/verify.sh" --only injections --scope inject_this_repository_does_not_define
   expect_exit "a shard outside 1..N is a misuse" 2 \
     bash "${ROOT}/verify.sh" --selftest --shard 9/8
+  # --site checks a site and nothing else, in either order, and names a
+  # directory that is not there (#32 I3).
+  expect_exit "--site beside --selftest is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --site "${ROOT}/pages" --selftest
+  expect_exit "--selftest beside --site is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --selftest --site "${ROOT}/pages"
+  expect_exit "--site naming no directory is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --site "${ROOT}/this-site-is-not-here"
 }
 
 # --------------------------------------------------------------------------
