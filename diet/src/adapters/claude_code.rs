@@ -697,6 +697,7 @@ impl Run {
             to_request: format!("u/{}", self.turn),
             output_tokens: count_of(at_row, "message.usage.output_tokens", tokens)?,
             text: (!spoke.trim().is_empty()).then_some(spoke),
+            timings: None,
         });
         Ok(())
     }

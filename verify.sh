@@ -1267,6 +1267,100 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A projector's digest left unchecked: a file name would pass as its identity
+# (#211's review, B1).
+inject_record_weights_projector_undigested() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "for digest in main.iter().chain(draft.iter()).chain(projector.iter()) {"
+new = "for digest in main.iter().chain(draft.iter()) {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The integer arm of the duration rule: without its sign check, unsigned_abs
+# turns -40 into 40 and the sign is lost silently (#211's review, B2).
+inject_record_timings_negative_integer_ms_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "Some(Value::Integer(n)) if n >= 0 => Ok(Some(Millis::Whole("
+new = "Some(Value::Integer(n)) => Ok(Some(Millis::Whole("
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A response's timings taking any key: the server's own arithmetic on its
+# numbers would then pass as evidence (#92).
+inject_record_timings_unknown_key_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "if let Some(key) = fields.keys().next() {\n        return Err(SchemaError::UnknownField {\n            of,\n            field: format!(\"timings.{key}\"),"
+new = "if let Some(key) = fields.keys().next().filter(|_| false) {\n        return Err(SchemaError::UnknownField {\n            of,\n            field: format!(\"timings.{key}\"),"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A negative decimal duration read as a duration (#92).
+inject_record_timings_negative_ms_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "Some(Value::Decimal(d)) if !d.as_str().starts_with('-') => Ok(Some(Millis::Exact(d))),"
+new = "Some(Value::Decimal(d)) if true || !d.as_str().starts_with('-') => Ok(Some(Millis::Exact(d))),"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# One weights file read in two spellings, a string and a list of one: two
+# records of one substrate would then differ (#92).
+inject_record_weights_one_file_list_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "Some(Value::Array(items)) if items.len() < 2 => {"
+new = "Some(Value::Array(items)) if items.len() < 1 => {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A draft's digest left unchecked: a file name would pass as its identity (#92).
+inject_record_weights_draft_undigested() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "for digest in main.iter().chain(draft.iter()).chain(projector.iter()) {"
+new = "for digest in main.iter().chain(projector.iter()) {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # The kind's own fields made advisory. `turns` is drained and thrown away on a
 # recompute summary, so the row is accepted and the number nobody can compute
 # is simply not there afterwards -- which is exactly the "tolerate the stray
@@ -1877,8 +1971,8 @@ import pathlib
 
 path = pathlib.Path("diet/src/formats/record/mod.rs")
 source = path.read_text(encoding="utf-8")
-old = '            let text = take_string(&mut members, of, "sha256")?;\n            if !digest_ok(&text) {'
-new = '            let text = take_string(&mut members, of, "sha256")?;\n            if false && !digest_ok(&text) {'
+old = "    for digest in main.iter().chain(draft.iter()).chain(projector.iter()) {"
+new = "    for digest in draft.iter().chain(projector.iter()) {"
 if source.count(old) != 1:
     raise SystemExit(f"the weights check appears {source.count(old)} times")
 path.write_text(source.replace(old, new), encoding="utf-8")
@@ -2755,13 +2849,60 @@ inject_exercise_type_error() {
   printf '\nexport const seededFault: number = %s;\n' "'not a number'" >> exercise/src/ui/format.ts
 }
 
-# One story's assertion broken in place: the kitchen sink's receipt expecting
-# 2.1 side calls an ask where the session makes 2.0. Typecheck and lint pass
-# it; only the browser tests -- every story run in Chromium -- can see it
-# (#175). The signature is Vitest's failure message for that assertion, which
-# only this fault prints; the story's FAIL line would name any of its failures.
-inject_exercise_story_assertion() {
-  edit_in_place "s/row('side-calls-per-ask')).toBe('2.0')/row('side-calls-per-ask')).toBe('2.1')/" exercise/src/stories/KitchenSink.stories.tsx
+# #32's replay page (track five's faults, carried here by courier). Each
+# breaks one rule of the published site in the tree, and `check_exercise` --
+# which builds the page, scans it with `check_site` and opens it in Chromium
+# -- must say so in its own words.
+
+# An authored session put back on the published list.
+inject_exercise_published_list_carries_authored_session() {
+  edit_in_place "s/\['first-drive', 'cancelled-capture', 'step-limit'\] as const/['first-drive', 'cancelled-capture', 'step-limit', 'kitchen-sink'] as const/" exercise/src/replay/published.ts
+}
+
+# One event of a published recording with no kind: the failure names the file.
+inject_exercise_recording_corrupt_event() {
+  edit_in_place '/^"kind": "session.start",$/d' exercise/src/drive/recorded/step-limit.json
+}
+
+# A network call in the shell the page is built from.
+inject_exercise_shell_carries_network_call() {
+  printf "\nvoid fetch('/x');\n" >> exercise/src/replay.tsx
+}
+
+# The modulepreload polyfill back on: Rolldown's injected text calls fetch().
+inject_exercise_modulepreload_polyfill_on() {
+  edit_in_place 's/modulePreload: { polyfill: false }/modulePreload: { polyfill: true }/' exercise/vite.config.ts
+}
+
+# A credential shape in a published recording, built here at run time so this
+# file carries none. The genesis table, which governs the recordings, sees it.
+inject_exercise_payload_carries_credential() {
+  local token
+  token="$(printf '%s%s' 'ghp_' '0123456789abcdefghijklmnopqrstuvwxyz')"
+  edit_in_place "s|^\"Scrubbed: |\"${token} Scrubbed: |" exercise/src/drive/recorded/step-limit.json
+}
+
+# A published recording edited after it was admitted.
+inject_exercise_recording_edited_after_admission() {
+  edit_in_place 's/^"title": "A drive that ran into the step limit",$/"title": "A drive that ran into the step limit, edited",/' exercise/src/drive/recorded/step-limit.json
+}
+
+# The recording loaded beside the page's bundle (assets/) rather than from its
+# base: the path the build never writes.
+inject_exercise_replay_loads_beside_its_bundle() {
+  edit_in_place 's|new URL(`${import.meta.env.BASE_URL}data/${name}.js`, document.baseURI)|new URL(`data/${name}.js`, import.meta.url)|' exercise/src/replay.tsx
+}
+
+# A published recording's admitted table edited: a snapshot is written once.
+inject_exercise_admitted_table_edited() {
+  local snapshot
+  snapshot="$(ls scripts/hygiene-admitted-*-patterns.tsv | head -n 1)"
+  printf '# edited after it was admitted\n' >> "$snapshot"
+}
+
+# A published recording whose admission is gone.
+inject_exercise_published_without_admission() {
+  rm -- exercise/src/drive/recorded/step-limit.admission.json
 }
 
 # A pnpm the check cannot have: the class #194 was, on the hosts it was on --
@@ -5904,6 +6045,14 @@ if source.count(old) != 1:
 path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
+# One story's assertion broken in place: the kitchen sink's receipt expecting
+# 2.1 side calls an ask where the session makes 2.0. Typecheck and lint pass
+# it; only the browser tests -- every story run in Chromium -- can see it
+# (#175). The signature is Vitest's failure message for that assertion, which
+# only this fault prints; the story's FAIL line would name any of its failures.
+inject_exercise_story_assertion() {
+  edit_in_place "s/row('side-calls-per-ask')).toBe('2.0')/row('side-calls-per-ask')).toBe('2.1')/" exercise/src/stories/KitchenSink.stories.tsx
+}
 
 # Every pattern in a table, shown catching its own class. A pattern that has
 # never caught anything is a guess.
@@ -6968,6 +7117,18 @@ selftest() {
     'record/fixtures/invalid/regime-missing-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "a comparison's word left open"        test     inject_record_comparison_word_open \
     'record/fixtures/invalid/comparison-word-outside-its-four\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a weights projector named rather than digested" test inject_record_weights_projector_undigested \
+    'record/fixtures/invalid/weights-projector-named-not-digested\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a negative whole-millisecond duration read" test inject_record_timings_negative_integer_ms_read \
+    'record/fixtures/invalid/timings-duration-that-is-a-negative-integer\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a timings key the server does not send read" test inject_record_timings_unknown_key_read \
+    'record/fixtures/invalid/timings-key-the-server-does-not-send\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a negative timings duration read" test inject_record_timings_negative_ms_read \
+    'record/fixtures/invalid/timings-duration-that-is-negative\.jsonl' 'test:conformance/formats::record'
+  seeded_case "one weights file spelled as a list read" test inject_record_weights_one_file_list_read \
+    'record/fixtures/invalid/weights-of-one-file-spelled-as-a-list\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a weights draft named rather than digested" test inject_record_weights_draft_undigested \
+    'record/fixtures/invalid/weights-draft-named-not-digested\.jsonl' 'test:conformance/formats::record'
   seeded_case "a summary kind's fields made advisory" test     inject_record_summary_kind_fields_advisory \
     'record/fixtures/invalid/recompute-summary-carries-turns\.jsonl' 'test:conformance/formats::record'
   seeded_case "a recompute summary with no product digest" test inject_record_recompute_digest_optional \
@@ -7229,8 +7390,24 @@ selftest() {
     'render-ledger: [0-9a-z-]+: row carries no result'
   seeded_case "a type error in the web surface"       exercise inject_exercise_type_error \
     'error TS2322'
-  seeded_case "a story's assertion broken in place"   exercise inject_exercise_story_assertion \
-    "expected '2\\.0' to be '2\\.1'"
+  seeded_case "an authored session on the published list" exercise inject_exercise_published_list_carries_authored_session \
+    'FAIL.*published\.test\.ts.*publishes the three recorded whole, and never an authored session'
+  seeded_case "a published recording's event with no kind" exercise inject_exercise_recording_corrupt_event \
+    'exercise/src/drive/recorded/step-limit\.json: not a recording: event 0 has no kind or time'
+  seeded_case "a network call in the replay page's shell" exercise inject_exercise_shell_carries_network_call \
+    'hygiene: network-call: _site/replay/assets/'
+  seeded_case "the modulepreload polyfill back on"     exercise inject_exercise_modulepreload_polyfill_on \
+    'hygiene: network-call: _site/replay/assets/'
+  seeded_case "a credential shape in a published recording" exercise inject_exercise_payload_carries_credential \
+    'hygiene: github-token: _site/replay/data/step-limit\.js'
+  seeded_case "a published recording edited after admission" exercise inject_exercise_recording_edited_after_admission \
+    'admission: exercise/src/drive/recorded/step-limit\.json: edited since it was admitted'
+  seeded_case "the recording loaded beside the bundle" exercise inject_exercise_replay_loads_beside_its_bundle \
+    'replay-smoke: step-limit did not load'
+  seeded_case "a published recording's admitted table edited" exercise inject_exercise_admitted_table_edited \
+    'admission: exercise/src/drive/recorded/[a-z-]+\.json: its admitted table scripts/hygiene-admitted-[0-9a-f]{12}-patterns\.tsv is not the one admitted'
+  seeded_case "a published recording with no admission" exercise inject_exercise_published_without_admission \
+    "expected \[ 'step-limit' \] to deeply equal \[\]"
   seeded_case "a pinned pnpm the host cannot have"    exercise inject_exercise_pnpm_unobtainable \
     'notarget No matching version found for pnpm@0\.0\.0-unpublished'
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
@@ -7541,6 +7718,8 @@ selftest() {
     'record/fixtures/invalid/fork-names-an-undeclared-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "a canned substrate that need not say which acts" test inject_record_canned_acts_optional \
     'record/fixtures/invalid/canned-with-no-acts-digest\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a story's assertion broken in place"   exercise inject_exercise_story_assertion \
+    "expected '2\\.0' to be '2\\.1'"
 
   echo
   echo "--- results fixtures, checked directly ---"

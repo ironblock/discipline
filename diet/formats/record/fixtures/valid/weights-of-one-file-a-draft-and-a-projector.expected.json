@@ -1,0 +1,17 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532\",\"id\":\"local\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"draft\":\"08e4dffcd7893a4c15981ab2061afa128013731be60f1a6847785a3d630f7c8d\",\"kind\":\"digest\",\"projector\":\"05353347512982ee62317b9d8c89372bc815f4b4043580e7ef3ad411ec1a1cd3\",\"sha256\":\"ff6941ded525b34eb159496762c29dd0ec6e71dc31b74d57e75d871a03eec259\"}}]},\"source\":{\"kind\":\"live\"}}\n",
+  "kinds": [
+    "start"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "hosted_substrates": [],
+    "substrates": [
+      "local"
+    ]
+  },
+  "source": {
+    "kind": "live"
+  }
+}

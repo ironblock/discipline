@@ -1788,7 +1788,6 @@ mod tests {
                 EntryKind::Stripped,
                 EntryKind::Issued,
                 EntryKind::Cache,
-                EntryKind::Timings,
                 EntryKind::Mismatch,
                 EntryKind::Received,
                 EntryKind::Capped,
@@ -1871,6 +1870,7 @@ mod tests {
             (EntryKind::Failed, Decision::Named),
             (EntryKind::Unreadable, Decision::Named),
             (EntryKind::Cache, Decision::Named),
+            // Alone, it has no response row to ride on (#92), so it is named.
             (EntryKind::Timings, Decision::Named),
         ];
 
@@ -2007,12 +2007,12 @@ mod tests {
             }
         }
         assert!(
-            unspellable.iter().any(|item| item.asks
+            !unspellable.iter().any(|item| item.asks
                 == Ask::Key {
                     row: "response",
                     key: "timings"
                 }),
-            "the one record change demanded now is on the list"
+            "`response.timings` is spelled since #92, so nothing asks for it"
         );
         let exempt_kinds: Vec<&str> = exempt.iter().map(|(kind, _)| *kind).collect();
         assert_eq!(
@@ -2026,8 +2026,94 @@ mod tests {
              count, the timeout projected to nothing -- {exempt:?}"
         );
         assert_eq!(
-            probed, 13,
+            probed, 12,
             "every item that asks for a key or a kind is probed"
+        );
+    }
+
+    /// A journalled timings is written onto the response row of the request
+    /// it measured, key for key, with a duration's digits exactly as the
+    /// server wrote them (#92, R3's `DoD` 5). Timings with no row to ride on,
+    /// or a value the record cannot spell, are named, never dropped.
+    #[test]
+    fn a_journalled_timings_rides_on_its_responses_row_digit_for_digit() {
+        use super::stream::{Millis, Timings};
+        use crate::formats::record::{self, json::Decimal};
+
+        let count = |n| Some(record::Count::new(n).expect("in bounds"));
+        let measured = Timings {
+            prompt_n: Some(12),
+            cache_n: Some(3_000),
+            prompt_ms: Some(Millis::new("41.10").expect("a decimal")),
+            predicted_n: Some(40),
+            predicted_ms: Some(Millis::new("1500").expect("an integer")),
+            draft_n: None,
+            draft_n_accepted: Some(0),
+        };
+        let mut journal = journal::Journal::new();
+        for (id, timings) in [("r/1", measured.clone()), ("r/2", measured.clone())] {
+            journal.push(Entry::Timings {
+                id: id.to_owned(),
+                timings,
+            });
+        }
+        journal.push(Entry::Received {
+            to_request: "r/1".to_owned(),
+            output_tokens: count(40),
+            capped: false,
+        });
+        let projection = journal::project(&journal, SUBSTRATE);
+
+        let Some(Event::Response { timings, .. }) = projection.events.first() else {
+            panic!("the response row: {:?}", projection.events);
+        };
+        assert_eq!(
+            timings.as_ref(),
+            Some(&record::Timings {
+                prompt_n: count(12),
+                cache_n: count(3_000),
+                prompt_ms: Some(record::Millis::Exact(
+                    Decimal::new("41.10").expect("a decimal")
+                )),
+                predicted_n: count(40),
+                predicted_ms: Some(record::Millis::Whole(
+                    record::Count::new(1500).expect("in bounds")
+                )),
+                draft_n: None,
+                draft_n_accepted: count(0),
+            }),
+            "every key the server sent, and no key it did not"
+        );
+        assert!(
+            projection
+                .unspellable
+                .iter()
+                .any(|item| item.kind == EntryKind::Timings && item.what.contains("no response")),
+            "r/2's timings had no row, and that is named: {:?}",
+            projection.unspellable
+        );
+
+        let mut past = journal::Journal::new();
+        past.push(Entry::Timings {
+            id: "r/1".to_owned(),
+            timings: Timings {
+                prompt_n: Some(u64::MAX),
+                ..measured
+            },
+        });
+        past.push(Entry::Received {
+            to_request: "r/1".to_owned(),
+            output_tokens: count(40),
+            capped: false,
+        });
+        let projection = journal::project(&past, SUBSTRATE);
+        assert!(
+            projection
+                .unspellable
+                .iter()
+                .any(|item| item.kind == EntryKind::Timings && item.what.contains("past what")),
+            "a value past the record's bound is named, not silently dropped: {:?}",
+            projection.unspellable
         );
     }
 
