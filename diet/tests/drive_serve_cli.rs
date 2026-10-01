@@ -28,6 +28,10 @@ struct Served {
     child: Child,
     listening: String,
     opened: u64,
+    /// The registered substrate it announced, when it was given a regimen.
+    substrate: Option<String>,
+    /// And the digest of the registry that resolved it.
+    registry_sha256: Option<String>,
     _head: HeadFile,
 }
 
@@ -85,6 +89,8 @@ fn start(endpoint: &str, extra: &[&str]) -> Served {
             .expect("the address it listens on")
             .to_owned(),
         opened: announced["opened"].as_u64().expect("when it opened"),
+        substrate: announced["substrate"].as_str().map(str::to_owned),
+        registry_sha256: announced["registry_sha256"].as_str().map(str::to_owned),
         child,
         _head: head,
     }
@@ -415,4 +421,56 @@ fn a_drive_server_sends_the_endpoint_key_from_a_file_never_an_argument() {
         .output()
         .expect("diet-drive runs");
     assert_eq!(refused.status.code(), Some(2));
+}
+
+/// A regimen naming substrate `id`, as a file.
+fn regimen_naming(id: &str) -> HeadFile {
+    file_holding(
+        "regimen",
+        &format!(
+            "arm = \"a\"\ndogma_version = 0\nsubstrate = \"{id}\"\n\
+             substrate_reasoning = \"off\"\nsubstrate_hardware = \"{}\"\n\
+             [sampler]\nseed = 7\n",
+            "a".repeat(64)
+        ),
+    )
+}
+
+#[test]
+fn a_drive_server_refuses_to_start_on_a_substrate_the_registry_does_not_resolve() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    // Not registered at all.
+    let regimen = regimen_naming("nowhere-at-all");
+    let path = regimen.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("`nowhere-at-all` is not a substrate"),
+        "{said}"
+    );
+    // Registered, and its main weights are two shards the record cannot spell.
+    let regimen = regimen_naming("ada48-llamacpp-qwen38flashnext-q20");
+    let path = regimen.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("list of shards") && said.contains("#92"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_drive_server_announces_the_registered_substrate_its_regimen_names() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let dev_loop = format!("{}/drive/dev-loop.toml", env!("CARGO_MANIFEST_DIR"));
+    let served = start(&stub.url(), &["--regimen", &dev_loop]);
+    assert_eq!(served.substrate.as_deref(), Some("canned-cache-n"));
+    assert_eq!(
+        served.registry_sha256,
+        Some(diet::drive::registry::registry_sha256()),
+        "and which registry answered"
+    );
+    // And without one, nothing is claimed.
+    let served = start(&stub.url(), &[]);
+    assert_eq!((&served.substrate, &served.registry_sha256), (&None, &None));
 }

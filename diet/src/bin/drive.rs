@@ -75,7 +75,7 @@ const SERVE: &str = "serve";
 fn serve_usage() -> String {
     let mut out = String::from(
         "usage: diet-drive serve --endpoint URL --model NAME --head FILE [--key-file FILE]\n\
-         \x20                       [--listen IP] [--port N] [--auth-file FILE]\n\
+         \x20                       [--listen IP] [--port N] [--auth-file FILE] [--regimen FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\n",
     );
     out.push_str("Serves one interactive session over HTTP + SSE on 127.0.0.1, or on\n");
@@ -89,32 +89,40 @@ fn serve_usage() -> String {
     out.push_str("--auth-file names a file holding user:password; every request must then\n");
     out.push_str("present it as Basic auth. --listen off loopback refuses to start without\n");
     out.push_str("it, and a wildcard (0.0.0.0, ::) is refused: name one interface.\n");
+    out.push_str("--regimen names the regimen the session runs under; its substrate is\n");
+    out.push_str("resolved from the registry, and an unregistered one refuses to start.\n");
     out
 }
 
-/// `diet-drive serve`: one interactive session, over HTTP + SSE, on loopback
-/// unless `--listen` names another address.
-///
-/// Fail-closed (#117 R2c, I7): off loopback it will not start without a
-/// credential, so nothing here binds a session that runs the model beyond the
-/// machine it is on for anyone who can reach it. A wildcard is refused: D17's
-/// `Host` check answers to the bound address, and a wildcard has none.
-fn serve(args: &[String]) -> ExitCode {
+/// What `serve`'s flags say.
+struct ServeArgs {
+    endpoint: String,
+    model: String,
+    head: String,
+    key_file: Option<String>,
+    auth_file: Option<String>,
+    regimen_file: Option<String>,
+    listen: IpAddr,
+    port: u16,
+    allowed_origins: Vec<String>,
+    max_output_tokens: u32,
+}
+
+/// `serve`'s flags, or nothing when they are not a usage it takes.
+fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut endpoint = None;
     let mut model = None;
     let mut head = None;
     let mut key_file = None;
     let mut auth_file = None;
+    let mut regimen_file = None;
     let mut listen = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let mut port: u16 = 0;
     let mut allowed_origins = Vec::new();
     let mut max_output_tokens: u32 = 512;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
-        let Some(value) = given.next() else {
-            eprint!("{}", serve_usage());
-            return ExitCode::from(EXIT_USAGE);
-        };
+        let value = given.next()?;
         let parsed = if flag == "--endpoint" {
             endpoint = Some(value.clone());
             true
@@ -129,6 +137,9 @@ fn serve(args: &[String]) -> ExitCode {
             true
         } else if flag == "--auth-file" {
             auth_file = Some(value.clone());
+            true
+        } else if flag == "--regimen" {
+            regimen_file = Some(value.clone());
             true
         } else if flag == "--listen" {
             value.parse().map(|given| listen = given).is_ok()
@@ -146,11 +157,44 @@ fn serve(args: &[String]) -> ExitCode {
             false
         };
         if !parsed {
-            eprint!("{}", serve_usage());
-            return ExitCode::from(EXIT_USAGE);
+            return None;
         }
     }
-    let (Some(endpoint), Some(model), Some(head)) = (endpoint, model, head) else {
+    Some(ServeArgs {
+        endpoint: endpoint?,
+        model: model?,
+        head: head?,
+        key_file,
+        auth_file,
+        regimen_file,
+        listen,
+        port,
+        allowed_origins,
+        max_output_tokens,
+    })
+}
+
+/// `diet-drive serve`: one interactive session, over HTTP + SSE, on loopback
+/// unless `--listen` names another address.
+///
+/// Fail-closed (#117 R2c, I7): off loopback it will not start without a
+/// credential, so nothing here binds a session that runs the model beyond the
+/// machine it is on for anyone who can reach it. A wildcard is refused: D17's
+/// `Host` check answers to the bound address, and a wildcard has none.
+fn serve(args: &[String]) -> ExitCode {
+    let Some(ServeArgs {
+        endpoint,
+        model,
+        head,
+        key_file,
+        auth_file,
+        regimen_file,
+        listen,
+        port,
+        allowed_origins,
+        max_output_tokens,
+    }) = serve_args(args)
+    else {
         eprint!("{}", serve_usage());
         return ExitCode::from(EXIT_USAGE);
     };
@@ -163,6 +207,10 @@ fn serve(args: &[String]) -> ExitCode {
         Err(why) => return fail(EXIT_INPUT, &format!("{head} cannot be read: {why}")),
     };
     let shape = trunk(model, system, max_output_tokens);
+    let regime = match regimen_file.as_deref().map(registered_regime).transpose() {
+        Ok(regime) => regime,
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
     let credential = match auth_file.as_deref().map(credential_from).transpose() {
         Ok(credential) => credential,
         Err(why) => return fail(EXIT_INPUT, &why),
@@ -189,7 +237,13 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(server) => server,
         Err(why) => return fail(EXIT_HALT, &format!("the server did not start: {why}")),
     };
-    println!("{}", announcement(&server.addr().to_string(), opened));
+    let substrate = regime
+        .as_ref()
+        .map(|regime| regime.substrates[0].id.as_str());
+    println!(
+        "{}",
+        announcement(&server.addr().to_string(), opened, substrate)
+    );
     // Serves until the process is stopped. The server's threads do the work;
     // this one only keeps the process, and the server, alive.
     loop {
@@ -253,19 +307,37 @@ fn listener(
 
 /// The first line `serve` prints: where it listens and when it opened, as
 /// JSON.
-fn announcement(listening: &str, opened: u64) -> String {
+fn announcement(listening: &str, opened: u64, substrate: Option<&str>) -> String {
+    let mut fields = BTreeMap::from([
+        ("listening".to_owned(), Value::String(listening.to_owned())),
+        (
+            "opened".to_owned(),
+            Value::Integer(i64::try_from(opened).unwrap_or(i64::MAX)),
+        ),
+    ]);
+    if let Some(substrate) = substrate {
+        fields.insert("substrate".to_owned(), Value::String(substrate.to_owned()));
+        // Which registry answered (#204): its text's digest, for a reader
+        // who has this line and not the binary.
+        fields.insert(
+            "registry_sha256".to_owned(),
+            Value::String(diet::drive::registry::registry_sha256()),
+        );
+    }
     let mut out = String::new();
-    json::render(
-        &Value::Object(BTreeMap::from([
-            ("listening".to_owned(), Value::String(listening.to_owned())),
-            (
-                "opened".to_owned(),
-                Value::Integer(i64::try_from(opened).unwrap_or(i64::MAX)),
-            ),
-        ])),
-        &mut out,
-    );
+    json::render(&Value::Object(fields), &mut out);
     out
+}
+
+/// The regime the regimen at `path` declares, its substrate resolved from the
+/// registry this program was built with (#157 Q2).
+fn registered_regime(path: &str) -> Result<diet::formats::record::Regime, String> {
+    let text =
+        std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
+    let regimen =
+        regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
+    diet::drive::regimen::regime_registered(&regimen, diet::drive::registry::REGISTRY)
+        .map_err(|why| format!("{path}: {why}"))
 }
 
 /// The endpoint's key, from a FILE: an argument is readable by anyone who

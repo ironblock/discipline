@@ -7073,6 +7073,94 @@ failure_class = "drive.canned-registry-scan-reads-nothing"
 migrated = false
 
 [[fault]]
+id = "drive.registry-scan-reads-a-list-as-absent"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-scan-reads-a-list-as-absent"
+failure_class = "drive.registry-scan-reads-a-list-as-absent"
+migrated = false
+
+[[fault]]
+id = "drive.registry-resolves-any-id"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-resolves-any-id"
+failure_class = "drive.registry-resolves-any-id"
+migrated = false
+
+[[fault]]
+id = "drive.registry-takes-one-shard-of-many"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-takes-one-shard-of-many"
+failure_class = "drive.registry-takes-one-shard-of-many"
+migrated = false
+
+[[fault]]
+id = "drive.regime-ignores-a-hardware-disagreement"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.regime-ignores-a-hardware-disagreement"
+failure_class = "drive.regime-ignores-a-hardware-disagreement"
+migrated = false
+
+[[fault]]
+id = "drive.regime-keeps-the-regimens-engine"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.regime-keeps-the-regimens-engine"
+failure_class = "drive.regime-keeps-the-regimens-engine"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-ignores-the-regimen"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-ignores-the-regimen"
+failure_class = "drive.serve-bin-ignores-the-regimen"
+migrated = false
+
+[[fault]]
+id = "drive.registry-files-a-bad-headers-keys-under-the-last-table"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-files-a-bad-headers-keys-under-the-last-table"
+failure_class = "drive.registry-files-a-bad-headers-keys-under-the-last-table"
+migrated = false
+
+[[fault]]
+id = "drive.registry-keeps-quotes-in-an-id"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-keeps-quotes-in-an-id"
+failure_class = "drive.registry-keeps-quotes-in-an-id"
+migrated = false
+
+[[fault]]
+id = "drive.registry-drops-the-engine-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-drops-the-engine-commit"
+failure_class = "drive.registry-drops-the-engine-commit"
+migrated = false
+
+[[fault]]
+id = "drive.regime-drops-the-chat-template"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.regime-drops-the-chat-template"
+failure_class = "drive.regime-drops-the-chat-template"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-no-registry-digest"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-no-registry-digest"
+failure_class = "drive.serve-bin-announces-no-registry-digest"
+migrated = false
+
+[[fault]]
 id = "drive.session-drops-timings"
 kind = "lane-fault"
 check = "lanes"
