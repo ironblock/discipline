@@ -32,7 +32,10 @@ results	diet
 recompute	diet
 admission	diet
 
-# --- pages: the published static surface ---
+# --- pages: the published static surface. pages/ and
+# .github/workflows/pages.yml -- the landing page and the deploy that
+# publishes the replay and the ledger beside it -- are track five's (#32,
+# ruling 8); the checks that guard them stay track one's. ---
 pages	pages
 
 # --- repo: concerns that belong to no single package ---

@@ -1,0 +1,13 @@
+{
+ "read": "2026-10-01, on the floor's host, read-only: stat -c '%W %Y %s' and sha256sum of the release tarball",
+ "tarball_sha256": "9da1f400e03925c797f1d699c5f275d6bd4616df5b9cdeb4c54f649850ced558",
+ "bytes": 375306877,
+ "birth": "2026-06-14T20:09:23Z",
+ "modified": "2026-06-14T20:09:41Z",
+ "note": "birth is when the file was written on the host (the download); its sha256 is the registry's engine_release_tarball_sha256",
+ "stat_raw": {
+  "birth_epoch": 1781467763,
+  "modified_epoch": 1781467781,
+  "bytes": 375306877
+ }
+}

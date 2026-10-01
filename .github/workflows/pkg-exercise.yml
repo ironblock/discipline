@@ -56,3 +56,12 @@ jobs:
           for check in "${checks[@]}"; do args+=(--only "$check"); done
           printf 'checks owned by exercise: %s\n' "${checks[*]}"
           ./verify.sh "${args[@]}"
+
+      # The replay page this run built and checked (#32): what pages.yml
+      # publishes if this run passes on a push to main, downloaded by run id.
+      - name: Keep the replay page this run built
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-replay
+          path: _site/replay
+          if-no-files-found: error
