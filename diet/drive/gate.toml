@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 141
+faults = 146
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -2074,8 +2074,11 @@ catches = [
     "drive::canned::tests::the_first_registered_acts_still_hash_to_their_registered_digest",
     "drive::canned::tests::the_regimen_names_the_substrate_that_plays_these_acts",
     "drive::regimen::tests::a_regimen_whose_hardware_disagrees_with_the_registry_is_refused",
+    "drive::regimen::tests::a_registered_chat_template_crosses_into_the_regime",
     "drive::regimen::tests::a_registered_substrate_crosses_with_the_registrys_identity",
+    "drive::registry::tests::a_header_is_read_strictly_and_never_files_keys_under_the_table_before_it",
     "drive::registry::tests::a_registered_digest_substrate_resolves_to_what_the_registry_declares",
+    "drive::registry::tests::a_registered_substrates_commit_and_chat_template_are_read",
     "drive::registry::tests::the_canned_instance_resolves_to_the_acts_this_crate_plays",
     "drive::registry::tests::the_scan_reads_a_list_as_a_list_and_never_as_an_absent_key",
 ]
@@ -2286,4 +2289,69 @@ becomes = '''
 catches = [
     "a_drive_server_announces_the_registered_substrate_its_regimen_names",
     "a_drive_server_refuses_to_start_on_a_substrate_the_registry_does_not_resolve",
+]
+
+[[fault]]
+id = "drive.registry-files-a-bad-headers-keys-under-the-last-table"
+failure_class = "drive.registry-files-a-bad-headers-keys-under-the-last-table"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+                    || format!("<unreadable header: {trimmed}>"),'''
+becomes = '''
+                    || current.clone(),'''
+catches = [
+    "drive::registry::tests::a_header_is_read_strictly_and_never_files_keys_under_the_table_before_it",
+]
+
+[[fault]]
+id = "drive.registry-keeps-quotes-in-an-id"
+failure_class = "drive.registry-keeps-quotes-in-an-id"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+                    |name| name.replace('"', ""),'''
+becomes = '''
+                    |name| name.to_owned(),'''
+catches = [
+    "drive::registry::tests::a_header_is_read_strictly_and_never_files_keys_under_the_table_before_it",
+]
+
+[[fault]]
+id = "drive.registry-drops-the-engine-commit"
+failure_class = "drive.registry-drops-the-engine-commit"
+target = "diet/src/drive/registry.rs"
+expect_exit = 101
+anchor = '''
+        engine_commit: table.strings.get("engine_commit").cloned(),'''
+becomes = '''
+        engine_commit: None,'''
+catches = [
+    "drive::registry::tests::a_registered_substrates_commit_and_chat_template_are_read",
+]
+
+[[fault]]
+id = "drive.regime-drops-the-chat-template"
+failure_class = "drive.regime-drops-the-chat-template"
+target = "diet/src/drive/regimen.rs"
+expect_exit = 101
+anchor = '''
+        substrate.chat_template_sha256 = identity.chat_template_sha256;'''
+becomes = '''
+        let _ = identity.chat_template_sha256;'''
+catches = [
+    "drive::regimen::tests::a_registered_chat_template_crosses_into_the_regime",
+]
+
+[[fault]]
+id = "drive.serve-bin-announces-no-registry-digest"
+failure_class = "drive.serve-bin-announces-no-registry-digest"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            Value::String(diet::drive::registry::registry_sha256()),'''
+becomes = '''
+            Value::String(String::new()),'''
+catches = [
+    "a_drive_server_announces_the_registered_substrate_its_regimen_names",
 ]
