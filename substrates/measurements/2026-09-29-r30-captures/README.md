@@ -86,9 +86,9 @@ One read-only GET `/props` was made at 2026-10-01T03:06:11Z by `capture_c0b.py` 
 - **No other key carries a build or commit id.** At any depth of `/props`, no key name contains `build` or `commit`, and no string value is commit-shaped.
 - **This is not the engine of C0-C5.**
   - C0-C5 ran on instance `2026-09-28`, engine `e7051ef`. The registry records that engine reporting itself as `system_fingerprint` `b7-e7051ef` on the chat reply.
-  - At C0b, `/props` `build_info` reads `b8-e486f80`. These are two fields, but both carry the build number and the commit the server was built from.
-  - Read-only reads on the host minutes later are in `engine-read.json`. No full response or path is kept there.
-    - The running binary's sha256 is `f316bc7f…`, not the registry's `41e6591d…`. It was built and launched on 2026-09-30.
+  - At C0b, `/props` `build_info` reads `b8-e486f80`. These are two fields; both read as `b<n>-<short sha>`.
+  - Read-only reads on the host minutes later, by hand-run commands rather than a committed script, are in `engine-read.json` (the commands are named in its `how`). No full response or path is kept there.
+    - The running binary's sha256 is `f316bc7f…`, not the registry's `41e6591d…`. It was built 2026-09-30T22:19Z and launched 2026-10-01T01:10Z.
     - Its checkout's HEAD `e486f80` is one commit on top of `e7051ef`: a fix to QSA bias indexing when a unified cache holds several sequences, 1 file changed.
     - The binary is a 17,872-byte stub, so the digests of its linked libraries are recorded beside it.
   - C0b is therefore a receipt for the engine running on 2026-10-01. It is not evidence about C0-C5. The registry row (still `current` for `2026-09-28`) is not changed here; the new instance and the stub-pinning recipe are #202.
