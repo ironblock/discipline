@@ -1,0 +1,23 @@
+{
+ "read": "disk",
+ "exe": "865044a2bf2d56856f843b7cf080faf519030e338d8b75d366270b5b9d2b5511",
+ "exe_bytes": 17888,
+ "libraries": {
+  "libggml-base.so.0.24.0": "76fccaca96c6b39ef6a70b77923929501a5f54966c007f73cf253f80ddb68dcd",
+  "libggml-cpu.so.0.24.0": "046fa0ca6467d75ab4980fe49583f1cb88fc586e7fca0f4790195bfbffa27899",
+  "libggml-cuda.so.0.24.0": "b502c27d9c58e68ae23083ca1d9f8c8db36eb804ea97025da1a5d9389c965516",
+  "libggml.so.0.24.0": "2ac057a878de41ee228d829a920086f6a8bf4b630ba146ac1a30a0f8267232c5",
+  "libllama-batched-bench-impl.so": "d70f238faccf2b2749df3a4fba38a897ac697b99f10d0cdbf9f3230e593cb7ef",
+  "libllama-bench-impl.so": "6c021a165c4da9dac8d0d3f78749448b7a0156b39e9f795047409a50403506cc",
+  "libllama-cli-impl.so": "adbade76d415c4c1d41028e1caacde2aa762b4b6ba8cbe19a8b44973d43fc468",
+  "libllama-common.so.0.4.1": "27a4450b9fd5755662227509b68156e095f9953f78f623d7c41847cec4438ee0",
+  "libllama-completion-impl.so": "77ea4e55bf766cdf1cf0f593a56b81ae9dd88ff184bf012937e1ff68e75d7981",
+  "libllama-fit-params-impl.so": "d9fbda37da707f20e65c76b407639685c3067a414de28b35a6dfab09f259b999",
+  "libllama-perplexity-impl.so": "e94c77049649ab8163fa8aaf2711c975d0a815e39e4b265f185fc92768564cf9",
+  "libllama-quantize-impl.so": "af2bd4f98327bbcc88baf5a8536600287385638df3a91a269159bc883c5114ad",
+  "libllama-server-impl.so": "33b77954e65ba5a8763664dc4d93764971151c32e90f90213ad8fa09562245d5",
+  "libllama.so.0.4.1": "75ee69002de615f4d54b4d20ce613c7088972cc4f62819fbd9b72306f30e8c38",
+  "libmtmd.so.0.4.1": "b51513377dea9e25bc33fd94bda3cea64549a589e368f02208e79a82c147c1b7"
+ },
+ "engine_fingerprint": "2c2bbdfd05dd5d3224b4ec8546c3fbe942de769e01527f08bb891e4b99bcaf99"
+}

@@ -185,9 +185,19 @@ in a digest, an inferred field added to a type's list, an instance field added
 to one — plus an undeclared type, an empty declaration, and an unreadable
 registry at exit 2.
 
-**It is not wired into `verify.sh` yet**, because that file and `scripts/` are
-the clean room's. Until it is, this is a check that exists and does not run,
-which is the state the rule was written to avoid; the ask is on #68.
+**It runs in `verify.sh`'s `admission` check** (#202), before the admission derivation, with its own `--selftest` first.
+
+**The engine has a fingerprint too (#202).** `engine_identity` used to be the sha256 of the server executable alone. A llama.cpp build's executable is a stub of about 18 KB, and its engine is the shared objects beside it. So every substrate whose `engine_identity` is one digest also carries exactly one of these:
+
+- `engine_libraries` (basename to sha256), with `engine_fingerprint` over the exe and every library, and `engine_libraries_read` set to `process` or `disk`;
+- `engine_libraries_unreadable`, giving the reason;
+- `engine_single_digest_suffices`, giving the reason, stated as measured.
+
+The recipe hashes every shared object in the executable's own directory. It is read with:
+
+    python3 substrates/check-fingerprints.py --read-engine <pid or path>
+
+It is seen red when a library digest changes while the exe digest holds, and when the recipe is narrowed back to the exe. The four reads behind the current fields are in `measurements/2026-10-01-engine-libraries/`.
 
 ## The interconnect, as a worked example of being wrong twice
 
