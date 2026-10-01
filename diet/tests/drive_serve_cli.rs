@@ -763,7 +763,7 @@ fn start_through_sh(prelude: &str, endpoint: &str, extra: &[&str]) -> (Child, St
 }
 
 #[test]
-fn a_log_that_cannot_be_written_stops_the_server_even_with_its_stdout_closed() {
+fn a_drive_server_whose_log_cannot_be_written_stops_even_with_its_stdout_closed() {
     // A file-size limit of one block, its signal ignored, so the log's
     // write fails as a full disk's would; and stdout closed after the
     // announcement, which once turned the failure into a panic that left
@@ -791,7 +791,7 @@ fn a_log_that_cannot_be_written_stops_the_server_even_with_its_stdout_closed() {
 }
 
 #[test]
-fn a_log_file_that_cannot_be_created_refuses_before_anything_binds() {
+fn a_drive_server_refuses_an_uncreatable_log_file_before_anything_binds() {
     let stub = Stub::serving(Vec::new()).expect("loopback");
     let path = std::env::temp_dir()
         .join(format!("diet-drive-no-such-dir-{}", std::process::id()))
@@ -805,7 +805,7 @@ fn a_log_file_that_cannot_be_created_refuses_before_anything_binds() {
 }
 
 #[test]
-fn a_server_that_fails_to_start_leaves_an_existing_log_file_as_it_was() {
+fn a_drive_server_that_fails_to_start_leaves_an_existing_log_file_as_it_was() {
     // Emptied only once the server runs (#230's review, finding 3).
     let held = file_holding("log", "an earlier session's log\n");
     let path = held.0.to_string_lossy().into_owned();
