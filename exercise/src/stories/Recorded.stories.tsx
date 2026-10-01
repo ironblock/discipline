@@ -4,6 +4,7 @@ import { expect, userEvent, waitFor } from 'storybook/test';
 
 import { PHASES } from '../App.tsx';
 import { cableOf } from './cables.ts';
+import { pointAt } from './pointing.ts';
 import { colourContrast, contrast, fillContrast } from './contrast.ts';
 import { labelsOf, RECORDINGS, recordedAt } from '../drive/recorded.ts';
 import type { RecordingName } from '../drive/recorded.ts';
@@ -353,8 +354,9 @@ export const Harness: Story = {
     // At rest a line is the net's; pointed at, a side call's own lines are drawn over it.
     const lit = () => [...document.querySelectorAll(`.ex-links .ex-link[data-from="${cell.dataset.branch}"]`)].filter((l) => getComputedStyle(l).stroke !== 'rgba(0, 0, 0, 0)');
     await expect(lit()).toHaveLength(0);
-    await userEvent.hover(cell.querySelector('.ex-block') as HTMLElement);
-    await waitFor(async () => expect(lit().length).toBeGreaterThan(0));
+    await pointAt(cell.querySelector('.ex-block') as HTMLElement, async () => {
+      await expect(lit().length).toBeGreaterThan(0);
+    });
   },
 };
 
