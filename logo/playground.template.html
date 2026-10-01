@@ -44,12 +44,15 @@
   summary { cursor: pointer; padding: 10px 12px; font-weight: 600; letter-spacing: 0.01em; }
   .knobs { padding: 2px 12px 10px; display: grid; gap: 10px; }
   .knob { display: grid; grid-template-columns: minmax(0, 1fr) 76px; gap: 2px 10px; align-items: center; }
+  .knob-head { grid-column: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+  .knob.is-select .knob-head { grid-column: 1 / span 2; }
   .knob label { color: var(--muted); font-size: 12px; letter-spacing: 0.02em; }
+  .knob-reset { visibility: hidden; min-height: 26px; padding: 0 8px; font-size: 12px; font-family: var(--mono); color: var(--accent); background: none; white-space: nowrap; }
+  .knob.changed .knob-reset { visibility: visible; }
   .knob input[type="range"] { grid-column: 1; width: 100%; min-width: 0; accent-color: var(--accent); margin: 0; height: 28px; }
   .knob input[type="number"] { grid-column: 2; grid-row: 1 / span 2; width: 76px; font-family: var(--mono); font-size: 13px; padding: 4px 6px; min-height: 32px; }
   .knob select { grid-column: 1 / span 2; }
   .knob.changed label { color: var(--fg); }
-  .knob.changed label::after { content: " •"; color: var(--accent); }
   #out { width: 100%; min-height: 140px; font: 12px/1.4 var(--mono); color: var(--fg); background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 8px; resize: vertical; }
   .hint { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
   @media (prefers-reduced-motion: no-preference) { details > summary { transition: color 0.15s; } }
@@ -101,15 +104,16 @@ const clone = (o) => JSON.parse(JSON.stringify(o));
 
 /* ---------- state ---------- */
 const GLOBAL_PARAMS = { wavelength: C.WAVELENGTH, ampScale: 1, crossOutside: C.CROSS_OUTSIDE };
-let P = {};                      // params: look, taper, harmonics, outside, gain, wavelength, ampScale, crossOutside
+let P = {};                      // params: surface, bezel, thickness, ior, specWidth, bandWidth, taper, harmonics, outside, gain, wavelength, ampScale, crossOutside
 let TH = clone(D.themes);        // both palettes, edited in place
 let base = null;                 // what "changed" is measured against
 const ui = { theme: "dark", view: "final", zoom: "100" };
 const T = () => TH[ui.theme];
 
 function applyPreset(name) {
-  const { desc, ...p } = D.presets[name];
-  P = { ...GLOBAL_PARAMS, ...p };
+  const { desc, look, ...p } = D.presets[name], lk = D.looks[look];
+  P = { ...GLOBAL_PARAMS, ...p, surface: "squircle", bezel: lk.bezel, thickness: lk.thickness, ior: C.IOR,
+        specWidth: lk.spec_width, bandWidth: lk.band_width };
   TH = clone(D.themes);
   base = { preset: name, p: clone(P), themes: clone(D.themes) };
   document.getElementById("preset-note").textContent = desc;
@@ -170,9 +174,113 @@ function falloffLayers(reach, steps = 5) {
   return Array.from({ length: steps }, (_, i) => [2 * reach * (i + 1) / steps, cover[i] - cover[i + 1]]);
 }
 
+
+/* ---------- refraction map (port of lens.py; surfaces from kube.io/blog/liquid-glass-css-svg) ---------- */
+const RES = 2;                      // raster pixels per user unit while computing; the delivered PNG is 1 per unit
+const BAND_MAX = 40;                // the widest bezel the knob allows
+const smoother = (t) => t * t * t * (t * (6 * t - 15) + 10);
+const dSmoother = (t) => 30 * t * t * (1 - t) * (1 - t);
+const sq = { h: (t) => Math.pow(1 - Math.pow(1 - t, 4), 0.25), dh: (t) => Math.pow(1 - t, 3) * Math.pow(1 - Math.pow(1 - t, 4), -0.75) };
+// height of the glass surface (0 at the edge, 1 at the top of the bezel) and its slope, per kube's four profiles.
+// The article writes concave and lip in terms of "Convex"; the squircle is taken as that here.
+const SURFACES = {
+  squircle: sq,
+  circle: { h: (t) => Math.sqrt(1 - (1 - t) * (1 - t)), dh: (t) => (1 - t) / Math.sqrt(1 - (1 - t) * (1 - t)) },
+  concave: { h: (t) => 1 - sq.h(t), dh: (t) => -sq.dh(t) },
+  lip: { h: (t) => sq.h(t) + smoother(t) - 2 * sq.h(t) * smoother(t), dh: (t) => sq.dh(t) * (1 - 2 * smoother(t)) + dSmoother(t) * (1 - 2 * sq.h(t)) },
+};
+// how far a vertical ray is thrown sideways at distance d inside the edge: Snell's law at the top surface
+function bezelShift(d, bezel, thickness, ior, surface) {
+  if (d >= bezel) return 0;
+  const t = Math.min(1, Math.max(1e-3, d / bezel));
+  const alpha = Math.atan(thickness / bezel * SURFACES[surface].dh(t));
+  return thickness * Math.tan(alpha - Math.asin(Math.sin(alpha) / ior));
+}
+function dt1(f, n, out, v, z) {            // Felzenszwalb's exact 1-D squared distance transform
+  let k = 0; v[0] = 0; z[0] = -1e30; z[1] = 1e30;
+  for (let q = 1; q < n; q++) {
+    let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+    k++; v[k] = q; z[k] = s; z[k + 1] = 1e30;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) { while (z[k + 1] < q) k++; out[q] = (q - v[k]) * (q - v[k]) + f[v[k]]; }
+}
+function blur1(a, W, Hh, sigma) {          // separable gaussian, scipy's defaults (radius 4 sigma, reflected edges)
+  const r = Math.ceil(4 * sigma), ker = [];
+  let sum = 0;
+  for (let i = -r; i <= r; i++) { const g = Math.exp(-i * i / (2 * sigma * sigma)); ker.push(g); sum += g; }
+  for (let i = 0; i < ker.length; i++) ker[i] /= sum;
+  const tmp = new Float64Array(a.length), out = new Float64Array(a.length);
+  const refl = (i, n) => (i < 0 ? -i - 1 : i >= n ? 2 * n - i - 1 : i);
+  for (let y = 0; y < Hh; y++) for (let x = 0; x < W; x++) {
+    let acc = 0; for (let i = -r; i <= r; i++) acc += ker[i + r] * a[y * W + refl(x + i, W)];
+    tmp[y * W + x] = acc;
+  }
+  for (let y = 0; y < Hh; y++) for (let x = 0; x < W; x++) {
+    let acc = 0; for (let i = -r; i <= r; i++) acc += ker[i + r] * tmp[refl(y + i, Hh) * W + x];
+    out[y * W + x] = acc;
+  }
+  return out;
+}
+let FIELD = null;
+function field() {                          // once: where the edge is and which way it faces, for every raster pixel
+  if (FIELD) return FIELD;
+  const [rx, ry, rw, rh] = D.region, W = rw * RES, Hh = rh * RES, N = W * Hh;
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = Hh;
+  const g = cv.getContext("2d", { willReadFrequently: true });
+  g.setTransform(RES, 0, 0, RES, -rx * RES, -ry * RES);
+  g.fill(new Path2D(D.word), "evenodd");
+  const px = g.getImageData(0, 0, W, Hh).data, mask = new Uint8Array(N);
+  for (let i = 0; i < N; i++) mask[i] = px[i * 4 + 3] > 127 ? 1 : 0;
+  // squared distance to the nearest outside pixel: columns, then rows
+  const f = new Float64Array(N), tmp = new Float64Array(N), m = Math.max(W, Hh);
+  const v = new Int32Array(m), z = new Float64Array(m + 1), col = new Float64Array(m), res = new Float64Array(m);
+  for (let i = 0; i < N; i++) f[i] = mask[i] ? 1e12 : 0;
+  for (let x = 0; x < W; x++) { for (let y = 0; y < Hh; y++) col[y] = f[y * W + x]; dt1(col, Hh, res, v, z); for (let y = 0; y < Hh; y++) tmp[y * W + x] = res[y]; }
+  for (let y = 0; y < Hh; y++) { dt1(tmp.subarray(y * W, y * W + W), W, res, v, z); for (let x = 0; x < W; x++) f[y * W + x] = res[x]; }
+  const d = new Float64Array(N);
+  for (let i = 0; i < N; i++) d[i] = Math.max(Math.sqrt(f[i]) - 0.5, 0) / RES;
+  const ds = blur1(d, W, Hh, 1.0), ux = new Float32Array(N), uy = new Float32Array(N), band = [];
+  const at = (x, y) => ds[y * W + x];
+  for (let y = 0; y < Hh; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    if (!mask[i] || d[i] >= BAND_MAX) continue;
+    const gx = x === 0 ? at(1, y) - at(0, y) : x === W - 1 ? at(x, y) - at(x - 1, y) : (at(x + 1, y) - at(x - 1, y)) / 2;
+    const gy = y === 0 ? at(x, 1) - at(x, 0) : y === Hh - 1 ? at(x, y) - at(x, y - 1) : (at(x, y + 1) - at(x, y - 1)) / 2;
+    const n = Math.hypot(gx, gy);
+    if (n > 1e-6) { ux[i] = gx / n; uy[i] = gy / n; }
+    band.push(i);
+  }
+  return (FIELD = { W, Hh, mask, d, ux, uy, band: Int32Array.from(band) });
+}
+let MAPS = { key: null, val: null };
+function maps() {                           // the displacement PNG and its scale for the current surface, bezel, thickness and index
+  const key = [P.surface, P.bezel, P.thickness, P.ior].join();
+  if (MAPS.key === key) return MAPS.val;
+  const F = field(), { W, Hh, mask, d, ux, uy, band } = F;
+  const shifts = new Float32Array(band.length);
+  let peak = 1e-9;
+  for (let j = 0; j < band.length; j++) { shifts[j] = bezelShift(d[band[j]], P.bezel, P.thickness, P.ior, P.surface); peak = Math.max(peak, Math.abs(shifts[j])); }
+  const R = new Float32Array(W * Hh), G = new Float32Array(W * Hh);
+  for (let i = 0; i < R.length; i++) R[i] = G[i] = mask[i] ? 127.5 : 128;
+  for (let j = 0; j < band.length; j++) { const i = band[j]; R[i] = 127.5 + 127.5 * shifts[j] * ux[i] / peak; G[i] = 127.5 + 127.5 * shifts[j] * uy[i] / peak; }
+  const ow = W / RES, oh = Hh / RES, cv = document.createElement("canvas"); cv.width = ow; cv.height = oh;
+  const g = cv.getContext("2d"), img = g.createImageData(ow, oh), q = RES * RES;
+  for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) {
+    let r = 0, gg = 0;
+    for (let dy = 0; dy < RES; dy++) for (let dx = 0; dx < RES; dx++) { const i = (y * RES + dy) * W + x * RES + dx; r += R[i]; gg += G[i]; }
+    const o = (y * ow + x) * 4;
+    img.data[o] = Math.round(r / q); img.data[o + 1] = Math.round(gg / q); img.data[o + 2] = 128; img.data[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  MAPS = { key, val: { disp: cv.toDataURL("image/png"), scale: 2 * peak } };
+  return MAPS.val;
+}
+
 /* ---------- the SVG (port of build.svg and build.element_glass for glass="refract") ---------- */
 function buildSvg(themeName, view) {
-  const t = TH[themeName], L = D.looks[P.look], look = L.look;
+  const t = TH[themeName], M = maps();
   const w = String(Math.round(D.width)), H = C.H, width = D.width;
   const outside = P.outside !== "none", ends = P.outside === "ends";
   const [start, end] = convergence();
@@ -180,7 +288,7 @@ function buildSvg(themeName, view) {
   const ramp0 = (end - 45) / width, ramp1 = (end + 25) / width;
   const comps = harmonics(P.harmonics, D.xHeight / 2 * P.ampScale, P.wavelength);
   const shift = crossoverShift(comps, P.taper, D.enters - P.crossOutside);
-  const [rx, ry, rw, rh] = L.region;
+  const [rx, ry, rw, rh] = D.region;
   const top = ry + C.PAD - C.CROP, height = rh - 2 * C.PAD + 2 * C.CROP;
 
   const waveDefs = wavePaths(comps, P.taper, shift).map((d, k) => `<path id="w${k}" d="${d}"/>`).join("\n    ");
@@ -190,8 +298,8 @@ function buildSvg(themeName, view) {
     `<use href="#beam" fill="none" stroke="${t.beam}" stroke-width="${t.beam_width * beamScale}" stroke-linecap="round" mask="url(#beammask)"/>`;
   const blur = (id, dev) => `<filter id="${id}" filterUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${H}" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="${dev}"/></filter>`;
   const bend = `<filter id="bend" filterUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${H}" color-interpolation-filters="sRGB">` +
-    `<feImage href="${L.disp}" x="${rx}" y="${ry}" width="${rw}" height="${rh}" preserveAspectRatio="none" result="dmap"/>` +
-    `<feDisplacementMap in="SourceGraphic" in2="dmap" scale="${(L.scale * P.gain).toFixed(2)}" xChannelSelector="R" yChannelSelector="G"/></filter>`;
+    `<feImage href="${M.disp}" x="${rx}" y="${ry}" width="${rw}" height="${rh}" preserveAspectRatio="none" result="dmap"/>` +
+    `<feDisplacementMap in="SourceGraphic" in2="dmap" scale="${(M.scale * P.gain).toFixed(2)}" xChannelSelector="R" yChannelSelector="G"/></filter>`;
   const padRect = `<rect width="${w}" height="${H}" fill="${t.pad}" fill-opacity="0.004"/>`;
   const bent = (scale, beamScale, alpha) =>
     `<g filter="url(#bend)">${padRect}<g opacity="${alpha}">${light(scale, beamScale)}</g></g>`;
@@ -209,23 +317,23 @@ function buildSvg(themeName, view) {
   }
 
   // rim light: outline segments stroked at each brightness step, clipped to the letters
-  const layers = falloffLayers(look.spec_width), facets = [];
+  const layers = falloffLayers(P.specWidth), facets = [];
   for (const [kind, colour, opacity] of [["s", t.shade, t.shade_opacity], ["l", t.lit, t.lit_opacity]]) {
-    for (let q = 1; q <= L.quant; q++) {
-      if (!L.bev[`b${kind}${q}`]) continue;
+    for (let q = 1; q <= D.quant; q++) {
+      if (!D.bev[`b${kind}${q}`]) continue;
       for (const [sw, share] of layers) {
-        facets.push(`<use href="#b${kind}${q}" fill="none" stroke="${colour}" stroke-opacity="${(opacity * (q / L.quant) * share * t.el.bevel).toFixed(3)}" stroke-width="${sw.toFixed(2)}" stroke-linejoin="round"/>`);
+        facets.push(`<use href="#b${kind}${q}" fill="none" stroke="${colour}" stroke-opacity="${(opacity * (q / D.quant) * share * t.el.bevel).toFixed(3)}" stroke-width="${sw.toFixed(2)}" stroke-linejoin="round"/>`);
       }
     }
   }
-  const bevDefs = Object.entries(L.bev).filter(([, d]) => d).map(([k, d]) => `<path id="${k}" d="${d}"/>`).join("");
+  const bevDefs = Object.entries(D.bev).filter(([, d]) => d).map(([k, d]) => `<path id="${k}" d="${d}"/>`).join("");
   const el = t.el, b = t.bloom;
 
   let body;
   if (view === "final") {
     body = `<use href="#word" fill="url(#body)"/>
   <g clip-path="url(#wordclip)">
-    <use href="#word" fill="none" stroke="${t.edge}" stroke-width="${2 * look.band_width}" stroke-opacity="${t.edge_opacity}"/>
+    <use href="#word" fill="none" stroke="${t.edge}" stroke-width="${2 * P.bandWidth}" stroke-opacity="${t.edge_opacity}"/>
     <g filter="url(#bloomB)">${bent(t.inner * el.b_width, t.beam_inner * el.b_width, el.b_alpha)}</g>
     <g filter="url(#bloomA)">${bent(t.inner * el.a_width, t.beam_inner * el.a_width, el.a_alpha)}</g>
     <g filter="url(#frost)">${bent(t.inner, t.beam_inner, 1)}</g>
@@ -234,8 +342,9 @@ function buildSvg(themeName, view) {
   </g>`;
   } else {
     const ink = themeName === "dark" ? "#fff" : "#000";
-    body = `<use href="#word" fill="none" stroke="${ink}" stroke-width="1" stroke-opacity="0.6"/>` +
-      (view === "bent"
+    body = (view === "map" ? `<image href="${M.disp}" x="${rx}" y="${ry}" width="${rw}" height="${rh}" preserveAspectRatio="none"/>` : "") +
+      `<use href="#word" fill="none" stroke="${ink}" stroke-width="1" stroke-opacity="0.6"/>` +
+      (view === "map" ? "" : view === "bent"
         // the map covers the word only; outside it the filter would shift everything, so show those lines plain
         ? `<clipPath id="reg"><rect x="${rx}" y="${ry}" width="${rw}" height="${rh}"/></clipPath>` +
           `<mask id="notreg" maskUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${H}"><rect width="${w}" height="${H}" fill="#fff"/><rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="#000"/></mask>` +
@@ -285,15 +394,22 @@ function buildSvg(themeName, view) {
 
 /* ---------- knobs ---------- */
 const OPTS = {
-  look: [["carved", "Carved (narrow bezel)"], ["liquid", "Liquid (wide bezel)"]],
+  surface: [["squircle", "Convex squircle"], ["circle", "Convex circle"], ["concave", "Concave"], ["lip", "Lip"]],
   taper: [["early", "Early"], ["mid", "Mid"], ["late", "Late"]],
   harmonics: [["single", "Single sine"], ["filter", "Noise, stripped letter by letter"]],
   outside: [["full", "Light shown outside the word"], ["ends", "Ends only (story)"], ["none", "Inside the letters only"]],
 };
 const GROUPS = [
-  { name: "Refraction and rim", open: true, items: [
+  { name: "Glass shape", open: true, items: [
+    { k: "surface", s: "p", label: "Surface profile", select: "surface" },
+    { k: "bezel", s: "p", label: "Bezel width", min: 1, max: 40, step: 0.5 },
+    { k: "thickness", s: "p", label: "Glass thickness", min: 1, max: 60, step: 0.5 },
+    { k: "ior", s: "p", label: "Refractive index", min: 1, max: 2.6, step: 0.02 },
     { k: "gain", s: "p", label: "Displacement gain", min: 0, max: 8, step: 0.05 },
-    { k: "look", s: "p", label: "Bezel", select: "look" },
+  ] },
+  { name: "Rim light", items: [
+    { k: "specWidth", s: "p", label: "Rim light reach", min: 0.5, max: 20, step: 0.5 },
+    { k: "bandWidth", s: "p", label: "Edge band reach", min: 0.5, max: 24, step: 0.5 },
     { k: "el.bevel", s: "t", label: "Rim light strength", min: 0, max: 3, step: 0.05 },
     { k: "lit_opacity", s: "t", label: "Lit edge opacity", min: 0, max: 1, step: 0.01 },
     { k: "shade_opacity", s: "t", label: "Shaded edge opacity", min: 0, max: 1, step: 0.01 },
@@ -313,11 +429,11 @@ const GROUPS = [
     { k: "bloom.b.1", s: "t", label: "Far bloom, y", min: 0, max: 40, step: 0.5 },
   ] },
   { name: "Light inside the glass", items: [
-    { k: "inner", s: "t", label: "Wave thickness inside (×)", min: 0.4, max: 3.5, step: 0.05 },
-    { k: "beam_inner", s: "t", label: "Beam thickness inside (×)", min: 0.3, max: 3.5, step: 0.05 },
-    { k: "el.a_width", s: "t", label: "Near bloom width (×)", min: 0.5, max: 8, step: 0.1 },
+    { k: "inner", s: "t", label: "Wave thickness inside (\u00d7)", min: 0.4, max: 3.5, step: 0.05 },
+    { k: "beam_inner", s: "t", label: "Beam thickness inside (\u00d7)", min: 0.3, max: 3.5, step: 0.05 },
+    { k: "el.a_width", s: "t", label: "Near bloom width (\u00d7)", min: 0.5, max: 8, step: 0.1 },
     { k: "el.a_alpha", s: "t", label: "Near bloom opacity", min: 0, max: 1.5, step: 0.05 },
-    { k: "el.b_width", s: "t", label: "Far bloom width (×)", min: 1, max: 12, step: 0.1 },
+    { k: "el.b_width", s: "t", label: "Far bloom width (\u00d7)", min: 1, max: 12, step: 0.1 },
     { k: "el.b_alpha", s: "t", label: "Far bloom opacity", min: 0, max: 1.5, step: 0.05 },
   ] },
   { name: "Light outside the glass", items: [
@@ -361,12 +477,14 @@ function buildKnobs() {
     box.className = "knobs";
     for (const it of g.items) {
       const id = "k-" + it.k.replace(/\./g, "-"), row = document.createElement("div");
-      row.className = "knob";
+      row.className = "knob" + (it.select ? " is-select" : "");
       row.dataset.k = it.k;
-      const lab = document.createElement("label");
-      lab.htmlFor = id;
-      lab.textContent = it.label;
-      row.append(lab);
+      const head = document.createElement("div"), lab = document.createElement("label"), undo = document.createElement("button");
+      head.className = "knob-head"; lab.htmlFor = id; lab.textContent = it.label;
+      undo.type = "button"; undo.className = "knob-reset";
+      undo.addEventListener("click", () => { set(it, baseValue(it, ui.theme)); syncKnob(it); changed(); });
+      head.append(lab, undo);
+      row.append(head);
       if (it.select) {
         const sel = document.createElement("select");
         sel.id = id;
@@ -388,19 +506,25 @@ function buildKnobs() {
     host.append(d);
   }
 }
+function syncKnob(it) {
+  const id = "k-" + it.k.replace(/\./g, "-"), v = get(it);
+  document.getElementById(id).value = v;
+  if (!it.select) document.getElementById(id + "-n").value = (+v).toFixed(decimals(it.step));
+}
 function syncKnobs() {
-  for (const it of ITEMS) {
-    const id = "k-" + it.k.replace(/\./g, "-"), v = get(it);
-    const el = document.getElementById(id);
-    el.value = v;
-    if (!it.select) document.getElementById(id + "-n").value = (+v).toFixed(decimals(it.step));
-  }
+  ITEMS.forEach(syncKnob);
   markChanged();
+}
+function shown(it, v) {
+  if (it.select) return (OPTS[it.select].find(([value]) => value === v) || [, v])[1];
+  return (+v).toFixed(decimals(it.step));
 }
 function markChanged() {
   for (const it of ITEMS) {
-    const row = document.querySelector(`.knob[data-k="${it.k}"]`);
-    row.classList.toggle("changed", get(it) !== baseValue(it, ui.theme));
+    const row = document.querySelector(`.knob[data-k="${it.k}"]`), was = baseValue(it, ui.theme), now = get(it);
+    row.classList.toggle("changed", now !== was);
+    row.querySelector(".knob-reset").textContent = `\u21ba ${shown(it, was)}`;
+    row.querySelector(".knob-reset").setAttribute("aria-label", `Reset ${it.label} to ${shown(it, was)}`);
   }
 }
 
@@ -423,13 +547,18 @@ function diff() {
 }
 const STORE = "logo-playground";
 function remember(d) {
-  try { localStorage.setItem(STORE, JSON.stringify({ sig: D.defaultPreset + D.width, d })); } catch (e) { /* storage may be unavailable */ }
+  try { localStorage.setItem(STORE, JSON.stringify({ sig: "v2" + D.defaultPreset + D.width, d })); } catch (e) { /* storage may be unavailable */ }
 }
 function restore(d) {
   applyPreset(d.preset in D.presets ? d.preset : D.defaultPreset);
-  for (const [k, v] of Object.entries(d.params || {})) set(ITEMS.find((i) => i.s === "p" && i.k === k), v);
+  for (const [k, v] of Object.entries(d.params || {})) {
+    const it = ITEMS.find((i) => i.s === "p" && i.k === k);
+    if (it) set(it, v);
+  }
   for (const name of ["dark", "light"]) {
     for (const [k, v] of Object.entries(d[name] || {})) {
+      const it = ITEMS.find((i) => i.s === "t" && i.k === k);
+      if (!it) continue;
       const parts = k.split("."), last = parts.pop();
       parts.reduce((o, p) => o[p], TH[name])[last] = v;
     }
@@ -486,16 +615,16 @@ function init() {
   const presetSel = document.getElementById("preset");
   for (const name of Object.keys(D.presets)) presetSel.add(new Option(name, name));
   let saved = null;
-  try { const s = JSON.parse(localStorage.getItem(STORE) || "null"); if (s && s.sig === D.defaultPreset + D.width) saved = s.d; } catch (e) { /* ignore */ }
+  try { const s = JSON.parse(localStorage.getItem(STORE) || "null"); if (s && s.sig === "v2" + D.defaultPreset + D.width) saved = s.d; } catch (e) { /* ignore */ }
   buildKnobs();
   if (saved) restore(saved); else applyPreset(D.defaultPreset);
   presetSel.value = base.preset;
   presetSel.addEventListener("change", () => { applyPreset(presetSel.value); syncKnobs(); changed(); });
   document.getElementById("reset").addEventListener("click", () => { applyPreset(presetSel.value); try { localStorage.removeItem(STORE); } catch (e) { /* ignore */ } syncKnobs(); changed(); });
   seg("seg-theme", [["dark", "Dark"], ["light", "Light"]], () => ui.theme, (v) => { ui.theme = v; syncKnobs(); changed(); });
-  seg("seg-view", [["final", "Final"], ["bent", "Bent lines"], ["plain", "Plain lines"]], () => ui.view, (v) => { ui.view = v; changed(); });
-  seg("seg-zoom", [["fit", "Fit"], ["100", "100%"], ["200", "200%"], ["300", "300%"]], () => ui.zoom, (v) => { ui.zoom = v; changed(); });
-  seg("seg-jump", [["300", "D"], ["600", "Middle"], ["880", "e"]], () => "", (v) => setTimeout(() => jump(+v), 30));
+  seg("seg-view", [["final", "Final"], ["bent", "Bent"], ["plain", "Plain"], ["map", "Map"]], () => ui.view, (v) => { ui.view = v; changed(); });
+  seg("seg-zoom", [["fit", "Fit"], ["100", "1\u00d7"], ["200", "2\u00d7"], ["300", "3\u00d7"]], () => ui.zoom, (v) => { ui.zoom = v; changed(); });
+  seg("seg-jump", [["300", "D"], ["600", "Mid"], ["880", "e"]], () => "", (v) => setTimeout(() => jump(+v), 30));
   document.getElementById("copy").addEventListener("click", async () => {
     const out = document.getElementById("out"), note = document.getElementById("copied");
     try { await navigator.clipboard.writeText(out.value); note.textContent = "Copied"; }

@@ -52,11 +52,14 @@ carved, wide as liquid.
 ## Playground
 
 `python3 logo/playground.py` writes `logo/playground.html` (not committed): the `refract` glass with a
-slider for each setting, drawn through `<img>` as GitHub does, for tweaking on a phone. The script in
-`playground.template.html` is a port of `build.svg` for `glass="refract"`; its output matches `build.py`
-pixel for pixel in Chromium for all four `refract` presets in both themes. Bezel width and glass
-thickness are baked into the maps, so they are the `carved`/`liquid` switch, not sliders. "Copy settings"
-gives the changes from a preset, to be turned into values in `THEMES` and `VARIANTS`.
+control for each setting, drawn through `<img>` as GitHub does, for tweaking on a phone. The script in
+`playground.template.html` ports `build.svg` for `glass="refract"` and also `lens.py`'s refraction map
+(distance transform of the rasterised outline, the bezel profile, Snell's law), so bezel width, glass
+thickness, refractive index and the surface profile are controls too. The profiles (convex squircle,
+convex circle, concave, lip) are kube.io's; the article writes concave and lip in terms of "Convex", and
+the squircle is assumed. Against `lens.py` the map differs by ~1/255 on average (the page rasterises the
+outline with canvas, `lens.py` with PIL) and the finished logos by under 0.15/255, checked in Chromium.
+"Copy settings" gives the changes from a preset, to be turned into values in `THEMES` and `VARIANTS`.
 
 ## Safari
 
