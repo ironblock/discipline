@@ -14,15 +14,12 @@ The five reads here were taken on 2026-10-01, between 04:52Z and 05:12Z, by `sub
 | `beellama-floor-process.json` | the beellama release, as the restored floor's production maps it | process | `980845d6…` | 29 | `8973ae1c…` | `accel24-beellama-qwen27b-q4kxl` |
 | `beellama-preview-v0.3.2-disk.json` | the beellama release | disk | `980845d6…` | 29 | `8973ae1c…` | `cpu-beellama-qwen3-1p7b-q4km` |
 | `accel24-llamacpp-candidate-disk.json` | the candidate's mainline build | disk | `865044a2…` | 15 | `2c2bbdfd…` | `accel24-llamacpp-qwen38-27b-iq3s` |
-| `ada48-2026-09-28-build-disk.json` | the registered DoD 1 build (`e7051ef`) | disk | `41e6591d…` | 8 | `a08e5511…` | `ada48-llamacpp-qwen38flashnext-q20` |
-| `ada48-running-2026-10-01-process.json` | what the DoD 1 host ran at 04:52Z (`b8-e486f80`) | process | `f316bc7f…` | 8 | `d8887042…` | nothing |
+| `ada48-2026-09-28-build-disk.json` | the DoD 1 build of 2026-09-28 (`e7051ef`) | disk | `41e6591d…` | 8 | `a08e5511…` | `ada48-llamacpp-qwen38flashnext-q20`'s 2026-09-28 instance |
+| `ada48-running-2026-10-01-process.json` | the DoD 1 build of 2026-10-01 (`b8-e486f80`), as it ran at 04:52Z | process | `f316bc7f…` | 8 | `d8887042…` | `ada48-llamacpp-qwen38flashnext-q20`'s engine fields since its 2026-10-01 instance |
 
-Four reads back registry fields. The fifth is a receipt only.
-
-- **What it is:** the line the maintainer was testing on the DoD 1 host, a different substrate in flux. It is not an instance of `ada48`, and nothing is registered for it (#202).
-- **When it was taken:** read-only, before the maintainer's word that the host is off-limits until the line settles. No read on that host has been taken since.
-- **What it shows:** it is evidence for the stub-pin finding.
-- **Which reader took it:** an earlier version than the one committed here. That version had no executable ctime check, so the read has no `process_started`.
+All five reads back registry fields. The DoD 1 process read, taken read-only at 04:52Z, was at first a receipt only, held while the maintainer's line was unsettled. It now backs `ada48`'s engine fields, through the instance of 2026-10-01:
+- The inference seat confirmed that the host has served the registered Q2_0 line on `b8-e486f80` since 2026-09-30 at about 23:20Z. The other quant never served production there.
+- Its own process read, at about 16:10Z, equals this one field for field (`substrates/measurements/2026-10-01-ada48-e486f80/`).
 
 ## How each disk read is tied to its instance
 
