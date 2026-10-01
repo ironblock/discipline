@@ -2305,6 +2305,7 @@ catches = [
     "a_drive_server_checks_the_engine_before_it_binds",
     "a_drive_server_refuses_a_substrate_with_no_registered_engine_identity_without_asking_it",
     "a_drive_server_refuses_to_start_on_a_substrate_the_registry_does_not_resolve",
+    "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
     "a_drive_server_starts_on_a_substrate_of_several_shards",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
 ]
@@ -2542,6 +2543,7 @@ becomes = '''
 catches = [
     "a_drive_server_checks_the_engine_before_it_binds",
     "a_drive_server_refuses_a_substrate_with_no_registered_engine_identity_without_asking_it",
+    "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
     "a_drive_server_starts_on_a_substrate_of_several_shards",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
 ]
@@ -2573,6 +2575,7 @@ anchor = '''
 becomes = '''
             Value::String(String::new()),'''
 catches = [
+    "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
     "a_drive_server_starts_on_a_substrate_of_several_shards",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
 ]
@@ -2587,6 +2590,7 @@ anchor = '''
 becomes = '''
             Value::String(String::new()),'''
 catches = [
+    "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
 ]
 
@@ -2663,6 +2667,7 @@ becomes = '''
 catches = [
     "a_drive_server_checks_the_engine_before_it_binds",
     "a_drive_server_refuses_a_wildcard_before_it_asks_the_engine",
+    "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
     "a_drive_server_starts_on_a_substrate_of_several_shards",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
 ]
