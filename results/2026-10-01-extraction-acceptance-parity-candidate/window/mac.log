@@ -1,0 +1,17 @@
+2026-10-01T14:50:54Z fingerprint before rc=0
+2026-10-01T14:50:54Z verify-box before rc=0
+2026-10-01T14:50:55Z box files staged rc=0
+2026-10-01T14:50:56Z box script running
+2026-10-01T14:51:27Z ready-fire seen
+2026-10-01T14:51:28Z rehearsal rc=0 {"main": {"draft_n": true, "content": true}, "seatb_canary": {"think": false, "draft_n": false}}
+2026-10-01T14:54:55Z canary before draw 1 rc=0 verdict=PASS rate: 36/36 = 1.000   95% CI [0.904, 1.000]
+2026-10-01T15:13:42Z seat A rc=0
+2026-10-01T16:02:01Z seat B rc=0
+2026-10-01T16:05:58Z canary after draw 1 rc=0 verdict=PASS rate: 36/36 = 1.000   95% CI [0.904, 1.000]
+2026-10-01T16:05:58Z canary after rc=0
+2026-10-01T16:05:58Z fire.done sent
+2026-10-01T16:07:59Z restored marker seen
+2026-10-01T16:08:17Z fingerprint rc=0
+2026-10-01T16:08:17Z verify-box after rc=0
+2026-10-01T16:12:33Z floor canary after rc=0 rate: 35/36 = 0.972   95% CI [0.858, 0.995] | verdict: PASS — canary consistent with pinned substrate
+2026-10-01T16:12:33Z MAC-END

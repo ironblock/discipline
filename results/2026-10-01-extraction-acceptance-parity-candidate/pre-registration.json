@@ -1,0 +1,43 @@
+{
+ "claim": "gym #143: planning's pre-registration for the candidate rung's parity fire (comment 5894139110), as ruled on its four gaps (comment 5921525110), ratified by the maintainer before the fire",
+ "written": "as a file after the fire, summarising the ratified text rather than quoting it; the operative rule is apply.py with the candidate config, both merged (#191, ced2512) before the first fork",
+ "hypothesis": "Fired once per seat on the candidate rung, under the configuration the archived row declares, the extraction-seat bakeoff reproduces the archived row's result: seat B, the small extractor answering a self-contained ask off the accelerator, has the larger deduped gate-accept rate than seat A, the candidate extracting off the warm session prefix, by an amount within the band derived from the archived row's committed tallies.",
+ "archived_row": "results/2026-08-10-extraction-acceptance-inverts",
+ "seats": {
+  "A": "the candidate, accel24-llamacpp-qwen38-27b-iq3s, at its registered fingerprint",
+  "B": "cpu-beellama-qwen3-1p7b-q4km, the same CPU-side substrate as #115, held constant so the only thing that changed is the rung"
+ },
+ "harness": "#115's, pinned at 0e14292, rebuilt --locked at #115's build path (binary f5682886..., byte-identical to #115's); planned requests byte-matched to the offline rehearsal's (candidate-planned-requests.json)",
+ "band": {
+  "derived_by": "band.py",
+  "band_py_sha256": "a2427d8175bc7c5728aaab98011ccaf06bacce47fc520fd7b3f27c266ba06d52",
+  "band_json_sha256": "e32eae7aab07590e33c3f25012ff32f83de4fe4db13e61ba1d2f524cf34c6cf6",
+  "point": 0.091469,
+  "band": [
+   0.024877,
+   0.21789
+  ],
+  "stated_as": "the archived row's band, #115's band.json, not a band re-derived from the floor's re-fire"
+ },
+ "rule": {
+  "applier": "apply.py",
+  "applier_sha256": "15ebefc2818872fcbfae27ee9fa5057c744f7177d55f9571dadbb98ae8102999",
+  "config": "extraction-acceptance-inverts-candidate.json",
+  "config_sha256": "de499089de7f9c707486286450ef4ddadbb3c43e01e5fb743433032d4949c578",
+  "planned_requests_sha256": "e23291689a466ff4b256458d45c0db857aa1703c98e6610909784d1c651999f5",
+  "supported": "within the band",
+  "refuted": "outside with the sign reversed (<= 0)",
+  "inconclusive": "outside with the sign preserved",
+  "disclosure": "#115's unmeasured-original-baseline disclosure on refuted and inconclusive"
+ },
+ "gaps_as_ruled": {
+  "pooling": "paired over the intersection of counted keys; the 25-of-31 floor on the intersection; the intersection size and each seat's counted total reported",
+  "stops": "a harness stop is an unadjudicated seat; a timeout leaves a fork missing; a content refusal counts",
+  "interviews": "a miss voids the fire only if a later planned request fails the byte-match; mis-routing stays unadjudicated; the per-fork timeout is 2400 s",
+  "straddle": "the band-edge sentence withdrawn; the fire's own interval reported as a number beside the word; its one sentence is that it straddles zero",
+  "numbers": "seat-A floor 10 accepted fields; the archived band does not straddle zero, so refuted is reachable"
+ },
+ "comparison": "the candidate's effect against the floor's (#115, 0.0885) under comparison-rule.toml: substrate_independent if they differ by < 0.05; substrate_dependent if by >= 0.15 with paired p below the attainable floor; inconclusive otherwise with the sign; predicted independent",
+ "cells": "the canary: the rung's baseline draw already taken, a draw before and after the fire tested against it; the reasoning state as rendered (the candidate's template renders xhigh by default and the floor renders no level: a disclosed regime difference, not a parameter to equalise)",
+ "one_fire": "exactly one fire per seat, the first; the window's log posted on #143 with the run"
+}

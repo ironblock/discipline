@@ -1,0 +1,37 @@
+{
+ "unadjudicated_checks": "all passed",
+ "band": [
+  0.024877,
+  0.21789
+ ],
+ "counted_forks": {
+  "A": {
+   "counted": 31,
+   "of": 31,
+   "floor": 25,
+   "misses": []
+  },
+  "B": {
+   "counted": 31,
+   "of": 31,
+   "floor": 25,
+   "misses": []
+  },
+  "paired": 31
+ },
+ "interview_misses": {
+  "A": [],
+  "B": []
+ },
+ "seat_a": {
+  "offered": 1177,
+  "accepted_deduped": 52
+ },
+ "seat_b": {
+  "offered": 2227,
+  "accepted_deduped": 181
+ },
+ "effect": 0.03709513924840692,
+ "word": "supported",
+ "disclosure": null
+}

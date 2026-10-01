@@ -1,0 +1,23 @@
+{
+ "criterion": {
+  "top_k": 5,
+  "attempts": 3,
+  "shape_match": 0.1,
+  "reference_warm_draws": 3
+ },
+ "word": "pass",
+ "distance": 0.0827798843383789,
+ "tolerance": 1.150883674621582,
+ "tolerance_parts": {
+  "cold_cold_reference": 0.0,
+  "warm_cold_reference": 1.150883674621582,
+  "cold_cold_rung": 0.0
+ },
+ "rung_cache_n": 2247,
+ "reference_cache_n": 2129,
+ "rung_warm_prompt_n": 515,
+ "reference_warm_prompt_n": 513,
+ "rung_attempts": 1,
+ "reference_attempts": 1,
+ "top1_same": true
+}
