@@ -506,9 +506,9 @@ engine_identity_measured_on = "2026-10-01"
 engine_identity_measured_how = """
 The running server's binary hashed through `/proc/<pid>/exe` (process found by `pgrep -x`) returned the substrate's engine digest."""
 accelerator_driver_read = "615.71.09"
-accelerator_driver_read_note = "read 2026-10-01 from the driver library the restored process maps (libcuda.so.615.71.09, in the process read of #205), unchanged from the 2026-09-29 read"
+accelerator_driver_read_note = "read 2026-10-01 from the driver library the restored process maps (libcuda.so.615.71.09, named in substrates/measurements/2026-10-01-engine-libraries/beellama-floor-process.json), unchanged from the 2026-09-29 read"
 canary = """
-Canary e0827, k = 36, one draw at registration (2026-10-01, after the restore): 36/36, 99% Wilson [0.844, 1.000] (z = 2.576, #114's rule), read against the 2026-09-20 instance's pooled baseline, PASS. Under #114's rule this instance's own pool begins with that draw; the draw is not committed, so it is not yet poolable."""
+Canary e0827, k = 36, one draw at registration (2026-10-01, after the restore): 36/36, 99% Wilson [0.844, 1.000] (z = 2.576, #114's rule), read against the 2026-09-20 instance's pooled baseline, PASS. That comparison is a stopgap, not #114's rule: #114 pools per instance and this instance has no pool yet; only the interval's level is #114's. Under #114's rule this instance's own pool begins with that draw; the draw is not committed, so it is not yet poolable."""
 admission_note = "the floor's admission (substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/) stands on this instance: its fingerprint is engine, weights, template, serving line and reasoning state, and an operating-system change is instance state. This is Dispatch's interim reading of planning's admission fingerprint (#143, comment 5884256685), posted there for planning to refine; the admission record itself is not edited here, since its manifest digest pins its files"
 current = true
 
