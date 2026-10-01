@@ -3118,7 +3118,11 @@ fn digest_weights(
             return Err(SchemaError::BadValue {
                 of,
                 field: "weights.sha256",
-                found: format!("a list of {}; one file is spelled as a string", items.len()),
+                found: if items.is_empty() {
+                    "an empty list; a main has at least one file".to_owned()
+                } else {
+                    "a list of one; one file is spelled as a string".to_owned()
+                },
             }
             .into());
         }
@@ -5144,6 +5148,18 @@ mod tests {
             parse(&with_weights(ADA48)).is_ok(),
             "{:?}",
             parse(&with_weights(ADA48))
+        );
+    }
+
+    // The one-spelling rule as a test rather than a sentence (#211's review):
+    // a one-file main with nothing beside it is `Digest`, never a `Set`.
+    #[test]
+    fn a_main_of_one_file_parses_as_a_digest_and_never_a_set() {
+        let parsed = parse(&format!("{START}\n")).expect("START parses");
+        let weights = &parsed.regime().substrates[0].weights;
+        assert!(
+            matches!(weights, Weights::Digest(_)),
+            "a one-file main was built as {weights:?}"
         );
     }
 
