@@ -75,7 +75,7 @@
   {
    "label": "the seat-B draft_n routing check dropped",
    "file": "apply.py",
-   "old": "                if \"draft_n\" in t:\n                    n[\"seat-B extraction carrying draft_n\"] += 1",
+   "old": "                if \"draft_n\" in t:\n                    bad(f, \"seat-B extraction carrying draft_n\")",
    "new": "                pass"
   },
   {
@@ -87,8 +87,8 @@
   {
    "label": "the interview-fork check dropped",
    "file": "apply.py",
-   "old": "        if short:",
-   "new": "        if False:"
+   "old": "        if short and INTERVIEW_MISS == \"fail\":",
+   "new": "        if False and INTERVIEW_MISS == \"fail\":"
   },
   {
    "label": "the offered check dropped",
@@ -171,8 +171,122 @@
   {
    "label": "the config's arms, floor and digest unchecked",
    "file": "apply.py",
-   "old": "    if set(ARMS) != {\"A\", \"B\"} or SEAT_A_FLOOR < 0 or not re.fullmatch(r\"[0-9a-f]{64}\", BAND_SHA):",
+   "old": "    if set(ARMS) != {\"A\", \"B\"} or SEAT_A_FLOOR < 0 or not re.fullmatch(r\"[0-9a-f]{64}\", BAND_SHA) or (COUNTED_FLOOR is not None and COUNTED_FLOOR < 1) or POOL not in (\"per-seat\", \"paired\") or INTERVIEW_MISS not in (\"fail\", \"byte-match\"):",
    "new": "    if False:"
+  },
+  {
+   "label": "the counted-fork floor check removed",
+   "file": "apply.py",
+   "old": "            if POOL != \"paired\" and len(tallies) < COUNTED_FLOOR:",
+   "new": "            if False:"
+  },
+  {
+   "label": "a missing fork not listed as a miss",
+   "file": "apply.py",
+   "old": "                misses[k] = \"missing (a timeout leaves no event)\"",
+   "new": "                pass"
+  },
+  {
+   "label": "a mis-routed extraction fork failing the seat under a floor",
+   "file": "apply.py",
+   "old": "            if COUNTED_FLOOR is not None and f[\"lane\"] == \"extraction\":",
+   "new": "            if False:"
+  },
+  {
+   "label": "the config's counted-fork floor ignored",
+   "file": "apply.py",
+   "old": "        COUNTED_FLOOR = None if c.get(\"counted_fork_floor\") is None else int(c[\"counted_fork_floor\"])",
+   "new": "        COUNTED_FLOOR = None"
+  },
+  {
+   "label": "paired pooling ignored",
+   "file": "apply.py",
+   "old": "    if POOL == \"paired\":  # the band's pairing kept: both seats over the forks both counted",
+   "new": "    if False:"
+  },
+  {
+   "label": "the fire's interval never straddles zero",
+   "file": "apply.py",
+   "old": "    zero = lo < 0 < hi\n",
+   "new": "    zero = False\n"
+  },
+  {
+   "label": "the fire's interval by another seed",
+   "file": "apply.py",
+   "old": "rng = random.Random(band[\"seed\"]); draws = []",
+   "new": "rng = random.Random(1); draws = []"
+  },
+  {
+   "label": "a floor above the fork count accepted",
+   "file": "apply.py",
+   "old": "    if COUNTED_FLOOR is not None and COUNTED_FLOOR > len(band[\"keys\"]):",
+   "new": "    if False:"
+  },
+  {
+   "label": "an interview routing failure folded into misses",
+   "file": "apply.py",
+   "old": "            if COUNTED_FLOOR is not None and f[\"lane\"] == \"extraction\":",
+   "new": "            if COUNTED_FLOOR is not None:"
+  },
+  {
+   "label": "duplicate or foreign keys allowed under a floor",
+   "file": "apply.py",
+   "old": "            if dup or not set(tallies) <= keys:",
+   "new": "            if False:"
+  },
+  {
+   "file": "apply.py",
+   "label": "under paired pooling, the per-seat floor applied as well (planning: the intersection's alone)",
+   "old": "if POOL != \"paired\" and len(tallies) < COUNTED_FLOOR:",
+   "new": "if len(tallies) < COUNTED_FLOOR:"
+  },
+  {
+   "file": "apply.py",
+   "label": "byte-match: a changed planned request does not void",
+   "old": "            if changed:\n",
+   "new": "            if False:\n"
+  },
+  {
+   "file": "apply.py",
+   "label": "byte-match: an interview miss still fails the seat",
+   "old": "if short and INTERVIEW_MISS == \"fail\":",
+   "new": "if short:"
+  },
+  {
+   "file": "apply.py",
+   "label": "the request digest blind to the messages",
+   "old": "json.dumps([e.get(\"lane\"), str(e.get(\"parent_turn\")), e.get(\"messages\"), e.get(\"params\")],",
+   "new": "json.dumps([e.get(\"lane\"), str(e.get(\"parent_turn\")), e.get(\"params\")],"
+  },
+  {
+   "file": "apply.py",
+   "label": "the band-edge withdrawal undone: a sentence whatever the interval",
+   "old": "straddles zero.\" if zero else None",
+   "new": "straddles zero.\" if True else None"
+  },
+  {
+   "file": "apply.py",
+   "label": "the plan's pin not checked",
+   "old": "            if not f.is_file() or hashlib.sha256(f.read_bytes()).hexdigest() != planned[\"sha256\"]:\n",
+   "new": "            if False:\n"
+  },
+  {
+   "file": "apply.py",
+   "label": "a planned fork that did not run read as a changed request",
+   "old": "if any(d != want for d in got.get(k, []))",
+   "new": "if any(d != want for d in got.get(k, [])) or not got.get(k)"
+  },
+  {
+   "file": "apply.py",
+   "label": "a duplicated planned fork passing on one matching copy",
+   "old": "if any(d != want for d in got.get(k, []))",
+   "new": "if got.get(k) and want not in got[k]"
+  },
+  {
+   "file": "apply.py",
+   "label": "a plan naming one seat accepted",
+   "old": "            if set(PLANNED) != {\"A\", \"B\"} or not all(PLANNED.values()):\n",
+   "new": "            if False:\n"
   }
  ]
 }
