@@ -224,7 +224,27 @@ build_diet() {
 # The report contract, with the record's format verdict dispatched to
 # `diet check-record` through the resolver. The linter prints which binary
 # answered; it does not read run.jsonl itself.
-check_results() { build_diet && python3 scripts/check-results.py --root results; }
+# The results linter over every directory, and the ledger page drawn from what
+# it passed (#32 I2): check-results.py emits the ledger only if every
+# directory passes, and exercise/scripts/render-ledger.py draws _site/ledger
+# from it, refusing -- naming the directory -- a row with no word, no product
+# digest, or no directory behind it. Each step's own exit status is the
+# check's: the renderer's verdict reaches it (`RENDER_LEDGER` names the
+# renderer, so the mechanics assertion can stand one in). The page links the
+# commit it was rendered from; a tree with no commit (the selftest's box)
+# links main.
+check_results() {
+  build_diet || return
+  local ledger rc=0
+  ledger="$(mktemp)" || return 2
+  python3 scripts/check-results.py --root results --ledger "$ledger" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    python3 "${RENDER_LEDGER:-exercise/scripts/render-ledger.py}" "$ledger" _site/ledger --results results \
+      --commit "$(git rev-parse --verify --quiet HEAD || echo main)" || rc=$?
+  fi
+  rm -f "$ledger"
+  return "$rc"
+}
 
 # Every regimen.toml under results/ must parse as a `regimen` document. This
 # is what keeps diet/formats load-bearing: the format is used on the
@@ -2892,6 +2912,21 @@ inject_exercise_published_without_admission() {
 # would fail here too, but not in these words, and the case would say so.
 inject_exercise_pnpm_unobtainable() {
   edit_in_place 's/"packageManager": "pnpm@[^"]*"/"packageManager": "pnpm@0.0.0-unpublished"/' exercise/package.json
+}
+
+# #32 I2's emitter mutated (track five's faults, carried here by courier): a
+# ledger row the renderer must refuse, naming the directory. The fixture loop
+# never reaches the renderer, and a record diet accepted cannot lack a word,
+# so the emitter is the one place a wrong row can come from.
+
+# A ledger row citing a directory that is not there.
+inject_results_ledger_row_cites_missing_directory() {
+  edit_in_place 's/"directory": directory.name,/"directory": directory.name + "-stale",/' scripts/check-results.py
+}
+
+# A ledger row with no word.
+inject_results_ledger_row_without_word() {
+  edit_in_place '/"result": front.get("result"),/d' scripts/check-results.py
 }
 
 inject_hygiene() {
@@ -6184,6 +6219,18 @@ prove_mechanics() {
   expect_exit "an ordinary binary does not false-positive" 0 \
     bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/bin-clean"
 
+  # The ledger renderer's verdict reaches the results check (#32 I2): a
+  # renderer that exits 7 makes `check_results` exit 7 -- its own status,
+  # which no other step of the check produces, so the assertion cannot pass
+  # for a reason that is not the renderer's. And, beside it, the real
+  # renderer passes. The pipe rule (AGENTS.md), on the step after the linter.
+  printf '#!/usr/bin/env python3\nimport sys\nsys.exit(7)\n' > "${box}/renderer-exits-7.py"
+  results_with_renderer() { (cd "$ROOT" && RENDER_LEDGER="$1" check_results); }
+  expect_exit "the ledger renderer's own exit status reaches the results check" 7 \
+    results_with_renderer "${box}/renderer-exits-7.py"
+  expect_exit "the results check passes with the real ledger renderer" 0 \
+    results_with_renderer "${ROOT}/exercise/scripts/render-ledger.py"
+
   # The pattern-table exemption is scoped to scripts/. Any other file that
   # happens to be named that way is still scanned.
   mkdir -p "${box}/fake-table/docs"
@@ -7337,6 +7384,10 @@ selftest() {
     'hygiene: internal-ticket-id:'
   seeded_case "external subresource on the site"      pages    inject_pages \
     'hygiene: external-subresource:'
+  seeded_case "a ledger row citing a missing directory" results inject_results_ledger_row_cites_missing_directory \
+    'render-ledger: [0-9a-z-]+-stale: no such directory'
+  seeded_case "a ledger row with no word"              results inject_results_ledger_row_without_word \
+    'render-ledger: [0-9a-z-]+: row carries no result'
   seeded_case "a type error in the web surface"       exercise inject_exercise_type_error \
     'error TS2322'
   seeded_case "an authored session on the published list" exercise inject_exercise_published_list_carries_authored_session \
