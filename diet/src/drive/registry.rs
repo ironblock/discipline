@@ -20,6 +20,11 @@
 //! `weights_main`, a one-line list of quoted digests. A field written another
 //! way is not read, and a list the scan cannot read is kept as unreadable,
 //! never mistaken for an absent key. Lines inside a `"""` string are skipped.
+//!
+//! A list is read more strictly than TOML reads one: one line, items in
+//! double quotes with no quote or comma inside them, no trailing comma, and
+//! no comment after the `]`. Anything else is unreadable, and a substrate
+//! whose weights need it is refused rather than guessed at.
 
 use std::collections::BTreeMap;
 
@@ -195,6 +200,22 @@ pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
     })
 }
 
+/// The `weights_*` keys whose digests the record spells.
+const WEIGHTS_SPELLED: &[&str] = &[
+    "weights_main",
+    "weights_draft",
+    "weights_projector",
+    "weights_acts_sha256",
+];
+
+/// Whether `value` is a sha256: 64 lowercase hex digits.
+fn is_a_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+}
+
 /// The weights a non-canned substrate's server loads: every main shard in
 /// the registry's order, and the draft and projector beside them (#92, as
 /// #211 spells it). One main file with nothing beside it is a
@@ -214,6 +235,25 @@ fn weight_set(
         }
         None => vec![one_main?],
     };
+    // Every file beside the main weights is one the record can spell, or the
+    // substrate is refused: a sidecar dropped here would make the record say
+    // "one file, nothing beside it" of weights that are not.
+    for (key, value) in &table.strings {
+        let spelled = WEIGHTS_SPELLED.contains(&key.as_str());
+        if key.starts_with("weights_") && !spelled && is_a_digest(value) {
+            return Err(format!(
+                "`{id}`'s `{key}` is a digest of a file beside its weights, and the record's \
+                 weights spell only a main, a draft and a projector"
+            ));
+        }
+    }
+    for key in ["weights_draft", "weights_projector"] {
+        if table.lists.contains_key(key) {
+            return Err(format!(
+                "`{id}`'s `{key}` is a list, and the record's weights hold one {key} file"
+            ));
+        }
+    }
     let draft = table.strings.get("weights_draft").cloned();
     let projector = table.strings.get("weights_projector").cloned();
     Ok(match (main.as_slice(), &draft, &projector) {
@@ -315,6 +355,26 @@ mod tests {
     }
 
     #[test]
+    fn a_file_beside_the_weights_the_record_cannot_spell_is_refused() {
+        // `embeddinggemma-300m`'s `weights_data`: the graph's external data,
+        // loaded beside it. Refused, never resolved as one file.
+        let refused = identity(REGISTRY, "embeddinggemma-300m").expect_err("a sidecar");
+        assert!(refused.contains("`weights_data`"), "{refused}");
+        let registry = format!(
+            "[equipment.e]\nhardware_fingerprint = \"{}\"\n\
+             [substrate.x]\nequipment = \"e\"\nengine_name = \"n\"\n\
+             engine_identity = \"i\"\nweights_main = \"{}\"\n\
+             weights_draft = [\"{}\", \"{}\"]\n",
+            "a".repeat(64),
+            "b".repeat(64),
+            "c".repeat(64),
+            "d".repeat(64)
+        );
+        let refused = identity(&registry, "x").expect_err("a draft list");
+        assert!(refused.contains("`weights_draft` is a list"), "{refused}");
+    }
+
+    #[test]
     fn one_main_file_with_nothing_beside_it_is_a_digest() {
         // A set of one file has one spelling (record v1 refuses the other).
         let id = "accel24-llamacpp-qwen38-27b-iq3s";
@@ -389,6 +449,11 @@ mod tests {
             Some(vec!["a".to_owned(), "b".to_owned()])
         );
         assert_eq!(table.lists["unread"], None, "not quoted strings");
+        let quoted = tables("[substrate.y]\nweights_main = [\"a\"b\"]\n");
+        assert_eq!(
+            quoted["substrate.y"].lists["weights_main"], None,
+            "a quote inside an item"
+        );
         assert!(!table.strings.contains_key("weights_main"));
         assert_eq!(table.strings["engine_name"], "e");
     }
