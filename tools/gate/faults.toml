@@ -874,12 +874,84 @@ legacy_signature = "error TS2322"
 migrated = false
 
 [[fault]]
-id = "exercise.exercise_story_assertion"
+id = "exercise.exercise_published_list_carries_authored_session"
 kind = "seeded-gate"
 check = "exercise"
-label = "a story's assertion broken in place"
-failure_class = "exercise.story"
-legacy_signature = "expected '2\\.0' to be '2\\.1'"
+label = "an authored session on the published list"
+failure_class = "exercise.replay-published"
+legacy_signature = "FAIL.*published\\.test\\.ts.*publishes the three recorded whole, and never an authored session"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_recording_corrupt_event"
+kind = "seeded-gate"
+check = "exercise"
+label = "a published recording's event with no kind"
+failure_class = "exercise.replay-recording"
+legacy_signature = "exercise/src/drive/recorded/step-limit\\.json: not a recording: event 0 has no kind or time"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_shell_carries_network_call"
+kind = "seeded-gate"
+check = "exercise"
+label = "a network call in the replay page's shell"
+failure_class = "exercise.replay-shell"
+legacy_signature = "hygiene: network-call: _site/replay/assets/"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_modulepreload_polyfill_on"
+kind = "seeded-gate"
+check = "exercise"
+label = "the modulepreload polyfill back on"
+failure_class = "exercise.replay-shell"
+legacy_signature = "hygiene: network-call: _site/replay/assets/"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_payload_carries_credential"
+kind = "seeded-gate"
+check = "exercise"
+label = "a credential shape in a published recording"
+failure_class = "exercise.replay-payload"
+legacy_signature = "hygiene: github-token: _site/replay/data/step-limit\\.js"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_recording_edited_after_admission"
+kind = "seeded-gate"
+check = "exercise"
+label = "a published recording edited after admission"
+failure_class = "exercise.replay-admission"
+legacy_signature = "admission: exercise/src/drive/recorded/step-limit\\.json: edited since it was admitted"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_replay_loads_beside_its_bundle"
+kind = "seeded-gate"
+check = "exercise"
+label = "the recording loaded beside the bundle"
+failure_class = "exercise.replay-load"
+legacy_signature = "replay-smoke: step-limit did not load"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_admitted_table_edited"
+kind = "seeded-gate"
+check = "exercise"
+label = "a published recording's admitted table edited"
+failure_class = "exercise.replay-admission"
+legacy_signature = "admission: exercise/src/drive/recorded/[a-z-]+\\.json: its admitted table scripts/hygiene-admitted-[0-9a-f]{12}-patterns\\.tsv is not the one admitted"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_published_without_admission"
+kind = "seeded-gate"
+check = "exercise"
+label = "a published recording with no admission"
+failure_class = "exercise.replay-admission"
+legacy_signature = "expected \\[ 'step-limit' \\] to deeply equal \\[\\]"
 migrated = false
 
 [[fault]]
@@ -7232,3 +7304,12 @@ check = "lanes"
 label = "adapters.compaction-read-as-a-turn"
 failure_class = "adapters.compaction-read-as-a-turn"
 migrated = false
+[[fault]]
+id = "exercise.exercise_story_assertion"
+kind = "seeded-gate"
+check = "exercise"
+label = "a story's assertion broken in place"
+failure_class = "exercise.story"
+legacy_signature = "expected '2\\.0' to be '2\\.1'"
+migrated = false
+

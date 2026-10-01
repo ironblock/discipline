@@ -2734,13 +2734,60 @@ inject_exercise_type_error() {
   printf '\nexport const seededFault: number = %s;\n' "'not a number'" >> exercise/src/ui/format.ts
 }
 
-# One story's assertion broken in place: the kitchen sink's receipt expecting
-# 2.1 side calls an ask where the session makes 2.0. Typecheck and lint pass
-# it; only the browser tests -- every story run in Chromium -- can see it
-# (#175). The signature is Vitest's failure message for that assertion, which
-# only this fault prints; the story's FAIL line would name any of its failures.
-inject_exercise_story_assertion() {
-  edit_in_place "s/row('side-calls-per-ask')).toBe('2.0')/row('side-calls-per-ask')).toBe('2.1')/" exercise/src/stories/KitchenSink.stories.tsx
+# #32's replay page (track five's faults, carried here by courier). Each
+# breaks one rule of the published site in the tree, and `check_exercise` --
+# which builds the page, scans it with `check_site` and opens it in Chromium
+# -- must say so in its own words.
+
+# An authored session put back on the published list.
+inject_exercise_published_list_carries_authored_session() {
+  edit_in_place "s/\['first-drive', 'cancelled-capture', 'step-limit'\] as const/['first-drive', 'cancelled-capture', 'step-limit', 'kitchen-sink'] as const/" exercise/src/replay/published.ts
+}
+
+# One event of a published recording with no kind: the failure names the file.
+inject_exercise_recording_corrupt_event() {
+  edit_in_place '/^"kind": "session.start",$/d' exercise/src/drive/recorded/step-limit.json
+}
+
+# A network call in the shell the page is built from.
+inject_exercise_shell_carries_network_call() {
+  printf "\nvoid fetch('/x');\n" >> exercise/src/replay.tsx
+}
+
+# The modulepreload polyfill back on: Rolldown's injected text calls fetch().
+inject_exercise_modulepreload_polyfill_on() {
+  edit_in_place 's/modulePreload: { polyfill: false }/modulePreload: { polyfill: true }/' exercise/vite.config.ts
+}
+
+# A credential shape in a published recording, built here at run time so this
+# file carries none. The genesis table, which governs the recordings, sees it.
+inject_exercise_payload_carries_credential() {
+  local token
+  token="$(printf '%s%s' 'ghp_' '0123456789abcdefghijklmnopqrstuvwxyz')"
+  edit_in_place "s|^\"Scrubbed: |\"${token} Scrubbed: |" exercise/src/drive/recorded/step-limit.json
+}
+
+# A published recording edited after it was admitted.
+inject_exercise_recording_edited_after_admission() {
+  edit_in_place 's/^"title": "A drive that ran into the step limit",$/"title": "A drive that ran into the step limit, edited",/' exercise/src/drive/recorded/step-limit.json
+}
+
+# The recording loaded beside the page's bundle (assets/) rather than from its
+# base: the path the build never writes.
+inject_exercise_replay_loads_beside_its_bundle() {
+  edit_in_place 's|new URL(`${import.meta.env.BASE_URL}data/${name}.js`, document.baseURI)|new URL(`data/${name}.js`, import.meta.url)|' exercise/src/replay.tsx
+}
+
+# A published recording's admitted table edited: a snapshot is written once.
+inject_exercise_admitted_table_edited() {
+  local snapshot
+  snapshot="$(ls scripts/hygiene-admitted-*-patterns.tsv | head -n 1)"
+  printf '# edited after it was admitted\n' >> "$snapshot"
+}
+
+# A published recording whose admission is gone.
+inject_exercise_published_without_admission() {
+  rm -- exercise/src/drive/recorded/step-limit.admission.json
 }
 
 # A pnpm the check cannot have: the class #194 was, on the hosts it was on --
@@ -5868,6 +5915,14 @@ if source.count(old) != 1:
 path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
+# One story's assertion broken in place: the kitchen sink's receipt expecting
+# 2.1 side calls an ask where the session makes 2.0. Typecheck and lint pass
+# it; only the browser tests -- every story run in Chromium -- can see it
+# (#175). The signature is Vitest's failure message for that assertion, which
+# only this fault prints; the story's FAIL line would name any of its failures.
+inject_exercise_story_assertion() {
+  edit_in_place "s/row('side-calls-per-ask')).toBe('2.0')/row('side-calls-per-ask')).toBe('2.1')/" exercise/src/stories/KitchenSink.stories.tsx
+}
 
 # Every pattern in a table, shown catching its own class. A pattern that has
 # never caught anything is a guess.
@@ -7177,8 +7232,24 @@ selftest() {
     'hygiene: external-subresource:'
   seeded_case "a type error in the web surface"       exercise inject_exercise_type_error \
     'error TS2322'
-  seeded_case "a story's assertion broken in place"   exercise inject_exercise_story_assertion \
-    "expected '2\\.0' to be '2\\.1'"
+  seeded_case "an authored session on the published list" exercise inject_exercise_published_list_carries_authored_session \
+    'FAIL.*published\.test\.ts.*publishes the three recorded whole, and never an authored session'
+  seeded_case "a published recording's event with no kind" exercise inject_exercise_recording_corrupt_event \
+    'exercise/src/drive/recorded/step-limit\.json: not a recording: event 0 has no kind or time'
+  seeded_case "a network call in the replay page's shell" exercise inject_exercise_shell_carries_network_call \
+    'hygiene: network-call: _site/replay/assets/'
+  seeded_case "the modulepreload polyfill back on"     exercise inject_exercise_modulepreload_polyfill_on \
+    'hygiene: network-call: _site/replay/assets/'
+  seeded_case "a credential shape in a published recording" exercise inject_exercise_payload_carries_credential \
+    'hygiene: github-token: _site/replay/data/step-limit\.js'
+  seeded_case "a published recording edited after admission" exercise inject_exercise_recording_edited_after_admission \
+    'admission: exercise/src/drive/recorded/step-limit\.json: edited since it was admitted'
+  seeded_case "the recording loaded beside the bundle" exercise inject_exercise_replay_loads_beside_its_bundle \
+    'replay-smoke: step-limit did not load'
+  seeded_case "a published recording's admitted table edited" exercise inject_exercise_admitted_table_edited \
+    'admission: exercise/src/drive/recorded/[a-z-]+\.json: its admitted table scripts/hygiene-admitted-[0-9a-f]{12}-patterns\.tsv is not the one admitted'
+  seeded_case "a published recording with no admission" exercise inject_exercise_published_without_admission \
+    "expected \[ 'step-limit' \] to deeply equal \[\]"
   seeded_case "a pinned pnpm the host cannot have"    exercise inject_exercise_pnpm_unobtainable \
     'notarget No matching version found for pnpm@0\.0\.0-unpublished'
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
@@ -7489,6 +7560,8 @@ selftest() {
     'record/fixtures/invalid/fork-names-an-undeclared-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "a canned substrate that need not say which acts" test inject_record_canned_acts_optional \
     'record/fixtures/invalid/canned-with-no-acts-digest\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a story's assertion broken in place"   exercise inject_exercise_story_assertion \
+    "expected '2\\.0' to be '2\\.1'"
 
   echo
   echo "--- results fixtures, checked directly ---"
