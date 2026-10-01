@@ -49,6 +49,15 @@ carved, wide as liquid.
   (`REFRACT_GAIN`) because thin strokes barely show the true shift, and content is not mirrored at the rim
   the way the real filter does.
 
+## Playground
+
+`python3 logo/playground.py` writes `logo/playground.html` (not committed): the `refract` glass with a
+slider for each setting, drawn through `<img>` as GitHub does, for tweaking on a phone. The script in
+`playground.template.html` is a port of `build.svg` for `glass="refract"`; its output matches `build.py`
+pixel for pixel in Chromium for all four `refract` presets in both themes. Bezel width and glass
+thickness are baked into the maps, so they are the `carved`/`liquid` switch, not sliders. "Copy settings"
+gives the changes from a preset, to be turned into values in `THEMES` and `VARIANTS`.
+
 ## Safari
 
 An earlier 104-primitive glass filter painted nothing in iOS Safari (only the body tint showed). It

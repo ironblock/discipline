@@ -1,0 +1,510 @@
+<title>Logo Playground</title>
+<style>
+  /* layout: one sticky preview over a stack of collapsible knob groups; the preview ground is GitHub's, not the page's */
+  :root {
+    --bg: #f4f5f8; --panel: #ffffff; --fg: #1a1d26; --muted: #5b6272; --line: #d8dbe3;
+    --accent: #3a5bd9; --accent-fg: #ffffff; --field: #eceef4;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117; --panel: #151b24; --fg: #e6e9f0; --muted: #98a1b3; --line: #2a3140;
+      --accent: #7f9bff; --accent-fg: #0d1117; --field: #1e2633; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1117; --panel: #151b24; --fg: #e6e9f0; --muted: #98a1b3; --line: #2a3140;
+    --accent: #7f9bff; --accent-fg: #0d1117; --field: #1e2633; color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.45 var(--sans); padding-inline: 16px; padding-block: 12px 48px; }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 16px; margin: 0; letter-spacing: 0.01em; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; padding-bottom: 10px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button, select, input[type="number"] {
+    font: inherit; color: var(--fg); background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; min-height: 34px;
+  }
+  button { cursor: pointer; }
+  button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: var(--field); min-height: 30px; padding: 4px 9px; font-size: 13px; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+  .dock { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); padding-block: 6px 10px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin-bottom: 6px; }
+  #stage { overflow: auto; max-height: 34vh; border: 1px solid var(--line); border-radius: 8px; background: #0d1117; }
+  #stage[data-theme="light"] { background: #ffffff; }
+  #logo { display: block; width: 100%; height: auto; max-width: none; }
+  .meta { color: var(--muted); font: 12px var(--mono); margin: 2px 0 4px; min-height: 1.4em; overflow-wrap: anywhere; }
+  .meta.bad { color: #d6455d; }
+  .preset-note { color: var(--muted); font-size: 12px; margin: 4px 0 10px; }
+  details { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; }
+  summary { cursor: pointer; padding: 10px 12px; font-weight: 600; letter-spacing: 0.01em; }
+  .knobs { padding: 2px 12px 10px; display: grid; gap: 10px; }
+  .knob { display: grid; grid-template-columns: minmax(0, 1fr) 76px; gap: 2px 10px; align-items: center; }
+  .knob label { color: var(--muted); font-size: 12px; letter-spacing: 0.02em; }
+  .knob input[type="range"] { grid-column: 1; width: 100%; min-width: 0; accent-color: var(--accent); margin: 0; height: 28px; }
+  .knob input[type="number"] { grid-column: 2; grid-row: 1 / span 2; width: 76px; font-family: var(--mono); font-size: 13px; padding: 4px 6px; min-height: 32px; }
+  .knob select { grid-column: 1 / span 2; }
+  .knob.changed label { color: var(--fg); }
+  .knob.changed label::after { content: " •"; color: var(--accent); }
+  #out { width: 100%; min-height: 140px; font: 12px/1.4 var(--mono); color: var(--fg); background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 8px; resize: vertical; }
+  .hint { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+  @media (prefers-reduced-motion: no-preference) { details > summary { transition: color 0.15s; } }
+</style>
+
+<main>
+  <header>
+    <h1>Logo Playground</h1>
+    <div class="row">
+      <select id="preset" aria-label="Preset"></select>
+      <button id="reset" type="button">Reset</button>
+    </div>
+  </header>
+
+  <div class="dock">
+    <div class="tools">
+      <div class="seg" id="seg-theme" role="group" aria-label="Palette"></div>
+      <div class="seg" id="seg-view" role="group" aria-label="View"></div>
+      <div class="seg" id="seg-zoom" role="group" aria-label="Zoom"></div>
+      <div class="seg" id="seg-jump" role="group" aria-label="Scroll to"></div>
+    </div>
+    <div id="stage"><img id="logo" alt="Discipline logo preview"></div>
+  </div>
+
+  <div class="meta" id="meta"></div>
+
+  <div class="preset-note" id="preset-note"></div>
+  <div id="knobs"></div>
+
+  <details id="export">
+    <summary>Settings to send back</summary>
+    <div class="knobs">
+      <p class="hint">Only what differs from the preset. Copy and paste it into the chat.</p>
+      <textarea id="out" readonly aria-label="Changed settings"></textarea>
+      <div class="row"><button id="copy" type="button">Copy settings</button><span class="meta" id="copied"></span></div>
+    </div>
+  </details>
+</main>
+
+<script>
+/*
+ * A port of build.svg() for glass="refract" (logo/build.py). The geometry and baked maps are data;
+ * everything below the data line is the same arithmetic as the Python, so a setting here can be
+ * turned into a THEMES or variant value there.
+ */
+const D = /*DATA*/null;
+const C = D.consts;
+const clone = (o) => JSON.parse(JSON.stringify(o));
+
+/* ---------- state ---------- */
+const GLOBAL_PARAMS = { wavelength: C.WAVELENGTH, ampScale: 1, crossOutside: C.CROSS_OUTSIDE };
+let P = {};                      // params: look, taper, harmonics, outside, gain, wavelength, ampScale, crossOutside
+let TH = clone(D.themes);        // both palettes, edited in place
+let base = null;                 // what "changed" is measured against
+const ui = { theme: "dark", view: "final", zoom: "100" };
+const T = () => TH[ui.theme];
+
+function applyPreset(name) {
+  const { desc, ...p } = D.presets[name];
+  P = { ...GLOBAL_PARAMS, ...p };
+  TH = clone(D.themes);
+  base = { preset: name, p: clone(P), themes: clone(D.themes) };
+  document.getElementById("preset-note").textContent = desc;
+}
+
+/* ---------- geometry (port of build.py) ---------- */
+function taper(kind, t) {
+  const [a, b] = D.tapers[kind];
+  t = Math.min(1, Math.max(0, t));
+  return 1 - Math.pow(1 - Math.pow(t, a), b);
+}
+function convergence() {
+  const s = D.spans;
+  return [s[0][0] - 10, s[s.length - 1][0] + 0.55 * (s[s.length - 1][1] - s[s.length - 1][0])];
+}
+function harmonics(mode, amp, wl) {
+  const [start, end] = convergence(), s = D.spans;
+  if (mode === "single") return [[wl, amp, start, end]];
+  return [[wl, 0.62 * amp, start, end], [0.53 * wl, 0.26 * amp, s[0][0], s[3][1]], [0.33 * wl, 0.12 * amp, s[0][0], s[1][1]]];
+}
+function waveY(comps, kind, k, x, shift) {
+  let y = D.beamY;
+  comps.forEach(([period, amp, f0, f1], h) => {
+    const phase = (k * 2 * Math.PI / 3) * (1 + h) + 0.9 * h * k;
+    y += amp * (1 - taper(kind, (x - f0) / (f1 - f0))) * Math.sin(2 * Math.PI * (x + shift) / period + phase);
+  });
+  return y;
+}
+function crossoverShift(comps, kind, x) {
+  const period = comps[0][0];
+  const gap = (sh) => waveY(comps, kind, 0, x, sh) - waveY(comps, kind, 1, x, sh);
+  const N = 2000, grid = Array.from({ length: N + 1 }, (_, i) => -period / 2 + period * i / N);
+  const vals = grid.map(gap), roots = [];
+  for (let i = 0; i < N; i++) {
+    if (vals[i] * vals[i + 1] < 0) {
+      let lo = grid[i], hi = grid[i + 1];
+      for (let j = 0; j < 60; j++) {
+        const mid = (lo + hi) / 2;
+        if (gap(lo) * gap(mid) > 0) lo = mid; else hi = mid;
+      }
+      roots.push((lo + hi) / 2);
+    }
+  }
+  return roots.length ? roots.reduce((a, b) => (Math.abs(b) < Math.abs(a) ? b : a)) : 0;
+}
+function wavePaths(comps, kind, shift) {
+  const step = comps.length === 1 ? 3 : 2, out = [];
+  for (let k = 0; k < 3; k++) {
+    const pts = [];
+    for (let x = 0; x <= D.width + step; x += step) pts.push(`${x.toFixed(0)},${waveY(comps, kind, k, x, shift).toFixed(1)}`);
+    out.push("M" + pts.join(" L"));
+  }
+  return out;
+}
+function falloffLayers(reach, steps = 5) {
+  const ss = (x) => x * x * (3 - 2 * x);
+  const cover = Array.from({ length: steps }, (_, i) => 1 - ss((i + 0.5) / steps)).concat([0]);
+  return Array.from({ length: steps }, (_, i) => [2 * reach * (i + 1) / steps, cover[i] - cover[i + 1]]);
+}
+
+/* ---------- the SVG (port of build.svg and build.element_glass for glass="refract") ---------- */
+function buildSvg(themeName, view) {
+  const t = TH[themeName], L = D.looks[P.look], look = L.look;
+  const w = String(Math.round(D.width)), H = C.H, width = D.width;
+  const outside = P.outside !== "none", ends = P.outside === "ends";
+  const [start, end] = convergence();
+  const fadeIn = (outside ? 110 : 1) / width, fadeOut = 1 - (outside ? 150 : 1) / width;
+  const ramp0 = (end - 45) / width, ramp1 = (end + 25) / width;
+  const comps = harmonics(P.harmonics, D.xHeight / 2 * P.ampScale, P.wavelength);
+  const shift = crossoverShift(comps, P.taper, D.enters - P.crossOutside);
+  const [rx, ry, rw, rh] = L.region;
+  const top = ry + C.PAD - C.CROP, height = rh - 2 * C.PAD + 2 * C.CROP;
+
+  const waveDefs = wavePaths(comps, P.taper, shift).map((d, k) => `<path id="w${k}" d="${d}"/>`).join("\n    ");
+  const strokes = () => t.wave.map((c, k) => `<use href="#w${k}" stroke="${c}"/>`).join("");
+  const light = (scale, beamScale) =>
+    `<g fill="none" stroke-width="${5 * scale}" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="${t.wave_alpha}" mask="url(#wavemask)">${strokes()}</g>` +
+    `<use href="#beam" fill="none" stroke="${t.beam}" stroke-width="${t.beam_width * beamScale}" stroke-linecap="round" mask="url(#beammask)"/>`;
+  const blur = (id, dev) => `<filter id="${id}" filterUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${H}" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="${dev}"/></filter>`;
+  const bend = `<filter id="bend" filterUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${H}" color-interpolation-filters="sRGB">` +
+    `<feImage href="${L.disp}" x="${rx}" y="${ry}" width="${rw}" height="${rh}" preserveAspectRatio="none" result="dmap"/>` +
+    `<feDisplacementMap in="SourceGraphic" in2="dmap" scale="${(L.scale * P.gain).toFixed(2)}" xChannelSelector="R" yChannelSelector="G"/></filter>`;
+  const padRect = `<rect width="${w}" height="${H}" fill="${t.pad}" fill-opacity="0.004"/>`;
+  const bent = (scale, beamScale, alpha) =>
+    `<g filter="url(#bend)">${padRect}<g opacity="${alpha}">${light(scale, beamScale)}</g></g>`;
+
+  let endsMask = "";
+  if (ends) {
+    const e = D.enters, l = D.leaves, F = C.ENDS_FADE;
+    endsMask =
+      `<linearGradient id="endsL" gradientUnits="userSpaceOnUse" x1="${e.toFixed(2)}" y1="0" x2="${(e + F).toFixed(2)}" y2="0"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>` +
+      `<linearGradient id="endsR" gradientUnits="userSpaceOnUse" x1="${(l - F).toFixed(2)}" y1="0" x2="${l.toFixed(2)}" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff"/></linearGradient>` +
+      `<mask id="ends" maskUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${H}">` +
+      `<rect x="0" y="0" width="${e.toFixed(2)}" height="${H}" fill="#fff"/><rect x="${e.toFixed(2)}" y="0" width="${F}" height="${H}" fill="url(#endsL)"/>` +
+      `<rect x="${(l - F).toFixed(2)}" y="0" width="${F}" height="${H}" fill="url(#endsR)"/><rect x="${l.toFixed(2)}" y="0" width="${(width - l).toFixed(2)}" height="${H}" fill="#fff"/>` +
+      `<use href="#word" fill="#000"/></mask>`;
+  }
+
+  // rim light: outline segments stroked at each brightness step, clipped to the letters
+  const layers = falloffLayers(look.spec_width), facets = [];
+  for (const [kind, colour, opacity] of [["s", t.shade, t.shade_opacity], ["l", t.lit, t.lit_opacity]]) {
+    for (let q = 1; q <= L.quant; q++) {
+      if (!L.bev[`b${kind}${q}`]) continue;
+      for (const [sw, share] of layers) {
+        facets.push(`<use href="#b${kind}${q}" fill="none" stroke="${colour}" stroke-opacity="${(opacity * (q / L.quant) * share * t.el.bevel).toFixed(3)}" stroke-width="${sw.toFixed(2)}" stroke-linejoin="round"/>`);
+      }
+    }
+  }
+  const bevDefs = Object.entries(L.bev).filter(([, d]) => d).map(([k, d]) => `<path id="${k}" d="${d}"/>`).join("");
+  const el = t.el, b = t.bloom;
+
+  let body;
+  if (view === "final") {
+    body = `<use href="#word" fill="url(#body)"/>
+  <g clip-path="url(#wordclip)">
+    <use href="#word" fill="none" stroke="${t.edge}" stroke-width="${2 * look.band_width}" stroke-opacity="${t.edge_opacity}"/>
+    <g filter="url(#bloomB)">${bent(t.inner * el.b_width, t.beam_inner * el.b_width, el.b_alpha)}</g>
+    <g filter="url(#bloomA)">${bent(t.inner * el.a_width, t.beam_inner * el.a_width, el.a_alpha)}</g>
+    <g filter="url(#frost)">${bent(t.inner, t.beam_inner, 1)}</g>
+    <g filter="url(#soft)">${facets.join("")}</g>
+    <use href="#word" fill="none" stroke="${t.rim}" stroke-width="1.8" stroke-opacity="${t.rim_opacity}"/>
+  </g>`;
+  } else {
+    const ink = themeName === "dark" ? "#fff" : "#000";
+    body = `<use href="#word" fill="none" stroke="${ink}" stroke-width="1" stroke-opacity="0.6"/>` +
+      (view === "bent"
+        // the map covers the word only; outside it the filter would shift everything, so show those lines plain
+        ? `<clipPath id="reg"><rect x="${rx}" y="${ry}" width="${rw}" height="${rh}"/></clipPath>` +
+          `<mask id="notreg" maskUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${H}"><rect width="${w}" height="${H}" fill="#fff"/><rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="#000"/></mask>` +
+          `<g mask="url(#notreg)"><use href="#light"/></g><g clip-path="url(#reg)"><g filter="url(#bend)">${padRect}<use href="#light"/></g></g>`
+        : `<use href="#light"/>`);
+  }
+
+  const outsideLight = outside && view === "final"
+    ? `<g mask="url(#${ends ? "ends" : "outside"})"><g filter="url(#glow)"><rect width="${w}" height="${H}" fill="${t.pad}" fill-opacity="0.004"/><use href="#light"/></g></g>`
+    : "";
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${height}" viewBox="0 ${top} ${w} ${height}" role="img" aria-label="Discipline">
+  <title>Discipline</title>
+  <defs>
+    <path id="word" d="${D.word}"/>
+    <clipPath id="wordclip"><use href="#word"/></clipPath>
+    <mask id="outside" maskUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${H}"><rect width="${w}" height="${H}" fill="#fff"/><use href="#word" fill="#000"/></mask>
+    ${endsMask}
+    <linearGradient id="body" gradientUnits="userSpaceOnUse" x1="0" y1="${C.BASELINE - 130}" x2="0" y2="${C.BASELINE + 35}">
+      <stop offset="0" stop-color="${t.body}" stop-opacity="${t.body_top}"/><stop offset="1" stop-color="${t.body}" stop-opacity="${t.body_bottom}"/>
+    </linearGradient>
+    <linearGradient id="wavefade" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="${w}" y2="0">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="${fadeIn.toFixed(4)}" stop-color="#fff"/><stop offset="${ramp0.toFixed(4)}" stop-color="#fff"/><stop offset="${ramp1.toFixed(4)}" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="beamfade" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="${w}" y2="0">
+      <stop offset="${ramp0.toFixed(4)}" stop-color="#fff" stop-opacity="0"/><stop offset="${ramp1.toFixed(4)}" stop-color="#fff"/><stop offset="${fadeOut.toFixed(4)}" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="wavemask" maskUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${H}"><rect width="${w}" height="${H}" fill="url(#wavefade)"/></mask>
+    <mask id="beammask" maskUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${H}"><rect width="${w}" height="${H}" fill="url(#beamfade)"/></mask>
+    ${waveDefs}
+    <path id="beam" d="M0,${D.beamY.toFixed(1)} H${w}"/>
+    <g id="light">${light(1, 1)}</g>
+    <filter id="glow" filterUnits="userSpaceOnUse" x="0" y="0" width="${w}" height="${H}" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="${t.glow_wide}" result="wideRaw"/>
+      <feComponentTransfer in="wideRaw" result="wide"><feFuncA type="linear" slope="${t.glow_wide_a}"/></feComponentTransfer>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="${t.glow_tight}" result="tight"/>
+      <feMerge><feMergeNode in="wide"/><feMergeNode in="tight"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    ${bevDefs}
+    ${blur("soft", t.soft)}${blur("frost", t.frost)}${blur("bloomA", `${b.a[0]} ${b.a[1]}`)}${blur("bloomB", `${b.b[0]} ${b.b[1]}`)}
+    ${bend}
+  </defs>
+  ${outsideLight}
+  ${body}
+</svg>`;
+}
+
+/* ---------- knobs ---------- */
+const OPTS = {
+  look: [["carved", "Carved (narrow bezel)"], ["liquid", "Liquid (wide bezel)"]],
+  taper: [["early", "Early"], ["mid", "Mid"], ["late", "Late"]],
+  harmonics: [["single", "Single sine"], ["filter", "Noise, stripped letter by letter"]],
+  outside: [["full", "Light shown outside the word"], ["ends", "Ends only (story)"], ["none", "Inside the letters only"]],
+};
+const GROUPS = [
+  { name: "Refraction and rim", open: true, items: [
+    { k: "gain", s: "p", label: "Displacement gain", min: 0, max: 8, step: 0.05 },
+    { k: "look", s: "p", label: "Bezel", select: "look" },
+    { k: "el.bevel", s: "t", label: "Rim light strength", min: 0, max: 3, step: 0.05 },
+    { k: "lit_opacity", s: "t", label: "Lit edge opacity", min: 0, max: 1, step: 0.01 },
+    { k: "shade_opacity", s: "t", label: "Shaded edge opacity", min: 0, max: 1, step: 0.01 },
+    { k: "edge_opacity", s: "t", label: "Edge band opacity", min: 0, max: 0.6, step: 0.01 },
+    { k: "rim_opacity", s: "t", label: "Hairline rim opacity", min: 0, max: 1, step: 0.01 },
+  ] },
+  { name: "Glass body", items: [
+    { k: "body_top", s: "t", label: "Body opacity, top", min: 0, max: 1, step: 0.01 },
+    { k: "body_bottom", s: "t", label: "Body opacity, bottom", min: 0, max: 1, step: 0.01 },
+  ] },
+  { name: "Blur and bloom", items: [
+    { k: "frost", s: "t", label: "Frost blur", min: 0, max: 16, step: 0.1 },
+    { k: "soft", s: "t", label: "Rim softening blur", min: 0, max: 8, step: 0.1 },
+    { k: "bloom.a.0", s: "t", label: "Near bloom, x", min: 0, max: 40, step: 0.5 },
+    { k: "bloom.a.1", s: "t", label: "Near bloom, y", min: 0, max: 40, step: 0.5 },
+    { k: "bloom.b.0", s: "t", label: "Far bloom, x", min: 0, max: 80, step: 0.5 },
+    { k: "bloom.b.1", s: "t", label: "Far bloom, y", min: 0, max: 40, step: 0.5 },
+  ] },
+  { name: "Light inside the glass", items: [
+    { k: "inner", s: "t", label: "Wave thickness inside (×)", min: 0.4, max: 3.5, step: 0.05 },
+    { k: "beam_inner", s: "t", label: "Beam thickness inside (×)", min: 0.3, max: 3.5, step: 0.05 },
+    { k: "el.a_width", s: "t", label: "Near bloom width (×)", min: 0.5, max: 8, step: 0.1 },
+    { k: "el.a_alpha", s: "t", label: "Near bloom opacity", min: 0, max: 1.5, step: 0.05 },
+    { k: "el.b_width", s: "t", label: "Far bloom width (×)", min: 1, max: 12, step: 0.1 },
+    { k: "el.b_alpha", s: "t", label: "Far bloom opacity", min: 0, max: 1.5, step: 0.05 },
+  ] },
+  { name: "Light outside the glass", items: [
+    { k: "wave_alpha", s: "t", label: "Wave opacity", min: 0, max: 1, step: 0.01 },
+    { k: "beam_width", s: "t", label: "Beam width", min: 1, max: 14, step: 0.5 },
+    { k: "glow_wide", s: "t", label: "Wide glow blur", min: 0, max: 24, step: 0.5 },
+    { k: "glow_wide_a", s: "t", label: "Wide glow opacity", min: 0, max: 2, step: 0.02 },
+    { k: "glow_tight", s: "t", label: "Tight glow blur", min: 0, max: 10, step: 0.1 },
+  ] },
+  { name: "Waves", items: [
+    { k: "wavelength", s: "p", label: "Wavelength", min: 100, max: 420, step: 5 },
+    { k: "ampScale", s: "p", label: "Height (1 = x-height)", min: 0.3, max: 1.6, step: 0.02 },
+    { k: "taper", s: "p", label: "Taper", select: "taper" },
+    { k: "harmonics", s: "p", label: "Shape", select: "harmonics" },
+    { k: "outside", s: "p", label: "Where the light shows", select: "outside" },
+    { k: "crossOutside", s: "p", label: "Red/green crossing, px left of the D", min: -20, max: 60, step: 1 },
+  ] },
+];
+const ITEMS = GROUPS.flatMap((g) => g.items);
+const slot = (it) => {
+  const root = it.s === "p" ? P : T(), parts = it.k.split(".");
+  return [parts.slice(0, -1).reduce((o, p) => o[p], root), parts[parts.length - 1]];
+};
+const get = (it) => { const [o, k] = slot(it); return o[k]; };
+const set = (it, v) => { const [o, k] = slot(it); o[k] = v; };
+const baseValue = (it, themeName) => {
+  const root = it.s === "p" ? base.p : base.themes[themeName], parts = it.k.split(".");
+  return parts.reduce((o, p) => o[p], root);
+};
+const decimals = (step) => (String(step).split(".")[1] || "").length;
+
+function buildKnobs() {
+  const host = document.getElementById("knobs");
+  host.textContent = "";
+  for (const g of GROUPS) {
+    const d = document.createElement("details");
+    d.open = !!g.open;
+    const s = document.createElement("summary");
+    s.textContent = g.name;
+    const box = document.createElement("div");
+    box.className = "knobs";
+    for (const it of g.items) {
+      const id = "k-" + it.k.replace(/\./g, "-"), row = document.createElement("div");
+      row.className = "knob";
+      row.dataset.k = it.k;
+      const lab = document.createElement("label");
+      lab.htmlFor = id;
+      lab.textContent = it.label;
+      row.append(lab);
+      if (it.select) {
+        const sel = document.createElement("select");
+        sel.id = id;
+        for (const [v, text] of OPTS[it.select]) sel.add(new Option(text, v));
+        sel.addEventListener("change", () => { set(it, sel.value); changed(); });
+        row.append(sel);
+      } else {
+        const r = document.createElement("input"), n = document.createElement("input");
+        r.type = "range"; r.id = id; n.type = "number"; n.id = id + "-n"; n.setAttribute("aria-label", it.label + " value");
+        for (const el of [r, n]) { el.min = it.min; el.max = it.max; el.step = it.step; }
+        n.removeAttribute("max"); n.removeAttribute("min");
+        r.addEventListener("input", () => { set(it, +r.value); n.value = (+r.value).toFixed(decimals(it.step)); changed(); });
+        n.addEventListener("input", () => { if (n.value === "" || isNaN(+n.value)) return; set(it, +n.value); r.value = n.value; changed(); });
+        row.append(r, n);
+      }
+      box.append(row);
+    }
+    d.append(s, box);
+    host.append(d);
+  }
+}
+function syncKnobs() {
+  for (const it of ITEMS) {
+    const id = "k-" + it.k.replace(/\./g, "-"), v = get(it);
+    const el = document.getElementById(id);
+    el.value = v;
+    if (!it.select) document.getElementById(id + "-n").value = (+v).toFixed(decimals(it.step));
+  }
+  markChanged();
+}
+function markChanged() {
+  for (const it of ITEMS) {
+    const row = document.querySelector(`.knob[data-k="${it.k}"]`);
+    row.classList.toggle("changed", get(it) !== baseValue(it, ui.theme));
+  }
+}
+
+/* ---------- settings out ---------- */
+function diff() {
+  const out = { preset: base.preset, params: {}, dark: {}, light: {} };
+  for (const it of ITEMS) {
+    if (it.s === "p") {
+      const v = get(it);
+      if (v !== baseValue(it)) out.params[it.k] = v;
+    } else {
+      for (const name of ["dark", "light"]) {
+        const v = it.k.split(".").reduce((o, p) => o[p], TH[name]);
+        if (v !== baseValue(it, name)) out[name][it.k] = v;
+      }
+    }
+  }
+  for (const key of ["params", "dark", "light"]) if (!Object.keys(out[key]).length) delete out[key];
+  return out;
+}
+const STORE = "logo-playground";
+function remember(d) {
+  try { localStorage.setItem(STORE, JSON.stringify({ sig: D.defaultPreset + D.width, d })); } catch (e) { /* storage may be unavailable */ }
+}
+function restore(d) {
+  applyPreset(d.preset in D.presets ? d.preset : D.defaultPreset);
+  for (const [k, v] of Object.entries(d.params || {})) set(ITEMS.find((i) => i.s === "p" && i.k === k), v);
+  for (const name of ["dark", "light"]) {
+    for (const [k, v] of Object.entries(d[name] || {})) {
+      const parts = k.split("."), last = parts.pop();
+      parts.reduce((o, p) => o[p], TH[name])[last] = v;
+    }
+  }
+}
+
+/* ---------- rendering ---------- */
+const img = document.getElementById("logo"), meta = document.getElementById("meta");
+let queued = false, blobUrl = null;
+function changed() {
+  markChanged();
+  if (queued) return;
+  queued = true;
+  requestAnimationFrame(() => { queued = false; render(); });
+}
+function render() {
+  const t0 = performance.now();
+  let svg;
+  try { svg = buildSvg(ui.theme, ui.view); } catch (e) { meta.textContent = "Build failed: " + e.message; meta.className = "meta bad"; return; }
+  const out = diff();
+  document.getElementById("out").value = JSON.stringify(out, null, 1);
+  remember(out);
+  if (blobUrl) URL.revokeObjectURL(blobUrl);
+  blobUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  img.onerror = () => { img.onerror = null; img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); };
+  img.src = blobUrl;
+  const stage = document.getElementById("stage");
+  stage.dataset.theme = ui.theme;
+  img.style.width = ui.zoom === "fit" ? "100%" : `${1200 * (+ui.zoom / 100)}px`;
+  meta.className = "meta";
+  meta.textContent = `${(svg.length / 1024).toFixed(0)} KB svg, built in ${(performance.now() - t0).toFixed(0)} ms`;
+}
+
+/* ---------- chrome ---------- */
+function seg(id, options, current, onPick) {
+  const host = document.getElementById(id);
+  const draw = () => {
+    host.textContent = "";
+    for (const [v, text] of options) {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = text; b.setAttribute("aria-pressed", String(v === current()));
+      b.addEventListener("click", () => { onPick(v); draw(); });
+      host.append(b);
+    }
+  };
+  draw();
+}
+function jump(x) {
+  const stage = document.getElementById("stage"), scale = img.getBoundingClientRect().width / 1200;
+  stage.scrollTo({ left: Math.max(0, x * scale - stage.clientWidth / 2), behavior: "auto" });
+}
+
+function init() {
+  const presetSel = document.getElementById("preset");
+  for (const name of Object.keys(D.presets)) presetSel.add(new Option(name, name));
+  let saved = null;
+  try { const s = JSON.parse(localStorage.getItem(STORE) || "null"); if (s && s.sig === D.defaultPreset + D.width) saved = s.d; } catch (e) { /* ignore */ }
+  buildKnobs();
+  if (saved) restore(saved); else applyPreset(D.defaultPreset);
+  presetSel.value = base.preset;
+  presetSel.addEventListener("change", () => { applyPreset(presetSel.value); syncKnobs(); changed(); });
+  document.getElementById("reset").addEventListener("click", () => { applyPreset(presetSel.value); try { localStorage.removeItem(STORE); } catch (e) { /* ignore */ } syncKnobs(); changed(); });
+  seg("seg-theme", [["dark", "Dark"], ["light", "Light"]], () => ui.theme, (v) => { ui.theme = v; syncKnobs(); changed(); });
+  seg("seg-view", [["final", "Final"], ["bent", "Bent lines"], ["plain", "Plain lines"]], () => ui.view, (v) => { ui.view = v; changed(); });
+  seg("seg-zoom", [["fit", "Fit"], ["100", "100%"], ["200", "200%"], ["300", "300%"]], () => ui.zoom, (v) => { ui.zoom = v; changed(); });
+  seg("seg-jump", [["300", "D"], ["600", "Middle"], ["880", "e"]], () => "", (v) => setTimeout(() => jump(+v), 30));
+  document.getElementById("copy").addEventListener("click", async () => {
+    const out = document.getElementById("out"), note = document.getElementById("copied");
+    try { await navigator.clipboard.writeText(out.value); note.textContent = "Copied"; }
+    catch (e) { out.focus(); out.select(); note.textContent = "Selected; press Copy in the menu"; }
+    setTimeout(() => { note.textContent = ""; }, 2500);
+  });
+  syncKnobs();
+  render();
+  setTimeout(() => jump(300), 60);
+}
+init();
+</script>
