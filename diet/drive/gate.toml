@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 176
+faults = 177
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -2813,4 +2813,17 @@ becomes = '''
         let _ = file;'''
 catches = [
     "a_drive_servers_log_file_is_the_events_stream_line_for_line",
+]
+
+[[fault]]
+id = "drive.serve-bin-hides-a-truncated-log"
+failure_class = "drive.serve-bin-hides-a-truncated-log"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    let truncated = std::fs::metadata(path).is_ok_and(|held| held.len() > 0);'''
+becomes = '''
+    let truncated = false;'''
+catches = [
+    "a_drive_server_says_when_its_log_flag_emptied_a_file",
 ]
