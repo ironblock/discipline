@@ -594,3 +594,49 @@ fn a_drive_server_refuses_a_wildcard_before_it_asks_the_engine() {
     assert!(said.contains("is a wildcard"), "{said}");
     assert!(stub.heads().is_empty(), "{:?}", stub.heads());
 }
+
+#[test]
+fn a_drive_servers_log_file_is_the_events_stream_line_for_line() {
+    let stub = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");
+    let log_file = file_holding("log", "");
+    let path = log_file.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--log", &path]);
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let settled = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains(r#""from":"capture""#) && read.contains(r#""to":"awaiting""#),
+    );
+    let at_least = settled.matches("data: ").count();
+
+    // The file is written by its own thread: read it once it has caught up.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let written = loop {
+        let written = std::fs::read_to_string(&log_file.0).unwrap_or_default();
+        if written.lines().count() >= at_least || Instant::now() >= deadline {
+            break written;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    // And the stream, read again to the file's length, line for line.
+    let stream = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.matches("data: ").count() >= written.lines().count(),
+    );
+    let streamed = stream
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .fold(String::new(), |mut out, data| {
+            out.push_str(data);
+            out.push('\n');
+            out
+        });
+    assert!(written.lines().count() >= at_least, "{written}");
+    assert_eq!(
+        written, streamed,
+        "the log file is the stream's data, byte for byte"
+    );
+}
