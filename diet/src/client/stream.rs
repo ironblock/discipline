@@ -180,7 +180,7 @@ pub struct Timings {
 
 impl Timings {
     /// The timings in a `timings` object, each read where the server put it.
-    fn read(object: &Value) -> Self {
+    pub(crate) fn read(object: &Value) -> Self {
         let count = |key: &str| {
             object
                 .get(key)

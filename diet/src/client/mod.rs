@@ -677,6 +677,12 @@ impl<T: Transport> Client<T> {
             id: id.to_owned(),
             cache: cache.clone(),
         });
+        if let Some(timings) = parsed.timings {
+            journal.push(Entry::Timings {
+                id: id.to_owned(),
+                timings,
+            });
+        }
 
         let echo = Echo {
             dialect: self.serving.dialect.name.clone(),
@@ -878,6 +884,32 @@ mod tests {
         let mut ids = IdSource::new("turn-1/main");
         let call = client.call(shape, "main", &mut ids);
         (call, stub.received())
+    }
+
+    #[test]
+    fn a_llama_cpp_reply_journals_its_timings() {
+        // C5, the drive endpoint's own unstreamed reply (`d9d2e92e…`).
+        let reply =
+            include_bytes!("../../client/fixtures/llama-server-e7051ef-unstreamed.http").to_vec();
+        let (call, _) = drive(
+            vec![Act::Raw(reply)],
+            &shaped(SamplerCard::empty(), 5_000, 20_000, 0),
+            Dialect::llama_cpp(),
+            Concurrency::Declared(1),
+        );
+        let timings: Vec<&super::stream::Timings> = call
+            .journal
+            .entries()
+            .iter()
+            .filter_map(|entry| match entry {
+                Entry::Timings { timings, .. } => Some(timings),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(timings.len(), 1, "{:?}", call.journal.entries());
+        assert_eq!(timings[0].cache_n, Some(42));
+        assert_eq!(timings[0].prompt_n, Some(30));
+        assert!(timings[0].draft_n.is_some(), "C5 decodes speculatively");
     }
 
     /// The common case, so every other test's setup can be trusted.
@@ -1756,6 +1788,7 @@ mod tests {
                 EntryKind::Stripped,
                 EntryKind::Issued,
                 EntryKind::Cache,
+                EntryKind::Timings,
                 EntryKind::Mismatch,
                 EntryKind::Received,
                 EntryKind::Capped,
@@ -1838,6 +1871,7 @@ mod tests {
             (EntryKind::Failed, Decision::Named),
             (EntryKind::Unreadable, Decision::Named),
             (EntryKind::Cache, Decision::Named),
+            (EntryKind::Timings, Decision::Named),
         ];
 
         assert_eq!(
@@ -1848,6 +1882,116 @@ mod tests {
         for (kind, decision) in expected {
             assert_eq!(decide(kind), decision, "{}", kind.tag());
         }
+    }
+
+    /// EVERY UNSPELLABLE ITEM IS ONE THE RECORD REFUSES (#117 R3, D8). Each
+    /// item's `asks` is put to the record's OWN reader: a key it names must
+    /// be refused as an unknown field on that row, and a kind it names as an
+    /// unknown kind. The day the record learns to spell one, this fails --
+    /// "`lost()` names `response.timings`, which the record now spells" --
+    /// and the projection has to write it. Comparing `lost()` with a list of
+    /// its own (the test above) could never notice that.
+    ///
+    /// A nested key is probed at the top-level key the row would carry it
+    /// under (`start.serving`, not `serving.concurrency`); an exempt item is
+    /// listed with its reason, and is not probed.
+    #[test]
+    fn every_unspellable_item_is_one_the_record_refuses() {
+        use crate::formats::record::{ParseError, SchemaError};
+        use journal::Ask;
+
+        // One of every kind, then the per-row losses: a pinned sampler, a
+        // retry's reason, an unreported count and a capped answer.
+        let mut journal = journal::Journal::new();
+        for kind in EntryKind::ALL {
+            journal.push(sample(*kind));
+        }
+        let Entry::Issued { head, lane, .. } = sample(EntryKind::Issued) else {
+            panic!("`sample` builds an issued request");
+        };
+        journal.push(Entry::Issued {
+            id: "r/2".to_owned(),
+            lane,
+            retry_of: Some("r/1".to_owned()),
+            because: Some(RetryReason::Timeout),
+            sampler: card(),
+            head,
+        });
+        journal.push(Entry::Received {
+            to_request: "r/2".to_owned(),
+            output_tokens: None,
+            capped: true,
+        });
+        let unspellable = journal::project(&journal, SUBSTRATE).unspellable;
+
+        let start = include_str!("../../formats/record/fixtures/valid/minimal.jsonl");
+        let rows = |request: &str, response: &str| {
+            format!("{}\n{request}\n{response}\n", start.trim_end())
+        };
+        let request = r#"{"record":"request","id":"q1","lane":"main","substrate":"local","head_sha256":"85c4ae51186ca1ee36eee21c92ea5dbcece090e3064325d1fab9a70c28412eed"}"#;
+        let response = r#"{"record":"response","id":"a1","to_request":"q1","output_tokens":512}"#;
+        assert!(
+            crate::formats::record::parse(&rows(request, response)).is_ok(),
+            "the probe's own record must be valid, or every refusal below is about it"
+        );
+        let with_key = |line: &str, key: &str| line.replacen('{', &format!("{{\"{key}\":1,"), 1);
+
+        let mut probed = 0;
+        let mut exempt = Vec::new();
+        for item in &unspellable {
+            match item.asks {
+                Ask::Key { row, key } => {
+                    let document = match row {
+                        _ if row == "start" => format!(
+                            "{}\n{request}\n{response}\n",
+                            with_key(start.trim_end(), key)
+                        ),
+                        _ if row == "request" => rows(&with_key(request, key), response),
+                        _ if row == "response" => rows(request, &with_key(response, key)),
+                        _ => panic!(
+                            "`{}` asks for a key on `{row}`, which the probe does not build",
+                            item.what
+                        ),
+                    };
+                    match crate::formats::record::parse(&document) {
+                        Err(ParseError::Schema(SchemaError::UnknownField { field, .. }))
+                            if field == key => {}
+                        other => panic!(
+                            "`lost()` names `{row}.{key}`, which the record now spells \
+                             (or refuses for another reason): {other:?}"
+                        ),
+                    }
+                    probed += 1;
+                }
+                Ask::Kind(kind) => {
+                    let document =
+                        format!("{}{{\"record\":\"{kind}\"}}\n", rows(request, response));
+                    match crate::formats::record::parse(&document) {
+                        Err(ParseError::Schema(SchemaError::UnknownKind(tag))) if tag == kind => {}
+                        other => panic!(
+                            "`lost()` names the kind `{kind}`, which the record now names: {other:?}"
+                        ),
+                    }
+                    probed += 1;
+                }
+                Ask::Exempt(why) => exempt.push((item.kind.tag(), why)),
+            }
+        }
+        assert!(
+            unspellable.iter().any(|item| item.asks
+                == Ask::Key {
+                    row: "response",
+                    key: "timings"
+                }),
+            "the one record change demanded now is on the list"
+        );
+        assert_eq!(
+            exempt.len(),
+            3,
+            "exempt, each with its reason: the timeout projected to nothing, issued \
+             versus arrived, an unreported count -- {exempt:?}"
+        );
+        assert!(probed >= 12, "{probed} items probed");
     }
 
     /// One entry of each kind. Written out rather than derived, because a
@@ -1916,6 +2060,10 @@ mod tests {
                     cached_tokens: None,
                     cached_path: None,
                 },
+            },
+            EntryKind::Timings => Entry::Timings {
+                id,
+                timings: super::stream::Timings::default(),
             },
         }
     }
@@ -2009,6 +2157,7 @@ mod tests {
                 "outcome.failed",
                 "outcome.unreadable",
                 "cache.observed",
+                "timings.observed",
             ]
         );
     }

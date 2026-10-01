@@ -23,6 +23,7 @@ use crate::formats::record::{Count, Event};
 use super::echo::Verified;
 use super::head::Head;
 use super::shape::{Concurrency, SamplerCard, SamplerSetting};
+use super::stream::Timings;
 use super::transport::TransportFailure;
 use super::wire::WireError;
 use super::{Cache, RetryReason, vocabulary};
@@ -64,6 +65,8 @@ vocabulary! {
         Unreadable => "outcome.unreadable",
         /// What the server said about its prompt cache.
         Cache => "cache.observed",
+        /// What the server measured of a request: its `timings` (#117 R3).
+        Timings => "timings.observed",
     }
 }
 
@@ -186,6 +189,13 @@ pub enum Entry {
         /// What it said.
         cache: Cache,
     },
+    /// What the server measured of the request, as it reported it.
+    Timings {
+        /// The attempt.
+        id: String,
+        /// What it measured.
+        timings: Timings,
+    },
 }
 
 impl Entry {
@@ -206,6 +216,7 @@ impl Entry {
             Self::Failed { .. } => EntryKind::Failed,
             Self::Unreadable { .. } => EntryKind::Unreadable,
             Self::Cache { .. } => EntryKind::Cache,
+            Self::Timings { .. } => EntryKind::Timings,
         }
     }
 }
@@ -257,6 +268,27 @@ pub struct Unspellable {
     pub kind: EntryKind,
     /// What is lost, in the words the request for a schema change uses.
     pub what: &'static str,
+    /// What the record would need to spell it, as data a test can put to
+    /// the record's own reader (#117 R3, D8).
+    pub asks: Ask,
+}
+
+/// What a record change would have to add for an [`Unspellable`] to be
+/// spelled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ask {
+    /// A key on a row of kind `row`. For a nested key, the top-level key the
+    /// row would carry it under: the record's reader refuses that one.
+    Key {
+        /// The row's kind, as the record spells it.
+        row: &'static str,
+        /// The key.
+        key: &'static str,
+    },
+    /// An event kind the record does not name.
+    Kind(&'static str),
+    /// Nothing a key or a kind could add, and why: exempt from the probe.
+    Exempt(&'static str),
 }
 
 /// The journal as far as the session record can carry it, and what it cannot.
@@ -287,46 +319,127 @@ pub fn response_id(request: &str) -> String {
 /// the schema is missing can be read in one place -- it is the content of the
 /// request for a schema change, and a request nobody can read in one sitting
 /// does not get made.
-fn lost(entry: &Entry) -> Option<&'static str> {
+fn lost(entry: &Entry) -> Option<(&'static str, Ask)> {
+    use Ask::{Exempt, Key, Kind};
     match entry {
-        Entry::Serving { .. } => {
-            Some("the server's declared concurrency: `start.serving.concurrency`")
-        }
-        Entry::Mismatch { .. } => {
-            Some("a `regime.mismatch` event kind, carrying the settings the server contradicted")
-        }
-        Entry::Unverified { .. } => {
-            Some("a `regime.unverified` event kind, carrying the pins nobody could check")
-        }
-        Entry::Stripped { .. } => Some(
+        Entry::Serving { .. } => Some((
+            "the server's declared concurrency: `start.serving.concurrency`",
+            Key {
+                row: "start",
+                key: "serving",
+            },
+        )),
+        Entry::Mismatch { .. } => Some((
+            "a `regime.mismatch` event kind, carrying the settings the server contradicted",
+            Kind("regime.mismatch"),
+        )),
+        Entry::Unverified { .. } => Some((
+            "a `regime.unverified` event kind, carrying the pins nobody could check",
+            Kind("regime.unverified"),
+        )),
+        Entry::Stripped { .. } => Some((
             "a `regime.stripped` event kind: a retry that removed a pin changed the regime \
              the answer was produced under",
-        ),
-        Entry::TimedOut { .. } => Some(
+            Kind("regime.stripped"),
+        )),
+        Entry::TimedOut { .. } => Some((
             "a timeout as a typed outcome. Deliberately projected to NOTHING: a response \
              with an empty string is exactly the defect this client exists to stop, so a \
              timed-out request has no response row at all until the schema has one",
-        ),
-        Entry::Capped { .. } => Some("the cap a generation hit: `response.capped_at`"),
-        Entry::Refused { .. } => {
-            Some("an error status as a typed outcome: `response.refused`, with the status")
-        }
-        Entry::Failed { .. } => {
-            Some("a transport failure as a typed outcome: `response.failed`, with the class")
-        }
-        Entry::Unreadable { .. } => {
-            Some("a reply that could not be read as a typed outcome: `response.unreadable`")
-        }
-        Entry::Cache { .. } => Some(
-            "cache telemetry per request: `response.cache`, with the prompt and reused \
-             token counts and the path they were read from",
-        ),
+            Exempt("no row is written to carry a key: the timeout is projected to nothing"),
+        )),
+        Entry::Capped { .. } => Some((
+            "the cap a generation hit: `response.capped_at`",
+            Key {
+                row: "response",
+                key: "capped_at",
+            },
+        )),
+        Entry::Refused { .. } => Some((
+            "an error status as a typed outcome: `response.refused`, with the status",
+            Key {
+                row: "response",
+                key: "refused",
+            },
+        )),
+        Entry::Failed { .. } => Some((
+            "a transport failure as a typed outcome: `response.failed`, with the class",
+            Key {
+                row: "response",
+                key: "failed",
+            },
+        )),
+        Entry::Unreadable { .. } => Some((
+            "a reply that could not be read as a typed outcome: `response.unreadable`",
+            Key {
+                row: "response",
+                key: "unreadable",
+            },
+        )),
+        Entry::Cache { .. } => Some((
+            "cache telemetry per request, on a dialect that reports no `timings`: \
+             `response.cache`, with the prompt and reused token counts and the path they \
+             were read from. NOT demanded: llama.cpp's reuse count is carried once, in \
+             `response.timings.cache_n`, and no session on another dialect wants it yet",
+            Key {
+                row: "response",
+                key: "cache",
+            },
+        )),
+        Entry::Timings { .. } => Some((
+            "per-request timings as the server reported them: `response.timings`, the \
+             server's own keys (prompt_n, cache_n, prompt_ms, predicted_n, predicted_ms, \
+             draft_n, draft_n_accepted), milliseconds as exact decimals. DEMANDED by #117's \
+             re-ranking ruling: per-message timings and cache counts are blocking",
+            Key {
+                row: "response",
+                key: "timings",
+            },
+        )),
         // The retry LINK is spellable and is carried by the next request's
         // `retry_of`; only its reason is not, and that is noted on `Sent`
         // where the reason travels. `Sent` and `Received` are projected, and
         // what they lose is decided per-row inside the projection.
         Entry::Retried { .. } | Entry::Issued { .. } | Entry::Received { .. } => None,
     }
+}
+
+/// What an issued request loses: its sampler card when it pinned one, a
+/// retry's reason when it is one, and always the difference between issued
+/// and arrived.
+fn issued_losses(
+    note: &mut impl FnMut(EntryKind, &'static str, Ask),
+    sampler: &SamplerCard,
+    a_retry: bool,
+) {
+    if !sampler.is_empty() {
+        note(
+            EntryKind::Issued,
+            "the sampler card a request pinned: `request.sampler`",
+            Ask::Key {
+                row: "request",
+                key: "sampler",
+            },
+        );
+    }
+    if a_retry {
+        note(
+            EntryKind::Issued,
+            "why a retry exists: `request.retry_reason`, one of 4xx-strip, \
+                 timeout, connection",
+            Ask::Key {
+                row: "request",
+                key: "retry_reason",
+            },
+        );
+    }
+    note(
+        EntryKind::Issued,
+        "the difference between a request the client ISSUED and one that \
+             reached the substrate: the record's `request` means the second, \
+             and a connection refused produces the first",
+        Ask::Exempt("a meaning of the `request` row, not a key it lacks"),
+    );
 }
 
 /// Project `journal` into record events, naming everything that does not fit.
@@ -351,12 +464,12 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
     // it is a retry, its reason -- and deduping by kind would report whichever
     // came first and silently drop the other, which is the shape of loss this
     // whole function exists to make visible.
-    let mut note = |kind: EntryKind, what: &'static str| {
+    let mut note = |kind: EntryKind, what: &'static str, asks: Ask| {
         if !unspellable
             .iter()
             .any(|entry| entry.kind == kind && entry.what == what)
         {
-            unspellable.push(Unspellable { kind, what });
+            unspellable.push(Unspellable { kind, what, asks });
         }
     };
 
@@ -383,25 +496,7 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
                     // fingerprint has a field, so it goes in it.
                     head_sha256: Some(head.digest().to_owned()),
                 });
-                if !sampler.is_empty() {
-                    note(
-                        EntryKind::Issued,
-                        "the sampler card a request pinned: `request.sampler`",
-                    );
-                }
-                if because.is_some() {
-                    note(
-                        EntryKind::Issued,
-                        "why a retry exists: `request.retry_reason`, one of 4xx-strip, \
-                         timeout, connection",
-                    );
-                }
-                note(
-                    EntryKind::Issued,
-                    "the difference between a request the client ISSUED and one that \
-                     reached the substrate: the record's `request` means the second, \
-                     and a connection refused produces the first",
-                );
+                issued_losses(&mut note, sampler, because.is_some());
             }
             Entry::Received {
                 to_request,
@@ -422,6 +517,10 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
                         EntryKind::Received,
                         "a response whose token count the server did not report: \
                          `response.output_tokens` is required and zero is a measurement",
+                        Ask::Exempt(
+                            "the key exists and is required; what is missing is a spelling \
+                             for its absence",
+                        ),
                     );
                 }
                 if *capped {
@@ -429,6 +528,10 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
                         EntryKind::Received,
                         "a typed outcome on a response: `response.outcome`, one of \
                          answered, capped",
+                        Ask::Key {
+                            row: "response",
+                            key: "outcome",
+                        },
                     );
                 }
             }
@@ -436,8 +539,8 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
             // exhaustive match: a new entry kind fails to compile there until
             // somebody decides whether the record can spell it.
             other => {
-                if let Some(what) = lost(other) {
-                    note(other.kind(), what);
+                if let Some((what, asks)) = lost(other) {
+                    note(other.kind(), what, asks);
                 }
             }
         }
