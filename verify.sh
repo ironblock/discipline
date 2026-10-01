@@ -9,6 +9,7 @@
 #   verify.sh --only injections --scope inject_NAME   apply one injection (selftest only)
 #   verify.sh --only history --range A..B   scan an explicit range, to repro
 #   verify.sh --list          name the checks, in order
+#   verify.sh --site DIR      check a built site as Pages would serve it (#32): check_site
 #   verify.sh --selftest      prove the gate goes red on seeded faults (bash 4+)
 #   verify.sh --selftest --shard K/N    run this job's share of the faults
 #   verify.sh --selftest --scope-plan F re-prove only what plan F does not inherit (#112)
@@ -8596,6 +8597,7 @@ EOF
 
 selected=()
 mode="all"
+SITE_DIR=""
 shard_arg=""
 
 while [ "$#" -gt 0 ]; do
@@ -8609,7 +8611,9 @@ while [ "$#" -gt 0 ]; do
       selected+=("$2")
       shift 2
       ;;
-    --selftest) mode="selftest"; shift ;;
+    --selftest)
+      [ "$mode" != "site" ] || { echo "verify: --site checks a site and nothing else" >&2; exit "$EXIT_MISUSE"; }
+      mode="selftest"; shift ;;
     --derive-scopes)
       [ "$#" -ge 2 ] || { echo "verify: --derive-scopes needs a directory" >&2; exit "$EXIT_MISUSE"; }
       SELFTEST_DERIVE="$2"
@@ -8676,6 +8680,17 @@ while [ "$#" -gt 0 ]; do
       esac
       shift 2
       ;;
+    --site)
+      [ "$#" -ge 2 ] || { echo "verify: --site needs the site's directory" >&2; exit "$EXIT_MISUSE"; }
+      # Resolved here, against the directory the caller is in, as --census is.
+      case "$2" in
+        /*) SITE_DIR="$2" ;;
+        *)  SITE_DIR="$(pwd)/$2" ;;
+      esac
+      [ "$mode" != "selftest" ] || { echo "verify: --site checks a site and nothing else" >&2; exit "$EXIT_MISUSE"; }
+      mode="site"
+      shift 2
+      ;;
     --list) printf '%s\n' "${CHECKS[@]}"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "verify: unknown argument '$1'" >&2; usage >&2; exit "$EXIT_MISUSE" ;;
@@ -8683,6 +8698,23 @@ while [ "$#" -gt 0 ]; do
 done
 
 cd "$ROOT"
+
+# `--site DIR`: the published site, checked as pages.yml checks it before it
+# publishes (#32). Alone: a site check that also ran other checks, or ran
+# under a selftest's flags, would be a different question answered.
+# `--site` given beside `--selftest`, in either order, is refused rather than
+# letting whichever came last decide.
+if [ -n "$SITE_DIR" ]; then
+  if [ "$mode" != "site" ] || [ "${#selected[@]}" -ne 0 ] || [ -n "$VERIFY_SCOPE_GIVEN" ] ||
+     [ -n "$VERIFY_HISTORY_RANGE" ] || [ "$SELFTEST_SHARD" -ne 0 ] || [ -n "$SELFTEST_CENSUS" ] ||
+     [ -n "$SELFTEST_SCOPE_PLAN" ] || [ -n "$SELFTEST_DERIVE" ]; then
+    echo "verify: --site checks a site and nothing else" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  [ -d "$SITE_DIR" ] || { echo "verify: --site ${SITE_DIR}: no such directory" >&2; exit "$EXIT_MISUSE"; }
+  check_site "$SITE_DIR"
+  exit $?
+fi
 
 # `--shard` and `--census` describe a selftest run. Silently ignoring them on
 # an ordinary run would let a workflow think it had sharded a gate that in
